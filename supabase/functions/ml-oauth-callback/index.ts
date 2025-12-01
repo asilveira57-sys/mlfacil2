@@ -60,60 +60,37 @@ serve(async (req) => {
     const userData = await userResponse.json();
     console.log('User data received:', userData.id);
 
-    // Get authenticated user from Supabase
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      throw new Error('Missing authorization header');
-    }
-
+    // Create Supabase client with service role to store tokens
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      {
-        global: {
-          headers: { Authorization: authHeader },
-        },
-      }
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    // Store ML account info with state as temporary user identifier
+    // In production, you should validate state against stored session
     
-    if (userError || !user) {
-      throw new Error('Failed to get authenticated user');
-    }
-
-    // Store ML account info
+    // For now, we'll store with a placeholder and the user will need to link manually
+    // This is a simplified flow - in production you'd store state with user_id in a session table
     const expiresAt = new Date();
     expiresAt.setSeconds(expiresAt.getSeconds() + tokenData.expires_in);
 
-    const { error: insertError } = await supabaseClient
-      .from('ml_accounts')
-      .upsert({
-        user_id: user.id,
-        ml_user_id: userData.id.toString(),
-        access_token: tokenData.access_token,
-        refresh_token: tokenData.refresh_token,
-        token_expires_at: expiresAt.toISOString(),
-        nickname: userData.nickname,
-        email: userData.email,
-        country_id: userData.site_id,
-        is_active: true,
-      }, {
-        onConflict: 'user_id,ml_user_id'
-      });
+    // Store in a temporary table or return to frontend with token for manual linking
+    // For MVP, we'll redirect with the token data and let frontend handle storage
+    
+    console.log('ML OAuth completed successfully');
 
-    if (insertError) {
-      console.error('Database insert error:', insertError);
-      throw new Error('Failed to store account info');
-    }
-
-    console.log('ML account stored successfully');
-
-    // Redirect back to dashboard with success
-    return Response.redirect(
-      `${url.origin}/dashboard?ml_connected=true`,
-      302
-    );
+    // Redirect back to dashboard with token data in URL (will be handled by frontend)
+    const redirectUrl = new URL(`${url.origin}/dashboard`);
+    redirectUrl.searchParams.set('ml_connected', 'true');
+    redirectUrl.searchParams.set('ml_user_id', userData.id.toString());
+    redirectUrl.searchParams.set('access_token', tokenData.access_token);
+    redirectUrl.searchParams.set('refresh_token', tokenData.refresh_token);
+    redirectUrl.searchParams.set('expires_at', expiresAt.toISOString());
+    redirectUrl.searchParams.set('nickname', userData.nickname || '');
+    redirectUrl.searchParams.set('email', userData.email || '');
+    redirectUrl.searchParams.set('country_id', userData.site_id || '');
+    
+    return Response.redirect(redirectUrl.toString(), 302);
 
   } catch (error) {
     console.error('OAuth callback error:', error);

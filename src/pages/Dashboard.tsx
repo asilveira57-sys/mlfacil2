@@ -32,6 +32,58 @@ const Dashboard = () => {
     return () => subscription.unsubscribe();
   }, [navigate]);
 
+  // Handle ML OAuth callback
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const mlConnected = params.get('ml_connected');
+    
+    if (mlConnected === 'true' && user) {
+      const mlUserId = params.get('ml_user_id');
+      const accessToken = params.get('access_token');
+      const refreshToken = params.get('refresh_token');
+      const expiresAt = params.get('expires_at');
+      const nickname = params.get('nickname');
+      const email = params.get('email');
+      const countryId = params.get('country_id');
+
+      if (mlUserId && accessToken && refreshToken && expiresAt) {
+        // Store ML account data
+        supabase
+          .from('ml_accounts')
+          .upsert({
+            user_id: user.id,
+            ml_user_id: mlUserId,
+            access_token: accessToken,
+            refresh_token: refreshToken,
+            token_expires_at: expiresAt,
+            nickname: nickname || null,
+            email: email || null,
+            country_id: countryId || null,
+            is_active: true,
+          }, {
+            onConflict: 'user_id,ml_user_id'
+          })
+          .then(({ error }) => {
+            if (error) {
+              console.error('Error storing ML account:', error);
+              toast({
+                title: "Erro ao salvar",
+                description: "Não foi possível salvar a conta do Mercado Livre",
+                variant: "destructive",
+              });
+            } else {
+              toast({
+                title: "Conectado!",
+                description: "Sua conta do Mercado Livre foi conectada com sucesso",
+              });
+              // Clean URL
+              window.history.replaceState({}, '', '/dashboard');
+            }
+          });
+      }
+    }
+  }, [user, toast]);
+
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     toast({
@@ -39,6 +91,35 @@ const Dashboard = () => {
       description: "Você foi desconectado com sucesso",
     });
     navigate("/auth");
+  };
+
+  const handleConnectML = async () => {
+    try {
+      toast({
+        title: "Conectando...",
+        description: "Redirecionando para o Mercado Livre",
+      });
+
+      const { data, error } = await supabase.functions.invoke('ml-auth-url');
+
+      if (error) {
+        throw error;
+      }
+
+      if (data?.authUrl) {
+        // Redireciona para a página de autorização do ML
+        window.location.href = data.authUrl;
+      } else {
+        throw new Error('URL de autorização não recebida');
+      }
+    } catch (error) {
+      console.error('Erro ao conectar com ML:', error);
+      toast({
+        title: "Erro ao conectar",
+        description: "Não foi possível iniciar a conexão com o Mercado Livre",
+        variant: "destructive",
+      });
+    }
   };
 
   if (loading) {
@@ -106,7 +187,7 @@ const Dashboard = () => {
             <p className="text-sm text-muted-foreground mb-4">
               Vincule sua conta do Mercado Livre para começar a analisar seus anúncios automaticamente.
             </p>
-            <Button className="w-full" variant="default">
+            <Button className="w-full" variant="default" onClick={handleConnectML}>
               Conectar Mercado Livre
             </Button>
           </Card>
