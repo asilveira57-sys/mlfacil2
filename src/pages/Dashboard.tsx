@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { LogOut, BarChart3, Plus, ExternalLink } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { ListingsPanel } from "@/components/ListingsPanel";
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -171,6 +172,11 @@ const Dashboard = () => {
           <p className="text-muted-foreground">
             Bem-vindo ao ML Analyzer Pro - sua ferramenta completa de análise de anúncios do Mercado Livre
           </p>
+        </div>
+
+        {/* Listings Panel */}
+        <div className="mb-8">
+          <ListingsPanel />
         </div>
 
         {/* Getting Started Cards */}
