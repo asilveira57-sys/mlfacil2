@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "ML Analyzer Pro",
+  "version": "1.0.0",
+  "description": "Análise profissional de anúncios do Mercado Livre em tempo real",
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://produto.mercadolivre.com.br/*",
+    "https://articulo.mercadolibre.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://produto.mercadolivre.com.br/*",
+        "https://articulo.mercadolibre.com/*"
+      ],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_end"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["sidebar.html", "styles.css"],
+      "matches": [
+        "https://produto.mercadolivre.com.br/*",
+        "https://articulo.mercadolibre.com/*"
+      ]
+    }
+  ]
+}
