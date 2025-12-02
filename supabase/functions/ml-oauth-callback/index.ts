@@ -20,7 +20,20 @@ serve(async (req) => {
       throw new Error('Missing authorization code');
     }
 
-    console.log('Processing OAuth callback with code:', code);
+    console.log('Processing OAuth callback with code');
+
+    // Parse state to get frontend origin
+    let frontendOrigin = 'https://lovable.dev';
+    try {
+      if (state) {
+        const stateData = JSON.parse(atob(state));
+        frontendOrigin = stateData.origin || frontendOrigin;
+      }
+    } catch (e) {
+      console.log('Could not parse state, using default origin');
+    }
+
+    console.log('Frontend origin:', frontendOrigin);
 
     // Exchange code for access token
     const tokenResponse = await fetch('https://api.mercadolibre.com/oauth/token', {
@@ -40,7 +53,7 @@ serve(async (req) => {
     if (!tokenResponse.ok) {
       const error = await tokenResponse.text();
       console.error('Token exchange failed:', error);
-      throw new Error('Failed to exchange authorization code');
+      throw new Error(`Failed to exchange authorization code: ${error}`);
     }
 
     const tokenData = await tokenResponse.json();
@@ -60,27 +73,13 @@ serve(async (req) => {
     const userData = await userResponse.json();
     console.log('User data received:', userData.id);
 
-    // Create Supabase client with service role to store tokens
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
-
-    // Store ML account info with state as temporary user identifier
-    // In production, you should validate state against stored session
-    
-    // For now, we'll store with a placeholder and the user will need to link manually
-    // This is a simplified flow - in production you'd store state with user_id in a session table
     const expiresAt = new Date();
     expiresAt.setSeconds(expiresAt.getSeconds() + tokenData.expires_in);
-
-    // Store in a temporary table or return to frontend with token for manual linking
-    // For MVP, we'll redirect with the token data and let frontend handle storage
     
     console.log('ML OAuth completed successfully');
 
-    // Redirect back to dashboard with token data in URL (will be handled by frontend)
-    const redirectUrl = new URL(`${url.origin}/dashboard`);
+    // Redirect back to frontend dashboard with token data
+    const redirectUrl = new URL(`${frontendOrigin}/dashboard`);
     redirectUrl.searchParams.set('ml_connected', 'true');
     redirectUrl.searchParams.set('ml_user_id', userData.id.toString());
     redirectUrl.searchParams.set('access_token', tokenData.access_token);
@@ -97,6 +96,7 @@ serve(async (req) => {
     
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     
+    // Redirect to frontend with error
     return new Response(
       JSON.stringify({ 
         error: errorMessage,

@@ -101,7 +101,9 @@ const Dashboard = () => {
         description: "Redirecionando para o Mercado Livre",
       });
 
-      const { data, error } = await supabase.functions.invoke('ml-auth-url');
+      const { data, error } = await supabase.functions.invoke('ml-auth-url', {
+        body: { frontendOrigin: window.location.origin }
+      });
 
       if (error) {
         throw error;
