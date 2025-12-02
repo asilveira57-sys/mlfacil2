@@ -11,6 +11,17 @@ serve(async (req) => {
   }
 
   try {
+    // Read frontend origin from request body
+    let frontendOrigin = 'https://lovable.dev';
+    try {
+      const body = await req.json();
+      frontendOrigin = body.frontendOrigin || frontendOrigin;
+    } catch (e) {
+      console.log('No body provided, using default origin');
+    }
+
+    console.log('Frontend origin received:', frontendOrigin);
+
     const appId = Deno.env.get('ML_APP_ID');
     const redirectUri = `${Deno.env.get('SUPABASE_URL')}/functions/v1/ml-oauth-callback`;
 
@@ -18,8 +29,12 @@ serve(async (req) => {
       throw new Error('ML_APP_ID not configured');
     }
 
-    // Generate state parameter for security
-    const state = crypto.randomUUID();
+    // Generate state parameter with frontend origin encoded
+    const stateData = {
+      nonce: crypto.randomUUID(),
+      origin: frontendOrigin,
+    };
+    const state = btoa(JSON.stringify(stateData));
 
     // Construct Mercado Livre authorization URL
     const authUrl = new URL('https://auth.mercadolibre.com.br/authorization');
