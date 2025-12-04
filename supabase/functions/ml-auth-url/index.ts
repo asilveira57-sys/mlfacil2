@@ -13,14 +13,23 @@ serve(async (req) => {
   try {
     // Read frontend origin from request body
     let frontendOrigin = 'https://lovable.dev';
+    
+    console.log('Request method:', req.method);
+    console.log('Content-Type:', req.headers.get('content-type'));
+    
     try {
-      const body = await req.json();
-      frontendOrigin = body.frontendOrigin || frontendOrigin;
+      const bodyText = await req.text();
+      console.log('Raw body:', bodyText);
+      
+      if (bodyText) {
+        const body = JSON.parse(bodyText);
+        frontendOrigin = body.frontendOrigin || frontendOrigin;
+      }
     } catch (e) {
-      console.log('No body provided, using default origin');
+      console.log('Body parsing error:', e);
     }
 
-    console.log('Frontend origin received:', frontendOrigin);
+    console.log('Frontend origin resolved:', frontendOrigin);
 
     const appId = Deno.env.get('ML_APP_ID');
     const redirectUri = `${Deno.env.get('SUPABASE_URL')}/functions/v1/ml-oauth-callback`;
