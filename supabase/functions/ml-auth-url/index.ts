@@ -45,8 +45,8 @@ serve(async (req) => {
     };
     const state = btoa(JSON.stringify(stateData));
 
-    // Construct Mercado Livre authorization URL
-    const authUrl = new URL('https://auth.mercadolibre.com.br/authorization');
+    // Construct Mercado Livre authorization URL (Brazilian domain uses "mercadolivre" with "v")
+    const authUrl = new URL('https://auth.mercadolivre.com.br/authorization');
     authUrl.searchParams.append('response_type', 'code');
     authUrl.searchParams.append('client_id', appId);
     authUrl.searchParams.append('redirect_uri', redirectUri);
