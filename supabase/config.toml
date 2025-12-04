@@ -1,1 +1,4 @@
 project_id = "jkyemuypfgldrvquehlb"
+
+[functions.ml-oauth-callback]
+verify_jwt = false
