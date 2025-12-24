@@ -4,21 +4,55 @@ import { supabase } from "@/integrations/supabase/client";
 import { User } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { LogOut, BarChart3, Plus, ExternalLink } from "lucide-react";
+import { LogOut, BarChart3, Plus, ExternalLink, Settings, CheckCircle, XCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { ListingsPanel } from "@/components/ListingsPanel";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+
+interface MLAccount {
+  id: string;
+  nickname: string | null;
+  email: string | null;
+  is_active: boolean | null;
+  ml_user_id: string;
+}
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [mlAccount, setMlAccount] = useState<MLAccount | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Fetch ML account status
+  const fetchMlAccount = async (userId: string) => {
+    const { data, error } = await supabase
+      .from('ml_accounts')
+      .select('id, nickname, email, is_active, ml_user_id')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .maybeSingle();
+    
+    if (!error && data) {
+      setMlAccount(data);
+    }
+  };
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
       if (!session) {
         navigate("/auth");
+      } else {
+        fetchMlAccount(session.user.id);
       }
     });
 
@@ -26,6 +60,8 @@ const Dashboard = () => {
       setUser(session?.user ?? null);
       if (!session) {
         navigate("/auth");
+      } else {
+        fetchMlAccount(session.user.id);
       }
       setLoading(false);
     });
@@ -76,6 +112,14 @@ const Dashboard = () => {
               toast({
                 title: "Conectado!",
                 description: "Sua conta do Mercado Livre foi conectada com sucesso",
+              });
+              // Update local state
+              setMlAccount({
+                id: '',
+                nickname: nickname || null,
+                email: email || null,
+                is_active: true,
+                ml_user_id: mlUserId,
               });
               // Clean URL
               window.history.replaceState({}, '', '/dashboard');
@@ -153,6 +197,55 @@ const Dashboard = () => {
               <span className="text-sm text-muted-foreground hidden sm:inline">
                 {user?.email}
               </span>
+              
+              {/* Settings Dialog */}
+              <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-2">
+                    <Settings className="w-4 h-4" />
+                    <span className="hidden sm:inline">Configurações</span>
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Configurações</DialogTitle>
+                    <DialogDescription>
+                      Gerencie suas conexões e preferências
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 py-4">
+                    {/* ML Connection Status */}
+                    <div className="space-y-3">
+                      <h4 className="font-medium text-sm">Mercado Livre</h4>
+                      <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          {mlAccount ? (
+                            <CheckCircle className="w-5 h-5 text-green-500" />
+                          ) : (
+                            <XCircle className="w-5 h-5 text-muted-foreground" />
+                          )}
+                          <div>
+                            <p className="text-sm font-medium">
+                              {mlAccount ? 'Conectado' : 'Desconectado'}
+                            </p>
+                            {mlAccount && (
+                              <p className="text-xs text-muted-foreground">
+                                {mlAccount.nickname || mlAccount.email || mlAccount.ml_user_id}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        {!mlAccount && (
+                          <Button size="sm" onClick={() => { setSettingsOpen(false); handleConnectML(); }}>
+                            Conectar
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
               <Button
                 variant="outline"
                 size="sm"
@@ -183,22 +276,41 @@ const Dashboard = () => {
 
         {/* Getting Started Cards */}
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 mb-8">
-          <Card className="p-6 hover:shadow-lg transition-all duration-300 border-2 border-dashed border-primary/20 hover:border-primary/40">
-            <div className="flex items-start justify-between mb-4">
-              <div className="w-12 h-12 bg-accent/10 rounded-xl flex items-center justify-center">
-                <Plus className="w-6 h-6 text-accent" />
+          {mlAccount ? (
+            <Card className="p-6 hover:shadow-lg transition-all duration-300 border-2 border-green-500/30 bg-green-500/5">
+              <div className="flex items-start justify-between mb-4">
+                <div className="w-12 h-12 bg-green-500/10 rounded-xl flex items-center justify-center">
+                  <CheckCircle className="w-6 h-6 text-green-500" />
+                </div>
               </div>
-            </div>
-            <h3 className="text-lg font-semibold text-card-foreground mb-2">
-              1. Conecte sua Conta ML
-            </h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Vincule sua conta do Mercado Livre para começar a analisar seus anúncios automaticamente.
-            </p>
-            <Button className="w-full" variant="default" onClick={handleConnectML}>
-              Conectar Mercado Livre
-            </Button>
-          </Card>
+              <h3 className="text-lg font-semibold text-card-foreground mb-2">
+                ✓ Conta Conectada
+              </h3>
+              <p className="text-sm text-muted-foreground mb-2">
+                {mlAccount.nickname || mlAccount.email || `ID: ${mlAccount.ml_user_id}`}
+              </p>
+              <p className="text-xs text-green-600 font-medium">
+                Status: Ativo
+              </p>
+            </Card>
+          ) : (
+            <Card className="p-6 hover:shadow-lg transition-all duration-300 border-2 border-dashed border-primary/20 hover:border-primary/40">
+              <div className="flex items-start justify-between mb-4">
+                <div className="w-12 h-12 bg-accent/10 rounded-xl flex items-center justify-center">
+                  <Plus className="w-6 h-6 text-accent" />
+                </div>
+              </div>
+              <h3 className="text-lg font-semibold text-card-foreground mb-2">
+                1. Conecte sua Conta ML
+              </h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                Vincule sua conta do Mercado Livre para começar a analisar seus anúncios automaticamente.
+              </p>
+              <Button className="w-full" variant="default" onClick={handleConnectML}>
+                Conectar Mercado Livre
+              </Button>
+            </Card>
+          )}
 
           <Card className="p-6 hover:shadow-lg transition-all duration-300">
             <div className="flex items-start justify-between mb-4">
