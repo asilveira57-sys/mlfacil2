@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { LogOut, BarChart3, Plus, ExternalLink, Settings, CheckCircle, XCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { ListingsPanel } from "@/components/ListingsPanel";
+import { SalesDashboard } from "@/components/SalesDashboard";
 import {
   Dialog,
   DialogContent,
@@ -269,10 +269,12 @@ const Dashboard = () => {
           </p>
         </div>
 
-        {/* Listings Panel */}
-        <div className="mb-8">
-          <ListingsPanel />
-        </div>
+        {/* Sales Dashboard - Only show when ML is connected */}
+        {mlAccount && (
+          <div className="mb-8">
+            <SalesDashboard />
+          </div>
+        )}
 
         {/* Getting Started Cards */}
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 mb-8">
