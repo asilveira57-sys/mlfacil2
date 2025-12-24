@@ -98,6 +98,13 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
+    // Garante somente 1 conta ativa por usuário
+    await supabaseAdmin
+      .from('ml_accounts')
+      .update({ is_active: false })
+      .eq('user_id', userId)
+      .eq('is_active', true);
+
     // Save ML account directly to database (secure - no tokens in URL)
     const { error: upsertError } = await supabaseAdmin
       .from('ml_accounts')

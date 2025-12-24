@@ -32,18 +32,22 @@ const Dashboard = () => {
   const [mlAccount, setMlAccount] = useState<MLAccount | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // Fetch ML account status
+  // Fetch ML account status (pega a conta ativa mais recente)
   const fetchMlAccount = async (userId: string) => {
     const { data, error } = await supabase
       .from('ml_accounts')
       .select('id, nickname, email, is_active, ml_user_id')
       .eq('user_id', userId)
       .eq('is_active', true)
-      .maybeSingle();
-    
-    if (!error && data) {
-      setMlAccount(data);
+      .order('updated_at', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error('Erro ao buscar conta ML:', error);
+      return;
     }
+
+    setMlAccount(data?.[0] ?? null);
   };
 
   useEffect(() => {

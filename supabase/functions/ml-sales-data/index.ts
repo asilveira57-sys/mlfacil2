@@ -49,13 +49,16 @@ serve(async (req) => {
 
     console.log('Fetching ML account for user:', user.id);
 
-    // Get user's ML account
-    const { data: mlAccount, error: accountError } = await supabaseClient
+    // Get user's ML account (pega a conta ativa mais recente)
+    const { data: accounts, error: accountError } = await supabaseClient
       .from('ml_accounts')
       .select('*')
       .eq('user_id', user.id)
       .eq('is_active', true)
-      .maybeSingle();
+      .order('updated_at', { ascending: false })
+      .limit(1);
+
+    const mlAccount = accounts?.[0] ?? null;
 
     if (accountError) {
       console.error('Error fetching ML account:', accountError);
