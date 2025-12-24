@@ -22,18 +22,29 @@ serve(async (req) => {
 
     console.log('Processing OAuth callback with code');
 
-    // Parse state to get frontend origin
+    // Parse state to get frontend origin and user_id
     let frontendOrigin = 'https://lovable.dev';
+    let userId = '';
+    
     try {
       if (state) {
         const stateData = JSON.parse(atob(state));
         frontendOrigin = stateData.origin || frontendOrigin;
+        userId = stateData.userId || '';
       }
     } catch (e) {
       console.log('Could not parse state, using default origin');
     }
 
     console.log('Frontend origin:', frontendOrigin);
+    console.log('User ID from state:', userId);
+
+    if (!userId) {
+      // Redirect with error - no user ID
+      const errorUrl = new URL(`${frontendOrigin}/dashboard`);
+      errorUrl.searchParams.set('ml_error', 'missing_user_id');
+      return Response.redirect(errorUrl.toString(), 302);
+    }
 
     // Exchange code for access token
     const tokenResponse = await fetch('https://api.mercadolibre.com/oauth/token', {
@@ -53,7 +64,10 @@ serve(async (req) => {
     if (!tokenResponse.ok) {
       const error = await tokenResponse.text();
       console.error('Token exchange failed:', error);
-      throw new Error(`Failed to exchange authorization code: ${error}`);
+      
+      const errorUrl = new URL(`${frontendOrigin}/dashboard`);
+      errorUrl.searchParams.set('ml_error', 'token_exchange_failed');
+      return Response.redirect(errorUrl.toString(), 302);
     }
 
     const tokenData = await tokenResponse.json();
@@ -67,7 +81,9 @@ serve(async (req) => {
     });
 
     if (!userResponse.ok) {
-      throw new Error('Failed to fetch user info');
+      const errorUrl = new URL(`${frontendOrigin}/dashboard`);
+      errorUrl.searchParams.set('ml_error', 'user_fetch_failed');
+      return Response.redirect(errorUrl.toString(), 302);
     }
 
     const userData = await userResponse.json();
@@ -75,20 +91,45 @@ serve(async (req) => {
 
     const expiresAt = new Date();
     expiresAt.setSeconds(expiresAt.getSeconds() + tokenData.expires_in);
-    
+
+    // Initialize Supabase client with service role key to bypass RLS
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    );
+
+    // Save ML account directly to database (secure - no tokens in URL)
+    const { error: upsertError } = await supabaseAdmin
+      .from('ml_accounts')
+      .upsert({
+        user_id: userId,
+        ml_user_id: userData.id.toString(),
+        access_token: tokenData.access_token,
+        refresh_token: tokenData.refresh_token,
+        token_expires_at: expiresAt.toISOString(),
+        nickname: userData.nickname || null,
+        email: userData.email || null,
+        country_id: userData.site_id || null,
+        is_active: true,
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'user_id,ml_user_id'
+      });
+
+    if (upsertError) {
+      console.error('Error saving ML account:', upsertError);
+      const errorUrl = new URL(`${frontendOrigin}/dashboard`);
+      errorUrl.searchParams.set('ml_error', 'save_failed');
+      return Response.redirect(errorUrl.toString(), 302);
+    }
+
+    console.log('ML account saved successfully');
     console.log('ML OAuth completed successfully');
 
-    // Redirect back to frontend dashboard with token data
-    // IMPORTANT: use ml_* param names to avoid clashing with the app auth flow
+    // Redirect back to frontend dashboard with simple success flag (NO TOKENS!)
     const redirectUrl = new URL(`${frontendOrigin}/dashboard`);
     redirectUrl.searchParams.set('ml_connected', 'true');
-    redirectUrl.searchParams.set('ml_user_id', userData.id.toString());
-    redirectUrl.searchParams.set('ml_access_token', tokenData.access_token);
-    redirectUrl.searchParams.set('ml_refresh_token', tokenData.refresh_token);
-    redirectUrl.searchParams.set('ml_expires_at', expiresAt.toISOString());
     redirectUrl.searchParams.set('nickname', userData.nickname || '');
-    redirectUrl.searchParams.set('email', userData.email || '');
-    redirectUrl.searchParams.set('country_id', userData.site_id || '');
     
     return Response.redirect(redirectUrl.toString(), 302);
 

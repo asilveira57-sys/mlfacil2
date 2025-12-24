@@ -69,63 +69,35 @@ const Dashboard = () => {
     return () => subscription.unsubscribe();
   }, [navigate]);
 
-  // Handle ML OAuth callback
+  // Handle ML OAuth callback - simplified (tokens saved server-side)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const mlConnected = params.get('ml_connected');
+    const mlError = params.get('ml_error');
+    
+    if (mlError) {
+      toast({
+        title: "Erro na conexão",
+        description: `Falha ao conectar: ${mlError}`,
+        variant: "destructive",
+      });
+      window.history.replaceState({}, '', '/dashboard');
+      return;
+    }
     
     if (mlConnected === 'true' && user) {
-      const mlUserId = params.get('ml_user_id');
-      const accessToken = params.get('ml_access_token');
-      const refreshToken = params.get('ml_refresh_token');
-      const expiresAt = params.get('ml_expires_at');
       const nickname = params.get('nickname');
-      const email = params.get('email');
-      const countryId = params.get('country_id');
-
-      if (mlUserId && accessToken && refreshToken && expiresAt) {
-        // Store ML account data
-        supabase
-          .from('ml_accounts')
-          .upsert({
-            user_id: user.id,
-            ml_user_id: mlUserId,
-            access_token: accessToken,
-            refresh_token: refreshToken,
-            token_expires_at: expiresAt,
-            nickname: nickname || null,
-            email: email || null,
-            country_id: countryId || null,
-            is_active: true,
-          }, {
-            onConflict: 'user_id,ml_user_id'
-          })
-          .then(({ error }) => {
-            if (error) {
-              console.error('Error storing ML account:', error);
-              toast({
-                title: "Erro ao salvar",
-                description: "Não foi possível salvar a conta do Mercado Livre",
-                variant: "destructive",
-              });
-            } else {
-              toast({
-                title: "Conectado!",
-                description: "Sua conta do Mercado Livre foi conectada com sucesso",
-              });
-              // Update local state
-              setMlAccount({
-                id: '',
-                nickname: nickname || null,
-                email: email || null,
-                is_active: true,
-                ml_user_id: mlUserId,
-              });
-              // Clean URL
-              window.history.replaceState({}, '', '/dashboard');
-            }
-          });
-      }
+      
+      toast({
+        title: "Conectado!",
+        description: "Sua conta do Mercado Livre foi conectada com sucesso",
+      });
+      
+      // Refresh ML account data from database
+      fetchMlAccount(user.id);
+      
+      // Clean URL
+      window.history.replaceState({}, '', '/dashboard');
     }
   }, [user, toast]);
 
