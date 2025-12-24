@@ -76,9 +76,9 @@ const Dashboard = () => {
     
     if (mlConnected === 'true' && user) {
       const mlUserId = params.get('ml_user_id');
-      const accessToken = params.get('access_token');
-      const refreshToken = params.get('refresh_token');
-      const expiresAt = params.get('expires_at');
+      const accessToken = params.get('ml_access_token');
+      const refreshToken = params.get('ml_refresh_token');
+      const expiresAt = params.get('ml_expires_at');
       const nickname = params.get('nickname');
       const email = params.get('email');
       const countryId = params.get('country_id');

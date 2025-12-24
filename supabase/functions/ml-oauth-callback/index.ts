@@ -79,12 +79,13 @@ serve(async (req) => {
     console.log('ML OAuth completed successfully');
 
     // Redirect back to frontend dashboard with token data
+    // IMPORTANT: use ml_* param names to avoid clashing with the app auth flow
     const redirectUrl = new URL(`${frontendOrigin}/dashboard`);
     redirectUrl.searchParams.set('ml_connected', 'true');
     redirectUrl.searchParams.set('ml_user_id', userData.id.toString());
-    redirectUrl.searchParams.set('access_token', tokenData.access_token);
-    redirectUrl.searchParams.set('refresh_token', tokenData.refresh_token);
-    redirectUrl.searchParams.set('expires_at', expiresAt.toISOString());
+    redirectUrl.searchParams.set('ml_access_token', tokenData.access_token);
+    redirectUrl.searchParams.set('ml_refresh_token', tokenData.refresh_token);
+    redirectUrl.searchParams.set('ml_expires_at', expiresAt.toISOString());
     redirectUrl.searchParams.set('nickname', userData.nickname || '');
     redirectUrl.searchParams.set('email', userData.email || '');
     redirectUrl.searchParams.set('country_id', userData.site_id || '');
