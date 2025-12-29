@@ -38,6 +38,8 @@ export default function ShippingLabels() {
     selectAll,
     clearSelection,
     isSyncing,
+    syncPhase,
+    syncProgress,
     sync,
     lastSyncAt,
     statusCounts,
@@ -147,6 +149,8 @@ export default function ShippingLabels() {
           setPeriodFilter={setPeriodFilter}
           statusCounts={statusCounts}
           isSyncing={isSyncing}
+          syncPhase={syncPhase}
+          syncProgress={syncProgress}
           onSync={sync}
           lastSyncAt={lastSyncAt}
         />

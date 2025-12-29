@@ -8,12 +8,11 @@ const corsHeaders = {
 };
 
 // Shipment statuses where labels are typically available
-const LABEL_AVAILABLE_STATUSES = [
-  'ready_to_ship',
-  'shipped',
-  'delivered',
-  'not_delivered',
-  'handling', // Added - labels may be available during handling
+// Removed restrictive filtering - most shipments with valid status have labels
+const LABEL_UNAVAILABLE_STATUSES = [
+  'cancelled',
+  'returned',
+  'not_verified',
 ];
 
 interface MLShipment {
@@ -31,6 +30,9 @@ interface MLShipment {
   };
 }
 
+// Sleep helper for yielding
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -46,37 +48,26 @@ serve(async (req) => {
       );
     }
 
-    // Extract JWT token
     const token = authHeader.replace('Bearer ', '');
     
-    // Create admin client with service role for ALL operations
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    // Validate JWT and get user
     const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
     
-    if (userError) {
-      console.error('Auth error:', userError.message);
+    if (userError || !user) {
+      console.error('Auth error:', userError?.message);
       return new Response(
-        JSON.stringify({ error: 'User not authenticated', details: userError.message }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-    
-    if (!user) {
-      console.error('No user found for token');
-      return new Response(
-        JSON.stringify({ error: 'User not authenticated' }),
+        JSON.stringify({ error: 'User not authenticated', details: userError?.message }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
     console.log('Authenticated user:', user.id);
 
-    const { seller_id, shipment_ids, order_ids } = await req.json();
+    const { seller_id, shipment_ids } = await req.json();
     
     if (!seller_id) {
       return new Response(
@@ -85,7 +76,14 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Syncing shipments for seller: ${seller_id}`);
+    if (!shipment_ids || shipment_ids.length === 0) {
+      return new Response(
+        JSON.stringify({ success: true, synced: 0, errors: 0, message: 'No shipments to sync' }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log(`Syncing ${shipment_ids.length} shipments for seller: ${seller_id}`);
 
     // Get ML account with access token
     const { data: mlAccount, error: mlError } = await supabaseAdmin
@@ -104,47 +102,34 @@ serve(async (req) => {
       );
     }
 
-    // If order_ids provided, get shipment_ids from cache
-    let shipmentsToSync: { shipment_id: string; order_id: string }[] = [];
+    // Get order_id mapping for shipment_ids
+    const { data: ordersMapping } = await supabaseAdmin
+      .from('meli_orders_cache')
+      .select('order_id, shipment_id')
+      .eq('seller_id', seller_id)
+      .in('shipment_id', shipment_ids);
 
-    if (order_ids && order_ids.length > 0) {
-      const { data: orders } = await supabaseAdmin
-        .from('meli_orders_cache')
-        .select('order_id, shipment_id')
-        .eq('seller_id', seller_id)
-        .in('order_id', order_ids)
-        .not('shipment_id', 'is', null);
-
-      shipmentsToSync = (orders || []).map(o => ({
-        shipment_id: o.shipment_id!,
-        order_id: o.order_id,
-      }));
-    } else if (shipment_ids && shipment_ids.length > 0) {
-      // Get order_ids for these shipments from cache
-      const { data: orders } = await supabaseAdmin
-        .from('meli_orders_cache')
-        .select('order_id, shipment_id')
-        .eq('seller_id', seller_id)
-        .in('shipment_id', shipment_ids);
-
-      shipmentsToSync = (orders || []).map(o => ({
-        shipment_id: o.shipment_id!,
-        order_id: o.order_id,
-      }));
-    }
-
-    console.log(`Shipments to sync: ${shipmentsToSync.length}`);
+    const shipmentToOrderMap = new Map(
+      (ordersMapping || []).map(o => [o.shipment_id, o.order_id])
+    );
 
     let synced = 0;
     let errors = 0;
 
-    // Process in batches
-    const batchSize = 10;
-    for (let i = 0; i < shipmentsToSync.length; i += batchSize) {
-      const batch = shipmentsToSync.slice(i, i + batchSize);
+    // Process shipments (already batched by frontend, but add internal batch processing)
+    const INTERNAL_BATCH = 10;
+    for (let i = 0; i < shipment_ids.length; i += INTERNAL_BATCH) {
+      const batch = shipment_ids.slice(i, i + INTERNAL_BATCH);
       
-      await Promise.all(batch.map(async ({ shipment_id, order_id }) => {
+      await Promise.all(batch.map(async (shipment_id: string) => {
         try {
+          const order_id = shipmentToOrderMap.get(shipment_id);
+          if (!order_id) {
+            console.warn(`No order_id found for shipment ${shipment_id}`);
+            errors++;
+            return;
+          }
+
           const mlUrl = `https://api.mercadolibre.com/shipments/${shipment_id}`;
           const response = await fetch(mlUrl, {
             headers: {
@@ -153,16 +138,15 @@ serve(async (req) => {
           });
 
           if (!response.ok) {
-            console.error(`Failed to fetch shipment ${shipment_id}:`, await response.text());
+            console.error(`Failed to fetch shipment ${shipment_id}:`, response.status);
             errors++;
             return;
           }
 
           const shipment: MLShipment = await response.json();
           
-          // Determine if label is available based on status only
-          // Removed logistic_type filter - labels may be available for all types
-          const labelAvailable = LABEL_AVAILABLE_STATUSES.includes(shipment.status);
+          // Label is available if status is not in the unavailable list
+          const labelAvailable = !LABEL_UNAVAILABLE_STATUSES.includes(shipment.status);
 
           // Build address string
           const addr = shipment.receiver_address;
@@ -188,7 +172,7 @@ serve(async (req) => {
             last_sync_at: new Date().toISOString(),
           };
 
-          // Upsert using admin client
+          // Upsert
           const { data: existing } = await supabaseAdmin
             .from('meli_shipments_cache')
             .select('id')
@@ -213,6 +197,11 @@ serve(async (req) => {
           errors++;
         }
       }));
+
+      // Yield between internal batches
+      if (i + INTERNAL_BATCH < shipment_ids.length) {
+        await sleep(100);
+      }
     }
 
     console.log(`Sync complete: ${synced} synced, ${errors} errors`);

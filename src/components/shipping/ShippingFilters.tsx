@@ -1,8 +1,8 @@
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { RefreshCw, Clock } from 'lucide-react';
-import { FinalStatus, PeriodFilter } from '@/hooks/useShippingLabels';
-import { format, formatDistanceToNow } from 'date-fns';
+import { RefreshCw, Clock, Loader2 } from 'lucide-react';
+import { FinalStatus, PeriodFilter, SyncPhase } from '@/hooks/useShippingLabels';
+import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 interface ShippingFiltersProps {
@@ -12,6 +12,8 @@ interface ShippingFiltersProps {
   setPeriodFilter: (period: PeriodFilter) => void;
   statusCounts: Record<FinalStatus, number>;
   isSyncing: boolean;
+  syncPhase?: SyncPhase;
+  syncProgress?: string;
   onSync: () => void;
   lastSyncAt: string | null;
 }
@@ -34,6 +36,14 @@ const STATUS_VARIANTS: Record<FinalStatus, 'default' | 'secondary' | 'destructiv
 
 const PERIOD_OPTIONS: PeriodFilter[] = [7, 15, 30, 90];
 
+const PHASE_LABELS: Record<SyncPhase, string> = {
+  idle: '',
+  orders: 'Buscando pedidos',
+  shipments: 'Atualizando envios',
+  invoices: 'Atualizando NFs',
+  done: 'Concluído',
+};
+
 export function ShippingFilters({
   statusFilter,
   setStatusFilter,
@@ -41,6 +51,8 @@ export function ShippingFilters({
   setPeriodFilter,
   statusCounts,
   isSyncing,
+  syncPhase = 'idle',
+  syncProgress = '',
   onSync,
   lastSyncAt,
 }: ShippingFiltersProps) {
@@ -56,6 +68,7 @@ export function ShippingFilters({
               variant={periodFilter === period ? 'default' : 'outline'}
               size="sm"
               onClick={() => setPeriodFilter(period)}
+              disabled={isSyncing}
             >
               {period} dias
             </Button>
@@ -63,7 +76,18 @@ export function ShippingFilters({
         </div>
 
         <div className="flex items-center gap-4">
-          {lastSyncAt && (
+          {/* Sync progress indicator */}
+          {isSyncing && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="max-w-[200px] truncate">
+                {syncProgress || PHASE_LABELS[syncPhase]}
+              </span>
+            </div>
+          )}
+
+          {/* Last sync time (only show when not syncing) */}
+          {!isSyncing && lastSyncAt && (
             <div className="flex items-center gap-1 text-sm text-muted-foreground">
               <Clock className="h-4 w-4" />
               <span>
@@ -74,6 +98,7 @@ export function ShippingFilters({
               </span>
             </div>
           )}
+          
           <Button
             variant="outline"
             size="sm"
