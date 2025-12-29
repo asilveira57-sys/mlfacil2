@@ -1,1 +1,13 @@
 project_id = "rfckrbqwdsejicjlxqdv"
+
+[functions.ml-auth-url]
+verify_jwt = false
+
+[functions.ml-oauth-callback]
+verify_jwt = false
+
+[functions.ml-sales-data]
+verify_jwt = false
+
+[functions.ml-get-item]
+verify_jwt = false
