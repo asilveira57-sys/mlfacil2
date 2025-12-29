@@ -179,6 +179,171 @@ export type Database = {
           },
         ]
       }
+      meli_invoices_cache: {
+        Row: {
+          error_message: string | null
+          id: string
+          invoice_key: string | null
+          invoice_number: string | null
+          invoice_status: string
+          issued_at: string | null
+          last_sync_at: string
+          order_id: string
+          seller_id: string
+          user_id: string
+        }
+        Insert: {
+          error_message?: string | null
+          id?: string
+          invoice_key?: string | null
+          invoice_number?: string | null
+          invoice_status?: string
+          issued_at?: string | null
+          last_sync_at?: string
+          order_id: string
+          seller_id: string
+          user_id: string
+        }
+        Update: {
+          error_message?: string | null
+          id?: string
+          invoice_key?: string | null
+          invoice_number?: string | null
+          invoice_status?: string
+          issued_at?: string | null
+          last_sync_at?: string
+          order_id?: string
+          seller_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      meli_orders_cache: {
+        Row: {
+          buyer_nickname: string | null
+          created_at_meli: string | null
+          id: string
+          last_sync_at: string
+          order_id: string
+          order_status: string | null
+          seller_id: string
+          shipment_id: string | null
+          total_amount: number | null
+          user_id: string
+        }
+        Insert: {
+          buyer_nickname?: string | null
+          created_at_meli?: string | null
+          id?: string
+          last_sync_at?: string
+          order_id: string
+          order_status?: string | null
+          seller_id: string
+          shipment_id?: string | null
+          total_amount?: number | null
+          user_id: string
+        }
+        Update: {
+          buyer_nickname?: string | null
+          created_at_meli?: string | null
+          id?: string
+          last_sync_at?: string
+          order_id?: string
+          order_status?: string | null
+          seller_id?: string
+          shipment_id?: string | null
+          total_amount?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      meli_print_queue: {
+        Row: {
+          created_at: string
+          error_log: string | null
+          file_url: string | null
+          format: string
+          id: string
+          seller_id: string
+          shipment_ids: Json
+          status: string
+          total_labels: number
+          user_id: string
+          zpl_content: string | null
+        }
+        Insert: {
+          created_at?: string
+          error_log?: string | null
+          file_url?: string | null
+          format: string
+          id?: string
+          seller_id: string
+          shipment_ids: Json
+          status?: string
+          total_labels?: number
+          user_id: string
+          zpl_content?: string | null
+        }
+        Update: {
+          created_at?: string
+          error_log?: string | null
+          file_url?: string | null
+          format?: string
+          id?: string
+          seller_id?: string
+          shipment_ids?: Json
+          status?: string
+          total_labels?: number
+          user_id?: string
+          zpl_content?: string | null
+        }
+        Relationships: []
+      }
+      meli_shipments_cache: {
+        Row: {
+          id: string
+          label_available: boolean
+          last_sync_at: string
+          order_id: string
+          receiver_address: string | null
+          receiver_name: string | null
+          seller_id: string
+          shipment_id: string
+          shipment_status: string | null
+          shipment_substatus: string | null
+          tracking_number: string | null
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          label_available?: boolean
+          last_sync_at?: string
+          order_id: string
+          receiver_address?: string | null
+          receiver_name?: string | null
+          seller_id: string
+          shipment_id: string
+          shipment_status?: string | null
+          shipment_substatus?: string | null
+          tracking_number?: string | null
+          user_id: string
+        }
+        Update: {
+          id?: string
+          label_available?: boolean
+          last_sync_at?: string
+          order_id?: string
+          receiver_address?: string | null
+          receiver_name?: string | null
+          seller_id?: string
+          shipment_id?: string
+          shipment_status?: string | null
+          shipment_substatus?: string | null
+          tracking_number?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       ml_accounts: {
         Row: {
           access_token: string
@@ -250,7 +415,34 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      meli_orders_ready_view: {
+        Row: {
+          buyer_nickname: string | null
+          created_at_meli: string | null
+          final_status: string | null
+          id: string | null
+          invoice_key: string | null
+          invoice_number: string | null
+          invoice_status: string | null
+          invoice_sync_at: string | null
+          issued_at: string | null
+          label_available: boolean | null
+          order_id: string | null
+          order_status: string | null
+          order_sync_at: string | null
+          receiver_name: string | null
+          selectable: boolean | null
+          seller_id: string | null
+          shipment_id: string | null
+          shipment_status: string | null
+          shipment_substatus: string | null
+          shipment_sync_at: string | null
+          total_amount: number | null
+          tracking_number: string | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       [_ in never]: never
