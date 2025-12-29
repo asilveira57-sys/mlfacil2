@@ -49,6 +49,13 @@ interface UseShippingLabelsOptions {
   sellerId: string | null;
 }
 
+// Helper to get auth headers
+async function getAuthHeaders(): Promise<{ Authorization: string } | null> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) return null;
+  return { Authorization: `Bearer ${session.access_token}` };
+}
+
 export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -105,14 +112,15 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     mutationFn: async () => {
       if (!sellerId) throw new Error('Seller ID not set');
 
+      const headers = await getAuthHeaders();
+      if (!headers) throw new Error('Not authenticated');
+
       const dateFrom = new Date();
       dateFrom.setDate(dateFrom.getDate() - periodFilter);
 
-      const { data: session } = await supabase.auth.getSession();
-      if (!session?.session?.access_token) throw new Error('Not authenticated');
-
       // Step 1: Sync orders
       const ordersResponse = await supabase.functions.invoke('ml-sync-orders', {
+        headers,
         body: {
           seller_id: sellerId,
           date_from: dateFrom.toISOString(),
@@ -138,6 +146,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         // Step 3: Sync shipments
         if (shipmentIds.length > 0) {
           const shipmentsResponse = await supabase.functions.invoke('ml-sync-shipments', {
+            headers,
             body: {
               seller_id: sellerId,
               shipment_ids: shipmentIds,
@@ -149,6 +158,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         // Step 4: Sync invoices
         if (orderIds.length > 0) {
           const invoicesResponse = await supabase.functions.invoke('ml-sync-invoices', {
+            headers,
             body: {
               seller_id: sellerId,
               order_ids: orderIds,
@@ -179,21 +189,32 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
   // Generate labels mutation
   const generateLabelsMutation = useMutation({
-    mutationFn: async ({ format }: { format: 'pdf' | 'zpl' }) => {
+    mutationFn: async ({ format, shipmentId }: { format: 'pdf' | 'zpl'; shipmentId?: string }) => {
       if (!sellerId) throw new Error('Seller ID not set');
-      if (selectedIds.size === 0) throw new Error('Nenhum envio selecionado');
+      
+      const headers = await getAuthHeaders();
+      if (!headers) throw new Error('Not authenticated');
 
-      // Get shipment IDs from selected orders
-      const selectedOrders = orders.filter(o => selectedIds.has(o.id));
-      const shipmentIds = selectedOrders
-        .map(o => o.shipment_id)
-        .filter(Boolean) as string[];
+      let shipmentIds: string[];
+      
+      if (shipmentId) {
+        // Single shipment (reprint)
+        shipmentIds = [shipmentId];
+      } else {
+        // Bulk from selection
+        if (selectedIds.size === 0) throw new Error('Nenhum envio selecionado');
+        const selectedOrders = orders.filter(o => selectedIds.has(o.id));
+        shipmentIds = selectedOrders
+          .map(o => o.shipment_id)
+          .filter(Boolean) as string[];
+      }
 
       if (shipmentIds.length === 0) {
         throw new Error('Nenhum envio válido selecionado');
       }
 
       const response = await supabase.functions.invoke('ml-generate-labels', {
+        headers,
         body: {
           seller_id: sellerId,
           shipment_ids: shipmentIds,
@@ -207,10 +228,26 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       return response.data;
     },
     onSuccess: (data, variables) => {
-      setSelectedIds(new Set());
+      if (!variables.shipmentId) {
+        // Only clear selection for bulk operations
+        setSelectedIds(new Set());
+      }
       
-      if (variables.format === 'pdf' && data.file_url) {
-        window.open(data.file_url, '_blank');
+      if (variables.format === 'pdf' && data.pdf_base64) {
+        // Download PDF from base64
+        const binary = atob(data.pdf_base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `etiquetas_${new Date().getTime()}.pdf`;
+        a.click();
+        URL.revokeObjectURL(url);
+        
         toast({
           title: 'PDF gerado com sucesso',
           description: `${data.total_labels} etiqueta(s) gerada(s)`,

@@ -13,6 +13,7 @@ const LABEL_AVAILABLE_STATUSES = [
   'shipped',
   'delivered',
   'not_delivered',
+  'handling', // Added - labels may be available during handling
 ];
 
 interface MLShipment {
@@ -37,28 +38,43 @@ serve(async (req) => {
 
   try {
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      console.error('Missing authorization header');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.error('Missing or invalid authorization header');
       return new Response(
         JSON.stringify({ error: 'Missing authorization header' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const supabaseClient = createClient(
+    // Extract JWT token
+    const token = authHeader.replace('Bearer ', '');
+    
+    // Create admin client with service role for ALL operations
+    const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
-    if (userError || !user) {
-      console.error('User not authenticated:', userError?.message);
+    // Validate JWT and get user
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
+    
+    if (userError) {
+      console.error('Auth error:', userError.message);
+      return new Response(
+        JSON.stringify({ error: 'User not authenticated', details: userError.message }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    if (!user) {
+      console.error('No user found for token');
       return new Response(
         JSON.stringify({ error: 'User not authenticated' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    console.log('Authenticated user:', user.id);
 
     const { seller_id, shipment_ids, order_ids } = await req.json();
     
@@ -72,12 +88,7 @@ serve(async (req) => {
     console.log(`Syncing shipments for seller: ${seller_id}`);
 
     // Get ML account with access token
-    const adminClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
-
-    const { data: mlAccount, error: mlError } = await adminClient
+    const { data: mlAccount, error: mlError } = await supabaseAdmin
       .from('ml_accounts')
       .select('access_token, ml_user_id')
       .eq('user_id', user.id)
@@ -97,7 +108,7 @@ serve(async (req) => {
     let shipmentsToSync: { shipment_id: string; order_id: string }[] = [];
 
     if (order_ids && order_ids.length > 0) {
-      const { data: orders } = await supabaseClient
+      const { data: orders } = await supabaseAdmin
         .from('meli_orders_cache')
         .select('order_id, shipment_id')
         .eq('seller_id', seller_id)
@@ -110,7 +121,7 @@ serve(async (req) => {
       }));
     } else if (shipment_ids && shipment_ids.length > 0) {
       // Get order_ids for these shipments from cache
-      const { data: orders } = await supabaseClient
+      const { data: orders } = await supabaseAdmin
         .from('meli_orders_cache')
         .select('order_id, shipment_id')
         .eq('seller_id', seller_id)
@@ -149,10 +160,9 @@ serve(async (req) => {
 
           const shipment: MLShipment = await response.json();
           
-          // Determine if label is available
-          const labelAvailable = LABEL_AVAILABLE_STATUSES.includes(shipment.status) &&
-            shipment.logistic_type !== 'cross_docking' &&
-            shipment.logistic_type !== 'drop_off';
+          // Determine if label is available based on status only
+          // Removed logistic_type filter - labels may be available for all types
+          const labelAvailable = LABEL_AVAILABLE_STATUSES.includes(shipment.status);
 
           // Build address string
           const addr = shipment.receiver_address;
@@ -178,8 +188,8 @@ serve(async (req) => {
             last_sync_at: new Date().toISOString(),
           };
 
-          // Upsert
-          const { data: existing } = await supabaseClient
+          // Upsert using admin client
+          const { data: existing } = await supabaseAdmin
             .from('meli_shipments_cache')
             .select('id')
             .eq('seller_id', seller_id)
@@ -187,12 +197,12 @@ serve(async (req) => {
             .maybeSingle();
 
           if (existing) {
-            await supabaseClient
+            await supabaseAdmin
               .from('meli_shipments_cache')
               .update(shipmentData)
               .eq('id', existing.id);
           } else {
-            await supabaseClient
+            await supabaseAdmin
               .from('meli_shipments_cache')
               .insert(shipmentData);
           }

@@ -19,28 +19,43 @@ serve(async (req) => {
 
   try {
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      console.error('Missing authorization header');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.error('Missing or invalid authorization header');
       return new Response(
         JSON.stringify({ error: 'Missing authorization header' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const supabaseClient = createClient(
+    // Extract JWT token
+    const token = authHeader.replace('Bearer ', '');
+    
+    // Create admin client with service role for ALL operations
+    const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
-    if (userError || !user) {
-      console.error('User not authenticated:', userError?.message);
+    // Validate JWT and get user
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
+    
+    if (userError) {
+      console.error('Auth error:', userError.message);
+      return new Response(
+        JSON.stringify({ error: 'User not authenticated', details: userError.message }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    if (!user) {
+      console.error('No user found for token');
       return new Response(
         JSON.stringify({ error: 'User not authenticated' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    console.log('Authenticated user:', user.id);
 
     const { seller_id, shipment_ids, format } = await req.json();
     
@@ -61,12 +76,7 @@ serve(async (req) => {
     console.log(`Generating ${format} labels for seller: ${seller_id}, shipments: ${shipment_ids.length}`);
 
     // Get ML account with access token
-    const adminClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
-
-    const { data: mlAccount, error: mlError } = await adminClient
+    const { data: mlAccount, error: mlError } = await supabaseAdmin
       .from('ml_accounts')
       .select('access_token, ml_user_id')
       .eq('user_id', user.id)
@@ -87,7 +97,7 @@ serve(async (req) => {
     const validShipmentIds: string[] = [];
 
     // Get shipment cache data
-    const { data: shipments } = await supabaseClient
+    const { data: shipments } = await supabaseAdmin
       .from('meli_shipments_cache')
       .select('shipment_id, order_id, label_available')
       .eq('seller_id', seller_id)
@@ -97,7 +107,7 @@ serve(async (req) => {
 
     // Get invoice cache data
     const orderIds = (shipments || []).map(s => s.order_id);
-    const { data: invoices } = await supabaseClient
+    const { data: invoices } = await supabaseAdmin
       .from('meli_invoices_cache')
       .select('order_id, invoice_status')
       .eq('seller_id', seller_id)
@@ -131,8 +141,8 @@ serve(async (req) => {
     console.log(`Validation: ${validShipmentIds.length} valid, ${validationErrors.length} errors`);
 
     if (validShipmentIds.length === 0) {
-      // Record error in print queue
-      await supabaseClient.from('meli_print_queue').insert({
+      // Record error in print queue (audit log only)
+      await supabaseAdmin.from('meli_print_queue').insert({
         user_id: user.id,
         seller_id: seller_id,
         format: format,
@@ -168,8 +178,8 @@ serve(async (req) => {
       const errorText = await mlResponse.text();
       console.error('ML labels API error:', errorText);
 
-      // Record error in print queue
-      await supabaseClient.from('meli_print_queue').insert({
+      // Record error in print queue (audit log)
+      await supabaseAdmin.from('meli_print_queue').insert({
         user_id: user.id,
         seller_id: seller_id,
         format: format,
@@ -185,62 +195,32 @@ serve(async (req) => {
       );
     }
 
-    let fileUrl: string | null = null;
+    // Get content for immediate download (no storage)
+    let pdfBase64: string | null = null;
     let zplContent: string | null = null;
 
     if (format === 'pdf') {
-      // Save PDF to storage
       const pdfBuffer = await mlResponse.arrayBuffer();
-      const now = new Date();
-      const path = `${user.id}/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}/labels_${now.getTime()}.pdf`;
-
-      const { error: uploadError } = await supabaseClient.storage
-        .from('meli-labels')
-        .upload(path, pdfBuffer, {
-          contentType: 'application/pdf',
-          upsert: false,
-        });
-
-      if (uploadError) {
-        console.error('Storage upload error:', uploadError);
-        
-        await supabaseClient.from('meli_print_queue').insert({
-          user_id: user.id,
-          seller_id: seller_id,
-          format: format,
-          shipment_ids: validShipmentIds,
-          total_labels: validShipmentIds.length,
-          status: 'erro',
-          error_log: `Storage error: ${uploadError.message}`,
-        });
-
-        return new Response(
-          JSON.stringify({ error: 'Failed to save PDF' }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+      // Convert to base64 for direct download
+      const uint8Array = new Uint8Array(pdfBuffer);
+      let binary = '';
+      for (let i = 0; i < uint8Array.length; i++) {
+        binary += String.fromCharCode(uint8Array[i]);
       }
-
-      // Generate signed URL (1 hour expiry)
-      const { data: signedUrlData } = await supabaseClient.storage
-        .from('meli-labels')
-        .createSignedUrl(path, 3600);
-
-      fileUrl = signedUrlData?.signedUrl || null;
+      pdfBase64 = btoa(binary);
     } else {
-      // ZPL format - return text content
       zplContent = await mlResponse.text();
     }
 
-    // Record success in print queue
-    await supabaseClient.from('meli_print_queue').insert({
+    // Record success in print queue (audit log only - no file stored)
+    await supabaseAdmin.from('meli_print_queue').insert({
       user_id: user.id,
       seller_id: seller_id,
       format: format,
       shipment_ids: validShipmentIds,
       total_labels: validShipmentIds.length,
       status: 'gerada',
-      file_url: fileUrl,
-      zpl_content: zplContent,
+      // Don't store file_url or zpl_content - return directly
     });
 
     console.log(`Labels generated successfully: ${validShipmentIds.length} labels`);
@@ -249,7 +229,7 @@ serve(async (req) => {
       JSON.stringify({ 
         success: true, 
         total_labels: validShipmentIds.length,
-        file_url: fileUrl,
+        pdf_base64: pdfBase64,
         zpl_content: zplContent,
         validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
       }),
