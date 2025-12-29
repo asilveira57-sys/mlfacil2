@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { User } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { LogOut, BarChart3, Plus, ExternalLink, Settings, CheckCircle, XCircle } from "lucide-react";
+import { LogOut, BarChart3, Plus, ExternalLink, Settings, CheckCircle, XCircle, Package } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { SalesDashboard } from "@/components/SalesDashboard";
 import {
@@ -343,6 +343,28 @@ const Dashboard = () => {
             </Button>
           </Card>
 
+          {mlAccount && (
+            <Card 
+              className="p-6 hover:shadow-lg transition-all duration-300 cursor-pointer border-2 border-primary/20 hover:border-primary/40"
+              onClick={() => navigate('/shipping-labels')}
+            >
+              <div className="flex items-start justify-between mb-4">
+                <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center">
+                  <Package className="w-6 h-6 text-primary" />
+                </div>
+              </div>
+              <h3 className="text-lg font-semibold text-card-foreground mb-2">
+                Etiquetas de Envio
+              </h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                Gerencie e imprima etiquetas dos seus envios em PDF ou ZPL.
+              </p>
+              <Button className="w-full" variant="default">
+                Acessar Etiquetas
+              </Button>
+            </Card>
+          )}
+
           <Card className="p-6 hover:shadow-lg transition-all duration-300">
             <div className="flex items-start justify-between mb-4">
               <div className="w-12 h-12 bg-warning/10 rounded-xl flex items-center justify-center">
@@ -350,7 +372,7 @@ const Dashboard = () => {
               </div>
             </div>
             <h3 className="text-lg font-semibold text-card-foreground mb-2">
-              3. Analise Produtos
+              {mlAccount ? '3.' : '3.'} Analise Produtos
             </h3>
             <p className="text-sm text-muted-foreground mb-4">
               Navegue até qualquer anúncio no ML e veja análises detalhadas no painel lateral.
