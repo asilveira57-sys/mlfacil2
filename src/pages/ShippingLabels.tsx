@@ -91,13 +91,6 @@ export default function ShippingLabels() {
     checkAuthAndFetchAccount();
   }, [navigate, toast]);
 
-  // Auto-sync on first load
-  useEffect(() => {
-    if (mlAccount && !isSyncing && orders.length === 0) {
-      sync();
-    }
-  }, [mlAccount]);
-
   const handleViewDetails = (order: ShippingOrder) => {
     setSelectedOrder(order);
     setDrawerOpen(true);
@@ -155,14 +148,14 @@ export default function ShippingLabels() {
           lastSyncAt={lastSyncAt}
         />
 
-        {/* Table */}
+        {/* Table - shows loading only for initial load, not during sync */}
         <ShippingTable
           orders={orders}
           selectedIds={selectedIds}
           onToggleSelection={toggleSelection}
           onSelectAll={selectAll}
           onViewDetails={handleViewDetails}
-          isLoading={isLoading || isSyncing}
+          isLoading={isLoading}
         />
       </main>
 
