@@ -1,0 +1,156 @@
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Eye, Loader2 } from 'lucide-react';
+import { ShippingOrder } from '@/hooks/useShippingLabels';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+
+interface ShippingTableProps {
+  orders: ShippingOrder[];
+  selectedIds: Set<string>;
+  onToggleSelection: (id: string) => void;
+  onSelectAll: () => void;
+  onViewDetails: (order: ShippingOrder) => void;
+  isLoading: boolean;
+}
+
+const STATUS_BADGES: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
+  pronta: { label: 'Pronta', variant: 'default' },
+  aguardando_nf: { label: 'Aguardando NF', variant: 'secondary' },
+  sem_etiqueta: { label: 'Sem Etiqueta', variant: 'outline' },
+  erro: { label: 'Erro', variant: 'destructive' },
+};
+
+const INVOICE_STATUS_LABELS: Record<string, string> = {
+  emitida: 'Emitida',
+  pendente: 'Pendente',
+  nao_localizada: 'Não localizada',
+  erro: 'Erro',
+};
+
+export function ShippingTable({
+  orders,
+  selectedIds,
+  onToggleSelection,
+  onSelectAll,
+  onViewDetails,
+  isLoading,
+}: ShippingTableProps) {
+  const selectableOrders = orders.filter(o => o.selectable);
+  const allSelected = selectableOrders.length > 0 && 
+    selectableOrders.every(o => selectedIds.has(o.id));
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (orders.length === 0) {
+    return (
+      <div className="text-center py-12 text-muted-foreground">
+        <p>Nenhum pedido encontrado para o período selecionado.</p>
+        <p className="text-sm mt-2">Tente sincronizar ou alterar os filtros.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border rounded-lg">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-12">
+              <Checkbox
+                checked={allSelected}
+                onCheckedChange={() => {
+                  if (allSelected) {
+                    // Clear selection if all selected
+                    selectableOrders.forEach(o => onToggleSelection(o.id));
+                  } else {
+                    onSelectAll();
+                  }
+                }}
+                disabled={selectableOrders.length === 0}
+              />
+            </TableHead>
+            <TableHead>Data</TableHead>
+            <TableHead>Pedido</TableHead>
+            <TableHead>Comprador</TableHead>
+            <TableHead>Envio</TableHead>
+            <TableHead>Status Envio</TableHead>
+            <TableHead>Status NF</TableHead>
+            <TableHead>Status Final</TableHead>
+            <TableHead className="w-12"></TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {orders.map((order) => {
+            const statusBadge = STATUS_BADGES[order.final_status || 'sem_etiqueta'];
+            
+            return (
+              <TableRow key={order.id}>
+                <TableCell>
+                  <Checkbox
+                    checked={selectedIds.has(order.id)}
+                    onCheckedChange={() => onToggleSelection(order.id)}
+                    disabled={!order.selectable}
+                  />
+                </TableCell>
+                <TableCell className="whitespace-nowrap">
+                  {order.created_at_meli 
+                    ? format(new Date(order.created_at_meli), 'dd/MM/yyyy HH:mm', { locale: ptBR })
+                    : '-'
+                  }
+                </TableCell>
+                <TableCell className="font-mono text-sm">
+                  {order.order_id}
+                </TableCell>
+                <TableCell>
+                  {order.buyer_nickname || '-'}
+                </TableCell>
+                <TableCell className="font-mono text-sm">
+                  {order.shipment_id || '-'}
+                </TableCell>
+                <TableCell>
+                  {order.shipment_status || '-'}
+                </TableCell>
+                <TableCell>
+                  {order.invoice_status 
+                    ? INVOICE_STATUS_LABELS[order.invoice_status] || order.invoice_status
+                    : '-'
+                  }
+                </TableCell>
+                <TableCell>
+                  <Badge variant={statusBadge?.variant || 'outline'}>
+                    {statusBadge?.label || order.final_status || '-'}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => onViewDetails(order)}
+                  >
+                    <Eye className="h-4 w-4" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
