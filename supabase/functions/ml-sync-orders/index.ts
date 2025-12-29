@@ -21,6 +21,9 @@ interface MLOrder {
   };
 }
 
+// Sleep helper for yielding between operations
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -36,37 +39,26 @@ serve(async (req) => {
       );
     }
 
-    // Extract JWT token
     const token = authHeader.replace('Bearer ', '');
     
-    // Create admin client with service role for ALL operations
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    // Validate JWT and get user
     const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
     
-    if (userError) {
-      console.error('Auth error:', userError.message);
+    if (userError || !user) {
+      console.error('Auth error:', userError?.message);
       return new Response(
-        JSON.stringify({ error: 'User not authenticated', details: userError.message }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-    
-    if (!user) {
-      console.error('No user found for token');
-      return new Response(
-        JSON.stringify({ error: 'User not authenticated' }),
+        JSON.stringify({ error: 'User not authenticated', details: userError?.message }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
     console.log('Authenticated user:', user.id);
 
-    const { seller_id, date_from, date_to, status } = await req.json();
+    const { seller_id, date_from, date_to } = await req.json();
     
     if (!seller_id) {
       return new Response(
@@ -103,13 +95,10 @@ serve(async (req) => {
     if (date_to) {
       mlUrl += `&order.date_created.to=${date_to}`;
     }
-    if (status && status.length > 0) {
-      mlUrl += `&order.status=${status.join(',')}`;
-    }
 
     console.log('Fetching orders from ML:', mlUrl);
 
-    // Fetch ALL orders with full pagination (no artificial limit)
+    // Fetch ALL orders with pagination (smaller pages for faster response)
     let allOrders: MLOrder[] = [];
     let offset = 0;
     const limit = 50;
@@ -148,14 +137,15 @@ serve(async (req) => {
 
       console.log(`Fetched ${orders.length} orders, total: ${allOrders.length}/${totalFromApi}`);
 
-      // Continue until we have all orders or no more results
       if (orders.length < limit || allOrders.length >= totalFromApi) {
         hasMore = false;
       } else {
         offset += limit;
+        // Yield between API pages
+        await sleep(100);
       }
 
-      // Failsafe: prevent infinite loops (max 10000 orders)
+      // Failsafe: prevent infinite loops
       if (allOrders.length >= 10000) {
         console.log('Reached failsafe limit of 10000 orders');
         hasMore = false;
@@ -164,41 +154,51 @@ serve(async (req) => {
 
     console.log(`Total orders fetched: ${allOrders.length}`);
 
-    // Upsert orders to cache using admin client
+    // Upsert orders in batches with yield
     let inserted = 0;
     let updated = 0;
+    const BATCH_SIZE = 25;
 
-    for (const order of allOrders) {
-      const orderData = {
-        user_id: user.id,
-        seller_id: seller_id,
-        order_id: order.id.toString(),
-        created_at_meli: order.date_created,
-        order_status: order.status,
-        shipment_id: order.shipping?.id?.toString() || null,
-        buyer_nickname: order.buyer?.nickname || null,
-        total_amount: order.total_amount || null,
-        last_sync_at: new Date().toISOString(),
-      };
+    for (let i = 0; i < allOrders.length; i += BATCH_SIZE) {
+      const batch = allOrders.slice(i, i + BATCH_SIZE);
+      
+      for (const order of batch) {
+        const orderData = {
+          user_id: user.id,
+          seller_id: seller_id,
+          order_id: order.id.toString(),
+          created_at_meli: order.date_created,
+          order_status: order.status,
+          shipment_id: order.shipping?.id?.toString() || null,
+          buyer_nickname: order.buyer?.nickname || null,
+          total_amount: order.total_amount || null,
+          last_sync_at: new Date().toISOString(),
+        };
 
-      const { data: existing } = await supabaseAdmin
-        .from('meli_orders_cache')
-        .select('id')
-        .eq('seller_id', seller_id)
-        .eq('order_id', order.id.toString())
-        .maybeSingle();
-
-      if (existing) {
-        await supabaseAdmin
+        const { data: existing } = await supabaseAdmin
           .from('meli_orders_cache')
-          .update(orderData)
-          .eq('id', existing.id);
-        updated++;
-      } else {
-        await supabaseAdmin
-          .from('meli_orders_cache')
-          .insert(orderData);
-        inserted++;
+          .select('id')
+          .eq('seller_id', seller_id)
+          .eq('order_id', order.id.toString())
+          .maybeSingle();
+
+        if (existing) {
+          await supabaseAdmin
+            .from('meli_orders_cache')
+            .update(orderData)
+            .eq('id', existing.id);
+          updated++;
+        } else {
+          await supabaseAdmin
+            .from('meli_orders_cache')
+            .insert(orderData);
+          inserted++;
+        }
+      }
+
+      // Yield between batches
+      if (i + BATCH_SIZE < allOrders.length) {
+        await sleep(50);
       }
     }
 

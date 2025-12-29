@@ -7,6 +7,9 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
+// Sleep helper for yielding
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -22,30 +25,19 @@ serve(async (req) => {
       );
     }
 
-    // Extract JWT token
     const token = authHeader.replace('Bearer ', '');
     
-    // Create admin client with service role for ALL operations
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    // Validate JWT and get user
     const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
     
-    if (userError) {
-      console.error('Auth error:', userError.message);
+    if (userError || !user) {
+      console.error('Auth error:', userError?.message);
       return new Response(
-        JSON.stringify({ error: 'User not authenticated', details: userError.message }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-    
-    if (!user) {
-      console.error('No user found for token');
-      return new Response(
-        JSON.stringify({ error: 'User not authenticated' }),
+        JSON.stringify({ error: 'User not authenticated', details: userError?.message }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -54,14 +46,21 @@ serve(async (req) => {
 
     const { seller_id, order_ids } = await req.json();
     
-    if (!seller_id || !order_ids || order_ids.length === 0) {
+    if (!seller_id) {
       return new Response(
-        JSON.stringify({ error: 'seller_id and order_ids are required' }),
+        JSON.stringify({ error: 'seller_id is required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log(`Syncing invoices for seller: ${seller_id}, orders: ${order_ids.length}`);
+    if (!order_ids || order_ids.length === 0) {
+      return new Response(
+        JSON.stringify({ success: true, synced: 0, errors: 0, message: 'No orders to sync' }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log(`Syncing invoices for ${order_ids.length} orders, seller: ${seller_id}`);
 
     // Get ML account with access token
     const { data: mlAccount, error: mlError } = await supabaseAdmin
@@ -83,61 +82,77 @@ serve(async (req) => {
     let synced = 0;
     let errors = 0;
 
-    // Process in batches
-    const batchSize = 10;
-    for (let i = 0; i < order_ids.length; i += batchSize) {
-      const batch = order_ids.slice(i, i + batchSize);
+    // Process in internal batches
+    const INTERNAL_BATCH = 10;
+    for (let i = 0; i < order_ids.length; i += INTERNAL_BATCH) {
+      const batch = order_ids.slice(i, i + INTERNAL_BATCH);
       
       await Promise.all(batch.map(async (order_id: string) => {
         try {
-          // Try to get billing info / fiscal documents
-          const mlUrl = `https://api.mercadolibre.com/orders/${order_id}/billing_info`;
-          const response = await fetch(mlUrl, {
-            headers: {
-              'Authorization': `Bearer ${mlAccount.access_token}`,
-            },
-          });
-
           let invoiceStatus = 'pendente';
           let invoiceNumber: string | null = null;
           let invoiceKey: string | null = null;
           let issuedAt: string | null = null;
           let errorMessage: string | null = null;
 
-          if (!response.ok) {
-            if (response.status === 404) {
-              invoiceStatus = 'nao_localizada';
-            } else {
+          // Try billing_info endpoint first
+          const billingUrl = `https://api.mercadolibre.com/orders/${order_id}/billing_info`;
+          const billingResponse = await fetch(billingUrl, {
+            headers: {
+              'Authorization': `Bearer ${mlAccount.access_token}`,
+            },
+          });
+
+          if (!billingResponse.ok) {
+            if (billingResponse.status === 404) {
+              // Try fiscal_documents endpoint as fallback
+              const fiscalUrl = `https://api.mercadolibre.com/packs/${order_id}/fiscal_documents`;
+              const fiscalResponse = await fetch(fiscalUrl, {
+                headers: {
+                  'Authorization': `Bearer ${mlAccount.access_token}`,
+                },
+              });
+
+              if (fiscalResponse.ok) {
+                const fiscalDocs = await fiscalResponse.json();
+                if (Array.isArray(fiscalDocs) && fiscalDocs.length > 0) {
+                  const nfe = fiscalDocs[0];
+                  invoiceStatus = 'emitida';
+                  invoiceNumber = nfe.fiscal_document_number || null;
+                  invoiceKey = nfe.access_key || null;
+                  issuedAt = nfe.issue_date || null;
+                }
+              }
+            } else if (billingResponse.status !== 401) {
               invoiceStatus = 'erro';
-              errorMessage = `HTTP ${response.status}: ${await response.text()}`;
+              errorMessage = `HTTP ${billingResponse.status}`;
             }
           } else {
-            const billingInfo = await response.json();
+            const billingInfo = await billingResponse.json();
             
             // Check for fiscal documents
-            const fiscalDocs = billingInfo.billing_info?.doc_number 
-              || billingInfo.additional_info?.find((info: any) => info.type === 'invoice');
+            const docNumber = billingInfo.billing_info?.doc_number;
+            const additionalInvoice = billingInfo.additional_info?.find((info: any) => info.type === 'invoice');
             
-            // Also check specific invoice endpoints
-            if (fiscalDocs || billingInfo.status === 'invoiced') {
+            if (docNumber || additionalInvoice || billingInfo.status === 'invoiced') {
               invoiceStatus = 'emitida';
-              invoiceNumber = billingInfo.billing_info?.doc_number || fiscalDocs?.doc_number || null;
-              invoiceKey = fiscalDocs?.access_key || billingInfo.billing_info?.access_key || null;
-              issuedAt = fiscalDocs?.issue_date || billingInfo.date_created || null;
+              invoiceNumber = docNumber || additionalInvoice?.doc_number || null;
+              invoiceKey = billingInfo.billing_info?.access_key || additionalInvoice?.access_key || null;
+              issuedAt = additionalInvoice?.issue_date || billingInfo.date_created || null;
             } else {
-              // Try alternative endpoint for NF-e
+              // Try fiscal_documents as secondary check
               try {
-                const nfeUrl = `https://api.mercadolibre.com/packs/${order_id}/fiscal_documents`;
-                const nfeResponse = await fetch(nfeUrl, {
+                const fiscalUrl = `https://api.mercadolibre.com/packs/${order_id}/fiscal_documents`;
+                const fiscalResponse = await fetch(fiscalUrl, {
                   headers: {
                     'Authorization': `Bearer ${mlAccount.access_token}`,
                   },
                 });
 
-                if (nfeResponse.ok) {
-                  const nfeDocs = await nfeResponse.json();
-                  if (nfeDocs && nfeDocs.length > 0) {
-                    const nfe = nfeDocs[0];
+                if (fiscalResponse.ok) {
+                  const fiscalDocs = await fiscalResponse.json();
+                  if (Array.isArray(fiscalDocs) && fiscalDocs.length > 0) {
+                    const nfe = fiscalDocs[0];
                     invoiceStatus = 'emitida';
                     invoiceNumber = nfe.fiscal_document_number || null;
                     invoiceKey = nfe.access_key || null;
@@ -145,7 +160,7 @@ serve(async (req) => {
                   }
                 }
               } catch {
-                // Ignore alternative endpoint errors
+                // Ignore secondary endpoint errors
               }
             }
           }
@@ -162,7 +177,7 @@ serve(async (req) => {
             last_sync_at: new Date().toISOString(),
           };
 
-          // Upsert using admin client
+          // Upsert
           const { data: existing } = await supabaseAdmin
             .from('meli_invoices_cache')
             .select('id')
@@ -187,6 +202,11 @@ serve(async (req) => {
           errors++;
         }
       }));
+
+      // Yield between internal batches
+      if (i + INTERNAL_BATCH < order_ids.length) {
+        await sleep(100);
+      }
     }
 
     console.log(`Sync complete: ${synced} synced, ${errors} errors`);
