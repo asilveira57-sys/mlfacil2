@@ -11,3 +11,15 @@ verify_jwt = false
 
 [functions.ml-get-item]
 verify_jwt = false
+
+[functions.ml-sync-orders]
+verify_jwt = false
+
+[functions.ml-sync-shipments]
+verify_jwt = false
+
+[functions.ml-sync-invoices]
+verify_jwt = false
+
+[functions.ml-generate-labels]
+verify_jwt = false
