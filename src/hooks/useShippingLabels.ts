@@ -1,10 +1,10 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
 export type FinalStatus = 'pronta' | 'aguardando_nf' | 'sem_etiqueta' | 'erro' | 'all';
-export type PeriodFilter = 7 | 15 | 30 | 90;
+export type PeriodFilter = 0 | 7 | 15 | 30 | 90; // 0 = hoje
 export type SyncPhase = 'idle' | 'orders' | 'shipments' | 'invoices' | 'done';
 
 export interface ShippingOrder {
@@ -60,25 +60,40 @@ async function getAuthHeaders(): Promise<{ Authorization: string } | null> {
 // Sleep helper for yielding between batches
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Statuses that indicate order is already completed/shipped (should be excluded)
+const COMPLETED_ORDER_STATUSES = ['cancelled'];
+const COMPLETED_SHIPMENT_STATUSES = ['delivered', 'shipped', 'not_delivered'];
+
 export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   
   const [statusFilter, setStatusFilter] = useState<FinalStatus>('all');
-  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>(30);
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>(0); // Default: hoje
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncPhase, setSyncPhase] = useState<SyncPhase>('idle');
   const [syncProgress, setSyncProgress] = useState<string>('');
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const syncAbortRef = useRef(false);
+  const lastSyncTimeRef = useRef<number>(0);
 
   // Calculate date range
   const getDateRange = useCallback(() => {
-    const dateFrom = new Date();
-    dateFrom.setDate(dateFrom.getDate() - periodFilter);
+    const now = new Date();
+    let dateFrom: Date;
+    
+    if (periodFilter === 0) {
+      // Hoje: início do dia
+      dateFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+    } else {
+      dateFrom = new Date();
+      dateFrom.setDate(dateFrom.getDate() - periodFilter);
+    }
+    
     return {
       dateFrom: dateFrom.toISOString(),
-      dateTo: new Date().toISOString(),
+      dateTo: now.toISOString(),
     };
   }, [periodFilter]);
 
@@ -90,16 +105,15 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
       const { dateFrom } = getDateRange();
 
-      // Step 1: Get orders from cache (fast)
-      let ordersQuery = supabase
+      // Step 1: Get orders from cache (fast) - exclude cancelled
+      const { data: ordersData, error: ordersError } = await supabase
         .from('meli_orders_cache')
         .select('*')
         .eq('seller_id', sellerId)
         .gte('created_at_meli', dateFrom)
+        .not('order_status', 'in', `(${COMPLETED_ORDER_STATUSES.join(',')})`)
         .order('created_at_meli', { ascending: false })
         .limit(500);
-
-      const { data: ordersData, error: ordersError } = await ordersQuery;
 
       if (ordersError) {
         console.error('Error fetching orders:', ordersError);
@@ -141,55 +155,62 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         (invoicesResult.data || []).map(i => [i.order_id, i])
       );
 
-      // Step 4: Build combined view
-      const combinedOrders: ShippingOrder[] = ordersData.map(order => {
-        const shipment = order.shipment_id ? shipmentsMap.get(order.shipment_id) : null;
-        const invoice = invoicesMap.get(order.order_id);
+      // Step 4: Build combined view - filter out already shipped/delivered
+      const combinedOrders: ShippingOrder[] = ordersData
+        .map(order => {
+          const shipment = order.shipment_id ? shipmentsMap.get(order.shipment_id) : null;
+          const invoice = invoicesMap.get(order.order_id);
 
-        // Calculate final_status
-        let finalStatus: string = 'sem_etiqueta';
-        const labelAvailable = shipment?.label_available ?? false;
-        const invoiceStatus = invoice?.invoice_status ?? 'pendente';
+          // Skip orders that are already shipped/delivered
+          if (shipment && COMPLETED_SHIPMENT_STATUSES.includes(shipment.shipment_status)) {
+            return null;
+          }
 
-        if (labelAvailable && invoiceStatus === 'emitida') {
-          finalStatus = 'pronta';
-        } else if (labelAvailable && invoiceStatus !== 'emitida') {
-          finalStatus = 'aguardando_nf';
-        } else if (invoiceStatus === 'erro') {
-          finalStatus = 'erro';
-        } else {
-          finalStatus = 'sem_etiqueta';
-        }
+          // Calculate final_status
+          let finalStatus: string = 'sem_etiqueta';
+          const labelAvailable = shipment?.label_available ?? false;
+          const invoiceStatus = invoice?.invoice_status ?? 'pendente';
 
-        // Selectable if label available and invoice emitida
-        const selectable = labelAvailable && invoiceStatus === 'emitida';
+          if (labelAvailable && invoiceStatus === 'emitida') {
+            finalStatus = 'pronta';
+          } else if (labelAvailable && invoiceStatus !== 'emitida') {
+            finalStatus = 'aguardando_nf';
+          } else if (invoiceStatus === 'erro') {
+            finalStatus = 'erro';
+          } else {
+            finalStatus = 'sem_etiqueta';
+          }
 
-        return {
-          id: order.id,
-          user_id: order.user_id,
-          seller_id: order.seller_id,
-          order_id: order.order_id,
-          created_at_meli: order.created_at_meli,
-          order_status: order.order_status,
-          shipment_id: order.shipment_id,
-          buyer_nickname: order.buyer_nickname,
-          total_amount: order.total_amount,
-          order_sync_at: order.last_sync_at,
-          shipment_status: shipment?.shipment_status ?? null,
-          shipment_substatus: shipment?.shipment_substatus ?? null,
-          tracking_number: shipment?.tracking_number ?? null,
-          label_available: labelAvailable,
-          receiver_name: shipment?.receiver_name ?? null,
-          shipment_sync_at: shipment?.last_sync_at ?? null,
-          invoice_status: invoiceStatus,
-          invoice_number: invoice?.invoice_number ?? null,
-          invoice_key: invoice?.invoice_key ?? null,
-          issued_at: invoice?.issued_at ?? null,
-          invoice_sync_at: invoice?.last_sync_at ?? null,
-          final_status: finalStatus,
-          selectable,
-        };
-      });
+          // Selectable if label available and invoice emitida
+          const selectable = labelAvailable && invoiceStatus === 'emitida';
+
+          return {
+            id: order.id,
+            user_id: order.user_id,
+            seller_id: order.seller_id,
+            order_id: order.order_id,
+            created_at_meli: order.created_at_meli,
+            order_status: order.order_status,
+            shipment_id: order.shipment_id,
+            buyer_nickname: order.buyer_nickname,
+            total_amount: order.total_amount,
+            order_sync_at: order.last_sync_at,
+            shipment_status: shipment?.shipment_status ?? null,
+            shipment_substatus: shipment?.shipment_substatus ?? null,
+            tracking_number: shipment?.tracking_number ?? null,
+            label_available: labelAvailable,
+            receiver_name: shipment?.receiver_name ?? null,
+            shipment_sync_at: shipment?.last_sync_at ?? null,
+            invoice_status: invoiceStatus,
+            invoice_number: invoice?.invoice_number ?? null,
+            invoice_key: invoice?.invoice_key ?? null,
+            issued_at: invoice?.issued_at ?? null,
+            invoice_sync_at: invoice?.last_sync_at ?? null,
+            final_status: finalStatus,
+            selectable,
+          };
+        })
+        .filter((o): o is ShippingOrder => o !== null);
 
       // Apply status filter
       if (statusFilter !== 'all') {
@@ -203,19 +224,9 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     refetchOnWindowFocus: false,
   });
 
-  // Get last sync time
-  const lastSyncAt = orders.length > 0 
-    ? orders.reduce((latest, order) => {
-        const syncAt = order.order_sync_at;
-        if (!syncAt) return latest;
-        if (!latest) return syncAt;
-        return new Date(syncAt) > new Date(latest) ? syncAt : latest;
-      }, null as string | null)
-    : null;
-
   // === SYNC PIPELINE (background, non-blocking) ===
 
-  // Phase 1: Sync orders (batched with yields)
+  // Phase 1: Sync orders
   const syncOrders = useCallback(async (): Promise<{ orderIds: string[]; shipmentIds: string[] }> => {
     if (!sellerId) return { orderIds: [], shipmentIds: [] };
 
@@ -225,7 +236,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     const { dateFrom, dateTo } = getDateRange();
 
     setSyncPhase('orders');
-    setSyncProgress('Buscando pedidos do período...');
+    setSyncProgress('Buscando pedidos...');
 
     const response = await supabase.functions.invoke('ml-sync-orders', {
       headers,
@@ -243,24 +254,24 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     // Get order IDs and shipment IDs from cache
     const { data: ordersWithShipments } = await supabase
       .from('meli_orders_cache')
-      .select('order_id, shipment_id')
+      .select('order_id, shipment_id, order_status')
       .eq('seller_id', sellerId)
-      .gte('created_at_meli', dateFrom);
+      .gte('created_at_meli', dateFrom)
+      .not('order_status', 'in', `(${COMPLETED_ORDER_STATUSES.join(',')})`);
 
     const orderIds = (ordersWithShipments || []).map(o => o.order_id);
     const shipmentIds = (ordersWithShipments || [])
       .map(o => o.shipment_id)
       .filter(Boolean) as string[];
 
-    setSyncProgress(`${orderIds.length} pedidos sincronizados`);
+    setSyncProgress(`${orderIds.length} pedidos`);
     
-    // Yield before next phase
-    await sleep(200);
+    await sleep(100);
 
     return { orderIds, shipmentIds: [...new Set(shipmentIds)] };
   }, [sellerId, getDateRange]);
 
-  // Phase 2: Sync shipments (batched)
+  // Phase 2: Sync shipments - send ALL at once to edge function
   const syncShipments = useCallback(async (shipmentIds: string[]): Promise<void> => {
     if (!sellerId || shipmentIds.length === 0) return;
 
@@ -268,41 +279,29 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     if (!headers) throw new Error('Not authenticated');
 
     setSyncPhase('shipments');
+    setSyncProgress(`Atualizando ${shipmentIds.length} envios...`);
 
-    const BATCH_SIZE = 25;
-    let processed = 0;
+    // Send ALL shipment IDs at once - edge function handles batching internally
+    const response = await supabase.functions.invoke('ml-sync-shipments', {
+      headers,
+      body: {
+        seller_id: sellerId,
+        shipment_ids: shipmentIds,
+      },
+    });
 
-    for (let i = 0; i < shipmentIds.length; i += BATCH_SIZE) {
-      if (syncAbortRef.current) break;
-
-      const batch = shipmentIds.slice(i, i + BATCH_SIZE);
-      processed += batch.length;
-      
-      setSyncProgress(`Atualizando envios ${processed}/${shipmentIds.length}...`);
-
-      const response = await supabase.functions.invoke('ml-sync-shipments', {
-        headers,
-        body: {
-          seller_id: sellerId,
-          shipment_ids: batch,
-        },
-      });
-
-      if (response.error) {
-        console.error('Shipments sync batch error:', response.error);
-      } else {
-        console.log(`Shipments batch synced:`, response.data);
-      }
-
-      // Refresh UI after each batch
-      await refetch();
-
-      // Yield between batches
-      await sleep(200);
+    if (response.error) {
+      console.error('Shipments sync error:', response.error);
+    } else {
+      console.log(`Shipments synced:`, response.data);
+      setSyncProgress(`${response.data?.synced || 0} envios atualizados`);
     }
+
+    // Refresh UI
+    await refetch();
   }, [sellerId, refetch]);
 
-  // Phase 3: Sync invoices (batched)
+  // Phase 3: Sync invoices - send ALL at once to edge function
   const syncInvoices = useCallback(async (orderIds: string[]): Promise<void> => {
     if (!sellerId || orderIds.length === 0) return;
 
@@ -310,44 +309,38 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     if (!headers) throw new Error('Not authenticated');
 
     setSyncPhase('invoices');
+    setSyncProgress(`Atualizando ${orderIds.length} NFs...`);
 
-    const BATCH_SIZE = 25;
-    let processed = 0;
+    // Send ALL order IDs at once - edge function handles batching internally
+    const response = await supabase.functions.invoke('ml-sync-invoices', {
+      headers,
+      body: {
+        seller_id: sellerId,
+        order_ids: orderIds,
+      },
+    });
 
-    for (let i = 0; i < orderIds.length; i += BATCH_SIZE) {
-      if (syncAbortRef.current) break;
-
-      const batch = orderIds.slice(i, i + BATCH_SIZE);
-      processed += batch.length;
-      
-      setSyncProgress(`Atualizando NFs ${processed}/${orderIds.length}...`);
-
-      const response = await supabase.functions.invoke('ml-sync-invoices', {
-        headers,
-        body: {
-          seller_id: sellerId,
-          order_ids: batch,
-        },
-      });
-
-      if (response.error) {
-        console.error('Invoices sync batch error:', response.error);
-      } else {
-        console.log(`Invoices batch synced:`, response.data);
-      }
-
-      // Refresh UI after each batch
-      await refetch();
-
-      // Yield between batches
-      await sleep(200);
+    if (response.error) {
+      console.error('Invoices sync error:', response.error);
+    } else {
+      console.log(`Invoices synced:`, response.data);
+      setSyncProgress(`${response.data?.synced || 0} NFs atualizadas`);
     }
+
+    // Refresh UI
+    await refetch();
   }, [sellerId, refetch]);
 
   // Main sync pipeline (non-blocking)
   const startSyncPipeline = useCallback(async () => {
-    if (isSyncing) return;
+    // Prevent concurrent syncs and spam (5 second debounce)
+    const now = Date.now();
+    if (isSyncing || (now - lastSyncTimeRef.current) < 5000) {
+      console.log('Sync skipped: already syncing or debounced');
+      return;
+    }
 
+    lastSyncTimeRef.current = now;
     syncAbortRef.current = false;
     setIsSyncing(true);
     setSyncPhase('orders');
@@ -373,7 +366,8 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       }
 
       setSyncPhase('done');
-      setSyncProgress('Sincronização completa');
+      setSyncProgress('Concluído');
+      setLastSyncAt(new Date().toISOString());
 
       // Final refresh
       await refetch();
@@ -381,7 +375,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
       toast({
         title: 'Sincronização concluída',
-        description: `${orderIds.length} pedidos, ${shipmentIds.length} envios atualizados`,
+        description: `${orderIds.length} pedidos atualizados`,
       });
 
     } catch (error) {
@@ -512,7 +506,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     startSyncPipeline();
   }, [startSyncPipeline]);
 
-  // Get counts by status (unfiltered)
+  // Get counts by status (unfiltered) - exclude completed orders
   const allOrders = useQuery({
     queryKey: ['shipping-orders-counts', sellerId, periodFilter],
     queryFn: async () => {
@@ -520,12 +514,13 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
       const { dateFrom } = getDateRange();
 
-      // Get all orders for counting
+      // Get all orders for counting - exclude cancelled
       const { data: ordersData } = await supabase
         .from('meli_orders_cache')
         .select('order_id, shipment_id')
         .eq('seller_id', sellerId)
-        .gte('created_at_meli', dateFrom);
+        .gte('created_at_meli', dateFrom)
+        .not('order_status', 'in', `(${COMPLETED_ORDER_STATUSES.join(',')})`);
 
       if (!ordersData || ordersData.length === 0) return [];
 
@@ -534,27 +529,36 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
       const [shipmentsResult, invoicesResult] = await Promise.all([
         shipmentIds.length > 0
-          ? supabase.from('meli_shipments_cache').select('shipment_id, label_available').eq('seller_id', sellerId).in('shipment_id', shipmentIds)
+          ? supabase.from('meli_shipments_cache').select('shipment_id, label_available, shipment_status').eq('seller_id', sellerId).in('shipment_id', shipmentIds)
           : Promise.resolve({ data: [] }),
         orderIds.length > 0
           ? supabase.from('meli_invoices_cache').select('order_id, invoice_status').eq('seller_id', sellerId).in('order_id', orderIds)
           : Promise.resolve({ data: [] }),
       ]);
 
-      const shipmentsMap = new Map((shipmentsResult.data || []).map(s => [s.shipment_id, s.label_available]));
+      const shipmentsMap = new Map((shipmentsResult.data || []).map(s => [s.shipment_id, s]));
       const invoicesMap = new Map((invoicesResult.data || []).map(i => [i.order_id, i.invoice_status]));
 
-      return ordersData.map(o => {
-        const labelAvailable = o.shipment_id ? shipmentsMap.get(o.shipment_id) ?? false : false;
-        const invoiceStatus = invoicesMap.get(o.order_id) ?? 'pendente';
+      return ordersData
+        .map(o => {
+          const shipment = o.shipment_id ? shipmentsMap.get(o.shipment_id) : null;
+          
+          // Skip completed shipments
+          if (shipment && COMPLETED_SHIPMENT_STATUSES.includes(shipment.shipment_status)) {
+            return null;
+          }
 
-        let finalStatus = 'sem_etiqueta';
-        if (labelAvailable && invoiceStatus === 'emitida') finalStatus = 'pronta';
-        else if (labelAvailable && invoiceStatus !== 'emitida') finalStatus = 'aguardando_nf';
-        else if (invoiceStatus === 'erro') finalStatus = 'erro';
+          const labelAvailable = shipment?.label_available ?? false;
+          const invoiceStatus = invoicesMap.get(o.order_id) ?? 'pendente';
 
-        return { finalStatus };
-      });
+          let finalStatus = 'sem_etiqueta';
+          if (labelAvailable && invoiceStatus === 'emitida') finalStatus = 'pronta';
+          else if (labelAvailable && invoiceStatus !== 'emitida') finalStatus = 'aguardando_nf';
+          else if (invoiceStatus === 'erro') finalStatus = 'erro';
+
+          return { finalStatus };
+        })
+        .filter(Boolean);
     },
     enabled: !!sellerId,
     staleTime: 30000,
@@ -562,10 +566,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
   const statusCounts = {
     all: allOrders.data?.length ?? 0,
-    pronta: allOrders.data?.filter(o => o.finalStatus === 'pronta').length ?? 0,
-    aguardando_nf: allOrders.data?.filter(o => o.finalStatus === 'aguardando_nf').length ?? 0,
-    sem_etiqueta: allOrders.data?.filter(o => o.finalStatus === 'sem_etiqueta').length ?? 0,
-    erro: allOrders.data?.filter(o => o.finalStatus === 'erro').length ?? 0,
+    pronta: allOrders.data?.filter(o => o?.finalStatus === 'pronta').length ?? 0,
+    aguardando_nf: allOrders.data?.filter(o => o?.finalStatus === 'aguardando_nf').length ?? 0,
+    sem_etiqueta: allOrders.data?.filter(o => o?.finalStatus === 'sem_etiqueta').length ?? 0,
+    erro: allOrders.data?.filter(o => o?.finalStatus === 'erro').length ?? 0,
   };
 
   return {

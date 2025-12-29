@@ -15,6 +15,9 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const startTime = Date.now();
+  const TIMEOUT_MS = 25000; // 25 second timeout
+
   try {
     const authHeader = req.headers.get('Authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -60,7 +63,7 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Syncing invoices for ${order_ids.length} orders, seller: ${seller_id}`);
+    console.log(`Starting invoice sync for ${order_ids.length} orders, seller: ${seller_id}`);
 
     // Get ML account with access token
     const { data: mlAccount, error: mlError } = await supabaseAdmin
@@ -82,10 +85,17 @@ serve(async (req) => {
     let synced = 0;
     let errors = 0;
 
-    // Process in internal batches
-    const INTERNAL_BATCH = 10;
-    for (let i = 0; i < order_ids.length; i += INTERNAL_BATCH) {
-      const batch = order_ids.slice(i, i + INTERNAL_BATCH);
+    // Process in batches of 20 with parallel requests
+    const BATCH_SIZE = 20;
+    for (let i = 0; i < order_ids.length; i += BATCH_SIZE) {
+      // Check timeout
+      if (Date.now() - startTime > TIMEOUT_MS) {
+        console.log(`Timeout reached after syncing ${synced} invoices`);
+        break;
+      }
+
+      const batch = order_ids.slice(i, i + BATCH_SIZE);
+      console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}: ${batch.length} orders`);
       
       await Promise.all(batch.map(async (order_id: string) => {
         try {
@@ -177,45 +187,41 @@ serve(async (req) => {
             last_sync_at: new Date().toISOString(),
           };
 
-          // Upsert
-          const { data: existing } = await supabaseAdmin
+          // Upsert using on conflict
+          const { error: upsertError } = await supabaseAdmin
             .from('meli_invoices_cache')
-            .select('id')
-            .eq('seller_id', seller_id)
-            .eq('order_id', order_id)
-            .maybeSingle();
+            .upsert(invoiceData, {
+              onConflict: 'seller_id,order_id',
+              ignoreDuplicates: false,
+            });
 
-          if (existing) {
-            await supabaseAdmin
-              .from('meli_invoices_cache')
-              .update(invoiceData)
-              .eq('id', existing.id);
+          if (upsertError) {
+            console.error(`Upsert error for order ${order_id}:`, upsertError);
+            errors++;
           } else {
-            await supabaseAdmin
-              .from('meli_invoices_cache')
-              .insert(invoiceData);
+            synced++;
           }
-
-          synced++;
         } catch (err) {
           console.error(`Error syncing invoice for order ${order_id}:`, err);
           errors++;
         }
       }));
 
-      // Yield between internal batches
-      if (i + INTERNAL_BATCH < order_ids.length) {
-        await sleep(100);
+      // Small yield between batches
+      if (i + BATCH_SIZE < order_ids.length) {
+        await sleep(50);
       }
     }
 
-    console.log(`Sync complete: ${synced} synced, ${errors} errors`);
+    const elapsed = Date.now() - startTime;
+    console.log(`Sync complete in ${elapsed}ms: ${synced} synced, ${errors} errors`);
 
     return new Response(
       JSON.stringify({ 
         success: true, 
         synced,
         errors,
+        elapsed_ms: elapsed,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

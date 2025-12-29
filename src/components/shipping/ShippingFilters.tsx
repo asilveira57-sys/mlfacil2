@@ -34,7 +34,12 @@ const STATUS_VARIANTS: Record<FinalStatus, 'default' | 'secondary' | 'destructiv
   erro: 'destructive',
 };
 
-const PERIOD_OPTIONS: PeriodFilter[] = [7, 15, 30, 90];
+const PERIOD_OPTIONS: { value: PeriodFilter; label: string }[] = [
+  { value: 0, label: 'Hoje' },
+  { value: 7, label: '7 dias' },
+  { value: 15, label: '15 dias' },
+  { value: 30, label: '30 dias' },
+];
 
 const PHASE_LABELS: Record<SyncPhase, string> = {
   idle: '',
@@ -62,15 +67,15 @@ export function ShippingFilters({
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Período:</span>
-          {PERIOD_OPTIONS.map((period) => (
+          {PERIOD_OPTIONS.map((option) => (
             <Button
-              key={period}
-              variant={periodFilter === period ? 'default' : 'outline'}
+              key={option.value}
+              variant={periodFilter === option.value ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setPeriodFilter(period)}
+              onClick={() => setPeriodFilter(option.value)}
               disabled={isSyncing}
             >
-              {period} dias
+              {option.label}
             </Button>
           ))}
         </div>

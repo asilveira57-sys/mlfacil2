@@ -7,8 +7,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
-// Shipment statuses where labels are typically available
-// Removed restrictive filtering - most shipments with valid status have labels
+// Shipment statuses where labels are NOT available
 const LABEL_UNAVAILABLE_STATUSES = [
   'cancelled',
   'returned',
@@ -37,6 +36,9 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
+
+  const startTime = Date.now();
+  const TIMEOUT_MS = 25000; // 25 second timeout
 
   try {
     const authHeader = req.headers.get('Authorization');
@@ -83,7 +85,7 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Syncing ${shipment_ids.length} shipments for seller: ${seller_id}`);
+    console.log(`Starting sync for ${shipment_ids.length} shipments, seller: ${seller_id}`);
 
     // Get ML account with access token
     const { data: mlAccount, error: mlError } = await supabaseAdmin
@@ -116,10 +118,17 @@ serve(async (req) => {
     let synced = 0;
     let errors = 0;
 
-    // Process shipments (already batched by frontend, but add internal batch processing)
-    const INTERNAL_BATCH = 10;
-    for (let i = 0; i < shipment_ids.length; i += INTERNAL_BATCH) {
-      const batch = shipment_ids.slice(i, i + INTERNAL_BATCH);
+    // Process in batches of 20 with parallel requests
+    const BATCH_SIZE = 20;
+    for (let i = 0; i < shipment_ids.length; i += BATCH_SIZE) {
+      // Check timeout
+      if (Date.now() - startTime > TIMEOUT_MS) {
+        console.log(`Timeout reached after syncing ${synced} shipments`);
+        break;
+      }
+
+      const batch = shipment_ids.slice(i, i + BATCH_SIZE);
+      console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}: ${batch.length} shipments`);
       
       await Promise.all(batch.map(async (shipment_id: string) => {
         try {
@@ -138,7 +147,7 @@ serve(async (req) => {
           });
 
           if (!response.ok) {
-            console.error(`Failed to fetch shipment ${shipment_id}:`, response.status);
+            console.error(`Failed to fetch shipment ${shipment_id}: HTTP ${response.status}`);
             errors++;
             return;
           }
@@ -172,45 +181,41 @@ serve(async (req) => {
             last_sync_at: new Date().toISOString(),
           };
 
-          // Upsert
-          const { data: existing } = await supabaseAdmin
+          // Upsert using on conflict
+          const { error: upsertError } = await supabaseAdmin
             .from('meli_shipments_cache')
-            .select('id')
-            .eq('seller_id', seller_id)
-            .eq('shipment_id', shipment_id)
-            .maybeSingle();
+            .upsert(shipmentData, {
+              onConflict: 'seller_id,shipment_id',
+              ignoreDuplicates: false,
+            });
 
-          if (existing) {
-            await supabaseAdmin
-              .from('meli_shipments_cache')
-              .update(shipmentData)
-              .eq('id', existing.id);
+          if (upsertError) {
+            console.error(`Upsert error for shipment ${shipment_id}:`, upsertError);
+            errors++;
           } else {
-            await supabaseAdmin
-              .from('meli_shipments_cache')
-              .insert(shipmentData);
+            synced++;
           }
-
-          synced++;
         } catch (err) {
           console.error(`Error syncing shipment ${shipment_id}:`, err);
           errors++;
         }
       }));
 
-      // Yield between internal batches
-      if (i + INTERNAL_BATCH < shipment_ids.length) {
-        await sleep(100);
+      // Small yield between batches
+      if (i + BATCH_SIZE < shipment_ids.length) {
+        await sleep(50);
       }
     }
 
-    console.log(`Sync complete: ${synced} synced, ${errors} errors`);
+    const elapsed = Date.now() - startTime;
+    console.log(`Sync complete in ${elapsed}ms: ${synced} synced, ${errors} errors`);
 
     return new Response(
       JSON.stringify({ 
         success: true, 
         synced,
         errors,
+        elapsed_ms: elapsed,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
