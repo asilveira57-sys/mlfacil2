@@ -176,6 +176,8 @@ export default function ShippingLabels() {
         order={selectedOrder}
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
+        onReprint={(shipmentId, format) => generateLabels({ format, shipmentId })}
+        isGenerating={isGenerating}
       />
     </div>
   );

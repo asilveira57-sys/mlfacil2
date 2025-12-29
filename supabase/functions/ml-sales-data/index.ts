@@ -32,40 +32,46 @@ serve(async (req) => {
   try {
     // Get user from authorization header
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      console.error('Missing authorization header');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.error('Missing or invalid authorization header');
       return new Response(
         JSON.stringify({ error: 'Missing authorization header' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Extract JWT token from header
+    // Extract JWT token
     const token = authHeader.replace('Bearer ', '');
     
-    // Create Supabase client with service role for admin operations
+    // Create admin client with service role for ALL operations
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    // Validate the JWT token and get user
+    // Validate JWT and get user using admin client
     const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
-    if (userError || !user) {
-      console.error('User not authenticated:', userError?.message);
+    
+    if (userError) {
+      console.error('Auth error:', userError.message, 'Status:', userError.status);
+      return new Response(
+        JSON.stringify({ error: 'User not authenticated', details: userError.message }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    if (!user) {
+      console.error('No user found for token');
       return new Response(
         JSON.stringify({ error: 'User not authenticated' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
-    
-    // Create client for user operations
-    const supabaseClient = supabaseAdmin;
 
-    console.log('Fetching ML account for user:', user.id);
+    console.log('Authenticated user:', user.id);
 
     // Get user's ML account (pega a conta ativa mais recente)
-    const { data: accounts, error: accountError } = await supabaseClient
+    const { data: accounts, error: accountError } = await supabaseAdmin
       .from('ml_accounts')
       .select('*')
       .eq('user_id', user.id)
@@ -116,7 +122,7 @@ serve(async (req) => {
         accessToken = tokenData.access_token;
         
         // Update tokens in database
-        await supabaseClient
+        await supabaseAdmin
           .from('ml_accounts')
           .update({
             access_token: tokenData.access_token,

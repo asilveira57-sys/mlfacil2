@@ -14,28 +14,43 @@ serve(async (req) => {
 
   try {
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      console.error('Missing authorization header');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.error('Missing or invalid authorization header');
       return new Response(
         JSON.stringify({ error: 'Missing authorization header' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const supabaseClient = createClient(
+    // Extract JWT token
+    const token = authHeader.replace('Bearer ', '');
+    
+    // Create admin client with service role for ALL operations
+    const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
-    if (userError || !user) {
-      console.error('User not authenticated:', userError?.message);
+    // Validate JWT and get user
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
+    
+    if (userError) {
+      console.error('Auth error:', userError.message);
+      return new Response(
+        JSON.stringify({ error: 'User not authenticated', details: userError.message }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    if (!user) {
+      console.error('No user found for token');
       return new Response(
         JSON.stringify({ error: 'User not authenticated' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    console.log('Authenticated user:', user.id);
 
     const { seller_id, order_ids } = await req.json();
     
@@ -49,12 +64,7 @@ serve(async (req) => {
     console.log(`Syncing invoices for seller: ${seller_id}, orders: ${order_ids.length}`);
 
     // Get ML account with access token
-    const adminClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
-
-    const { data: mlAccount, error: mlError } = await adminClient
+    const { data: mlAccount, error: mlError } = await supabaseAdmin
       .from('ml_accounts')
       .select('access_token, ml_user_id')
       .eq('user_id', user.id)
@@ -152,8 +162,8 @@ serve(async (req) => {
             last_sync_at: new Date().toISOString(),
           };
 
-          // Upsert
-          const { data: existing } = await supabaseClient
+          // Upsert using admin client
+          const { data: existing } = await supabaseAdmin
             .from('meli_invoices_cache')
             .select('id')
             .eq('seller_id', seller_id)
@@ -161,12 +171,12 @@ serve(async (req) => {
             .maybeSingle();
 
           if (existing) {
-            await supabaseClient
+            await supabaseAdmin
               .from('meli_invoices_cache')
               .update(invoiceData)
               .eq('id', existing.id);
           } else {
-            await supabaseClient
+            await supabaseAdmin
               .from('meli_invoices_cache')
               .insert(invoiceData);
           }

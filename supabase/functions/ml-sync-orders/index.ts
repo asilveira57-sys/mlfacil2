@@ -28,28 +28,43 @@ serve(async (req) => {
 
   try {
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      console.error('Missing authorization header');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.error('Missing or invalid authorization header');
       return new Response(
         JSON.stringify({ error: 'Missing authorization header' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const supabaseClient = createClient(
+    // Extract JWT token
+    const token = authHeader.replace('Bearer ', '');
+    
+    // Create admin client with service role for ALL operations
+    const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
-    if (userError || !user) {
-      console.error('User not authenticated:', userError?.message);
+    // Validate JWT and get user
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
+    
+    if (userError) {
+      console.error('Auth error:', userError.message);
+      return new Response(
+        JSON.stringify({ error: 'User not authenticated', details: userError.message }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    if (!user) {
+      console.error('No user found for token');
       return new Response(
         JSON.stringify({ error: 'User not authenticated' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    console.log('Authenticated user:', user.id);
 
     const { seller_id, date_from, date_to, status } = await req.json();
     
@@ -63,12 +78,7 @@ serve(async (req) => {
     console.log(`Syncing orders for seller: ${seller_id}, date_from: ${date_from}, date_to: ${date_to}`);
 
     // Get ML account with access token
-    const adminClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
-
-    const { data: mlAccount, error: mlError } = await adminClient
+    const { data: mlAccount, error: mlError } = await supabaseAdmin
       .from('ml_accounts')
       .select('access_token, ml_user_id')
       .eq('user_id', user.id)
@@ -99,11 +109,12 @@ serve(async (req) => {
 
     console.log('Fetching orders from ML:', mlUrl);
 
-    // Fetch orders with pagination
+    // Fetch ALL orders with full pagination (no artificial limit)
     let allOrders: MLOrder[] = [];
     let offset = 0;
     const limit = 50;
     let hasMore = true;
+    let totalFromApi = 0;
 
     while (hasMore) {
       const paginatedUrl = `${mlUrl}&offset=${offset}&limit=${limit}`;
@@ -132,26 +143,28 @@ serve(async (req) => {
 
       const data = await mlResponse.json();
       const orders = data.results || [];
+      totalFromApi = data.paging?.total || 0;
       allOrders = [...allOrders, ...orders];
 
-      console.log(`Fetched ${orders.length} orders, total: ${allOrders.length}, paging: ${JSON.stringify(data.paging)}`);
+      console.log(`Fetched ${orders.length} orders, total: ${allOrders.length}/${totalFromApi}`);
 
-      if (orders.length < limit || allOrders.length >= (data.paging?.total || 0)) {
+      // Continue until we have all orders or no more results
+      if (orders.length < limit || allOrders.length >= totalFromApi) {
         hasMore = false;
       } else {
         offset += limit;
       }
 
-      // Safety limit
-      if (allOrders.length >= 500) {
-        console.log('Reached safety limit of 500 orders');
+      // Failsafe: prevent infinite loops (max 10000 orders)
+      if (allOrders.length >= 10000) {
+        console.log('Reached failsafe limit of 10000 orders');
         hasMore = false;
       }
     }
 
     console.log(`Total orders fetched: ${allOrders.length}`);
 
-    // Upsert orders to cache
+    // Upsert orders to cache using admin client
     let inserted = 0;
     let updated = 0;
 
@@ -168,7 +181,7 @@ serve(async (req) => {
         last_sync_at: new Date().toISOString(),
       };
 
-      const { data: existing } = await supabaseClient
+      const { data: existing } = await supabaseAdmin
         .from('meli_orders_cache')
         .select('id')
         .eq('seller_id', seller_id)
@@ -176,13 +189,13 @@ serve(async (req) => {
         .maybeSingle();
 
       if (existing) {
-        await supabaseClient
+        await supabaseAdmin
           .from('meli_orders_cache')
           .update(orderData)
           .eq('id', existing.id);
         updated++;
       } else {
-        await supabaseClient
+        await supabaseAdmin
           .from('meli_orders_cache')
           .insert(orderData);
         inserted++;
