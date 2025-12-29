@@ -64,18 +64,24 @@ export function SalesDashboard() {
   const [salesData, setSalesData] = useState<SalesData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
   const { toast } = useToast();
 
-  const fetchSalesData = async () => {
+  const fetchSalesData = async (attempt = 0): Promise<void> => {
     setIsLoading(true);
-    setError(null);
+    if (attempt === 0) setError(null);
 
     try {
-      // Busca sessão atual para passar JWT explicitamente
       let { data: { session } } = await supabase.auth.getSession();
       
       if (!session) {
+        // Se não há sessão e ainda não tentamos retry, aguardar
+        if (attempt < 2) {
+          await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+          return fetchSalesData(attempt + 1);
+        }
         setError("Sessão expirada. Faça login novamente.");
+        setIsLoading(false);
         return;
       }
 
@@ -89,7 +95,13 @@ export function SalesDashboard() {
         const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
         
         if (refreshError || !refreshData.session) {
+          // Retry automático antes de mostrar erro
+          if (attempt < 2) {
+            await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+            return fetchSalesData(attempt + 1);
+          }
           setError("Sessão expirada. Faça login novamente.");
+          setIsLoading(false);
           return;
         }
         
@@ -105,6 +117,7 @@ export function SalesDashboard() {
 
       if (response.data?.error === "No ML account connected") {
         setError("connect");
+        setIsLoading(false);
         return;
       }
 
@@ -113,8 +126,14 @@ export function SalesDashboard() {
       }
 
       setSalesData(response.data);
+      setRetryCount(0);
     } catch (err: any) {
       console.error("Error fetching sales data:", err);
+      // Retry automático para erros de rede/auth
+      if (attempt < 2) {
+        await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+        return fetchSalesData(attempt + 1);
+      }
       const errorMsg = err?.message || "Erro ao carregar dados de vendas";
       setError(errorMsg);
       toast({
@@ -128,7 +147,15 @@ export function SalesDashboard() {
   };
 
   useEffect(() => {
-    fetchSalesData();
+    // Aguardar sessão estar pronta via auth state change
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
+        // Pequeno delay para garantir que a sessão está completamente restaurada
+        setTimeout(() => fetchSalesData(), 100);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   if (error === "connect") {
@@ -149,7 +176,7 @@ export function SalesDashboard() {
         <AlertCircle className="w-12 h-12 mx-auto mb-4 text-destructive" />
         <h3 className="text-xl font-semibold mb-2">Erro ao carregar</h3>
         <p className="text-muted-foreground mb-4">{error}</p>
-        <Button onClick={fetchSalesData} variant="outline">
+        <Button onClick={() => fetchSalesData()} variant="outline">
           <RefreshCw className="w-4 h-4 mr-2" />
           Tentar novamente
         </Button>
@@ -174,7 +201,7 @@ export function SalesDashboard() {
         <Button
           variant="outline"
           size="sm"
-          onClick={fetchSalesData}
+          onClick={() => fetchSalesData()}
           disabled={isLoading}
         >
           <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
