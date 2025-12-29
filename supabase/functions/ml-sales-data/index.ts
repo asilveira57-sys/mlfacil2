@@ -40,14 +40,17 @@ serve(async (req) => {
       );
     }
 
-    const supabaseClient = createClient(
+    // Extract JWT token from header
+    const token = authHeader.replace('Bearer ', '');
+    
+    // Create Supabase client with service role for admin operations
+    const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
     );
 
-    // Get current user
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    // Validate the JWT token and get user
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
     if (userError || !user) {
       console.error('User not authenticated:', userError?.message);
       return new Response(
@@ -55,6 +58,9 @@ serve(async (req) => {
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+    
+    // Create client for user operations
+    const supabaseClient = supabaseAdmin;
 
     console.log('Fetching ML account for user:', user.id);
 
