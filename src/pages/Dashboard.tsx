@@ -121,25 +121,61 @@ const Dashboard = () => {
         description: "Redirecionando para o Mercado Livre",
       });
 
-      const { data, error } = await supabase.functions.invoke('ml-auth-url', {
-        body: { frontendOrigin: window.location.origin }
-      });
-
-      if (error) {
-        throw error;
+      // Busca sessão atual para passar JWT explicitamente
+      let { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        toast({
+          title: "Sessão expirada",
+          description: "Faça login novamente para continuar",
+          variant: "destructive",
+        });
+        navigate("/auth");
+        return;
       }
 
-      if (data?.authUrl) {
-        // Redireciona para a página de autorização do ML
-        window.location.href = data.authUrl;
+      let response = await supabase.functions.invoke('ml-auth-url', {
+        body: { frontendOrigin: window.location.origin },
+        headers: { Authorization: `Bearer ${session.access_token}` }
+      });
+
+      // Se receber 401, tenta refresh e repete
+      if (response.error?.message?.includes('401') || response.error?.status === 401) {
+        console.log('Token expirado, tentando refresh...');
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+        
+        if (refreshError || !refreshData.session) {
+          toast({
+            title: "Sessão expirada",
+            description: "Faça login novamente para continuar",
+            variant: "destructive",
+          });
+          navigate("/auth");
+          return;
+        }
+        
+        session = refreshData.session;
+        response = await supabase.functions.invoke('ml-auth-url', {
+          body: { frontendOrigin: window.location.origin },
+          headers: { Authorization: `Bearer ${session.access_token}` }
+        });
+      }
+
+      if (response.error) {
+        throw response.error;
+      }
+
+      if (response.data?.authUrl) {
+        window.location.href = response.data.authUrl;
       } else {
         throw new Error('URL de autorização não recebida');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao conectar com ML:', error);
+      const errorMsg = error?.message || "Não foi possível iniciar a conexão com o Mercado Livre";
       toast({
         title: "Erro ao conectar",
-        description: "Não foi possível iniciar a conexão com o Mercado Livre",
+        description: errorMsg,
         variant: "destructive",
       });
     }

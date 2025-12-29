@@ -71,25 +71,52 @@ export function SalesDashboard() {
     setError(null);
 
     try {
-      const { data, error } = await supabase.functions.invoke("ml-sales-data");
-
-      if (error) {
-        throw error;
+      // Busca sessão atual para passar JWT explicitamente
+      let { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        setError("Sessão expirada. Faça login novamente.");
+        return;
       }
 
-      if (data.error === "No ML account connected") {
+      let response = await supabase.functions.invoke("ml-sales-data", {
+        headers: { Authorization: `Bearer ${session.access_token}` }
+      });
+
+      // Se receber 401, tenta refresh e repete
+      if (response.error?.message?.includes('401') || response.error?.status === 401) {
+        console.log('Token expirado, tentando refresh...');
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+        
+        if (refreshError || !refreshData.session) {
+          setError("Sessão expirada. Faça login novamente.");
+          return;
+        }
+        
+        session = refreshData.session;
+        response = await supabase.functions.invoke("ml-sales-data", {
+          headers: { Authorization: `Bearer ${session.access_token}` }
+        });
+      }
+
+      if (response.error) {
+        throw response.error;
+      }
+
+      if (response.data?.error === "No ML account connected") {
         setError("connect");
         return;
       }
 
-      if (data.error) {
-        throw new Error(data.error);
+      if (response.data?.error) {
+        throw new Error(response.data.error);
       }
 
-      setSalesData(data);
-    } catch (err) {
+      setSalesData(response.data);
+    } catch (err: any) {
       console.error("Error fetching sales data:", err);
-      setError("Erro ao carregar dados de vendas");
+      const errorMsg = err?.message || "Erro ao carregar dados de vendas";
+      setError(errorMsg);
       toast({
         title: "Erro",
         description: "Não foi possível carregar os dados de vendas",
