@@ -1,4 +1,3 @@
-import { Progress } from '@/components/ui/progress';
 import { Loader2, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 
 export interface BatchProgress {
@@ -33,13 +32,13 @@ export function LabelGenerationProgress({ progress }: LabelGenerationProgressPro
   const getStatusIcon = () => {
     switch (progress.status) {
       case 'processing':
-        return <Loader2 className="h-4 w-4 animate-spin text-primary" />;
+        return <Loader2 className="h-5 w-5 animate-spin" />;
       case 'completed':
-        return <CheckCircle className="h-4 w-4 text-green-500" />;
+        return <CheckCircle className="h-5 w-5 text-green-400" />;
       case 'partial':
-        return <AlertTriangle className="h-4 w-4 text-yellow-500" />;
+        return <AlertTriangle className="h-5 w-5 text-yellow-400" />;
       case 'error':
-        return <XCircle className="h-4 w-4 text-destructive" />;
+        return <XCircle className="h-5 w-5 text-red-400" />;
       default:
         return null;
     }
@@ -50,7 +49,7 @@ export function LabelGenerationProgress({ progress }: LabelGenerationProgressPro
       case 'processing':
         return `Processando lote ${progress.completed_batches + 1} de ${progress.total_batches}...`;
       case 'completed':
-        return `${progress.processed_labels} etiqueta(s) gerada(s) com sucesso`;
+        return `${progress.processed_labels} etiqueta(s) gerada(s) com sucesso!`;
       case 'partial':
         return `${progress.processed_labels} gerada(s), ${progress.error_batches} lote(s) com erro`;
       case 'error':
@@ -61,29 +60,39 @@ export function LabelGenerationProgress({ progress }: LabelGenerationProgressPro
   };
 
   return (
-    <div className="space-y-3 py-2">
-      <div className="flex items-center gap-2">
+    <div className="space-y-3 min-w-[300px]">
+      <div className="flex items-center gap-3">
         {getStatusIcon()}
         <span className="text-sm font-medium">{getStatusText()}</span>
       </div>
       
       {progress.status === 'processing' && (
-        <div className="space-y-1">
-          <Progress value={percentage} className="h-2" />
-          <div className="flex justify-between text-xs text-muted-foreground">
+        <div className="space-y-2">
+          {/* Progress bar container */}
+          <div className="h-3 w-full bg-primary-foreground/20 rounded-full overflow-hidden">
+            {/* Progress bar fill */}
+            <div 
+              className="h-full bg-primary-foreground rounded-full transition-all duration-500 ease-out"
+              style={{ width: `${percentage}%` }}
+            />
+          </div>
+          
+          {/* Progress info */}
+          <div className="flex justify-between text-xs opacity-80">
             <span>{progress.completed_batches}/{progress.total_batches} lotes</span>
             <span>{percentage}%</span>
           </div>
         </div>
       )}
 
+      {/* Retry info */}
       {progress.batch_details && progress.batch_details.some(b => b.retry_count > 1) && (
-        <div className="text-xs text-muted-foreground">
+        <div className="text-xs opacity-70">
           {progress.batch_details
             .filter(b => b.retry_count > 1)
             .map(b => (
               <div key={b.batch_id}>
-                Lote {b.batch_id}: {b.retry_count} tentativa(s)
+                ⟳ Lote {b.batch_id}: tentativa {b.retry_count}/5
               </div>
             ))}
         </div>
