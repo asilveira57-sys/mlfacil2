@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { ZipReader, BlobReader, TextWriter } from "https://deno.land/x/zipjs@v2.7.32/index.js";
+import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -13,9 +14,32 @@ interface ValidationError {
   reason: string;
 }
 
+interface BatchResult {
+  batch_id: number;
+  shipment_ids: string[];
+  status: 'pending' | 'success' | 'error';
+  retry_count: number;
+  pdf_data?: Uint8Array;
+  zpl_data?: string;
+  error_message?: string;
+}
+
+const MAX_BATCH_SIZE = 50; // ML API limit
+const MAX_RETRIES = 5;
+const DELAY_BETWEEN_BATCHES_MS = 100;
+
+// Sleep helper
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Exponential backoff delay: 1s, 2s, 4s, 8s, 16s
+ */
+function getBackoffDelay(attempt: number): number {
+  return Math.pow(2, attempt - 1) * 1000;
+}
+
 /**
  * Extracts ZPL content from a ZIP file response.
- * The ML API returns ZPL labels inside a ZIP containing a .txt file with the actual ZPL code.
  */
 async function extractZplFromZip(zipBuffer: ArrayBuffer): Promise<string> {
   const blob = new Blob([zipBuffer]);
@@ -23,29 +47,22 @@ async function extractZplFromZip(zipBuffer: ArrayBuffer): Promise<string> {
   
   try {
     const entries = await zipReader.getEntries();
-    console.log(`ZIP contains ${entries.length} files:`, entries.map(e => e.filename));
+    console.log(`ZIP contains ${entries.length} files:`, entries.map((e: { filename: string }) => e.filename));
     
-    // Find the .txt file containing ZPL
-    const txtEntry = entries.find(entry => 
+    const txtEntry = entries.find((entry: { filename: string }) => 
       entry.filename.toLowerCase().endsWith('.txt')
     );
     
     if (!txtEntry) {
-      console.error('No .txt file found in ZIP. Available files:', entries.map(e => e.filename));
       throw new Error('Arquivo ZPL (.txt) não encontrado no ZIP');
     }
     
-    console.log(`Extracting ZPL from: ${txtEntry.filename}`);
-    
-    // Extract text content
     if (!txtEntry.getData) {
       throw new Error('Não foi possível extrair dados do arquivo ZPL');
     }
     
     const textWriter = new TextWriter();
     const zplContent = await txtEntry.getData(textWriter);
-    
-    console.log(`Extracted ZPL content length: ${zplContent.length} chars`);
     
     return zplContent;
   } finally {
@@ -58,8 +75,129 @@ async function extractZplFromZip(zipBuffer: ArrayBuffer): Promise<string> {
  */
 function isZipFile(buffer: ArrayBuffer): boolean {
   const bytes = new Uint8Array(buffer);
-  // ZIP files start with "PK" (0x50 0x4B)
   return bytes.length >= 2 && bytes[0] === 0x50 && bytes[1] === 0x4B;
+}
+
+/**
+ * Splits array into chunks of specified size
+ */
+function chunkArray<T>(array: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < array.length; i += size) {
+    chunks.push(array.slice(i, i + size));
+  }
+  return chunks;
+}
+
+/**
+ * Process a single batch with retry logic
+ */
+async function processBatchWithRetry(
+  batchId: number,
+  shipmentIds: string[],
+  format: 'pdf' | 'zpl',
+  accessToken: string,
+  updateProgress: (batchId: number, status: string, retryCount: number, errorMessage?: string) => Promise<void>
+): Promise<BatchResult> {
+  const result: BatchResult = {
+    batch_id: batchId,
+    shipment_ids: shipmentIds,
+    status: 'pending',
+    retry_count: 0,
+  };
+
+  const responseType = format === 'pdf' ? 'pdf' : 'zpl2';
+  const mlUrl = `https://api.mercadolibre.com/shipment_labels?shipment_ids=${shipmentIds.join(',')}&response_type=${responseType}`;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    result.retry_count = attempt;
+    
+    try {
+      console.log(`Batch ${batchId}: Attempt ${attempt}/${MAX_RETRIES} for ${shipmentIds.length} labels`);
+      await updateProgress(batchId, 'processing', attempt);
+
+      const mlResponse = await fetch(mlUrl, {
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+      });
+
+      if (!mlResponse.ok) {
+        const errorText = await mlResponse.text();
+        
+        // Check if it's a rate limit error (429) or server error (5xx)
+        if (mlResponse.status === 429 || mlResponse.status >= 500) {
+          if (attempt < MAX_RETRIES) {
+            const delay = getBackoffDelay(attempt);
+            console.log(`Batch ${batchId}: Rate limited/Server error. Retry in ${delay}ms...`);
+            await sleep(delay);
+            continue;
+          }
+        }
+        
+        throw new Error(`ML API Error ${mlResponse.status}: ${errorText}`);
+      }
+
+      // Success - process response
+      if (format === 'pdf') {
+        const pdfBuffer = await mlResponse.arrayBuffer();
+        result.pdf_data = new Uint8Array(pdfBuffer);
+      } else {
+        const responseBuffer = await mlResponse.arrayBuffer();
+        if (isZipFile(responseBuffer)) {
+          result.zpl_data = await extractZplFromZip(responseBuffer);
+        } else {
+          const decoder = new TextDecoder('utf-8');
+          result.zpl_data = decoder.decode(responseBuffer);
+        }
+      }
+
+      result.status = 'success';
+      console.log(`Batch ${batchId}: Success after ${attempt} attempt(s)`);
+      return result;
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`Batch ${batchId}: Attempt ${attempt} failed:`, errorMessage);
+      
+      if (attempt < MAX_RETRIES) {
+        const delay = getBackoffDelay(attempt);
+        console.log(`Batch ${batchId}: Retry in ${delay}ms...`);
+        await updateProgress(batchId, 'retrying', attempt, errorMessage);
+        await sleep(delay);
+      } else {
+        result.status = 'error';
+        result.error_message = errorMessage;
+        await updateProgress(batchId, 'error', attempt, errorMessage);
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Merge multiple PDFs into one
+ */
+async function mergePDFs(pdfDataArray: Uint8Array[]): Promise<Uint8Array> {
+  const mergedPdf = await PDFDocument.create();
+  
+  for (const pdfData of pdfDataArray) {
+    try {
+      const pdf = await PDFDocument.load(pdfData);
+      const pages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+      pages.forEach(page => mergedPdf.addPage(page));
+    } catch (error) {
+      console.error('Error loading PDF for merge:', error);
+    }
+  }
+  
+  return await mergedPdf.save();
+}
+
+/**
+ * Merge multiple ZPL strings into one
+ */
+function mergeZPLs(zplDataArray: string[]): string {
+  return zplDataArray.join('\n\n');
 }
 
 serve(async (req) => {
@@ -70,35 +208,22 @@ serve(async (req) => {
   try {
     const authHeader = req.headers.get('Authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.error('Missing or invalid authorization header');
       return new Response(
         JSON.stringify({ error: 'Missing authorization header' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Extract JWT token
     const token = authHeader.replace('Bearer ', '');
     
-    // Create admin client with service role for ALL operations
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    // Validate JWT and get user
     const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
     
-    if (userError) {
-      console.error('Auth error:', userError.message);
-      return new Response(
-        JSON.stringify({ error: 'User not authenticated', details: userError.message }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-    
-    if (!user) {
-      console.error('No user found for token');
+    if (userError || !user) {
       return new Response(
         JSON.stringify({ error: 'User not authenticated' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -135,7 +260,6 @@ serve(async (req) => {
       .maybeSingle();
 
     if (mlError || !mlAccount) {
-      console.error('ML account not found:', mlError?.message);
       return new Response(
         JSON.stringify({ error: 'ML account not found' }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -146,7 +270,6 @@ serve(async (req) => {
     const validationErrors: ValidationError[] = [];
     const validShipmentIds: string[] = [];
 
-    // Get shipment cache data
     const { data: shipments } = await supabaseAdmin
       .from('meli_shipments_cache')
       .select('shipment_id, order_id, label_available')
@@ -155,7 +278,6 @@ serve(async (req) => {
 
     const shipmentMap = new Map((shipments || []).map(s => [s.shipment_id, s]));
 
-    // Get invoice cache data
     const orderIds = (shipments || []).map(s => s.order_id);
     const { data: invoices } = await supabaseAdmin
       .from('meli_invoices_cache')
@@ -165,7 +287,6 @@ serve(async (req) => {
 
     const invoiceMap = new Map((invoices || []).map(i => [i.order_id, i]));
 
-    // Validate each shipment
     for (const shipment_id of shipment_ids) {
       const shipment = shipmentMap.get(shipment_id);
       
@@ -191,13 +312,14 @@ serve(async (req) => {
     console.log(`Validation: ${validShipmentIds.length} valid, ${validationErrors.length} errors`);
 
     if (validShipmentIds.length === 0) {
-      // Record error in print queue (audit log only)
       await supabaseAdmin.from('meli_print_queue').insert({
         user_id: user.id,
         seller_id: seller_id,
         format: format,
         shipment_ids: shipment_ids,
         total_labels: 0,
+        processed_labels: 0,
+        batches: [],
         status: 'erro',
         error_log: JSON.stringify(validationErrors),
       });
@@ -212,90 +334,204 @@ serve(async (req) => {
       );
     }
 
-    // Call ML API to generate labels
-    const responseType = format === 'pdf' ? 'pdf' : 'zpl2';
-    const mlUrl = `https://api.mercadolibre.com/shipment_labels?shipment_ids=${validShipmentIds.join(',')}&response_type=${responseType}`;
+    // Split into batches of 50 (ML API limit)
+    const batches = chunkArray(validShipmentIds, MAX_BATCH_SIZE);
+    const totalBatches = batches.length;
     
-    console.log('Calling ML labels API:', mlUrl);
+    console.log(`Processing ${validShipmentIds.length} labels in ${totalBatches} batch(es)`);
 
-    const mlResponse = await fetch(mlUrl, {
-      headers: {
-        'Authorization': `Bearer ${mlAccount.access_token}`,
-      },
-    });
+    // Create job record
+    const batchesInitial = batches.map((batch, idx) => ({
+      batch_id: idx + 1,
+      shipment_ids: batch,
+      status: 'pending',
+      retry_count: 0,
+    }));
 
-    if (!mlResponse.ok) {
-      const errorText = await mlResponse.text();
-      console.error('ML labels API error:', errorText);
-
-      // Record error in print queue (audit log)
-      await supabaseAdmin.from('meli_print_queue').insert({
+    const { data: jobRecord, error: jobError } = await supabaseAdmin
+      .from('meli_print_queue')
+      .insert({
         user_id: user.id,
         seller_id: seller_id,
         format: format,
         shipment_ids: validShipmentIds,
-        total_labels: 0,
-        status: 'erro',
-        error_log: `ML API Error: ${errorText}`,
-      });
+        total_labels: validShipmentIds.length,
+        processed_labels: 0,
+        batches: batchesInitial,
+        status: 'processando',
+        job_started_at: new Date().toISOString(),
+      })
+      .select('id')
+      .single();
+
+    if (jobError || !jobRecord) {
+      throw new Error('Failed to create job record');
+    }
+
+    const jobId = jobRecord.id;
+    console.log(`Created job: ${jobId}`);
+
+    // Progress update function
+    const updateProgress = async (batchId: number, status: string, retryCount: number, errorMessage?: string) => {
+      try {
+        // Get current batches
+        const { data: current } = await supabaseAdmin
+          .from('meli_print_queue')
+          .select('batches, processed_labels')
+          .eq('id', jobId)
+          .single();
+
+        if (current) {
+          const updatedBatches = (current.batches as BatchResult[]).map(b => 
+            b.batch_id === batchId 
+              ? { ...b, status, retry_count: retryCount, error_message: errorMessage }
+              : b
+          );
+
+          const successCount = updatedBatches.filter(b => b.status === 'success').length;
+          const processedLabels = batches
+            .slice(0, successCount)
+            .reduce((sum, batch) => sum + batch.length, 0);
+
+          await supabaseAdmin
+            .from('meli_print_queue')
+            .update({ 
+              batches: updatedBatches,
+              processed_labels: processedLabels,
+            })
+            .eq('id', jobId);
+        }
+      } catch (e) {
+        console.error('Failed to update progress:', e);
+      }
+    };
+
+    // Process all batches
+    const batchResults: BatchResult[] = [];
+    
+    for (let i = 0; i < batches.length; i++) {
+      const batchId = i + 1;
+      const batchShipmentIds = batches[i];
+      
+      const result = await processBatchWithRetry(
+        batchId,
+        batchShipmentIds,
+        format,
+        mlAccount.access_token,
+        updateProgress
+      );
+      
+      batchResults.push(result);
+
+      // Small delay between batches to avoid rate limiting
+      if (i < batches.length - 1) {
+        await sleep(DELAY_BETWEEN_BATCHES_MS);
+      }
+    }
+
+    // Check results
+    const successBatches = batchResults.filter(b => b.status === 'success');
+    const errorBatches = batchResults.filter(b => b.status === 'error');
+    
+    console.log(`Results: ${successBatches.length} success, ${errorBatches.length} errors`);
+
+    if (successBatches.length === 0) {
+      // All failed
+      await supabaseAdmin
+        .from('meli_print_queue')
+        .update({
+          status: 'erro',
+          error_log: JSON.stringify(errorBatches.map(b => ({
+            batch_id: b.batch_id,
+            shipment_ids: b.shipment_ids,
+            error: b.error_message,
+          }))),
+          job_completed_at: new Date().toISOString(),
+        })
+        .eq('id', jobId);
 
       return new Response(
-        JSON.stringify({ error: 'Failed to generate labels from ML', details: errorText }),
+        JSON.stringify({ 
+          success: false,
+          job_id: jobId,
+          message: 'Todos os lotes falharam',
+          errors: errorBatches.map(b => ({
+            batch_id: b.batch_id,
+            shipment_ids: b.shipment_ids,
+            error: b.error_message,
+          })),
+        }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Get content for immediate download (no storage)
-    let pdfBase64: string | null = null;
-    let zplContent: string | null = null;
+    // Merge successful results
+    let finalPdfBase64: string | null = null;
+    let finalZplContent: string | null = null;
 
     if (format === 'pdf') {
-      const pdfBuffer = await mlResponse.arrayBuffer();
-      // Convert to base64 for direct download
-      const uint8Array = new Uint8Array(pdfBuffer);
-      let binary = '';
-      for (let i = 0; i < uint8Array.length; i++) {
-        binary += String.fromCharCode(uint8Array[i]);
+      const pdfDataArray = successBatches
+        .filter(b => b.pdf_data)
+        .map(b => b.pdf_data!);
+      
+      if (pdfDataArray.length > 1) {
+        const mergedPdf = await mergePDFs(pdfDataArray);
+        const binary = String.fromCharCode(...mergedPdf);
+        finalPdfBase64 = btoa(binary);
+      } else if (pdfDataArray.length === 1) {
+        const binary = String.fromCharCode(...pdfDataArray[0]);
+        finalPdfBase64 = btoa(binary);
       }
-      pdfBase64 = btoa(binary);
     } else {
-      // ZPL format - ML returns a ZIP file containing the .txt with ZPL code
-      const responseBuffer = await mlResponse.arrayBuffer();
+      const zplDataArray = successBatches
+        .filter(b => b.zpl_data)
+        .map(b => b.zpl_data!);
       
-      // Check if response is a ZIP file
-      if (isZipFile(responseBuffer)) {
-        console.log('ZPL response is a ZIP file, extracting...');
-        zplContent = await extractZplFromZip(responseBuffer);
-      } else {
-        // Fallback: treat as plain text if not a ZIP
-        console.log('ZPL response is plain text');
-        const decoder = new TextDecoder('utf-8');
-        zplContent = decoder.decode(responseBuffer);
-      }
-      
-      console.log(`ZPL content extracted, length: ${zplContent.length} chars`);
+      finalZplContent = mergeZPLs(zplDataArray);
     }
 
-    // Record success in print queue (audit log only - no file stored)
-    await supabaseAdmin.from('meli_print_queue').insert({
-      user_id: user.id,
-      seller_id: seller_id,
-      format: format,
-      shipment_ids: validShipmentIds,
-      total_labels: validShipmentIds.length,
-      status: 'gerada',
-      // Don't store file_url or zpl_content - return directly
-    });
+    const totalSuccessLabels = successBatches.reduce(
+      (sum, b) => sum + b.shipment_ids.length, 0
+    );
 
-    console.log(`Labels generated successfully: ${validShipmentIds.length} labels`);
+    // Update job as completed
+    const finalStatus = errorBatches.length > 0 ? 'parcial' : 'concluido';
+    
+    await supabaseAdmin
+      .from('meli_print_queue')
+      .update({
+        status: finalStatus,
+        processed_labels: totalSuccessLabels,
+        batches: batchResults,
+        job_completed_at: new Date().toISOString(),
+        error_log: errorBatches.length > 0 
+          ? JSON.stringify(errorBatches.map(b => ({
+              batch_id: b.batch_id,
+              shipment_ids: b.shipment_ids,
+              error: b.error_message,
+            })))
+          : null,
+      })
+      .eq('id', jobId);
+
+    console.log(`Job ${jobId} completed: ${totalSuccessLabels} labels generated`);
 
     return new Response(
       JSON.stringify({ 
-        success: true, 
-        total_labels: validShipmentIds.length,
-        pdf_base64: pdfBase64,
-        zpl_content: zplContent,
+        success: true,
+        job_id: jobId,
+        total_batches: totalBatches,
+        success_batches: successBatches.length,
+        error_batches: errorBatches.length,
+        total_labels: totalSuccessLabels,
+        pdf_base64: finalPdfBase64,
+        zpl_content: finalZplContent,
         validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
+        batch_errors: errorBatches.length > 0 ? errorBatches.map(b => ({
+          batch_id: b.batch_id,
+          shipment_ids: b.shipment_ids,
+          error: b.error_message,
+        })) : undefined,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

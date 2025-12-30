@@ -259,11 +259,15 @@ export type Database = {
       }
       meli_print_queue: {
         Row: {
+          batches: Json | null
           created_at: string
           error_log: string | null
           file_url: string | null
           format: string
           id: string
+          job_completed_at: string | null
+          job_started_at: string | null
+          processed_labels: number
           seller_id: string
           shipment_ids: Json
           status: string
@@ -272,11 +276,15 @@ export type Database = {
           zpl_content: string | null
         }
         Insert: {
+          batches?: Json | null
           created_at?: string
           error_log?: string | null
           file_url?: string | null
           format: string
           id?: string
+          job_completed_at?: string | null
+          job_started_at?: string | null
+          processed_labels?: number
           seller_id: string
           shipment_ids: Json
           status?: string
@@ -285,11 +293,15 @@ export type Database = {
           zpl_content?: string | null
         }
         Update: {
+          batches?: Json | null
           created_at?: string
           error_log?: string | null
           file_url?: string | null
           format?: string
           id?: string
+          job_completed_at?: string | null
+          job_started_at?: string | null
+          processed_labels?: number
           seller_id?: string
           shipment_ids?: Json
           status?: string

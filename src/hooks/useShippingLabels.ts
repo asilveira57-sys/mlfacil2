@@ -40,16 +40,51 @@ export interface PrintQueueEntry {
   format: string;
   shipment_ids: string[];
   total_labels: number;
+  processed_labels: number;
   status: string;
   file_url: string | null;
   zpl_content: string | null;
   error_log: string | null;
   created_at: string;
+  batches: BatchInfo[];
+}
+
+export interface BatchInfo {
+  batch_id: number;
+  shipment_ids: string[];
+  status: 'pending' | 'processing' | 'retrying' | 'success' | 'error';
+  retry_count: number;
+  error_message?: string;
+}
+
+export interface GenerationProgress {
+  status: 'idle' | 'processing' | 'completed' | 'partial' | 'error';
+  total_labels: number;
+  processed_labels: number;
+  total_batches: number;
+  completed_batches: number;
+  error_batches: number;
+  batch_details?: {
+    batch_id: number;
+    status: string;
+    label_count: number;
+    retry_count: number;
+    error?: string;
+  }[];
 }
 
 interface UseShippingLabelsOptions {
   sellerId: string | null;
 }
+
+const INITIAL_GENERATION_PROGRESS: GenerationProgress = {
+  status: 'idle',
+  total_labels: 0,
+  processed_labels: 0,
+  total_batches: 0,
+  completed_batches: 0,
+  error_batches: 0,
+};
 
 // Helper to get auth headers
 async function getAuthHeaders(): Promise<{ Authorization: string } | null> {
@@ -89,6 +124,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const [syncPhase, setSyncPhase] = useState<SyncPhase>('idle');
   const [syncProgress, setSyncProgress] = useState<string>('');
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
+  const [generationProgress, setGenerationProgress] = useState<GenerationProgress>(INITIAL_GENERATION_PROGRESS);
   const syncAbortRef = useRef(false);
   const lastSyncTimeRef = useRef<number>(0);
   const hasAutoSyncedRef = useRef(false);
@@ -445,7 +481,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     }
   }, [isSyncing, syncOrders, syncShipments, syncInvoices, refetch, queryClient, toast]);
 
-  // Generate labels mutation
+  // Generate labels mutation with batch support
   const generateLabelsMutation = useMutation({
     mutationFn: async ({ format, shipmentId }: { format: 'pdf' | 'zpl'; shipmentId?: string }) => {
       if (!sellerId) throw new Error('Seller ID not set');
@@ -469,6 +505,17 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         throw new Error('Nenhum envio válido selecionado');
       }
 
+      // Set initial progress
+      const totalBatches = Math.ceil(shipmentIds.length / 50);
+      setGenerationProgress({
+        status: 'processing',
+        total_labels: shipmentIds.length,
+        processed_labels: 0,
+        total_batches: totalBatches,
+        completed_batches: 0,
+        error_batches: 0,
+      });
+
       const response = await supabase.functions.invoke('ml-generate-labels', {
         headers,
         body: {
@@ -487,6 +534,24 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       if (!variables.shipmentId) {
         setSelectedIds(new Set());
       }
+
+      // Update progress to completed
+      const status = data.error_batches > 0 ? 'partial' : 'completed';
+      setGenerationProgress({
+        status,
+        total_labels: data.total_labels || 0,
+        processed_labels: data.total_labels || 0,
+        total_batches: data.total_batches || 1,
+        completed_batches: data.success_batches || data.total_batches || 1,
+        error_batches: data.error_batches || 0,
+        batch_details: data.batch_errors?.map((b: { batch_id: number; shipment_ids: string[]; error: string }) => ({
+          batch_id: b.batch_id,
+          status: 'error',
+          label_count: b.shipment_ids.length,
+          retry_count: 5,
+          error: b.error,
+        })),
+      });
       
       if (variables.format === 'pdf' && data.pdf_base64) {
         const binary = atob(data.pdf_base64);
@@ -504,7 +569,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         
         toast({
           title: 'PDF gerado com sucesso',
-          description: `${data.total_labels} etiqueta(s) gerada(s)`,
+          description: `${data.total_labels} etiqueta(s) em ${data.total_batches || 1} lote(s)`,
         });
       } else if (variables.format === 'zpl' && data.zpl_content) {
         const blob = new Blob([data.zpl_content], { type: 'text/plain' });
@@ -517,17 +582,40 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         
         toast({
           title: 'ZPL gerado com sucesso',
-          description: `${data.total_labels} etiqueta(s) gerada(s)`,
+          description: `${data.total_labels} etiqueta(s) em ${data.total_batches || 1} lote(s)`,
         });
       }
+
+      // Show warning if there were partial failures
+      if (data.error_batches > 0 && data.batch_errors) {
+        toast({
+          title: 'Alguns lotes falharam',
+          description: `${data.error_batches} lote(s) não foram processados após 5 tentativas`,
+          variant: 'destructive',
+        });
+      }
+
+      // Reset progress after 3 seconds
+      setTimeout(() => {
+        setGenerationProgress(INITIAL_GENERATION_PROGRESS);
+      }, 3000);
     },
     onError: (error) => {
       console.error('Generate labels error:', error);
+      setGenerationProgress(prev => ({
+        ...prev,
+        status: 'error',
+      }));
       toast({
         title: 'Erro ao gerar etiquetas',
         description: error.message,
         variant: 'destructive',
       });
+
+      // Reset progress after 3 seconds
+      setTimeout(() => {
+        setGenerationProgress(INITIAL_GENERATION_PROGRESS);
+      }, 3000);
     },
   });
 
@@ -680,5 +768,6 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     statusCounts,
     generateLabels: generateLabelsMutation.mutate,
     isGenerating: generateLabelsMutation.isPending,
+    generationProgress,
   };
 }
