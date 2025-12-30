@@ -23,7 +23,6 @@ const STATUS_LABELS: Record<FinalStatus, string> = {
   pronta: 'Para imprimir',
   aguardando_nf: 'Aguardando NF',
   reimprimir: 'Reimprimir',
-  erro: 'Erro',
 };
 
 const STATUS_VARIANTS: Record<FinalStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
@@ -31,7 +30,6 @@ const STATUS_VARIANTS: Record<FinalStatus, 'default' | 'secondary' | 'destructiv
   pronta: 'default',
   aguardando_nf: 'secondary',
   reimprimir: 'outline',
-  erro: 'destructive',
 };
 
 const PERIOD_OPTIONS: { value: PeriodFilter; label: string }[] = [
