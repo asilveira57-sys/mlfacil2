@@ -2,10 +2,14 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { toZonedTime, fromZonedTime } from 'date-fns-tz';
+import { startOfDay, endOfDay, subDays, subHours } from 'date-fns';
 
 export type FinalStatus = 'pronta' | 'aguardando_nf' | 'reimprimir' | 'full' | 'enviado' | 'outros' | 'all';
-export type PeriodFilter = 0 | 7 | 15 | 30 | 90; // 0 = hoje (últimas 24h)
+export type PeriodFilter = 'all' | 'today' | '7d' | '15d' | '30d' | 'custom';
 export type SyncPhase = 'idle' | 'orders' | 'shipments' | 'invoices' | 'done';
+
+const BRASILIA_TZ = 'America/Sao_Paulo';
 
 export interface ShippingOrder {
   id: string;
@@ -73,6 +77,11 @@ export interface GenerationProgress {
   }[];
 }
 
+export interface DateRange {
+  from: Date | null;
+  to: Date | null;
+}
+
 interface UseShippingLabelsOptions {
   sellerId: string | null;
 }
@@ -85,6 +94,8 @@ const INITIAL_GENERATION_PROGRESS: GenerationProgress = {
   completed_batches: 0,
   error_batches: 0,
 };
+
+const PAGE_SIZE = 30;
 
 // Helper to get auth headers
 async function getAuthHeaders(): Promise<{ Authorization: string } | null> {
@@ -118,7 +129,9 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const queryClient = useQueryClient();
   
   const [statusFilter, setStatusFilter] = useState<FinalStatus>('all');
-  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>(0); // Default: hoje
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('all'); // Default: sem filtro
+  const [customDateRange, setCustomDateRange] = useState<DateRange>({ from: null, to: null });
+  const [currentPage, setCurrentPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncPhase, setSyncPhase] = useState<SyncPhase>('idle');
@@ -129,57 +142,98 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const lastSyncTimeRef = useRef<number>(0);
   const hasAutoSyncedRef = useRef(false);
 
-  // Calculate date range - "Hoje" means last 24 hours
-  const getDateRange = useCallback(() => {
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter, periodFilter, customDateRange]);
+
+  // Calculate date range with Brasília timezone
+  const getDateRange = useCallback((): { dateFrom: string | null; dateTo: string | null } => {
     const now = new Date();
-    let dateFrom: Date;
+    const nowBrasilia = toZonedTime(now, BRASILIA_TZ);
     
-    if (periodFilter === 0) {
-      // Hoje: últimas 24 horas (não início do dia)
-      dateFrom = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    } else {
-      dateFrom = new Date();
-      dateFrom.setDate(dateFrom.getDate() - periodFilter);
+    let dateFrom: Date | null = null;
+    let dateTo: Date | null = null;
+    
+    switch (periodFilter) {
+      case 'all':
+        // No date filter
+        return { dateFrom: null, dateTo: null };
+      case 'today':
+        // Últimas 24 horas (rolling window)
+        dateFrom = subHours(now, 24);
+        dateTo = now;
+        break;
+      case '7d':
+        dateFrom = startOfDay(subDays(nowBrasilia, 7));
+        dateTo = endOfDay(nowBrasilia);
+        break;
+      case '15d':
+        dateFrom = startOfDay(subDays(nowBrasilia, 15));
+        dateTo = endOfDay(nowBrasilia);
+        break;
+      case '30d':
+        dateFrom = startOfDay(subDays(nowBrasilia, 30));
+        dateTo = endOfDay(nowBrasilia);
+        break;
+      case 'custom':
+        if (customDateRange.from) {
+          // Convert to Brasília time at start of day
+          dateFrom = fromZonedTime(startOfDay(customDateRange.from), BRASILIA_TZ);
+        }
+        if (customDateRange.to) {
+          // Convert to Brasília time at end of day
+          dateTo = fromZonedTime(endOfDay(customDateRange.to), BRASILIA_TZ);
+        }
+        break;
     }
     
     return {
-      dateFrom: dateFrom.toISOString(),
-      dateTo: now.toISOString(),
+      dateFrom: dateFrom ? dateFrom.toISOString() : null,
+      dateTo: dateTo ? dateTo.toISOString() : null,
     };
-  }, [periodFilter]);
+  }, [periodFilter, customDateRange]);
 
-  // FAST LOAD: Query local cache with joins - NO await on sync
-  const { data: orders = [], isLoading, refetch } = useQuery({
-    queryKey: ['shipping-orders', sellerId, statusFilter, periodFilter],
+  // FAST LOAD: Query local cache with joins - with pagination
+  const { data: ordersData, isLoading, refetch } = useQuery({
+    queryKey: ['shipping-orders', sellerId, statusFilter, periodFilter, customDateRange, currentPage],
     queryFn: async () => {
-      if (!sellerId) return [];
+      if (!sellerId) return { orders: [], totalCount: 0 };
 
-      const { dateFrom } = getDateRange();
+      const { dateFrom, dateTo } = getDateRange();
 
-      // Step 1: Get orders from cache (fast) - exclude cancelled
-      const { data: ordersData, error: ordersError } = await supabase
+      // Build base query - exclude cancelled
+      let query = supabase
         .from('meli_orders_cache')
-        .select('*')
+        .select('*', { count: 'exact' })
         .eq('seller_id', sellerId)
-        .gte('created_at_meli', dateFrom)
         .not('order_status', 'in', `(${COMPLETED_ORDER_STATUSES.join(',')})`)
-        .order('created_at_meli', { ascending: false })
-        .limit(500);
+        .order('created_at_meli', { ascending: false });
+
+      // Apply date filters if set
+      if (dateFrom) {
+        query = query.gte('created_at_meli', dateFrom);
+      }
+      if (dateTo) {
+        query = query.lte('created_at_meli', dateTo);
+      }
+
+      const { data: ordersRaw, error: ordersError, count } = await query;
 
       if (ordersError) {
         console.error('Error fetching orders:', ordersError);
         throw ordersError;
       }
 
-      if (!ordersData || ordersData.length === 0) {
-        return [];
+      if (!ordersRaw || ordersRaw.length === 0) {
+        return { orders: [], totalCount: 0 };
       }
 
       // Step 2: Get shipment_ids and order_ids for joins
-      const shipmentIds = ordersData
+      const shipmentIds = ordersRaw
         .map(o => o.shipment_id)
         .filter(Boolean) as string[];
-      const orderIds = ordersData.map(o => o.order_id);
+      const orderIds = ordersRaw.map(o => o.order_id);
 
       // Step 3: Parallel fetch shipments and invoices from cache
       const [shipmentsResult, invoicesResult] = await Promise.all([
@@ -207,7 +261,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       );
 
       // Step 4: Build combined view - include ALL orders for "Todos" filter
-      const combinedOrders: ShippingOrder[] = ordersData
+      const combinedOrders: ShippingOrder[] = ordersRaw
         .map(order => {
           const shipment = order.shipment_id ? shipmentsMap.get(order.shipment_id) : null;
           const invoice = invoicesMap.get(order.order_id);
@@ -299,19 +353,29 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         }
       });
 
-      const uniqueOrders = Array.from(groupedByShipment.values());
+      let uniqueOrders = Array.from(groupedByShipment.values());
 
       // Apply status filter - "all" shows everything
       if (statusFilter !== 'all') {
-        return uniqueOrders.filter(o => o.final_status === statusFilter);
+        uniqueOrders = uniqueOrders.filter(o => o.final_status === statusFilter);
       }
 
-      return uniqueOrders;
+      const totalCount = uniqueOrders.length;
+
+      // Apply pagination
+      const startIndex = (currentPage - 1) * PAGE_SIZE;
+      const paginatedOrders = uniqueOrders.slice(startIndex, startIndex + PAGE_SIZE);
+
+      return { orders: paginatedOrders, totalCount };
     },
     enabled: !!sellerId,
     staleTime: 30000, // 30 seconds
     refetchOnWindowFocus: false,
   });
+
+  const orders = ordersData?.orders ?? [];
+  const totalCount = ordersData?.totalCount ?? 0;
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
   // === SYNC PIPELINE (background, non-blocking) ===
 
@@ -331,8 +395,8 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       headers,
       body: {
         seller_id: sellerId,
-        date_from: dateFrom,
-        date_to: dateTo,
+        date_from: dateFrom || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(), // default 30 days
+        date_to: dateTo || new Date().toISOString(),
       },
     });
 
@@ -340,13 +404,18 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
     console.log('Orders synced:', response.data);
 
-    // Get order IDs and shipment IDs from cache
-    const { data: ordersWithShipments } = await supabase
+    // Build query for orders cache
+    let query = supabase
       .from('meli_orders_cache')
       .select('order_id, shipment_id, order_status')
       .eq('seller_id', sellerId)
-      .gte('created_at_meli', dateFrom)
       .not('order_status', 'in', `(${COMPLETED_ORDER_STATUSES.join(',')})`);
+
+    if (dateFrom) {
+      query = query.gte('created_at_meli', dateFrom);
+    }
+
+    const { data: ordersWithShipments } = await query;
 
     const orderIds = (ordersWithShipments || []).map(o => o.order_id);
     const shipmentIds = (ordersWithShipments || [])
@@ -650,19 +719,27 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   // Calculate status counts from the current orders (already deduped)
   // We need a separate query for counts that doesn't apply statusFilter
   const { data: allOrdersForCounts = [] } = useQuery({
-    queryKey: ['shipping-orders-all', sellerId, periodFilter],
+    queryKey: ['shipping-orders-all', sellerId, periodFilter, customDateRange],
     queryFn: async () => {
       if (!sellerId) return [];
 
-      const { dateFrom } = getDateRange();
+      const { dateFrom, dateTo } = getDateRange();
 
       // Get all orders for counting - exclude cancelled
-      const { data: ordersData } = await supabase
+      let query = supabase
         .from('meli_orders_cache')
         .select('order_id, shipment_id')
         .eq('seller_id', sellerId)
-        .gte('created_at_meli', dateFrom)
         .not('order_status', 'in', `(${COMPLETED_ORDER_STATUSES.join(',')})`);
+
+      if (dateFrom) {
+        query = query.gte('created_at_meli', dateFrom);
+      }
+      if (dateTo) {
+        query = query.lte('created_at_meli', dateTo);
+      }
+
+      const { data: ordersData } = await query;
 
       if (!ordersData || ordersData.length === 0) return [];
 
@@ -748,6 +825,14 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     }
   }, [sellerId, isSyncing, startSyncPipeline]);
 
+  // Set custom date range helper
+  const setDateRange = useCallback((range: DateRange) => {
+    setCustomDateRange(range);
+    if (range.from || range.to) {
+      setPeriodFilter('custom');
+    }
+  }, []);
+
   return {
     orders,
     isLoading,
@@ -756,6 +841,13 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     setStatusFilter,
     periodFilter,
     setPeriodFilter,
+    customDateRange,
+    setDateRange,
+    currentPage,
+    setCurrentPage,
+    totalCount,
+    totalPages,
+    pageSize: PAGE_SIZE,
     selectedIds,
     toggleSelection,
     selectAll,

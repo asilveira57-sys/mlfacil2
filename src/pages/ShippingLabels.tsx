@@ -6,6 +6,7 @@ import { ArrowLeft, Package } from 'lucide-react';
 import { useShippingLabels, ShippingOrder } from '@/hooks/useShippingLabels';
 import { ShippingFilters } from '@/components/shipping/ShippingFilters';
 import { ShippingTable } from '@/components/shipping/ShippingTable';
+import { ShippingPagination } from '@/components/shipping/ShippingPagination';
 import { BulkActionsBar } from '@/components/shipping/BulkActionsBar';
 import { OrderDetailsDrawer } from '@/components/shipping/OrderDetailsDrawer';
 import { useToast } from '@/hooks/use-toast';
@@ -33,6 +34,13 @@ export default function ShippingLabels() {
     setStatusFilter,
     periodFilter,
     setPeriodFilter,
+    customDateRange,
+    setDateRange,
+    currentPage,
+    setCurrentPage,
+    totalCount,
+    totalPages,
+    pageSize,
     selectedIds,
     toggleSelection,
     selectAll,
@@ -141,12 +149,15 @@ export default function ShippingLabels() {
           setStatusFilter={setStatusFilter}
           periodFilter={periodFilter}
           setPeriodFilter={setPeriodFilter}
+          customDateRange={customDateRange}
+          setDateRange={setDateRange}
           statusCounts={statusCounts}
           isSyncing={isSyncing}
           syncPhase={syncPhase}
           syncProgress={syncProgress}
           onSync={sync}
           lastSyncAt={lastSyncAt}
+          totalCount={totalCount}
         />
 
         {/* Table - shows loading only for initial load, not during sync */}
@@ -157,6 +168,15 @@ export default function ShippingLabels() {
           onSelectAll={selectAll}
           onViewDetails={handleViewDetails}
           isLoading={isLoading}
+        />
+
+        {/* Pagination */}
+        <ShippingPagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={setCurrentPage}
+          pageSize={pageSize}
+          totalCount={totalCount}
         />
       </main>
 
