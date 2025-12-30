@@ -428,6 +428,45 @@ export type Database = {
         }
         Relationships: []
       }
+      sync_jobs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          id: string
+          job_type: string
+          processed_records: number | null
+          seller_id: string
+          status: string
+          total_records: number | null
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          job_type?: string
+          processed_records?: number | null
+          seller_id: string
+          status?: string
+          total_records?: number | null
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          job_type?: string
+          processed_records?: number | null
+          seller_id?: string
+          status?: string
+          total_records?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       meli_orders_ready_view: {

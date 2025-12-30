@@ -377,121 +377,48 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const totalCount = ordersData?.totalCount ?? 0;
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
-  // === SYNC PIPELINE (background, non-blocking) ===
+  // === SYNC PIPELINE (background, fire-and-forget) ===
 
-  // Phase 1: Sync orders
-  const syncOrders = useCallback(async (): Promise<{ orderIds: string[]; shipmentIds: string[] }> => {
-    if (!sellerId) return { orderIds: [], shipmentIds: [] };
-
-    const headers = await getAuthHeaders();
-    if (!headers) throw new Error('Not authenticated');
-
-    const { dateFrom, dateTo } = getDateRange();
-
-    setSyncPhase('orders');
-    setSyncProgress('Buscando pedidos...');
-
-    const response = await supabase.functions.invoke('ml-sync-orders', {
-      headers,
-      body: {
-        seller_id: sellerId,
-        date_from: dateFrom || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(), // default 30 days
-        date_to: dateTo || new Date().toISOString(),
-      },
-    });
-
-    if (response.error) throw new Error(response.error.message);
-
-    console.log('Orders synced:', response.data);
-
-    // Build query for orders cache
-    let query = supabase
-      .from('meli_orders_cache')
-      .select('order_id, shipment_id, order_status')
-      .eq('seller_id', sellerId)
-      .not('order_status', 'in', `(${COMPLETED_ORDER_STATUSES.join(',')})`);
-
-    if (dateFrom) {
-      query = query.gte('created_at_meli', dateFrom);
-    }
-
-    const { data: ordersWithShipments } = await query;
-
-    const orderIds = (ordersWithShipments || []).map(o => o.order_id);
-    const shipmentIds = (ordersWithShipments || [])
-      .map(o => o.shipment_id)
-      .filter(Boolean) as string[];
-
-    setSyncProgress(`${orderIds.length} pedidos`);
+  // Poll for sync job completion
+  const pollSyncJobs = useCallback(async (jobIds: string[]) => {
+    const maxAttempts = 60; // 2 minutes max
+    let attempts = 0;
     
-    await sleep(100);
-
-    return { orderIds, shipmentIds: [...new Set(shipmentIds)] };
-  }, [sellerId, getDateRange]);
-
-  // Phase 2: Sync shipments - send ALL at once to edge function
-  const syncShipments = useCallback(async (shipmentIds: string[]): Promise<void> => {
-    if (!sellerId || shipmentIds.length === 0) return;
-
-    const headers = await getAuthHeaders();
-    if (!headers) throw new Error('Not authenticated');
-
-    setSyncPhase('shipments');
-    setSyncProgress(`Atualizando ${shipmentIds.length} envios...`);
-
-    // Send ALL shipment IDs at once - edge function handles batching internally
-    const response = await supabase.functions.invoke('ml-sync-shipments', {
-      headers,
-      body: {
-        seller_id: sellerId,
-        shipment_ids: shipmentIds,
-      },
-    });
-
-    if (response.error) {
-      console.error('Shipments sync error:', response.error);
-    } else {
-      console.log(`Shipments synced:`, response.data);
-      setSyncProgress(`${response.data?.synced || 0} envios atualizados`);
+    while (attempts < maxAttempts) {
+      await sleep(2000); // Poll every 2 seconds
+      attempts++;
+      
+      const { data: jobs } = await supabase
+        .from('sync_jobs')
+        .select('id, status, job_type, processed_records, total_records')
+        .in('id', jobIds);
+      
+      if (!jobs) continue;
+      
+      const allDone = jobs.every(j => j.status === 'done' || j.status === 'error');
+      const processing = jobs.find(j => j.status === 'processing');
+      
+      if (processing) {
+        const progress = processing.total_records > 0 
+          ? Math.round((processing.processed_records / processing.total_records) * 100)
+          : 0;
+        setSyncProgress(`${processing.job_type}: ${progress}%`);
+      }
+      
+      if (allDone) {
+        console.log('All sync jobs completed');
+        break;
+      }
     }
-
-    // Refresh UI
+    
+    // Refresh UI after all jobs complete
     await refetch();
-  }, [sellerId, refetch]);
+    queryClient.invalidateQueries({ queryKey: ['shipping-orders'] });
+    queryClient.invalidateQueries({ queryKey: ['shipping-orders-all'] });
+  }, [refetch, queryClient]);
 
-  // Phase 3: Sync invoices - send ALL at once to edge function
-  const syncInvoices = useCallback(async (orderIds: string[]): Promise<void> => {
-    if (!sellerId || orderIds.length === 0) return;
-
-    const headers = await getAuthHeaders();
-    if (!headers) throw new Error('Not authenticated');
-
-    setSyncPhase('invoices');
-    setSyncProgress(`Atualizando ${orderIds.length} NFs...`);
-
-    // Send ALL order IDs at once - edge function handles batching internally
-    const response = await supabase.functions.invoke('ml-sync-invoices', {
-      headers,
-      body: {
-        seller_id: sellerId,
-        order_ids: orderIds,
-      },
-    });
-
-    if (response.error) {
-      console.error('Invoices sync error:', response.error);
-    } else {
-      console.log(`Invoices synced:`, response.data);
-      setSyncProgress(`${response.data?.synced || 0} NFs atualizadas`);
-    }
-
-    // Refresh UI
-    await refetch();
-  }, [sellerId, refetch]);
-
-  // Main sync pipeline (non-blocking)
+  // Fire-and-forget sync - returns immediately
   const startSyncPipeline = useCallback(async () => {
-    // Prevent concurrent syncs and spam (5 second debounce)
     const now = Date.now();
     if (isSyncing || (now - lastSyncTimeRef.current) < 5000) {
       console.log('Sync skipped: already syncing or debounced');
@@ -502,39 +429,94 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     syncAbortRef.current = false;
     setIsSyncing(true);
     setSyncPhase('orders');
+    setSyncProgress('Iniciando...');
+
+    const headers = await getAuthHeaders();
+    if (!headers || !sellerId) {
+      setIsSyncing(false);
+      setSyncPhase('idle');
+      return;
+    }
+
+    const jobIds: string[] = [];
 
     try {
-      // Phase 1: Orders
-      const { orderIds, shipmentIds } = await syncOrders();
-      if (syncAbortRef.current) return;
-
-      // Refresh after orders
-      await refetch();
-
-      // Phase 2: Shipments
-      if (shipmentIds.length > 0) {
-        await syncShipments(shipmentIds);
-        if (syncAbortRef.current) return;
-      }
-
-      // Phase 3: Invoices
-      if (orderIds.length > 0) {
-        await syncInvoices(orderIds);
-        if (syncAbortRef.current) return;
-      }
-
-      setSyncPhase('done');
-      setSyncProgress('Concluído');
-      setLastSyncAt(new Date().toISOString());
-
-      // Final refresh
-      await refetch();
-      queryClient.invalidateQueries({ queryKey: ['shipping-orders'] });
-
-      toast({
-        title: 'Sincronização concluída',
-        description: `${orderIds.length} pedidos atualizados`,
+      // Phase 1: Start orders sync (fire-and-forget)
+      const { dateFrom, dateTo } = getDateRange();
+      const ordersResponse = await supabase.functions.invoke('ml-sync-orders', {
+        headers,
+        body: {
+          seller_id: sellerId,
+          date_from: dateFrom || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+          date_to: dateTo || new Date().toISOString(),
+        },
       });
+
+      if (ordersResponse.data?.job_id) {
+        jobIds.push(ordersResponse.data.job_id);
+      }
+
+      // Wait a bit for orders to start populating
+      await sleep(3000);
+
+      // Refresh UI with whatever data exists
+      await refetch();
+
+      // Get shipment IDs from cache for next phase
+      const { data: ordersWithShipments } = await supabase
+        .from('meli_orders_cache')
+        .select('order_id, shipment_id')
+        .eq('seller_id', sellerId)
+        .not('order_status', 'in', `(cancelled)`);
+
+      const orderIds = (ordersWithShipments || []).map(o => o.order_id);
+      const shipmentIds = [...new Set((ordersWithShipments || []).map(o => o.shipment_id).filter(Boolean))] as string[];
+
+      setSyncPhase('shipments');
+      setSyncProgress(`${shipmentIds.length} envios`);
+
+      // Phase 2: Start shipments sync (fire-and-forget)
+      if (shipmentIds.length > 0) {
+        const shipmentsResponse = await supabase.functions.invoke('ml-sync-shipments', {
+          headers,
+          body: { seller_id: sellerId, shipment_ids: shipmentIds },
+        });
+        if (shipmentsResponse.data?.job_id) {
+          jobIds.push(shipmentsResponse.data.job_id);
+        }
+      }
+
+      setSyncPhase('invoices');
+      setSyncProgress(`${orderIds.length} NFs`);
+
+      // Phase 3: Start invoices sync (fire-and-forget)
+      if (orderIds.length > 0) {
+        const invoicesResponse = await supabase.functions.invoke('ml-sync-invoices', {
+          headers,
+          body: { seller_id: sellerId, order_ids: orderIds },
+        });
+        if (invoicesResponse.data?.job_id) {
+          jobIds.push(invoicesResponse.data.job_id);
+        }
+      }
+
+      // Poll for completion in background
+      if (jobIds.length > 0) {
+        pollSyncJobs(jobIds).then(() => {
+          setSyncPhase('done');
+          setSyncProgress('Concluído');
+          setLastSyncAt(new Date().toISOString());
+          
+          setTimeout(() => {
+            setIsSyncing(false);
+            setSyncPhase('idle');
+            setSyncProgress('');
+          }, 2000);
+        });
+      } else {
+        setIsSyncing(false);
+        setSyncPhase('idle');
+      }
 
     } catch (error) {
       console.error('Sync pipeline error:', error);
@@ -543,12 +525,11 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         description: error instanceof Error ? error.message : 'Erro desconhecido',
         variant: 'destructive',
       });
-    } finally {
       setIsSyncing(false);
       setSyncPhase('idle');
       setSyncProgress('');
     }
-  }, [isSyncing, syncOrders, syncShipments, syncInvoices, refetch, queryClient, toast]);
+  }, [isSyncing, sellerId, getDateRange, refetch, queryClient, toast, pollSyncJobs]);
 
   // Generate labels mutation with batch support
   const generateLabelsMutation = useMutation({

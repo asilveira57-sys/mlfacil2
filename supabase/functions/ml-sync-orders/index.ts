@@ -1,5 +1,9 @@
+// @ts-nocheck - Deno types not available in build context
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+// Declare EdgeRuntime for Supabase Edge Functions
+declare const EdgeRuntime: { waitUntil: (promise: Promise<unknown>) => void } | undefined;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -23,6 +27,149 @@ interface MLOrder {
 
 // Sleep helper for yielding between operations
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Background processing function
+async function processOrdersInBackground(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  userId: string,
+  sellerId: string,
+  accessToken: string,
+  dateFrom: string | null,
+  dateTo: string | null,
+  jobId: string
+) {
+  try {
+    console.log(`[Job ${jobId}] Starting background sync for seller ${sellerId}`);
+
+    // Build ML API URL
+    let mlUrl = `https://api.mercadolibre.com/orders/search?seller=${sellerId}&sort=date_desc`;
+    
+    if (dateFrom) {
+      mlUrl += `&order.date_created.from=${dateFrom}`;
+    }
+    if (dateTo) {
+      mlUrl += `&order.date_created.to=${dateTo}`;
+    }
+
+    // Fetch ALL orders with pagination
+    let allOrders: MLOrder[] = [];
+    let offset = 0;
+    const limit = 50;
+    let hasMore = true;
+    let totalFromApi = 0;
+
+    while (hasMore) {
+      const paginatedUrl = `${mlUrl}&offset=${offset}&limit=${limit}`;
+      const mlResponse = await fetch(paginatedUrl, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      });
+
+      if (!mlResponse.ok) {
+        const errorText = await mlResponse.text();
+        console.error(`[Job ${jobId}] ML API error:`, errorText);
+        
+        // Update job with error
+        await supabaseAdmin.from('sync_jobs').update({
+          status: 'error',
+          error_message: `ML API error: ${mlResponse.status}`,
+          completed_at: new Date().toISOString(),
+        }).eq('id', jobId);
+        
+        return;
+      }
+
+      const data = await mlResponse.json();
+      const orders = data.results || [];
+      totalFromApi = data.paging?.total || 0;
+      allOrders = [...allOrders, ...orders];
+
+      console.log(`[Job ${jobId}] Fetched ${orders.length} orders, total: ${allOrders.length}/${totalFromApi}`);
+
+      // Update progress
+      await supabaseAdmin.from('sync_jobs').update({
+        total_records: totalFromApi,
+        processed_records: allOrders.length,
+      }).eq('id', jobId);
+
+      if (orders.length < limit || allOrders.length >= totalFromApi) {
+        hasMore = false;
+      } else {
+        offset += limit;
+        await sleep(100);
+      }
+
+      // Failsafe
+      if (allOrders.length >= 10000) {
+        console.log(`[Job ${jobId}] Reached failsafe limit of 10000 orders`);
+        hasMore = false;
+      }
+    }
+
+    console.log(`[Job ${jobId}] Total orders fetched: ${allOrders.length}`);
+
+    // Batch upsert (100 at a time)
+    const BATCH_SIZE = 100;
+    let processed = 0;
+
+    for (let i = 0; i < allOrders.length; i += BATCH_SIZE) {
+      const batch = allOrders.slice(i, i + BATCH_SIZE);
+      
+      const orderData = batch.map(order => ({
+        user_id: userId,
+        seller_id: sellerId,
+        order_id: order.id.toString(),
+        created_at_meli: order.date_created,
+        order_status: order.status,
+        shipment_id: order.shipping?.id?.toString() || null,
+        buyer_nickname: order.buyer?.nickname || null,
+        total_amount: order.total_amount || null,
+        last_sync_at: new Date().toISOString(),
+      }));
+
+      const { error: upsertError } = await supabaseAdmin
+        .from('meli_orders_cache')
+        .upsert(orderData, {
+          onConflict: 'seller_id,order_id',
+          ignoreDuplicates: false,
+        });
+
+      if (upsertError) {
+        console.error(`[Job ${jobId}] Batch upsert error:`, upsertError);
+      }
+
+      processed += batch.length;
+
+      // Update progress
+      await supabaseAdmin.from('sync_jobs').update({
+        processed_records: processed,
+      }).eq('id', jobId);
+
+      // Yield between batches
+      if (i + BATCH_SIZE < allOrders.length) {
+        await sleep(50);
+      }
+    }
+
+    console.log(`[Job ${jobId}] Sync complete: ${processed} orders processed`);
+
+    // Mark job as done
+    await supabaseAdmin.from('sync_jobs').update({
+      status: 'done',
+      processed_records: processed,
+      completed_at: new Date().toISOString(),
+    }).eq('id', jobId);
+
+  } catch (error) {
+    console.error(`[Job ${jobId}] Background processing error:`, error);
+    await supabaseAdmin.from('sync_jobs').update({
+      status: 'error',
+      error_message: error instanceof Error ? error.message : 'Unknown error',
+      completed_at: new Date().toISOString(),
+    }).eq('id', jobId);
+  }
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -67,7 +214,7 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Syncing orders for seller: ${seller_id}, date_from: ${date_from}, date_to: ${date_to}`);
+    console.log(`Syncing orders for seller: ${seller_id}`);
 
     // Get ML account with access token
     const { data: mlAccount, error: mlError } = await supabaseAdmin
@@ -86,132 +233,56 @@ serve(async (req) => {
       );
     }
 
-    // Build ML API URL
-    let mlUrl = `https://api.mercadolibre.com/orders/search?seller=${seller_id}&sort=date_desc`;
-    
-    if (date_from) {
-      mlUrl += `&order.date_created.from=${date_from}`;
-    }
-    if (date_to) {
-      mlUrl += `&order.date_created.to=${date_to}`;
-    }
+    // Create job record
+    const jobId = crypto.randomUUID();
+    const { error: jobError } = await supabaseAdmin.from('sync_jobs').insert({
+      id: jobId,
+      user_id: user.id,
+      seller_id: seller_id,
+      job_type: 'orders',
+      status: 'processing',
+      total_records: 0,
+      processed_records: 0,
+    });
 
-    console.log('Fetching orders from ML:', mlUrl);
-
-    // Fetch ALL orders with pagination (smaller pages for faster response)
-    let allOrders: MLOrder[] = [];
-    let offset = 0;
-    const limit = 50;
-    let hasMore = true;
-    let totalFromApi = 0;
-
-    while (hasMore) {
-      const paginatedUrl = `${mlUrl}&offset=${offset}&limit=${limit}`;
-      const mlResponse = await fetch(paginatedUrl, {
-        headers: {
-          'Authorization': `Bearer ${mlAccount.access_token}`,
-        },
-      });
-
-      if (!mlResponse.ok) {
-        const errorText = await mlResponse.text();
-        console.error('ML API error:', errorText);
-        
-        if (mlResponse.status === 401) {
-          return new Response(
-            JSON.stringify({ error: 'ML token expired', code: 'TOKEN_EXPIRED' }),
-            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
-        }
-        
-        return new Response(
-          JSON.stringify({ error: 'Failed to fetch orders from ML' }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      const data = await mlResponse.json();
-      const orders = data.results || [];
-      totalFromApi = data.paging?.total || 0;
-      allOrders = [...allOrders, ...orders];
-
-      console.log(`Fetched ${orders.length} orders, total: ${allOrders.length}/${totalFromApi}`);
-
-      if (orders.length < limit || allOrders.length >= totalFromApi) {
-        hasMore = false;
-      } else {
-        offset += limit;
-        // Yield between API pages
-        await sleep(100);
-      }
-
-      // Failsafe: prevent infinite loops
-      if (allOrders.length >= 10000) {
-        console.log('Reached failsafe limit of 10000 orders');
-        hasMore = false;
-      }
+    if (jobError) {
+      console.error('Failed to create job:', jobError);
     }
 
-    console.log(`Total orders fetched: ${allOrders.length}`);
-
-    // Upsert orders in batches with yield
-    let inserted = 0;
-    let updated = 0;
-    const BATCH_SIZE = 25;
-
-    for (let i = 0; i < allOrders.length; i += BATCH_SIZE) {
-      const batch = allOrders.slice(i, i + BATCH_SIZE);
-      
-      for (const order of batch) {
-        const orderData = {
-          user_id: user.id,
-          seller_id: seller_id,
-          order_id: order.id.toString(),
-          created_at_meli: order.date_created,
-          order_status: order.status,
-          shipment_id: order.shipping?.id?.toString() || null,
-          buyer_nickname: order.buyer?.nickname || null,
-          total_amount: order.total_amount || null,
-          last_sync_at: new Date().toISOString(),
-        };
-
-        const { data: existing } = await supabaseAdmin
-          .from('meli_orders_cache')
-          .select('id')
-          .eq('seller_id', seller_id)
-          .eq('order_id', order.id.toString())
-          .maybeSingle();
-
-        if (existing) {
-          await supabaseAdmin
-            .from('meli_orders_cache')
-            .update(orderData)
-            .eq('id', existing.id);
-          updated++;
-        } else {
-          await supabaseAdmin
-            .from('meli_orders_cache')
-            .insert(orderData);
-          inserted++;
-        }
-      }
-
-      // Yield between batches
-      if (i + BATCH_SIZE < allOrders.length) {
-        await sleep(50);
-      }
+    // Start background processing using EdgeRuntime.waitUntil
+    if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime?.waitUntil) {
+      EdgeRuntime.waitUntil(
+        processOrdersInBackground(
+          supabaseAdmin,
+          user.id,
+          seller_id,
+          mlAccount.access_token,
+          date_from,
+          date_to,
+          jobId
+        )
+      );
+    } else {
+      // Fallback: start async but don't await
+      processOrdersInBackground(
+        supabaseAdmin,
+        user.id,
+        seller_id,
+        mlAccount.access_token,
+        date_from,
+        date_to,
+        jobId
+      ).catch(err => console.error('Background processing failed:', err));
     }
 
-    console.log(`Sync complete: ${inserted} inserted, ${updated} updated`);
-
+    // Return immediately with job_id
     return new Response(
       JSON.stringify({ 
-        success: true, 
-        total: allOrders.length,
-        inserted,
-        updated,
+        accepted: true,
+        job_id: jobId,
+        message: 'Sync started in background',
       }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { status: 202, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
   } catch (error) {
