@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Calendar } from '@/components/ui/calendar';
+import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { RefreshCw, Clock, Loader2, CalendarIcon } from 'lucide-react';
+import { RefreshCw, Clock, Loader2, CalendarIcon, Search, X } from 'lucide-react';
 import { FinalStatus, PeriodFilter, SyncPhase, DateRange } from '@/hooks/useShippingLabels';
 import { formatDistanceToNow, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -19,6 +20,8 @@ interface ShippingFiltersProps {
   setPeriodFilter: (period: PeriodFilter) => void;
   customDateRange: DateRange;
   setDateRange: (range: DateRange) => void;
+  searchQuery: string;
+  setSearchQuery: (query: string) => void;
   statusCounts: { all: number; pronta: number; aguardando_nf: number; reimprimir: number };
   isSyncing: boolean;
   syncPhase?: SyncPhase;
@@ -67,6 +70,8 @@ export function ShippingFilters({
   setPeriodFilter,
   customDateRange,
   setDateRange,
+  searchQuery,
+  setSearchQuery,
   statusCounts,
   isSyncing,
   syncPhase = 'idle',
@@ -109,6 +114,26 @@ export function ShippingFilters({
 
   return (
     <div className="space-y-4">
+      {/* Search bar */}
+      <div className="relative max-w-sm">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          type="text"
+          placeholder="Buscar pedido, comprador ou destinatário..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="pl-9 pr-9"
+        />
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery('')}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
       {/* Top bar with period and sync */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-2">

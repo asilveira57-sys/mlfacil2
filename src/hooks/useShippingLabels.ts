@@ -131,6 +131,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const [statusFilter, setStatusFilter] = useState<FinalStatus>('all');
   const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('all'); // Default: sem filtro
   const [customDateRange, setCustomDateRange] = useState<DateRange>({ from: null, to: null });
+  const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSyncing, setIsSyncing] = useState(false);
@@ -145,7 +146,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [statusFilter, periodFilter, customDateRange]);
+  }, [statusFilter, periodFilter, customDateRange, searchQuery]);
 
   // Calculate date range with Brasília timezone
   const getDateRange = useCallback((): { dateFrom: string | null; dateTo: string | null } => {
@@ -196,7 +197,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
   // FAST LOAD: Query local cache with joins - with pagination
   const { data: ordersData, isLoading, refetch } = useQuery({
-    queryKey: ['shipping-orders', sellerId, statusFilter, periodFilter, customDateRange, currentPage],
+    queryKey: ['shipping-orders', sellerId, statusFilter, periodFilter, customDateRange, currentPage, searchQuery],
     queryFn: async () => {
       if (!sellerId) return { orders: [], totalCount: 0 };
 
@@ -358,6 +359,17 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       // Apply status filter - "all" shows everything
       if (statusFilter !== 'all') {
         uniqueOrders = uniqueOrders.filter(o => o.final_status === statusFilter);
+      }
+
+      // Apply search filter
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase().trim();
+        uniqueOrders = uniqueOrders.filter(o => 
+          o.order_id.toLowerCase().includes(query) ||
+          o.buyer_nickname?.toLowerCase().includes(query) ||
+          o.shipment_id?.toLowerCase().includes(query) ||
+          o.receiver_name?.toLowerCase().includes(query)
+        );
       }
 
       const totalCount = uniqueOrders.length;
@@ -824,6 +836,8 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     setPeriodFilter,
     customDateRange,
     setDateRange,
+    searchQuery,
+    setSearchQuery,
     currentPage,
     setCurrentPage,
     totalCount,
