@@ -5,12 +5,15 @@ import { FinalStatus, PeriodFilter, SyncPhase } from '@/hooks/useShippingLabels'
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
+// Filter status types (only the ones shown as filter chips)
+type FilterStatus = 'all' | 'pronta' | 'aguardando_nf' | 'reimprimir';
+
 interface ShippingFiltersProps {
   statusFilter: FinalStatus;
   setStatusFilter: (status: FinalStatus) => void;
   periodFilter: PeriodFilter;
   setPeriodFilter: (period: PeriodFilter) => void;
-  statusCounts: Record<FinalStatus, number>;
+  statusCounts: { all: number; pronta: number; aguardando_nf: number; reimprimir: number };
   isSyncing: boolean;
   syncPhase?: SyncPhase;
   syncProgress?: string;
@@ -18,14 +21,14 @@ interface ShippingFiltersProps {
   lastSyncAt: string | null;
 }
 
-const STATUS_LABELS: Record<FinalStatus, string> = {
+const STATUS_LABELS: Record<FilterStatus, string> = {
   all: 'Todos',
   pronta: 'Para imprimir',
   aguardando_nf: 'Aguardando NF',
   reimprimir: 'Reimprimir',
 };
 
-const STATUS_VARIANTS: Record<FinalStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
+const STATUS_VARIANTS: Record<FilterStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   all: 'outline',
   pronta: 'default',
   aguardando_nf: 'secondary',
@@ -116,7 +119,7 @@ export function ShippingFilters({
 
       {/* Status chips */}
       <div className="flex flex-wrap gap-2">
-        {(Object.keys(STATUS_LABELS) as FinalStatus[]).map((status) => (
+        {(Object.keys(STATUS_LABELS) as FilterStatus[]).map((status) => (
           <Badge
             key={status}
             variant={statusFilter === status ? STATUS_VARIANTS[status] : 'outline'}

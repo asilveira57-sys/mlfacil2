@@ -27,13 +27,9 @@ const STATUS_BADGES: Record<string, { label: string; variant: 'default' | 'secon
   pronta: { label: 'Para Imprimir', variant: 'default', className: 'bg-green-600 hover:bg-green-700' },
   aguardando_nf: { label: 'Aguardando NF', variant: 'secondary' },
   reimprimir: { label: 'Etiqueta Impressa', variant: 'outline', className: 'text-yellow-600 border-yellow-600' },
-};
-
-const INVOICE_STATUS_LABELS: Record<string, string> = {
-  emitida: 'Emitida',
-  pendente: 'Pendente',
-  nao_localizada: 'Não localizada',
-  erro: 'Erro',
+  full: { label: 'FULL', variant: 'outline', className: 'text-muted-foreground border-muted-foreground' },
+  enviado: { label: 'Enviado', variant: 'outline', className: 'text-blue-600 border-blue-600' },
+  outros: { label: 'Outro', variant: 'outline' },
 };
 
 export function ShippingTable({
@@ -75,7 +71,6 @@ export function ShippingTable({
                 checked={allSelected}
                 onCheckedChange={() => {
                   if (allSelected) {
-                    // Clear selection if all selected
                     selectableOrders.forEach(o => onToggleSelection(o.id));
                   } else {
                     onSelectAll();
@@ -87,16 +82,13 @@ export function ShippingTable({
             <TableHead>Data</TableHead>
             <TableHead>Pedido</TableHead>
             <TableHead>Comprador</TableHead>
-            <TableHead>Envio</TableHead>
-            <TableHead>Status Envio</TableHead>
-            <TableHead>Status NF</TableHead>
-            <TableHead>Status Final</TableHead>
+            <TableHead>Status</TableHead>
             <TableHead className="w-12"></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {orders.map((order) => {
-            const statusBadge = STATUS_BADGES[order.final_status || 'sem_etiqueta'];
+            const statusBadge = STATUS_BADGES[order.final_status || 'outros'];
             
             return (
               <TableRow key={order.id}>
@@ -119,19 +111,7 @@ export function ShippingTable({
                 <TableCell>
                   {order.buyer_nickname || '-'}
                 </TableCell>
-                <TableCell className="font-mono text-sm">
-                  {order.shipment_id || '-'}
-                </TableCell>
                 <TableCell>
-                  {order.shipment_status || '-'}
-                </TableCell>
-                <TableCell>
-                  {order.invoice_status 
-                    ? INVOICE_STATUS_LABELS[order.invoice_status] || order.invoice_status
-                    : '-'
-                  }
-                </TableCell>
-              <TableCell>
                   <Badge 
                     variant={statusBadge?.variant || 'outline'}
                     className={statusBadge?.className}

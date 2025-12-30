@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
-export type FinalStatus = 'pronta' | 'aguardando_nf' | 'reimprimir' | 'all';
+export type FinalStatus = 'pronta' | 'aguardando_nf' | 'reimprimir' | 'full' | 'enviado' | 'outros' | 'all';
 export type PeriodFilter = 0 | 7 | 15 | 30 | 90; // 0 = hoje (últimas 24h)
 export type SyncPhase = 'idle' | 'orders' | 'shipments' | 'invoices' | 'done';
 
@@ -73,6 +73,9 @@ const STATUS_PRIORITY: Record<string, number> = {
   pronta: 1,
   aguardando_nf: 2,
   reimprimir: 3,
+  full: 4,
+  enviado: 5,
+  outros: 6,
 };
 
 export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
@@ -167,7 +170,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         (invoicesResult.data || []).map(i => [i.order_id, i])
       );
 
-      // Step 4: Build combined view - filter out completed/shipped and FULL logistics
+      // Step 4: Build combined view - include ALL orders for "Todos" filter
       const combinedOrders: ShippingOrder[] = ordersData
         .map(order => {
           const shipment = order.shipment_id ? shipmentsMap.get(order.shipment_id) : null;
@@ -176,34 +179,37 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
           // Skip orders without shipment
           if (!shipment || !order.shipment_id) return null;
 
-          // Skip orders that are already shipped/delivered
-          if (COMPLETED_SHIPMENT_STATUSES.includes(shipment.shipment_status)) {
-            return null;
-          }
-
-          // Skip FULL logistics (fulfillment) - ML handles these
           const logisticType = shipment.logistic_type;
-          if (logisticType && FULL_LOGISTIC_TYPES.includes(logisticType)) {
-            return null;
-          }
-
-          // Calculate final_status based on substatus
-          let finalStatus: string;
           const labelAvailable = shipment?.label_available ?? false;
           const substatus = shipment?.shipment_substatus;
+          const shipmentStatus = shipment?.shipment_status;
 
-          if (substatus === 'printed') {
-            // Already printed - can reprint
+          // Calculate final_status for ALL orders
+          let finalStatus: string;
+
+          // FULL logistics - ML handles these
+          if (logisticType && FULL_LOGISTIC_TYPES.includes(logisticType)) {
+            finalStatus = 'full';
+          }
+          // Already shipped/delivered
+          else if (shipmentStatus && COMPLETED_SHIPMENT_STATUSES.includes(shipmentStatus)) {
+            finalStatus = 'enviado';
+          }
+          // Already printed - can reprint
+          else if (substatus === 'printed') {
             finalStatus = 'reimprimir';
-          } else if (substatus === 'invoice_pending') {
-            // Waiting for NF emission at ML
+          }
+          // Waiting for NF emission at ML
+          else if (substatus === 'invoice_pending') {
             finalStatus = 'aguardando_nf';
-          } else if (substatus === 'ready_to_print' && labelAvailable) {
-            // Ready to print (NF already emitted)
+          }
+          // Ready to print (NF already emitted)
+          else if (substatus === 'ready_to_print' && labelAvailable) {
             finalStatus = 'pronta';
-          } else {
-            // Skip non-relevant substatuses (in_hub, packed, etc.)
-            return null;
+          }
+          // Other statuses (in_hub, packed, etc.)
+          else {
+            finalStatus = 'outros';
           }
 
           // Selectable only if ready to print (new labels for bulk printing)
@@ -553,9 +559,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     startSyncPipeline();
   }, [startSyncPipeline]);
 
-  // Get counts by status (unfiltered) - exclude completed orders and FULL
-  const allOrders = useQuery({
-    queryKey: ['shipping-orders-counts', sellerId, periodFilter],
+  // Calculate status counts from the current orders (already deduped)
+  // We need a separate query for counts that doesn't apply statusFilter
+  const { data: allOrdersForCounts = [] } = useQuery({
+    queryKey: ['shipping-orders-all', sellerId, periodFilter],
     queryFn: async () => {
       if (!sellerId) return [];
 
@@ -587,29 +594,37 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         
         // Skip if no shipment
         if (!shipment || !o.shipment_id) return;
-        
-        // Skip completed shipments
-        if (COMPLETED_SHIPMENT_STATUSES.includes(shipment.shipment_status)) {
-          return;
-        }
-
-        // Skip FULL logistics
-        if (shipment.logistic_type && FULL_LOGISTIC_TYPES.includes(shipment.logistic_type)) {
-          return;
-        }
 
         const substatus = shipment.shipment_substatus;
         const labelAvailable = shipment.label_available ?? false;
+        const logisticType = shipment.logistic_type;
+        const shipmentStatus = shipment.shipment_status;
 
         let finalStatus: string;
-        if (substatus === 'printed') {
+
+        // FULL logistics
+        if (logisticType && FULL_LOGISTIC_TYPES.includes(logisticType)) {
+          finalStatus = 'full';
+        }
+        // Already shipped/delivered
+        else if (shipmentStatus && COMPLETED_SHIPMENT_STATUSES.includes(shipmentStatus)) {
+          finalStatus = 'enviado';
+        }
+        // Already printed
+        else if (substatus === 'printed') {
           finalStatus = 'reimprimir';
-        } else if (substatus === 'invoice_pending') {
+        }
+        // Invoice pending
+        else if (substatus === 'invoice_pending') {
           finalStatus = 'aguardando_nf';
-        } else if (substatus === 'ready_to_print' && labelAvailable) {
+        }
+        // Ready to print
+        else if (substatus === 'ready_to_print' && labelAvailable) {
           finalStatus = 'pronta';
-        } else {
-          return; // Skip non-relevant
+        }
+        // Other
+        else {
+          finalStatus = 'outros';
         }
 
         const priority = STATUS_PRIORITY[finalStatus] || 99;
@@ -627,10 +642,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   });
 
   const statusCounts = {
-    all: allOrders.data?.length ?? 0,
-    pronta: allOrders.data?.filter(o => o?.finalStatus === 'pronta').length ?? 0,
-    aguardando_nf: allOrders.data?.filter(o => o?.finalStatus === 'aguardando_nf').length ?? 0,
-    reimprimir: allOrders.data?.filter(o => o?.finalStatus === 'reimprimir').length ?? 0,
+    all: allOrdersForCounts.length,
+    pronta: allOrdersForCounts.filter(o => o.finalStatus === 'pronta').length,
+    aguardando_nf: allOrdersForCounts.filter(o => o.finalStatus === 'aguardando_nf').length,
+    reimprimir: allOrdersForCounts.filter(o => o.finalStatus === 'reimprimir').length,
   };
 
   // Auto-sync on first load when sellerId is available
