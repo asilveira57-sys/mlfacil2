@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.ml-generate-labels]
 verify_jwt = false
+
+[functions.ml-generate-labels-status]
+verify_jwt = false

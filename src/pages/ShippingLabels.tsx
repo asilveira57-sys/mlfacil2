@@ -45,6 +45,7 @@ export default function ShippingLabels() {
     statusCounts,
     generateLabels,
     isGenerating,
+    generationProgress,
   } = useShippingLabels({ sellerId: mlAccount?.ml_user_id || null });
 
   useEffect(() => {
@@ -166,6 +167,7 @@ export default function ShippingLabels() {
         onGeneratePDF={() => generateLabels({ format: 'pdf' })}
         onGenerateZPL={() => generateLabels({ format: 'zpl' })}
         isGenerating={isGenerating}
+        generationProgress={generationProgress}
       />
 
       {/* Details Drawer */}

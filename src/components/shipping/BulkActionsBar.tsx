@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button';
 import { FileText, Printer, X, Loader2 } from 'lucide-react';
+import { LabelGenerationProgress, GenerationProgress } from './LabelGenerationProgress';
 
 interface BulkActionsBarProps {
   selectedCount: number;
@@ -7,6 +8,7 @@ interface BulkActionsBarProps {
   onGeneratePDF: () => void;
   onGenerateZPL: () => void;
   isGenerating: boolean;
+  generationProgress: GenerationProgress;
 }
 
 export function BulkActionsBar({
@@ -15,54 +17,68 @@ export function BulkActionsBar({
   onGeneratePDF,
   onGenerateZPL,
   isGenerating,
+  generationProgress,
 }: BulkActionsBarProps) {
-  if (selectedCount === 0) return null;
+  // Show progress bar even when nothing selected (during generation)
+  if (selectedCount === 0 && generationProgress.status === 'idle') return null;
 
   return (
     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
-      <div className="bg-primary text-primary-foreground rounded-lg shadow-lg px-6 py-3 flex items-center gap-4">
-        <span className="font-medium">
-          {selectedCount} selecionado{selectedCount > 1 ? 's' : ''}
-        </span>
-        
-        <div className="h-6 w-px bg-primary-foreground/30" />
-        
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={onGeneratePDF}
-          disabled={isGenerating}
-        >
-          {isGenerating ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <FileText className="h-4 w-4 mr-2" />
-          )}
-          Gerar PDF
-        </Button>
-        
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={onGenerateZPL}
-          disabled={isGenerating}
-        >
-          {isGenerating ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <Printer className="h-4 w-4 mr-2" />
-          )}
-          Gerar ZPL
-        </Button>
-        
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onClear}
-          className="text-primary-foreground hover:bg-primary-foreground/20"
-        >
-          <X className="h-4 w-4" />
-        </Button>
+      <div className="bg-primary text-primary-foreground rounded-lg shadow-lg px-6 py-3 flex flex-col gap-2 min-w-[400px]">
+        {/* Progress indicator */}
+        {generationProgress.status !== 'idle' && (
+          <div className="text-primary-foreground">
+            <LabelGenerationProgress progress={generationProgress} />
+          </div>
+        )}
+
+        {/* Action buttons - only show when items selected and not generating */}
+        {selectedCount > 0 && generationProgress.status === 'idle' && (
+          <div className="flex items-center gap-4">
+            <span className="font-medium">
+              {selectedCount} selecionado{selectedCount > 1 ? 's' : ''}
+            </span>
+            
+            <div className="h-6 w-px bg-primary-foreground/30" />
+            
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={onGeneratePDF}
+              disabled={isGenerating}
+            >
+              {isGenerating ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <FileText className="h-4 w-4 mr-2" />
+              )}
+              Gerar PDF
+            </Button>
+            
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={onGenerateZPL}
+              disabled={isGenerating}
+            >
+              {isGenerating ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Printer className="h-4 w-4 mr-2" />
+              )}
+              Gerar ZPL
+            </Button>
+            
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onClear}
+              className="text-primary-foreground hover:bg-primary-foreground/20"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );
