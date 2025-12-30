@@ -20,9 +20,9 @@ interface ShippingFiltersProps {
 
 const STATUS_LABELS: Record<FinalStatus, string> = {
   all: 'Todos',
-  pronta: 'Prontas para imprimir',
+  pronta: 'Para imprimir',
   aguardando_nf: 'Aguardando NF',
-  sem_etiqueta: 'Sem etiqueta',
+  reimprimir: 'Reimprimir',
   erro: 'Erro',
 };
 
@@ -30,7 +30,7 @@ const STATUS_VARIANTS: Record<FinalStatus, 'default' | 'secondary' | 'destructiv
   all: 'outline',
   pronta: 'default',
   aguardando_nf: 'secondary',
-  sem_etiqueta: 'outline',
+  reimprimir: 'outline',
   erro: 'destructive',
 };
 

@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
-export type FinalStatus = 'pronta' | 'aguardando_nf' | 'sem_etiqueta' | 'erro' | 'all';
+export type FinalStatus = 'pronta' | 'aguardando_nf' | 'reimprimir' | 'erro' | 'all';
 export type PeriodFilter = 0 | 7 | 15 | 30 | 90; // 0 = hoje
 export type SyncPhase = 'idle' | 'orders' | 'shipments' | 'invoices' | 'done';
 
@@ -63,6 +63,9 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 // Statuses that indicate order is already completed/shipped (should be excluded)
 const COMPLETED_ORDER_STATUSES = ['cancelled'];
 const COMPLETED_SHIPMENT_STATUSES = ['delivered', 'shipped', 'not_delivered'];
+
+// Substatuses that are relevant for printing (seller prints the label)
+const RELEVANT_SUBSTATUSES = ['ready_to_print', 'printed'];
 
 export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const { toast } = useToast();
@@ -155,7 +158,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         (invoicesResult.data || []).map(i => [i.order_id, i])
       );
 
-      // Step 4: Build combined view - filter out already shipped/delivered
+      // Step 4: Build combined view - filter out already shipped/delivered and non-relevant substatuses
       const combinedOrders: ShippingOrder[] = ordersData
         .map(order => {
           const shipment = order.shipment_id ? shipmentsMap.get(order.shipment_id) : null;
@@ -166,19 +169,30 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
             return null;
           }
 
-          // Calculate final_status
-          let finalStatus: string = 'sem_etiqueta';
+          // Skip orders with non-relevant substatuses (FULL, pending, etc.)
+          // Only show orders where seller needs to print (ready_to_print, printed)
+          if (shipment && !RELEVANT_SUBSTATUSES.includes(shipment.shipment_substatus || '')) {
+            return null;
+          }
+
+          // Calculate final_status based on NF status
+          let finalStatus: string;
           const labelAvailable = shipment?.label_available ?? false;
           const invoiceStatus = invoice?.invoice_status ?? 'pendente';
+          const substatus = shipment?.shipment_substatus;
 
-          if (labelAvailable && invoiceStatus === 'emitida') {
+          if (substatus === 'printed') {
+            // Already printed - can reprint
+            finalStatus = 'reimprimir';
+          } else if (labelAvailable && invoiceStatus === 'emitida') {
             finalStatus = 'pronta';
           } else if (labelAvailable && invoiceStatus !== 'emitida') {
             finalStatus = 'aguardando_nf';
           } else if (invoiceStatus === 'erro') {
             finalStatus = 'erro';
           } else {
-            finalStatus = 'sem_etiqueta';
+            // Should not reach here due to filter above, but fallback
+            return null;
           }
 
           // Selectable if label available and invoice emitida
@@ -548,13 +562,27 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
             return null;
           }
 
+          // Skip non-relevant substatuses (FULL, pending, etc.)
+          if (shipment && !RELEVANT_SUBSTATUSES.includes(shipment.shipment_substatus || '')) {
+            return null;
+          }
+
           const labelAvailable = shipment?.label_available ?? false;
           const invoiceStatus = invoicesMap.get(o.order_id) ?? 'pendente';
+          const substatus = shipment?.shipment_substatus;
 
-          let finalStatus = 'sem_etiqueta';
-          if (labelAvailable && invoiceStatus === 'emitida') finalStatus = 'pronta';
-          else if (labelAvailable && invoiceStatus !== 'emitida') finalStatus = 'aguardando_nf';
-          else if (invoiceStatus === 'erro') finalStatus = 'erro';
+          let finalStatus: string;
+          if (substatus === 'printed') {
+            finalStatus = 'reimprimir';
+          } else if (labelAvailable && invoiceStatus === 'emitida') {
+            finalStatus = 'pronta';
+          } else if (labelAvailable && invoiceStatus !== 'emitida') {
+            finalStatus = 'aguardando_nf';
+          } else if (invoiceStatus === 'erro') {
+            finalStatus = 'erro';
+          } else {
+            return null;
+          }
 
           return { finalStatus };
         })
@@ -568,7 +596,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     all: allOrders.data?.length ?? 0,
     pronta: allOrders.data?.filter(o => o?.finalStatus === 'pronta').length ?? 0,
     aguardando_nf: allOrders.data?.filter(o => o?.finalStatus === 'aguardando_nf').length ?? 0,
-    sem_etiqueta: allOrders.data?.filter(o => o?.finalStatus === 'sem_etiqueta').length ?? 0,
+    reimprimir: allOrders.data?.filter(o => o?.finalStatus === 'reimprimir').length ?? 0,
     erro: allOrders.data?.filter(o => o?.finalStatus === 'erro').length ?? 0,
   };
 
