@@ -465,6 +465,17 @@ serve(async (req) => {
       );
     }
 
+    // Helper to convert Uint8Array to base64 without stack overflow
+    function uint8ArrayToBase64(bytes: Uint8Array): string {
+      let binary = '';
+      const chunkSize = 32768; // Process in chunks to avoid call stack issues
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        const chunk = bytes.subarray(i, i + chunkSize);
+        binary += String.fromCharCode.apply(null, Array.from(chunk));
+      }
+      return btoa(binary);
+    }
+
     // Merge successful results
     let finalPdfBase64: string | null = null;
     let finalZplContent: string | null = null;
@@ -476,11 +487,9 @@ serve(async (req) => {
       
       if (pdfDataArray.length > 1) {
         const mergedPdf = await mergePDFs(pdfDataArray);
-        const binary = String.fromCharCode(...mergedPdf);
-        finalPdfBase64 = btoa(binary);
+        finalPdfBase64 = uint8ArrayToBase64(mergedPdf);
       } else if (pdfDataArray.length === 1) {
-        const binary = String.fromCharCode(...pdfDataArray[0]);
-        finalPdfBase64 = btoa(binary);
+        finalPdfBase64 = uint8ArrayToBase64(pdfDataArray[0]);
       }
     } else {
       const zplDataArray = successBatches
