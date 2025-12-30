@@ -23,11 +23,10 @@ interface ShippingTableProps {
   isLoading: boolean;
 }
 
-const STATUS_BADGES: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
-  pronta: { label: 'Pronta', variant: 'default' },
+const STATUS_BADGES: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; className?: string }> = {
+  pronta: { label: 'Para Imprimir', variant: 'default', className: 'bg-green-600 hover:bg-green-700' },
   aguardando_nf: { label: 'Aguardando NF', variant: 'secondary' },
-  sem_etiqueta: { label: 'Sem Etiqueta', variant: 'outline' },
-  erro: { label: 'Erro', variant: 'destructive' },
+  reimprimir: { label: 'Etiqueta Impressa', variant: 'outline', className: 'text-yellow-600 border-yellow-600' },
 };
 
 const INVOICE_STATUS_LABELS: Record<string, string> = {
@@ -132,8 +131,11 @@ export function ShippingTable({
                     : '-'
                   }
                 </TableCell>
-                <TableCell>
-                  <Badge variant={statusBadge?.variant || 'outline'}>
+              <TableCell>
+                  <Badge 
+                    variant={statusBadge?.variant || 'outline'}
+                    className={statusBadge?.className}
+                  >
                     {statusBadge?.label || order.final_status || '-'}
                   </Badge>
                 </TableCell>

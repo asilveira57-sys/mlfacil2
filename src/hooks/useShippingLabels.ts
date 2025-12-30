@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
-export type FinalStatus = 'pronta' | 'aguardando_nf' | 'reimprimir' | 'erro' | 'all';
+export type FinalStatus = 'pronta' | 'aguardando_nf' | 'reimprimir' | 'all';
 export type PeriodFilter = 0 | 7 | 15 | 30 | 90; // 0 = hoje
 export type SyncPhase = 'idle' | 'orders' | 'shipments' | 'invoices' | 'done';
 
@@ -65,7 +65,7 @@ const COMPLETED_ORDER_STATUSES = ['cancelled'];
 const COMPLETED_SHIPMENT_STATUSES = ['delivered', 'shipped', 'not_delivered'];
 
 // Substatuses that are relevant for printing (seller prints the label)
-const RELEVANT_SUBSTATUSES = ['ready_to_print', 'printed'];
+const RELEVANT_SUBSTATUSES = ['ready_to_print', 'printed', 'invoice_pending'];
 
 export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const { toast } = useToast();
@@ -170,33 +170,33 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
           }
 
           // Skip orders with non-relevant substatuses (FULL, pending, etc.)
-          // Only show orders where seller needs to print (ready_to_print, printed)
+          // Only show orders where seller needs to print (ready_to_print, printed, invoice_pending)
           if (shipment && !RELEVANT_SUBSTATUSES.includes(shipment.shipment_substatus || '')) {
             return null;
           }
 
-          // Calculate final_status based on NF status
+          // Calculate final_status based on substatus
           let finalStatus: string;
           const labelAvailable = shipment?.label_available ?? false;
-          const invoiceStatus = invoice?.invoice_status ?? 'pendente';
           const substatus = shipment?.shipment_substatus;
 
           if (substatus === 'printed') {
             // Already printed - can reprint
             finalStatus = 'reimprimir';
-          } else if (labelAvailable && invoiceStatus === 'emitida') {
-            finalStatus = 'pronta';
-          } else if (labelAvailable && invoiceStatus !== 'emitida') {
+          } else if (substatus === 'invoice_pending') {
+            // Waiting for NF emission at ML
             finalStatus = 'aguardando_nf';
-          } else if (invoiceStatus === 'erro') {
-            finalStatus = 'erro';
+          } else if (substatus === 'ready_to_print' && labelAvailable) {
+            // Ready to print (NF already emitted)
+            finalStatus = 'pronta';
           } else {
-            // Should not reach here due to filter above, but fallback
+            // Skip non-relevant
             return null;
           }
 
-          // Selectable if label available and invoice emitida
-          const selectable = labelAvailable && invoiceStatus === 'emitida';
+          // Selectable only if ready to print (new labels for bulk printing)
+          // reimprimir and aguardando_nf are not auto-selectable
+          const selectable = finalStatus === 'pronta';
 
           return {
             id: order.id,
@@ -215,7 +215,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
             label_available: labelAvailable,
             receiver_name: shipment?.receiver_name ?? null,
             shipment_sync_at: shipment?.last_sync_at ?? null,
-            invoice_status: invoiceStatus,
+            invoice_status: invoice?.invoice_status ?? 'pendente',
             invoice_number: invoice?.invoice_number ?? null,
             invoice_key: invoice?.invoice_key ?? null,
             issued_at: invoice?.issued_at ?? null,
@@ -226,12 +226,24 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         })
         .filter((o): o is ShippingOrder => o !== null);
 
+      // Group by shipment_id to handle shopping cart orders (multiple orders = one shipment)
+      const groupedByShipment = new Map<string, ShippingOrder>();
+      combinedOrders.forEach(order => {
+        if (!order.shipment_id) return;
+        // Keep only the first order per shipment_id (avoid duplicates from cart)
+        if (!groupedByShipment.has(order.shipment_id)) {
+          groupedByShipment.set(order.shipment_id, order);
+        }
+      });
+
+      const uniqueOrders = Array.from(groupedByShipment.values());
+
       // Apply status filter
       if (statusFilter !== 'all') {
-        return combinedOrders.filter(o => o.final_status === statusFilter);
+        return uniqueOrders.filter(o => o.final_status === statusFilter);
       }
 
-      return combinedOrders;
+      return uniqueOrders;
     },
     enabled: !!sellerId,
     staleTime: 30000, // 30 seconds
@@ -543,7 +555,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
       const [shipmentsResult, invoicesResult] = await Promise.all([
         shipmentIds.length > 0
-          ? supabase.from('meli_shipments_cache').select('shipment_id, label_available, shipment_status').eq('seller_id', sellerId).in('shipment_id', shipmentIds)
+          ? supabase.from('meli_shipments_cache').select('shipment_id, label_available, shipment_status, shipment_substatus').eq('seller_id', sellerId).in('shipment_id', shipmentIds)
           : Promise.resolve({ data: [] }),
         orderIds.length > 0
           ? supabase.from('meli_invoices_cache').select('order_id, invoice_status').eq('seller_id', sellerId).in('order_id', orderIds)
@@ -553,33 +565,40 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       const shipmentsMap = new Map((shipmentsResult.data || []).map(s => [s.shipment_id, s]));
       const invoicesMap = new Map((invoicesResult.data || []).map(i => [i.order_id, i.invoice_status]));
 
+      // Build list with deduplication by shipment_id
+      const seenShipments = new Set<string>();
+      
       return ordersData
         .map(o => {
           const shipment = o.shipment_id ? shipmentsMap.get(o.shipment_id) : null;
           
+          // Skip if no shipment
+          if (!shipment || !o.shipment_id) return null;
+          
+          // Skip duplicates (cart orders)
+          if (seenShipments.has(o.shipment_id)) return null;
+          seenShipments.add(o.shipment_id);
+          
           // Skip completed shipments
-          if (shipment && COMPLETED_SHIPMENT_STATUSES.includes(shipment.shipment_status)) {
+          if (COMPLETED_SHIPMENT_STATUSES.includes(shipment.shipment_status)) {
             return null;
           }
 
           // Skip non-relevant substatuses (FULL, pending, etc.)
-          if (shipment && !RELEVANT_SUBSTATUSES.includes(shipment.shipment_substatus || '')) {
+          const substatus = shipment.shipment_substatus;
+          if (!RELEVANT_SUBSTATUSES.includes(substatus || '')) {
             return null;
           }
 
-          const labelAvailable = shipment?.label_available ?? false;
-          const invoiceStatus = invoicesMap.get(o.order_id) ?? 'pendente';
-          const substatus = shipment?.shipment_substatus;
+          const labelAvailable = shipment.label_available ?? false;
 
           let finalStatus: string;
           if (substatus === 'printed') {
             finalStatus = 'reimprimir';
-          } else if (labelAvailable && invoiceStatus === 'emitida') {
-            finalStatus = 'pronta';
-          } else if (labelAvailable && invoiceStatus !== 'emitida') {
+          } else if (substatus === 'invoice_pending') {
             finalStatus = 'aguardando_nf';
-          } else if (invoiceStatus === 'erro') {
-            finalStatus = 'erro';
+          } else if (substatus === 'ready_to_print' && labelAvailable) {
+            finalStatus = 'pronta';
           } else {
             return null;
           }
@@ -597,7 +616,6 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     pronta: allOrders.data?.filter(o => o?.finalStatus === 'pronta').length ?? 0,
     aguardando_nf: allOrders.data?.filter(o => o?.finalStatus === 'aguardando_nf').length ?? 0,
     reimprimir: allOrders.data?.filter(o => o?.finalStatus === 'reimprimir').length ?? 0,
-    erro: allOrders.data?.filter(o => o?.finalStatus === 'erro').length ?? 0,
   };
 
   return {
