@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { ZipReader, BlobReader, TextWriter } from "https://deno.land/x/zipjs@v2.7.32/index.js";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -10,6 +11,55 @@ const corsHeaders = {
 interface ValidationError {
   shipment_id: string;
   reason: string;
+}
+
+/**
+ * Extracts ZPL content from a ZIP file response.
+ * The ML API returns ZPL labels inside a ZIP containing a .txt file with the actual ZPL code.
+ */
+async function extractZplFromZip(zipBuffer: ArrayBuffer): Promise<string> {
+  const blob = new Blob([zipBuffer]);
+  const zipReader = new ZipReader(new BlobReader(blob));
+  
+  try {
+    const entries = await zipReader.getEntries();
+    console.log(`ZIP contains ${entries.length} files:`, entries.map(e => e.filename));
+    
+    // Find the .txt file containing ZPL
+    const txtEntry = entries.find(entry => 
+      entry.filename.toLowerCase().endsWith('.txt')
+    );
+    
+    if (!txtEntry) {
+      console.error('No .txt file found in ZIP. Available files:', entries.map(e => e.filename));
+      throw new Error('Arquivo ZPL (.txt) não encontrado no ZIP');
+    }
+    
+    console.log(`Extracting ZPL from: ${txtEntry.filename}`);
+    
+    // Extract text content
+    if (!txtEntry.getData) {
+      throw new Error('Não foi possível extrair dados do arquivo ZPL');
+    }
+    
+    const textWriter = new TextWriter();
+    const zplContent = await txtEntry.getData(textWriter);
+    
+    console.log(`Extracted ZPL content length: ${zplContent.length} chars`);
+    
+    return zplContent;
+  } finally {
+    await zipReader.close();
+  }
+}
+
+/**
+ * Checks if a buffer starts with ZIP magic bytes (PK)
+ */
+function isZipFile(buffer: ArrayBuffer): boolean {
+  const bytes = new Uint8Array(buffer);
+  // ZIP files start with "PK" (0x50 0x4B)
+  return bytes.length >= 2 && bytes[0] === 0x50 && bytes[1] === 0x4B;
 }
 
 serve(async (req) => {
@@ -209,7 +259,21 @@ serve(async (req) => {
       }
       pdfBase64 = btoa(binary);
     } else {
-      zplContent = await mlResponse.text();
+      // ZPL format - ML returns a ZIP file containing the .txt with ZPL code
+      const responseBuffer = await mlResponse.arrayBuffer();
+      
+      // Check if response is a ZIP file
+      if (isZipFile(responseBuffer)) {
+        console.log('ZPL response is a ZIP file, extracting...');
+        zplContent = await extractZplFromZip(responseBuffer);
+      } else {
+        // Fallback: treat as plain text if not a ZIP
+        console.log('ZPL response is plain text');
+        const decoder = new TextDecoder('utf-8');
+        zplContent = decoder.decode(responseBuffer);
+      }
+      
+      console.log(`ZPL content extracted, length: ${zplContent.length} chars`);
     }
 
     // Record success in print queue (audit log only - no file stored)
