@@ -1,5 +1,9 @@
+// @ts-nocheck - Deno types not available in build context
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+// Declare EdgeRuntime for Supabase Edge Functions
+declare const EdgeRuntime: { waitUntil: (promise: Promise<unknown>) => void } | undefined;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -10,13 +14,170 @@ const corsHeaders = {
 // Sleep helper for yielding
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Background processing function
+async function processInvoicesInBackground(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  userId: string,
+  sellerId: string,
+  accessToken: string,
+  orderIds: string[],
+  jobId: string
+) {
+  try {
+    console.log(`[Job ${jobId}] Starting background invoices sync: ${orderIds.length} orders`);
+
+    let synced = 0;
+    let errors = 0;
+    const BATCH_SIZE = 20;
+
+    for (let i = 0; i < orderIds.length; i += BATCH_SIZE) {
+      const batch = orderIds.slice(i, i + BATCH_SIZE);
+      console.log(`[Job ${jobId}] Processing batch ${Math.floor(i / BATCH_SIZE) + 1}: ${batch.length} orders`);
+      
+      await Promise.all(batch.map(async (order_id: string) => {
+        try {
+          let invoiceStatus = 'pendente';
+          let invoiceNumber: string | null = null;
+          let invoiceKey: string | null = null;
+          let issuedAt: string | null = null;
+          let errorMessage: string | null = null;
+
+          // Try billing_info endpoint first
+          const billingUrl = `https://api.mercadolibre.com/orders/${order_id}/billing_info`;
+          const billingResponse = await fetch(billingUrl, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+            },
+          });
+
+          if (!billingResponse.ok) {
+            if (billingResponse.status === 404) {
+              // Try fiscal_documents endpoint as fallback
+              const fiscalUrl = `https://api.mercadolibre.com/packs/${order_id}/fiscal_documents`;
+              const fiscalResponse = await fetch(fiscalUrl, {
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                },
+              });
+
+              if (fiscalResponse.ok) {
+                const fiscalDocs = await fiscalResponse.json();
+                if (Array.isArray(fiscalDocs) && fiscalDocs.length > 0) {
+                  const nfe = fiscalDocs[0];
+                  invoiceStatus = 'emitida';
+                  invoiceNumber = nfe.fiscal_document_number || null;
+                  invoiceKey = nfe.access_key || null;
+                  issuedAt = nfe.issue_date || null;
+                }
+              }
+            } else if (billingResponse.status !== 401) {
+              invoiceStatus = 'erro';
+              errorMessage = `HTTP ${billingResponse.status}`;
+            }
+          } else {
+            const billingInfo = await billingResponse.json();
+            
+            // Check for fiscal documents
+            const docNumber = billingInfo.billing_info?.doc_number;
+            const additionalInvoice = billingInfo.additional_info?.find((info: { type: string }) => info.type === 'invoice');
+            
+            if (docNumber || additionalInvoice || billingInfo.status === 'invoiced') {
+              invoiceStatus = 'emitida';
+              invoiceNumber = docNumber || additionalInvoice?.doc_number || null;
+              invoiceKey = billingInfo.billing_info?.access_key || additionalInvoice?.access_key || null;
+              issuedAt = additionalInvoice?.issue_date || billingInfo.date_created || null;
+            } else {
+              // Try fiscal_documents as secondary check
+              try {
+                const fiscalUrl = `https://api.mercadolibre.com/packs/${order_id}/fiscal_documents`;
+                const fiscalResponse = await fetch(fiscalUrl, {
+                  headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                  },
+                });
+
+                if (fiscalResponse.ok) {
+                  const fiscalDocs = await fiscalResponse.json();
+                  if (Array.isArray(fiscalDocs) && fiscalDocs.length > 0) {
+                    const nfe = fiscalDocs[0];
+                    invoiceStatus = 'emitida';
+                    invoiceNumber = nfe.fiscal_document_number || null;
+                    invoiceKey = nfe.access_key || null;
+                    issuedAt = nfe.issue_date || null;
+                  }
+                }
+              } catch {
+                // Ignore secondary endpoint errors
+              }
+            }
+          }
+
+          const invoiceData = {
+            user_id: userId,
+            seller_id: sellerId,
+            order_id: order_id,
+            invoice_status: invoiceStatus,
+            invoice_number: invoiceNumber,
+            invoice_key: invoiceKey,
+            issued_at: issuedAt,
+            error_message: errorMessage,
+            last_sync_at: new Date().toISOString(),
+          };
+
+          const { error: upsertError } = await supabaseAdmin
+            .from('meli_invoices_cache')
+            .upsert(invoiceData, {
+              onConflict: 'seller_id,order_id',
+              ignoreDuplicates: false,
+            });
+
+          if (upsertError) {
+            console.error(`[Job ${jobId}] Upsert error for order ${order_id}:`, upsertError);
+            errors++;
+          } else {
+            synced++;
+          }
+        } catch (err) {
+          console.error(`[Job ${jobId}] Error syncing invoice for order ${order_id}:`, err);
+          errors++;
+        }
+      }));
+
+      // Update progress
+      await supabaseAdmin.from('sync_jobs').update({
+        processed_records: synced + errors,
+      }).eq('id', jobId);
+
+      // Small yield between batches
+      if (i + BATCH_SIZE < orderIds.length) {
+        await sleep(50);
+      }
+    }
+
+    console.log(`[Job ${jobId}] Invoices sync complete: ${synced} synced, ${errors} errors`);
+
+    // Mark job as done
+    await supabaseAdmin.from('sync_jobs').update({
+      status: errors > 0 && synced === 0 ? 'error' : 'done',
+      processed_records: synced,
+      error_message: errors > 0 ? `${errors} invoices failed` : null,
+      completed_at: new Date().toISOString(),
+    }).eq('id', jobId);
+
+  } catch (error) {
+    console.error(`[Job ${jobId}] Background processing error:`, error);
+    await supabaseAdmin.from('sync_jobs').update({
+      status: 'error',
+      error_message: error instanceof Error ? error.message : 'Unknown error',
+      completed_at: new Date().toISOString(),
+    }).eq('id', jobId);
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
-
-  const startTime = Date.now();
-  const TIMEOUT_MS = 25000; // 25 second timeout
 
   try {
     const authHeader = req.headers.get('Authorization');
@@ -58,7 +219,7 @@ serve(async (req) => {
 
     if (!order_ids || order_ids.length === 0) {
       return new Response(
-        JSON.stringify({ success: true, synced: 0, errors: 0, message: 'No orders to sync' }),
+        JSON.stringify({ accepted: true, job_id: null, message: 'No orders to sync' }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -82,148 +243,50 @@ serve(async (req) => {
       );
     }
 
-    let synced = 0;
-    let errors = 0;
+    // Create job record
+    const jobId = crypto.randomUUID();
+    await supabaseAdmin.from('sync_jobs').insert({
+      id: jobId,
+      user_id: user.id,
+      seller_id: seller_id,
+      job_type: 'invoices',
+      status: 'processing',
+      total_records: order_ids.length,
+      processed_records: 0,
+    });
 
-    // Process in batches of 20 with parallel requests
-    const BATCH_SIZE = 20;
-    for (let i = 0; i < order_ids.length; i += BATCH_SIZE) {
-      // Check timeout
-      if (Date.now() - startTime > TIMEOUT_MS) {
-        console.log(`Timeout reached after syncing ${synced} invoices`);
-        break;
-      }
-
-      const batch = order_ids.slice(i, i + BATCH_SIZE);
-      console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}: ${batch.length} orders`);
-      
-      await Promise.all(batch.map(async (order_id: string) => {
-        try {
-          let invoiceStatus = 'pendente';
-          let invoiceNumber: string | null = null;
-          let invoiceKey: string | null = null;
-          let issuedAt: string | null = null;
-          let errorMessage: string | null = null;
-
-          // Try billing_info endpoint first
-          const billingUrl = `https://api.mercadolibre.com/orders/${order_id}/billing_info`;
-          const billingResponse = await fetch(billingUrl, {
-            headers: {
-              'Authorization': `Bearer ${mlAccount.access_token}`,
-            },
-          });
-
-          if (!billingResponse.ok) {
-            if (billingResponse.status === 404) {
-              // Try fiscal_documents endpoint as fallback
-              const fiscalUrl = `https://api.mercadolibre.com/packs/${order_id}/fiscal_documents`;
-              const fiscalResponse = await fetch(fiscalUrl, {
-                headers: {
-                  'Authorization': `Bearer ${mlAccount.access_token}`,
-                },
-              });
-
-              if (fiscalResponse.ok) {
-                const fiscalDocs = await fiscalResponse.json();
-                if (Array.isArray(fiscalDocs) && fiscalDocs.length > 0) {
-                  const nfe = fiscalDocs[0];
-                  invoiceStatus = 'emitida';
-                  invoiceNumber = nfe.fiscal_document_number || null;
-                  invoiceKey = nfe.access_key || null;
-                  issuedAt = nfe.issue_date || null;
-                }
-              }
-            } else if (billingResponse.status !== 401) {
-              invoiceStatus = 'erro';
-              errorMessage = `HTTP ${billingResponse.status}`;
-            }
-          } else {
-            const billingInfo = await billingResponse.json();
-            
-            // Check for fiscal documents
-            const docNumber = billingInfo.billing_info?.doc_number;
-            const additionalInvoice = billingInfo.additional_info?.find((info: any) => info.type === 'invoice');
-            
-            if (docNumber || additionalInvoice || billingInfo.status === 'invoiced') {
-              invoiceStatus = 'emitida';
-              invoiceNumber = docNumber || additionalInvoice?.doc_number || null;
-              invoiceKey = billingInfo.billing_info?.access_key || additionalInvoice?.access_key || null;
-              issuedAt = additionalInvoice?.issue_date || billingInfo.date_created || null;
-            } else {
-              // Try fiscal_documents as secondary check
-              try {
-                const fiscalUrl = `https://api.mercadolibre.com/packs/${order_id}/fiscal_documents`;
-                const fiscalResponse = await fetch(fiscalUrl, {
-                  headers: {
-                    'Authorization': `Bearer ${mlAccount.access_token}`,
-                  },
-                });
-
-                if (fiscalResponse.ok) {
-                  const fiscalDocs = await fiscalResponse.json();
-                  if (Array.isArray(fiscalDocs) && fiscalDocs.length > 0) {
-                    const nfe = fiscalDocs[0];
-                    invoiceStatus = 'emitida';
-                    invoiceNumber = nfe.fiscal_document_number || null;
-                    invoiceKey = nfe.access_key || null;
-                    issuedAt = nfe.issue_date || null;
-                  }
-                }
-              } catch {
-                // Ignore secondary endpoint errors
-              }
-            }
-          }
-
-          const invoiceData = {
-            user_id: user.id,
-            seller_id: seller_id,
-            order_id: order_id,
-            invoice_status: invoiceStatus,
-            invoice_number: invoiceNumber,
-            invoice_key: invoiceKey,
-            issued_at: issuedAt,
-            error_message: errorMessage,
-            last_sync_at: new Date().toISOString(),
-          };
-
-          // Upsert using on conflict
-          const { error: upsertError } = await supabaseAdmin
-            .from('meli_invoices_cache')
-            .upsert(invoiceData, {
-              onConflict: 'seller_id,order_id',
-              ignoreDuplicates: false,
-            });
-
-          if (upsertError) {
-            console.error(`Upsert error for order ${order_id}:`, upsertError);
-            errors++;
-          } else {
-            synced++;
-          }
-        } catch (err) {
-          console.error(`Error syncing invoice for order ${order_id}:`, err);
-          errors++;
-        }
-      }));
-
-      // Small yield between batches
-      if (i + BATCH_SIZE < order_ids.length) {
-        await sleep(50);
-      }
+    // Start background processing
+    if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime?.waitUntil) {
+      EdgeRuntime.waitUntil(
+        processInvoicesInBackground(
+          supabaseAdmin,
+          user.id,
+          seller_id,
+          mlAccount.access_token,
+          order_ids,
+          jobId
+        )
+      );
+    } else {
+      processInvoicesInBackground(
+        supabaseAdmin,
+        user.id,
+        seller_id,
+        mlAccount.access_token,
+        order_ids,
+        jobId
+      ).catch(err => console.error('Background processing failed:', err));
     }
 
-    const elapsed = Date.now() - startTime;
-    console.log(`Sync complete in ${elapsed}ms: ${synced} synced, ${errors} errors`);
-
+    // Return immediately
     return new Response(
       JSON.stringify({ 
-        success: true, 
-        synced,
-        errors,
-        elapsed_ms: elapsed,
+        accepted: true,
+        job_id: jobId,
+        message: 'Invoices sync started in background',
+        total: order_ids.length,
       }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { status: 202, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
   } catch (error) {

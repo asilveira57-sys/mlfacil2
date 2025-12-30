@@ -1,5 +1,9 @@
+// @ts-nocheck - Deno types not available in build context
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+// Declare EdgeRuntime for Supabase Edge Functions
+declare const EdgeRuntime: { waitUntil: (promise: Promise<unknown>) => void } | undefined;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -31,13 +35,137 @@ interface MLShipment {
 // Sleep helper for yielding
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Background processing function
+async function processShipmentsInBackground(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  userId: string,
+  sellerId: string,
+  accessToken: string,
+  shipmentIds: string[],
+  shipmentToOrderMap: Map<string, string>,
+  jobId: string
+) {
+  try {
+    console.log(`[Job ${jobId}] Starting background shipments sync: ${shipmentIds.length} shipments`);
+
+    let synced = 0;
+    let errors = 0;
+    const BATCH_SIZE = 20;
+
+    for (let i = 0; i < shipmentIds.length; i += BATCH_SIZE) {
+      const batch = shipmentIds.slice(i, i + BATCH_SIZE);
+      console.log(`[Job ${jobId}] Processing batch ${Math.floor(i / BATCH_SIZE) + 1}: ${batch.length} shipments`);
+      
+      await Promise.all(batch.map(async (shipment_id: string) => {
+        try {
+          const order_id = shipmentToOrderMap.get(shipment_id);
+          if (!order_id) {
+            console.warn(`[Job ${jobId}] No order_id found for shipment ${shipment_id}`);
+            errors++;
+            return;
+          }
+
+          const mlUrl = `https://api.mercadolibre.com/shipments/${shipment_id}`;
+          const response = await fetch(mlUrl, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+            },
+          });
+
+          if (!response.ok) {
+            console.error(`[Job ${jobId}] Failed to fetch shipment ${shipment_id}: HTTP ${response.status}`);
+            errors++;
+            return;
+          }
+
+          const shipment: MLShipment = await response.json();
+          
+          // Label is available ONLY if:
+          // 1. Substatus is ready_to_print or printed
+          // 2. AND it's NOT a FULL logistic (fulfillment, cross_docking)
+          const isFullLogistic = FULL_LOGISTIC_TYPES.includes(shipment.logistic_type);
+          const isPrintableSubstatus = SELLER_PRINTABLE_SUBSTATUSES.includes(shipment.substatus || '');
+          const labelAvailable = isPrintableSubstatus && !isFullLogistic;
+
+          // Build address string
+          const addr = shipment.receiver_address;
+          const addressParts = [
+            addr?.address_line,
+            addr?.city?.name,
+            addr?.state?.name,
+            addr?.zip_code,
+          ].filter(Boolean);
+          const receiverAddress = addressParts.join(', ') || null;
+
+          const shipmentData = {
+            user_id: userId,
+            seller_id: sellerId,
+            order_id: order_id,
+            shipment_id: shipment_id,
+            shipment_status: shipment.status,
+            shipment_substatus: shipment.substatus,
+            tracking_number: shipment.tracking_number,
+            label_available: labelAvailable,
+            logistic_type: shipment.logistic_type,
+            receiver_name: addr?.receiver_name || null,
+            receiver_address: receiverAddress,
+            last_sync_at: new Date().toISOString(),
+          };
+
+          const { error: upsertError } = await supabaseAdmin
+            .from('meli_shipments_cache')
+            .upsert(shipmentData, {
+              onConflict: 'seller_id,shipment_id',
+              ignoreDuplicates: false,
+            });
+
+          if (upsertError) {
+            console.error(`[Job ${jobId}] Upsert error for shipment ${shipment_id}:`, upsertError);
+            errors++;
+          } else {
+            synced++;
+          }
+        } catch (err) {
+          console.error(`[Job ${jobId}] Error syncing shipment ${shipment_id}:`, err);
+          errors++;
+        }
+      }));
+
+      // Update progress
+      await supabaseAdmin.from('sync_jobs').update({
+        processed_records: synced + errors,
+      }).eq('id', jobId);
+
+      // Small yield between batches
+      if (i + BATCH_SIZE < shipmentIds.length) {
+        await sleep(50);
+      }
+    }
+
+    console.log(`[Job ${jobId}] Shipments sync complete: ${synced} synced, ${errors} errors`);
+
+    // Mark job as done
+    await supabaseAdmin.from('sync_jobs').update({
+      status: errors > 0 && synced === 0 ? 'error' : 'done',
+      processed_records: synced,
+      error_message: errors > 0 ? `${errors} shipments failed` : null,
+      completed_at: new Date().toISOString(),
+    }).eq('id', jobId);
+
+  } catch (error) {
+    console.error(`[Job ${jobId}] Background processing error:`, error);
+    await supabaseAdmin.from('sync_jobs').update({
+      status: 'error',
+      error_message: error instanceof Error ? error.message : 'Unknown error',
+      completed_at: new Date().toISOString(),
+    }).eq('id', jobId);
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
-
-  const startTime = Date.now();
-  const TIMEOUT_MS = 25000; // 25 second timeout
 
   try {
     const authHeader = req.headers.get('Authorization');
@@ -79,7 +207,7 @@ serve(async (req) => {
 
     if (!shipment_ids || shipment_ids.length === 0) {
       return new Response(
-        JSON.stringify({ success: true, synced: 0, errors: 0, message: 'No shipments to sync' }),
+        JSON.stringify({ accepted: true, job_id: null, message: 'No shipments to sync' }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -114,116 +242,52 @@ serve(async (req) => {
       (ordersMapping || []).map(o => [o.shipment_id, o.order_id])
     );
 
-    let synced = 0;
-    let errors = 0;
+    // Create job record
+    const jobId = crypto.randomUUID();
+    await supabaseAdmin.from('sync_jobs').insert({
+      id: jobId,
+      user_id: user.id,
+      seller_id: seller_id,
+      job_type: 'shipments',
+      status: 'processing',
+      total_records: shipment_ids.length,
+      processed_records: 0,
+    });
 
-    // Process in batches of 20 with parallel requests
-    const BATCH_SIZE = 20;
-    for (let i = 0; i < shipment_ids.length; i += BATCH_SIZE) {
-      // Check timeout
-      if (Date.now() - startTime > TIMEOUT_MS) {
-        console.log(`Timeout reached after syncing ${synced} shipments`);
-        break;
-      }
-
-      const batch = shipment_ids.slice(i, i + BATCH_SIZE);
-      console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}: ${batch.length} shipments`);
-      
-      await Promise.all(batch.map(async (shipment_id: string) => {
-        try {
-          const order_id = shipmentToOrderMap.get(shipment_id);
-          if (!order_id) {
-            console.warn(`No order_id found for shipment ${shipment_id}`);
-            errors++;
-            return;
-          }
-
-          const mlUrl = `https://api.mercadolibre.com/shipments/${shipment_id}`;
-          const response = await fetch(mlUrl, {
-            headers: {
-              'Authorization': `Bearer ${mlAccount.access_token}`,
-            },
-          });
-
-          if (!response.ok) {
-            console.error(`Failed to fetch shipment ${shipment_id}: HTTP ${response.status}`);
-            errors++;
-            return;
-          }
-
-          const shipment: MLShipment = await response.json();
-          
-          // Label is available ONLY if:
-          // 1. Substatus is ready_to_print or printed
-          // 2. AND it's NOT a FULL logistic (fulfillment, cross_docking)
-          const isFullLogistic = FULL_LOGISTIC_TYPES.includes(shipment.logistic_type);
-          const isPrintableSubstatus = SELLER_PRINTABLE_SUBSTATUSES.includes(shipment.substatus || '');
-          const labelAvailable = isPrintableSubstatus && !isFullLogistic;
-
-          console.log(`Shipment ${shipment_id}: status=${shipment.status}, substatus=${shipment.substatus}, logistic_type=${shipment.logistic_type}, labelAvailable=${labelAvailable}`);
-
-          // Build address string
-          const addr = shipment.receiver_address;
-          const addressParts = [
-            addr?.address_line,
-            addr?.city?.name,
-            addr?.state?.name,
-            addr?.zip_code,
-          ].filter(Boolean);
-          const receiverAddress = addressParts.join(', ') || null;
-
-          const shipmentData = {
-            user_id: user.id,
-            seller_id: seller_id,
-            order_id: order_id,
-            shipment_id: shipment_id,
-            shipment_status: shipment.status,
-            shipment_substatus: shipment.substatus,
-            tracking_number: shipment.tracking_number,
-            label_available: labelAvailable,
-            logistic_type: shipment.logistic_type,
-            receiver_name: addr?.receiver_name || null,
-            receiver_address: receiverAddress,
-            last_sync_at: new Date().toISOString(),
-          };
-
-          // Upsert using on conflict
-          const { error: upsertError } = await supabaseAdmin
-            .from('meli_shipments_cache')
-            .upsert(shipmentData, {
-              onConflict: 'seller_id,shipment_id',
-              ignoreDuplicates: false,
-            });
-
-          if (upsertError) {
-            console.error(`Upsert error for shipment ${shipment_id}:`, upsertError);
-            errors++;
-          } else {
-            synced++;
-          }
-        } catch (err) {
-          console.error(`Error syncing shipment ${shipment_id}:`, err);
-          errors++;
-        }
-      }));
-
-      // Small yield between batches
-      if (i + BATCH_SIZE < shipment_ids.length) {
-        await sleep(50);
-      }
+    // Start background processing
+    if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime?.waitUntil) {
+      EdgeRuntime.waitUntil(
+        processShipmentsInBackground(
+          supabaseAdmin,
+          user.id,
+          seller_id,
+          mlAccount.access_token,
+          shipment_ids,
+          shipmentToOrderMap,
+          jobId
+        )
+      );
+    } else {
+      processShipmentsInBackground(
+        supabaseAdmin,
+        user.id,
+        seller_id,
+        mlAccount.access_token,
+        shipment_ids,
+        shipmentToOrderMap,
+        jobId
+      ).catch(err => console.error('Background processing failed:', err));
     }
 
-    const elapsed = Date.now() - startTime;
-    console.log(`Sync complete in ${elapsed}ms: ${synced} synced, ${errors} errors`);
-
+    // Return immediately
     return new Response(
       JSON.stringify({ 
-        success: true, 
-        synced,
-        errors,
-        elapsed_ms: elapsed,
+        accepted: true,
+        job_id: jobId,
+        message: 'Shipments sync started in background',
+        total: shipment_ids.length,
       }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { status: 202, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
   } catch (error) {
