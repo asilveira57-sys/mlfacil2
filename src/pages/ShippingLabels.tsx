@@ -54,6 +54,8 @@ export default function ShippingLabels() {
     generateLabels,
     isGenerating,
     generationProgress,
+    searchQuery,
+    setSearchQuery,
   } = useShippingLabels({ sellerId: mlAccount?.ml_user_id || null });
 
   useEffect(() => {
@@ -151,6 +153,8 @@ export default function ShippingLabels() {
           setPeriodFilter={setPeriodFilter}
           customDateRange={customDateRange}
           setDateRange={setDateRange}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
           statusCounts={statusCounts}
           isSyncing={isSyncing}
           syncPhase={syncPhase}
