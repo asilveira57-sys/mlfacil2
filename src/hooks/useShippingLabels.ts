@@ -248,8 +248,8 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
             finalStatus = 'outros';
           }
 
-          // Selectable only if ready to print (new labels for bulk printing)
-          const selectable = finalStatus === 'pronta';
+          // Selectable for bulk printing: pronta (new) or reimprimir (reprint)
+          const selectable = finalStatus === 'pronta' || finalStatus === 'reimprimir';
 
           return {
             id: order.id,
