@@ -7,12 +7,11 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
-// Shipment statuses where labels are NOT available
-const LABEL_UNAVAILABLE_STATUSES = [
-  'cancelled',
-  'returned',
-  'not_verified',
-];
+// Substatus that indicate seller can/should print the label
+const SELLER_PRINTABLE_SUBSTATUSES = ['ready_to_print', 'printed'];
+
+// Logistic types that are FULL (Mercado Livre handles shipping - seller doesn't print)
+const FULL_LOGISTIC_TYPES = ['fulfillment', 'cross_docking'];
 
 interface MLShipment {
   id: number;
@@ -154,8 +153,14 @@ serve(async (req) => {
 
           const shipment: MLShipment = await response.json();
           
-          // Label is available if status is not in the unavailable list
-          const labelAvailable = !LABEL_UNAVAILABLE_STATUSES.includes(shipment.status);
+          // Label is available ONLY if:
+          // 1. Substatus is ready_to_print or printed
+          // 2. AND it's NOT a FULL logistic (fulfillment, cross_docking)
+          const isFullLogistic = FULL_LOGISTIC_TYPES.includes(shipment.logistic_type);
+          const isPrintableSubstatus = SELLER_PRINTABLE_SUBSTATUSES.includes(shipment.substatus || '');
+          const labelAvailable = isPrintableSubstatus && !isFullLogistic;
+
+          console.log(`Shipment ${shipment_id}: status=${shipment.status}, substatus=${shipment.substatus}, logistic_type=${shipment.logistic_type}, labelAvailable=${labelAvailable}`);
 
           // Build address string
           const addr = shipment.receiver_address;
@@ -176,6 +181,7 @@ serve(async (req) => {
             shipment_substatus: shipment.substatus,
             tracking_number: shipment.tracking_number,
             label_available: labelAvailable,
+            logistic_type: shipment.logistic_type,
             receiver_name: addr?.receiver_name || null,
             receiver_address: receiverAddress,
             last_sync_at: new Date().toISOString(),

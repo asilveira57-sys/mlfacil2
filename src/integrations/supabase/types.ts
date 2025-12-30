@@ -304,6 +304,7 @@ export type Database = {
           id: string
           label_available: boolean
           last_sync_at: string
+          logistic_type: string | null
           order_id: string
           receiver_address: string | null
           receiver_name: string | null
@@ -318,6 +319,7 @@ export type Database = {
           id?: string
           label_available?: boolean
           last_sync_at?: string
+          logistic_type?: string | null
           order_id: string
           receiver_address?: string | null
           receiver_name?: string | null
@@ -332,6 +334,7 @@ export type Database = {
           id?: string
           label_available?: boolean
           last_sync_at?: string
+          logistic_type?: string | null
           order_id?: string
           receiver_address?: string | null
           receiver_name?: string | null
