@@ -7,7 +7,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Eye, Package, Bell, TrendingUp, TrendingDown, ExternalLink, RefreshCw } from 'lucide-react';
-import { useSellerTopVisited, useSellerTopSold, useAlerts, useTriggerCollection, useDismissAlert, useMarkAlertRead } from '@/hooks/useTrendsApi';
+import { useSellerTopVisited, useSellerTopSold, useAlerts, useTriggerCollection, useDismissAlert, useMarkAlertRead, SellerItem } from '@/hooks/useTrendsApi';
+import { TrendsItemDetailDrawer } from './TrendsItemDetailDrawer';
 
 interface TrendsSellerTabProps {
   sellerId: string | null;
@@ -16,6 +17,8 @@ interface TrendsSellerTabProps {
 export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
   const [periodDays, setPeriodDays] = useState<number>(7);
   const [activeSubTab, setActiveSubTab] = useState('visited');
+  const [selectedItem, setSelectedItem] = useState<SellerItem | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const { data: topVisited, isLoading: visitedLoading, refetch: refetchVisited } = useSellerTopVisited(sellerId, periodDays);
   const { data: topSold, isLoading: soldLoading, refetch: refetchSold } = useSellerTopSold(sellerId, periodDays);
@@ -32,6 +35,11 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
   const handleRefresh = () => {
     refetchVisited();
     refetchSold();
+  };
+
+  const handleItemClick = (item: SellerItem) => {
+    setSelectedItem(item);
+    setDrawerOpen(true);
   };
 
   if (!sellerId) {
@@ -125,7 +133,8 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
                     {topVisited.items.map((item, idx) => (
                       <div 
                         key={item.item_id} 
-                        className="flex items-center gap-4 p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors"
+                        className="flex items-center gap-4 p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors cursor-pointer"
+                        onClick={() => handleItemClick(item)}
                       >
                         <span className="text-2xl font-bold text-muted-foreground w-8 text-center">
                           {idx + 1}
@@ -150,6 +159,7 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-muted-foreground hover:text-primary"
+                            onClick={(e) => e.stopPropagation()}
                           >
                             <ExternalLink className="h-4 w-4" />
                           </a>
@@ -189,7 +199,8 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
                     {topSold.items.map((item, idx) => (
                       <div 
                         key={item.item_id} 
-                        className="flex items-center gap-4 p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors"
+                        className="flex items-center gap-4 p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors cursor-pointer"
+                        onClick={() => handleItemClick(item)}
                       >
                         <span className="text-2xl font-bold text-muted-foreground w-8 text-center">
                           {idx + 1}
@@ -221,6 +232,7 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-muted-foreground hover:text-primary"
+                            onClick={(e) => e.stopPropagation()}
                           >
                             <ExternalLink className="h-4 w-4" />
                           </a>
@@ -325,6 +337,14 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Item Detail Drawer */}
+      <TrendsItemDetailDrawer
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
+        item={selectedItem}
+        sellerId={sellerId || ''}
+      />
     </div>
   );
 }
