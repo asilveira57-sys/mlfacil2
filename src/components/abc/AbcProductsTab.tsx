@@ -3,6 +3,7 @@ import { AbcFilters, AbcConfig } from "@/pages/AbcAnalysis";
 import { AbcTable, AbcItem } from "./AbcTable";
 import { AbcSummaryCards, createProductsSummary } from "./AbcSummaryCards";
 import { AbcParetoChart } from "./AbcParetoChart";
+import { AbcProductDetailDrawer } from "./AbcProductDetailDrawer";
 import { useAbcAnalysis, AbcIndicator } from "@/hooks/useAbcAnalysis";
 import { Button } from "@/components/ui/button";
 import { Download, Package, TrendingUp, DollarSign } from "lucide-react";
@@ -34,6 +35,8 @@ const TABLE_COLUMNS = [
 
 export function AbcProductsTab({ sellerId, filters, config }: AbcProductsTabProps) {
   const [indicator, setIndicator] = useState<AbcIndicator>("revenue");
+  const [selectedItem, setSelectedItem] = useState<AbcItem | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const { items, loading, error, totals, refetch } = useAbcAnalysis({
     sellerId,
@@ -73,13 +76,17 @@ export function AbcProductsTab({ sellerId, filters, config }: AbcProductsTabProp
     URL.revokeObjectURL(url);
   };
 
+  const handleRowClick = (item: AbcItem) => {
+    setSelectedItem(item);
+    setDrawerOpen(true);
+  };
+
   const summaryCards = createProductsSummary({
     totalProducts: totals.totalItems,
     totalUnits: items.reduce((sum, i) => sum + i.units, 0),
     totalRevenue: totals.totalValue,
     classACount: totals.classACount,
   });
-
 
   return (
     <div className="space-y-6">
@@ -136,7 +143,15 @@ export function AbcProductsTab({ sellerId, filters, config }: AbcProductsTabProp
         columns={TABLE_COLUMNS}
         loading={loading}
         emptyMessage="Nenhum produto encontrado no período selecionado"
+        onRowClick={handleRowClick}
       />
+
+      {/* Hint for clicking */}
+      {!loading && items.length > 0 && (
+        <p className="text-sm text-muted-foreground text-center">
+          Clique em um produto para ver pedidos e clientes
+        </p>
+      )}
 
       {/* Class distribution summary */}
       {!loading && items.length > 0 && (
@@ -152,6 +167,18 @@ export function AbcProductsTab({ sellerId, filters, config }: AbcProductsTabProp
           </span>
         </div>
       )}
+
+      {/* Product Detail Drawer */}
+      <AbcProductDetailDrawer
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
+        productKey={selectedItem?.id || null}
+        productName={selectedItem?.name || ""}
+        classification={selectedItem?.classification || "C"}
+        sellerId={sellerId}
+        dateFrom={filters.dateFrom}
+        dateTo={filters.dateTo}
+      />
     </div>
   );
 }
