@@ -79,20 +79,26 @@ export default function ZPLConverter() {
     return detectLabelCount(zplCode, selectedLabelType);
   }, [zplCode, selectedLabelType]);
 
-  // Map quality to DPMM
-  const getQualityDpmm = (q: 'normal' | 'high' | 'max') => {
-    const dpmmMap = { normal: 8, high: 12, max: 24 };
-    return dpmmMap[q];
+  // Map quality to scale factor (supersampling)
+  // Using fixed DPMM=8 and scaling dimensions for consistent physical size
+  const getQualityScale = (q: 'normal' | 'high' | 'max') => {
+    const scaleMap = { normal: 1, high: 2, max: 3 };
+    return scaleMap[q];
   };
 
   const convertSingleLabel = async (
     labelCode: string, 
     widthInches: number, 
     heightInches: number, 
-    dpmm: number,
+    scale: number = 1,
     format: 'png' | 'pdf' = 'png'
   ): Promise<Blob> => {
-    const labelaryUrl = `https://api.labelary.com/v1/printers/${dpmm}dpmm/labels/${widthInches.toFixed(2)}x${heightInches.toFixed(2)}/0/`;
+    // Fixed DPMM=8, use scaled dimensions for higher quality
+    const dpmm = 8;
+    const scaledWidthInches = widthInches * scale;
+    const scaledHeightInches = heightInches * scale;
+    
+    const labelaryUrl = `https://api.labelary.com/v1/printers/${dpmm}dpmm/labels/${scaledWidthInches.toFixed(2)}x${scaledHeightInches.toFixed(2)}/0/`;
 
     const maxRetries = 3;
 
@@ -127,12 +133,13 @@ export default function ZPLConverter() {
     labels: string[], 
     widthInches: number, 
     heightInches: number, 
-    dpmm: number,
+    scale: number = 1,
     format: 'png' | 'pdf' = 'png'
   ): Promise<Blob[]> => {
     const blobs: Blob[] = new Array(labels.length);
     let currentDelay = 200;
-    const concurrentRequests = format === 'pdf' ? 2 : 3; // PDF requests are heavier
+    // Higher scales = larger images = fewer concurrent requests
+    const concurrentRequests = scale >= 3 ? 2 : 3;
     
     for (let i = 0; i < labels.length; i += concurrentRequests) {
       const batch = labels.slice(i, Math.min(i + concurrentRequests, labels.length));
@@ -140,7 +147,7 @@ export default function ZPLConverter() {
       try {
         const batchPromises = batch.map(async (label, batchIndex) => {
           const labelIndex = i + batchIndex;
-          const blob = await convertSingleLabel(label, widthInches, heightInches, dpmm, format);
+          const blob = await convertSingleLabel(label, widthInches, heightInches, scale, format);
           blobs[labelIndex] = blob;
           
           const progress = Math.round(((labelIndex + 1) / labels.length) * 100);
@@ -197,7 +204,7 @@ export default function ZPLConverter() {
     try {
       const widthInches = parseFloat(width) / 25.4;
       const heightInches = parseFloat(height) / 25.4;
-      const dpmm = getQualityDpmm(quality);
+      const scale = getQualityScale(quality);
       const useVectorPdf = outputFormat === 'pdf_vector';
 
       const labels = splitZPLByType(zplCode.trim(), selectedLabelType);
@@ -208,15 +215,16 @@ export default function ZPLConverter() {
         return;
       }
 
-      const qualityLabel = quality === 'max' ? 'máxima' : quality === 'high' ? 'alta' : 'normal';
+      const qualityLabel = quality === 'max' ? 'máxima (3x)' : quality === 'high' ? 'alta (2x)' : 'normal';
       toast.info(`Processando ${labels.length} etiqueta(s) em qualidade ${qualityLabel}${useVectorPdf ? ' (PDF vetorial)' : ''}...`);
 
       if (useVectorPdf) {
-        // Vector PDF mode - get PDFs directly from Labelary and merge
-        const convertedBlobs = await processLabelsInBatches(labels, widthInches, heightInches, dpmm, 'pdf');
+        // Vector PDF mode - get PDFs directly from Labelary
+        // For vector, scale=1 since PDF is already vector quality
+        const convertedBlobs = await processLabelsInBatches(labels, widthInches, heightInches, 1, 'pdf');
         
-        // For preview, get first label as PNG
-        const previewBlob = await convertSingleLabel(labels[0], widthInches, heightInches, dpmm, 'png');
+        // For preview, get first label as PNG at scale 1
+        const previewBlob = await convertSingleLabel(labels[0], widthInches, heightInches, 1, 'png');
         setPreviewImage(URL.createObjectURL(previewBlob));
 
         // Merge PDFs using pdf-lib would be ideal, but for simplicity, if single label, download directly
@@ -228,9 +236,8 @@ export default function ZPLConverter() {
           a.click();
           URL.revokeObjectURL(url);
         } else {
-          // For multiple labels in vector mode, we need to merge - fallback to jsPDF with high-res PNGs
-          // since we don't have pdf-lib. Let's convert to PNG at max quality for the merge
-          const pngBlobs = await processLabelsInBatches(labels, widthInches, heightInches, 24, 'png');
+          // For multiple labels in vector mode, fallback to jsPDF with max quality PNGs
+          const pngBlobs = await processLabelsInBatches(labels, widthInches, heightInches, 3, 'png');
           
           const pdf = new jsPDF({
             orientation: widthInches > heightInches ? "landscape" : "portrait",
@@ -246,6 +253,7 @@ export default function ZPLConverter() {
               reader.onload = () => {
                 try {
                   if (i > 0) pdf.addPage();
+                  // Insert scaled image at original dimensions (supersampling)
                   pdf.addImage(reader.result as string, "PNG", 0, 0, parseFloat(width), parseFloat(height));
                   resolve();
                 } catch (error) {
@@ -260,8 +268,8 @@ export default function ZPLConverter() {
           pdf.save("etiquetas_zpl.pdf");
         }
       } else {
-        // Standard PNG to PDF mode
-        const convertedBlobs = await processLabelsInBatches(labels, widthInches, heightInches, dpmm, 'png');
+        // Standard PNG to PDF mode with supersampling
+        const convertedBlobs = await processLabelsInBatches(labels, widthInches, heightInches, scale, 'png');
 
         const pdf = new jsPDF({
           orientation: widthInches > heightInches ? "landscape" : "portrait",
