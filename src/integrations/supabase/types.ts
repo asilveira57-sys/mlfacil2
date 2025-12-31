@@ -638,6 +638,45 @@ export type Database = {
         }
         Relationships: []
       }
+      zpl_conversion_history: {
+        Row: {
+          created_at: string | null
+          duration_seconds: number
+          height_mm: number
+          id: string
+          label_count: number
+          label_subtype: string | null
+          label_type: string
+          time_per_label: number | null
+          user_id: string
+          width_mm: number
+        }
+        Insert: {
+          created_at?: string | null
+          duration_seconds: number
+          height_mm: number
+          id?: string
+          label_count: number
+          label_subtype?: string | null
+          label_type: string
+          time_per_label?: number | null
+          user_id: string
+          width_mm: number
+        }
+        Update: {
+          created_at?: string | null
+          duration_seconds?: number
+          height_mm?: number
+          id?: string
+          label_count?: number
+          label_subtype?: string | null
+          label_type?: string
+          time_per_label?: number | null
+          user_id?: string
+          width_mm?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       meli_orders_ready_view: {

@@ -15,6 +15,7 @@ import { useDropzone } from "react-dropzone";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { LABEL_TYPES, FULL_PRODUTO_SUBTYPES, splitZPLByType, detectLabelCount } from "@/hooks/useZPLSettings";
 import { ZPLTimer } from "@/components/ZPLTimer";
+import { useZPLTimeEstimate } from "@/hooks/useZPLTimeEstimate";
 import type { User } from "@supabase/supabase-js";
 
 export default function ZPLConverter() {
@@ -35,6 +36,8 @@ export default function ZPLConverter() {
     return localStorage.getItem('zpl_full_produto_subtype') || "";
   });
   const [estimatedSeconds, setEstimatedSeconds] = useState(0);
+  
+  const { getEstimate, saveConversionTime } = useZPLTimeEstimate();
 
   // Verificar autenticação
   useEffect(() => {
@@ -158,10 +161,11 @@ export default function ZPLConverter() {
     setIsConverting(true);
     setConversionProgress(0);
 
-    const isShippingLabel = ['shopee', 'magalu', 'mercadolivre', 'full_volume'].includes(selectedLabelType);
-    const timePerLabel = isShippingLabel ? 0.5 : 1.5;
-    const estimatedTime = Math.ceil(labelCount * timePerLabel);
+    // Buscar estimativa baseada no histórico
+    const estimatedTime = await getEstimate(selectedLabelType, labelCount, selectedFullProdutoSubType || null);
     setEstimatedSeconds(estimatedTime);
+
+    const startTime = Date.now();
 
     try {
       const dpiValue = parseInt(dpi);
@@ -212,6 +216,21 @@ export default function ZPLConverter() {
 
       pdf.save("etiquetas_zpl.pdf");
       toast.success(`${convertedBlobs.length} etiqueta(s) convertida(s) com sucesso!`);
+      
+      // Salvar tempo real de conversão no histórico
+      const endTime = Date.now();
+      const durationSeconds = (endTime - startTime) / 1000;
+      
+      if (user?.id) {
+        await saveConversionTime(user.id, {
+          label_type: selectedLabelType,
+          label_subtype: selectedFullProdutoSubType || null,
+          label_count: labels.length,
+          width_mm: parseFloat(width),
+          height_mm: parseFloat(height),
+          duration_seconds: durationSeconds,
+        });
+      }
       
     } catch (error) {
       console.error("Erro na conversão:", error);
