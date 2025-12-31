@@ -29,3 +29,12 @@ verify_jwt = false
 
 [functions.ml-enrich-neighborhoods]
 verify_jwt = false
+
+[functions.trends-api]
+verify_jwt = false
+
+[functions.trends-collect-seller]
+verify_jwt = false
+
+[functions.trends-collect-public]
+verify_jwt = false
