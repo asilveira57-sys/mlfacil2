@@ -8,6 +8,8 @@ import { startOfDay, endOfDay, subDays, subHours } from 'date-fns';
 export type FinalStatus = 'pronta' | 'aguardando_nf' | 'reimprimir' | 'full' | 'enviado' | 'outros' | 'all';
 export type PeriodFilter = 'all' | 'today' | '7d' | '15d' | '30d' | 'custom';
 export type SyncPhase = 'idle' | 'orders' | 'shipments' | 'invoices' | 'done';
+export type SortField = 'created_at_meli' | 'buyer_nickname' | 'final_status';
+export type SortDirection = 'asc' | 'desc';
 
 const BRASILIA_TZ = 'America/Sao_Paulo';
 
@@ -132,6 +134,8 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('all'); // Default: sem filtro
   const [customDateRange, setCustomDateRange] = useState<DateRange>({ from: null, to: null });
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortField, setSortField] = useState<SortField>('created_at_meli');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSyncing, setIsSyncing] = useState(false);
@@ -146,7 +150,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [statusFilter, periodFilter, customDateRange, searchQuery]);
+  }, [statusFilter, periodFilter, customDateRange, searchQuery, sortField, sortDirection]);
 
   // Calculate date range with Brasília timezone
   const getDateRange = useCallback((): { dateFrom: string | null; dateTo: string | null } => {
@@ -197,7 +201,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
   // FAST LOAD: Query local cache with joins - with pagination
   const { data: ordersData, isLoading, refetch } = useQuery({
-    queryKey: ['shipping-orders', sellerId, statusFilter, periodFilter, customDateRange, currentPage, searchQuery],
+    queryKey: ['shipping-orders', sellerId, statusFilter, periodFilter, customDateRange, currentPage, searchQuery, sortField, sortDirection],
     queryFn: async () => {
       if (!sellerId) return { orders: [], totalCount: 0 };
 
@@ -371,6 +375,27 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
           o.receiver_name?.toLowerCase().includes(query)
         );
       }
+
+      // Apply sorting
+      uniqueOrders.sort((a, b) => {
+        let comparison = 0;
+        
+        if (sortField === 'created_at_meli') {
+          const dateA = a.created_at_meli ? new Date(a.created_at_meli).getTime() : 0;
+          const dateB = b.created_at_meli ? new Date(b.created_at_meli).getTime() : 0;
+          comparison = dateA - dateB;
+        } else if (sortField === 'buyer_nickname') {
+          const nameA = (a.buyer_nickname || '').toLowerCase();
+          const nameB = (b.buyer_nickname || '').toLowerCase();
+          comparison = nameA.localeCompare(nameB);
+        } else if (sortField === 'final_status') {
+          const priorityA = STATUS_PRIORITY[a.final_status || ''] || 99;
+          const priorityB = STATUS_PRIORITY[b.final_status || ''] || 99;
+          comparison = priorityA - priorityB;
+        }
+        
+        return sortDirection === 'asc' ? comparison : -comparison;
+      });
 
       const totalCount = uniqueOrders.length;
 
@@ -826,6 +851,16 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     }
   }, []);
 
+  // Toggle sort helper
+  const toggleSort = useCallback((field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('desc');
+    }
+  }, [sortField]);
+
   return {
     orders,
     isLoading,
@@ -838,6 +873,9 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     setDateRange,
     searchQuery,
     setSearchQuery,
+    sortField,
+    sortDirection,
+    toggleSort,
     currentPage,
     setCurrentPage,
     totalCount,

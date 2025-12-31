@@ -56,6 +56,9 @@ export default function ShippingLabels() {
     generationProgress,
     searchQuery,
     setSearchQuery,
+    sortField,
+    sortDirection,
+    toggleSort,
   } = useShippingLabels({ sellerId: mlAccount?.ml_user_id || null });
 
   useEffect(() => {
@@ -172,6 +175,9 @@ export default function ShippingLabels() {
           onSelectAll={selectAll}
           onViewDetails={handleViewDetails}
           isLoading={isLoading}
+          sortField={sortField}
+          sortDirection={sortDirection}
+          onToggleSort={toggleSort}
         />
 
         {/* Pagination */}
