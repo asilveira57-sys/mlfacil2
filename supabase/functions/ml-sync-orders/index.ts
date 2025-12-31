@@ -23,6 +23,12 @@ interface MLOrderItem {
   currency_id?: string;
 }
 
+interface MLItemDetails {
+  id: string;
+  permalink?: string;
+  catalog_product_id?: string;
+}
+
 interface MLOrder {
   id: number;
   status: string;
@@ -161,8 +167,69 @@ async function processOrdersInBackground(
       currency_id: string | null;
       product_key: string;
       created_at_meli: string;
+      permalink: string | null;
+      catalog_product_id: string | null;
     }
     const allOrderItems: OrderItemData[] = [];
+
+    // Cache for item details (to avoid fetching same item multiple times)
+    const itemDetailsCache = new Map<string, MLItemDetails>();
+
+    // Collect unique item IDs to fetch details
+    const uniqueItemIds = new Set<string>();
+    for (const order of allOrders) {
+      if (order.order_items && order.order_items.length > 0) {
+        for (const item of order.order_items) {
+          if (item.item?.id) {
+            uniqueItemIds.add(item.item.id);
+          }
+        }
+      }
+    }
+
+    console.log(`[Job ${jobId}] Fetching details for ${uniqueItemIds.size} unique items`);
+
+    // Fetch item details in batches (ML multiget supports up to 20 items)
+    const itemIdsList = Array.from(uniqueItemIds);
+    const ITEMS_FETCH_BATCH = 20;
+    
+    for (let i = 0; i < itemIdsList.length; i += ITEMS_FETCH_BATCH) {
+      const batchIds = itemIdsList.slice(i, i + ITEMS_FETCH_BATCH);
+      const idsParam = batchIds.join(',');
+      
+      try {
+        const itemsResponse = await fetch(
+          `https://api.mercadolibre.com/items?ids=${idsParam}&attributes=id,permalink,catalog_product_id`,
+          {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+            },
+          }
+        );
+
+        if (itemsResponse.ok) {
+          const itemsData = await itemsResponse.json();
+          for (const result of itemsData) {
+            if (result.code === 200 && result.body) {
+              itemDetailsCache.set(result.body.id, {
+                id: result.body.id,
+                permalink: result.body.permalink || null,
+                catalog_product_id: result.body.catalog_product_id || null,
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.error(`[Job ${jobId}] Error fetching item details batch:`, err);
+      }
+
+      // Small delay between batches
+      if (i + ITEMS_FETCH_BATCH < itemIdsList.length) {
+        await sleep(100);
+      }
+    }
+
+    console.log(`[Job ${jobId}] Item details cached: ${itemDetailsCache.size}`);
 
     // Track items count per order
     const orderItemsCount: Record<string, number> = {};
@@ -187,6 +254,9 @@ async function processOrdersInBackground(
             const productKey = generateProductKey(itemId, variationId || null, sku);
             const quantity = item.quantity || 1;
 
+            // Get cached item details
+            const itemDetails = itemDetailsCache.get(itemId);
+
             allOrderItems.push({
               user_id: userId,
               seller_id: sellerId,
@@ -202,6 +272,8 @@ async function processOrdersInBackground(
               currency_id: item.currency_id || 'BRL',
               product_key: productKey,
               created_at_meli: order.date_created,
+              permalink: itemDetails?.permalink || null,
+              catalog_product_id: itemDetails?.catalog_product_id || null,
             });
 
             itemCount += quantity;
@@ -287,6 +359,8 @@ async function processOrdersInBackground(
           product_key: item.product_key,
           created_at_meli: item.created_at_meli,
           last_sync_at: new Date().toISOString(),
+          permalink: item.permalink,
+          catalog_product_id: item.catalog_product_id,
         }));
 
         const { error: itemsUpsertError } = await supabaseAdmin

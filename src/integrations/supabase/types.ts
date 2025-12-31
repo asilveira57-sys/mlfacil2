@@ -271,12 +271,14 @@ export type Database = {
       }
       meli_order_items_cache: {
         Row: {
+          catalog_product_id: string | null
           created_at_meli: string | null
           currency_id: string | null
           id: string
           item_id: string
           last_sync_at: string | null
           order_id: string
+          permalink: string | null
           product_key: string
           quantity: number
           seller_id: string
@@ -289,12 +291,14 @@ export type Database = {
           variation_id: string | null
         }
         Insert: {
+          catalog_product_id?: string | null
           created_at_meli?: string | null
           currency_id?: string | null
           id?: string
           item_id: string
           last_sync_at?: string | null
           order_id: string
+          permalink?: string | null
           product_key?: string
           quantity?: number
           seller_id: string
@@ -307,12 +311,14 @@ export type Database = {
           variation_id?: string | null
         }
         Update: {
+          catalog_product_id?: string | null
           created_at_meli?: string | null
           currency_id?: string | null
           id?: string
           item_id?: string
           last_sync_at?: string | null
           order_id?: string
+          permalink?: string | null
           product_key?: string
           quantity?: number
           seller_id?: string
