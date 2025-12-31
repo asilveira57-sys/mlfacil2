@@ -3,6 +3,7 @@ import { format } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { SalesMetricsCard } from "./SalesMetricsCard";
 import { SalesChart } from "./SalesChart";
+import { AnnualSalesChart } from "./AnnualSalesChart";
 import { TopProductsTable } from "./TopProductsTable";
 import { DashboardFilters } from "./DashboardFilters";
 import { OnboardingSync } from "./OnboardingSync";
@@ -21,6 +22,13 @@ import { useToast } from "@/hooks/use-toast";
 
 interface DailySale {
   date: string;
+  revenue: number;
+  orders: number;
+}
+
+interface MonthlySale {
+  month: string;
+  monthLabel: string;
   revenue: number;
   orders: number;
 }
@@ -77,6 +85,8 @@ interface DebugInfo {
 interface SalesData {
   metrics: SalesMetrics;
   dailySales: DailySale[];
+  monthlySales: MonthlySale[];
+  monthlyCancelled: MonthlySale[];
   topProducts: Product[];
   availableMonths: AvailableMonth[];
   seller: {
@@ -483,7 +493,7 @@ export function SalesDashboard() {
         />
       </div>
 
-      {/* Charts */}
+      {/* Charts - 30 days */}
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <SalesChart 
@@ -497,6 +507,22 @@ export function SalesDashboard() {
             isLoading={isLoading} 
           />
         </div>
+      </div>
+
+      {/* Annual Charts */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <AnnualSalesChart
+          data={salesData?.monthlySales || []}
+          isLoading={isLoading}
+          title="Vendas Anuais (12 meses)"
+          colorScheme="primary"
+        />
+        <AnnualSalesChart
+          data={salesData?.monthlyCancelled || []}
+          isLoading={isLoading}
+          title="Cancelamentos/Devoluções Anuais"
+          colorScheme="destructive"
+        />
       </div>
     </div>
   );
