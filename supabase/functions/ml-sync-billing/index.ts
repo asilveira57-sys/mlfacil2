@@ -121,34 +121,27 @@ async function processBillingInBackground(
   console.log(`[ml-sync-billing] Background processing started for job ${jobId}`);
 
   try {
-    // Get billing periods
-    const periodsUrl = `https://api.mercadolibre.com/billing/integration/monthly/periods?caller.id=${sellerId}&group=ML&limit=12`;
-    const periodsResponse = await fetch(periodsUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-
-    if (!periodsResponse.ok) {
-      const errorText = await periodsResponse.text();
-      console.error('[ml-sync-billing] Failed to fetch periods:', errorText);
-      await updateJobStatus(supabase, jobId, 'error', 'Failed to fetch billing periods');
-      return;
+    // Generate billing periods for the last N months
+    const periods: { period_id: string; year: number; month: number }[] = [];
+    const now = new Date();
+    for (let i = 0; i < months; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const year = d.getFullYear();
+      const month = d.getMonth() + 1;
+      periods.push({
+        period_id: `${year}-${String(month).padStart(2, '0')}`,
+        year,
+        month,
+      });
     }
 
-    const periodsData = await periodsResponse.json();
-    const periods = (periodsData.results || []).slice(0, months);
-
-    console.log(`[ml-sync-billing] Found ${periods.length} billing periods`);
-
-    if (periods.length === 0) {
-      await updateJobStatus(supabase, jobId, 'done');
-      return;
-    }
+    console.log(`[ml-sync-billing] Processing ${periods.length} billing periods`);
 
     const allFinancials: any[] = [];
     let processedPeriods = 0;
 
     for (const period of periods) {
-      const periodKey = period.period_id || period.key;
+      const periodKey = period.period_id;
       console.log(`[ml-sync-billing] Processing period: ${periodKey}`);
 
       try {
@@ -209,30 +202,91 @@ async function fetchPeriodDetails(
   const limit = 100;
   let hasMore = true;
 
+  // Parse period key to get year and month
+  const [year, month] = periodKey.split('-').map(Number);
+  
+  // Use the orders/search API to get orders from this period and then fetch their billing info
+  const startDate = new Date(year, month - 1, 1);
+  const endDate = new Date(year, month, 0, 23, 59, 59);
+  
+  const dateFrom = startDate.toISOString();
+  const dateTo = endDate.toISOString();
+
   while (hasMore) {
-    const detailsUrl = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/group/ML/details?caller.id=${sellerId}&offset=${offset}&limit=${limit}`;
+    // Fetch orders for this period
+    const ordersUrl = `https://api.mercadolibre.com/orders/search?seller=${sellerId}&order.date_created.from=${dateFrom}&order.date_created.to=${dateTo}&offset=${offset}&limit=${limit}&sort=date_desc`;
     
-    const response = await fetch(detailsUrl, {
+    const response = await fetch(ordersUrl, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`[ml-sync-billing] Failed to fetch details for ${periodKey}:`, errorText);
+      console.error(`[ml-sync-billing] Failed to fetch orders for ${periodKey}:`, errorText);
       break;
     }
 
     const data = await response.json();
     const results = data.results || [];
 
-    for (const item of results) {
-      // Extract order_id from sales_info or detail
-      const orderId = extractOrderId(item);
+    for (const order of results) {
+      const orderId = order.id?.toString();
       if (!orderId) continue;
 
-      // Extract financial values
-      const financial = extractFinancialValues(item, orderId, periodKey);
+      // Create financial record from order data
+      const financial = {
+        order_id: orderId,
+        billing_period_key: periodKey,
+        revenue_products: order.total_amount || 0,
+        revenue_shipping: order.shipping?.cost || 0,
+        cost_sale_fee: 0,
+        cost_shipping_fee: 0,
+        cost_installment_fee: 0,
+        cost_cancellations: 0,
+      };
+
+      // Fetch order billing details if available
+      try {
+        const billingUrl = `https://api.mercadolibre.com/orders/${orderId}/billing_info`;
+        const billingResp = await fetch(billingUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+
+        if (billingResp.ok) {
+          const billingData = await billingResp.json();
+          
+          // Extract fees from billing_info
+          if (billingData.seller) {
+            const charges = billingData.seller.charges || [];
+            for (const charge of charges) {
+              const chargeType = (charge.type || '').toLowerCase();
+              const amount = Math.abs(charge.value || 0);
+              
+              if (chargeType.includes('sale_fee') || chargeType.includes('commission')) {
+                financial.cost_sale_fee += amount;
+              } else if (chargeType.includes('shipping')) {
+                financial.cost_shipping_fee += amount;
+              } else if (chargeType.includes('financing') || chargeType.includes('installment')) {
+                financial.cost_installment_fee += amount;
+              }
+            }
+          }
+        }
+      } catch (billingError) {
+        // Billing info not available, continue with order data only
+        console.log(`[ml-sync-billing] No billing info for order ${orderId}`);
+      }
+
+      // Handle cancelled/refunded orders
+      if (order.status === 'cancelled') {
+        financial.cost_cancellations = order.total_amount || 0;
+        financial.revenue_products = 0;
+      }
+
       allFinancials.push(financial);
+      
+      // Small delay to avoid rate limiting on billing endpoint
+      await sleep(50);
     }
 
     hasMore = results.length === limit;
