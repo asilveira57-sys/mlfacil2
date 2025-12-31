@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { User } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { LogOut, BarChart3, Plus, ExternalLink, Settings, CheckCircle, XCircle, Package } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { LogOut, BarChart3, Plus, ExternalLink, Settings, CheckCircle, XCircle, Package, CloudDownload, RefreshCw, Database } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { SalesDashboard } from "@/components/SalesDashboard";
 import {
@@ -24,6 +25,20 @@ interface MLAccount {
   ml_user_id: string;
 }
 
+interface SyncJob {
+  id: string;
+  status: string;
+  total_records: number;
+  processed_records: number;
+}
+
+interface SyncDebugInfo {
+  cachedOrdersCount: number;
+  cachedItemsCount: number;
+  ordersWithItemsSynced: number;
+  itemsSyncedPercent: number;
+}
+
 const Dashboard = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -32,7 +47,12 @@ const Dashboard = () => {
   const [mlAccount, setMlAccount] = useState<MLAccount | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // Fetch ML account status (pega a conta ativa mais recente)
+  // Sync state for settings
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncJob, setSyncJob] = useState<SyncJob | null>(null);
+  const [syncDebugInfo, setSyncDebugInfo] = useState<SyncDebugInfo | null>(null);
+
+  // Fetch ML account status
   const fetchMlAccount = async (userId: string) => {
     const { data, error } = await supabase
       .from('ml_accounts')
@@ -49,6 +69,26 @@ const Dashboard = () => {
 
     setMlAccount(data?.[0] ?? null);
   };
+
+  // Fetch sync debug info
+  const fetchSyncDebugInfo = useCallback(async () => {
+    if (!user) return;
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const response = await supabase.functions.invoke("ml-sales-data", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+
+      if (response.data?._debug) {
+        setSyncDebugInfo(response.data._debug);
+      }
+    } catch (err) {
+      console.error("Error fetching sync debug info:", err);
+    }
+  }, [user]);
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -73,7 +113,14 @@ const Dashboard = () => {
     return () => subscription.unsubscribe();
   }, [navigate]);
 
-  // Handle ML OAuth callback - simplified (tokens saved server-side)
+  // Fetch debug info when settings open
+  useEffect(() => {
+    if (settingsOpen && mlAccount) {
+      fetchSyncDebugInfo();
+    }
+  }, [settingsOpen, mlAccount, fetchSyncDebugInfo]);
+
+  // Handle ML OAuth callback
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const mlConnected = params.get('ml_connected');
@@ -90,17 +137,12 @@ const Dashboard = () => {
     }
     
     if (mlConnected === 'true' && user) {
-      const nickname = params.get('nickname');
-      
       toast({
         title: "Conectado!",
         description: "Sua conta do Mercado Livre foi conectada com sucesso",
       });
       
-      // Refresh ML account data from database
       fetchMlAccount(user.id);
-      
-      // Clean URL
       window.history.replaceState({}, '', '/dashboard');
     }
   }, [user, toast]);
@@ -121,7 +163,6 @@ const Dashboard = () => {
         description: "Redirecionando para o Mercado Livre",
       });
 
-      // Busca sessão atual para passar JWT explicitamente
       let { data: { session } } = await supabase.auth.getSession();
       
       if (!session) {
@@ -139,9 +180,7 @@ const Dashboard = () => {
         headers: { Authorization: `Bearer ${session.access_token}` }
       });
 
-      // Se receber 401, tenta refresh e repete
       if (response.error?.message?.includes('401') || response.error?.status === 401) {
-        console.log('Token expirado, tentando refresh...');
         const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
         
         if (refreshError || !refreshData.session) {
@@ -181,6 +220,89 @@ const Dashboard = () => {
     }
   };
 
+  // Sync orders from settings
+  const handleSyncOrders = async () => {
+    if (!mlAccount) return;
+
+    setIsSyncing(true);
+    setSyncJob(null);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error("Sessão expirada");
+      }
+
+      const response = await supabase.functions.invoke("ml-sync-orders", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: { seller_id: mlAccount.ml_user_id }
+      });
+
+      if (response.error) {
+        throw response.error;
+      }
+
+      if (response.data?.job_id) {
+        toast({
+          title: "Sincronização iniciada",
+          description: "Os pedidos estão sendo sincronizados em background",
+        });
+        
+        pollJobStatus(response.data.job_id);
+      }
+    } catch (err: any) {
+      console.error("Error syncing orders:", err);
+      setIsSyncing(false);
+      toast({
+        title: "Erro ao sincronizar",
+        description: err?.message || "Não foi possível iniciar a sincronização",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Poll job status
+  const pollJobStatus = useCallback(async (jobId: string) => {
+    const poll = async () => {
+      const { data, error } = await supabase
+        .from('sync_jobs')
+        .select('id, status, total_records, processed_records')
+        .eq('id', jobId)
+        .maybeSingle();
+
+      if (error || !data) {
+        setIsSyncing(false);
+        return;
+      }
+
+      setSyncJob(data);
+
+      if (data.status === 'done') {
+        setIsSyncing(false);
+        toast({
+          title: "Sincronização concluída",
+          description: `${data.processed_records} pedidos sincronizados`,
+        });
+        fetchSyncDebugInfo();
+      } else if (data.status === 'error') {
+        setIsSyncing(false);
+        toast({
+          title: "Erro na sincronização",
+          description: "Ocorreu um erro durante a sincronização",
+          variant: "destructive",
+        });
+      } else {
+        setTimeout(poll, 2000);
+      }
+    };
+
+    poll();
+  }, [toast, fetchSyncDebugInfo]);
+
+  const syncProgress = syncJob && syncJob.total_records > 0 
+    ? (syncJob.processed_records / syncJob.total_records) * 100 
+    : 0;
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -218,14 +340,14 @@ const Dashboard = () => {
                     <span className="hidden sm:inline">Configurações</span>
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="sm:max-w-md">
+                <DialogContent className="sm:max-w-lg">
                   <DialogHeader>
                     <DialogTitle>Configurações</DialogTitle>
                     <DialogDescription>
-                      Gerencie suas conexões e preferências
+                      Gerencie suas conexões e sincronização de dados
                     </DialogDescription>
                   </DialogHeader>
-                  <div className="space-y-4 py-4">
+                  <div className="space-y-6 py-4">
                     {/* ML Connection Status */}
                     <div className="space-y-3">
                       <h4 className="font-medium text-sm">Mercado Livre</h4>
@@ -254,6 +376,87 @@ const Dashboard = () => {
                         )}
                       </div>
                     </div>
+
+                    {/* Sync Section - Only show when ML is connected */}
+                    {mlAccount && (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Database className="w-4 h-4 text-muted-foreground" />
+                          <h4 className="font-medium text-sm">Sincronização de Dados</h4>
+                        </div>
+
+                        {/* Sync Debug Info */}
+                        {syncDebugInfo && (
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="text-center p-3 bg-muted/50 rounded-lg">
+                              <div className="text-xl font-bold text-foreground">
+                                {syncDebugInfo.cachedOrdersCount.toLocaleString("pt-BR")}
+                              </div>
+                              <div className="text-xs text-muted-foreground">Pedidos</div>
+                            </div>
+                            <div className="text-center p-3 bg-muted/50 rounded-lg">
+                              <div className="text-xl font-bold text-foreground">
+                                {syncDebugInfo.cachedItemsCount.toLocaleString("pt-BR")}
+                              </div>
+                              <div className="text-xs text-muted-foreground">Itens</div>
+                            </div>
+                            <div className="text-center p-3 bg-muted/50 rounded-lg">
+                              <div className="text-xl font-bold text-foreground">
+                                {syncDebugInfo.ordersWithItemsSynced.toLocaleString("pt-BR")}
+                              </div>
+                              <div className="text-xs text-muted-foreground">Pedidos c/ Itens</div>
+                            </div>
+                            <div className="text-center p-3 bg-muted/50 rounded-lg">
+                              <div className={`text-xl font-bold ${syncDebugInfo.itemsSyncedPercent >= 80 ? 'text-green-500' : syncDebugInfo.itemsSyncedPercent >= 50 ? 'text-amber-500' : 'text-destructive'}`}>
+                                {syncDebugInfo.itemsSyncedPercent}%
+                              </div>
+                              <div className="text-xs text-muted-foreground">% Sincronizado</div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Sync Progress */}
+                        {isSyncing && syncJob && (
+                          <div className="space-y-2 p-3 bg-muted/50 rounded-lg">
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="flex items-center gap-2">
+                                <RefreshCw className="w-4 h-4 animate-spin" />
+                                Sincronizando...
+                              </span>
+                              <span className="text-muted-foreground">
+                                {syncJob.processed_records} / {syncJob.total_records}
+                              </span>
+                            </div>
+                            <Progress value={syncProgress} className="h-2" />
+                          </div>
+                        )}
+
+                        {/* Sync Button */}
+                        <Button
+                          onClick={handleSyncOrders}
+                          disabled={isSyncing}
+                          className="w-full"
+                          variant="outline"
+                        >
+                          {isSyncing ? (
+                            <>
+                              <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                              Sincronizando...
+                            </>
+                          ) : (
+                            <>
+                              <CloudDownload className="w-4 h-4 mr-2" />
+                              Sincronizar Pedidos
+                            </>
+                          )}
+                        </Button>
+
+                        <p className="text-xs text-muted-foreground">
+                          A sincronização carrega todos os pedidos e itens do Mercado Livre para o cache local,
+                          permitindo análises mais rápidas e completas.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </DialogContent>
               </Dialog>

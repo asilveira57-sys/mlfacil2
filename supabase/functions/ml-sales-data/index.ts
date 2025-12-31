@@ -54,6 +54,21 @@ serve(async (req) => {
 
     console.log('Authenticated user:', user.id);
 
+    // Parse request body for date filters
+    let dateFrom: string | null = null;
+    let dateTo: string | null = null;
+    
+    if (req.method === 'POST') {
+      try {
+        const body = await req.json();
+        dateFrom = body.date_from || null;
+        dateTo = body.date_to || null;
+        console.log('Date filters:', { dateFrom, dateTo });
+      } catch {
+        // No body or invalid JSON, use defaults
+      }
+    }
+
     // Get user's ML account (pega a conta ativa mais recente)
     const { data: accounts, error: accountError } = await supabaseAdmin
       .from('ml_accounts')
@@ -84,9 +99,13 @@ serve(async (req) => {
     const sellerId = mlAccount.ml_user_id;
     console.log('ML Account found:', sellerId);
 
-    // ====== USAR RPC PARA PERFORMANCE ======
+    // Call RPC with date filters
     const { data: metricsData, error: rpcError } = await supabaseAdmin
-      .rpc('get_sales_metrics', { p_seller_id: sellerId });
+      .rpc('get_sales_metrics', { 
+        p_seller_id: sellerId,
+        p_date_from: dateFrom,
+        p_date_to: dateTo
+      });
 
     if (rpcError) {
       console.error('RPC error:', rpcError);
@@ -106,11 +125,19 @@ serve(async (req) => {
             orders7d: 0,
             revenue30d: 0,
             orders30d: 0,
+            revenuePeriod: 0,
+            ordersPeriod: 0,
             averageTicket: 0,
             averageTicket30d: 0,
+            averageTicketPeriod: 0,
+            cancelledOrders: 0,
+            cancelledRevenue: 0,
+            cancelledOrdersPeriod: 0,
+            cancelledRevenuePeriod: 0,
           },
           dailySales: [],
           topProducts: [],
+          availableMonths: [],
           seller: {
             nickname: mlAccount.nickname,
             email: mlAccount.email,
@@ -130,9 +157,10 @@ serve(async (req) => {
     console.log('Metrics from RPC:', {
       ordersTotal: metricsData.ordersTotal,
       revenueTotal: metricsData.revenueTotal,
-      orders30d: metricsData.orders30d,
-      revenue30d: metricsData.revenue30d,
-      topProductsCount: metricsData.topProducts?.length || 0,
+      ordersPeriod: metricsData.ordersPeriod,
+      revenuePeriod: metricsData.revenuePeriod,
+      cancelledOrders: metricsData.cancelledOrders,
+      availableMonths: metricsData.availableMonths?.length || 0,
     });
 
     // Build response in expected format
@@ -146,11 +174,19 @@ serve(async (req) => {
         orders7d: Number(metricsData.orders7d) || 0,
         revenue30d: Number(metricsData.revenue30d) || 0,
         orders30d: Number(metricsData.orders30d) || 0,
+        revenuePeriod: Number(metricsData.revenuePeriod) || 0,
+        ordersPeriod: Number(metricsData.ordersPeriod) || 0,
         averageTicket: Number(metricsData.averageTicket) || 0,
         averageTicket30d: Number(metricsData.averageTicket30d) || 0,
+        averageTicketPeriod: Number(metricsData.averageTicketPeriod) || 0,
+        cancelledOrders: Number(metricsData.cancelledOrders) || 0,
+        cancelledRevenue: Number(metricsData.cancelledRevenue) || 0,
+        cancelledOrdersPeriod: Number(metricsData.cancelledOrdersPeriod) || 0,
+        cancelledRevenuePeriod: Number(metricsData.cancelledRevenuePeriod) || 0,
       },
       dailySales: metricsData.dailySales || [],
       topProducts: metricsData.topProducts || [],
+      availableMonths: metricsData.availableMonths || [],
       seller: {
         nickname: mlAccount.nickname,
         email: mlAccount.email,
@@ -161,6 +197,8 @@ serve(async (req) => {
         ordersWithItemsSynced: metricsData._debug?.ordersWithItemsSynced || 0,
         itemsSyncedPercent: metricsData._debug?.itemsSyncedPercent || 0,
         source: metricsData._debug?.source || 'rpc_get_sales_metrics',
+        dateFrom: metricsData._debug?.dateFrom || null,
+        dateTo: metricsData._debug?.dateTo || null,
       },
     };
 

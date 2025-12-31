@@ -604,7 +604,10 @@ export type Database = {
       }
     }
     Functions: {
-      get_sales_metrics: { Args: { p_seller_id: string }; Returns: Json }
+      get_sales_metrics: {
+        Args: { p_date_from?: string; p_date_to?: string; p_seller_id: string }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never
