@@ -50,6 +50,7 @@ export interface OrderItemSummary {
   unit_price: number;
   permalink: string | null;
   catalog_product_id: string | null;
+  thumbnail: string | null;
 }
 
 export type LabelLayout = 'meli_100x150' | 'mlfacil_100x175_header';
@@ -439,7 +440,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       
       const { data: items, error } = await supabase
         .from('meli_order_items_cache')
-        .select('order_id, item_id, variation_id, sku, title_short, title, quantity, unit_price, permalink, catalog_product_id')
+        .select('order_id, item_id, variation_id, sku, title_short, title, quantity, unit_price, permalink, catalog_product_id, thumbnail')
         .eq('seller_id', sellerId)
         .in('order_id', orderIds);
 
@@ -462,6 +463,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
           unit_price: item.unit_price,
           permalink: item.permalink,
           catalog_product_id: item.catalog_product_id,
+          thumbnail: item.thumbnail,
         });
         itemsMap.set(item.order_id, existing);
       });

@@ -284,6 +284,7 @@ export type Database = {
           seller_id: string
           shipment_id: string | null
           sku: string | null
+          thumbnail: string | null
           title: string | null
           title_short: string | null
           unit_price: number
@@ -304,6 +305,7 @@ export type Database = {
           seller_id: string
           shipment_id?: string | null
           sku?: string | null
+          thumbnail?: string | null
           title?: string | null
           title_short?: string | null
           unit_price?: number
@@ -324,6 +326,7 @@ export type Database = {
           seller_id?: string
           shipment_id?: string | null
           sku?: string | null
+          thumbnail?: string | null
           title?: string | null
           title_short?: string | null
           unit_price?: number

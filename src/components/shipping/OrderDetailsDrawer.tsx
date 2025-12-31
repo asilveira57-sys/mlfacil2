@@ -94,26 +94,9 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
                       key={`${item.item_id}-${item.variation_id || index}`}
                       className="bg-muted/50 rounded-lg p-3"
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium">
-                              {item.quantity}x
-                            </span>
-                            <span className="text-sm truncate">
-                              {item.sku || item.title_short || item.title || item.item_id}
-                            </span>
-                          </div>
-                          {(item.title_short || item.title) && item.sku && (
-                            <p className="text-xs text-muted-foreground truncate mt-0.5">
-                              {item.title_short || item.title}
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-sm font-medium">
-                            R$ {(item.unit_price * item.quantity).toFixed(2)}
-                          </span>
+                      <div className="flex items-start gap-3">
+                        {/* Thumbnail */}
+                        {item.thumbnail ? (
                           <a
                             href={
                               item.catalog_product_id
@@ -124,18 +107,66 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
                             }
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-muted-foreground hover:text-primary transition-colors"
-                            title="Abrir anúncio no Mercado Livre"
+                            className="shrink-0"
                           >
-                            <ExternalLink className="h-4 w-4" />
+                            <img 
+                              src={item.thumbnail} 
+                              alt={item.title_short || item.title || item.item_id}
+                              className="w-12 h-12 object-cover rounded-md border border-border hover:opacity-80 transition-opacity"
+                            />
                           </a>
+                        ) : (
+                          <div className="w-12 h-12 bg-muted rounded-md border border-border flex items-center justify-center shrink-0">
+                            <Package className="h-5 w-5 text-muted-foreground" />
+                          </div>
+                        )}
+                        
+                        {/* Content */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium">
+                                  {item.quantity}x
+                                </span>
+                                <span className="text-sm truncate">
+                                  {item.sku || item.title_short || item.title || item.item_id}
+                                </span>
+                              </div>
+                              {(item.title_short || item.title) && item.sku && (
+                                <p className="text-xs text-muted-foreground truncate mt-0.5">
+                                  {item.title_short || item.title}
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="text-sm font-medium">
+                                R$ {(item.unit_price * item.quantity).toFixed(2)}
+                              </span>
+                              <a
+                                href={
+                                  item.catalog_product_id
+                                    ? `https://www.mercadolivre.com.br/p/${item.catalog_product_id}`
+                                    : item.permalink
+                                      ? item.permalink
+                                      : `https://produto.mercadolivre.com.br/${item.item_id.replace(/^(MLB)(\d+)$/, '$1-$2')}`
+                                }
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-muted-foreground hover:text-primary transition-colors"
+                                title="Abrir anúncio no Mercado Livre"
+                              >
+                                <ExternalLink className="h-4 w-4" />
+                              </a>
+                            </div>
+                          </div>
+                          {item.sku && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              SKU: {item.sku}
+                            </p>
+                          )}
                         </div>
                       </div>
-                      {item.sku && (
-                        <p className="text-xs text-muted-foreground mt-1">
-                          SKU: {item.sku}
-                        </p>
-                      )}
                     </div>
                   ))}
                 </div>
