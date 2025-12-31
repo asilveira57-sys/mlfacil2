@@ -12,6 +12,7 @@ import LabelHeaderSettings from "./pages/LabelHeaderSettings";
 import ZPLConverter from "./pages/ZPLConverter";
 import AbcAnalysis from "./pages/AbcAnalysis";
 import Tendencias from "./pages/Tendencias";
+import Custos from "./pages/Custos";
 import NotFound from "./pages/NotFound";
 
 const App = () => {
@@ -32,6 +33,7 @@ const App = () => {
             <Route path="/zpl-converter" element={<ZPLConverter />} />
             <Route path="/abc-analysis" element={<AbcAnalysis />} />
             <Route path="/tendencias" element={<Tendencias />} />
+            <Route path="/custos" element={<Custos />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
