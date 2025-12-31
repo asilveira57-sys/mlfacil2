@@ -71,21 +71,126 @@ export const SHIPMENT_STATUS_MAP: Record<string, StatusInfo> = {
 
 // Shipment substatus mapping
 export const SHIPMENT_SUBSTATUS_MAP: Record<string, StatusInfo> = {
+  // Centro de distribuição
   in_warehouse: {
     label: 'No centro de distribuição',
-    description: 'O pedido está aguardando no centro de distribuição.',
+    description: 'O pedido já foi recebido pelo centro de distribuição do Mercado Livre.',
     severity: 'info',
   },
+  buffered: {
+    label: 'Em triagem',
+    description: 'O pedido está em processamento no centro logístico.',
+    severity: 'info',
+  },
+  // Etiqueta
+  ready_to_print: {
+    label: 'Etiqueta pronta',
+    description: 'A etiqueta está pronta para impressão.',
+    severity: 'success',
+  },
+  printed: {
+    label: 'Etiqueta impressa',
+    description: 'A etiqueta já foi impressa.',
+    severity: 'info',
+  },
+  // Transporte
   picked_up: {
     label: 'Coletado',
-    description: 'O pedido foi coletado pela transportadora.',
+    description: 'O pedido foi coletado para transporte.',
+    severity: 'info',
+  },
+  in_transit: {
+    label: 'Em transporte',
+    description: 'O pedido está a caminho do comprador.',
     severity: 'info',
   },
   out_for_delivery: {
     label: 'Saiu para entrega',
-    description: 'O pedido está a caminho do destinatário.',
+    description: 'O pedido está em rota de entrega.',
     severity: 'success',
   },
+  // Atrasos
+  delayed: {
+    label: 'Atraso no transporte',
+    description: 'O pedido teve atraso no fluxo logístico.',
+    severity: 'warning',
+  },
+  stuck: {
+    label: 'Parado no transporte',
+    description: 'O pedido está sem avanço no rastreio.',
+    severity: 'warning',
+  },
+  // Problemas na entrega
+  not_delivered: {
+    label: 'Não entregue',
+    description: 'Houve tentativa de entrega sem sucesso.',
+    severity: 'warning',
+  },
+  receiver_absent: {
+    label: 'Destinatário ausente',
+    description: 'Tentativa de entrega sem presença no local.',
+    severity: 'warning',
+  },
+  address_not_found: {
+    label: 'Endereço não localizado',
+    description: 'A transportadora não conseguiu localizar o endereço.',
+    severity: 'warning',
+  },
+  refused_by_receiver: {
+    label: 'Recusado na entrega',
+    description: 'O pedido foi recusado no momento da entrega.',
+    severity: 'danger',
+  },
+  // Retirada
+  waiting_for_withdrawal: {
+    label: 'Aguardando retirada',
+    description: 'O pedido está disponível para retirada.',
+    severity: 'info',
+  },
+  withdrawn: {
+    label: 'Retirado',
+    description: 'O pedido foi retirado.',
+    severity: 'success',
+  },
+  // Devolução
+  returned: {
+    label: 'Devolvido',
+    description: 'O pedido retornou ao vendedor.',
+    severity: 'warning',
+  },
+  returning_to_sender: {
+    label: 'Retornando ao vendedor',
+    description: 'O pedido está voltando para o vendedor.',
+    severity: 'warning',
+  },
+  // Problemas críticos
+  cancelled: {
+    label: 'Envio cancelado',
+    description: 'O envio foi cancelado.',
+    severity: 'danger',
+  },
+  lost: {
+    label: 'Extraviado',
+    description: 'O pedido foi perdido no transporte.',
+    severity: 'danger',
+  },
+  damaged: {
+    label: 'Avariado',
+    description: 'O pedido sofreu avaria no transporte.',
+    severity: 'danger',
+  },
+  error: {
+    label: 'Erro no envio',
+    description: 'Ocorreu um erro operacional no envio.',
+    severity: 'danger',
+  },
+};
+
+// Fallback for unknown substatuses
+export const SHIPMENT_SUBSTATUS_FALLBACK: StatusInfo = {
+  label: 'Em processamento',
+  description: 'O pedido está em uma etapa logística.',
+  severity: 'muted',
 };
 
 // Invoice status mapping (based on fiscal_status)
@@ -194,10 +299,11 @@ export function getShipmentStatus(status: string | null | undefined): StatusInfo
 
 /**
  * Get the translated shipment substatus info
+ * Uses fallback for unknown substatuses
  */
 export function getShipmentSubstatus(substatus: string | null | undefined): StatusInfo {
   if (!substatus) return { label: '-', description: '' };
-  return SHIPMENT_SUBSTATUS_MAP[substatus] || { label: substatus, description: '' };
+  return SHIPMENT_SUBSTATUS_MAP[substatus] || SHIPMENT_SUBSTATUS_FALLBACK;
 }
 
 /**
