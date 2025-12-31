@@ -65,7 +65,7 @@ function buildItemsSummary(items: OrderItemSummary[] | undefined): string {
   const remaining = sorted.length - MAX_DISPLAY;
 
   const parts = displayed.map(item => {
-    const label = item.sku || item.title_short || 'Item';
+    const label = item.sku || item.title_short || item.item_id;
     // Truncate long labels
     const truncated = label.length > 15 ? label.substring(0, 15) + '…' : label;
     return `${item.quantity}x ${truncated}`;
@@ -173,8 +173,12 @@ export function ShippingTable({
             const itemsSummary = buildItemsSummary(items);
             
             return (
-              <TableRow key={order.id}>
-                <TableCell>
+              <TableRow 
+                key={order.id}
+                className="cursor-pointer hover:bg-muted/50"
+                onClick={() => onViewDetails(order)}
+              >
+                <TableCell onClick={(e) => e.stopPropagation()}>
                   <Checkbox
                     checked={selectedIds.has(order.id)}
                     onCheckedChange={() => onToggleSelection(order.id)}
@@ -194,9 +198,8 @@ export function ShippingTable({
                   {order.buyer_nickname || '-'}
                 </TableCell>
                 <TableCell 
-                  className="text-sm text-muted-foreground max-w-[200px] truncate cursor-pointer hover:text-foreground transition-colors"
-                  onClick={() => onViewDetails(order)}
-                  title={`Clique para ver detalhes: ${itemsSummary}`}
+                  className="text-sm text-muted-foreground max-w-[200px] truncate"
+                  title={itemsSummary}
                 >
                   {itemsSummary}
                 </TableCell>
@@ -208,7 +211,7 @@ export function ShippingTable({
                     {statusBadge?.label || order.final_status || '-'}
                   </Badge>
                 </TableCell>
-                <TableCell>
+                <TableCell onClick={(e) => e.stopPropagation()}>
                   <Button
                     variant="ghost"
                     size="icon"
