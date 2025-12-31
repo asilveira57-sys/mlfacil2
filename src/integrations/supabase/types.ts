@@ -221,48 +221,70 @@ export type Database = {
       meli_order_items_cache: {
         Row: {
           created_at_meli: string | null
+          currency_id: string | null
           id: string
           item_id: string
           last_sync_at: string | null
           order_id: string
+          product_key: string
           quantity: number
           seller_id: string
+          shipment_id: string | null
+          sku: string | null
           title: string | null
+          title_short: string | null
           unit_price: number
           user_id: string
+          variation_id: string | null
         }
         Insert: {
           created_at_meli?: string | null
+          currency_id?: string | null
           id?: string
           item_id: string
           last_sync_at?: string | null
           order_id: string
+          product_key?: string
           quantity?: number
           seller_id: string
+          shipment_id?: string | null
+          sku?: string | null
           title?: string | null
+          title_short?: string | null
           unit_price?: number
           user_id: string
+          variation_id?: string | null
         }
         Update: {
           created_at_meli?: string | null
+          currency_id?: string | null
           id?: string
           item_id?: string
           last_sync_at?: string | null
           order_id?: string
+          product_key?: string
           quantity?: number
           seller_id?: string
+          shipment_id?: string | null
+          sku?: string | null
           title?: string | null
+          title_short?: string | null
           unit_price?: number
           user_id?: string
+          variation_id?: string | null
         }
         Relationships: []
       }
       meli_orders_cache: {
         Row: {
+          buyer_name: string | null
           buyer_nickname: string | null
           created_at_meli: string | null
           id: string
+          items_count: number
+          items_synced_at: string | null
           last_sync_at: string
+          order_comment: string | null
           order_id: string
           order_status: string | null
           seller_id: string
@@ -271,10 +293,14 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          buyer_name?: string | null
           buyer_nickname?: string | null
           created_at_meli?: string | null
           id?: string
+          items_count?: number
+          items_synced_at?: string | null
           last_sync_at?: string
+          order_comment?: string | null
           order_id: string
           order_status?: string | null
           seller_id: string
@@ -283,10 +309,14 @@ export type Database = {
           user_id: string
         }
         Update: {
+          buyer_name?: string | null
           buyer_nickname?: string | null
           created_at_meli?: string | null
           id?: string
+          items_count?: number
+          items_synced_at?: string | null
           last_sync_at?: string
+          order_comment?: string | null
           order_id?: string
           order_status?: string | null
           seller_id?: string
@@ -443,6 +473,42 @@ export type Database = {
         }
         Relationships: []
       }
+      product_cost_catalog: {
+        Row: {
+          cost_currency: string
+          cost_value: number
+          created_at: string
+          display_name: string | null
+          id: string
+          product_key: string
+          seller_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          cost_currency?: string
+          cost_value?: number
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          product_key: string
+          seller_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          cost_currency?: string
+          cost_value?: number
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          product_key?: string
+          seller_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           company_name: string | null
@@ -538,7 +604,7 @@ export type Database = {
       }
     }
     Functions: {
-      [_ in never]: never
+      get_sales_metrics: { Args: { p_seller_id: string }; Returns: Json }
     }
     Enums: {
       [_ in never]: never
