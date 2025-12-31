@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AbcFilters, AbcConfig } from "@/pages/AbcAnalysis";
 import { AbcTable, AbcItem } from "./AbcTable";
 import { AbcSummaryCards, createProductsSummary } from "./AbcSummaryCards";
+import { AbcParetoChart } from "./AbcParetoChart";
 import { useAbcAnalysis, AbcIndicator } from "@/hooks/useAbcAnalysis";
 import { Button } from "@/components/ui/button";
 import { Download, Package, TrendingUp, DollarSign } from "lucide-react";
@@ -117,6 +118,16 @@ export function AbcProductsTab({ sellerId, filters, config }: AbcProductsTabProp
         <div className="rounded-lg bg-destructive/10 p-4 text-destructive">
           {error}
         </div>
+      )}
+
+      {/* Pareto Chart */}
+      {!loading && items.length > 0 && (
+        <AbcParetoChart
+          items={items}
+          indicator={indicator}
+          thresholdA={config.percentA}
+          thresholdB={config.percentB}
+        />
       )}
 
       {/* ABC Table */}

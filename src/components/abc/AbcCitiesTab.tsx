@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { AbcFilters, AbcConfig } from "@/pages/AbcAnalysis";
 import { AbcTable, AbcItem } from "./AbcTable";
 import { AbcSummaryCards } from "./AbcSummaryCards";
+import { AbcParetoChart } from "./AbcParetoChart";
 import { AbcIndicator } from "@/hooks/useAbcAnalysis";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -465,6 +466,16 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
         <div className="rounded-lg bg-destructive/10 p-4 text-destructive">
           {error}
         </div>
+      )}
+
+      {/* Pareto Chart */}
+      {!loading && classifiedItems.length > 0 && (
+        <AbcParetoChart
+          items={classifiedItems}
+          indicator={indicator}
+          thresholdA={config.percentA}
+          thresholdB={config.percentB}
+        />
       )}
 
       {/* ABC Table */}
