@@ -7,22 +7,6 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
-interface MLOrder {
-  id: number;
-  date_created: string;
-  status: string;
-  total_amount: number;
-  currency_id: string;
-  order_items: Array<{
-    item: {
-      id: string;
-      title: string;
-    };
-    quantity: number;
-    unit_price: number;
-  }>;
-}
-
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -97,73 +81,45 @@ serve(async (req) => {
       );
     }
 
-    console.log('ML Account found:', mlAccount.ml_user_id);
+    const sellerId = mlAccount.ml_user_id;
+    console.log('ML Account found:', sellerId);
 
-    // Check if token is expired and refresh if needed
-    let accessToken = mlAccount.access_token;
-    const tokenExpires = new Date(mlAccount.token_expires_at);
+    // ====== BUSCAR DADOS DO CACHE LOCAL ======
     
-    if (tokenExpires <= new Date()) {
-      console.log('Token expired, refreshing...');
-      
-      const refreshResponse = await fetch('https://api.mercadolibre.com/oauth/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          grant_type: 'refresh_token',
-          client_id: Deno.env.get('ML_APP_ID') ?? '',
-          client_secret: Deno.env.get('ML_SECRET_KEY') ?? '',
-          refresh_token: mlAccount.refresh_token,
-        }),
-      });
+    // 1. Buscar todos os pedidos pagos do cache
+    const { data: cachedOrders, error: ordersError } = await supabaseAdmin
+      .from('meli_orders_cache')
+      .select('order_id, created_at_meli, total_amount, order_status')
+      .eq('seller_id', sellerId)
+      .eq('order_status', 'paid')
+      .order('created_at_meli', { ascending: false });
 
-      if (refreshResponse.ok) {
-        const tokenData = await refreshResponse.json();
-        accessToken = tokenData.access_token;
-        
-        // Update tokens in database
-        await supabaseAdmin
-          .from('ml_accounts')
-          .update({
-            access_token: tokenData.access_token,
-            refresh_token: tokenData.refresh_token,
-            token_expires_at: new Date(Date.now() + tokenData.expires_in * 1000).toISOString(),
-          })
-          .eq('id', mlAccount.id);
-          
-        console.log('Token refreshed successfully');
-      } else {
-        console.error('Failed to refresh token');
-        throw new Error('Failed to refresh ML token');
-      }
+    if (ordersError) {
+      console.error('Error fetching cached orders:', ordersError);
+      throw new Error('Failed to fetch cached orders');
     }
 
-    // Fetch orders from ML API
-    const ordersUrl = `https://api.mercadolibre.com/orders/search?seller=${mlAccount.ml_user_id}&sort=date_desc&limit=50`;
-    console.log('Fetching orders from:', ordersUrl);
-    
-    const ordersResponse = await fetch(ordersUrl, {
-      headers: { 'Authorization': `Bearer ${accessToken}` },
-    });
+    console.log('Cached orders found:', cachedOrders?.length || 0);
 
-    if (!ordersResponse.ok) {
-      const errorText = await ordersResponse.text();
-      console.error('ML API error:', errorText);
-      throw new Error(`ML API error: ${ordersResponse.status}`);
+    // 2. Buscar items dos pedidos para top produtos
+    const { data: cachedItems, error: itemsError } = await supabaseAdmin
+      .from('meli_order_items_cache')
+      .select('item_id, title, quantity, unit_price, created_at_meli')
+      .eq('seller_id', sellerId);
+
+    if (itemsError) {
+      console.error('Error fetching cached items:', itemsError);
+      // Não é erro fatal, apenas log
     }
 
-    const ordersData = await ordersResponse.json();
-    const orders: MLOrder[] = ordersData.results || [];
-    
-    console.log('Orders fetched:', orders.length);
+    console.log('Cached items found:', cachedItems?.length || 0);
 
-    // Process orders to generate metrics
+    // ====== CALCULAR MÉTRICAS DO CACHE ======
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const last7Days = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
     const last30Days = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-    // Calculate metrics
     let totalRevenue = 0;
     let totalOrders = 0;
     let revenue7d = 0;
@@ -174,53 +130,54 @@ serve(async (req) => {
     let ordersToday = 0;
 
     const dailySales: Record<string, { date: string; revenue: number; orders: number }> = {};
-    const productSales: Record<string, { title: string; quantity: number; revenue: number }> = {};
 
-    for (const order of orders) {
-      if (order.status !== 'paid' && order.status !== 'shipped' && order.status !== 'delivered') {
-        continue;
-      }
-
-      const orderDate = new Date(order.date_created);
+    for (const order of cachedOrders || []) {
+      const amount = Number(order.total_amount) || 0;
+      const orderDate = new Date(order.created_at_meli);
       const dateKey = orderDate.toISOString().split('T')[0];
-      
-      totalRevenue += order.total_amount;
+
+      totalRevenue += amount;
       totalOrders++;
 
       // Daily aggregation
       if (!dailySales[dateKey]) {
         dailySales[dateKey] = { date: dateKey, revenue: 0, orders: 0 };
       }
-      dailySales[dateKey].revenue += order.total_amount;
+      dailySales[dateKey].revenue += amount;
       dailySales[dateKey].orders++;
-
-      // Product aggregation
-      for (const item of order.order_items || []) {
-        const itemId = item.item?.id || 'unknown';
-        if (!productSales[itemId]) {
-          productSales[itemId] = { 
-            title: item.item?.title || 'Produto sem título', 
-            quantity: 0, 
-            revenue: 0 
-          };
-        }
-        productSales[itemId].quantity += item.quantity;
-        productSales[itemId].revenue += item.unit_price * item.quantity;
-      }
 
       // Period metrics
       if (orderDate >= today) {
-        revenueToday += order.total_amount;
+        revenueToday += amount;
         ordersToday++;
       }
       if (orderDate >= last7Days) {
-        revenue7d += order.total_amount;
+        revenue7d += amount;
         orders7d++;
       }
       if (orderDate >= last30Days) {
-        revenue30d += order.total_amount;
+        revenue30d += amount;
         orders30d++;
       }
+    }
+
+    // ====== CALCULAR TOP PRODUTOS DO CACHE DE ITEMS ======
+    const productSales: Record<string, { title: string; quantity: number; revenue: number }> = {};
+
+    for (const item of cachedItems || []) {
+      const itemId = item.item_id;
+      const qty = Number(item.quantity) || 1;
+      const price = Number(item.unit_price) || 0;
+
+      if (!productSales[itemId]) {
+        productSales[itemId] = { 
+          title: item.title || 'Produto sem título', 
+          quantity: 0, 
+          revenue: 0 
+        };
+      }
+      productSales[itemId].quantity += qty;
+      productSales[itemId].revenue += price * qty;
     }
 
     // Convert to arrays and sort
@@ -246,7 +203,13 @@ serve(async (req) => {
       averageTicket30d: orders30d > 0 ? revenue30d / orders30d : 0,
     };
 
-    console.log('Metrics calculated:', metrics);
+    console.log('Metrics calculated from cache:', {
+      totalOrders: metrics.totalOrders,
+      totalRevenue: metrics.totalRevenue,
+      orders30d: metrics.orders30d,
+      revenue30d: metrics.revenue30d,
+      topProductsCount: topProducts.length,
+    });
 
     return new Response(
       JSON.stringify({
@@ -256,6 +219,11 @@ serve(async (req) => {
         seller: {
           nickname: mlAccount.nickname,
           email: mlAccount.email,
+        },
+        _debug: {
+          cachedOrdersCount: cachedOrders?.length || 0,
+          cachedItemsCount: cachedItems?.length || 0,
+          source: 'local_cache',
         },
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

@@ -11,6 +11,15 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
+interface MLOrderItem {
+  item: {
+    id: string;
+    title: string;
+  };
+  quantity: number;
+  unit_price: number;
+}
+
 interface MLOrder {
   id: number;
   status: string;
@@ -23,6 +32,7 @@ interface MLOrder {
   shipping?: {
     id: number;
   };
+  order_items?: MLOrderItem[];
 }
 
 // Sleep helper for yielding between operations
@@ -109,9 +119,21 @@ async function processOrdersInBackground(
 
     console.log(`[Job ${jobId}] Total orders fetched: ${allOrders.length}`);
 
-    // Batch upsert (100 at a time)
+    // ====== BATCH UPSERT ORDERS (100 at a time) ======
     const BATCH_SIZE = 100;
     let processed = 0;
+
+    // Collect all order items for batch insert
+    const allOrderItems: Array<{
+      user_id: string;
+      seller_id: string;
+      order_id: string;
+      item_id: string;
+      title: string;
+      quantity: number;
+      unit_price: number;
+      created_at_meli: string;
+    }> = [];
 
     for (let i = 0; i < allOrders.length; i += BATCH_SIZE) {
       const batch = allOrders.slice(i, i + BATCH_SIZE);
@@ -139,6 +161,24 @@ async function processOrdersInBackground(
         console.error(`[Job ${jobId}] Batch upsert error:`, upsertError);
       }
 
+      // Extract order items from this batch
+      for (const order of batch) {
+        if (order.order_items && order.order_items.length > 0) {
+          for (const item of order.order_items) {
+            allOrderItems.push({
+              user_id: userId,
+              seller_id: sellerId,
+              order_id: order.id.toString(),
+              item_id: item.item?.id || 'unknown',
+              title: item.item?.title || 'Produto sem título',
+              quantity: item.quantity || 1,
+              unit_price: item.unit_price || 0,
+              created_at_meli: order.date_created,
+            });
+          }
+        }
+      }
+
       processed += batch.length;
 
       // Update progress
@@ -152,7 +192,51 @@ async function processOrdersInBackground(
       }
     }
 
-    console.log(`[Job ${jobId}] Sync complete: ${processed} orders processed`);
+    console.log(`[Job ${jobId}] Orders processed: ${processed}, Items to sync: ${allOrderItems.length}`);
+
+    // ====== BATCH UPSERT ORDER ITEMS ======
+    if (allOrderItems.length > 0) {
+      const ITEMS_BATCH_SIZE = 100;
+      let itemsProcessed = 0;
+
+      for (let i = 0; i < allOrderItems.length; i += ITEMS_BATCH_SIZE) {
+        const itemsBatch = allOrderItems.slice(i, i + ITEMS_BATCH_SIZE);
+
+        const itemsData = itemsBatch.map(item => ({
+          user_id: item.user_id,
+          seller_id: item.seller_id,
+          order_id: item.order_id,
+          item_id: item.item_id,
+          title: item.title,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          created_at_meli: item.created_at_meli,
+          last_sync_at: new Date().toISOString(),
+        }));
+
+        const { error: itemsUpsertError } = await supabaseAdmin
+          .from('meli_order_items_cache')
+          .upsert(itemsData, {
+            onConflict: 'seller_id,order_id,item_id',
+            ignoreDuplicates: false,
+          });
+
+        if (itemsUpsertError) {
+          console.error(`[Job ${jobId}] Items batch upsert error:`, itemsUpsertError);
+        }
+
+        itemsProcessed += itemsBatch.length;
+
+        // Yield between batches
+        if (i + ITEMS_BATCH_SIZE < allOrderItems.length) {
+          await sleep(50);
+        }
+      }
+
+      console.log(`[Job ${jobId}] Order items synced: ${itemsProcessed}`);
+    }
+
+    console.log(`[Job ${jobId}] Sync complete: ${processed} orders, ${allOrderItems.length} items`);
 
     // Mark job as done
     await supabaseAdmin.from('sync_jobs').update({
