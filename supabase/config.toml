@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.ml-generate-labels-status]
 verify_jwt = false
+
+[functions.ml-enrich-neighborhoods]
+verify_jwt = false

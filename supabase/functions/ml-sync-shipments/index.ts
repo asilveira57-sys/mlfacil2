@@ -17,6 +17,22 @@ const SELLER_PRINTABLE_SUBSTATUSES = ['ready_to_print', 'printed'];
 // Logistic types that are FULL (Mercado Livre handles shipping - seller doesn't print)
 const FULL_LOGISTIC_TYPES = ['fulfillment', 'cross_docking'];
 
+// State name to UF mapping
+const STATE_TO_UF: Record<string, string> = {
+  'Acre': 'AC', 'Alagoas': 'AL', 'Amapá': 'AP', 'Amazonas': 'AM',
+  'Bahia': 'BA', 'Ceará': 'CE', 'Distrito Federal': 'DF', 'Espírito Santo': 'ES',
+  'Goiás': 'GO', 'Maranhão': 'MA', 'Mato Grosso': 'MT', 'Mato Grosso do Sul': 'MS',
+  'Minas Gerais': 'MG', 'Pará': 'PA', 'Paraíba': 'PB', 'Paraná': 'PR',
+  'Pernambuco': 'PE', 'Piauí': 'PI', 'Rio de Janeiro': 'RJ', 'Rio Grande do Norte': 'RN',
+  'Rio Grande do Sul': 'RS', 'Rondônia': 'RO', 'Roraima': 'RR', 'Santa Catarina': 'SC',
+  'São Paulo': 'SP', 'Sergipe': 'SE', 'Tocantins': 'TO',
+  // Without accents fallback
+  'Amapa': 'AP', 'Ceara': 'CE', 'Espirito Santo': 'ES', 'Goias': 'GO',
+  'Maranhao': 'MA', 'Para': 'PA', 'Paraiba': 'PB', 'Parana': 'PR',
+  'Piaui': 'PI', 'Rio Grande Do Norte': 'RN', 'Rondonia': 'RO',
+  'Sao Paulo': 'SP',
+};
+
 interface MLShipment {
   id: number;
   status: string;
@@ -27,8 +43,9 @@ interface MLShipment {
     receiver_name?: string;
     address_line?: string;
     city?: { name?: string };
-    state?: { name?: string };
+    state?: { name?: string; id?: string };
     zip_code?: string;
+    neighborhood?: { name?: string };
   };
 }
 
@@ -87,7 +104,7 @@ async function processShipmentsInBackground(
           const isPrintableSubstatus = SELLER_PRINTABLE_SUBSTATUSES.includes(shipment.substatus || '');
           const labelAvailable = isPrintableSubstatus && !isFullLogistic;
 
-          // Build address string
+          // Extract address data
           const addr = shipment.receiver_address;
           const addressParts = [
             addr?.address_line,
@@ -96,6 +113,15 @@ async function processShipmentsInBackground(
             addr?.zip_code,
           ].filter(Boolean);
           const receiverAddress = addressParts.join(', ') || null;
+
+          // Extract individual geographic fields
+          const rawCity = addr?.city?.name || null;
+          const rawState = addr?.state?.name || null;
+          const rawZipcode = addr?.zip_code?.replace(/\D/g, '') || null;
+          const rawNeighborhood = addr?.neighborhood?.name || null;
+          
+          // Map state name to UF code
+          const stateUf = rawState ? (STATE_TO_UF[rawState] || addr?.state?.id || rawState) : null;
 
           const shipmentData = {
             user_id: userId,
@@ -109,6 +135,10 @@ async function processShipmentsInBackground(
             logistic_type: shipment.logistic_type,
             receiver_name: addr?.receiver_name || null,
             receiver_address: receiverAddress,
+            shipping_city: rawCity,
+            shipping_state_uf: stateUf,
+            shipping_zipcode: rawZipcode,
+            shipping_neighborhood: rawNeighborhood,
             last_sync_at: new Date().toISOString(),
           };
 
@@ -151,6 +181,24 @@ async function processShipmentsInBackground(
       error_message: errors > 0 ? `${errors} shipments failed` : null,
       completed_at: new Date().toISOString(),
     }).eq('id', jobId);
+
+    // Trigger neighborhood enrichment in background (fire and forget)
+    if (synced > 0) {
+      console.log(`[Job ${jobId}] Triggering neighborhood enrichment for seller ${sellerId}`);
+      try {
+        const enrichUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/ml-enrich-neighborhoods`;
+        fetch(enrichUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+          },
+          body: JSON.stringify({ seller_id: sellerId, user_id: userId }),
+        }).catch(err => console.warn('[Job] Failed to trigger enrichment:', err));
+      } catch (enrichErr) {
+        console.warn('[Job] Error triggering enrichment:', enrichErr);
+      }
+    }
 
   } catch (error) {
     console.error(`[Job ${jobId}] Background processing error:`, error);
