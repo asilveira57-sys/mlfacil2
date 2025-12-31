@@ -13,6 +13,7 @@ import ZPLConverter from "./pages/ZPLConverter";
 import AbcAnalysis from "./pages/AbcAnalysis";
 import Tendencias from "./pages/Tendencias";
 import Custos from "./pages/Custos";
+import Concorrencia from "./pages/Concorrencia";
 import NotFound from "./pages/NotFound";
 
 const App = () => {
@@ -34,6 +35,7 @@ const App = () => {
             <Route path="/abc-analysis" element={<AbcAnalysis />} />
             <Route path="/tendencias" element={<Tendencias />} />
             <Route path="/custos" element={<Custos />} />
+            <Route path="/concorrencia" element={<Concorrencia />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
