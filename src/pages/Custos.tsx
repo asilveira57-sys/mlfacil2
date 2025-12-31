@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { DollarSign, Package, TrendingUp, Calculator, RefreshCw, Settings, BarChart3 } from 'lucide-react';
+import { DollarSign, Package, TrendingUp, Calculator, RefreshCw, Settings, BarChart3, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
-import NavLink from '@/components/NavLink';
+import { CostCatalog } from '@/components/custos/CostCatalog';
+import { CostSettings } from '@/components/custos/CostSettings';
+import { CostOrders } from '@/components/custos/CostOrders';
+import { CostAbcProfit } from '@/components/custos/CostAbcProfit';
 
 interface MlAccount {
   id: string;
@@ -125,7 +128,10 @@ export default function Custos() {
       <header className="border-b bg-card">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <NavLink to="/" variant="ghost" size="sm">← Voltar</NavLink>
+            <Link to="/" className="flex items-center gap-1 text-sm hover:underline">
+              <ArrowLeft className="h-4 w-4" />
+              Voltar
+            </Link>
             <h1 className="text-xl font-bold flex items-center gap-2">
               <Calculator className="h-5 w-5" />
               Módulo de Custos
@@ -228,39 +234,19 @@ export default function Custos() {
           </TabsContent>
 
           <TabsContent value="catalogo">
-            <Card>
-              <CardContent className="py-8 text-center">
-                <Package className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                <p className="text-muted-foreground">Catálogo de custos - Em breve</p>
-              </CardContent>
-            </Card>
+            <CostCatalog sellerId={selectedSellerId || ''} />
           </TabsContent>
 
           <TabsContent value="pedidos">
-            <Card>
-              <CardContent className="py-8 text-center">
-                <DollarSign className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                <p className="text-muted-foreground">Custo por pedido - Em breve</p>
-              </CardContent>
-            </Card>
+            <CostOrders sellerId={selectedSellerId || ''} />
           </TabsContent>
 
           <TabsContent value="abc">
-            <Card>
-              <CardContent className="py-8 text-center">
-                <TrendingUp className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                <p className="text-muted-foreground">ABC por Lucro - Em breve</p>
-              </CardContent>
-            </Card>
+            <CostAbcProfit sellerId={selectedSellerId || ''} />
           </TabsContent>
 
           <TabsContent value="config">
-            <Card>
-              <CardContent className="py-8 text-center">
-                <Settings className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                <p className="text-muted-foreground">Configurações de custo - Em breve</p>
-              </CardContent>
-            </Card>
+            <CostSettings sellerId={selectedSellerId || ''} />
           </TabsContent>
         </Tabs>
       </main>
