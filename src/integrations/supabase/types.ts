@@ -14,6 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
+      abc_config: {
+        Row: {
+          created_at: string
+          id: string
+          percent_a: number
+          percent_b: number
+          percent_c: number
+          seller_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          percent_a?: number
+          percent_b?: number
+          percent_c?: number
+          seller_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          percent_a?: number
+          percent_b?: number
+          percent_c?: number
+          seller_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       analyzed_items: {
         Row: {
           analyzed_at: string
@@ -75,6 +108,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      cep_cache: {
+        Row: {
+          city: string | null
+          created_at: string
+          id: string
+          neighborhood: string | null
+          state_uf: string | null
+          street: string | null
+          updated_at: string
+          zipcode: string
+        }
+        Insert: {
+          city?: string | null
+          created_at?: string
+          id?: string
+          neighborhood?: string | null
+          state_uf?: string | null
+          street?: string | null
+          updated_at?: string
+          zipcode: string
+        }
+        Update: {
+          city?: string | null
+          created_at?: string
+          id?: string
+          neighborhood?: string | null
+          state_uf?: string | null
+          street?: string | null
+          updated_at?: string
+          zipcode?: string
+        }
+        Relationships: []
       }
       item_metrics: {
         Row: {
@@ -459,6 +525,10 @@ export type Database = {
           shipment_id: string
           shipment_status: string | null
           shipment_substatus: string | null
+          shipping_city: string | null
+          shipping_neighborhood: string | null
+          shipping_state_uf: string | null
+          shipping_zipcode: string | null
           tracking_number: string | null
           user_id: string
         }
@@ -474,6 +544,10 @@ export type Database = {
           shipment_id: string
           shipment_status?: string | null
           shipment_substatus?: string | null
+          shipping_city?: string | null
+          shipping_neighborhood?: string | null
+          shipping_state_uf?: string | null
+          shipping_zipcode?: string | null
           tracking_number?: string | null
           user_id: string
         }
@@ -489,6 +563,10 @@ export type Database = {
           shipment_id?: string
           shipment_status?: string | null
           shipment_substatus?: string | null
+          shipping_city?: string | null
+          shipping_neighborhood?: string | null
+          shipping_state_uf?: string | null
+          shipping_zipcode?: string | null
           tracking_number?: string | null
           user_id?: string
         }
