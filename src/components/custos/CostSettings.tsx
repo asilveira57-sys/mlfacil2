@@ -162,7 +162,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
         const pollInterval = setInterval(async () => {
           const { data: job } = await supabase
             .from('sync_jobs')
-            .select('status')
+            .select('status,error_message')
             .eq('id', response.data.job_id)
             .single();
 
@@ -173,7 +173,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
               toast.success('Dados financeiros sincronizados');
               loadBillingStatus(session.access_token);
             } else {
-              toast.error('Erro na sincronização');
+              toast.error(job.error_message || 'Erro na sincronização');
             }
           }
         }, 2000);
