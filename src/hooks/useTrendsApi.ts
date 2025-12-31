@@ -66,16 +66,7 @@ async function callTrendsApi<T>(path: string, params: Record<string, string> = {
   if (!session) throw new Error('Not authenticated');
 
   const queryString = new URLSearchParams(params).toString();
-  const url = `${path}${queryString ? `?${queryString}` : ''}`;
 
-  const { data, error } = await supabase.functions.invoke('trends-api', {
-    body: null,
-    headers: {
-      Authorization: `Bearer ${session.access_token}`,
-    },
-  });
-
-  // Manually construct the request since invoke doesn't support path routing
   const response = await fetch(
     `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/trends-api/${path}${queryString ? `?${queryString}` : ''}`,
     {
