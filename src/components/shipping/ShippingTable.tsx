@@ -9,8 +9,8 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Eye, Loader2, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
-import { ShippingOrder, SortField, SortDirection } from '@/hooks/useShippingLabels';
+import { Eye, Loader2, ArrowUp, ArrowDown, ArrowUpDown, Package } from 'lucide-react';
+import { ShippingOrder, SortField, SortDirection, OrderItemSummary } from '@/hooks/useShippingLabels';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -24,6 +24,7 @@ interface ShippingTableProps {
   sortField: SortField;
   sortDirection: SortDirection;
   onToggleSort: (field: SortField) => void;
+  orderItems: Map<string, OrderItemSummary[]>;
 }
 
 const STATUS_BADGES: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; className?: string }> = {
@@ -44,6 +45,39 @@ function SortIcon({ field, currentField, direction }: { field: SortField; curren
     : <ArrowDown className="ml-1 h-3 w-3" />;
 }
 
+/**
+ * Builds a compact item summary string from order items
+ * Format: "2x SKU | 1x SKU | +N itens"
+ */
+function buildItemsSummary(items: OrderItemSummary[] | undefined): string {
+  if (!items || items.length === 0) return '-';
+
+  // Sort by quantity desc, then by sku/title
+  const sorted = [...items].sort((a, b) => {
+    if (b.quantity !== a.quantity) return b.quantity - a.quantity;
+    const labelA = a.sku || a.title_short || '';
+    const labelB = b.sku || b.title_short || '';
+    return labelA.localeCompare(labelB);
+  });
+
+  const MAX_DISPLAY = 2;
+  const displayed = sorted.slice(0, MAX_DISPLAY);
+  const remaining = sorted.length - MAX_DISPLAY;
+
+  const parts = displayed.map(item => {
+    const label = item.sku || item.title_short || 'Item';
+    // Truncate long labels
+    const truncated = label.length > 15 ? label.substring(0, 15) + '…' : label;
+    return `${item.quantity}x ${truncated}`;
+  });
+
+  if (remaining > 0) {
+    parts.push(`+${remaining} ${remaining === 1 ? 'item' : 'itens'}`);
+  }
+
+  return parts.join(' | ');
+}
+
 export function ShippingTable({
   orders,
   selectedIds,
@@ -54,6 +88,7 @@ export function ShippingTable({
   sortField,
   sortDirection,
   onToggleSort,
+  orderItems,
 }: ShippingTableProps) {
   const selectableOrders = orders.filter(o => o.selectable);
   const allSelected = selectableOrders.length > 0 && 
@@ -114,6 +149,12 @@ export function ShippingTable({
               </button>
             </TableHead>
             <TableHead>
+              <div className="flex items-center gap-1">
+                <Package className="h-3.5 w-3.5" />
+                Itens
+              </div>
+            </TableHead>
+            <TableHead>
               <button
                 onClick={() => onToggleSort('final_status')}
                 className="flex items-center hover:text-foreground transition-colors"
@@ -128,6 +169,8 @@ export function ShippingTable({
         <TableBody>
           {orders.map((order) => {
             const statusBadge = STATUS_BADGES[order.final_status || 'outros'];
+            const items = orderItems.get(order.order_id);
+            const itemsSummary = buildItemsSummary(items);
             
             return (
               <TableRow key={order.id}>
@@ -149,6 +192,9 @@ export function ShippingTable({
                 </TableCell>
                 <TableCell>
                   {order.buyer_nickname || '-'}
+                </TableCell>
+                <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate" title={itemsSummary}>
+                  {itemsSummary}
                 </TableCell>
                 <TableCell>
                   <Badge 

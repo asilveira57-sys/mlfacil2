@@ -1,12 +1,21 @@
 import { Button } from '@/components/ui/button';
-import { FileText, Printer, X, Loader2 } from 'lucide-react';
+import { FileText, Printer, X, Loader2, ChevronDown } from 'lucide-react';
 import { LabelGenerationProgress, GenerationProgress } from './LabelGenerationProgress';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+} from '@/components/ui/dropdown-menu';
+
+export type LabelLayout = 'meli_100x150' | 'mlfacil_100x175_header';
 
 interface BulkActionsBarProps {
   selectedCount: number;
   onClear: () => void;
-  onGeneratePDF: () => void;
-  onGenerateZPL: () => void;
+  onGenerateLabels: (format: 'pdf' | 'zpl', layout: LabelLayout) => void;
   isGenerating: boolean;
   generationProgress: GenerationProgress;
 }
@@ -14,8 +23,7 @@ interface BulkActionsBarProps {
 export function BulkActionsBar({
   selectedCount,
   onClear,
-  onGeneratePDF,
-  onGenerateZPL,
+  onGenerateLabels,
   isGenerating,
   generationProgress,
 }: BulkActionsBarProps) {
@@ -24,7 +32,7 @@ export function BulkActionsBar({
 
   return (
     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
-      <div className="bg-primary text-primary-foreground rounded-lg shadow-lg px-6 py-3 flex flex-col gap-2 min-w-[400px]">
+      <div className="bg-primary text-primary-foreground rounded-lg shadow-lg px-6 py-3 flex flex-col gap-2 min-w-[500px]">
         {/* Progress indicator */}
         {generationProgress.status !== 'idle' && (
           <div className="text-primary-foreground">
@@ -41,33 +49,71 @@ export function BulkActionsBar({
             
             <div className="h-6 w-px bg-primary-foreground/30" />
             
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={onGeneratePDF}
-              disabled={isGenerating}
-            >
-              {isGenerating ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <FileText className="h-4 w-4 mr-2" />
-              )}
-              Gerar PDF
-            </Button>
+            {/* PDF Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={isGenerating}
+                >
+                  {isGenerating ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <FileText className="h-4 w-4 mr-2" />
+                  )}
+                  PDF
+                  <ChevronDown className="h-4 w-4 ml-1" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="bg-popover">
+                <DropdownMenuLabel className="text-xs text-muted-foreground">
+                  Formato PDF
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => onGenerateLabels('pdf', 'meli_100x150')}>
+                  <span className="font-medium">Padrão ML</span>
+                  <span className="ml-2 text-xs text-muted-foreground">100×150mm</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onGenerateLabels('pdf', 'mlfacil_100x175_header')}>
+                  <span className="font-medium">Com Cabeçalho</span>
+                  <span className="ml-2 text-xs text-muted-foreground">100×175mm</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={onGenerateZPL}
-              disabled={isGenerating}
-            >
-              {isGenerating ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Printer className="h-4 w-4 mr-2" />
-              )}
-              Gerar ZPL
-            </Button>
+            {/* ZPL Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={isGenerating}
+                >
+                  {isGenerating ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Printer className="h-4 w-4 mr-2" />
+                  )}
+                  ZPL
+                  <ChevronDown className="h-4 w-4 ml-1" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="bg-popover">
+                <DropdownMenuLabel className="text-xs text-muted-foreground">
+                  Formato ZPL
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => onGenerateLabels('zpl', 'meli_100x150')}>
+                  <span className="font-medium">Padrão ML</span>
+                  <span className="ml-2 text-xs text-muted-foreground">100×150mm</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onGenerateLabels('zpl', 'mlfacil_100x175_header')}>
+                  <span className="font-medium">Com Cabeçalho</span>
+                  <span className="ml-2 text-xs text-muted-foreground">100×175mm</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             
             <Button
               variant="ghost"

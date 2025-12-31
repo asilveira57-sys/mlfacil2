@@ -218,6 +218,57 @@ export type Database = {
         }
         Relationships: []
       }
+      meli_label_header_preferences: {
+        Row: {
+          created_at: string
+          font_size: number
+          id: string
+          line_order: string[]
+          max_product_lines: number
+          max_total_lines: number
+          seller_id: string
+          show_comment: boolean
+          show_customer: boolean
+          show_order_id: boolean
+          show_products: boolean
+          show_shipment_id: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          font_size?: number
+          id?: string
+          line_order?: string[]
+          max_product_lines?: number
+          max_total_lines?: number
+          seller_id: string
+          show_comment?: boolean
+          show_customer?: boolean
+          show_order_id?: boolean
+          show_products?: boolean
+          show_shipment_id?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          font_size?: number
+          id?: string
+          line_order?: string[]
+          max_product_lines?: number
+          max_total_lines?: number
+          seller_id?: string
+          show_comment?: boolean
+          show_customer?: boolean
+          show_order_id?: boolean
+          show_products?: boolean
+          show_shipment_id?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       meli_order_items_cache: {
         Row: {
           created_at_meli: string | null
@@ -281,6 +332,7 @@ export type Database = {
           buyer_nickname: string | null
           created_at_meli: string | null
           id: string
+          internal_header: string | null
           items_count: number
           items_synced_at: string | null
           last_sync_at: string
@@ -297,6 +349,7 @@ export type Database = {
           buyer_nickname?: string | null
           created_at_meli?: string | null
           id?: string
+          internal_header?: string | null
           items_count?: number
           items_synced_at?: string | null
           last_sync_at?: string
@@ -313,6 +366,7 @@ export type Database = {
           buyer_nickname?: string | null
           created_at_meli?: string | null
           id?: string
+          internal_header?: string | null
           items_count?: number
           items_synced_at?: string | null
           last_sync_at?: string
@@ -336,6 +390,7 @@ export type Database = {
           id: string
           job_completed_at: string | null
           job_started_at: string | null
+          layout: string
           processed_labels: number
           seller_id: string
           shipment_ids: Json
@@ -353,6 +408,7 @@ export type Database = {
           id?: string
           job_completed_at?: string | null
           job_started_at?: string | null
+          layout?: string
           processed_labels?: number
           seller_id: string
           shipment_ids: Json
@@ -370,6 +426,7 @@ export type Database = {
           id?: string
           job_completed_at?: string | null
           job_started_at?: string | null
+          layout?: string
           processed_labels?: number
           seller_id?: string
           shipment_ids?: Json
