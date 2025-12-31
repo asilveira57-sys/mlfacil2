@@ -324,8 +324,28 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
   };
 
   const handleOpenDetail = (item: AbcItem) => {
-    setSelectedGeoItem(item);
+    // Store the current drill context along with the item
+    setSelectedGeoItem({
+      ...item,
+      // Store current context for location building
+    });
     setDrawerOpen(true);
+  };
+
+  // Build location object based on current drill level and selected item
+  const getLocationForDrawer = () => {
+    if (!selectedGeoItem) return null;
+    
+    // Extract the clean ID from name (remove the count suffix like "(123)")
+    const cleanId = selectedGeoItem.id;
+    
+    if (drillLevel === "uf") {
+      return { uf: cleanId };
+    } else if (drillLevel === "city") {
+      return { uf: selectedUf!, city: cleanId };
+    } else {
+      return { uf: selectedUf!, city: selectedCity!, neighborhood: cleanId };
+    }
   };
 
   const handleDrillUp = () => {
@@ -494,15 +514,16 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
         columns={TABLE_COLUMNS}
         loading={loading}
         emptyMessage={`Nenhum${drillLevel === "uf" ? " estado" : drillLevel === "city" ? "a cidade" : " bairro"} encontrado no período selecionado`}
-        onRowClick={drillLevel !== "neighborhood" ? handleDrillDown : handleOpenDetail}
+        onRowClick={drillLevel !== "neighborhood" ? handleDrillDown : undefined}
+        onDetailClick={handleOpenDetail}
       />
 
       {/* Drill hint */}
       {!loading && classifiedItems.length > 0 && (
         <p className="text-sm text-muted-foreground text-center">
           {drillLevel !== "neighborhood" 
-            ? `Clique em uma linha para ver ${drillLevel === "uf" ? "as cidades" : "os bairros"}`
-            : "Clique em um bairro para ver produtos, clientes e pedidos"
+            ? `Clique em uma linha para navegar, ou no ícone 👁 para ver detalhes`
+            : "Clique no ícone 👁 para ver produtos, clientes e pedidos"
           }
         </p>
       )}
@@ -526,11 +547,7 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
       <AbcGeographicDetailDrawer
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
-        location={selectedGeoItem ? {
-          uf: selectedUf || selectedGeoItem.id,
-          city: drillLevel === "neighborhood" ? selectedCity || undefined : undefined,
-          neighborhood: drillLevel === "neighborhood" ? selectedGeoItem.id : undefined,
-        } : null}
+        location={getLocationForDrawer()}
         locationName={selectedGeoItem?.name || ""}
         classification={selectedGeoItem?.classification || "C"}
         sellerId={sellerId}

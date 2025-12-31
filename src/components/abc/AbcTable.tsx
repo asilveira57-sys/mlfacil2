@@ -9,8 +9,9 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { ArrowUpDown, ArrowUp, ArrowDown, Eye } from "lucide-react";
 
 export interface AbcItem {
   id: string;
@@ -43,6 +44,7 @@ interface AbcTableProps {
   loading?: boolean;
   emptyMessage?: string;
   onRowClick?: (item: AbcItem) => void;
+  onDetailClick?: (item: AbcItem) => void;
 }
 
 const formatValue = (value: number, format?: string): string => {
@@ -80,6 +82,7 @@ export function AbcTable({
   loading,
   emptyMessage = "Nenhum dado encontrado",
   onRowClick,
+  onDetailClick,
 }: AbcTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
@@ -168,6 +171,7 @@ export function AbcTable({
             <TableHead className="text-right">% Part.</TableHead>
             <TableHead className="text-right">% Acum.</TableHead>
             <TableHead className="w-20 text-center">Classe</TableHead>
+            {onDetailClick && <TableHead className="w-16"></TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -217,6 +221,22 @@ export function AbcTable({
               <TableCell className="text-center">
                 {getClassBadge(item.classification)}
               </TableCell>
+              {onDetailClick && (
+                <TableCell className="text-center">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDetailClick(item);
+                    }}
+                    title="Ver detalhes"
+                  >
+                    <Eye className="h-4 w-4" />
+                  </Button>
+                </TableCell>
+              )}
             </TableRow>
           ))}
         </TableBody>
