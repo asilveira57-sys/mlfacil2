@@ -45,6 +45,7 @@ export interface OrderItemSummary {
   variation_id: string | null;
   sku: string | null;
   title_short: string | null;
+  title: string | null;
   quantity: number;
   unit_price: number;
 }
@@ -436,7 +437,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       
       const { data: items, error } = await supabase
         .from('meli_order_items_cache')
-        .select('order_id, item_id, variation_id, sku, title_short, quantity, unit_price')
+        .select('order_id, item_id, variation_id, sku, title_short, title, quantity, unit_price')
         .eq('seller_id', sellerId)
         .in('order_id', orderIds);
 
@@ -454,6 +455,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
           variation_id: item.variation_id,
           sku: item.sku,
           title_short: item.title_short,
+          title: item.title,
           quantity: item.quantity,
           unit_price: item.unit_price,
         });
