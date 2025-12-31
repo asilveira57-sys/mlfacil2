@@ -3,6 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { SalesMetricsCard } from "./SalesMetricsCard";
 import { SalesChart } from "./SalesChart";
 import { TopProductsTable } from "./TopProductsTable";
+import { DashboardFilters } from "./DashboardFilters";
+import { OnboardingSync } from "./OnboardingSync";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,13 +14,9 @@ import {
   Package,
   RefreshCw,
   AlertCircle,
-  CloudDownload,
-  CheckCircle,
-  Database,
-  AlertTriangle,
+  XCircle,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { Progress } from "@/components/ui/progress";
 
 interface DailySale {
   date: string;
@@ -33,6 +31,11 @@ interface Product {
   revenue: number;
 }
 
+interface AvailableMonth {
+  key: string;
+  label: string;
+}
+
 interface SalesMetrics {
   totalRevenue: number;
   totalOrders: number;
@@ -42,8 +45,15 @@ interface SalesMetrics {
   orders7d: number;
   revenue30d: number;
   orders30d: number;
+  revenuePeriod: number;
+  ordersPeriod: number;
   averageTicket: number;
   averageTicket30d: number;
+  averageTicketPeriod: number;
+  cancelledOrders: number;
+  cancelledRevenue: number;
+  cancelledOrdersPeriod: number;
+  cancelledRevenuePeriod: number;
 }
 
 interface DebugInfo {
@@ -58,6 +68,7 @@ interface SalesData {
   metrics: SalesMetrics;
   dailySales: DailySale[];
   topProducts: Product[];
+  availableMonths: AvailableMonth[];
   seller: {
     nickname: string;
     email: string;
@@ -70,6 +81,11 @@ interface SyncJob {
   status: string;
   total_records: number;
   processed_records: number;
+}
+
+interface DateFilter {
+  dateFrom: string | null;
+  dateTo: string | null;
 }
 
 const formatCurrency = (value: number) => {
@@ -86,15 +102,20 @@ export function SalesDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sellerId, setSellerId] = useState<string | null>(null);
+  const [dateFilter, setDateFilter] = useState<DateFilter>({ dateFrom: null, dateTo: null });
   const { toast } = useToast();
 
-  // Sync state
+  // Sync state for onboarding
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncJob, setSyncJob] = useState<SyncJob | null>(null);
+  const [isFirstLoad, setIsFirstLoad] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
-  const fetchSalesData = async (attempt = 0): Promise<void> => {
+  const fetchSalesData = useCallback(async (filters?: DateFilter, attempt = 0): Promise<void> => {
     setIsLoading(true);
     if (attempt === 0) setError(null);
+
+    const currentFilters = filters || dateFilter;
 
     try {
       let { data: { session } } = await supabase.auth.getSession();
@@ -102,14 +123,14 @@ export function SalesDashboard() {
       if (!session) {
         if (attempt < 2) {
           await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
-          return fetchSalesData(attempt + 1);
+          return fetchSalesData(currentFilters, attempt + 1);
         }
         setError("Sessão expirada. Faça login novamente.");
         setIsLoading(false);
         return;
       }
 
-      // Also fetch seller_id from ml_accounts
+      // Fetch seller_id from ml_accounts
       const { data: accounts } = await supabase
         .from('ml_accounts')
         .select('ml_user_id')
@@ -122,7 +143,11 @@ export function SalesDashboard() {
       }
 
       let response = await supabase.functions.invoke("ml-sales-data", {
-        headers: { Authorization: `Bearer ${session.access_token}` }
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: {
+          date_from: currentFilters.dateFrom,
+          date_to: currentFilters.dateTo,
+        },
       });
 
       if (response.error?.message?.includes('401') || response.error?.status === 401) {
@@ -131,7 +156,7 @@ export function SalesDashboard() {
         if (refreshError || !refreshData.session) {
           if (attempt < 2) {
             await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
-            return fetchSalesData(attempt + 1);
+            return fetchSalesData(currentFilters, attempt + 1);
           }
           setError("Sessão expirada. Faça login novamente.");
           setIsLoading(false);
@@ -140,7 +165,11 @@ export function SalesDashboard() {
         
         session = refreshData.session;
         response = await supabase.functions.invoke("ml-sales-data", {
-          headers: { Authorization: `Bearer ${session.access_token}` }
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          body: {
+            date_from: currentFilters.dateFrom,
+            date_to: currentFilters.dateTo,
+          },
         });
       }
 
@@ -159,11 +188,20 @@ export function SalesDashboard() {
       }
 
       setSalesData(response.data);
+
+      // Check if this is a new account that needs onboarding sync
+      const debug = response.data?._debug;
+      if (isFirstLoad && debug?.cachedOrdersCount === 0 && accounts?.[0]) {
+        setShowOnboarding(true);
+        startAutoSync(accounts[0].ml_user_id, session.access_token);
+      }
+      setIsFirstLoad(false);
+
     } catch (err: any) {
       console.error("Error fetching sales data:", err);
       if (attempt < 2) {
         await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
-        return fetchSalesData(attempt + 1);
+        return fetchSalesData(currentFilters, attempt + 1);
       }
       const errorMsg = err?.message || "Erro ao carregar dados de vendas";
       setError(errorMsg);
@@ -175,31 +213,17 @@ export function SalesDashboard() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [dateFilter, isFirstLoad, toast]);
 
-  // Sync orders function
-  const syncOrders = useCallback(async () => {
-    if (!sellerId) {
-      toast({
-        title: "Erro",
-        description: "Conta ML não encontrada",
-        variant: "destructive",
-      });
-      return;
-    }
-
+  // Auto-sync for new accounts
+  const startAutoSync = async (sellerIdParam: string, accessToken: string) => {
     setIsSyncing(true);
     setSyncJob(null);
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error("Sessão expirada");
-      }
-
       const response = await supabase.functions.invoke("ml-sync-orders", {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        body: { seller_id: sellerId }
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: { seller_id: sellerIdParam }
       });
 
       if (response.error) {
@@ -207,24 +231,14 @@ export function SalesDashboard() {
       }
 
       if (response.data?.job_id) {
-        toast({
-          title: "Sincronização iniciada",
-          description: "Os pedidos estão sendo sincronizados em background",
-        });
-        
-        // Start polling for job status
         pollJobStatus(response.data.job_id);
       }
     } catch (err: any) {
-      console.error("Error syncing orders:", err);
+      console.error("Error auto-syncing orders:", err);
       setIsSyncing(false);
-      toast({
-        title: "Erro ao sincronizar",
-        description: err?.message || "Não foi possível iniciar a sincronização",
-        variant: "destructive",
-      });
+      setShowOnboarding(false);
     }
-  }, [sellerId, toast]);
+  };
 
   // Poll job status
   const pollJobStatus = useCallback(async (jobId: string) => {
@@ -244,27 +258,32 @@ export function SalesDashboard() {
 
       if (data.status === 'done') {
         setIsSyncing(false);
-        toast({
-          title: "Sincronização concluída",
-          description: `${data.processed_records} pedidos sincronizados`,
-        });
-        // Refresh sales data
-        fetchSalesData();
+        // Wait a moment then hide onboarding and refresh data
+        setTimeout(() => {
+          setShowOnboarding(false);
+          fetchSalesData();
+        }, 1500);
       } else if (data.status === 'error') {
         setIsSyncing(false);
+        setShowOnboarding(false);
         toast({
           title: "Erro na sincronização",
           description: "Ocorreu um erro durante a sincronização",
           variant: "destructive",
         });
       } else {
-        // Continue polling
         setTimeout(poll, 2000);
       }
     };
 
     poll();
-  }, [toast]);
+  }, [fetchSalesData, toast]);
+
+  // Handle filter change
+  const handleFilterChange = (filter: DateFilter) => {
+    setDateFilter(filter);
+    fetchSalesData(filter);
+  };
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -275,6 +294,23 @@ export function SalesDashboard() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Show onboarding sync screen
+  if (showOnboarding) {
+    const progress = syncJob && syncJob.total_records > 0 
+      ? (syncJob.processed_records / syncJob.total_records) * 100 
+      : 0;
+
+    return (
+      <OnboardingSync
+        sellerNickname={salesData?.seller?.nickname}
+        progress={progress}
+        processedRecords={syncJob?.processed_records || 0}
+        totalRecords={syncJob?.total_records || 0}
+        status={syncJob?.status || "processing"}
+      />
+    );
+  }
 
   if (error === "connect") {
     return (
@@ -303,13 +339,7 @@ export function SalesDashboard() {
   }
 
   const metrics = salesData?.metrics;
-  const debug = salesData?._debug;
-  const syncProgress = syncJob && syncJob.total_records > 0 
-    ? (syncJob.processed_records / syncJob.total_records) * 100 
-    : 0;
-
-  // Check if sync is needed
-  const needsSync = debug && (debug.cachedOrdersCount === 0 || debug.itemsSyncedPercent < 50);
+  const hasDateFilter = dateFilter.dateFrom !== null;
 
   return (
     <div className="space-y-6">
@@ -324,142 +354,77 @@ export function SalesDashboard() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="default"
-            size="sm"
-            onClick={syncOrders}
-            disabled={isSyncing || !sellerId}
-          >
-            {isSyncing ? (
-              <>
-                <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                Sincronizando...
-              </>
-            ) : (
-              <>
-                <CloudDownload className="w-4 h-4 mr-2" />
-                Sincronizar Pedidos
-              </>
-            )}
-          </Button>
+          <DashboardFilters
+            availableMonths={salesData?.availableMonths || []}
+            onFilterChange={handleFilterChange}
+            isLoading={isLoading}
+          />
           <Button
             variant="outline"
-            size="sm"
+            size="icon"
             onClick={() => fetchSalesData()}
             disabled={isLoading}
           >
-            <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
-            Atualizar
+            <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
           </Button>
         </div>
       </div>
 
-      {/* Sync Progress */}
-      {isSyncing && syncJob && (
-        <Card className="p-4">
-          <div className="flex items-center gap-4">
-            <RefreshCw className="w-5 h-5 animate-spin text-primary" />
-            <div className="flex-1">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium">Sincronizando pedidos...</span>
-                <span className="text-sm text-muted-foreground">
-                  {syncJob.processed_records} / {syncJob.total_records}
-                </span>
-              </div>
-              <Progress value={syncProgress} className="h-2" />
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* Sync Complete Notice */}
-      {!isSyncing && syncJob?.status === 'done' && (
-        <Card className="p-4 border-green-500/30 bg-green-500/5">
-          <div className="flex items-center gap-3">
-            <CheckCircle className="w-5 h-5 text-green-500" />
-            <span className="text-sm font-medium text-green-700 dark:text-green-400">
-              Sincronização concluída: {syncJob.processed_records} pedidos e items atualizados
-            </span>
-          </div>
-        </Card>
-      )}
-
-      {/* Sync Needed Warning */}
-      {!isSyncing && !isLoading && needsSync && (
-        <Card className="p-4 border-amber-500/30 bg-amber-500/5">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <AlertTriangle className="w-5 h-5 text-amber-500" />
-              <span className="text-sm font-medium text-amber-700 dark:text-amber-400">
-                {debug?.cachedOrdersCount === 0 
-                  ? "Nenhum pedido sincronizado. Clique em 'Sincronizar Pedidos' para carregar os dados."
-                  : `Apenas ${debug?.itemsSyncedPercent}% dos pedidos têm itens sincronizados. Sincronize para ver dados completos.`
-                }
-              </span>
-            </div>
-            <Button size="sm" variant="outline" onClick={syncOrders} disabled={!sellerId}>
-              <CloudDownload className="w-4 h-4 mr-2" />
-              Sincronizar
-            </Button>
-          </div>
-        </Card>
-      )}
-
-      {/* Debug/Validation Indicators */}
-      {debug && !isLoading && (
-        <Card className="p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Database className="w-4 h-4 text-muted-foreground" />
-            <span className="text-sm font-medium text-muted-foreground">Indicadores de Cache</span>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="text-center p-3 bg-muted/50 rounded-lg">
-              <div className="text-2xl font-bold text-foreground">{debug.cachedOrdersCount}</div>
-              <div className="text-xs text-muted-foreground">Pedidos no Cache</div>
-            </div>
-            <div className="text-center p-3 bg-muted/50 rounded-lg">
-              <div className="text-2xl font-bold text-foreground">{debug.cachedItemsCount}</div>
-              <div className="text-xs text-muted-foreground">Itens no Cache</div>
-            </div>
-            <div className="text-center p-3 bg-muted/50 rounded-lg">
-              <div className="text-2xl font-bold text-foreground">{debug.ordersWithItemsSynced || 0}</div>
-              <div className="text-xs text-muted-foreground">Pedidos c/ Itens</div>
-            </div>
-            <div className="text-center p-3 bg-muted/50 rounded-lg">
-              <div className={`text-2xl font-bold ${debug.itemsSyncedPercent >= 80 ? 'text-green-500' : debug.itemsSyncedPercent >= 50 ? 'text-amber-500' : 'text-red-500'}`}>
-                {debug.itemsSyncedPercent || 0}%
-              </div>
-              <div className="text-xs text-muted-foreground">% Itens Sync</div>
-            </div>
-          </div>
-        </Card>
-      )}
-
       {/* Metrics Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+        {/* Show period metrics when filter is active, otherwise show default */}
+        {hasDateFilter ? (
+          <>
+            <SalesMetricsCard
+              title="Receita Período"
+              value={isLoading ? "..." : formatCurrency(metrics?.revenuePeriod || 0)}
+              subtitle={`${metrics?.ordersPeriod || 0} pedidos`}
+              icon={<DollarSign className="w-6 h-6 text-primary" />}
+            />
+            <SalesMetricsCard
+              title="Ticket Médio"
+              value={isLoading ? "..." : formatCurrency(metrics?.averageTicketPeriod || 0)}
+              subtitle="período selecionado"
+              icon={<Package className="w-6 h-6 text-primary" />}
+            />
+          </>
+        ) : (
+          <>
+            <SalesMetricsCard
+              title="Receita Hoje"
+              value={isLoading ? "..." : formatCurrency(metrics?.revenueToday || 0)}
+              subtitle={`${metrics?.ordersToday || 0} pedidos`}
+              icon={<DollarSign className="w-6 h-6 text-primary" />}
+            />
+            <SalesMetricsCard
+              title="Receita 7 Dias"
+              value={isLoading ? "..." : formatCurrency(metrics?.revenue7d || 0)}
+              subtitle={`${metrics?.orders7d || 0} pedidos`}
+              icon={<TrendingUp className="w-6 h-6 text-primary" />}
+            />
+            <SalesMetricsCard
+              title="Receita 30 Dias"
+              value={isLoading ? "..." : formatCurrency(metrics?.revenue30d || 0)}
+              subtitle={`${metrics?.orders30d || 0} pedidos`}
+              icon={<ShoppingCart className="w-6 h-6 text-primary" />}
+            />
+            <SalesMetricsCard
+              title="Ticket Médio"
+              value={isLoading ? "..." : formatCurrency(metrics?.averageTicket30d || 0)}
+              subtitle="últimos 30 dias"
+              icon={<Package className="w-6 h-6 text-primary" />}
+            />
+          </>
+        )}
+
+        {/* Cancelled/Refunded Card - Always visible */}
         <SalesMetricsCard
-          title="Receita Hoje"
-          value={isLoading ? "..." : formatCurrency(metrics?.revenueToday || 0)}
-          subtitle={`${metrics?.ordersToday || 0} pedidos`}
-          icon={<DollarSign className="w-6 h-6 text-primary" />}
-        />
-        <SalesMetricsCard
-          title="Receita 7 Dias"
-          value={isLoading ? "..." : formatCurrency(metrics?.revenue7d || 0)}
-          subtitle={`${metrics?.orders7d || 0} pedidos`}
-          icon={<TrendingUp className="w-6 h-6 text-primary" />}
-        />
-        <SalesMetricsCard
-          title="Receita 30 Dias"
-          value={isLoading ? "..." : formatCurrency(metrics?.revenue30d || 0)}
-          subtitle={`${metrics?.orders30d || 0} pedidos`}
-          icon={<ShoppingCart className="w-6 h-6 text-primary" />}
-        />
-        <SalesMetricsCard
-          title="Ticket Médio"
-          value={isLoading ? "..." : formatCurrency(metrics?.averageTicket30d || 0)}
-          subtitle="últimos 30 dias"
-          icon={<Package className="w-6 h-6 text-primary" />}
+          title="Cancelados"
+          value={isLoading ? "..." : formatCurrency(
+            hasDateFilter ? (metrics?.cancelledRevenuePeriod || 0) : (metrics?.cancelledRevenue || 0)
+          )}
+          subtitle={`${hasDateFilter ? (metrics?.cancelledOrdersPeriod || 0) : (metrics?.cancelledOrders || 0)} pedidos`}
+          icon={<XCircle className="w-6 h-6 text-destructive" />}
         />
       </div>
 
