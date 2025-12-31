@@ -10,6 +10,7 @@ import Dashboard from "./pages/Dashboard";
 import ShippingLabels from "./pages/ShippingLabels";
 import LabelHeaderSettings from "./pages/LabelHeaderSettings";
 import ZPLConverter from "./pages/ZPLConverter";
+import AbcAnalysis from "./pages/AbcAnalysis";
 import NotFound from "./pages/NotFound";
 
 const App = () => {
@@ -28,6 +29,7 @@ const App = () => {
             <Route path="/shipping-labels" element={<ShippingLabels />} />
             <Route path="/shipping-labels/header-settings" element={<LabelHeaderSettings />} />
             <Route path="/zpl-converter" element={<ZPLConverter />} />
+            <Route path="/abc-analysis" element={<AbcAnalysis />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
