@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Search, AlertCircle, TrendingUp, TrendingDown, RefreshCw, ExternalLink } from 'lucide-react';
+import { Search, AlertCircle, TrendingUp, TrendingDown, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface CostOrdersProps {
@@ -21,6 +21,8 @@ interface OrderCost {
   shipment_id: string | null;
   revenue_total: number;
   cost_total: number;
+  cost_fees: number;
+  cost_shipping: number;
   profit_total: number;
   margin_percent: number;
   missing_cost_items_count: number;
@@ -34,6 +36,7 @@ interface OrderDetail {
   order: any;
   items: any[];
   breakdown: any;
+  billing: any;
   missing_costs: number;
 }
 
@@ -115,7 +118,16 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
 
       if (response.ok) {
         const data = await response.json();
-        setSelectedOrder(data);
+        
+        // Also fetch billing data for this order
+        const { data: billing } = await supabase
+          .from('meli_order_financials_cache')
+          .select('*')
+          .eq('seller_id', sellerId)
+          .eq('order_id', orderId)
+          .maybeSingle();
+
+        setSelectedOrder({ ...data, billing });
       }
     } catch (error) {
       console.error('Error loading order detail:', error);
@@ -135,6 +147,11 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
       month: '2-digit',
       year: '2-digit',
     });
+  };
+
+  // Check if order has real billing data
+  const hasRealData = (order: OrderCost) => {
+    return (order.cost_fees > 0 || order.cost_shipping > 0);
   };
 
   return (
@@ -258,14 +275,21 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                             {order.margin_percent.toFixed(1)}%
                           </TableCell>
                           <TableCell>
-                            {order.status === 'ok' ? (
-                              <Badge variant="outline" className="text-green-600 border-green-600">OK</Badge>
-                            ) : (
-                              <Badge variant="destructive" className="flex items-center gap-1 w-fit">
-                                <AlertCircle className="h-3 w-3" />
-                                {order.missing_cost_items_count} s/ custo
-                              </Badge>
-                            )}
+                            <div className="flex items-center gap-1">
+                              {order.status === 'ok' ? (
+                                <Badge variant="outline" className="text-green-600 border-green-600">OK</Badge>
+                              ) : (
+                                <Badge variant="destructive" className="flex items-center gap-1 w-fit">
+                                  <AlertCircle className="h-3 w-3" />
+                                  {order.missing_cost_items_count} s/ custo
+                                </Badge>
+                              )}
+                              {hasRealData(order) && (
+                                <span title="Dados reais do ML">
+                                  <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                                </span>
+                              )}
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))
@@ -293,7 +317,15 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Detalhes do Pedido</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              Detalhes do Pedido
+              {selectedOrder?.billing && (
+                <Badge variant="outline" className="text-green-600 border-green-600">
+                  <CheckCircle2 className="h-3 w-3 mr-1" />
+                  Dados Reais
+                </Badge>
+              )}
+            </DialogTitle>
           </DialogHeader>
 
           {loadingDetail ? (
@@ -357,8 +389,21 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                 <div className="bg-muted/50 rounded-lg p-4">
                   <h4 className="font-medium mb-3">Resumo Financeiro</h4>
                   <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div>Receita:</div>
-                    <div className="text-right font-medium">{formatCurrency(selectedOrder.breakdown.revenue_total)}</div>
+                    <div>Receita Produtos:</div>
+                    <div className="text-right font-medium">{formatCurrency(selectedOrder.order?.total_amount || 0)}</div>
+
+                    {selectedOrder.billing?.revenue_shipping > 0 && (
+                      <>
+                        <div className="flex items-center gap-1">
+                          (+) Receita Frete:
+                          <CheckCircle2 className="h-3 w-3 text-green-600" />
+                        </div>
+                        <div className="text-right text-green-600">{formatCurrency(selectedOrder.billing.revenue_shipping)}</div>
+                      </>
+                    )}
+
+                    <div className="border-t pt-2 font-medium">Receita Total:</div>
+                    <div className="text-right border-t pt-2 font-medium">{formatCurrency(selectedOrder.breakdown.revenue_total)}</div>
 
                     <div>(-) Custo dos Itens:</div>
                     <div className="text-right">{formatCurrency(selectedOrder.breakdown.cost_items_total)}</div>
@@ -366,14 +411,50 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                     <div>(-) Embalagem:</div>
                     <div className="text-right">{formatCurrency(selectedOrder.breakdown.cost_packaging)}</div>
 
-                    <div>(-) Taxa Marketplace:</div>
-                    <div className="text-right">{formatCurrency(selectedOrder.breakdown.cost_fees)}</div>
+                    {selectedOrder.billing ? (
+                      <>
+                        <div className="flex items-center gap-1">
+                          (-) Tarifa de Venda:
+                          <CheckCircle2 className="h-3 w-3 text-green-600" />
+                        </div>
+                        <div className="text-right">{formatCurrency(selectedOrder.billing.cost_sale_fee || 0)}</div>
 
-                    <div>(-) Frete:</div>
-                    <div className="text-right">{formatCurrency(selectedOrder.breakdown.cost_shipping)}</div>
+                        {selectedOrder.billing.cost_installment_fee > 0 && (
+                          <>
+                            <div className="flex items-center gap-1">
+                              (-) Taxa Parcelamento:
+                              <CheckCircle2 className="h-3 w-3 text-green-600" />
+                            </div>
+                            <div className="text-right">{formatCurrency(selectedOrder.billing.cost_installment_fee)}</div>
+                          </>
+                        )}
 
-                    <div>(-) Outros Custos:</div>
-                    <div className="text-right">{formatCurrency(selectedOrder.breakdown.cost_other)}</div>
+                        {selectedOrder.billing.cost_shipping_fee > 0 && (
+                          <>
+                            <div className="flex items-center gap-1">
+                              (-) Custo de Frete:
+                              <CheckCircle2 className="h-3 w-3 text-green-600" />
+                            </div>
+                            <div className="text-right">{formatCurrency(selectedOrder.billing.cost_shipping_fee)}</div>
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-1 text-muted-foreground">
+                          (-) Tarifas ML:
+                          <Badge variant="outline" className="text-xs">Sem dados</Badge>
+                        </div>
+                        <div className="text-right text-muted-foreground">-</div>
+                      </>
+                    )}
+
+                    {selectedOrder.breakdown.cost_other > 0 && (
+                      <>
+                        <div>(-) Outros Custos:</div>
+                        <div className="text-right">{formatCurrency(selectedOrder.breakdown.cost_other)}</div>
+                      </>
+                    )}
 
                     <div className="border-t pt-2 font-medium">Custo Total:</div>
                     <div className="text-right border-t pt-2 font-medium text-destructive">

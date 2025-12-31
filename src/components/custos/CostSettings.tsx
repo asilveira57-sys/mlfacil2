@@ -6,7 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Save, Package, Percent, Calculator } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Save, Package, Calculator, RefreshCw, CheckCircle2, CloudOff } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface CostSettingsProps {
@@ -18,20 +19,26 @@ interface Settings {
     default_packaging_cost: number;
     packaging_cost_mode: 'por_pedido' | 'por_item';
   };
-  fees: {
-    fee_mode: 'percentual' | 'fixo' | 'misto';
-    fee_percent_default: number;
-    fee_fixed_default: number;
-  };
+}
+
+interface BillingStatus {
+  total_orders: number;
+  orders_with_billing: number;
+  last_sync: string | null;
 }
 
 export function CostSettings({ sellerId }: CostSettingsProps) {
   const [settings, setSettings] = useState<Settings>({
     packaging: { default_packaging_cost: 0, packaging_cost_mode: 'por_pedido' },
-    fees: { fee_mode: 'percentual', fee_percent_default: 16, fee_fixed_default: 0 },
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [billingStatus, setBillingStatus] = useState<BillingStatus>({
+    total_orders: 0,
+    orders_with_billing: 0,
+    last_sync: null,
+  });
 
   const loadSettings = async () => {
     setLoading(true);
@@ -51,18 +58,50 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
             default_packaging_cost: data.packaging?.default_packaging_cost || 0,
             packaging_cost_mode: data.packaging?.packaging_cost_mode || 'por_pedido',
           },
-          fees: {
-            fee_mode: data.fees?.fee_mode || 'percentual',
-            fee_percent_default: data.fees?.fee_percent_default || 16,
-            fee_fixed_default: data.fees?.fee_fixed_default || 0,
-          },
         });
       }
+
+      // Load billing status
+      await loadBillingStatus(session.access_token);
+
     } catch (error) {
       console.error('Error loading settings:', error);
       toast.error('Erro ao carregar configurações');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadBillingStatus = async (accessToken: string) => {
+    try {
+      // Count orders
+      const { count: totalOrders } = await supabase
+        .from('meli_orders_cache')
+        .select('*', { count: 'exact', head: true })
+        .eq('seller_id', sellerId)
+        .eq('order_status', 'paid');
+
+      // Count orders with billing data
+      const { count: ordersWithBilling } = await supabase
+        .from('meli_order_financials_cache')
+        .select('*', { count: 'exact', head: true })
+        .eq('seller_id', sellerId);
+
+      // Get last sync
+      const { data: lastSync } = await supabase
+        .from('meli_order_financials_cache')
+        .select('synced_at')
+        .eq('seller_id', sellerId)
+        .order('synced_at', { ascending: false })
+        .limit(1);
+
+      setBillingStatus({
+        total_orders: totalOrders || 0,
+        orders_with_billing: ordersWithBilling || 0,
+        last_sync: lastSync?.[0]?.synced_at || null,
+      });
+    } catch (error) {
+      console.error('Error loading billing status:', error);
     }
   };
 
@@ -89,7 +128,6 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
           body: JSON.stringify({
             seller_id: sellerId,
             packaging: settings.packaging,
-            fees: settings.fees,
           }),
         }
       );
@@ -106,6 +144,67 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     }
   };
 
+  const handleSyncBilling = async () => {
+    setSyncing(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const response = await supabase.functions.invoke('ml-sync-billing', {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: { seller_id: sellerId, months: 6 },
+      });
+
+      if (response.data?.job_id) {
+        toast.success('Sincronização de dados financeiros iniciada');
+        
+        // Poll for completion
+        const pollInterval = setInterval(async () => {
+          const { data: job } = await supabase
+            .from('sync_jobs')
+            .select('status')
+            .eq('id', response.data.job_id)
+            .single();
+
+          if (job?.status === 'done' || job?.status === 'error') {
+            clearInterval(pollInterval);
+            setSyncing(false);
+            if (job.status === 'done') {
+              toast.success('Dados financeiros sincronizados');
+              loadBillingStatus(session.access_token);
+            } else {
+              toast.error('Erro na sincronização');
+            }
+          }
+        }, 2000);
+
+        // Timeout after 2 minutes
+        setTimeout(() => {
+          clearInterval(pollInterval);
+          setSyncing(false);
+        }, 120000);
+      } else {
+        toast.error('Erro ao iniciar sincronização');
+        setSyncing(false);
+      }
+    } catch (error) {
+      console.error('Error syncing billing:', error);
+      toast.error('Erro ao sincronizar dados financeiros');
+      setSyncing(false);
+    }
+  };
+
+  const formatDate = (date: string | null) => {
+    if (!date) return 'Nunca';
+    return new Date(date).toLocaleString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
   if (loading) {
     return (
       <div className="space-y-4">
@@ -115,8 +214,68 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     );
   }
 
+  const billingCoverage = billingStatus.total_orders > 0
+    ? Math.round((billingStatus.orders_with_billing / billingStatus.total_orders) * 100)
+    : 0;
+
   return (
     <div className="space-y-6">
+      {/* Billing Sync Status Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <CheckCircle2 className="h-5 w-5" />
+            Dados Financeiros do Mercado Livre
+          </CardTitle>
+          <CardDescription>
+            Os custos da venda (tarifa, frete, parcelamento) são obtidos automaticamente da API do ML
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Última sincronização:</span>
+                <span className="text-sm font-medium">{formatDate(billingStatus.last_sync)}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Cobertura:</span>
+                <span className="text-sm font-medium">
+                  {billingStatus.orders_with_billing} de {billingStatus.total_orders} pedidos
+                </span>
+                {billingCoverage >= 80 ? (
+                  <Badge variant="outline" className="text-green-600 border-green-600">
+                    {billingCoverage}% com dados reais
+                  </Badge>
+                ) : billingCoverage > 0 ? (
+                  <Badge variant="outline" className="text-amber-600 border-amber-600">
+                    {billingCoverage}% com dados reais
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-muted-foreground">
+                    <CloudOff className="h-3 w-3 mr-1" />
+                    Sem dados
+                  </Badge>
+                )}
+              </div>
+            </div>
+            <Button 
+              variant="outline" 
+              onClick={handleSyncBilling} 
+              disabled={syncing}
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
+              {syncing ? 'Sincronizando...' : 'Sincronizar Agora'}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Os dados financeiros são sincronizados automaticamente ao conectar sua conta. 
+            Use o botão acima para buscar dados mais recentes.
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Packaging Cost Card */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -171,89 +330,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Percent className="h-5 w-5" />
-            Taxa do Marketplace
-          </CardTitle>
-          <CardDescription>
-            Configure a taxa do Mercado Livre para cálculo de custos
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <Label>Tipo de taxa</Label>
-            <RadioGroup
-              value={settings.fees.fee_mode}
-              onValueChange={(value: 'percentual' | 'fixo' | 'misto') =>
-                setSettings(s => ({
-                  ...s,
-                  fees: { ...s.fees, fee_mode: value },
-                }))
-              }
-              className="mt-2"
-            >
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="percentual" id="percentual" />
-                <Label htmlFor="percentual" className="font-normal">Percentual sobre a venda</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="fixo" id="fixo" />
-                <Label htmlFor="fixo" className="font-normal">Valor fixo por venda</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="misto" id="misto" />
-                <Label htmlFor="misto" className="font-normal">Percentual + valor fixo</Label>
-              </div>
-            </RadioGroup>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            {(settings.fees.fee_mode === 'percentual' || settings.fees.fee_mode === 'misto') && (
-              <div>
-                <Label htmlFor="feePercent">Taxa percentual (%)</Label>
-                <Input
-                  id="feePercent"
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  max="100"
-                  value={settings.fees.fee_percent_default}
-                  onChange={(e) =>
-                    setSettings(s => ({
-                      ...s,
-                      fees: { ...s.fees, fee_percent_default: parseFloat(e.target.value) || 0 },
-                    }))
-                  }
-                  className="mt-1"
-                />
-              </div>
-            )}
-
-            {(settings.fees.fee_mode === 'fixo' || settings.fees.fee_mode === 'misto') && (
-              <div>
-                <Label htmlFor="feeFixed">Taxa fixa (R$)</Label>
-                <Input
-                  id="feeFixed"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={settings.fees.fee_fixed_default}
-                  onChange={(e) =>
-                    setSettings(s => ({
-                      ...s,
-                      fees: { ...s.fees, fee_fixed_default: parseFloat(e.target.value) || 0 },
-                    }))
-                  }
-                  className="mt-1"
-                />
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
+      {/* Preview Card */}
       <Card className="bg-muted/50">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -274,16 +351,8 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
                 </strong>
               </li>
               <li>
-                Taxa marketplace: <strong>
-                  R$ {(
-                    (settings.fees.fee_mode === 'percentual' || settings.fees.fee_mode === 'misto'
-                      ? (100 * settings.fees.fee_percent_default) / 100
-                      : 0) +
-                    (settings.fees.fee_mode === 'fixo' || settings.fees.fee_mode === 'misto'
-                      ? settings.fees.fee_fixed_default
-                      : 0)
-                  ).toFixed(2)}
-                </strong>
+                Tarifas ML: <Badge variant="outline" className="ml-1 text-green-600 border-green-600">Dados Reais</Badge>
+                <span className="text-xs ml-1">(busca automática da API)</span>
               </li>
             </ul>
           </div>

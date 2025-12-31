@@ -458,16 +458,15 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
     const dateFromStr = dateFrom.toISOString();
 
     // Get settings
-    const [{ data: packaging }, { data: fees }] = await Promise.all([
-      supabase.from('packaging_cost_settings').select('*').eq('seller_id', sellerId).eq('user_id', userId).maybeSingle(),
-      supabase.from('marketplace_fee_rules').select('*').eq('seller_id', sellerId).eq('user_id', userId).maybeSingle(),
-    ]);
+    const { data: packaging } = await supabase
+      .from('packaging_cost_settings')
+      .select('*')
+      .eq('seller_id', sellerId)
+      .eq('user_id', userId)
+      .maybeSingle();
 
     const packagingCost = packaging?.default_packaging_cost || 0;
     const packagingMode = packaging?.packaging_cost_mode || 'por_pedido';
-    const feeMode = fees?.fee_mode || 'percentual';
-    const feePercent = fees?.fee_percent_default || 16;
-    const feeFixed = fees?.fee_fixed_default || 0;
 
     // Get all paid orders
     const { data: orders, error: ordersError } = await supabase
@@ -489,55 +488,75 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
       .eq('seller_id', sellerId)
       .in('order_id', orderIds);
 
-  // Get all product costs
-  const { data: costs } = await supabase
-    .from('product_cost_catalog')
-    .select('product_key, cost_value')
-    .eq('seller_id', sellerId);
+    // Get all product costs
+    const { data: costs } = await supabase
+      .from('product_cost_catalog')
+      .select('product_key, cost_value')
+      .eq('seller_id', sellerId);
 
-  const costMap = new Map<string, number>((costs || []).map((c: any) => [c.product_key, Number(c.cost_value) || 0]));
+    const costMap = new Map<string, number>((costs || []).map((c: any) => [c.product_key, Number(c.cost_value) || 0]));
 
-  // Group items by order
-  const itemsByOrder = new Map<string, any[]>();
-  for (const item of allItems || []) {
-    const key = item.product_key || `${item.item_id}:${item.variation_id || ''}`;
-    const itemWithKey = { ...item, product_key: key };
-    if (!itemsByOrder.has(item.order_id)) {
-      itemsByOrder.set(item.order_id, []);
-    }
-    itemsByOrder.get(item.order_id)!.push(itemWithKey);
-  }
+    // Get real billing data from ML
+    const { data: financials } = await supabase
+      .from('meli_order_financials_cache')
+      .select('order_id, revenue_products, revenue_shipping, cost_sale_fee, cost_shipping_fee, cost_installment_fee, cost_cancellations')
+      .eq('seller_id', sellerId)
+      .in('order_id', orderIds);
 
-  // Calculate for each order
-  const breakdowns: any[] = [];
+    const financialsMap = new Map<string, any>(
+      (financials || []).map((f: any) => [f.order_id, f])
+    );
+    console.log(`[cost-engine] Found ${financials?.length || 0} orders with real billing data`);
 
-  for (const order of orders || []) {
-    const items = itemsByOrder.get(order.order_id) || [];
-    let costItemsTotal = 0;
-    let missingCount = 0;
-
-    for (const item of items) {
-      const unitCost = costMap.get(item.product_key) || 0;
-      costItemsTotal += unitCost * item.quantity;
-      if (unitCost === 0) {
-        missingCount++;
+    // Group items by order
+    const itemsByOrder = new Map<string, any[]>();
+    for (const item of allItems || []) {
+      const key = item.product_key || `${item.item_id}:${item.variation_id || ''}`;
+      const itemWithKey = { ...item, product_key: key };
+      if (!itemsByOrder.has(item.order_id)) {
+        itemsByOrder.set(item.order_id, []);
       }
+      itemsByOrder.get(item.order_id)!.push(itemWithKey);
     }
 
-      const revenue = Number(order.total_amount) || 0;
+    // Calculate for each order
+    const breakdowns: any[] = [];
+
+    for (const order of orders || []) {
+      const items = itemsByOrder.get(order.order_id) || [];
+      const billing = financialsMap.get(order.order_id);
+      
+      let costItemsTotal = 0;
+      let missingCount = 0;
+
+      for (const item of items) {
+        const unitCost = costMap.get(item.product_key) || 0;
+        costItemsTotal += unitCost * item.quantity;
+        if (unitCost === 0) {
+          missingCount++;
+        }
+      }
+
+      const baseRevenue = Number(order.total_amount) || 0;
       const itemCount = items.reduce((sum: number, i: any) => sum + i.quantity, 0);
       const costPackaging = packagingMode === 'por_item' ? packagingCost * itemCount : packagingCost;
       
+      // Use real billing data if available, otherwise estimate at 0 (no more manual fee config)
       let costFees = 0;
-      if (feeMode === 'percentual') {
-        costFees = revenue * (feePercent / 100);
-      } else if (feeMode === 'fixo') {
-        costFees = feeFixed;
-      } else if (feeMode === 'misto') {
-        costFees = revenue * (feePercent / 100) + feeFixed;
+      let costShipping = 0;
+      let revenueShipping = 0;
+
+      if (billing) {
+        // Real data from ML billing API
+        costFees = (billing.cost_sale_fee || 0) + (billing.cost_installment_fee || 0);
+        costShipping = billing.cost_shipping_fee || 0;
+        revenueShipping = billing.revenue_shipping || 0;
       }
 
-      const costTotal = costItemsTotal + costPackaging + costFees;
+      // Total revenue includes shipping paid by buyer
+      const revenue = baseRevenue + revenueShipping;
+
+      const costTotal = costItemsTotal + costPackaging + costFees + costShipping;
       const profit = revenue - costTotal;
       const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
 
@@ -551,7 +570,7 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
         cost_items_total: costItemsTotal,
         cost_packaging: costPackaging,
         cost_fees: costFees,
-        cost_shipping: 0,
+        cost_shipping: costShipping,
         cost_other: 0,
         cost_total: costTotal,
         profit_total: profit,

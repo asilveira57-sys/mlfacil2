@@ -47,3 +47,6 @@ verify_jwt = false
 
 [functions.cost-engine]
 verify_jwt = false
+
+[functions.ml-sync-billing]
+verify_jwt = false
