@@ -13,6 +13,7 @@ import { Eye, Loader2, ArrowUp, ArrowDown, ArrowUpDown, Package } from 'lucide-r
 import { ShippingOrder, SortField, SortDirection, OrderItemSummary } from '@/hooks/useShippingLabels';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { getFinalStatus } from '@/lib/shippingStatusMap';
 
 interface ShippingTableProps {
   orders: ShippingOrder[];
@@ -168,7 +169,7 @@ export function ShippingTable({
         </TableHeader>
         <TableBody>
           {orders.map((order) => {
-            const statusBadge = STATUS_BADGES[order.final_status || 'outros'];
+            const statusInfo = getFinalStatus(order.final_status);
             const items = orderItems.get(order.order_id);
             const itemsSummary = buildItemsSummary(items);
             
@@ -205,10 +206,11 @@ export function ShippingTable({
                 </TableCell>
                 <TableCell>
                   <Badge 
-                    variant={statusBadge?.variant || 'outline'}
-                    className={statusBadge?.className}
+                    variant={statusInfo.badgeVariant}
+                    className={statusInfo.className}
+                    title={statusInfo.description}
                   >
-                    {statusBadge?.label || order.final_status || '-'}
+                    {statusInfo.label}
                   </Badge>
                 </TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
