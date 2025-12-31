@@ -3,6 +3,7 @@ import { AbcFilters, AbcConfig } from "@/pages/AbcAnalysis";
 import { AbcTable, AbcItem } from "./AbcTable";
 import { AbcSummaryCards, createCustomersSummary } from "./AbcSummaryCards";
 import { AbcParetoChart } from "./AbcParetoChart";
+import { AbcCustomerDetailDrawer } from "./AbcCustomerDetailDrawer";
 import { useAbcAnalysis, AbcIndicator } from "@/hooks/useAbcAnalysis";
 import { Button } from "@/components/ui/button";
 import { Download, Users, TrendingUp, DollarSign } from "lucide-react";
@@ -34,6 +35,8 @@ const TABLE_COLUMNS = [
 
 export function AbcCustomersTab({ sellerId, filters, config }: AbcCustomersTabProps) {
   const [indicator, setIndicator] = useState<AbcIndicator>("revenue");
+  const [selectedItem, setSelectedItem] = useState<AbcItem | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const { items, loading, error, totals, refetch } = useAbcAnalysis({
     sellerId,
@@ -70,6 +73,12 @@ export function AbcCustomersTab({ sellerId, filters, config }: AbcCustomersTabPr
     link.download = `curva-abc-clientes-${new Date().toISOString().split("T")[0]}.csv`;
     link.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleRowClick = (item: AbcItem) => {
+    // Extract buyer_nickname from the item id (which is the buyer_nickname)
+    setSelectedItem(item);
+    setDrawerOpen(true);
   };
 
   const summaryCards = createCustomersSummary({
@@ -134,7 +143,15 @@ export function AbcCustomersTab({ sellerId, filters, config }: AbcCustomersTabPr
         columns={TABLE_COLUMNS}
         loading={loading}
         emptyMessage="Nenhum cliente encontrado no período selecionado"
+        onRowClick={handleRowClick}
       />
+
+      {/* Hint for clicking */}
+      {!loading && items.length > 0 && (
+        <p className="text-sm text-muted-foreground text-center">
+          Clique em um cliente para ver pedidos e produtos comprados
+        </p>
+      )}
 
       {/* Class distribution summary */}
       {!loading && items.length > 0 && (
@@ -150,6 +167,18 @@ export function AbcCustomersTab({ sellerId, filters, config }: AbcCustomersTabPr
           </span>
         </div>
       )}
+
+      {/* Customer Detail Drawer */}
+      <AbcCustomerDetailDrawer
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
+        buyerNickname={selectedItem?.id || null}
+        buyerName={selectedItem?.name || ""}
+        classification={selectedItem?.classification || "C"}
+        sellerId={sellerId}
+        dateFrom={filters.dateFrom}
+        dateTo={filters.dateTo}
+      />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { AbcFilters, AbcConfig } from "@/pages/AbcAnalysis";
 import { AbcTable, AbcItem } from "./AbcTable";
 import { AbcSummaryCards } from "./AbcSummaryCards";
 import { AbcParetoChart } from "./AbcParetoChart";
+import { AbcGeographicDetailDrawer } from "./AbcGeographicDetailDrawer";
 import { AbcIndicator } from "@/hooks/useAbcAnalysis";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -103,6 +104,10 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [enrichmentStatus, setEnrichmentStatus] = useState<string | null>(null);
+
+  // Drawer state for geographic details
+  const [selectedGeoItem, setSelectedGeoItem] = useState<AbcItem | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -318,6 +323,11 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
     }
   };
 
+  const handleOpenDetail = (item: AbcItem) => {
+    setSelectedGeoItem(item);
+    setDrawerOpen(true);
+  };
+
   const handleDrillUp = () => {
     if (drillLevel === "neighborhood") {
       setSelectedCity(null);
@@ -484,13 +494,16 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
         columns={TABLE_COLUMNS}
         loading={loading}
         emptyMessage={`Nenhum${drillLevel === "uf" ? " estado" : drillLevel === "city" ? "a cidade" : " bairro"} encontrado no período selecionado`}
-        onRowClick={drillLevel !== "neighborhood" ? handleDrillDown : undefined}
+        onRowClick={drillLevel !== "neighborhood" ? handleDrillDown : handleOpenDetail}
       />
 
       {/* Drill hint */}
-      {!loading && classifiedItems.length > 0 && drillLevel !== "neighborhood" && (
+      {!loading && classifiedItems.length > 0 && (
         <p className="text-sm text-muted-foreground text-center">
-          Clique em uma linha para ver {drillLevel === "uf" ? "as cidades" : "os bairros"}
+          {drillLevel !== "neighborhood" 
+            ? `Clique em uma linha para ver ${drillLevel === "uf" ? "as cidades" : "os bairros"}`
+            : "Clique em um bairro para ver produtos, clientes e pedidos"
+          }
         </p>
       )}
 
@@ -508,6 +521,22 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
           </span>
         </div>
       )}
+
+      {/* Geographic Detail Drawer */}
+      <AbcGeographicDetailDrawer
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
+        location={selectedGeoItem ? {
+          uf: selectedUf || selectedGeoItem.id,
+          city: drillLevel === "neighborhood" ? selectedCity || undefined : undefined,
+          neighborhood: drillLevel === "neighborhood" ? selectedGeoItem.id : undefined,
+        } : null}
+        locationName={selectedGeoItem?.name || ""}
+        classification={selectedGeoItem?.classification || "C"}
+        sellerId={sellerId}
+        dateFrom={filters.dateFrom}
+        dateTo={filters.dateTo}
+      />
     </div>
   );
 }
