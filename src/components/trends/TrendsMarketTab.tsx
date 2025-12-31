@@ -10,7 +10,7 @@ import { useMarketTrends, useMarketHighlights } from '@/hooks/useTrendsApi';
 
 // Common ML categories
 const CATEGORIES = [
-  { id: '', label: 'Todas (Geral)' },
+  { id: 'all', label: 'Todas (Geral)' },
   { id: 'MLB5672', label: 'Acessórios para Veículos' },
   { id: 'MLB1051', label: 'Celulares e Telefones' },
   { id: 'MLB1648', label: 'Computadores' },
@@ -27,11 +27,12 @@ const CATEGORIES = [
 ];
 
 export function TrendsMarketTab() {
-  const [categoryId, setCategoryId] = useState('');
+  const [categoryId, setCategoryId] = useState('all');
   const [searchKeyword, setSearchKeyword] = useState('');
 
-  const { data: trends, isLoading: trendsLoading } = useMarketTrends('MLB', categoryId || undefined);
-  const { data: highlights, isLoading: highlightsLoading } = useMarketHighlights('MLB', categoryId || undefined);
+  const actualCategoryId = categoryId === 'all' ? undefined : categoryId;
+  const { data: trends, isLoading: trendsLoading } = useMarketTrends('MLB', actualCategoryId);
+  const { data: highlights, isLoading: highlightsLoading } = useMarketHighlights('MLB', actualCategoryId);
 
   const filteredTrends = trends?.trends?.filter(t => 
     !searchKeyword || t.keyword.toLowerCase().includes(searchKeyword.toLowerCase())
@@ -142,7 +143,7 @@ export function TrendsMarketTab() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {!categoryId ? (
+            {categoryId === 'all' ? (
               <div className="text-center py-8">
                 <Package className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                 <p className="text-muted-foreground">Selecione uma categoria para ver os mais vendidos</p>
