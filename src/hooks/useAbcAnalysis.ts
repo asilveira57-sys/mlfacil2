@@ -28,7 +28,7 @@ interface AbcAnalysisResult {
 }
 
 function classifyItems(
-  items: Array<{ id: string; name: string; subtitle?: string; value: number; orders?: number; units?: number; revenue?: number }>,
+  items: Array<{ id: string; name: string; subtitle?: string; value: number; orders: number; units: number; revenue: number }>,
   config: AbcConfig
 ): AbcItem[] {
   const total = items.reduce((sum, item) => sum + item.value, 0);
@@ -59,8 +59,9 @@ function classifyItems(
       name: item.name,
       subtitle: item.subtitle,
       value: item.value,
-      secondaryValue: item.orders,
-      tertiaryValue: item.units,
+      orders: item.orders,
+      units: item.units,
+      revenue: item.revenue,
       percentage,
       cumulative,
       classification,

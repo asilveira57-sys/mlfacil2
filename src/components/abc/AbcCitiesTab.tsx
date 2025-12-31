@@ -82,8 +82,9 @@ function classifyItems(
       name: `${item.name} (${item.orders})`,
       subtitle: undefined,
       value,
-      secondaryValue: item.orders,
-      tertiaryValue: item.units,
+      orders: item.orders,
+      units: item.units,
+      revenue: item.revenue,
       percentage,
       cumulative,
       classification,
@@ -334,9 +335,9 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
     const rows = classifiedItems.map(item => [
       item.rank,
       item.name,
-      item.secondaryValue || 0,
-      item.tertiaryValue || 0,
-      item.value,
+      item.orders,
+      item.units,
+      item.revenue,
       item.percentage.toFixed(2),
       item.cumulative.toFixed(2),
       item.classification,
@@ -392,9 +393,9 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
   };
 
   const TABLE_COLUMNS = [
-    { key: "secondaryValue", label: "Pedidos", format: "number" as const, align: "right" as const },
-    { key: "tertiaryValue", label: "Unidades", format: "number" as const, align: "right" as const },
-    { key: "value", label: "Valor", format: "currency" as const, align: "right" as const },
+    { key: "orders" as const, label: "Pedidos", format: "number" as const, align: "right" as const, sortable: true },
+    { key: "units" as const, label: "Unidades", format: "number" as const, align: "right" as const, sortable: true },
+    { key: "revenue" as const, label: "Valor", format: "currency" as const, align: "right" as const, sortable: true },
   ];
 
   return (

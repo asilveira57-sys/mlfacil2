@@ -26,9 +26,9 @@ const INDICATOR_OPTIONS: { value: AbcIndicator; label: string; icon: React.React
 ];
 
 const TABLE_COLUMNS = [
-  { key: "tertiaryValue", label: "Unidades", format: "number" as const, align: "right" as const },
-  { key: "secondaryValue", label: "Pedidos", format: "number" as const, align: "right" as const },
-  { key: "value", label: "Faturamento", format: "currency" as const, align: "right" as const },
+  { key: "orders" as const, label: "Pedidos", format: "number" as const, align: "right" as const, sortable: true },
+  { key: "units" as const, label: "Unidades", format: "number" as const, align: "right" as const, sortable: true },
+  { key: "revenue" as const, label: "Valor Total", format: "currency" as const, align: "right" as const, sortable: true },
 ];
 
 export function AbcProductsTab({ sellerId, filters, config }: AbcProductsTabProps) {
@@ -45,14 +45,14 @@ export function AbcProductsTab({ sellerId, filters, config }: AbcProductsTabProp
   const handleExportCSV = () => {
     if (items.length === 0) return;
 
-    const headers = ["Rank", "Produto", "SKU", "Unidades", "Pedidos", "Faturamento", "% Participação", "% Acumulado", "Classe"];
+    const headers = ["Rank", "Produto", "SKU", "Pedidos", "Unidades", "Valor Total", "% Participação", "% Acumulado", "Classe"];
     const rows = items.map(item => [
       item.rank,
       item.name,
       item.subtitle || "",
-      item.tertiaryValue || 0,
-      item.secondaryValue || 0,
-      item.value,
+      item.orders,
+      item.units,
+      item.revenue,
       item.percentage.toFixed(2),
       item.cumulative.toFixed(2),
       item.classification,
@@ -74,22 +74,11 @@ export function AbcProductsTab({ sellerId, filters, config }: AbcProductsTabProp
 
   const summaryCards = createProductsSummary({
     totalProducts: totals.totalItems,
-    totalUnits: items.reduce((sum, i) => sum + (i.tertiaryValue || 0), 0),
+    totalUnits: items.reduce((sum, i) => sum + i.units, 0),
     totalRevenue: totals.totalValue,
     classACount: totals.classACount,
   });
 
-  // Update columns based on indicator
-  const dynamicColumns = TABLE_COLUMNS.map(col => {
-    if (col.key === "value") {
-      return {
-        ...col,
-        label: indicator === "revenue" ? "Faturamento" : indicator === "units" ? "Unidades" : "Pedidos",
-        format: indicator === "revenue" ? "currency" as const : "number" as const,
-      };
-    }
-    return col;
-  });
 
   return (
     <div className="space-y-6">
@@ -133,7 +122,7 @@ export function AbcProductsTab({ sellerId, filters, config }: AbcProductsTabProp
       {/* ABC Table */}
       <AbcTable
         items={items}
-        columns={dynamicColumns}
+        columns={TABLE_COLUMNS}
         loading={loading}
         emptyMessage="Nenhum produto encontrado no período selecionado"
       />

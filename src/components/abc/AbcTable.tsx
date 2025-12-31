@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Table,
   TableBody,
@@ -9,6 +10,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 
 export interface AbcItem {
   id: string;
@@ -16,19 +18,24 @@ export interface AbcItem {
   name: string;
   subtitle?: string;
   value: number;
-  secondaryValue?: number;
-  tertiaryValue?: number;
+  orders: number;
+  units: number;
+  revenue: number;
   percentage: number;
   cumulative: number;
   classification: "A" | "B" | "C";
 }
 
 interface AbcTableColumn {
-  key: string;
+  key: "units" | "orders" | "revenue";
   label: string;
   format?: "number" | "currency" | "percent";
   align?: "left" | "center" | "right";
+  sortable?: boolean;
 }
+
+type SortDirection = "asc" | "desc" | null;
+type SortKey = "units" | "orders" | "revenue" | null;
 
 interface AbcTableProps {
   items: AbcItem[];
@@ -74,6 +81,46 @@ export function AbcTable({
   emptyMessage = "Nenhum dado encontrado",
   onRowClick,
 }: AbcTableProps) {
+  const [sortKey, setSortKey] = useState<SortKey>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>(null);
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      if (sortDirection === "desc") {
+        setSortDirection("asc");
+      } else if (sortDirection === "asc") {
+        setSortKey(null);
+        setSortDirection(null);
+      }
+    } else {
+      setSortKey(key);
+      setSortDirection("desc");
+    }
+  };
+
+  const sortedItems = [...items].sort((a, b) => {
+    if (!sortKey || !sortDirection) {
+      return a.rank - b.rank;
+    }
+    
+    const aValue = a[sortKey];
+    const bValue = b[sortKey];
+    
+    if (sortDirection === "desc") {
+      return bValue - aValue;
+    }
+    return aValue - bValue;
+  });
+
+  const SortIcon = ({ columnKey }: { columnKey: SortKey }) => {
+    if (sortKey !== columnKey) {
+      return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />;
+    }
+    return sortDirection === "desc" 
+      ? <ArrowDown className="h-4 w-4 ml-1" />
+      : <ArrowUp className="h-4 w-4 ml-1" />;
+  };
+
   if (loading) {
     return (
       <div className="space-y-2">
@@ -104,10 +151,18 @@ export function AbcTable({
                 key={col.key}
                 className={cn(
                   col.align === "right" && "text-right",
-                  col.align === "center" && "text-center"
+                  col.align === "center" && "text-center",
+                  col.sortable !== false && "cursor-pointer select-none hover:bg-muted/80"
                 )}
+                onClick={() => col.sortable !== false && handleSort(col.key)}
               >
-                {col.label}
+                <div className={cn(
+                  "flex items-center",
+                  col.align === "right" && "justify-end"
+                )}>
+                  {col.label}
+                  {col.sortable !== false && <SortIcon columnKey={col.key} />}
+                </div>
               </TableHead>
             ))}
             <TableHead className="text-right">% Part.</TableHead>
@@ -116,7 +171,7 @@ export function AbcTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {items.map((item) => (
+          {sortedItems.map((item, index) => (
             <TableRow
               key={item.id}
               className={cn(
@@ -128,7 +183,7 @@ export function AbcTable({
               onClick={() => onRowClick?.(item)}
             >
               <TableCell className="text-center font-medium text-muted-foreground">
-                {item.rank}
+                {sortKey ? index + 1 : item.rank}
               </TableCell>
               <TableCell>
                 <div>
@@ -139,11 +194,7 @@ export function AbcTable({
                 </div>
               </TableCell>
               {columns.map((col) => {
-                let value: number;
-                if (col.key === "value") value = item.value;
-                else if (col.key === "secondaryValue") value = item.secondaryValue || 0;
-                else if (col.key === "tertiaryValue") value = item.tertiaryValue || 0;
-                else value = 0;
+                const value = item[col.key];
 
                 return (
                   <TableCell
