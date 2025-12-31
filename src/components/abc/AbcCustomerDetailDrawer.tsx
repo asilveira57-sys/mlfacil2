@@ -211,12 +211,12 @@ export function AbcCustomerDetailDrawer({
                 <User className="h-5 w-5" />
                 {buyerName}
               </DrawerTitle>
-              <DrawerDescription className="flex items-center gap-4">
+              <div className="flex items-center gap-4 text-sm text-muted-foreground">
                 {getClassBadge(classification)}
                 <span>{totals.orders} pedidos</span>
                 <span>{totals.products} produtos</span>
                 <span className="font-medium">{formatCurrency(totals.revenue)}</span>
-              </DrawerDescription>
+              </div>
             </div>
           </div>
         </DrawerHeader>

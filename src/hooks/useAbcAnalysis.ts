@@ -157,7 +157,10 @@ export function useAbcAnalysis({
         }>();
 
         (itemsData || []).forEach(item => {
-          const key = item.product_key || item.title || "unknown";
+          // Use product_key if not empty, otherwise use title_short or title
+          const key = (item.product_key && item.product_key.trim() !== "") 
+            ? item.product_key 
+            : (item.title_short || item.title || "unknown");
           const existing = productMap.get(key);
           
           if (existing) {

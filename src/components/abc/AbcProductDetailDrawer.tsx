@@ -78,21 +78,58 @@ export function AbcProductDetailDrawer({
     setLoading(true);
 
     try {
-      // Fetch orders containing this product
-      let query = supabase
-        .from("meli_order_items_cache")
-        .select(`
-          order_id,
-          quantity,
-          unit_price,
-          created_at_meli
-        `)
-        .eq("seller_id", sellerId)
-        .eq("product_key", productKey);
+      // Determine if productKey is an actual product_key or a title_short fallback
+      // If it's a short title (contains spaces or special chars), search by title_short
+      const isLikelyTitle = productKey.includes(" ") || productKey.length > 20;
+      
+      let query;
+      if (isLikelyTitle) {
+        // Search by title_short (for products with empty product_key)
+        query = supabase
+          .from("meli_order_items_cache")
+          .select(`
+            order_id,
+            quantity,
+            unit_price,
+            created_at_meli
+          `)
+          .eq("seller_id", sellerId)
+          .eq("title_short", productKey);
+      } else {
+        // Search by product_key first, then fallback to title_short
+        query = supabase
+          .from("meli_order_items_cache")
+          .select(`
+            order_id,
+            quantity,
+            unit_price,
+            created_at_meli
+          `)
+          .eq("seller_id", sellerId)
+          .eq("product_key", productKey);
+      }
 
-      const { data: items, error: itemsError } = await query;
+      let { data: items, error: itemsError } = await query;
 
       if (itemsError) throw itemsError;
+
+      // If no items found with product_key, try with title_short
+      if ((!items || items.length === 0) && !isLikelyTitle) {
+        const { data: fallbackItems, error: fallbackError } = await supabase
+          .from("meli_order_items_cache")
+          .select(`
+            order_id,
+            quantity,
+            unit_price,
+            created_at_meli
+          `)
+          .eq("seller_id", sellerId)
+          .eq("title_short", productKey);
+        
+        if (!fallbackError) {
+          items = fallbackItems;
+        }
+      }
 
       if (!items || items.length === 0) {
         setOrders([]);
@@ -103,7 +140,7 @@ export function AbcProductDetailDrawer({
       }
 
       // Get unique order IDs
-      const orderIds = [...new Set(items.map((i) => i.order_id))];
+      const orderIds = [...new Set(items.map((i) => i.order_id))] as string[];
 
       // Fetch order details
       let ordersQuery = supabase
@@ -217,12 +254,12 @@ export function AbcProductDetailDrawer({
                 <Package className="h-5 w-5" />
                 {productName}
               </DrawerTitle>
-              <DrawerDescription className="flex items-center gap-4">
+              <div className="flex items-center gap-4 text-sm text-muted-foreground">
                 {getClassBadge(classification)}
                 <span>{totals.orders} pedidos</span>
                 <span>{totals.units} unidades</span>
                 <span className="font-medium">{formatCurrency(totals.revenue)}</span>
-              </DrawerDescription>
+              </div>
             </div>
           </div>
         </DrawerHeader>
