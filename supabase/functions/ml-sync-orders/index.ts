@@ -27,6 +27,7 @@ interface MLItemDetails {
   id: string;
   permalink?: string;
   catalog_product_id?: string;
+  thumbnail?: string;
 }
 
 interface MLOrder {
@@ -169,6 +170,7 @@ async function processOrdersInBackground(
       created_at_meli: string;
       permalink: string | null;
       catalog_product_id: string | null;
+      thumbnail: string | null;
     }
     const allOrderItems: OrderItemData[] = [];
 
@@ -199,7 +201,7 @@ async function processOrdersInBackground(
       
       try {
         const itemsResponse = await fetch(
-          `https://api.mercadolibre.com/items?ids=${idsParam}&attributes=id,permalink,catalog_product_id`,
+          `https://api.mercadolibre.com/items?ids=${idsParam}&attributes=id,permalink,catalog_product_id,thumbnail`,
           {
             headers: {
               'Authorization': `Bearer ${accessToken}`,
@@ -215,6 +217,7 @@ async function processOrdersInBackground(
                 id: result.body.id,
                 permalink: result.body.permalink || null,
                 catalog_product_id: result.body.catalog_product_id || null,
+                thumbnail: result.body.thumbnail || null,
               });
             }
           }
@@ -274,6 +277,7 @@ async function processOrdersInBackground(
               created_at_meli: order.date_created,
               permalink: itemDetails?.permalink || null,
               catalog_product_id: itemDetails?.catalog_product_id || null,
+              thumbnail: itemDetails?.thumbnail || null,
             });
 
             itemCount += quantity;
@@ -361,6 +365,7 @@ async function processOrdersInBackground(
           last_sync_at: new Date().toISOString(),
           permalink: item.permalink,
           catalog_product_id: item.catalog_product_id,
+          thumbnail: item.thumbnail,
         }));
 
         const { error: itemsUpsertError } = await supabaseAdmin
