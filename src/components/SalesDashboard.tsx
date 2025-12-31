@@ -493,36 +493,35 @@ export function SalesDashboard() {
         />
       </div>
 
-      {/* Charts - 30 days */}
+      {/* Charts Layout: Stacked charts on left, Top Products on right */}
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
+        {/* Left column: Stacked charts */}
+        <div className="lg:col-span-2 space-y-6">
           <SalesChart 
             data={salesData?.dailySales || []} 
             isLoading={isLoading} 
           />
+          <AnnualSalesChart
+            data={salesData?.monthlySales || []}
+            isLoading={isLoading}
+            title="Vendas Anuais (12 meses)"
+            colorScheme="primary"
+          />
+          <AnnualSalesChart
+            data={salesData?.monthlyCancelled || []}
+            isLoading={isLoading}
+            title="Cancelamentos/Devoluções Anuais"
+            colorScheme="destructive"
+          />
         </div>
+        
+        {/* Right column: Top Products */}
         <div className="lg:col-span-1">
           <TopProductsTable 
             products={salesData?.topProducts || []} 
             isLoading={isLoading} 
           />
         </div>
-      </div>
-
-      {/* Annual Charts */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <AnnualSalesChart
-          data={salesData?.monthlySales || []}
-          isLoading={isLoading}
-          title="Vendas Anuais (12 meses)"
-          colorScheme="primary"
-        />
-        <AnnualSalesChart
-          data={salesData?.monthlyCancelled || []}
-          isLoading={isLoading}
-          title="Cancelamentos/Devoluções Anuais"
-          colorScheme="destructive"
-        />
       </div>
     </div>
   );
