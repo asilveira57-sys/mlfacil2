@@ -157,6 +157,7 @@ export function SalesDashboard() {
   const [syncJob, setSyncJob] = useState<SyncJob | null>(null);
   const [isFirstLoad, setIsFirstLoad] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [syncPhase, setSyncPhase] = useState<1 | 2 | 3>(1);
 
   const fetchSalesData = useCallback(async (filters?: DateFilter, attempt = 0): Promise<void> => {
     setIsLoading(true);
@@ -240,7 +241,7 @@ export function SalesDashboard() {
       const debug = response.data?._debug;
       if (isFirstLoad && debug?.cachedOrdersCount === 0 && accounts?.[0]) {
         setShowOnboarding(true);
-        startAutoSync(accounts[0].ml_user_id, session.access_token);
+        startProgressiveSync(accounts[0].ml_user_id, session.access_token);
       }
       setIsFirstLoad(false);
 
@@ -262,69 +263,126 @@ export function SalesDashboard() {
     }
   }, [dateFilter, isFirstLoad, toast]);
 
-  // Auto-sync for new accounts
-  const startAutoSync = async (sellerIdParam: string, accessToken: string) => {
+  // Helper to wait for a job to complete
+  const waitForJobCompletion = useCallback(async (jobId: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      const poll = async () => {
+        const { data, error } = await supabase
+          .from('sync_jobs')
+          .select('id, status, total_records, processed_records')
+          .eq('id', jobId)
+          .maybeSingle();
+
+        if (error || !data) {
+          resolve(false);
+          return;
+        }
+
+        setSyncJob(data);
+
+        if (data.status === 'done') {
+          resolve(true);
+        } else if (data.status === 'error') {
+          resolve(false);
+        } else {
+          setTimeout(poll, 1500);
+        }
+      };
+      poll();
+    });
+  }, []);
+
+  // Progressive sync for new accounts: 7d -> 30d -> 1 year
+  const startProgressiveSync = async (sellerIdParam: string, accessToken: string) => {
     setIsSyncing(true);
     setSyncJob(null);
+    setSyncPhase(1);
+
+    const today = new Date();
+    const formatDate = (d: Date, time: string) => 
+      `${d.toISOString().split('T')[0]}T${time}-03:00`;
+
+    const dateTo = formatDate(today, '23:59:59.999');
+
+    // Phase dates
+    const sevenDaysAgo = new Date(today);
+    sevenDaysAgo.setDate(today.getDate() - 7);
+
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setDate(today.getDate() - 30);
+
+    const oneYearAgo = new Date(today);
+    oneYearAgo.setFullYear(today.getFullYear() - 1);
 
     try {
-      const response = await supabase.functions.invoke("ml-sync-orders", {
+      // PHASE 1: Sync last 7 days (fast - user sees data quickly)
+      console.log("[Progressive Sync] Phase 1: Last 7 days");
+      setSyncPhase(1);
+      
+      const phase1Response = await supabase.functions.invoke("ml-sync-orders", {
         headers: { Authorization: `Bearer ${accessToken}` },
-        body: { seller_id: sellerIdParam }
+        body: { 
+          seller_id: sellerIdParam,
+          date_from: formatDate(sevenDaysAgo, '00:00:00.000'),
+          date_to: dateTo
+        }
       });
 
-      if (response.error) {
-        throw response.error;
+      if (phase1Response.data?.job_id) {
+        await waitForJobCompletion(phase1Response.data.job_id);
       }
 
-      if (response.data?.job_id) {
-        pollJobStatus(response.data.job_id);
-      }
-    } catch (err: any) {
-      console.error("Error auto-syncing orders:", err);
-      setIsSyncing(false);
+      // Show dashboard with 7 days of data
+      console.log("[Progressive Sync] Phase 1 complete - showing dashboard");
       setShowOnboarding(false);
+      setIsSyncing(false);
+      fetchSalesData();
+
+      // PHASE 2: Sync 30 days (background, updates UI)
+      console.log("[Progressive Sync] Phase 2: Last 30 days");
+      setSyncPhase(2);
+      
+      const phase2Response = await supabase.functions.invoke("ml-sync-orders", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: { 
+          seller_id: sellerIdParam,
+          date_from: formatDate(thirtyDaysAgo, '00:00:00.000'),
+          date_to: dateTo
+        }
+      });
+
+      if (phase2Response.data?.job_id) {
+        await waitForJobCompletion(phase2Response.data.job_id);
+        console.log("[Progressive Sync] Phase 2 complete - refreshing data");
+        fetchSalesData(); // Update with more data
+      }
+
+      // PHASE 3: Sync 1 full year (silent background)
+      console.log("[Progressive Sync] Phase 3: Last 1 year");
+      setSyncPhase(3);
+      
+      const phase3Response = await supabase.functions.invoke("ml-sync-orders", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: { 
+          seller_id: sellerIdParam,
+          date_from: formatDate(oneYearAgo, '00:00:00.000'),
+          date_to: dateTo
+        }
+      });
+
+      if (phase3Response.data?.job_id) {
+        await waitForJobCompletion(phase3Response.data.job_id);
+        console.log("[Progressive Sync] Phase 3 complete - full year synced");
+        fetchSalesData(); // Full data available
+      }
+
+    } catch (err: any) {
+      console.error("Error in progressive sync:", err);
+      setShowOnboarding(false);
+    } finally {
+      setIsSyncing(false);
     }
   };
-
-  // Poll job status
-  const pollJobStatus = useCallback(async (jobId: string) => {
-    const poll = async () => {
-      const { data, error } = await supabase
-        .from('sync_jobs')
-        .select('id, status, total_records, processed_records')
-        .eq('id', jobId)
-        .maybeSingle();
-
-      if (error || !data) {
-        setIsSyncing(false);
-        return;
-      }
-
-      setSyncJob(data);
-
-      if (data.status === 'done') {
-        setIsSyncing(false);
-        // Wait a moment then hide onboarding and refresh data
-        setTimeout(() => {
-          setShowOnboarding(false);
-          fetchSalesData();
-        }, 1500);
-      } else if (data.status === 'error') {
-        setIsSyncing(false);
-        setShowOnboarding(false);
-        toast({
-          title: "Erro na sincronização",
-          description: "Ocorreu um erro durante a sincronização",
-          variant: "destructive",
-        });
-      } else {
-        setTimeout(poll, 2000);
-      }
-    };
-
-    poll();
-  }, [fetchSalesData, toast]);
 
   // Handle filter change
   const handleFilterChange = (filter: DateFilter) => {
@@ -355,6 +413,7 @@ export function SalesDashboard() {
         processedRecords={syncJob?.processed_records || 0}
         totalRecords={syncJob?.total_records || 0}
         status={syncJob?.status || "processing"}
+        phase={syncPhase}
       />
     );
   }
