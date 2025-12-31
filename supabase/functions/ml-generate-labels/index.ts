@@ -232,7 +232,7 @@ serve(async (req) => {
 
     console.log('Authenticated user:', user.id);
 
-    const { seller_id, shipment_ids, format } = await req.json();
+    const { seller_id, shipment_ids, format, layout = 'meli_100x150' } = await req.json();
     
     if (!seller_id || !shipment_ids || shipment_ids.length === 0) {
       return new Response(
@@ -248,7 +248,14 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Generating ${format} labels for seller: ${seller_id}, shipments: ${shipment_ids.length}`);
+    if (!['meli_100x150', 'mlfacil_100x175_header'].includes(layout)) {
+      return new Response(
+        JSON.stringify({ error: 'layout must be meli_100x150 or mlfacil_100x175_header' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log(`Generating ${format} labels (layout: ${layout}) for seller: ${seller_id}, shipments: ${shipment_ids.length}`);
 
     // Get ML account with access token
     const { data: mlAccount, error: mlError } = await supabaseAdmin
@@ -354,6 +361,7 @@ serve(async (req) => {
         user_id: user.id,
         seller_id: seller_id,
         format: format,
+        layout: layout,
         shipment_ids: validShipmentIds,
         total_labels: validShipmentIds.length,
         processed_labels: 0,

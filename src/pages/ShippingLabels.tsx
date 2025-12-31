@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Package } from 'lucide-react';
-import { useShippingLabels, ShippingOrder } from '@/hooks/useShippingLabels';
+import { useShippingLabels, ShippingOrder, LabelLayout } from '@/hooks/useShippingLabels';
 import { ShippingFilters } from '@/components/shipping/ShippingFilters';
 import { ShippingTable } from '@/components/shipping/ShippingTable';
 import { ShippingPagination } from '@/components/shipping/ShippingPagination';
@@ -59,6 +59,7 @@ export default function ShippingLabels() {
     sortField,
     sortDirection,
     toggleSort,
+    orderItems,
   } = useShippingLabels({ sellerId: mlAccount?.ml_user_id || null });
 
   useEffect(() => {
@@ -108,6 +109,14 @@ export default function ShippingLabels() {
   const handleViewDetails = (order: ShippingOrder) => {
     setSelectedOrder(order);
     setDrawerOpen(true);
+  };
+
+  const handleGenerateLabels = (format: 'pdf' | 'zpl', layout: LabelLayout) => {
+    generateLabels({ format, layout });
+  };
+
+  const handleReprintLabel = (shipmentId: string, format: 'pdf' | 'zpl') => {
+    generateLabels({ format, layout: 'meli_100x150', shipmentId });
   };
 
   if (loading) {
@@ -178,6 +187,7 @@ export default function ShippingLabels() {
           sortField={sortField}
           sortDirection={sortDirection}
           onToggleSort={toggleSort}
+          orderItems={orderItems}
         />
 
         {/* Pagination */}
@@ -194,8 +204,7 @@ export default function ShippingLabels() {
       <BulkActionsBar
         selectedCount={selectedIds.size}
         onClear={clearSelection}
-        onGeneratePDF={() => generateLabels({ format: 'pdf' })}
-        onGenerateZPL={() => generateLabels({ format: 'zpl' })}
+        onGenerateLabels={handleGenerateLabels}
         isGenerating={isGenerating}
         generationProgress={generationProgress}
       />
@@ -205,7 +214,7 @@ export default function ShippingLabels() {
         order={selectedOrder}
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
-        onReprint={(shipmentId, format) => generateLabels({ format, shipmentId })}
+        onReprint={handleReprintLabel}
         isGenerating={isGenerating}
       />
     </div>

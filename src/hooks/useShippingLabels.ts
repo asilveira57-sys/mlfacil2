@@ -40,6 +40,17 @@ export interface ShippingOrder {
   logistic_type: string | null;
 }
 
+export interface OrderItemSummary {
+  item_id: string;
+  variation_id: string | null;
+  sku: string | null;
+  title_short: string | null;
+  quantity: number;
+  unit_price: number;
+}
+
+export type LabelLayout = 'meli_100x150' | 'mlfacil_100x175_header';
+
 export interface PrintQueueEntry {
   id: string;
   seller_id: string;
@@ -414,6 +425,48 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const totalCount = ordersData?.totalCount ?? 0;
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
+  // Fetch order items for displayed orders
+  const { data: orderItemsData } = useQuery({
+    queryKey: ['order-items', sellerId, orders.map(o => o.order_id).join(',')],
+    queryFn: async () => {
+      if (!sellerId || orders.length === 0) return new Map<string, OrderItemSummary[]>();
+
+      const orderIds = orders.map(o => o.order_id);
+      
+      const { data: items, error } = await supabase
+        .from('meli_order_items_cache')
+        .select('order_id, item_id, variation_id, sku, title_short, quantity, unit_price')
+        .eq('seller_id', sellerId)
+        .in('order_id', orderIds);
+
+      if (error) {
+        console.error('Error fetching order items:', error);
+        return new Map<string, OrderItemSummary[]>();
+      }
+
+      // Group items by order_id
+      const itemsMap = new Map<string, OrderItemSummary[]>();
+      (items || []).forEach(item => {
+        const existing = itemsMap.get(item.order_id) || [];
+        existing.push({
+          item_id: item.item_id,
+          variation_id: item.variation_id,
+          sku: item.sku,
+          title_short: item.title_short,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+        });
+        itemsMap.set(item.order_id, existing);
+      });
+
+      return itemsMap;
+    },
+    enabled: !!sellerId && orders.length > 0,
+    staleTime: 60000, // 1 minute
+  });
+
+  const orderItems = orderItemsData ?? new Map<string, OrderItemSummary[]>();
+
   // === SYNC PIPELINE (background, fire-and-forget) ===
 
   // Poll for sync job completion
@@ -570,7 +623,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
   // Generate labels mutation with batch support
   const generateLabelsMutation = useMutation({
-    mutationFn: async ({ format, shipmentId }: { format: 'pdf' | 'zpl'; shipmentId?: string }) => {
+    mutationFn: async ({ format, layout, shipmentId }: { format: 'pdf' | 'zpl'; layout: LabelLayout; shipmentId?: string }) => {
       if (!sellerId) throw new Error('Seller ID not set');
       
       const headers = await getAuthHeaders();
@@ -609,6 +662,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
           seller_id: sellerId,
           shipment_ids: shipmentIds,
           format,
+          layout,
         },
       });
 
@@ -894,5 +948,6 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     generateLabels: generateLabelsMutation.mutate,
     isGenerating: generateLabelsMutation.isPending,
     generationProgress,
+    orderItems,
   };
 }
