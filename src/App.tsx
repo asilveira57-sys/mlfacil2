@@ -8,6 +8,7 @@ import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import ShippingLabels from "./pages/ShippingLabels";
+import LabelHeaderSettings from "./pages/LabelHeaderSettings";
 import NotFound from "./pages/NotFound";
 
 const App = () => {
@@ -24,6 +25,7 @@ const App = () => {
             <Route path="/auth" element={<Auth />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/shipping-labels" element={<ShippingLabels />} />
+            <Route path="/shipping-labels/header-settings" element={<LabelHeaderSettings />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

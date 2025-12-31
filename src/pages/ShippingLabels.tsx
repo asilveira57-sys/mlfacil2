@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Package } from 'lucide-react';
+import { ArrowLeft, Package, Settings } from 'lucide-react';
 import { useShippingLabels, ShippingOrder, LabelLayout } from '@/hooks/useShippingLabels';
 import { ShippingFilters } from '@/components/shipping/ShippingFilters';
 import { ShippingTable } from '@/components/shipping/ShippingTable';
@@ -132,25 +132,35 @@ export default function ShippingLabels() {
       {/* Header */}
       <header className="border-b bg-card">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => navigate('/dashboard')}
+              >
+                <ArrowLeft className="h-5 w-5" />
+              </Button>
+              <div className="flex items-center gap-3">
+                <Package className="h-6 w-6 text-primary" />
+                <div>
+                  <h1 className="text-xl font-semibold">Etiquetas de Envio</h1>
+                  {mlAccount && (
+                    <p className="text-sm text-muted-foreground">
+                      {mlAccount.nickname || mlAccount.email}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => navigate('/dashboard')}
+              onClick={() => navigate('/shipping-labels/header-settings')}
+              title="Configurar cabeçalho"
             >
-              <ArrowLeft className="h-5 w-5" />
+              <Settings className="h-5 w-5" />
             </Button>
-            <div className="flex items-center gap-3">
-              <Package className="h-6 w-6 text-primary" />
-              <div>
-                <h1 className="text-xl font-semibold">Etiquetas de Envio</h1>
-                {mlAccount && (
-                  <p className="text-sm text-muted-foreground">
-                    {mlAccount.nickname || mlAccount.email}
-                  </p>
-                )}
-              </div>
-            </div>
           </div>
         </div>
       </header>
