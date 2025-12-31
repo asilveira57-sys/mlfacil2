@@ -106,22 +106,20 @@ async function getMarketTrends(supabase: any, params: Record<string, string>) {
   const siteId = params.site_id || 'MLB';
   const categoryId = params.category_id;
 
-  let query = supabase
+  // Use __ROOT__ for null category to match how trends-collect-public stores it
+  const categoryValue = categoryId || '__ROOT__';
+
+  const { data, error } = await supabase
     .from('trend_snapshots')
     .select('*')
     .eq('site_id', siteId)
+    .eq('category_id', categoryValue)
     .order('snapshot_date', { ascending: false })
-    .limit(1);
-
-  if (categoryId) {
-    query = query.eq('category_id', categoryId);
-  } else {
-    query = query.is('category_id', null);
-  }
-
-  const { data, error } = await query.single();
+    .limit(1)
+    .maybeSingle();
   
-  if (error && error.code !== 'PGRST116') {
+  if (error) {
+    console.error('[trends-api] Error fetching trends:', error);
     throw error;
   }
 
@@ -129,7 +127,7 @@ async function getMarketTrends(supabase: any, params: Record<string, string>) {
     trends: data?.trends_data || [],
     keywords: data?.keywords_data || [],
     snapshot_date: data?.snapshot_date || null,
-    message: !data ? 'Histórico indisponível antes da ativação do módulo' : null,
+    message: !data ? 'Dados ainda não coletados. Aguarde a próxima sincronização.' : null,
   };
 }
 
