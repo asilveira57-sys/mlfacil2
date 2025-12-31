@@ -157,6 +157,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const syncAbortRef = useRef(false);
   const lastSyncTimeRef = useRef<number>(0);
   const hasAutoSyncedRef = useRef(false);
+  const isSilentSyncRef = useRef(false);
 
   // Reset page when filters change
   useEffect(() => {
@@ -467,10 +468,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
   const orderItems = orderItemsData ?? new Map<string, OrderItemSummary[]>();
 
-  // === SYNC PIPELINE (background, fire-and-forget) ===
+  // === SYNC PIPELINE (background, silent by default) ===
 
-  // Poll for sync job completion
-  const pollSyncJobs = useCallback(async (jobIds: string[]) => {
+  // Poll for sync job completion (silent mode - no UI updates)
+  const pollSyncJobs = useCallback(async (jobIds: string[], silent: boolean) => {
     const maxAttempts = 60; // 2 minutes max
     let attempts = 0;
     
@@ -486,17 +487,9 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       if (!jobs) continue;
       
       const allDone = jobs.every(j => j.status === 'done' || j.status === 'error');
-      const processing = jobs.find(j => j.status === 'processing');
-      
-      if (processing) {
-        const progress = processing.total_records > 0 
-          ? Math.round((processing.processed_records / processing.total_records) * 100)
-          : 0;
-        setSyncProgress(`${processing.job_type}: ${progress}%`);
-      }
       
       if (allDone) {
-        console.log('All sync jobs completed');
+        console.log('All sync jobs completed (silent:', silent, ')');
         break;
       }
     }
@@ -507,8 +500,8 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     queryClient.invalidateQueries({ queryKey: ['shipping-orders-all'] });
   }, [refetch, queryClient]);
 
-  // Fire-and-forget sync - returns immediately
-  const startSyncPipeline = useCallback(async () => {
+  // Core sync pipeline - silent mode available
+  const startSyncPipeline = useCallback(async (silent = false) => {
     const now = Date.now();
     if (isSyncing || (now - lastSyncTimeRef.current) < 5000) {
       console.log('Sync skipped: already syncing or debounced');
@@ -517,21 +510,27 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
     lastSyncTimeRef.current = now;
     syncAbortRef.current = false;
-    setIsSyncing(true);
-    setSyncPhase('orders');
-    setSyncProgress('Iniciando...');
+    isSilentSyncRef.current = silent;
+    
+    // Only update UI if not silent
+    if (!silent) {
+      setIsSyncing(true);
+      setSyncPhase('orders');
+    }
 
     const headers = await getAuthHeaders();
     if (!headers || !sellerId) {
-      setIsSyncing(false);
-      setSyncPhase('idle');
+      if (!silent) {
+        setIsSyncing(false);
+        setSyncPhase('idle');
+      }
       return;
     }
 
     const jobIds: string[] = [];
 
     try {
-      // Phase 1: Start orders sync (fire-and-forget)
+      // Phase 1: Start orders sync
       const { dateFrom, dateTo } = getDateRange();
       const ordersResponse = await supabase.functions.invoke('ml-sync-orders', {
         headers,
@@ -547,7 +546,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       }
 
       // Wait a bit for orders to start populating
-      await sleep(3000);
+      await sleep(1500);
 
       // Refresh UI with whatever data exists
       await refetch();
@@ -562,10 +561,11 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       const orderIds = (ordersWithShipments || []).map(o => o.order_id);
       const shipmentIds = [...new Set((ordersWithShipments || []).map(o => o.shipment_id).filter(Boolean))] as string[];
 
-      setSyncPhase('shipments');
-      setSyncProgress(`${shipmentIds.length} envios`);
+      if (!silent) {
+        setSyncPhase('shipments');
+      }
 
-      // Phase 2: Start shipments sync (fire-and-forget)
+      // Phase 2: Start shipments sync
       if (shipmentIds.length > 0) {
         const shipmentsResponse = await supabase.functions.invoke('ml-sync-shipments', {
           headers,
@@ -576,10 +576,11 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         }
       }
 
-      setSyncPhase('invoices');
-      setSyncProgress(`${orderIds.length} NFs`);
+      if (!silent) {
+        setSyncPhase('invoices');
+      }
 
-      // Phase 3: Start invoices sync (fire-and-forget)
+      // Phase 3: Start invoices sync
       if (orderIds.length > 0) {
         const invoicesResponse = await supabase.functions.invoke('ml-sync-invoices', {
           headers,
@@ -592,32 +593,35 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
       // Poll for completion in background
       if (jobIds.length > 0) {
-        pollSyncJobs(jobIds).then(() => {
-          setSyncPhase('done');
-          setSyncProgress('Concluído');
+        pollSyncJobs(jobIds, silent).then(() => {
           setLastSyncAt(new Date().toISOString());
           
-          setTimeout(() => {
-            setIsSyncing(false);
-            setSyncPhase('idle');
-            setSyncProgress('');
-          }, 2000);
+          if (!silent) {
+            setSyncPhase('done');
+            setTimeout(() => {
+              setIsSyncing(false);
+              setSyncPhase('idle');
+            }, 1000);
+          }
         });
       } else {
-        setIsSyncing(false);
-        setSyncPhase('idle');
+        if (!silent) {
+          setIsSyncing(false);
+          setSyncPhase('idle');
+        }
       }
 
     } catch (error) {
       console.error('Sync pipeline error:', error);
-      toast({
-        title: 'Erro na sincronização',
-        description: error instanceof Error ? error.message : 'Erro desconhecido',
-        variant: 'destructive',
-      });
-      setIsSyncing(false);
-      setSyncPhase('idle');
-      setSyncProgress('');
+      if (!silent) {
+        toast({
+          title: 'Erro na sincronização',
+          description: error instanceof Error ? error.message : 'Erro desconhecido',
+          variant: 'destructive',
+        });
+        setIsSyncing(false);
+        setSyncPhase('idle');
+      }
     }
   }, [isSyncing, sellerId, getDateRange, refetch, queryClient, toast, pollSyncJobs]);
 
@@ -885,17 +889,48 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     reimprimir: allOrdersForCounts.filter(o => o.finalStatus === 'reimprimir').length,
   };
 
-  // Auto-sync on first load when sellerId is available
+  // Auto-sync on first load with staleness check
   useEffect(() => {
-    if (sellerId && !hasAutoSyncedRef.current && !isSyncing) {
-      hasAutoSyncedRef.current = true;
-      // Small delay to let the UI render first
-      const timer = setTimeout(() => {
-        startSyncPipeline();
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [sellerId, isSyncing, startSyncPipeline]);
+    if (!sellerId || hasAutoSyncedRef.current) return;
+    
+    hasAutoSyncedRef.current = true;
+    
+    const checkAndSync = async () => {
+      // Check last sync from database
+      const { data: lastJob } = await supabase
+        .from('sync_jobs')
+        .select('created_at')
+        .eq('seller_id', sellerId)
+        .eq('status', 'done')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      const lastSync = lastJob?.created_at;
+      setLastSyncAt(lastSync || null);
+      
+      if (!lastSync) {
+        // Never synced - do visible sync
+        startSyncPipeline(false);
+        return;
+      }
+      
+      const staleMinutes = (Date.now() - new Date(lastSync).getTime()) / 60000;
+      
+      if (staleMinutes > 15) {
+        // Very stale - show minimal indicator
+        startSyncPipeline(false);
+      } else if (staleMinutes > 2) {
+        // Slightly stale - silent background sync
+        startSyncPipeline(true);
+      }
+      // else: Fresh data, no sync needed
+    };
+    
+    // Small delay to let UI render first with cached data
+    const timer = setTimeout(checkAndSync, 300);
+    return () => clearTimeout(timer);
+  }, [sellerId, startSyncPipeline]);
 
   // Set custom date range helper
   const setDateRange = useCallback((range: DateRange) => {
