@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { FileText, Printer, X, Loader2, ChevronDown } from 'lucide-react';
 import { LabelGenerationProgress, GenerationProgress } from './LabelGenerationProgress';
+import { LabelLayout } from '@/hooks/useShippingLabels';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -9,8 +10,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
-
-export type LabelLayout = 'meli_100x150' | 'mlfacil_100x175_header';
 
 interface BulkActionsBarProps {
   selectedCount: number;
