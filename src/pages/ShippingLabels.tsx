@@ -226,6 +226,7 @@ export default function ShippingLabels() {
         onOpenChange={setDrawerOpen}
         onReprint={handleReprintLabel}
         isGenerating={isGenerating}
+        orderItems={selectedOrder ? orderItems.get(selectedOrder.order_id) : undefined}
       />
     </div>
   );

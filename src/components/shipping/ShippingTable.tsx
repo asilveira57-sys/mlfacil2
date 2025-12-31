@@ -193,7 +193,11 @@ export function ShippingTable({
                 <TableCell>
                   {order.buyer_nickname || '-'}
                 </TableCell>
-                <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate" title={itemsSummary}>
+                <TableCell 
+                  className="text-sm text-muted-foreground max-w-[200px] truncate cursor-pointer hover:text-foreground transition-colors"
+                  onClick={() => onViewDetails(order)}
+                  title={`Clique para ver detalhes: ${itemsSummary}`}
+                >
                   {itemsSummary}
                 </TableCell>
                 <TableCell>

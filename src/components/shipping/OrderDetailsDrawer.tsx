@@ -9,11 +9,11 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
-import { ShippingOrder } from '@/hooks/useShippingLabels';
+import { ShippingOrder, OrderItemSummary } from '@/hooks/useShippingLabels';
 import { usePrintHistory } from '@/hooks/usePrintHistory';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Package, FileText, History, MapPin, Truck, CheckCircle, AlertCircle, Clock, Printer, FileDown } from 'lucide-react';
+import { Package, FileText, History, MapPin, Truck, CheckCircle, AlertCircle, Clock, Printer, FileDown, ExternalLink, ShoppingCart } from 'lucide-react';
 
 interface OrderDetailsDrawerProps {
   order: ShippingOrder | null;
@@ -21,9 +21,10 @@ interface OrderDetailsDrawerProps {
   onOpenChange: (open: boolean) => void;
   onReprint?: (shipmentId: string, format: 'pdf' | 'zpl') => void;
   isGenerating?: boolean;
+  orderItems?: OrderItemSummary[];
 }
 
-export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGenerating }: OrderDetailsDrawerProps) {
+export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGenerating, orderItems = [] }: OrderDetailsDrawerProps) {
   const { data: printHistory = [] } = usePrintHistory(
     order?.seller_id || null,
     order?.shipment_id || undefined
@@ -79,6 +80,63 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
                 </p>
               </section>
             )}
+
+            {/* Order Items */}
+            {orderItems.length > 0 && (
+              <section>
+                <h3 className="text-sm font-semibold flex items-center gap-2 mb-3">
+                  <ShoppingCart className="h-4 w-4" />
+                  Itens do Pedido ({orderItems.length})
+                </h3>
+                <div className="space-y-2">
+                  {orderItems.map((item, index) => (
+                    <div
+                      key={`${item.item_id}-${item.variation_id || index}`}
+                      className="bg-muted/50 rounded-lg p-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium">
+                              {item.quantity}x
+                            </span>
+                            <span className="text-sm truncate">
+                              {item.sku || item.title_short || 'Item'}
+                            </span>
+                          </div>
+                          {item.title_short && item.sku && (
+                            <p className="text-xs text-muted-foreground truncate mt-0.5">
+                              {item.title_short}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-sm font-medium">
+                            R$ {(item.unit_price * item.quantity).toFixed(2)}
+                          </span>
+                          <a
+                            href={`https://produto.mercadolivre.com.br/MLB-${item.item_id.replace('MLB', '')}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-muted-foreground hover:text-primary transition-colors"
+                            title="Abrir anúncio no Mercado Livre"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
+                        </div>
+                      </div>
+                      {item.sku && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          SKU: {item.sku}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            <Separator />
 
             {/* Shipment Info */}
             <section>
