@@ -261,12 +261,12 @@ export function AbcGeographicDetailDrawer({
                 <MapPin className="h-5 w-5" />
                 {locationName}
               </DrawerTitle>
-              <DrawerDescription className="flex items-center gap-4">
+              <div className="flex items-center gap-4 text-sm text-muted-foreground">
                 {getClassBadge(classification)}
                 <span>{totals.orders} pedidos</span>
                 <span>{totals.customers} clientes</span>
                 <span className="font-medium">{formatCurrency(totals.revenue)}</span>
-              </DrawerDescription>
+              </div>
             </div>
           </div>
         </DrawerHeader>
