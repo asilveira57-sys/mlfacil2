@@ -133,8 +133,8 @@ export function AnnualSalesChart({ data, isLoading, title, colorScheme = "primar
                 fill={barColor}
                 radius={[4, 4, 0, 0]}
                 label={({ x, y, width, payload }) => {
-                  const percentChange = payload.percentChange;
-                  if (percentChange === null) return <text></text>;
+                  const percentChange = payload?.percentChange;
+                  if (percentChange == null || x == null || y == null || width == null) return <text />;
                   const color = percentChange >= 0 ? "#16a34a" : "#dc2626";
                   return (
                     <text
@@ -175,8 +175,8 @@ export function AnnualSalesChart({ data, isLoading, title, colorScheme = "primar
                 fill={barColor}
                 radius={[4, 4, 0, 0]}
                 label={({ x, y, width, payload }) => {
-                  const percentChange = payload.percentChange;
-                  if (percentChange === null) return <text></text>;
+                  const percentChange = payload?.percentChange;
+                  if (percentChange == null || x == null || y == null || width == null) return <text />;
                   const color = percentChange >= 0 ? "#16a34a" : "#dc2626";
                   return (
                     <text
