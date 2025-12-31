@@ -6,8 +6,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { TrendingUp, BarChart3, Store, History, Bell, Package, Eye, ShoppingCart, AlertTriangle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { TrendingUp, BarChart3, Store, History, Bell, Eye, ShoppingCart, ArrowLeft } from 'lucide-react';
 import { useOverview, useAlerts, useMarketTrends, useSellerTopVisited, useSellerTopSold } from '@/hooks/useTrendsApi';
+import { TrendsSellerTab } from '@/components/trends/TrendsSellerTab';
+import { TrendsHistoryTab } from '@/components/trends/TrendsHistoryTab';
+import { TrendsMarketTab } from '@/components/trends/TrendsMarketTab';
 
 interface MlAccount {
   id: string;
@@ -57,7 +61,10 @@ export default function Tendencias() {
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <TrendingUp className="h-6 w-6 text-primary" />
+              <Button variant="ghost" size="icon" onClick={() => navigate('/dashboard')}>
+                <ArrowLeft className="h-5 w-5" />
+              </Button>
+              <TrendingUp className="h-6 w-6 text-orange-500" />
               <h1 className="text-xl font-semibold">Tendências</h1>
             </div>
             
@@ -105,11 +112,12 @@ export default function Tendencias() {
           <TabsContent value="overview" className="space-y-6">
             {/* Summary Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <Card className="relative overflow-hidden">
-                <div className="absolute inset-0 bg-gradient-to-br from-primary/10 to-transparent" />
+              <Card className="relative overflow-hidden group hover:shadow-lg transition-all duration-300">
+                <div className="absolute inset-0 bg-gradient-to-br from-orange-500/10 to-transparent" />
+                <div className="absolute -right-4 -top-4 w-24 h-24 bg-orange-500/5 rounded-full blur-2xl group-hover:scale-150 transition-transform" />
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">Em Alta no ML</CardTitle>
-                  <TrendingUp className="h-4 w-4 text-primary" />
+                  <TrendingUp className="h-4 w-4 text-orange-500" />
                 </CardHeader>
                 <CardContent>
                   {trendsLoading ? (
@@ -118,16 +126,17 @@ export default function Tendencias() {
                     <p className="text-2xl font-bold">{trends?.trends?.length || 0}</p>
                   )}
                   <p className="text-xs text-muted-foreground mt-1">
-                    {trends?.snapshot_date ? `Atualizado: ${trends.snapshot_date}` : 'Aguardando dados'}
+                    {trends?.snapshot_date ? `Atualizado: ${new Date(trends.snapshot_date + 'T00:00:00').toLocaleDateString('pt-BR')}` : 'Aguardando dados'}
                   </p>
                 </CardContent>
               </Card>
 
-              <Card className="relative overflow-hidden">
-                <div className="absolute inset-0 bg-gradient-to-br from-orange-500/10 to-transparent" />
+              <Card className="relative overflow-hidden group hover:shadow-lg transition-all duration-300">
+                <div className="absolute inset-0 bg-gradient-to-br from-red-500/10 to-transparent" />
+                <div className="absolute -right-4 -top-4 w-24 h-24 bg-red-500/5 rounded-full blur-2xl group-hover:scale-150 transition-transform" />
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">Alertas Abertos</CardTitle>
-                  <Bell className="h-4 w-4 text-orange-500" />
+                  <Bell className="h-4 w-4 text-red-500" />
                 </CardHeader>
                 <CardContent>
                   {overviewLoading ? (
@@ -139,8 +148,9 @@ export default function Tendencias() {
                 </CardContent>
               </Card>
 
-              <Card className="relative overflow-hidden">
+              <Card className="relative overflow-hidden group hover:shadow-lg transition-all duration-300">
                 <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-transparent" />
+                <div className="absolute -right-4 -top-4 w-24 h-24 bg-blue-500/5 rounded-full blur-2xl group-hover:scale-150 transition-transform" />
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">Visitas 7d</CardTitle>
                   <Eye className="h-4 w-4 text-blue-500" />
@@ -155,8 +165,9 @@ export default function Tendencias() {
                 </CardContent>
               </Card>
 
-              <Card className="relative overflow-hidden">
+              <Card className="relative overflow-hidden group hover:shadow-lg transition-all duration-300">
                 <div className="absolute inset-0 bg-gradient-to-br from-green-500/10 to-transparent" />
+                <div className="absolute -right-4 -top-4 w-24 h-24 bg-green-500/5 rounded-full blur-2xl group-hover:scale-150 transition-transform" />
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">Vendas 7d</CardTitle>
                   <ShoppingCart className="h-4 w-4 text-green-500" />
@@ -168,8 +179,11 @@ export default function Tendencias() {
                     <>
                       <p className="text-2xl font-bold">{overview?.seller_stats?.sales_7d || 0}</p>
                       {overview?.seller_stats?.growth_7d_vs_28d && (
-                        <Badge variant={Number(overview.seller_stats.growth_7d_vs_28d) >= 0 ? 'default' : 'destructive'} className="mt-1">
-                          {Number(overview.seller_stats.growth_7d_vs_28d) >= 0 ? '+' : ''}{overview.seller_stats.growth_7d_vs_28d}%
+                        <Badge 
+                          variant={Number(overview.seller_stats.growth_7d_vs_28d) >= 0 ? 'default' : 'destructive'} 
+                          className="mt-1"
+                        >
+                          {Number(overview.seller_stats.growth_7d_vs_28d) >= 0 ? '+' : ''}{overview.seller_stats.growth_7d_vs_28d}% vs 28d
                         </Badge>
                       )}
                     </>
@@ -178,34 +192,72 @@ export default function Tendencias() {
               </Card>
             </div>
 
-            {/* Alerts Section */}
-            {alerts && alerts.alerts.length > 0 && (
+            {/* Quick Lists */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Top Trends */}
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-lg">
-                    <AlertTriangle className="h-5 w-5 text-orange-500" />
-                    Alertas Recentes
+                    <TrendingUp className="h-5 w-5 text-orange-500" />
+                    Top em Alta
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-2">
-                    {alerts.alerts.slice(0, 5).map((alert) => (
-                      <div key={alert.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                        <div>
-                          <p className="font-medium">{alert.title}</p>
-                          {alert.message && <p className="text-sm text-muted-foreground">{alert.message}</p>}
+                  {trendsLoading ? (
+                    <div className="space-y-2">
+                      {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} className="h-10 w-full" />)}
+                    </div>
+                  ) : trends?.trends?.length ? (
+                    <div className="space-y-2">
+                      {trends.trends.slice(0, 5).map((trend, idx) => (
+                        <div key={idx} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors">
+                          <span className="text-lg font-bold text-orange-500 w-6">{idx + 1}</span>
+                          <span className="text-sm">{trend.keyword}</span>
                         </div>
-                        <Badge variant={alert.severity === 'critical' ? 'destructive' : alert.severity === 'warning' ? 'secondary' : 'outline'}>
-                          {alert.severity}
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-muted-foreground text-center py-4">Sem dados disponíveis</p>
+                  )}
                 </CardContent>
               </Card>
-            )}
 
-            {/* Top Items Section */}
+              {/* Alerts */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Bell className="h-5 w-5 text-red-500" />
+                    Alertas do Seller
+                    {alerts && alerts.unread_count > 0 && (
+                      <Badge variant="destructive">{alerts.unread_count}</Badge>
+                    )}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {alerts?.alerts?.length ? (
+                    <div className="space-y-2">
+                      {alerts.alerts.slice(0, 5).map((alert) => (
+                        <div key={alert.id} className="flex items-center justify-between p-2 bg-muted/50 rounded-lg">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-sm truncate">{alert.title}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {new Date(alert.triggered_at).toLocaleDateString('pt-BR')}
+                            </p>
+                          </div>
+                          <Badge variant={alert.severity === 'critical' ? 'destructive' : 'secondary'}>
+                            {alert.severity}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-muted-foreground text-center py-4">Nenhum alerta</p>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Top Items */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <Card>
                 <CardHeader>
@@ -243,7 +295,7 @@ export default function Tendencias() {
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-lg">
-                    <Package className="h-5 w-5 text-green-500" />
+                    <ShoppingCart className="h-5 w-5 text-green-500" />
                     Mais Vendidos (7d)
                   </CardTitle>
                 </CardHeader>
@@ -277,62 +329,17 @@ export default function Tendencias() {
 
           {/* Market Tab */}
           <TabsContent value="market">
-            <Card>
-              <CardHeader>
-                <CardTitle>Tendências do Mercado</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {trends?.message ? (
-                  <div className="text-center py-8">
-                    <TrendingUp className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                    <p className="text-muted-foreground">{trends.message}</p>
-                  </div>
-                ) : trends?.trends?.length ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {trends.trends.map((trend, idx) => (
-                      <div key={idx} className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
-                        <span className="text-lg font-bold text-primary">{idx + 1}</span>
-                        <span className="text-sm">{trend.keyword}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-muted-foreground text-center py-8">Carregando tendências...</p>
-                )}
-              </CardContent>
-            </Card>
+            <TrendsMarketTab />
           </TabsContent>
 
           {/* Seller Tab */}
           <TabsContent value="seller">
-            <Card>
-              <CardHeader>
-                <CardTitle>Métricas do Seller</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {selectedSellerId ? (
-                  <p className="text-muted-foreground">Dados do seller em carregamento. Sincronize seus dados para visualizar métricas detalhadas.</p>
-                ) : (
-                  <p className="text-muted-foreground">Selecione uma conta para visualizar métricas.</p>
-                )}
-              </CardContent>
-            </Card>
+            <TrendsSellerTab sellerId={selectedSellerId} />
           </TabsContent>
 
           {/* History Tab */}
           <TabsContent value="history">
-            <Card>
-              <CardHeader>
-                <CardTitle>Histórico</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-8">
-                  <History className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-muted-foreground">Dados disponíveis a partir de jan/2025</p>
-                  <p className="text-sm text-muted-foreground mt-2">Fonte: snapshots do app</p>
-                </div>
-              </CardContent>
-            </Card>
+            <TrendsHistoryTab sellerId={selectedSellerId} />
           </TabsContent>
         </Tabs>
       </main>

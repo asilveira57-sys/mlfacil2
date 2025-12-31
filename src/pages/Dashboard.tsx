@@ -568,6 +568,50 @@ const Dashboard = () => {
             </Card>
           )}
 
+          {mlAccount && (
+            <Card 
+              className="p-6 hover:shadow-lg transition-all duration-300 cursor-pointer border-2 border-orange-500/20 hover:border-orange-500/40"
+              onClick={() => navigate('/tendencias')}
+            >
+              <div className="flex items-start justify-between mb-4">
+                <div className="w-12 h-12 bg-orange-500/10 rounded-xl flex items-center justify-center">
+                  <BarChart3 className="w-6 h-6 text-orange-500" />
+                </div>
+              </div>
+              <h3 className="text-lg font-semibold text-card-foreground mb-2">
+                Tendências
+              </h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                Produtos em alta, mais vendidos por categoria e alertas de oportunidades.
+              </p>
+              <Button className="w-full border-orange-500/50 text-orange-600 hover:bg-orange-500/10" variant="outline">
+                Ver Tendências
+              </Button>
+            </Card>
+          )}
+
+          {mlAccount && (
+            <Card 
+              className="p-6 hover:shadow-lg transition-all duration-300 cursor-pointer border-2 border-cyan-500/20 hover:border-cyan-500/40"
+              onClick={() => navigate('/abc-analysis')}
+            >
+              <div className="flex items-start justify-between mb-4">
+                <div className="w-12 h-12 bg-cyan-500/10 rounded-xl flex items-center justify-center">
+                  <BarChart3 className="w-6 h-6 text-cyan-500" />
+                </div>
+              </div>
+              <h3 className="text-lg font-semibold text-card-foreground mb-2">
+                Análise ABC
+              </h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                Identifique produtos, clientes e regiões mais importantes.
+              </p>
+              <Button className="w-full border-cyan-500/50 text-cyan-600 hover:bg-cyan-500/10" variant="outline">
+                Ver Análise ABC
+              </Button>
+            </Card>
+          )}
+
           <Card className="p-6 hover:shadow-lg transition-all duration-300">
             <div className="flex items-start justify-between mb-4">
               <div className="w-12 h-12 bg-warning/10 rounded-xl flex items-center justify-center">
@@ -575,7 +619,7 @@ const Dashboard = () => {
               </div>
             </div>
             <h3 className="text-lg font-semibold text-card-foreground mb-2">
-              {mlAccount ? '3.' : '3.'} Analise Produtos
+              Analise Produtos
             </h3>
             <p className="text-sm text-muted-foreground mb-4">
               Navegue até qualquer anúncio no ML e veja análises detalhadas no painel lateral.
