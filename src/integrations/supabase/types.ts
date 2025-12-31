@@ -142,6 +142,77 @@ export type Database = {
         }
         Relationships: []
       }
+      highlights_items: {
+        Row: {
+          created_at: string
+          id: string
+          item_id: string
+          permalink: string | null
+          price: number | null
+          rank: number
+          snapshot_id: string
+          sold_quantity: number | null
+          thumbnail: string | null
+          title: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          item_id: string
+          permalink?: string | null
+          price?: number | null
+          rank: number
+          snapshot_id: string
+          sold_quantity?: number | null
+          thumbnail?: string | null
+          title?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          item_id?: string
+          permalink?: string | null
+          price?: number | null
+          rank?: number
+          snapshot_id?: string
+          sold_quantity?: number | null
+          thumbnail?: string | null
+          title?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "highlights_items_snapshot_id_fkey"
+            columns: ["snapshot_id"]
+            isOneToOne: false
+            referencedRelation: "highlights_snapshots"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      highlights_snapshots: {
+        Row: {
+          category_id: string
+          created_at: string
+          id: string
+          site_id: string
+          snapshot_date: string
+        }
+        Insert: {
+          category_id: string
+          created_at?: string
+          id?: string
+          site_id?: string
+          snapshot_date: string
+        }
+        Update: {
+          category_id?: string
+          created_at?: string
+          id?: string
+          site_id?: string
+          snapshot_date?: string
+        }
+        Relationships: []
+      }
       item_metrics: {
         Row: {
           analyzed_item_id: string
@@ -617,6 +688,72 @@ export type Database = {
         }
         Relationships: []
       }
+      modules_registry: {
+        Row: {
+          created_at: string
+          default_visible: boolean | null
+          icon: string | null
+          id: string
+          module_key: string
+          name: string
+          order_default: number | null
+          route: string | null
+          show_in_panel: boolean | null
+        }
+        Insert: {
+          created_at?: string
+          default_visible?: boolean | null
+          icon?: string | null
+          id?: string
+          module_key: string
+          name: string
+          order_default?: number | null
+          route?: string | null
+          show_in_panel?: boolean | null
+        }
+        Update: {
+          created_at?: string
+          default_visible?: boolean | null
+          icon?: string | null
+          id?: string
+          module_key?: string
+          name?: string
+          order_default?: number | null
+          route?: string | null
+          show_in_panel?: boolean | null
+        }
+        Relationships: []
+      }
+      monthly_rankings: {
+        Row: {
+          created_at: string
+          id: string
+          ranking_month: string
+          ranking_type: string
+          rankings: Json
+          seller_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          ranking_month: string
+          ranking_type: string
+          rankings?: Json
+          seller_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          ranking_month?: string
+          ranking_type?: string
+          rankings?: Json
+          seller_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       product_cost_catalog: {
         Row: {
           cost_currency: string
@@ -677,6 +814,105 @@ export type Database = {
         }
         Relationships: []
       }
+      seller_item_sales_daily: {
+        Row: {
+          created_at: string
+          id: string
+          item_id: string
+          quantity_sold: number
+          revenue: number
+          sale_date: string
+          seller_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          item_id: string
+          quantity_sold?: number
+          revenue?: number
+          sale_date: string
+          seller_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          item_id?: string
+          quantity_sold?: number
+          revenue?: number
+          sale_date?: string
+          seller_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      seller_item_sales_monthly: {
+        Row: {
+          created_at: string
+          id: string
+          item_id: string
+          quantity_sold: number
+          revenue: number
+          sale_month: string
+          seller_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          item_id: string
+          quantity_sold?: number
+          revenue?: number
+          sale_month: string
+          seller_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          item_id?: string
+          quantity_sold?: number
+          revenue?: number
+          sale_month?: string
+          seller_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      seller_item_visits: {
+        Row: {
+          created_at: string
+          id: string
+          item_id: string
+          seller_id: string
+          user_id: string
+          visit_date: string
+          visits_count: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          item_id: string
+          seller_id: string
+          user_id: string
+          visit_date: string
+          visits_count?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          item_id?: string
+          seller_id?: string
+          user_id?: string
+          visit_date?: string
+          visits_count?: number
+        }
+        Relationships: []
+      }
       sync_jobs: {
         Row: {
           completed_at: string | null
@@ -712,6 +948,147 @@ export type Database = {
           seller_id?: string
           status?: string
           total_records?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      trend_alerts: {
+        Row: {
+          alert_data: Json | null
+          alert_type: string
+          created_at: string
+          id: string
+          is_dismissed: boolean
+          is_read: boolean
+          item_id: string | null
+          message: string | null
+          seller_id: string
+          severity: string
+          title: string
+          triggered_at: string
+          user_id: string
+        }
+        Insert: {
+          alert_data?: Json | null
+          alert_type: string
+          created_at?: string
+          id?: string
+          is_dismissed?: boolean
+          is_read?: boolean
+          item_id?: string | null
+          message?: string | null
+          seller_id: string
+          severity?: string
+          title: string
+          triggered_at?: string
+          user_id: string
+        }
+        Update: {
+          alert_data?: Json | null
+          alert_type?: string
+          created_at?: string
+          id?: string
+          is_dismissed?: boolean
+          is_read?: boolean
+          item_id?: string | null
+          message?: string | null
+          seller_id?: string
+          severity?: string
+          title?: string
+          triggered_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      trend_module_settings: {
+        Row: {
+          alerts_enabled: boolean
+          created_at: string
+          favorite_categories: string[] | null
+          id: string
+          sales_spike_threshold: number
+          seller_id: string
+          updated_at: string
+          user_id: string
+          visits_spike_threshold: number
+        }
+        Insert: {
+          alerts_enabled?: boolean
+          created_at?: string
+          favorite_categories?: string[] | null
+          id?: string
+          sales_spike_threshold?: number
+          seller_id: string
+          updated_at?: string
+          user_id: string
+          visits_spike_threshold?: number
+        }
+        Update: {
+          alerts_enabled?: boolean
+          created_at?: string
+          favorite_categories?: string[] | null
+          id?: string
+          sales_spike_threshold?: number
+          seller_id?: string
+          updated_at?: string
+          user_id?: string
+          visits_spike_threshold?: number
+        }
+        Relationships: []
+      }
+      trend_snapshots: {
+        Row: {
+          category_id: string | null
+          created_at: string
+          id: string
+          keywords_data: Json | null
+          site_id: string
+          snapshot_date: string
+          trends_data: Json | null
+        }
+        Insert: {
+          category_id?: string | null
+          created_at?: string
+          id?: string
+          keywords_data?: Json | null
+          site_id?: string
+          snapshot_date: string
+          trends_data?: Json | null
+        }
+        Update: {
+          category_id?: string | null
+          created_at?: string
+          id?: string
+          keywords_data?: Json | null
+          site_id?: string
+          snapshot_date?: string
+          trends_data?: Json | null
+        }
+        Relationships: []
+      }
+      user_feature_flags: {
+        Row: {
+          created_at: string
+          enabled: boolean
+          feature_key: string
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          enabled?: boolean
+          feature_key: string
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          feature_key?: string
+          id?: string
+          updated_at?: string
           user_id?: string
         }
         Relationships: []
