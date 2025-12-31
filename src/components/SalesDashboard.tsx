@@ -41,15 +41,24 @@ interface SalesMetrics {
   totalOrders: number;
   revenueToday: number;
   ordersToday: number;
+  revenueYesterday: number;
+  ordersYesterday: number;
   revenue7d: number;
   orders7d: number;
+  revenuePrev7d: number;
+  ordersPrev7d: number;
   revenue30d: number;
   orders30d: number;
+  revenuePrev30d: number;
+  ordersPrev30d: number;
   revenuePeriod: number;
   ordersPeriod: number;
+  revenuePrevPeriod: number;
+  ordersPrevPeriod: number;
   averageTicket: number;
   averageTicket30d: number;
   averageTicketPeriod: number;
+  averageTicketPrevPeriod: number;
   cancelledOrders: number;
   cancelledRevenue: number;
   cancelledOrdersPeriod: number;
@@ -95,6 +104,14 @@ const formatCurrency = (value: number) => {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(value);
+};
+
+// Calculate percentage change between current and previous period
+const calcTrend = (current: number, previous: number): number | undefined => {
+  if (previous === 0) {
+    return current > 0 ? 100 : undefined;
+  }
+  return ((current - previous) / previous) * 100;
 };
 
 export function SalesDashboard() {
@@ -380,12 +397,24 @@ export function SalesDashboard() {
               value={isLoading ? "..." : formatCurrency(metrics?.revenuePeriod || 0)}
               subtitle={`${metrics?.ordersPeriod || 0} pedidos`}
               icon={<DollarSign className="w-6 h-6 text-primary" />}
+              trend={calcTrend(metrics?.revenuePeriod || 0, metrics?.revenuePrevPeriod || 0)}
+              trendLabel="vs período ant."
+            />
+            <SalesMetricsCard
+              title="Pedidos Período"
+              value={isLoading ? "..." : (metrics?.ordersPeriod || 0).toString()}
+              subtitle={formatCurrency(metrics?.revenuePeriod || 0)}
+              icon={<ShoppingCart className="w-6 h-6 text-primary" />}
+              trend={calcTrend(metrics?.ordersPeriod || 0, metrics?.ordersPrevPeriod || 0)}
+              trendLabel="vs período ant."
             />
             <SalesMetricsCard
               title="Ticket Médio"
               value={isLoading ? "..." : formatCurrency(metrics?.averageTicketPeriod || 0)}
               subtitle="período selecionado"
               icon={<Package className="w-6 h-6 text-primary" />}
+              trend={calcTrend(metrics?.averageTicketPeriod || 0, metrics?.averageTicketPrevPeriod || 0)}
+              trendLabel="vs período ant."
             />
           </>
         ) : (
@@ -395,18 +424,24 @@ export function SalesDashboard() {
               value={isLoading ? "..." : formatCurrency(metrics?.revenueToday || 0)}
               subtitle={`${metrics?.ordersToday || 0} pedidos`}
               icon={<DollarSign className="w-6 h-6 text-primary" />}
+              trend={calcTrend(metrics?.revenueToday || 0, metrics?.revenueYesterday || 0)}
+              trendLabel="vs ontem"
             />
             <SalesMetricsCard
               title="Receita 7 Dias"
               value={isLoading ? "..." : formatCurrency(metrics?.revenue7d || 0)}
               subtitle={`${metrics?.orders7d || 0} pedidos`}
               icon={<TrendingUp className="w-6 h-6 text-primary" />}
+              trend={calcTrend(metrics?.revenue7d || 0, metrics?.revenuePrev7d || 0)}
+              trendLabel="vs 7d ant."
             />
             <SalesMetricsCard
               title="Receita 30 Dias"
               value={isLoading ? "..." : formatCurrency(metrics?.revenue30d || 0)}
               subtitle={`${metrics?.orders30d || 0} pedidos`}
               icon={<ShoppingCart className="w-6 h-6 text-primary" />}
+              trend={calcTrend(metrics?.revenue30d || 0, metrics?.revenuePrev30d || 0)}
+              trendLabel="vs 30d ant."
             />
             <SalesMetricsCard
               title="Ticket Médio"
