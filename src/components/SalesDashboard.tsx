@@ -14,6 +14,8 @@ import {
   AlertCircle,
   CloudDownload,
   CheckCircle,
+  Database,
+  AlertTriangle,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Progress } from "@/components/ui/progress";
@@ -44,6 +46,14 @@ interface SalesMetrics {
   averageTicket30d: number;
 }
 
+interface DebugInfo {
+  cachedOrdersCount: number;
+  cachedItemsCount: number;
+  ordersWithItemsSynced: number;
+  itemsSyncedPercent: number;
+  source: string;
+}
+
 interface SalesData {
   metrics: SalesMetrics;
   dailySales: DailySale[];
@@ -52,11 +62,7 @@ interface SalesData {
     nickname: string;
     email: string;
   };
-  _debug?: {
-    cachedOrdersCount: number;
-    cachedItemsCount: number;
-    source: string;
-  };
+  _debug?: DebugInfo;
 }
 
 interface SyncJob {
@@ -297,9 +303,13 @@ export function SalesDashboard() {
   }
 
   const metrics = salesData?.metrics;
+  const debug = salesData?._debug;
   const syncProgress = syncJob && syncJob.total_records > 0 
     ? (syncJob.processed_records / syncJob.total_records) * 100 
     : 0;
+
+  // Check if sync is needed
+  const needsSync = debug && (debug.cachedOrdersCount === 0 || debug.itemsSyncedPercent < 50);
 
   return (
     <div className="space-y-6">
@@ -310,11 +320,6 @@ export function SalesDashboard() {
           {salesData?.seller && (
             <p className="text-muted-foreground">
               Conta: {salesData.seller.nickname || salesData.seller.email}
-              {salesData._debug && (
-                <span className="ml-2 text-xs text-muted-foreground/70">
-                  ({salesData._debug.cachedOrdersCount} pedidos, {salesData._debug.cachedItemsCount} items)
-                </span>
-              )}
             </p>
           )}
         </div>
@@ -375,6 +380,57 @@ export function SalesDashboard() {
             <span className="text-sm font-medium text-green-700 dark:text-green-400">
               Sincronização concluída: {syncJob.processed_records} pedidos e items atualizados
             </span>
+          </div>
+        </Card>
+      )}
+
+      {/* Sync Needed Warning */}
+      {!isSyncing && !isLoading && needsSync && (
+        <Card className="p-4 border-amber-500/30 bg-amber-500/5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-500" />
+              <span className="text-sm font-medium text-amber-700 dark:text-amber-400">
+                {debug?.cachedOrdersCount === 0 
+                  ? "Nenhum pedido sincronizado. Clique em 'Sincronizar Pedidos' para carregar os dados."
+                  : `Apenas ${debug?.itemsSyncedPercent}% dos pedidos têm itens sincronizados. Sincronize para ver dados completos.`
+                }
+              </span>
+            </div>
+            <Button size="sm" variant="outline" onClick={syncOrders} disabled={!sellerId}>
+              <CloudDownload className="w-4 h-4 mr-2" />
+              Sincronizar
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {/* Debug/Validation Indicators */}
+      {debug && !isLoading && (
+        <Card className="p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Database className="w-4 h-4 text-muted-foreground" />
+            <span className="text-sm font-medium text-muted-foreground">Indicadores de Cache</span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="text-center p-3 bg-muted/50 rounded-lg">
+              <div className="text-2xl font-bold text-foreground">{debug.cachedOrdersCount}</div>
+              <div className="text-xs text-muted-foreground">Pedidos no Cache</div>
+            </div>
+            <div className="text-center p-3 bg-muted/50 rounded-lg">
+              <div className="text-2xl font-bold text-foreground">{debug.cachedItemsCount}</div>
+              <div className="text-xs text-muted-foreground">Itens no Cache</div>
+            </div>
+            <div className="text-center p-3 bg-muted/50 rounded-lg">
+              <div className="text-2xl font-bold text-foreground">{debug.ordersWithItemsSynced || 0}</div>
+              <div className="text-xs text-muted-foreground">Pedidos c/ Itens</div>
+            </div>
+            <div className="text-center p-3 bg-muted/50 rounded-lg">
+              <div className={`text-2xl font-bold ${debug.itemsSyncedPercent >= 80 ? 'text-green-500' : debug.itemsSyncedPercent >= 50 ? 'text-amber-500' : 'text-red-500'}`}>
+                {debug.itemsSyncedPercent || 0}%
+              </div>
+              <div className="text-xs text-muted-foreground">% Itens Sync</div>
+            </div>
           </div>
         </Card>
       )}

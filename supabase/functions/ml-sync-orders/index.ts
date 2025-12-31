@@ -15,9 +15,12 @@ interface MLOrderItem {
   item: {
     id: string;
     title: string;
+    seller_sku?: string;
+    variation_id?: number;
   };
   quantity: number;
   unit_price: number;
+  currency_id?: string;
 }
 
 interface MLOrder {
@@ -27,16 +30,35 @@ interface MLOrder {
   buyer: {
     id: number;
     nickname: string;
+    first_name?: string;
+    last_name?: string;
   };
   total_amount: number;
   shipping?: {
     id: number;
   };
   order_items?: MLOrderItem[];
+  comments?: string;
 }
 
 // Sleep helper for yielding between operations
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Generate title_short (first 50 chars)
+const generateTitleShort = (title: string | null): string => {
+  if (!title) return '';
+  return title.substring(0, 50).trim();
+};
+
+// Generate product_key for cost consolidation
+// Rule: if sku exists use normalized sku, else item_id:variation_id
+const generateProductKey = (itemId: string, variationId: string | null, sku: string | null): string => {
+  if (sku && sku.trim()) {
+    // Normalize SKU: uppercase, trim
+    return sku.trim().toUpperCase();
+  }
+  return `${itemId}:${variationId || '0'}`;
+};
 
 // Background processing function
 async function processOrdersInBackground(
@@ -61,7 +83,7 @@ async function processOrdersInBackground(
       mlUrl += `&order.date_created.to=${dateTo}`;
     }
 
-    // Fetch ALL orders with pagination
+    // Fetch ALL orders with pagination (no limit)
     let allOrders: MLOrder[] = [];
     let offset = 0;
     const limit = 50;
@@ -110,9 +132,9 @@ async function processOrdersInBackground(
         await sleep(100);
       }
 
-      // Failsafe
-      if (allOrders.length >= 10000) {
-        console.log(`[Job ${jobId}] Reached failsafe limit of 10000 orders`);
+      // Failsafe: max 50k orders to prevent infinite loops
+      if (allOrders.length >= 50000) {
+        console.log(`[Job ${jobId}] Reached failsafe limit of 50000 orders`);
         hasMore = false;
       }
     }
@@ -124,31 +146,93 @@ async function processOrdersInBackground(
     let processed = 0;
 
     // Collect all order items for batch insert
-    const allOrderItems: Array<{
+    interface OrderItemData {
       user_id: string;
       seller_id: string;
       order_id: string;
+      shipment_id: string | null;
       item_id: string;
+      variation_id: string | null;
+      sku: string | null;
       title: string;
+      title_short: string;
       quantity: number;
       unit_price: number;
+      currency_id: string | null;
+      product_key: string;
       created_at_meli: string;
-    }> = [];
+    }
+    const allOrderItems: OrderItemData[] = [];
+
+    // Track items count per order
+    const orderItemsCount: Record<string, number> = {};
 
     for (let i = 0; i < allOrders.length; i += BATCH_SIZE) {
       const batch = allOrders.slice(i, i + BATCH_SIZE);
       
-      const orderData = batch.map(order => ({
-        user_id: userId,
-        seller_id: sellerId,
-        order_id: order.id.toString(),
-        created_at_meli: order.date_created,
-        order_status: order.status,
-        shipment_id: order.shipping?.id?.toString() || null,
-        buyer_nickname: order.buyer?.nickname || null,
-        total_amount: order.total_amount || null,
-        last_sync_at: new Date().toISOString(),
-      }));
+      // Extract items from this batch first to count them
+      for (const order of batch) {
+        const orderId = order.id.toString();
+        const shipmentId = order.shipping?.id?.toString() || null;
+        let itemCount = 0;
+
+        if (order.order_items && order.order_items.length > 0) {
+          for (const item of order.order_items) {
+            const itemId = item.item?.id || 'unknown';
+            const variationId = item.item?.variation_id?.toString() || null;
+            const sku = item.item?.seller_sku || null;
+            const title = item.item?.title || 'Produto sem título';
+            const titleShort = generateTitleShort(title);
+            const productKey = generateProductKey(itemId, variationId, sku);
+            const quantity = item.quantity || 1;
+
+            allOrderItems.push({
+              user_id: userId,
+              seller_id: sellerId,
+              order_id: orderId,
+              shipment_id: shipmentId,
+              item_id: itemId,
+              variation_id: variationId,
+              sku: sku,
+              title: title,
+              title_short: titleShort,
+              quantity: quantity,
+              unit_price: item.unit_price || 0,
+              currency_id: item.currency_id || 'BRL',
+              product_key: productKey,
+              created_at_meli: order.date_created,
+            });
+
+            itemCount += quantity;
+          }
+        }
+
+        orderItemsCount[orderId] = itemCount;
+      }
+
+      // Build order data with items_count
+      const orderData = batch.map(order => {
+        const orderId = order.id.toString();
+        const buyerName = order.buyer?.first_name && order.buyer?.last_name 
+          ? `${order.buyer.first_name} ${order.buyer.last_name}`.trim()
+          : order.buyer?.nickname || null;
+
+        return {
+          user_id: userId,
+          seller_id: sellerId,
+          order_id: orderId,
+          created_at_meli: order.date_created,
+          order_status: order.status,
+          shipment_id: order.shipping?.id?.toString() || null,
+          buyer_nickname: order.buyer?.nickname || null,
+          buyer_name: buyerName,
+          order_comment: order.comments || null,
+          total_amount: order.total_amount || null,
+          items_count: orderItemsCount[orderId] || 0,
+          items_synced_at: orderItemsCount[orderId] > 0 ? new Date().toISOString() : null,
+          last_sync_at: new Date().toISOString(),
+        };
+      });
 
       const { error: upsertError } = await supabaseAdmin
         .from('meli_orders_cache')
@@ -159,24 +243,7 @@ async function processOrdersInBackground(
 
       if (upsertError) {
         console.error(`[Job ${jobId}] Batch upsert error:`, upsertError);
-      }
-
-      // Extract order items from this batch
-      for (const order of batch) {
-        if (order.order_items && order.order_items.length > 0) {
-          for (const item of order.order_items) {
-            allOrderItems.push({
-              user_id: userId,
-              seller_id: sellerId,
-              order_id: order.id.toString(),
-              item_id: item.item?.id || 'unknown',
-              title: item.item?.title || 'Produto sem título',
-              quantity: item.quantity || 1,
-              unit_price: item.unit_price || 0,
-              created_at_meli: order.date_created,
-            });
-          }
-        }
+        // Continue processing other batches
       }
 
       processed += batch.length;
@@ -198,6 +265,7 @@ async function processOrdersInBackground(
     if (allOrderItems.length > 0) {
       const ITEMS_BATCH_SIZE = 100;
       let itemsProcessed = 0;
+      let itemsErrors = 0;
 
       for (let i = 0; i < allOrderItems.length; i += ITEMS_BATCH_SIZE) {
         const itemsBatch = allOrderItems.slice(i, i + ITEMS_BATCH_SIZE);
@@ -206,10 +274,16 @@ async function processOrdersInBackground(
           user_id: item.user_id,
           seller_id: item.seller_id,
           order_id: item.order_id,
+          shipment_id: item.shipment_id,
           item_id: item.item_id,
+          variation_id: item.variation_id,
+          sku: item.sku,
           title: item.title,
+          title_short: item.title_short,
           quantity: item.quantity,
           unit_price: item.unit_price,
+          currency_id: item.currency_id,
+          product_key: item.product_key,
           created_at_meli: item.created_at_meli,
           last_sync_at: new Date().toISOString(),
         }));
@@ -217,12 +291,14 @@ async function processOrdersInBackground(
         const { error: itemsUpsertError } = await supabaseAdmin
           .from('meli_order_items_cache')
           .upsert(itemsData, {
-            onConflict: 'seller_id,order_id,item_id',
+            onConflict: 'seller_id,order_id,item_id,variation_id',
             ignoreDuplicates: false,
           });
 
         if (itemsUpsertError) {
           console.error(`[Job ${jobId}] Items batch upsert error:`, itemsUpsertError);
+          itemsErrors++;
+          // Continue processing - don't stop sync for individual item errors
         }
 
         itemsProcessed += itemsBatch.length;
@@ -233,7 +309,7 @@ async function processOrdersInBackground(
         }
       }
 
-      console.log(`[Job ${jobId}] Order items synced: ${itemsProcessed}`);
+      console.log(`[Job ${jobId}] Order items synced: ${itemsProcessed}, errors: ${itemsErrors}`);
     }
 
     console.log(`[Job ${jobId}] Sync complete: ${processed} orders, ${allOrderItems.length} items`);
