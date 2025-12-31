@@ -1,12 +1,11 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
-  Drawer,
-  DrawerContent,
-  DrawerHeader,
-  DrawerTitle,
-  DrawerDescription,
-} from "@/components/ui/drawer";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -21,6 +20,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { User, Package, ShoppingCart } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { OrderDetailsDrawer } from "@/components/shipping/OrderDetailsDrawer";
+import { useOrderDetails } from "@/hooks/useOrderDetails";
 
 interface AbcCustomerDetailDrawerProps {
   open: boolean;
@@ -63,6 +64,10 @@ export function AbcCustomerDetailDrawer({
   const [products, setProducts] = useState<ProductData[]>([]);
   const [loading, setLoading] = useState(false);
   const [totals, setTotals] = useState({ orders: 0, products: 0, revenue: 0 });
+  
+  // Order details drawer state
+  const [orderDrawerOpen, setOrderDrawerOpen] = useState(false);
+  const { loading: orderLoading, orderDetails, fetchOrderDetails, clearOrderDetails } = useOrderDetails(sellerId);
 
   useEffect(() => {
     if (open && buyerNickname) {
@@ -70,12 +75,23 @@ export function AbcCustomerDetailDrawer({
     }
   }, [open, buyerNickname, sellerId, dateFrom, dateTo]);
 
+  const handleOrderClick = async (orderId: string) => {
+    await fetchOrderDetails(orderId);
+    setOrderDrawerOpen(true);
+  };
+
+  const handleOrderDrawerClose = (isOpen: boolean) => {
+    setOrderDrawerOpen(isOpen);
+    if (!isOpen) {
+      clearOrderDetails();
+    }
+  };
+
   const fetchCustomerDetails = async () => {
     if (!buyerNickname) return;
     setLoading(true);
 
     try {
-      // Fetch orders from this customer
       let ordersQuery = supabase
         .from("meli_orders_cache")
         .select("order_id, created_at_meli, total_amount, order_status, items_count")
@@ -102,7 +118,6 @@ export function AbcCustomerDetailDrawer({
         return;
       }
 
-      // Sort orders by date desc
       const sortedOrders = ordersData.sort(
         (a, b) =>
           new Date(b.created_at_meli).getTime() -
@@ -111,10 +126,8 @@ export function AbcCustomerDetailDrawer({
 
       setOrders(sortedOrders.slice(0, 100));
 
-      // Get order IDs for items query
       const orderIds = ordersData.map((o) => o.order_id);
 
-      // Fetch items from these orders
       const { data: itemsData, error: itemsError } = await supabase
         .from("meli_order_items_cache")
         .select("product_key, title, title_short, sku, item_id, order_id, quantity, unit_price")
@@ -123,7 +136,6 @@ export function AbcCustomerDetailDrawer({
 
       if (itemsError) throw itemsError;
 
-      // Aggregate by product
       const productMap = new Map<string, ProductData>();
       const orderSet = new Set<string>();
 
@@ -150,7 +162,6 @@ export function AbcCustomerDetailDrawer({
         }
       }
 
-      // Recalculate order_count properly
       const itemsByProduct = new Map<string, Set<string>>();
       for (const item of itemsData || []) {
         const key = item.product_key || item.item_id;
@@ -164,7 +175,6 @@ export function AbcCustomerDetailDrawer({
         product.order_count = itemsByProduct.get(key)?.size || 1;
       }
 
-      // Sort products by revenue desc
       const productList = Array.from(productMap.values()).sort(
         (a, b) => b.total_revenue - a.total_revenue
       );
@@ -202,135 +212,149 @@ export function AbcCustomerDetailDrawer({
     }).format(value);
 
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="max-h-[90vh]">
-        <DrawerHeader className="border-b">
-          <div className="flex items-start justify-between">
-            <div className="space-y-1">
-              <DrawerTitle className="flex items-center gap-2">
-                <User className="h-5 w-5" />
-                {buyerName}
-              </DrawerTitle>
-              <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                {getClassBadge(classification)}
-                <span>{totals.orders} pedidos</span>
-                <span>{totals.products} produtos</span>
-                <span className="font-medium">{formatCurrency(totals.revenue)}</span>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-[800px] w-full max-h-[90vh] overflow-hidden">
+          <DialogHeader className="border-b pb-4">
+            <div className="flex items-start justify-between">
+              <div className="space-y-1">
+                <DialogTitle className="flex items-center gap-2">
+                  <User className="h-5 w-5" />
+                  {buyerName}
+                </DialogTitle>
+                <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                  {getClassBadge(classification)}
+                  <span>{totals.orders} pedidos</span>
+                  <span>{totals.products} produtos</span>
+                  <span className="font-medium">{formatCurrency(totals.revenue)}</span>
+                </div>
               </div>
             </div>
-          </div>
-        </DrawerHeader>
+          </DialogHeader>
 
-        <ScrollArea className="flex-1 p-4">
-          <div className="space-y-6">
-            {/* Orders Section */}
-            <div>
-              <h3 className="text-sm font-semibold flex items-center gap-2 mb-3">
-                <ShoppingCart className="h-4 w-4" />
-                Pedidos ({orders.length})
-              </h3>
+          <ScrollArea className="h-[calc(90vh-140px)]">
+            <div className="space-y-6 p-1">
+              {/* Orders Section */}
+              <div>
+                <h3 className="text-sm font-semibold flex items-center gap-2 mb-3">
+                  <ShoppingCart className="h-4 w-4" />
+                  Pedidos ({orders.length})
+                </h3>
 
-              {loading ? (
-                <div className="space-y-2">
-                  {[...Array(5)].map((_, i) => (
-                    <Skeleton key={i} className="h-12 w-full" />
-                  ))}
-                </div>
-              ) : orders.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Nenhum pedido encontrado no período.
-                </p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Data</TableHead>
-                      <TableHead>Pedido</TableHead>
-                      <TableHead className="text-right">Itens</TableHead>
-                      <TableHead className="text-right">Valor</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {orders.map((order) => (
-                      <TableRow key={order.order_id}>
-                        <TableCell className="text-sm">
-                          {format(new Date(order.created_at_meli), "dd/MM/yy", {
-                            locale: ptBR,
-                          })}
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">
-                          {order.order_id}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {order.items_count}
-                        </TableCell>
-                        <TableCell className="text-right font-medium">
-                          {formatCurrency(order.total_amount || 0)}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="text-xs">
-                            {order.order_status}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
+                {loading ? (
+                  <div className="space-y-2">
+                    {[...Array(5)].map((_, i) => (
+                      <Skeleton key={i} className="h-12 w-full" />
                     ))}
-                  </TableBody>
-                </Table>
-              )}
-            </div>
-
-            {/* Products Section */}
-            <div>
-              <h3 className="text-sm font-semibold flex items-center gap-2 mb-3">
-                <Package className="h-4 w-4" />
-                Produtos Comprados ({products.length})
-              </h3>
-
-              {loading ? (
-                <div className="space-y-2">
-                  {[...Array(3)].map((_, i) => (
-                    <Skeleton key={i} className="h-12 w-full" />
-                  ))}
-                </div>
-              ) : products.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Nenhum produto encontrado.
-                </p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Produto</TableHead>
-                      <TableHead className="text-right">Pedidos</TableHead>
-                      <TableHead className="text-right">Unidades</TableHead>
-                      <TableHead className="text-right">Total</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {products.map((product) => (
-                      <TableRow key={product.product_key}>
-                        <TableCell className="max-w-[200px] truncate">
-                          {product.product_name}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {product.order_count}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {product.total_quantity}
-                        </TableCell>
-                        <TableCell className="text-right font-medium">
-                          {formatCurrency(product.total_revenue)}
-                        </TableCell>
+                  </div>
+                ) : orders.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Nenhum pedido encontrado no período.
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Data</TableHead>
+                        <TableHead>Pedido</TableHead>
+                        <TableHead className="text-right">Itens</TableHead>
+                        <TableHead className="text-right">Valor</TableHead>
+                        <TableHead>Status</TableHead>
                       </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {orders.map((order) => (
+                        <TableRow 
+                          key={order.order_id}
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() => handleOrderClick(order.order_id)}
+                        >
+                          <TableCell className="text-sm">
+                            {format(new Date(order.created_at_meli), "dd/MM/yy", {
+                              locale: ptBR,
+                            })}
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {order.order_id}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {order.items_count}
+                          </TableCell>
+                          <TableCell className="text-right font-medium">
+                            {formatCurrency(order.total_amount || 0)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="text-xs">
+                              {order.order_status}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </div>
+
+              {/* Products Section */}
+              <div>
+                <h3 className="text-sm font-semibold flex items-center gap-2 mb-3">
+                  <Package className="h-4 w-4" />
+                  Produtos Comprados ({products.length})
+                </h3>
+
+                {loading ? (
+                  <div className="space-y-2">
+                    {[...Array(3)].map((_, i) => (
+                      <Skeleton key={i} className="h-12 w-full" />
                     ))}
-                  </TableBody>
-                </Table>
-              )}
+                  </div>
+                ) : products.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Nenhum produto encontrado.
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Produto</TableHead>
+                        <TableHead className="text-right">Pedidos</TableHead>
+                        <TableHead className="text-right">Unidades</TableHead>
+                        <TableHead className="text-right">Total</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {products.map((product) => (
+                        <TableRow key={product.product_key}>
+                          <TableCell className="max-w-[200px] truncate">
+                            {product.product_name}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {product.order_count}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {product.total_quantity}
+                          </TableCell>
+                          <TableCell className="text-right font-medium">
+                            {formatCurrency(product.total_revenue)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </div>
             </div>
-          </div>
-        </ScrollArea>
-      </DrawerContent>
-    </Drawer>
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
+      {/* Order Details Drawer */}
+      <OrderDetailsDrawer
+        order={orderDetails?.order ?? null}
+        open={orderDrawerOpen}
+        onOpenChange={handleOrderDrawerClose}
+        orderItems={orderDetails?.items ?? []}
+      />
+    </>
   );
 }
