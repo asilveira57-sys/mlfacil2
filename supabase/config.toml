@@ -44,3 +44,6 @@ verify_jwt = false
 
 [functions.trends-build-history]
 verify_jwt = false
+
+[functions.cost-engine]
+verify_jwt = false
