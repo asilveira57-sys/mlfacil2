@@ -13,7 +13,7 @@ import { ShippingOrder, OrderItemSummary } from '@/hooks/useShippingLabels';
 import { usePrintHistory } from '@/hooks/usePrintHistory';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Package, FileText, History, MapPin, Truck, CheckCircle, AlertCircle, Clock, Printer, FileDown, ExternalLink, ShoppingCart } from 'lucide-react';
+import { Package, History, MapPin, Truck, CheckCircle, AlertCircle, Clock, Printer, FileDown, ExternalLink, ShoppingCart } from 'lucide-react';
 import { getShipmentStatus, getInvoiceStatusFromSubstatus, getSeverityColors } from '@/lib/shippingStatusMap';
 
 interface OrderDetailsDrawerProps {
@@ -243,52 +243,6 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
                   </div>
                 );
               })()}
-            </section>
-
-            <Separator />
-
-            {/* Invoice Info */}
-            <section>
-              <h3 className="text-sm font-semibold flex items-center gap-2 mb-3">
-                <FileText className="h-4 w-4" />
-                Nota Fiscal
-              </h3>
-              <div className="bg-muted/50 rounded-lg p-4 space-y-3">
-                <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">Status</span>
-                  <Badge 
-                    variant={order.invoice_status === 'emitida' ? 'default' : 'secondary'}
-                  >
-                    {order.invoice_status === 'emitida' && 'Emitida'}
-                    {order.invoice_status === 'pendente' && 'Pendente'}
-                    {order.invoice_status === 'nao_localizada' && 'Não localizada'}
-                    {order.invoice_status === 'erro' && 'Erro'}
-                    {!order.invoice_status && '-'}
-                  </Badge>
-                </div>
-                {order.invoice_number && (
-                  <div className="flex justify-between">
-                    <span className="text-sm text-muted-foreground">Número</span>
-                    <span className="text-sm font-mono">{order.invoice_number}</span>
-                  </div>
-                )}
-                {order.invoice_key && (
-                  <div>
-                    <span className="text-sm text-muted-foreground block mb-1">Chave de Acesso</span>
-                    <code className="text-xs bg-background p-2 rounded block break-all">
-                      {order.invoice_key}
-                    </code>
-                  </div>
-                )}
-                {order.issued_at && (
-                  <div className="flex justify-between">
-                    <span className="text-sm text-muted-foreground">Data de emissão</span>
-                    <span className="text-sm">
-                      {format(new Date(order.issued_at), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
-                    </span>
-                  </div>
-                )}
-              </div>
             </section>
 
             <Separator />
