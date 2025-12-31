@@ -115,7 +115,13 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
                             R$ {(item.unit_price * item.quantity).toFixed(2)}
                           </span>
                           <a
-                            href={`https://www.mercadolivre.com.br/${item.item_id}`}
+                            href={
+                              item.catalog_product_id
+                                ? `https://www.mercadolivre.com.br/p/${item.catalog_product_id}`
+                                : item.permalink
+                                  ? item.permalink
+                                  : `https://produto.mercadolivre.com.br/${item.item_id.replace(/^(MLB)(\d+)$/, '$1-$2')}`
+                            }
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-muted-foreground hover:text-primary transition-colors"
