@@ -101,12 +101,12 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
                               {item.quantity}x
                             </span>
                             <span className="text-sm truncate">
-                              {item.sku || item.title_short || item.item_id}
+                              {item.sku || item.title_short || item.title || item.item_id}
                             </span>
                           </div>
-                          {item.title_short && item.sku && (
+                          {(item.title_short || item.title) && item.sku && (
                             <p className="text-xs text-muted-foreground truncate mt-0.5">
-                              {item.title_short}
+                              {item.title_short || item.title}
                             </p>
                           )}
                         </div>

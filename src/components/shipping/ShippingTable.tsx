@@ -65,7 +65,7 @@ function buildItemsSummary(items: OrderItemSummary[] | undefined): string {
   const remaining = sorted.length - MAX_DISPLAY;
 
   const parts = displayed.map(item => {
-    const label = item.sku || item.title_short || item.item_id;
+    const label = item.sku || item.title_short || item.title || item.item_id;
     // Truncate long labels
     const truncated = label.length > 15 ? label.substring(0, 15) + '…' : label;
     return `${item.quantity}x ${truncated}`;
