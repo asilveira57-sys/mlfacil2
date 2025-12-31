@@ -1,10 +1,10 @@
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet';
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -35,19 +35,19 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
   const canReprint = order.label_available && order.invoice_status === 'emitida' && order.shipment_id;
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-[400px] sm:w-[540px]">
-        <SheetHeader>
-          <SheetTitle className="flex items-center gap-2">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-[700px] w-full max-h-[90vh] overflow-hidden">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
             <Package className="h-5 w-5" />
             Pedido #{order.order_id}
-          </SheetTitle>
-          <SheetDescription>
+          </DialogTitle>
+          <DialogDescription>
             {order.buyer_nickname && `Comprador: ${order.buyer_nickname}`}
-          </SheetDescription>
-        </SheetHeader>
+          </DialogDescription>
+        </DialogHeader>
 
-        <ScrollArea className="h-[calc(100vh-120px)] mt-6 pr-4">
+        <ScrollArea className="h-[calc(90vh-120px)] pr-4">
           <div className="space-y-6">
             {/* Reprint Actions */}
             {canReprint && onReprint && (
@@ -101,7 +101,7 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
                               {item.quantity}x
                             </span>
                             <span className="text-sm truncate">
-                              {item.sku || item.title_short || 'Item'}
+                              {item.sku || item.title_short || item.item_id}
                             </span>
                           </div>
                           {item.title_short && item.sku && (
@@ -115,7 +115,7 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
                             R$ {(item.unit_price * item.quantity).toFixed(2)}
                           </span>
                           <a
-                            href={`https://produto.mercadolivre.com.br/MLB-${item.item_id.replace('MLB', '')}`}
+                            href={`https://www.mercadolivre.com.br/${item.item_id}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-muted-foreground hover:text-primary transition-colors"
@@ -275,7 +275,7 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
             </section>
           </div>
         </ScrollArea>
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }
