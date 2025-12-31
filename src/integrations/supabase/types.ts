@@ -193,6 +193,237 @@ export type Database = {
         }
         Relationships: []
       }
+      competitor_alerts: {
+        Row: {
+          alert_type: string
+          catalog_product_id: string | null
+          created_at: string
+          data_json: Json | null
+          id: string
+          is_dismissed: boolean
+          is_read: boolean
+          item_id: string | null
+          message_pt: string
+          product_key: string | null
+          resolved_at: string | null
+          seller_id: string
+          severity: string
+          title: string
+          user_id: string
+        }
+        Insert: {
+          alert_type: string
+          catalog_product_id?: string | null
+          created_at?: string
+          data_json?: Json | null
+          id?: string
+          is_dismissed?: boolean
+          is_read?: boolean
+          item_id?: string | null
+          message_pt: string
+          product_key?: string | null
+          resolved_at?: string | null
+          seller_id: string
+          severity?: string
+          title: string
+          user_id: string
+        }
+        Update: {
+          alert_type?: string
+          catalog_product_id?: string | null
+          created_at?: string
+          data_json?: Json | null
+          id?: string
+          is_dismissed?: boolean
+          is_read?: boolean
+          item_id?: string | null
+          message_pt?: string
+          product_key?: string | null
+          resolved_at?: string | null
+          seller_id?: string
+          severity?: string
+          title?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      competitor_catalog_snapshots: {
+        Row: {
+          catalog_product_id: string
+          collected_at: string
+          competitor_offers_json: Json | null
+          created_at: string
+          expires_at: string
+          id: string
+          market_price_avg: number | null
+          market_price_max: number | null
+          market_price_median: number | null
+          market_price_min: number | null
+          notes: string | null
+          seller_id: string
+          total_offers: number | null
+          user_id: string
+          your_item_id: string | null
+          your_position: number | null
+          your_price: number | null
+        }
+        Insert: {
+          catalog_product_id: string
+          collected_at?: string
+          competitor_offers_json?: Json | null
+          created_at?: string
+          expires_at: string
+          id?: string
+          market_price_avg?: number | null
+          market_price_max?: number | null
+          market_price_median?: number | null
+          market_price_min?: number | null
+          notes?: string | null
+          seller_id: string
+          total_offers?: number | null
+          user_id: string
+          your_item_id?: string | null
+          your_position?: number | null
+          your_price?: number | null
+        }
+        Update: {
+          catalog_product_id?: string
+          collected_at?: string
+          competitor_offers_json?: Json | null
+          created_at?: string
+          expires_at?: string
+          id?: string
+          market_price_avg?: number | null
+          market_price_max?: number | null
+          market_price_median?: number | null
+          market_price_min?: number | null
+          notes?: string | null
+          seller_id?: string
+          total_offers?: number | null
+          user_id?: string
+          your_item_id?: string | null
+          your_position?: number | null
+          your_price?: number | null
+        }
+        Relationships: []
+      }
+      competitor_market_snapshots: {
+        Row: {
+          avg_price: number | null
+          category_id: string | null
+          collected_at: string
+          created_at: string
+          expires_at: string
+          filters_json: Json | null
+          id: string
+          max_price: number | null
+          min_price: number | null
+          notes: string | null
+          p10_price: number | null
+          p25_price: number | null
+          p50_price: number | null
+          p75_price: number | null
+          p90_price: number | null
+          query_term: string | null
+          seller_id: string
+          snapshot_key: string
+          top_competitors_json: Json | null
+          total_results: number | null
+          user_id: string
+        }
+        Insert: {
+          avg_price?: number | null
+          category_id?: string | null
+          collected_at?: string
+          created_at?: string
+          expires_at: string
+          filters_json?: Json | null
+          id?: string
+          max_price?: number | null
+          min_price?: number | null
+          notes?: string | null
+          p10_price?: number | null
+          p25_price?: number | null
+          p50_price?: number | null
+          p75_price?: number | null
+          p90_price?: number | null
+          query_term?: string | null
+          seller_id: string
+          snapshot_key: string
+          top_competitors_json?: Json | null
+          total_results?: number | null
+          user_id: string
+        }
+        Update: {
+          avg_price?: number | null
+          category_id?: string | null
+          collected_at?: string
+          created_at?: string
+          expires_at?: string
+          filters_json?: Json | null
+          id?: string
+          max_price?: number | null
+          min_price?: number | null
+          notes?: string | null
+          p10_price?: number | null
+          p25_price?: number | null
+          p50_price?: number | null
+          p75_price?: number | null
+          p90_price?: number | null
+          query_term?: string | null
+          seller_id?: string
+          snapshot_key?: string
+          top_competitors_json?: Json | null
+          total_results?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      competitor_settings: {
+        Row: {
+          auto_monitor_abc_a: boolean
+          auto_monitor_trending: boolean
+          created_at: string
+          default_search_filters_json: Json | null
+          default_snapshot_ttl_hours: number
+          id: string
+          margin_floor_percent: number
+          max_requests_per_minute: number
+          seller_id: string
+          target_margin_percent: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          auto_monitor_abc_a?: boolean
+          auto_monitor_trending?: boolean
+          created_at?: string
+          default_search_filters_json?: Json | null
+          default_snapshot_ttl_hours?: number
+          id?: string
+          margin_floor_percent?: number
+          max_requests_per_minute?: number
+          seller_id: string
+          target_margin_percent?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          auto_monitor_abc_a?: boolean
+          auto_monitor_trending?: boolean
+          created_at?: string
+          default_search_filters_json?: Json | null
+          default_snapshot_ttl_hours?: number
+          id?: string
+          margin_floor_percent?: number
+          max_requests_per_minute?: number
+          seller_id?: string
+          target_margin_percent?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       highlights_items: {
         Row: {
           created_at: string
@@ -490,6 +721,87 @@ export type Database = {
           show_shipment_id?: boolean
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      meli_listings_cache: {
+        Row: {
+          available_quantity: number | null
+          catalog_product_id: string | null
+          category_id: string | null
+          condition: string | null
+          created_at: string
+          currency_id: string | null
+          health: number | null
+          id: string
+          item_id: string
+          last_sync_at: string
+          listing_type_id: string | null
+          logistic_type: string | null
+          original_price: number | null
+          permalink: string | null
+          price: number
+          seller_id: string
+          sku: string | null
+          sold_quantity: number | null
+          status: string | null
+          thumbnail: string | null
+          title: string | null
+          title_short: string | null
+          user_id: string
+          variation_id: string
+        }
+        Insert: {
+          available_quantity?: number | null
+          catalog_product_id?: string | null
+          category_id?: string | null
+          condition?: string | null
+          created_at?: string
+          currency_id?: string | null
+          health?: number | null
+          id?: string
+          item_id: string
+          last_sync_at?: string
+          listing_type_id?: string | null
+          logistic_type?: string | null
+          original_price?: number | null
+          permalink?: string | null
+          price?: number
+          seller_id: string
+          sku?: string | null
+          sold_quantity?: number | null
+          status?: string | null
+          thumbnail?: string | null
+          title?: string | null
+          title_short?: string | null
+          user_id: string
+          variation_id?: string
+        }
+        Update: {
+          available_quantity?: number | null
+          catalog_product_id?: string | null
+          category_id?: string | null
+          condition?: string | null
+          created_at?: string
+          currency_id?: string | null
+          health?: number | null
+          id?: string
+          item_id?: string
+          last_sync_at?: string
+          listing_type_id?: string | null
+          logistic_type?: string | null
+          original_price?: number | null
+          permalink?: string | null
+          price?: number
+          seller_id?: string
+          sku?: string | null
+          sold_quantity?: number | null
+          status?: string | null
+          thumbnail?: string | null
+          title?: string | null
+          title_short?: string | null
+          user_id?: string
+          variation_id?: string
         }
         Relationships: []
       }
