@@ -218,6 +218,45 @@ export type Database = {
         }
         Relationships: []
       }
+      meli_order_items_cache: {
+        Row: {
+          created_at_meli: string | null
+          id: string
+          item_id: string
+          last_sync_at: string | null
+          order_id: string
+          quantity: number
+          seller_id: string
+          title: string | null
+          unit_price: number
+          user_id: string
+        }
+        Insert: {
+          created_at_meli?: string | null
+          id?: string
+          item_id: string
+          last_sync_at?: string | null
+          order_id: string
+          quantity?: number
+          seller_id: string
+          title?: string | null
+          unit_price?: number
+          user_id: string
+        }
+        Update: {
+          created_at_meli?: string | null
+          id?: string
+          item_id?: string
+          last_sync_at?: string | null
+          order_id?: string
+          quantity?: number
+          seller_id?: string
+          title?: string | null
+          unit_price?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
       meli_orders_cache: {
         Row: {
           buyer_nickname: string | null
