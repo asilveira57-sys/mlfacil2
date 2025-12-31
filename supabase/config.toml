@@ -50,3 +50,6 @@ verify_jwt = false
 
 [functions.ml-sync-billing]
 verify_jwt = false
+
+[functions.competitor-engine]
+verify_jwt = false
