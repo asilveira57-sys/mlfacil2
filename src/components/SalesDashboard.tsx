@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { SalesMetricsCard } from "./SalesMetricsCard";
 import { SalesChart } from "./SalesChart";
@@ -12,8 +12,11 @@ import {
   Package,
   RefreshCw,
   AlertCircle,
+  CloudDownload,
+  CheckCircle,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { Progress } from "@/components/ui/progress";
 
 interface DailySale {
   date: string;
@@ -49,6 +52,18 @@ interface SalesData {
     nickname: string;
     email: string;
   };
+  _debug?: {
+    cachedOrdersCount: number;
+    cachedItemsCount: number;
+    source: string;
+  };
+}
+
+interface SyncJob {
+  id: string;
+  status: string;
+  total_records: number;
+  processed_records: number;
 }
 
 const formatCurrency = (value: number) => {
@@ -64,8 +79,12 @@ export function SalesDashboard() {
   const [salesData, setSalesData] = useState<SalesData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [retryCount, setRetryCount] = useState(0);
+  const [sellerId, setSellerId] = useState<string | null>(null);
   const { toast } = useToast();
+
+  // Sync state
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncJob, setSyncJob] = useState<SyncJob | null>(null);
 
   const fetchSalesData = async (attempt = 0): Promise<void> => {
     setIsLoading(true);
@@ -75,7 +94,6 @@ export function SalesDashboard() {
       let { data: { session } } = await supabase.auth.getSession();
       
       if (!session) {
-        // Se não há sessão e ainda não tentamos retry, aguardar
         if (attempt < 2) {
           await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
           return fetchSalesData(attempt + 1);
@@ -85,17 +103,26 @@ export function SalesDashboard() {
         return;
       }
 
+      // Also fetch seller_id from ml_accounts
+      const { data: accounts } = await supabase
+        .from('ml_accounts')
+        .select('ml_user_id')
+        .eq('user_id', session.user.id)
+        .eq('is_active', true)
+        .limit(1);
+      
+      if (accounts?.[0]) {
+        setSellerId(accounts[0].ml_user_id);
+      }
+
       let response = await supabase.functions.invoke("ml-sales-data", {
         headers: { Authorization: `Bearer ${session.access_token}` }
       });
 
-      // Se receber 401, tenta refresh e repete
       if (response.error?.message?.includes('401') || response.error?.status === 401) {
-        console.log('Token expirado, tentando refresh...');
         const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
         
         if (refreshError || !refreshData.session) {
-          // Retry automático antes de mostrar erro
           if (attempt < 2) {
             await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
             return fetchSalesData(attempt + 1);
@@ -126,10 +153,8 @@ export function SalesDashboard() {
       }
 
       setSalesData(response.data);
-      setRetryCount(0);
     } catch (err: any) {
       console.error("Error fetching sales data:", err);
-      // Retry automático para erros de rede/auth
       if (attempt < 2) {
         await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
         return fetchSalesData(attempt + 1);
@@ -146,11 +171,98 @@ export function SalesDashboard() {
     }
   };
 
+  // Sync orders function
+  const syncOrders = useCallback(async () => {
+    if (!sellerId) {
+      toast({
+        title: "Erro",
+        description: "Conta ML não encontrada",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSyncing(true);
+    setSyncJob(null);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error("Sessão expirada");
+      }
+
+      const response = await supabase.functions.invoke("ml-sync-orders", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: { seller_id: sellerId }
+      });
+
+      if (response.error) {
+        throw response.error;
+      }
+
+      if (response.data?.job_id) {
+        toast({
+          title: "Sincronização iniciada",
+          description: "Os pedidos estão sendo sincronizados em background",
+        });
+        
+        // Start polling for job status
+        pollJobStatus(response.data.job_id);
+      }
+    } catch (err: any) {
+      console.error("Error syncing orders:", err);
+      setIsSyncing(false);
+      toast({
+        title: "Erro ao sincronizar",
+        description: err?.message || "Não foi possível iniciar a sincronização",
+        variant: "destructive",
+      });
+    }
+  }, [sellerId, toast]);
+
+  // Poll job status
+  const pollJobStatus = useCallback(async (jobId: string) => {
+    const poll = async () => {
+      const { data, error } = await supabase
+        .from('sync_jobs')
+        .select('id, status, total_records, processed_records')
+        .eq('id', jobId)
+        .maybeSingle();
+
+      if (error || !data) {
+        setIsSyncing(false);
+        return;
+      }
+
+      setSyncJob(data);
+
+      if (data.status === 'done') {
+        setIsSyncing(false);
+        toast({
+          title: "Sincronização concluída",
+          description: `${data.processed_records} pedidos sincronizados`,
+        });
+        // Refresh sales data
+        fetchSalesData();
+      } else if (data.status === 'error') {
+        setIsSyncing(false);
+        toast({
+          title: "Erro na sincronização",
+          description: "Ocorreu um erro durante a sincronização",
+          variant: "destructive",
+        });
+      } else {
+        // Continue polling
+        setTimeout(poll, 2000);
+      }
+    };
+
+    poll();
+  }, [toast]);
+
   useEffect(() => {
-    // Aguardar sessão estar pronta via auth state change
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
-        // Pequeno delay para garantir que a sessão está completamente restaurada
         setTimeout(() => fetchSalesData(), 100);
       }
     });
@@ -185,29 +297,87 @@ export function SalesDashboard() {
   }
 
   const metrics = salesData?.metrics;
+  const syncProgress = syncJob && syncJob.total_records > 0 
+    ? (syncJob.processed_records / syncJob.total_records) * 100 
+    : 0;
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h3 className="text-2xl font-bold text-foreground">Dashboard de Vendas</h3>
           {salesData?.seller && (
             <p className="text-muted-foreground">
               Conta: {salesData.seller.nickname || salesData.seller.email}
+              {salesData._debug && (
+                <span className="ml-2 text-xs text-muted-foreground/70">
+                  ({salesData._debug.cachedOrdersCount} pedidos, {salesData._debug.cachedItemsCount} items)
+                </span>
+              )}
             </p>
           )}
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => fetchSalesData()}
-          disabled={isLoading}
-        >
-          <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
-          Atualizar
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="default"
+            size="sm"
+            onClick={syncOrders}
+            disabled={isSyncing || !sellerId}
+          >
+            {isSyncing ? (
+              <>
+                <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                Sincronizando...
+              </>
+            ) : (
+              <>
+                <CloudDownload className="w-4 h-4 mr-2" />
+                Sincronizar Pedidos
+              </>
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => fetchSalesData()}
+            disabled={isLoading}
+          >
+            <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
+            Atualizar
+          </Button>
+        </div>
       </div>
+
+      {/* Sync Progress */}
+      {isSyncing && syncJob && (
+        <Card className="p-4">
+          <div className="flex items-center gap-4">
+            <RefreshCw className="w-5 h-5 animate-spin text-primary" />
+            <div className="flex-1">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium">Sincronizando pedidos...</span>
+                <span className="text-sm text-muted-foreground">
+                  {syncJob.processed_records} / {syncJob.total_records}
+                </span>
+              </div>
+              <Progress value={syncProgress} className="h-2" />
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* Sync Complete Notice */}
+      {!isSyncing && syncJob?.status === 'done' && (
+        <Card className="p-4 border-green-500/30 bg-green-500/5">
+          <div className="flex items-center gap-3">
+            <CheckCircle className="w-5 h-5 text-green-500" />
+            <span className="text-sm font-medium text-green-700 dark:text-green-400">
+              Sincronização concluída: {syncJob.processed_records} pedidos e items atualizados
+            </span>
+          </div>
+        </Card>
+      )}
 
       {/* Metrics Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
