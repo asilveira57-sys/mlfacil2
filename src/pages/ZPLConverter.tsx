@@ -9,13 +9,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { Home, Download, FileText, X, Upload } from "lucide-react";
+import { Home, Download, FileText, X, Upload, History, Clock, Trash2 } from "lucide-react";
 import jsPDF from "jspdf";
 import { useDropzone } from "react-dropzone";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { LABEL_TYPES, FULL_PRODUTO_SUBTYPES, splitZPLByType, detectLabelCount } from "@/hooks/useZPLSettings";
 import { ZPLTimer } from "@/components/ZPLTimer";
 import { useZPLTimeEstimate } from "@/hooks/useZPLTimeEstimate";
+import { useZPLPrintHistory } from "@/hooks/useZPLPrintHistory";
 import type { User } from "@supabase/supabase-js";
 
 export default function ZPLConverter() {
@@ -38,6 +39,7 @@ export default function ZPLConverter() {
   const [estimatedSeconds, setEstimatedSeconds] = useState(0);
   
   const { getEstimate, saveConversionTime } = useZPLTimeEstimate();
+  const { history, addToHistory, removeFromHistory, clearHistory, getTimeRemaining } = useZPLPrintHistory();
 
   // Verificar autenticação
   useEffect(() => {
@@ -216,6 +218,18 @@ export default function ZPLConverter() {
 
       pdf.save("etiquetas_zpl.pdf");
       toast.success(`${convertedBlobs.length} etiqueta(s) convertida(s) com sucesso!`);
+      
+      // Salvar no histórico de reimpressão rápida
+      addToHistory({
+        fileName: uploadedFileName || `etiquetas_${Date.now()}.zpl`,
+        labelType: selectedLabelType,
+        labelSubtype: selectedFullProdutoSubType || null,
+        labelCount: labels.length,
+        zplCode: zplCode.trim(),
+        width,
+        height,
+        dpi,
+      });
       
       // Salvar tempo real de conversão no histórico
       const endTime = Date.now();
@@ -538,6 +552,82 @@ export default function ZPLConverter() {
                   <div className="border rounded-lg p-4 bg-muted">
                     <img src={previewImage} alt="Preview da etiqueta" className="w-full h-auto" />
                   </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Histórico de Reimpressão Rápida */}
+            {history.length > 0 && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <History className="h-4 w-4" />
+                      Reimpressão Rápida
+                    </CardTitle>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={clearHistory}
+                      className="h-7 text-xs text-muted-foreground hover:text-destructive"
+                    >
+                      <Trash2 className="h-3 w-3 mr-1" />
+                      Limpar
+                    </Button>
+                  </div>
+                  <CardDescription className="text-xs">
+                    Armazenamento rápido por 24h • Limite de 10 arquivos
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {history.map((item) => (
+                    <div 
+                      key={item.id}
+                      className="flex items-center justify-between p-2 rounded-lg border bg-muted/30 hover:bg-muted/50 transition-colors group"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{item.fileName}</p>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <span>{LABEL_TYPES.find(t => t.value === item.labelType)?.label || item.labelType}</span>
+                          <span>•</span>
+                          <span>{item.labelCount} etiqueta(s)</span>
+                          <span>•</span>
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {getTimeRemaining(item.createdAt)}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 ml-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2"
+                          onClick={() => {
+                            setZplCode(item.zplCode);
+                            setSelectedLabelType(item.labelType);
+                            setSelectedFullProdutoSubType(item.labelSubtype || "");
+                            setWidth(item.width);
+                            setHeight(item.height);
+                            setDpi(item.dpi);
+                            setUploadedFileName(item.fileName);
+                            toast.success("Etiqueta carregada para reimpressão");
+                          }}
+                        >
+                          <Upload className="h-3 w-3 mr-1" />
+                          Carregar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 hover:text-destructive"
+                          onClick={() => removeFromHistory(item.id)}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
                 </CardContent>
               </Card>
             )}
