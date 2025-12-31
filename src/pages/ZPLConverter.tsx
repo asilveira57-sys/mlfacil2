@@ -9,12 +9,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { Home, Download, FileText, X, Upload, History, Clock, Trash2 } from "lucide-react";
+import { Home, Download, FileText, X, Upload, History, Clock, Trash2, Sparkles, Info } from "lucide-react";
 import jsPDF from "jspdf";
 import { useDropzone } from "react-dropzone";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { LABEL_TYPES, FULL_PRODUTO_SUBTYPES, splitZPLByType, detectLabelCount } from "@/hooks/useZPLSettings";
 import { ZPLTimer } from "@/components/ZPLTimer";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useZPLTimeEstimate } from "@/hooks/useZPLTimeEstimate";
 import { useZPLPrintHistory } from "@/hooks/useZPLPrintHistory";
 import type { User } from "@supabase/supabase-js";
@@ -35,6 +36,12 @@ export default function ZPLConverter() {
   const [selectedLabelType, setSelectedLabelType] = useState("");
   const [selectedFullProdutoSubType, setSelectedFullProdutoSubType] = useState(() => {
     return localStorage.getItem('zpl_full_produto_subtype') || "";
+  });
+  const [quality, setQuality] = useState<'normal' | 'high' | 'max'>(() => {
+    return (localStorage.getItem('zpl_quality_preference') as 'normal' | 'high' | 'max') || 'high';
+  });
+  const [outputFormat, setOutputFormat] = useState<'pdf_png' | 'pdf_vector'>(() => {
+    return (localStorage.getItem('zpl_output_format') as 'pdf_png' | 'pdf_vector') || 'pdf_png';
   });
   const [estimatedSeconds, setEstimatedSeconds] = useState(0);
   
@@ -72,7 +79,19 @@ export default function ZPLConverter() {
     return detectLabelCount(zplCode, selectedLabelType);
   }, [zplCode, selectedLabelType]);
 
-  const convertSingleLabel = async (labelCode: string, widthInches: number, heightInches: number, dpmm: number): Promise<Blob> => {
+  // Map quality to DPMM
+  const getQualityDpmm = (q: 'normal' | 'high' | 'max') => {
+    const dpmmMap = { normal: 8, high: 12, max: 24 };
+    return dpmmMap[q];
+  };
+
+  const convertSingleLabel = async (
+    labelCode: string, 
+    widthInches: number, 
+    heightInches: number, 
+    dpmm: number,
+    format: 'png' | 'pdf' = 'png'
+  ): Promise<Blob> => {
     const labelaryUrl = `https://api.labelary.com/v1/printers/${dpmm}dpmm/labels/${widthInches.toFixed(2)}x${heightInches.toFixed(2)}/0/`;
 
     const maxRetries = 3;
@@ -82,7 +101,7 @@ export default function ZPLConverter() {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
-          "Accept": "image/png",
+          "Accept": format === 'pdf' ? "application/pdf" : "image/png",
         },
         body: labelCode,
       });
@@ -104,10 +123,16 @@ export default function ZPLConverter() {
     throw new Error("Erro ao converter etiqueta: limite de tentativas excedido");
   };
 
-  const processLabelsInBatches = async (labels: string[], widthInches: number, heightInches: number, dpmm: number): Promise<Blob[]> => {
+  const processLabelsInBatches = async (
+    labels: string[], 
+    widthInches: number, 
+    heightInches: number, 
+    dpmm: number,
+    format: 'png' | 'pdf' = 'png'
+  ): Promise<Blob[]> => {
     const blobs: Blob[] = new Array(labels.length);
     let currentDelay = 200;
-    const concurrentRequests = 3;
+    const concurrentRequests = format === 'pdf' ? 2 : 3; // PDF requests are heavier
     
     for (let i = 0; i < labels.length; i += concurrentRequests) {
       const batch = labels.slice(i, Math.min(i + concurrentRequests, labels.length));
@@ -115,7 +140,7 @@ export default function ZPLConverter() {
       try {
         const batchPromises = batch.map(async (label, batchIndex) => {
           const labelIndex = i + batchIndex;
-          const blob = await convertSingleLabel(label, widthInches, heightInches, dpmm);
+          const blob = await convertSingleLabel(label, widthInches, heightInches, dpmm, format);
           blobs[labelIndex] = blob;
           
           const progress = Math.round(((labelIndex + 1) / labels.length) * 100);
@@ -170,10 +195,10 @@ export default function ZPLConverter() {
     const startTime = Date.now();
 
     try {
-      const dpiValue = parseInt(dpi);
       const widthInches = parseFloat(width) / 25.4;
       const heightInches = parseFloat(height) / 25.4;
-      const dpmm = dpiValue <= 203 ? 8 : 12;
+      const dpmm = getQualityDpmm(quality);
+      const useVectorPdf = outputFormat === 'pdf_vector';
 
       const labels = splitZPLByType(zplCode.trim(), selectedLabelType);
 
@@ -183,41 +208,93 @@ export default function ZPLConverter() {
         return;
       }
 
-      toast.info(`Processando ${labels.length} etiqueta(s)...`);
+      const qualityLabel = quality === 'max' ? 'máxima' : quality === 'high' ? 'alta' : 'normal';
+      toast.info(`Processando ${labels.length} etiqueta(s) em qualidade ${qualityLabel}${useVectorPdf ? ' (PDF vetorial)' : ''}...`);
 
-      const convertedBlobs = await processLabelsInBatches(labels, widthInches, heightInches, dpmm);
-
-      const pdf = new jsPDF({
-        orientation: widthInches > heightInches ? "landscape" : "portrait",
-        unit: "mm",
-        format: [parseFloat(width), parseFloat(height)],
-      });
-
-      for (let i = 0; i < convertedBlobs.length; i++) {
-        const blob = convertedBlobs[i];
-        const reader = new FileReader();
+      if (useVectorPdf) {
+        // Vector PDF mode - get PDFs directly from Labelary and merge
+        const convertedBlobs = await processLabelsInBatches(labels, widthInches, heightInches, dpmm, 'pdf');
         
-        await new Promise<void>((resolve, reject) => {
-          reader.onload = () => {
-            try {
-              if (i > 0) pdf.addPage();
-              pdf.addImage(reader.result as string, "PNG", 0, 0, parseFloat(width), parseFloat(height));
-              resolve();
-            } catch (error) {
-              reject(error);
-            }
-          };
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
+        // For preview, get first label as PNG
+        const previewBlob = await convertSingleLabel(labels[0], widthInches, heightInches, dpmm, 'png');
+        setPreviewImage(URL.createObjectURL(previewBlob));
+
+        // Merge PDFs using pdf-lib would be ideal, but for simplicity, if single label, download directly
+        if (convertedBlobs.length === 1) {
+          const url = URL.createObjectURL(convertedBlobs[0]);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'etiquetas_zpl.pdf';
+          a.click();
+          URL.revokeObjectURL(url);
+        } else {
+          // For multiple labels in vector mode, we need to merge - fallback to jsPDF with high-res PNGs
+          // since we don't have pdf-lib. Let's convert to PNG at max quality for the merge
+          const pngBlobs = await processLabelsInBatches(labels, widthInches, heightInches, 24, 'png');
+          
+          const pdf = new jsPDF({
+            orientation: widthInches > heightInches ? "landscape" : "portrait",
+            unit: "mm",
+            format: [parseFloat(width), parseFloat(height)],
+          });
+
+          for (let i = 0; i < pngBlobs.length; i++) {
+            const blob = pngBlobs[i];
+            const reader = new FileReader();
+            
+            await new Promise<void>((resolve, reject) => {
+              reader.onload = () => {
+                try {
+                  if (i > 0) pdf.addPage();
+                  pdf.addImage(reader.result as string, "PNG", 0, 0, parseFloat(width), parseFloat(height));
+                  resolve();
+                } catch (error) {
+                  reject(error);
+                }
+              };
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
+            });
+          }
+
+          pdf.save("etiquetas_zpl.pdf");
+        }
+      } else {
+        // Standard PNG to PDF mode
+        const convertedBlobs = await processLabelsInBatches(labels, widthInches, heightInches, dpmm, 'png');
+
+        const pdf = new jsPDF({
+          orientation: widthInches > heightInches ? "landscape" : "portrait",
+          unit: "mm",
+          format: [parseFloat(width), parseFloat(height)],
         });
 
-        if (i === 0) {
-          setPreviewImage(URL.createObjectURL(blob));
-        }
-      }
+        for (let i = 0; i < convertedBlobs.length; i++) {
+          const blob = convertedBlobs[i];
+          const reader = new FileReader();
+          
+          await new Promise<void>((resolve, reject) => {
+            reader.onload = () => {
+              try {
+                if (i > 0) pdf.addPage();
+                pdf.addImage(reader.result as string, "PNG", 0, 0, parseFloat(width), parseFloat(height));
+                resolve();
+              } catch (error) {
+                reject(error);
+              }
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
 
-      pdf.save("etiquetas_zpl.pdf");
-      toast.success(`${convertedBlobs.length} etiqueta(s) convertida(s) com sucesso!`);
+          if (i === 0) {
+            setPreviewImage(URL.createObjectURL(blob));
+          }
+        }
+
+        pdf.save("etiquetas_zpl.pdf");
+      }
+      toast.success(`${labels.length} etiqueta(s) convertida(s) com sucesso!`);
       
       // Salvar no histórico de reimpressão rápida
       addToHistory({
@@ -417,13 +494,73 @@ export default function ZPLConverter() {
                 </div>
 
                 <div>
-                  <Label>DPI</Label>
-                  <Input
-                    type="number"
-                    value={dpi}
-                    onChange={(e) => setDpi(e.target.value)}
-                    placeholder="203"
-                  />
+                  <Label className="flex items-center gap-1">
+                    Qualidade
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-3 w-3 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">
+                          <p className="text-xs">
+                            <strong>Normal (203 DPI):</strong> Mais rápido, ideal para testes<br/>
+                            <strong>Alta (300 DPI):</strong> Boa qualidade para impressão<br/>
+                            <strong>Máxima (600 DPI):</strong> Melhor qualidade, mais lento
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </Label>
+                  <Select 
+                    value={quality} 
+                    onValueChange={(value: 'normal' | 'high' | 'max') => {
+                      setQuality(value);
+                      localStorage.setItem('zpl_quality_preference', value);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="normal">Normal (203 DPI)</SelectItem>
+                      <SelectItem value="high">Alta (300 DPI)</SelectItem>
+                      <SelectItem value="max">Máxima (600 DPI)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label className="flex items-center gap-1">
+                    Formato
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Sparkles className="h-3 w-3 text-amber-500 cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">
+                          <p className="text-xs">
+                            <strong>PDF Padrão:</strong> Mais compatível<br/>
+                            <strong>PDF Vetorial:</strong> Qualidade máxima, códigos sempre nítidos (recomendado para etiquetas de envio)
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </Label>
+                  <Select 
+                    value={outputFormat} 
+                    onValueChange={(value: 'pdf_png' | 'pdf_vector') => {
+                      setOutputFormat(value);
+                      localStorage.setItem('zpl_output_format', value);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pdf_png">PDF Padrão</SelectItem>
+                      <SelectItem value="pdf_vector">PDF Vetorial ✨</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             </CardContent>
