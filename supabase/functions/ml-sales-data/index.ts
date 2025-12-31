@@ -194,6 +194,8 @@ serve(async (req) => {
         cancelledRevenuePeriod: Number(metricsData.cancelledRevenuePeriod) || 0,
       },
       dailySales: metricsData.dailySales || [],
+      monthlySales: metricsData.monthlySales || [],
+      monthlyCancelled: metricsData.monthlyCancelled || [],
       topProducts: metricsData.topProducts || [],
       availableMonths: metricsData.availableMonths || [],
       seller: {
