@@ -179,11 +179,12 @@ async function processOrdersInBackground(
         if (order.order_items && order.order_items.length > 0) {
           for (const item of order.order_items) {
             const itemId = item.item?.id || 'unknown';
-            const variationId = item.item?.variation_id?.toString() || null;
+            // CRITICAL: variation_id must never be null to match unique constraint
+            const variationId = item.item?.variation_id?.toString() || '';
             const sku = item.item?.seller_sku || null;
             const title = item.item?.title || 'Produto sem título';
             const titleShort = generateTitleShort(title);
-            const productKey = generateProductKey(itemId, variationId, sku);
+            const productKey = generateProductKey(itemId, variationId || null, sku);
             const quantity = item.quantity || 1;
 
             allOrderItems.push({
