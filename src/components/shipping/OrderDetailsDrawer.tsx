@@ -14,6 +14,7 @@ import { usePrintHistory } from '@/hooks/usePrintHistory';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Package, FileText, History, MapPin, Truck, CheckCircle, AlertCircle, Clock, Printer, FileDown, ExternalLink, ShoppingCart } from 'lucide-react';
+import { getShipmentStatus, getInvoiceStatusFromSubstatus, getSeverityColors } from '@/lib/shippingStatusMap';
 
 interface OrderDetailsDrawerProps {
   order: ShippingOrder | null;
@@ -181,46 +182,67 @@ export function OrderDetailsDrawer({ order, open, onOpenChange, onReprint, isGen
                 <Truck className="h-4 w-4" />
                 Dados do Envio
               </h3>
-              <div className="bg-muted/50 rounded-lg p-4 space-y-3">
-                <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">Shipment ID</span>
-                  <span className="text-sm font-mono">{order.shipment_id || '-'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">Status</span>
-                  <Badge variant="outline">{order.shipment_status || '-'}</Badge>
-                </div>
-                {order.shipment_substatus && (
-                  <div className="flex justify-between">
-                    <span className="text-sm text-muted-foreground">Substatus</span>
-                    <span className="text-sm">{order.shipment_substatus}</span>
-                  </div>
-                )}
-                {order.tracking_number && (
-                  <div className="flex justify-between">
-                    <span className="text-sm text-muted-foreground">Rastreio</span>
-                    <span className="text-sm font-mono">{order.tracking_number}</span>
-                  </div>
-                )}
-                <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">Etiqueta disponível</span>
-                  {order.label_available ? (
-                    <CheckCircle className="h-4 w-4 text-green-500" />
-                  ) : (
-                    <AlertCircle className="h-4 w-4 text-muted-foreground" />
-                  )}
-                </div>
-                {order.receiver_name && (
-                  <div className="pt-2 border-t">
-                    <div className="flex items-start gap-2">
-                      <MapPin className="h-4 w-4 mt-0.5 text-muted-foreground" />
-                      <div>
-                        <p className="text-sm font-medium">{order.receiver_name}</p>
-                      </div>
+              {(() => {
+                const shipmentInfo = getShipmentStatus(order.shipment_status);
+                const shipmentColors = shipmentInfo.severity ? getSeverityColors(shipmentInfo.severity) : getSeverityColors('muted');
+                const invoiceInfo = getInvoiceStatusFromSubstatus(order.shipment_substatus);
+                const invoiceColors = invoiceInfo.severity ? getSeverityColors(invoiceInfo.severity) : getSeverityColors('muted');
+                
+                return (
+                  <div className="bg-muted/50 rounded-lg p-4 space-y-3">
+                    <div className="flex justify-between">
+                      <span className="text-sm text-muted-foreground">Shipment ID</span>
+                      <span className="text-sm font-mono">{order.shipment_id || '-'}</span>
                     </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-muted-foreground">Status do Envio</span>
+                      <Badge 
+                        variant="outline" 
+                        className={shipmentColors.text}
+                        title={shipmentInfo.description}
+                      >
+                        {shipmentInfo.label}
+                      </Badge>
+                    </div>
+                    {order.shipment_substatus && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-muted-foreground">Situação Fiscal</span>
+                        <Badge 
+                          variant="outline"
+                          className={invoiceColors.text}
+                          title={invoiceInfo.description}
+                        >
+                          {invoiceInfo.label}
+                        </Badge>
+                      </div>
+                    )}
+                    {order.tracking_number && (
+                      <div className="flex justify-between">
+                        <span className="text-sm text-muted-foreground">Rastreio</span>
+                        <span className="text-sm font-mono">{order.tracking_number}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between">
+                      <span className="text-sm text-muted-foreground">Etiqueta disponível</span>
+                      {order.label_available ? (
+                        <CheckCircle className="h-4 w-4 text-green-500" />
+                      ) : (
+                        <AlertCircle className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </div>
+                    {order.receiver_name && (
+                      <div className="pt-2 border-t">
+                        <div className="flex items-start gap-2">
+                          <MapPin className="h-4 w-4 mt-0.5 text-muted-foreground" />
+                          <div>
+                            <p className="text-sm font-medium">{order.receiver_name}</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                );
+              })()}
             </section>
 
             <Separator />
