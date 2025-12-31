@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Calendar } from '@/components/ui/calendar';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { RefreshCw, Clock, Loader2, CalendarIcon, Search, X } from 'lucide-react';
+import { RefreshCw, Clock, CalendarIcon, Search, X } from 'lucide-react';
 import { FinalStatus, PeriodFilter, SyncPhase, DateRange } from '@/hooks/useShippingLabels';
 import { formatDistanceToNow, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -55,13 +55,8 @@ const PERIOD_OPTIONS: { value: QuickPeriod; label: string }[] = [
   { value: '30d', label: '30 dias' },
 ];
 
-const PHASE_LABELS: Record<SyncPhase, string> = {
-  idle: '',
-  orders: 'Buscando pedidos',
-  shipments: 'Atualizando envios',
-  invoices: 'Atualizando NFs',
-  done: 'Concluído',
-};
+// Phase labels kept for reference but not displayed anymore
+// const PHASE_LABELS: Record<SyncPhase, string> = { ... };
 
 export function ShippingFilters({
   statusFilter,
@@ -221,23 +216,13 @@ export function ShippingFilters({
           </Popover>
         </div>
 
-        <div className="flex items-center gap-4">
-          {/* Sync progress indicator */}
-          {isSyncing && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="max-w-[200px] truncate">
-                {syncProgress || PHASE_LABELS[syncPhase]}
-              </span>
-            </div>
-          )}
-
-          {/* Last sync time (only show when not syncing) */}
-          {!isSyncing && lastSyncAt && (
-            <div className="flex items-center gap-1 text-sm text-muted-foreground">
-              <Clock className="h-4 w-4" />
+        <div className="flex items-center gap-3">
+          {/* Last sync time - always visible */}
+          {lastSyncAt && (
+            <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <Clock className="h-3.5 w-3.5" />
               <span>
-                Sincronizado {formatDistanceToNow(new Date(lastSyncAt), { 
+                {formatDistanceToNow(new Date(lastSyncAt), { 
                   addSuffix: true, 
                   locale: ptBR 
                 })}
@@ -246,13 +231,14 @@ export function ShippingFilters({
           )}
           
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             onClick={onSync}
             disabled={isSyncing}
+            className="gap-2"
           >
-            <RefreshCw className={`h-4 w-4 mr-2 ${isSyncing ? 'animate-spin' : ''}`} />
-            {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
+            <RefreshCw className={`h-4 w-4 ${isSyncing ? 'animate-spin text-primary' : ''}`} />
+            {!isSyncing && 'Atualizar'}
           </Button>
         </div>
       </div>
