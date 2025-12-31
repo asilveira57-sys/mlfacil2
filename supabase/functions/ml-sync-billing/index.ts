@@ -139,6 +139,7 @@ async function processBillingInBackground(
 
     const allFinancials: any[] = [];
     let processedPeriods = 0;
+    let lastError: string | null = null;
 
     for (const period of periods) {
       const periodKey = period.period_id;
@@ -146,6 +147,11 @@ async function processBillingInBackground(
 
       try {
         await fetchPeriodDetails(accessToken, sellerId, periodKey, allFinancials);
+      } catch (periodError) {
+        const msg = periodError instanceof Error ? periodError.message : String(periodError);
+        lastError = msg;
+        console.error(`[ml-sync-billing] Error processing period ${periodKey}:`, msg);
+      } finally {
         processedPeriods++;
 
         await supabase
@@ -153,15 +159,13 @@ async function processBillingInBackground(
           .update({
             total_records: periods.length,
             processed_records: processedPeriods,
+            error_message: lastError,
           })
           .eq('id', jobId);
 
-      } catch (periodError) {
-        console.error(`[ml-sync-billing] Error processing period ${periodKey}:`, periodError);
+        // Rate limiting
+        await sleep(300);
       }
-
-      // Rate limiting
-      await sleep(300);
     }
 
     console.log(`[ml-sync-billing] Total financials collected: ${allFinancials.length}`);
@@ -170,8 +174,17 @@ async function processBillingInBackground(
     const orderFinancials = aggregateByOrder(allFinancials, userId, sellerId);
     console.log(`[ml-sync-billing] Aggregated to ${orderFinancials.length} unique orders`);
 
+    if (orderFinancials.length === 0) {
+      const msg = lastError || 'Nenhum pedido retornado pela API; nada para salvar.';
+      await updateJobStatus(supabase, jobId, 'error', msg);
+      console.error(`[ml-sync-billing] Job ${jobId} finished with 0 records: ${msg}`);
+      return;
+    }
+
     // Batch upsert
     const BATCH_SIZE = 100;
+    let upsertErrorMsg: string | null = null;
+
     for (let i = 0; i < orderFinancials.length; i += BATCH_SIZE) {
       const batch = orderFinancials.slice(i, i + BATCH_SIZE);
       const { error } = await supabase
@@ -179,8 +192,14 @@ async function processBillingInBackground(
         .upsert(batch, { onConflict: 'seller_id,order_id' });
 
       if (error) {
+        upsertErrorMsg = String(error.message || error);
         console.error('[ml-sync-billing] Upsert error:', error);
       }
+    }
+
+    if (upsertErrorMsg) {
+      await updateJobStatus(supabase, jobId, 'error', upsertErrorMsg);
+      return;
     }
 
     await updateJobStatus(supabase, jobId, 'done');
@@ -199,23 +218,23 @@ async function fetchPeriodDetails(
   allFinancials: any[]
 ) {
   let offset = 0;
-  const limit = 100;
+  const limit = 50; // ML orders/search limit max is 51
   let hasMore = true;
 
   // Parse period key to get year and month
   const [year, month] = periodKey.split('-').map(Number);
-  
+
   // Use the orders/search API to get orders from this period and then fetch their billing info
   const startDate = new Date(year, month - 1, 1);
   const endDate = new Date(year, month, 0, 23, 59, 59);
-  
-  const dateFrom = startDate.toISOString();
-  const dateTo = endDate.toISOString();
+
+  const dateFrom = encodeURIComponent(startDate.toISOString());
+  const dateTo = encodeURIComponent(endDate.toISOString());
 
   while (hasMore) {
     // Fetch orders for this period
     const ordersUrl = `https://api.mercadolibre.com/orders/search?seller=${sellerId}&order.date_created.from=${dateFrom}&order.date_created.to=${dateTo}&offset=${offset}&limit=${limit}&sort=date_desc`;
-    
+
     const response = await fetch(ordersUrl, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
@@ -223,7 +242,7 @@ async function fetchPeriodDetails(
     if (!response.ok) {
       const errorText = await response.text();
       console.error(`[ml-sync-billing] Failed to fetch orders for ${periodKey}:`, errorText);
-      break;
+      throw new Error(errorText);
     }
 
     const data = await response.json();
