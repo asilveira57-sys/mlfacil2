@@ -493,6 +493,57 @@ export type Database = {
         }
         Relationships: []
       }
+      meli_order_financials_cache: {
+        Row: {
+          billing_period_key: string | null
+          cost_cancellations: number
+          cost_installment_fee: number
+          cost_sale_fee: number
+          cost_shipping_fee: number
+          created_at: string
+          id: string
+          order_id: string
+          revenue_products: number
+          revenue_shipping: number
+          seller_id: string
+          shipment_id: string | null
+          synced_at: string
+          user_id: string
+        }
+        Insert: {
+          billing_period_key?: string | null
+          cost_cancellations?: number
+          cost_installment_fee?: number
+          cost_sale_fee?: number
+          cost_shipping_fee?: number
+          created_at?: string
+          id?: string
+          order_id: string
+          revenue_products?: number
+          revenue_shipping?: number
+          seller_id: string
+          shipment_id?: string | null
+          synced_at?: string
+          user_id: string
+        }
+        Update: {
+          billing_period_key?: string | null
+          cost_cancellations?: number
+          cost_installment_fee?: number
+          cost_sale_fee?: number
+          cost_shipping_fee?: number
+          created_at?: string
+          id?: string
+          order_id?: string
+          revenue_products?: number
+          revenue_shipping?: number
+          seller_id?: string
+          shipment_id?: string | null
+          synced_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       meli_order_items_cache: {
         Row: {
           catalog_product_id: string | null
