@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { format } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { SalesMetricsCard } from "./SalesMetricsCard";
 import { SalesChart } from "./SalesChart";
@@ -97,6 +98,25 @@ interface DateFilter {
   dateTo: string | null;
 }
 
+// Helper to get initial 30-day filter in São Paulo timezone
+const getInitial30DayFilter = (): DateFilter => {
+  const now = new Date();
+  // Approximate São Paulo timezone offset (UTC-3)
+  const spOffset = -3 * 60;
+  const localOffset = now.getTimezoneOffset();
+  const diff = spOffset - localOffset;
+  const spNow = new Date(now.getTime() + diff * 60 * 1000);
+  
+  const today = new Date(spNow.getFullYear(), spNow.getMonth(), spNow.getDate());
+  const thirtyDaysAgo = new Date(today);
+  thirtyDaysAgo.setDate(today.getDate() - 30);
+  
+  return {
+    dateFrom: format(thirtyDaysAgo, 'yyyy-MM-dd'),
+    dateTo: format(today, 'yyyy-MM-dd'),
+  };
+};
+
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
@@ -119,7 +139,7 @@ export function SalesDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sellerId, setSellerId] = useState<string | null>(null);
-  const [dateFilter, setDateFilter] = useState<DateFilter>({ dateFrom: null, dateTo: null });
+  const [dateFilter, setDateFilter] = useState<DateFilter>(getInitial30DayFilter);
   const { toast } = useToast();
 
   // Sync state for onboarding
