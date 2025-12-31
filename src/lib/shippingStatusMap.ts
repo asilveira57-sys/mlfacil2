@@ -69,7 +69,26 @@ export const SHIPMENT_STATUS_MAP: Record<string, StatusInfo> = {
   },
 };
 
-// Invoice status mapping (based on shipment_substatus)
+// Shipment substatus mapping
+export const SHIPMENT_SUBSTATUS_MAP: Record<string, StatusInfo> = {
+  in_warehouse: {
+    label: 'No centro de distribuição',
+    description: 'O pedido está aguardando no centro de distribuição.',
+    severity: 'info',
+  },
+  picked_up: {
+    label: 'Coletado',
+    description: 'O pedido foi coletado pela transportadora.',
+    severity: 'info',
+  },
+  out_for_delivery: {
+    label: 'Saiu para entrega',
+    description: 'O pedido está a caminho do destinatário.',
+    severity: 'success',
+  },
+};
+
+// Invoice status mapping (based on fiscal_status)
 export const INVOICE_STATUS_MAP: Record<string, StatusInfo> = {
   invoice_pending: {
     label: 'Nota fiscal pendente',
@@ -171,6 +190,14 @@ export const FINAL_STATUS_MAP: Record<string, FinalStatusInfo> = {
 export function getShipmentStatus(status: string | null | undefined): StatusInfo {
   if (!status) return { label: '-', description: '' };
   return SHIPMENT_STATUS_MAP[status] || { label: status, description: '' };
+}
+
+/**
+ * Get the translated shipment substatus info
+ */
+export function getShipmentSubstatus(substatus: string | null | undefined): StatusInfo {
+  if (!substatus) return { label: '-', description: '' };
+  return SHIPMENT_SUBSTATUS_MAP[substatus] || { label: substatus, description: '' };
 }
 
 /**
