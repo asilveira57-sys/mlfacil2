@@ -47,6 +47,57 @@ export type Database = {
         }
         Relationships: []
       }
+      abc_profit_cache: {
+        Row: {
+          class: string
+          created_at: string
+          cumulative_percent: number
+          display_name: string | null
+          id: string
+          metric: string
+          percent: number
+          period_key: string
+          product_key: string
+          rank: number
+          seller_id: string
+          updated_at: string
+          user_id: string
+          value_total: number
+        }
+        Insert: {
+          class?: string
+          created_at?: string
+          cumulative_percent?: number
+          display_name?: string | null
+          id?: string
+          metric: string
+          percent?: number
+          period_key: string
+          product_key: string
+          rank?: number
+          seller_id: string
+          updated_at?: string
+          user_id: string
+          value_total?: number
+        }
+        Update: {
+          class?: string
+          created_at?: string
+          cumulative_percent?: number
+          display_name?: string | null
+          id?: string
+          metric?: string
+          percent?: number
+          period_key?: string
+          product_key?: string
+          rank?: number
+          seller_id?: string
+          updated_at?: string
+          user_id?: string
+          value_total?: number
+        }
+        Relationships: []
+      }
       analyzed_items: {
         Row: {
           analyzed_at: string
@@ -315,6 +366,42 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      marketplace_fee_rules: {
+        Row: {
+          channel: string
+          created_at: string
+          fee_fixed_default: number
+          fee_mode: string
+          fee_percent_default: number
+          id: string
+          seller_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          channel?: string
+          created_at?: string
+          fee_fixed_default?: number
+          fee_mode?: string
+          fee_percent_default?: number
+          id?: string
+          seller_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          channel?: string
+          created_at?: string
+          fee_fixed_default?: number
+          fee_mode?: string
+          fee_percent_default?: number
+          id?: string
+          seller_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       meli_invoices_cache: {
         Row: {
@@ -754,9 +841,103 @@ export type Database = {
         }
         Relationships: []
       }
+      order_cost_breakdown_cache: {
+        Row: {
+          calculated_at: string
+          cost_fees: number
+          cost_items_total: number
+          cost_other: number
+          cost_packaging: number
+          cost_shipping: number
+          cost_total: number
+          id: string
+          margin_percent: number
+          missing_cost_items_count: number
+          notes: string | null
+          order_id: string
+          profit_total: number
+          revenue_total: number
+          seller_id: string
+          shipment_id: string | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          calculated_at?: string
+          cost_fees?: number
+          cost_items_total?: number
+          cost_other?: number
+          cost_packaging?: number
+          cost_shipping?: number
+          cost_total?: number
+          id?: string
+          margin_percent?: number
+          missing_cost_items_count?: number
+          notes?: string | null
+          order_id: string
+          profit_total?: number
+          revenue_total?: number
+          seller_id: string
+          shipment_id?: string | null
+          status?: string
+          user_id: string
+        }
+        Update: {
+          calculated_at?: string
+          cost_fees?: number
+          cost_items_total?: number
+          cost_other?: number
+          cost_packaging?: number
+          cost_shipping?: number
+          cost_total?: number
+          id?: string
+          margin_percent?: number
+          missing_cost_items_count?: number
+          notes?: string | null
+          order_id?: string
+          profit_total?: number
+          revenue_total?: number
+          seller_id?: string
+          shipment_id?: string | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      packaging_cost_settings: {
+        Row: {
+          created_at: string
+          default_packaging_cost: number
+          id: string
+          packaging_cost_mode: string
+          seller_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          default_packaging_cost?: number
+          id?: string
+          packaging_cost_mode?: string
+          seller_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          default_packaging_cost?: number
+          id?: string
+          packaging_cost_mode?: string
+          seller_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       product_cost_catalog: {
         Row: {
           cost_currency: string
+          cost_source: string
           cost_value: number
           created_at: string
           display_name: string | null
@@ -768,6 +949,7 @@ export type Database = {
         }
         Insert: {
           cost_currency?: string
+          cost_source?: string
           cost_value?: number
           created_at?: string
           display_name?: string | null
@@ -779,11 +961,63 @@ export type Database = {
         }
         Update: {
           cost_currency?: string
+          cost_source?: string
           cost_value?: number
           created_at?: string
           display_name?: string | null
           id?: string
           product_key?: string
+          seller_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      product_profit_aggregate_cache: {
+        Row: {
+          cost_total: number
+          created_at: string
+          id: string
+          margin_percent: number
+          period_end: string
+          period_key: string
+          period_start: string
+          product_key: string
+          profit_total: number
+          quantity_total: number
+          revenue_total: number
+          seller_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          cost_total?: number
+          created_at?: string
+          id?: string
+          margin_percent?: number
+          period_end: string
+          period_key: string
+          period_start: string
+          product_key: string
+          profit_total?: number
+          quantity_total?: number
+          revenue_total?: number
+          seller_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          cost_total?: number
+          created_at?: string
+          id?: string
+          margin_percent?: number
+          period_end?: string
+          period_key?: string
+          period_start?: string
+          product_key?: string
+          profit_total?: number
+          quantity_total?: number
+          revenue_total?: number
           seller_id?: string
           updated_at?: string
           user_id?: string
