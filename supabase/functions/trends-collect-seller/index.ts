@@ -177,29 +177,30 @@ async function collectItemVisits(
   today: string
 ) {
   try {
-    // Get all active items for this seller
+    // Get unique items from order items cache (more reliable than analyzed_items)
     const { data: items, error: itemsError } = await supabase
-      .from('analyzed_items')
+      .from('meli_order_items_cache')
       .select('item_id')
-      .eq('ml_account_id', sellerId)
-      .eq('user_id', userId)
-      .eq('status', 'active');
+      .eq('seller_id', sellerId)
+      .eq('user_id', userId);
 
     if (itemsError || !items?.length) {
-      console.log('[trends-collect-seller] No active items found');
+      console.log('[trends-collect-seller] No items found in order items cache');
       return;
     }
 
-    console.log(`[trends-collect-seller] Collecting visits for ${items.length} items`);
+    // Get unique item IDs
+    const uniqueItemIds = [...new Set(items.map((i: any) => i.item_id))];
+    console.log(`[trends-collect-seller] Collecting visits for ${uniqueItemIds.length} unique items`);
 
     const visitsToUpsert: any[] = [];
 
-    for (const item of items) {
+    for (const itemId of uniqueItemIds) {
       try {
         await sleep(RATE_LIMIT_DELAY);
 
         const response = await fetch(
-          `https://api.mercadolibre.com/items/${item.item_id}/visits/time_window?last=7&unit=day`,
+          `https://api.mercadolibre.com/items/${itemId}/visits/time_window?last=7&unit=day`,
           {
             headers: { Authorization: `Bearer ${accessToken}` },
           }
@@ -212,7 +213,7 @@ async function collectItemVisits(
         }
 
         if (!response.ok) {
-          console.warn(`[trends-collect-seller] Failed to get visits for ${item.item_id}`);
+          console.warn(`[trends-collect-seller] Failed to get visits for ${itemId}: ${response.status}`);
           continue;
         }
 
@@ -222,12 +223,12 @@ async function collectItemVisits(
         visitsToUpsert.push({
           user_id: userId,
           seller_id: sellerId,
-          item_id: item.item_id,
+          item_id: itemId,
           visit_date: today,
           visits_count: totalVisits,
         });
       } catch (error) {
-        console.error(`[trends-collect-seller] Error collecting visits for ${item.item_id}:`, error);
+        console.error(`[trends-collect-seller] Error collecting visits for ${itemId}:`, error);
       }
     }
 
@@ -256,28 +257,44 @@ async function collectItemSales(
   today: string
 ) {
   try {
-    // Aggregate sales from meli_order_items_cache for today
-    const { data: salesData, error } = await supabase
-      .from('meli_order_items_cache')
-      .select(`
-        item_id,
-        quantity,
-        unit_price,
-        meli_orders_cache!inner(created_at_meli, order_status)
-      `)
+    // First get paid orders for today
+    const { data: orders, error: ordersError } = await supabase
+      .from('meli_orders_cache')
+      .select('order_id')
       .eq('seller_id', sellerId)
       .eq('user_id', userId)
-      .eq('meli_orders_cache.order_status', 'paid')
-      .gte('meli_orders_cache.created_at_meli', `${today}T00:00:00`)
-      .lte('meli_orders_cache.created_at_meli', `${today}T23:59:59`);
+      .eq('order_status', 'paid')
+      .gte('created_at_meli', `${today}T00:00:00`)
+      .lte('created_at_meli', `${today}T23:59:59`);
 
-    if (error) {
-      console.error('[trends-collect-seller] Failed to query sales:', error);
+    if (ordersError) {
+      console.error('[trends-collect-seller] Failed to query orders:', ordersError);
+      return;
+    }
+
+    if (!orders?.length) {
+      console.log('[trends-collect-seller] No paid orders for today');
+      return;
+    }
+
+    const orderIds = orders.map((o: any) => o.order_id);
+    console.log(`[trends-collect-seller] Found ${orderIds.length} paid orders for today`);
+
+    // Get items for these orders
+    const { data: salesData, error: itemsError } = await supabase
+      .from('meli_order_items_cache')
+      .select('item_id, quantity, unit_price')
+      .eq('seller_id', sellerId)
+      .eq('user_id', userId)
+      .in('order_id', orderIds);
+
+    if (itemsError) {
+      console.error('[trends-collect-seller] Failed to query order items:', itemsError);
       return;
     }
 
     if (!salesData?.length) {
-      console.log('[trends-collect-seller] No sales for today');
+      console.log('[trends-collect-seller] No items found for today orders');
       return;
     }
 
