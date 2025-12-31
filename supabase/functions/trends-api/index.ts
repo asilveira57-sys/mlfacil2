@@ -62,6 +62,9 @@ Deno.serve(async (req) => {
       case 'seller/historico':
         result = await getSellerHistory(supabase, user.id, params);
         break;
+      case 'seller/item-history':
+        result = await getSellerItemHistory(supabase, user.id, params);
+        break;
       case 'alertas':
         result = await getAlerts(supabase, user.id, params);
         break;
@@ -350,6 +353,87 @@ async function getSellerHistory(supabase: any, userId: string, params: Record<st
   return {
     months: data || [],
     message: data?.length === 0 ? 'Dados disponíveis a partir de jan/2025' : null,
+  };
+}
+
+async function getSellerItemHistory(supabase: any, userId: string, params: Record<string, string>) {
+  const sellerId = params.seller_id;
+  const itemId = params.item_id;
+
+  if (!sellerId || !itemId) {
+    return { visits: [], sales: [], totals: { visits_7d: 0, visits_30d: 0, sales_7d: 0, sales_30d: 0, revenue_7d: 0, revenue_30d: 0 } };
+  }
+
+  const today = new Date();
+  const sevenDaysAgo = new Date(today);
+  sevenDaysAgo.setDate(today.getDate() - 7);
+  const thirtyDaysAgo = new Date(today);
+  thirtyDaysAgo.setDate(today.getDate() - 30);
+
+  const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0];
+  const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
+
+  // Fetch visits for last 30 days
+  const { data: visitsData, error: visitsError } = await supabase
+    .from('seller_item_visits')
+    .select('visit_date, visits_count')
+    .eq('seller_id', sellerId)
+    .eq('user_id', userId)
+    .eq('item_id', itemId)
+    .gte('visit_date', thirtyDaysAgoStr)
+    .order('visit_date', { ascending: true });
+
+  if (visitsError) throw visitsError;
+
+  // Fetch sales for last 30 days
+  const { data: salesData, error: salesError } = await supabase
+    .from('seller_item_sales_daily')
+    .select('sale_date, quantity_sold, revenue')
+    .eq('seller_id', sellerId)
+    .eq('user_id', userId)
+    .eq('item_id', itemId)
+    .gte('sale_date', thirtyDaysAgoStr)
+    .order('sale_date', { ascending: true });
+
+  if (salesError) throw salesError;
+
+  // Calculate totals
+  let visits7d = 0, visits30d = 0, sales7d = 0, sales30d = 0, revenue7d = 0, revenue30d = 0;
+
+  for (const row of visitsData || []) {
+    visits30d += row.visits_count;
+    if (row.visit_date >= sevenDaysAgoStr) {
+      visits7d += row.visits_count;
+    }
+  }
+
+  for (const row of salesData || []) {
+    sales30d += row.quantity_sold;
+    revenue30d += Number(row.revenue);
+    if (row.sale_date >= sevenDaysAgoStr) {
+      sales7d += row.quantity_sold;
+      revenue7d += Number(row.revenue);
+    }
+  }
+
+  return {
+    visits: (visitsData || []).map((row: any) => ({
+      date: row.visit_date,
+      visits: row.visits_count,
+    })),
+    sales: (salesData || []).map((row: any) => ({
+      date: row.sale_date,
+      quantity: row.quantity_sold,
+      revenue: Number(row.revenue),
+    })),
+    totals: {
+      visits_7d: visits7d,
+      visits_30d: visits30d,
+      sales_7d: sales7d,
+      sales_30d: sales30d,
+      revenue_7d: revenue7d,
+      revenue_30d: revenue30d,
+    },
   };
 }
 
