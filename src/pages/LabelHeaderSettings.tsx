@@ -6,7 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
-import { ArrowLeft, GripVertical, Save, RotateCcw, Package } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { ArrowLeft, GripVertical, Save, RotateCcw, Package, AlertTriangle, CheckCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { HeaderPreferences, OrderData, OrderItem } from '@/lib/buildHeaderLines';
 
@@ -202,6 +203,21 @@ export default function LabelHeaderSettings() {
     return allLines;
   }, [preferences]);
 
+  // Calculate estimated header height in mm
+  // Formula: line_height ≈ font_size * 1.4, convert pt to mm (1pt ≈ 0.353mm)
+  const calculateHeaderHeight = useCallback((lines: number, fontSize: number): number => {
+    const lineHeightMm = fontSize * 1.4 * 0.353;
+    const paddingMm = 2; // Top and bottom padding
+    return lines * lineHeightMm + paddingMm;
+  }, []);
+
+  const previewLines = generatePreviewLines();
+  const estimatedHeightMm = calculateHeaderHeight(previewLines.length, preferences.font_size);
+  const maxHeightMm = 25;
+  const isOverflow = estimatedHeightMm > maxHeightMm;
+  const usagePercent = Math.min((estimatedHeightMm / maxHeightMm) * 100, 100);
+  const heightDisplay = estimatedHeightMm.toFixed(1);
+
   const handleDragStart = (index: number) => {
     setDraggedIndex(index);
   };
@@ -274,8 +290,6 @@ export default function LabelHeaderSettings() {
       </div>
     );
   }
-
-  const previewLines = generatePreviewLines();
 
   return (
     <div className="min-h-screen bg-background">
@@ -455,13 +469,39 @@ export default function LabelHeaderSettings() {
               </CardContent>
             </Card>
 
+            {/* Height Validation Alert */}
+            <Alert variant={isOverflow ? "destructive" : "default"} className={isOverflow ? "" : "border-green-500/50 bg-green-500/10"}>
+              {isOverflow ? (
+                <AlertTriangle className="h-4 w-4" />
+              ) : (
+                <CheckCircle className="h-4 w-4 text-green-600" />
+              )}
+              <AlertDescription className="flex items-center justify-between">
+                <span>
+                  {isOverflow 
+                    ? `Cabeçalho excede 25mm (${heightDisplay}mm). Reduza linhas ou fonte.`
+                    : `Altura estimada: ${heightDisplay}mm de 25mm disponíveis`
+                  }
+                </span>
+                <div className="flex items-center gap-2 ml-4">
+                  <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full transition-all ${isOverflow ? 'bg-destructive' : 'bg-green-500'}`}
+                      style={{ width: `${usagePercent}%` }}
+                    />
+                  </div>
+                  <span className="text-xs font-medium w-10">{Math.round(usagePercent)}%</span>
+                </div>
+              </AlertDescription>
+            </Alert>
+
             {/* Actions */}
             <div className="flex gap-3">
               <Button variant="outline" onClick={handleReset} className="flex-1">
                 <RotateCcw className="h-4 w-4 mr-2" />
                 Restaurar Padrão
               </Button>
-              <Button onClick={handleSave} disabled={saving} className="flex-1">
+              <Button onClick={handleSave} disabled={saving || isOverflow} className="flex-1">
                 <Save className="h-4 w-4 mr-2" />
                 {saving ? 'Salvando...' : 'Salvar Preferências'}
               </Button>
