@@ -9,8 +9,8 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Eye, Loader2 } from 'lucide-react';
-import { ShippingOrder } from '@/hooks/useShippingLabels';
+import { Eye, Loader2, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
+import { ShippingOrder, SortField, SortDirection } from '@/hooks/useShippingLabels';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -21,6 +21,9 @@ interface ShippingTableProps {
   onSelectAll: () => void;
   onViewDetails: (order: ShippingOrder) => void;
   isLoading: boolean;
+  sortField: SortField;
+  sortDirection: SortDirection;
+  onToggleSort: (field: SortField) => void;
 }
 
 const STATUS_BADGES: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; className?: string }> = {
@@ -32,6 +35,15 @@ const STATUS_BADGES: Record<string, { label: string; variant: 'default' | 'secon
   outros: { label: 'Outro', variant: 'outline' },
 };
 
+function SortIcon({ field, currentField, direction }: { field: SortField; currentField: SortField; direction: SortDirection }) {
+  if (field !== currentField) {
+    return <ArrowUpDown className="ml-1 h-3 w-3 text-muted-foreground/50" />;
+  }
+  return direction === 'asc' 
+    ? <ArrowUp className="ml-1 h-3 w-3" />
+    : <ArrowDown className="ml-1 h-3 w-3" />;
+}
+
 export function ShippingTable({
   orders,
   selectedIds,
@@ -39,6 +51,9 @@ export function ShippingTable({
   onSelectAll,
   onViewDetails,
   isLoading,
+  sortField,
+  sortDirection,
+  onToggleSort,
 }: ShippingTableProps) {
   const selectableOrders = orders.filter(o => o.selectable);
   const allSelected = selectableOrders.length > 0 && 
@@ -79,10 +94,34 @@ export function ShippingTable({
                 disabled={selectableOrders.length === 0}
               />
             </TableHead>
-            <TableHead>Data</TableHead>
+            <TableHead>
+              <button
+                onClick={() => onToggleSort('created_at_meli')}
+                className="flex items-center hover:text-foreground transition-colors"
+              >
+                Data
+                <SortIcon field="created_at_meli" currentField={sortField} direction={sortDirection} />
+              </button>
+            </TableHead>
             <TableHead>Pedido</TableHead>
-            <TableHead>Comprador</TableHead>
-            <TableHead>Status</TableHead>
+            <TableHead>
+              <button
+                onClick={() => onToggleSort('buyer_nickname')}
+                className="flex items-center hover:text-foreground transition-colors"
+              >
+                Comprador
+                <SortIcon field="buyer_nickname" currentField={sortField} direction={sortDirection} />
+              </button>
+            </TableHead>
+            <TableHead>
+              <button
+                onClick={() => onToggleSort('final_status')}
+                className="flex items-center hover:text-foreground transition-colors"
+              >
+                Status
+                <SortIcon field="final_status" currentField={sortField} direction={sortDirection} />
+              </button>
+            </TableHead>
             <TableHead className="w-12"></TableHead>
           </TableRow>
         </TableHeader>
