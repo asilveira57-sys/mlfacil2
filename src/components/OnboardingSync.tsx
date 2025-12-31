@@ -8,7 +8,23 @@ interface OnboardingSyncProps {
   processedRecords: number;
   totalRecords: number;
   status: string;
+  phase?: 1 | 2 | 3;
 }
+
+const phaseMessages = {
+  1: {
+    title: "Carregando dados recentes...",
+    subtitle: "Últimos 7 dias",
+  },
+  2: {
+    title: "Expandindo histórico...",
+    subtitle: "Últimos 30 dias",
+  },
+  3: {
+    title: "Carregando histórico completo...",
+    subtitle: "Último ano",
+  },
+};
 
 export function OnboardingSync({
   sellerNickname,
@@ -16,9 +32,11 @@ export function OnboardingSync({
   processedRecords,
   totalRecords,
   status,
+  phase = 1,
 }: OnboardingSyncProps) {
   const isProcessing = status === "processing";
   const isDone = status === "done";
+  const currentPhase = phaseMessages[phase];
 
   return (
     <Card className="p-8 max-w-lg mx-auto">
@@ -48,11 +66,11 @@ export function OnboardingSync({
         <div className="space-y-2">
           {isProcessing && (
             <>
-              <p className="text-foreground">
-                Estamos carregando seus dados do Mercado Livre...
+              <p className="text-foreground font-medium">
+                {currentPhase.title}
               </p>
               <p className="text-sm text-muted-foreground">
-                Isso pode levar alguns minutos dependendo do volume de pedidos.
+                {currentPhase.subtitle} • Em alguns segundos você verá seus dados
               </p>
             </>
           )}
