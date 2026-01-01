@@ -231,64 +231,88 @@ async function processBillingInBackground(
     let processedPeriods = 0;
     let lastError: string | null = null;
 
+    // Process each period with retry logic
     for (const period of periods) {
       const periodKey = period.period_id;
       console.log(`[ml-sync-billing] Processing period: ${periodKey}`);
 
-      try {
-        const result = await fetchPeriodDetails(currentAccessToken, sellerId, periodKey, allFinancials);
-        
-        // Check if we got an auth error and need to refresh
-        if (result.needsRefresh) {
-          console.log(`[ml-sync-billing] Got auth error, attempting token refresh...`);
+      let periodSuccess = false;
+      let retryCount = 0;
+      const MAX_RETRIES = 10;
+
+      while (!periodSuccess && retryCount < MAX_RETRIES) {
+        try {
+          const result = await fetchPeriodDetails(currentAccessToken, sellerId, periodKey, allFinancials);
           
-          const refreshResult = await refreshMercadoLibreToken(currentRefreshToken);
-          
-          if (!refreshResult.success) {
-            lastError = JSON.stringify({ code: 'RECONNECT_REQUIRED', message: 'Token refresh failed - reconnection needed' });
-            console.error(`[ml-sync-billing] Token refresh failed in background:`, refreshResult.error);
-            await updateJobStatus(supabase, jobId, 'error', lastError);
-            return;
+          // Check if we got an auth error and need to refresh
+          if (result.needsRefresh) {
+            console.log(`[ml-sync-billing] Auth error on retry ${retryCount + 1}, attempting token refresh...`);
+            
+            const refreshResult = await refreshMercadoLibreToken(currentRefreshToken);
+            
+            if (!refreshResult.success) {
+              lastError = JSON.stringify({ code: 'RECONNECT_REQUIRED', message: 'Token refresh failed' });
+              console.error(`[ml-sync-billing] Token refresh failed:`, refreshResult.error);
+              await updateJobStatus(supabase, jobId, 'error', lastError);
+              return;
+            }
+            
+            // Update tokens
+            currentAccessToken = refreshResult.access_token!;
+            currentRefreshToken = refreshResult.refresh_token!;
+            
+            await supabase
+              .from('ml_accounts')
+              .update({
+                access_token: currentAccessToken,
+                refresh_token: currentRefreshToken,
+                token_expires_at: new Date(Date.now() + (refreshResult.expires_in || 21600) * 1000).toISOString(),
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', accountId);
+            
+            console.log(`[ml-sync-billing] Token refreshed, retrying period...`);
+            retryCount++;
+            await sleep(1000 * retryCount); // Exponential backoff
+            continue;
           }
           
-          // Update tokens
-          currentAccessToken = refreshResult.access_token!;
-          currentRefreshToken = refreshResult.refresh_token!;
+          // Period processed successfully
+          periodSuccess = true;
+          console.log(`[ml-sync-billing] Period ${periodKey} completed, collected ${result.ordersProcessed || 0} orders`);
           
-          await supabase
-            .from('ml_accounts')
-            .update({
-              access_token: currentAccessToken,
-              refresh_token: currentRefreshToken,
-              token_expires_at: new Date(Date.now() + (refreshResult.expires_in || 21600) * 1000).toISOString(),
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', accountId);
+        } catch (periodError) {
+          retryCount++;
+          const msg = periodError instanceof Error ? periodError.message : String(periodError);
+          lastError = `Period ${periodKey} retry ${retryCount}: ${msg}`;
+          console.error(`[ml-sync-billing] Error on retry ${retryCount}/${MAX_RETRIES} for period ${periodKey}:`, msg);
           
-          console.log(`[ml-sync-billing] Token refreshed in background, retrying period...`);
+          if (retryCount >= MAX_RETRIES) {
+            console.error(`[ml-sync-billing] Max retries reached for period ${periodKey}, continuing to next period...`);
+            break;
+          }
           
-          // Retry with new token
-          await fetchPeriodDetails(currentAccessToken, sellerId, periodKey, allFinancials);
+          // Exponential backoff: 1s, 2s, 4s, 8s, etc.
+          const backoffMs = 1000 * Math.pow(2, retryCount - 1);
+          console.log(`[ml-sync-billing] Waiting ${backoffMs}ms before retry...`);
+          await sleep(backoffMs);
         }
-      } catch (periodError) {
-        const msg = periodError instanceof Error ? periodError.message : String(periodError);
-        lastError = msg;
-        console.error(`[ml-sync-billing] Error processing period ${periodKey}:`, msg);
-      } finally {
-        processedPeriods++;
-
-        await supabase
-          .from('sync_jobs')
-          .update({
-            total_records: periods.length,
-            processed_records: processedPeriods,
-            error_message: lastError,
-          })
-          .eq('id', jobId);
-
-        // Rate limiting
-        await sleep(300);
       }
+
+      processedPeriods++;
+
+      // Update job progress
+      await supabase
+        .from('sync_jobs')
+        .update({
+          total_records: periods.length,
+          processed_records: processedPeriods,
+          error_message: lastError,
+        })
+        .eq('id', jobId);
+
+      // Rate limiting between periods
+      await sleep(500);
     }
 
     console.log(`[ml-sync-billing] Total financials collected: ${allFinancials.length}`);
@@ -298,35 +322,56 @@ async function processBillingInBackground(
     console.log(`[ml-sync-billing] Aggregated to ${orderFinancials.length} unique orders`);
 
     if (orderFinancials.length === 0) {
-      const msg = lastError || 'Nenhum pedido retornado pela API; nada para salvar.';
-      await updateJobStatus(supabase, jobId, 'error', msg);
-      console.error(`[ml-sync-billing] Job ${jobId} finished with 0 records: ${msg}`);
+      const msg = lastError || 'Nenhum pedido encontrado nos períodos processados';
+      await updateJobStatus(supabase, jobId, 'done', msg);
+      console.log(`[ml-sync-billing] Job ${jobId} completed with 0 records: ${msg}`);
       return;
     }
 
-    // Batch upsert
-    const BATCH_SIZE = 100;
-    let upsertErrorMsg: string | null = null;
+    // Batch upsert with retry logic
+    const BATCH_SIZE = 50;
+    let upsertedCount = 0;
 
     for (let i = 0; i < orderFinancials.length; i += BATCH_SIZE) {
       const batch = orderFinancials.slice(i, i + BATCH_SIZE);
-      const { error } = await supabase
-        .from('meli_order_financials_cache')
-        .upsert(batch, { onConflict: 'seller_id,order_id' });
+      let upsertSuccess = false;
+      let upsertRetries = 0;
+      const MAX_UPSERT_RETRIES = 3;
 
-      if (error) {
-        upsertErrorMsg = String(error.message || error);
-        console.error('[ml-sync-billing] Upsert error:', error);
+      while (!upsertSuccess && upsertRetries < MAX_UPSERT_RETRIES) {
+        try {
+          const { error } = await supabase
+            .from('meli_order_financials_cache')
+            .upsert(batch, { onConflict: 'seller_id,order_id' });
+
+          if (error) {
+            throw new Error(error.message);
+          }
+
+          upsertSuccess = true;
+          upsertedCount += batch.length;
+          console.log(`[ml-sync-billing] Upserted batch ${Math.floor(i / BATCH_SIZE) + 1}, total: ${upsertedCount}/${orderFinancials.length}`);
+          
+        } catch (upsertError) {
+          upsertRetries++;
+          const msg = upsertError instanceof Error ? upsertError.message : String(upsertError);
+          console.error(`[ml-sync-billing] Upsert error (retry ${upsertRetries}/${MAX_UPSERT_RETRIES}):`, msg);
+          
+          if (upsertRetries >= MAX_UPSERT_RETRIES) {
+            await updateJobStatus(supabase, jobId, 'error', `Falha no upsert após ${MAX_UPSERT_RETRIES} tentativas: ${msg}`);
+            return;
+          }
+          
+          await sleep(1000 * upsertRetries);
+        }
       }
-    }
-
-    if (upsertErrorMsg) {
-      await updateJobStatus(supabase, jobId, 'error', upsertErrorMsg);
-      return;
+      
+      // Small delay between batches
+      await sleep(200);
     }
 
     await updateJobStatus(supabase, jobId, 'done');
-    console.log(`[ml-sync-billing] Job ${jobId} completed successfully`);
+    console.log(`[ml-sync-billing] Job ${jobId} completed successfully, upserted ${upsertedCount} orders`);
 
   } catch (error) {
     console.error('[ml-sync-billing] Background processing error:', error);
@@ -339,15 +384,16 @@ async function fetchPeriodDetails(
   sellerId: string,
   periodKey: string,
   allFinancials: any[]
-): Promise<{ needsRefresh: boolean }> {
+): Promise<{ needsRefresh: boolean; ordersProcessed: number }> {
   let offset = 0;
-  const limit = 50; // ML orders/search limit max is 51
+  const limit = 50;
   let hasMore = true;
+  let ordersProcessed = 0;
 
   // Parse period key to get year and month
   const [year, month] = periodKey.split('-').map(Number);
 
-  // Use the orders/search API to get orders from this period and then fetch their billing info
+  // Use the orders/search API to get orders from this period
   const startDate = new Date(year, month - 1, 1);
   const endDate = new Date(year, month, 0, 23, 59, 59);
 
@@ -358,24 +404,32 @@ async function fetchPeriodDetails(
     // Fetch orders for this period
     const ordersUrl = `https://api.mercadolibre.com/orders/search?seller=${sellerId}&order.date_created.from=${dateFrom}&order.date_created.to=${dateTo}&offset=${offset}&limit=${limit}&sort=date_desc`;
 
-    const response = await fetch(ordersUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    let response;
+    try {
+      response = await fetch(ordersUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+    } catch (fetchError) {
+      console.error(`[ml-sync-billing] Network error fetching orders for ${periodKey}:`, fetchError);
+      throw new Error(`Network error: ${fetchError}`);
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`[ml-sync-billing] Failed to fetch orders for ${periodKey}:`, errorText);
+      console.error(`[ml-sync-billing] Failed to fetch orders for ${periodKey} (status ${response.status}):`, errorText);
       
       // Check if it's an auth error
       if (response.status === 401 || errorText.includes('invalid access token') || errorText.includes('unauthorized')) {
-        return { needsRefresh: true };
+        return { needsRefresh: true, ordersProcessed };
       }
       
-      throw new Error(errorText);
+      throw new Error(`ML API error (${response.status}): ${errorText}`);
     }
 
     const data = await response.json();
     const results = data.results || [];
+    
+    console.log(`[ml-sync-billing] Period ${periodKey} offset ${offset}: found ${results.length} orders`);
 
     for (const order of results) {
       const orderId = order.id?.toString();
@@ -394,35 +448,56 @@ async function fetchPeriodDetails(
       };
 
       // Fetch order billing details if available
-      try {
-        const billingUrl = `https://api.mercadolibre.com/orders/${orderId}/billing_info`;
-        const billingResp = await fetch(billingUrl, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
+      let billingRetries = 0;
+      const MAX_BILLING_RETRIES = 3;
+      let billingSuccess = false;
 
-        if (billingResp.ok) {
-          const billingData = await billingResp.json();
-          
-          // Extract fees from billing_info
-          if (billingData.seller) {
-            const charges = billingData.seller.charges || [];
-            for (const charge of charges) {
-              const chargeType = (charge.type || '').toLowerCase();
-              const amount = Math.abs(charge.value || 0);
-              
-              if (chargeType.includes('sale_fee') || chargeType.includes('commission')) {
-                financial.cost_sale_fee += amount;
-              } else if (chargeType.includes('shipping')) {
-                financial.cost_shipping_fee += amount;
-              } else if (chargeType.includes('financing') || chargeType.includes('installment')) {
-                financial.cost_installment_fee += amount;
+      while (!billingSuccess && billingRetries < MAX_BILLING_RETRIES) {
+        try {
+          const billingUrl = `https://api.mercadolibre.com/orders/${orderId}/billing_info`;
+          const billingResp = await fetch(billingUrl, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+
+          if (billingResp.ok) {
+            const billingData = await billingResp.json();
+            
+            // Extract fees from billing_info
+            if (billingData.seller) {
+              const charges = billingData.seller.charges || [];
+              for (const charge of charges) {
+                const chargeType = (charge.type || '').toLowerCase();
+                const amount = Math.abs(charge.value || 0);
+                
+                if (chargeType.includes('sale_fee') || chargeType.includes('commission')) {
+                  financial.cost_sale_fee += amount;
+                } else if (chargeType.includes('shipping')) {
+                  financial.cost_shipping_fee += amount;
+                } else if (chargeType.includes('financing') || chargeType.includes('installment')) {
+                  financial.cost_installment_fee += amount;
+                }
               }
             }
+            billingSuccess = true;
+          } else if (billingResp.status === 404) {
+            // Billing info not available for this order, that's ok
+            billingSuccess = true;
+          } else {
+            billingRetries++;
+            if (billingRetries < MAX_BILLING_RETRIES) {
+              await sleep(100 * billingRetries);
+            }
+          }
+        } catch (billingError) {
+          billingRetries++;
+          console.log(`[ml-sync-billing] Billing info error for order ${orderId} (retry ${billingRetries}):`, billingError);
+          if (billingRetries >= MAX_BILLING_RETRIES) {
+            // Continue without billing data
+            billingSuccess = true;
+          } else {
+            await sleep(100 * billingRetries);
           }
         }
-      } catch (billingError) {
-        // Billing info not available, continue with order data only
-        console.log(`[ml-sync-billing] No billing info for order ${orderId}`);
       }
 
       // Handle cancelled/refunded orders
@@ -432,19 +507,20 @@ async function fetchPeriodDetails(
       }
 
       allFinancials.push(financial);
+      ordersProcessed++;
       
-      // Small delay to avoid rate limiting on billing endpoint
+      // Rate limit: 50ms between billing requests
       await sleep(50);
     }
 
     hasMore = results.length === limit;
     offset += limit;
 
-    // Rate limiting
-    await sleep(200);
+    // Rate limiting between pages
+    await sleep(300);
   }
   
-  return { needsRefresh: false };
+  return { needsRefresh: false, ordersProcessed };
 }
 
 function extractOrderId(item: any): string | null {
