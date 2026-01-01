@@ -7,7 +7,8 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
-import { Save, Package, Calculator, RefreshCw, CheckCircle2, CloudOff } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Save, Package, Calculator, RefreshCw, CheckCircle2, CloudOff, AlertTriangle, Link2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface CostSettingsProps {
@@ -34,6 +35,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [needsReconnect, setNeedsReconnect] = useState(false);
   const [billingStatus, setBillingStatus] = useState<BillingStatus>({
     total_orders: 0,
     orders_with_billing: 0,
@@ -146,6 +148,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
 
   const handleSyncBilling = async () => {
     setSyncing(true);
+    setNeedsReconnect(false);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
@@ -154,6 +157,14 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
         headers: { Authorization: `Bearer ${session.access_token}` },
         body: { seller_id: sellerId, months: 6 },
       });
+
+      // Check for reconnection required error
+      if (response.data?.code === 'RECONNECT_REQUIRED') {
+        setNeedsReconnect(true);
+        setSyncing(false);
+        toast.error('Conexão com o Mercado Livre expirou');
+        return;
+      }
 
       if (response.data?.job_id) {
         toast.success('Sincronização de dados financeiros iniciada');
@@ -173,7 +184,14 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
               toast.success('Dados financeiros sincronizados');
               loadBillingStatus(session.access_token);
             } else {
-              toast.error(job.error_message || 'Erro na sincronização');
+              // Check if the error indicates reconnection needed
+              const errorMsg = job.error_message || '';
+              if (errorMsg.includes('RECONNECT_REQUIRED') || errorMsg.includes('invalid access token') || errorMsg.includes('unauthorized')) {
+                setNeedsReconnect(true);
+                toast.error('Conexão com o Mercado Livre expirou');
+              } else {
+                toast.error(errorMsg || 'Erro na sincronização');
+              }
             }
           }
         }, 2000);
@@ -191,6 +209,27 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
       console.error('Error syncing billing:', error);
       toast.error('Erro ao sincronizar dados financeiros');
       setSyncing(false);
+    }
+  };
+
+  const handleReconnect = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const response = await supabase.functions.invoke('ml-auth-url', {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: {},
+      });
+
+      if (response.data?.url) {
+        window.location.href = response.data.url;
+      } else {
+        toast.error('Erro ao obter URL de autorização');
+      }
+    } catch (error) {
+      console.error('Error getting auth URL:', error);
+      toast.error('Erro ao reconectar');
     }
   };
 
@@ -220,6 +259,21 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
 
   return (
     <div className="space-y-6">
+      {/* Reconnection Alert */}
+      {needsReconnect && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Reconexão necessária</AlertTitle>
+          <AlertDescription className="flex items-center justify-between">
+            <span>Sua conexão com o Mercado Livre expirou. Reconecte para sincronizar os dados financeiros.</span>
+            <Button variant="outline" size="sm" onClick={handleReconnect} className="ml-4">
+              <Link2 className="h-4 w-4 mr-2" />
+              Reconectar Conta
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Billing Sync Status Card */}
       <Card>
         <CardHeader>

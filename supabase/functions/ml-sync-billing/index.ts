@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
     // Get ML account
     const { data: account, error: accountError } = await supabase
       .from('ml_accounts')
-      .select('access_token, refresh_token, token_expires_at, ml_user_id')
+      .select('id, access_token, refresh_token, token_expires_at, ml_user_id')
       .eq('ml_user_id', seller_id)
       .eq('user_id', user.id)
       .eq('is_active', true)
@@ -69,6 +69,48 @@ Deno.serve(async (req) => {
         status: 404,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    }
+
+    // Check if token needs refresh
+    let validAccessToken = account.access_token;
+    const tokenExpiresAt = new Date(account.token_expires_at);
+    const now = new Date();
+    const bufferMinutes = 5;
+    
+    if (tokenExpiresAt.getTime() - now.getTime() < bufferMinutes * 60 * 1000) {
+      console.log(`[ml-sync-billing] Token expired or expiring soon, attempting refresh...`);
+      
+      const refreshResult = await refreshMercadoLibreToken(account.refresh_token);
+      
+      if (!refreshResult.success) {
+        console.error(`[ml-sync-billing] Token refresh failed:`, refreshResult.error);
+        return new Response(JSON.stringify({ 
+          error: 'Token refresh failed', 
+          code: 'RECONNECT_REQUIRED',
+          message: 'Sua conexão com o Mercado Livre expirou. Por favor, reconecte sua conta.'
+        }), {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Update tokens in database
+      const { error: updateError } = await supabase
+        .from('ml_accounts')
+        .update({
+          access_token: refreshResult.access_token,
+          refresh_token: refreshResult.refresh_token,
+          token_expires_at: new Date(Date.now() + (refreshResult.expires_in || 21600) * 1000).toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', account.id);
+
+      if (updateError) {
+        console.error(`[ml-sync-billing] Failed to update tokens:`, updateError);
+      } else {
+        console.log(`[ml-sync-billing] Token refreshed successfully`);
+        validAccessToken = refreshResult.access_token;
+      }
     }
 
     // Create sync job
@@ -95,7 +137,7 @@ Deno.serve(async (req) => {
 
     // Start background processing
     EdgeRuntime.waitUntil(
-      processBillingInBackground(supabase, user.id, seller_id, account.access_token, months, job.id)
+      processBillingInBackground(supabase, user.id, seller_id, validAccessToken, account.id, account.refresh_token, months, job.id)
     );
 
     return new Response(JSON.stringify({ job_id: job.id, status: 'processing' }), {
@@ -113,15 +155,60 @@ Deno.serve(async (req) => {
   }
 });
 
+// Refresh Mercado Libre token
+async function refreshMercadoLibreToken(refreshToken: string): Promise<{
+  success: boolean;
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+  error?: string;
+}> {
+  try {
+    const response = await fetch('https://api.mercadolibre.com/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: ML_APP_ID,
+        client_secret: ML_SECRET_KEY,
+        refresh_token: refreshToken,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[ml-sync-billing] Token refresh API error:', errorText);
+      return { success: false, error: errorText };
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+      expires_in: data.expires_in,
+    };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[ml-sync-billing] Token refresh exception:', msg);
+    return { success: false, error: msg };
+  }
+}
+
 async function processBillingInBackground(
   supabase: any,
   userId: string,
   sellerId: string,
   accessToken: string,
+  accountId: string,
+  refreshToken: string,
   months: number,
   jobId: string
 ) {
   console.log(`[ml-sync-billing] Background processing started for job ${jobId}`);
+  
+  let currentAccessToken = accessToken;
+  let currentRefreshToken = refreshToken;
 
   try {
     // Generate billing periods for the last N months
@@ -149,7 +236,40 @@ async function processBillingInBackground(
       console.log(`[ml-sync-billing] Processing period: ${periodKey}`);
 
       try {
-        await fetchPeriodDetails(accessToken, sellerId, periodKey, allFinancials);
+        const result = await fetchPeriodDetails(currentAccessToken, sellerId, periodKey, allFinancials);
+        
+        // Check if we got an auth error and need to refresh
+        if (result.needsRefresh) {
+          console.log(`[ml-sync-billing] Got auth error, attempting token refresh...`);
+          
+          const refreshResult = await refreshMercadoLibreToken(currentRefreshToken);
+          
+          if (!refreshResult.success) {
+            lastError = JSON.stringify({ code: 'RECONNECT_REQUIRED', message: 'Token refresh failed - reconnection needed' });
+            console.error(`[ml-sync-billing] Token refresh failed in background:`, refreshResult.error);
+            await updateJobStatus(supabase, jobId, 'error', lastError);
+            return;
+          }
+          
+          // Update tokens
+          currentAccessToken = refreshResult.access_token!;
+          currentRefreshToken = refreshResult.refresh_token!;
+          
+          await supabase
+            .from('ml_accounts')
+            .update({
+              access_token: currentAccessToken,
+              refresh_token: currentRefreshToken,
+              token_expires_at: new Date(Date.now() + (refreshResult.expires_in || 21600) * 1000).toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', accountId);
+          
+          console.log(`[ml-sync-billing] Token refreshed in background, retrying period...`);
+          
+          // Retry with new token
+          await fetchPeriodDetails(currentAccessToken, sellerId, periodKey, allFinancials);
+        }
       } catch (periodError) {
         const msg = periodError instanceof Error ? periodError.message : String(periodError);
         lastError = msg;
@@ -219,7 +339,7 @@ async function fetchPeriodDetails(
   sellerId: string,
   periodKey: string,
   allFinancials: any[]
-) {
+): Promise<{ needsRefresh: boolean }> {
   let offset = 0;
   const limit = 50; // ML orders/search limit max is 51
   let hasMore = true;
@@ -245,6 +365,12 @@ async function fetchPeriodDetails(
     if (!response.ok) {
       const errorText = await response.text();
       console.error(`[ml-sync-billing] Failed to fetch orders for ${periodKey}:`, errorText);
+      
+      // Check if it's an auth error
+      if (response.status === 401 || errorText.includes('invalid access token') || errorText.includes('unauthorized')) {
+        return { needsRefresh: true };
+      }
+      
       throw new Error(errorText);
     }
 
@@ -317,6 +443,8 @@ async function fetchPeriodDetails(
     // Rate limiting
     await sleep(200);
   }
+  
+  return { needsRefresh: false };
 }
 
 function extractOrderId(item: any): string | null {
