@@ -9,6 +9,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+const ML_APP_ID = Deno.env.get('ML_APP_ID')!;
+const ML_SECRET_KEY = Deno.env.get('ML_SECRET_KEY')!;
+
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 Deno.serve(async (req) => {
