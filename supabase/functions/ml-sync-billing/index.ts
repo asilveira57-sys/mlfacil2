@@ -44,7 +44,8 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { seller_id, months = 6 } = body;
+    // mode: 'full' (default for initial) or 'delta' (incremental)
+    const { seller_id, months = 6, mode = 'full' } = body;
 
     if (!seller_id) {
       return new Response(JSON.stringify({ error: 'seller_id is required' }), {
@@ -53,7 +54,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    console.log(`[ml-sync-billing] Starting billing sync for seller ${seller_id}, last ${months} months`);
+    console.log(`[ml-sync-billing] Starting ${mode} billing sync for seller ${seller_id}`);
 
     // Get ML account
     const { data: account, error: accountError } = await supabase
@@ -113,13 +114,33 @@ Deno.serve(async (req) => {
       }
     }
 
+    // For delta sync, get last sync timestamp
+    let lastSyncAt: string | null = null;
+    if (mode === 'delta') {
+      const { data: lastSync } = await supabase
+        .from('meli_order_financials_cache')
+        .select('synced_at')
+        .eq('seller_id', seller_id)
+        .eq('user_id', user.id)
+        .order('synced_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (lastSync?.synced_at) {
+        lastSyncAt = lastSync.synced_at;
+        console.log(`[ml-sync-billing] Delta sync from: ${lastSyncAt}`);
+      } else {
+        console.log(`[ml-sync-billing] No previous sync found, falling back to full sync`);
+      }
+    }
+
     // Create sync job
     const { data: job, error: jobError } = await supabase
       .from('sync_jobs')
       .insert({
         user_id: user.id,
         seller_id,
-        job_type: 'billing',
+        job_type: mode === 'delta' ? 'billing_delta' : 'billing',
         status: 'processing',
         total_records: 0,
         processed_records: 0,
@@ -137,10 +158,26 @@ Deno.serve(async (req) => {
 
     // Start background processing
     EdgeRuntime.waitUntil(
-      processBillingInBackground(supabase, user.id, seller_id, validAccessToken, account.id, account.refresh_token, months, job.id)
+      processBillingInBackground(
+        supabase, 
+        user.id, 
+        seller_id, 
+        validAccessToken, 
+        account.id, 
+        account.refresh_token, 
+        months, 
+        job.id,
+        mode,
+        lastSyncAt
+      )
     );
 
-    return new Response(JSON.stringify({ job_id: job.id, status: 'processing' }), {
+    return new Response(JSON.stringify({ 
+      job_id: job.id, 
+      status: 'processing',
+      mode,
+      last_sync_at: lastSyncAt
+    }), {
       status: 202,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -203,175 +240,65 @@ async function processBillingInBackground(
   accountId: string,
   refreshToken: string,
   months: number,
-  jobId: string
+  jobId: string,
+  mode: string,
+  lastSyncAt: string | null
 ) {
-  console.log(`[ml-sync-billing] Background processing started for job ${jobId}`);
+  console.log(`[ml-sync-billing] Background processing started for job ${jobId}, mode: ${mode}`);
   
   let currentAccessToken = accessToken;
   let currentRefreshToken = refreshToken;
+  let totalOrdersProcessed = 0;
+  let totalOrdersUpserted = 0;
 
   try {
-    // Generate billing periods for the last N months
-    const periods: { period_id: string; year: number; month: number }[] = [];
-    const now = new Date();
-    for (let i = 0; i < months; i++) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const year = d.getFullYear();
-      const month = d.getMonth() + 1;
-      periods.push({
-        period_id: `${year}-${String(month).padStart(2, '0')}`,
-        year,
-        month,
-      });
-    }
-
-    console.log(`[ml-sync-billing] Processing ${periods.length} billing periods`);
-
-    const allFinancials: any[] = [];
-    let processedPeriods = 0;
-    let lastError: string | null = null;
-
-    // Process each period with retry logic
-    for (const period of periods) {
-      const periodKey = period.period_id;
-      console.log(`[ml-sync-billing] Processing period: ${periodKey}`);
-
-      let periodSuccess = false;
-      let retryCount = 0;
-      const MAX_RETRIES = 10;
-
-      while (!periodSuccess && retryCount < MAX_RETRIES) {
-        try {
-          const result = await fetchPeriodDetails(currentAccessToken, sellerId, periodKey, allFinancials);
-          
-          // Check if we got an auth error and need to refresh
-          if (result.needsRefresh) {
-            console.log(`[ml-sync-billing] Auth error on retry ${retryCount + 1}, attempting token refresh...`);
-            
-            const refreshResult = await refreshMercadoLibreToken(currentRefreshToken);
-            
-            if (!refreshResult.success) {
-              lastError = JSON.stringify({ code: 'RECONNECT_REQUIRED', message: 'Token refresh failed' });
-              console.error(`[ml-sync-billing] Token refresh failed:`, refreshResult.error);
-              await updateJobStatus(supabase, jobId, 'error', lastError);
-              return;
-            }
-            
-            // Update tokens
-            currentAccessToken = refreshResult.access_token!;
-            currentRefreshToken = refreshResult.refresh_token!;
-            
-            await supabase
-              .from('ml_accounts')
-              .update({
-                access_token: currentAccessToken,
-                refresh_token: currentRefreshToken,
-                token_expires_at: new Date(Date.now() + (refreshResult.expires_in || 21600) * 1000).toISOString(),
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', accountId);
-            
-            console.log(`[ml-sync-billing] Token refreshed, retrying period...`);
-            retryCount++;
-            await sleep(1000 * retryCount); // Exponential backoff
-            continue;
-          }
-          
-          // Period processed successfully
-          periodSuccess = true;
-          console.log(`[ml-sync-billing] Period ${periodKey} completed, collected ${result.ordersProcessed || 0} orders`);
-          
-        } catch (periodError) {
-          retryCount++;
-          const msg = periodError instanceof Error ? periodError.message : String(periodError);
-          lastError = `Period ${periodKey} retry ${retryCount}: ${msg}`;
-          console.error(`[ml-sync-billing] Error on retry ${retryCount}/${MAX_RETRIES} for period ${periodKey}:`, msg);
-          
-          if (retryCount >= MAX_RETRIES) {
-            console.error(`[ml-sync-billing] Max retries reached for period ${periodKey}, continuing to next period...`);
-            break;
-          }
-          
-          // Exponential backoff: 1s, 2s, 4s, 8s, etc.
-          const backoffMs = 1000 * Math.pow(2, retryCount - 1);
-          console.log(`[ml-sync-billing] Waiting ${backoffMs}ms before retry...`);
-          await sleep(backoffMs);
-        }
-      }
-
-      processedPeriods++;
-
-      // Update job progress
-      await supabase
-        .from('sync_jobs')
-        .update({
-          total_records: periods.length,
-          processed_records: processedPeriods,
-          error_message: lastError,
-        })
-        .eq('id', jobId);
-
-      // Rate limiting between periods
-      await sleep(500);
-    }
-
-    console.log(`[ml-sync-billing] Total financials collected: ${allFinancials.length}`);
-
-    // Group by order_id and aggregate
-    const orderFinancials = aggregateByOrder(allFinancials, userId, sellerId);
-    console.log(`[ml-sync-billing] Aggregated to ${orderFinancials.length} unique orders`);
-
-    if (orderFinancials.length === 0) {
-      const msg = lastError || 'Nenhum pedido encontrado nos períodos processados';
-      await updateJobStatus(supabase, jobId, 'done', msg);
-      console.log(`[ml-sync-billing] Job ${jobId} completed with 0 records: ${msg}`);
-      return;
-    }
-
-    // Batch upsert with retry logic
-    const BATCH_SIZE = 50;
-    let upsertedCount = 0;
-
-    for (let i = 0; i < orderFinancials.length; i += BATCH_SIZE) {
-      const batch = orderFinancials.slice(i, i + BATCH_SIZE);
-      let upsertSuccess = false;
-      let upsertRetries = 0;
-      const MAX_UPSERT_RETRIES = 3;
-
-      while (!upsertSuccess && upsertRetries < MAX_UPSERT_RETRIES) {
-        try {
-          const { error } = await supabase
-            .from('meli_order_financials_cache')
-            .upsert(batch, { onConflict: 'seller_id,order_id' });
-
-          if (error) {
-            throw new Error(error.message);
-          }
-
-          upsertSuccess = true;
-          upsertedCount += batch.length;
-          console.log(`[ml-sync-billing] Upserted batch ${Math.floor(i / BATCH_SIZE) + 1}, total: ${upsertedCount}/${orderFinancials.length}`);
-          
-        } catch (upsertError) {
-          upsertRetries++;
-          const msg = upsertError instanceof Error ? upsertError.message : String(upsertError);
-          console.error(`[ml-sync-billing] Upsert error (retry ${upsertRetries}/${MAX_UPSERT_RETRIES}):`, msg);
-          
-          if (upsertRetries >= MAX_UPSERT_RETRIES) {
-            await updateJobStatus(supabase, jobId, 'error', `Falha no upsert após ${MAX_UPSERT_RETRIES} tentativas: ${msg}`);
-            return;
-          }
-          
-          await sleep(1000 * upsertRetries);
-        }
+    // For delta sync, use date_last_updated filter
+    // For full sync, process periods
+    if (mode === 'delta' && lastSyncAt) {
+      // Delta sync: fetch orders updated since lastSyncAt
+      const result = await processDeltaSync(
+        supabase,
+        userId,
+        sellerId,
+        currentAccessToken,
+        currentRefreshToken,
+        accountId,
+        jobId,
+        lastSyncAt
+      );
+      
+      totalOrdersProcessed = result.processed;
+      totalOrdersUpserted = result.upserted;
+      
+      if (result.error) {
+        await updateJobStatus(supabase, jobId, 'error', result.error);
+        return;
       }
       
-      // Small delay between batches
-      await sleep(200);
+    } else {
+      // Full sync: process by periods
+      const result = await processFullSync(
+        supabase,
+        userId,
+        sellerId,
+        currentAccessToken,
+        currentRefreshToken,
+        accountId,
+        months,
+        jobId
+      );
+      
+      totalOrdersProcessed = result.processed;
+      totalOrdersUpserted = result.upserted;
+      
+      if (result.error) {
+        await updateJobStatus(supabase, jobId, 'error', result.error);
+        return;
+      }
     }
 
     await updateJobStatus(supabase, jobId, 'done');
-    console.log(`[ml-sync-billing] Job ${jobId} completed successfully, upserted ${upsertedCount} orders`);
+    console.log(`[ml-sync-billing] Job ${jobId} completed: ${totalOrdersProcessed} processed, ${totalOrdersUpserted} upserted`);
 
   } catch (error) {
     console.error('[ml-sync-billing] Background processing error:', error);
@@ -379,21 +306,264 @@ async function processBillingInBackground(
   }
 }
 
-async function fetchPeriodDetails(
+// Delta sync: fetch orders updated since lastSyncAt
+async function processDeltaSync(
+  supabase: any,
+  userId: string,
+  sellerId: string,
   accessToken: string,
+  refreshToken: string,
+  accountId: string,
+  jobId: string,
+  lastSyncAt: string
+): Promise<{ processed: number; upserted: number; error?: string }> {
+  console.log(`[ml-sync-billing] Delta sync starting from ${lastSyncAt}`);
+  
+  let currentAccessToken = accessToken;
+  let currentRefreshToken = refreshToken;
+  
+  const allFinancials: any[] = [];
+  let offset = 0;
+  const limit = 50;
+  let hasMore = true;
+  let totalFetched = 0;
+
+  // Use date_last_updated to get only updated orders
+  const dateFrom = encodeURIComponent(lastSyncAt);
+
+  while (hasMore) {
+    const ordersUrl = `https://api.mercadolibre.com/orders/search?seller=${sellerId}&order.date_last_updated.from=${dateFrom}&offset=${offset}&limit=${limit}&sort=date_desc`;
+
+    let response;
+    let retries = 0;
+    const MAX_RETRIES = 10;
+
+    while (retries < MAX_RETRIES) {
+      try {
+        response = await fetch(ordersUrl, {
+          headers: { Authorization: `Bearer ${currentAccessToken}` },
+        });
+
+        if (response.ok) break;
+
+        if (response.status === 401) {
+          console.log(`[ml-sync-billing] Auth error, refreshing token...`);
+          const refreshResult = await refreshMercadoLibreToken(currentRefreshToken);
+          
+          if (!refreshResult.success) {
+            return { processed: totalFetched, upserted: 0, error: 'RECONNECT_REQUIRED' };
+          }
+          
+          currentAccessToken = refreshResult.access_token!;
+          currentRefreshToken = refreshResult.refresh_token!;
+          
+          await supabase
+            .from('ml_accounts')
+            .update({
+              access_token: currentAccessToken,
+              refresh_token: currentRefreshToken,
+              token_expires_at: new Date(Date.now() + (refreshResult.expires_in || 21600) * 1000).toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', accountId);
+          
+          retries++;
+          await sleep(1000 * retries);
+          continue;
+        }
+
+        if (response.status === 429) {
+          // Rate limited, wait and retry
+          retries++;
+          console.log(`[ml-sync-billing] Rate limited, waiting ${retries * 2}s...`);
+          await sleep(2000 * retries);
+          continue;
+        }
+
+        const errorText = await response.text();
+        console.error(`[ml-sync-billing] Delta sync error: ${response.status} - ${errorText}`);
+        retries++;
+        await sleep(1000 * retries);
+
+      } catch (fetchError) {
+        retries++;
+        console.error(`[ml-sync-billing] Network error:`, fetchError);
+        await sleep(1000 * retries);
+      }
+    }
+
+    if (!response || !response.ok) {
+      console.error(`[ml-sync-billing] Failed to fetch after ${MAX_RETRIES} retries`);
+      break;
+    }
+
+    const data = await response.json();
+    const results = data.results || [];
+    const paging = data.paging || {};
+
+    console.log(`[ml-sync-billing] Delta fetch offset ${offset}: ${results.length} orders, total: ${paging.total || 0}`);
+
+    // Update job progress
+    await supabase
+      .from('sync_jobs')
+      .update({
+        total_records: paging.total || 0,
+        processed_records: totalFetched + results.length,
+      })
+      .eq('id', jobId);
+
+    // Process each order with billing info
+    for (const order of results) {
+      const orderId = order.id?.toString();
+      if (!orderId) continue;
+
+      const financial = await fetchOrderBillingWithRetry(
+        currentAccessToken,
+        currentRefreshToken,
+        accountId,
+        supabase,
+        order,
+        (newToken, newRefresh) => {
+          currentAccessToken = newToken;
+          currentRefreshToken = newRefresh;
+        }
+      );
+
+      if (financial) {
+        allFinancials.push(financial);
+      }
+
+      totalFetched++;
+      
+      // Rate limiting between orders
+      await sleep(100);
+    }
+
+    // Check pagination
+    const total = paging.total || 0;
+    offset += limit;
+    hasMore = results.length === limit && offset < total;
+
+    // Rate limiting between pages
+    await sleep(500);
+  }
+
+  console.log(`[ml-sync-billing] Delta sync: ${allFinancials.length} financials collected`);
+
+  if (allFinancials.length === 0) {
+    return { processed: totalFetched, upserted: 0 };
+  }
+
+  // Aggregate and upsert
+  const aggregated = aggregateByOrder(allFinancials, userId, sellerId);
+  const upserted = await batchUpsertFinancials(supabase, aggregated, jobId);
+
+  return { processed: totalFetched, upserted };
+}
+
+// Full sync: process by monthly periods
+async function processFullSync(
+  supabase: any,
+  userId: string,
+  sellerId: string,
+  accessToken: string,
+  refreshToken: string,
+  accountId: string,
+  months: number,
+  jobId: string
+): Promise<{ processed: number; upserted: number; error?: string }> {
+  let currentAccessToken = accessToken;
+  let currentRefreshToken = refreshToken;
+
+  // Generate billing periods
+  const periods: { period_id: string; year: number; month: number }[] = [];
+  const now = new Date();
+  for (let i = 0; i < months; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    periods.push({
+      period_id: `${year}-${String(month).padStart(2, '0')}`,
+      year,
+      month,
+    });
+  }
+
+  console.log(`[ml-sync-billing] Full sync: processing ${periods.length} periods`);
+
+  const allFinancials: any[] = [];
+  let processedPeriods = 0;
+  let totalOrders = 0;
+
+  for (const period of periods) {
+    const periodKey = period.period_id;
+    console.log(`[ml-sync-billing] Processing period: ${periodKey}`);
+
+    const result = await fetchPeriodOrders(
+      currentAccessToken,
+      currentRefreshToken,
+      accountId,
+      supabase,
+      sellerId,
+      periodKey,
+      (newToken, newRefresh) => {
+        currentAccessToken = newToken;
+        currentRefreshToken = newRefresh;
+      }
+    );
+
+    if (result.needsReconnect) {
+      return { processed: totalOrders, upserted: 0, error: 'RECONNECT_REQUIRED' };
+    }
+
+    allFinancials.push(...result.financials);
+    totalOrders += result.ordersProcessed;
+    processedPeriods++;
+
+    // Update progress
+    await supabase
+      .from('sync_jobs')
+      .update({
+        total_records: periods.length,
+        processed_records: processedPeriods,
+      })
+      .eq('id', jobId);
+
+    // Rate limiting between periods
+    await sleep(500);
+  }
+
+  console.log(`[ml-sync-billing] Full sync: ${allFinancials.length} financials from ${totalOrders} orders`);
+
+  if (allFinancials.length === 0) {
+    return { processed: totalOrders, upserted: 0 };
+  }
+
+  const aggregated = aggregateByOrder(allFinancials, userId, sellerId);
+  const upserted = await batchUpsertFinancials(supabase, aggregated, jobId);
+
+  return { processed: totalOrders, upserted };
+}
+
+async function fetchPeriodOrders(
+  accessToken: string,
+  refreshToken: string,
+  accountId: string,
+  supabase: any,
   sellerId: string,
   periodKey: string,
-  allFinancials: any[]
-): Promise<{ needsRefresh: boolean; ordersProcessed: number }> {
+  updateTokens: (access: string, refresh: string) => void
+): Promise<{ financials: any[]; ordersProcessed: number; needsReconnect: boolean }> {
+  let currentAccessToken = accessToken;
+  let currentRefreshToken = refreshToken;
+
+  const financials: any[] = [];
   let offset = 0;
   const limit = 50;
   let hasMore = true;
   let ordersProcessed = 0;
 
-  // Parse period key to get year and month
   const [year, month] = periodKey.split('-').map(Number);
-
-  // Use the orders/search API to get orders from this period
   const startDate = new Date(year, month - 1, 1);
   const endDate = new Date(year, month, 0, 23, 59, 59);
 
@@ -401,240 +571,309 @@ async function fetchPeriodDetails(
   const dateTo = encodeURIComponent(endDate.toISOString());
 
   while (hasMore) {
-    // Fetch orders for this period
     const ordersUrl = `https://api.mercadolibre.com/orders/search?seller=${sellerId}&order.date_created.from=${dateFrom}&order.date_created.to=${dateTo}&offset=${offset}&limit=${limit}&sort=date_desc`;
 
     let response;
-    try {
-      response = await fetch(ordersUrl, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-    } catch (fetchError) {
-      console.error(`[ml-sync-billing] Network error fetching orders for ${periodKey}:`, fetchError);
-      throw new Error(`Network error: ${fetchError}`);
+    let retries = 0;
+    const MAX_RETRIES = 10;
+
+    while (retries < MAX_RETRIES) {
+      try {
+        response = await fetch(ordersUrl, {
+          headers: { Authorization: `Bearer ${currentAccessToken}` },
+        });
+
+        if (response.ok) break;
+
+        if (response.status === 401) {
+          const refreshResult = await refreshMercadoLibreToken(currentRefreshToken);
+          
+          if (!refreshResult.success) {
+            return { financials, ordersProcessed, needsReconnect: true };
+          }
+          
+          currentAccessToken = refreshResult.access_token!;
+          currentRefreshToken = refreshResult.refresh_token!;
+          updateTokens(currentAccessToken, currentRefreshToken);
+          
+          await supabase
+            .from('ml_accounts')
+            .update({
+              access_token: currentAccessToken,
+              refresh_token: currentRefreshToken,
+              token_expires_at: new Date(Date.now() + (refreshResult.expires_in || 21600) * 1000).toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', accountId);
+          
+          retries++;
+          await sleep(1000 * retries);
+          continue;
+        }
+
+        if (response.status === 429) {
+          retries++;
+          console.log(`[ml-sync-billing] Rate limited, waiting ${retries * 2}s...`);
+          await sleep(2000 * retries);
+          continue;
+        }
+
+        retries++;
+        await sleep(1000 * retries);
+
+      } catch (fetchError) {
+        retries++;
+        console.error(`[ml-sync-billing] Network error:`, fetchError);
+        await sleep(1000 * retries);
+      }
     }
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[ml-sync-billing] Failed to fetch orders for ${periodKey} (status ${response.status}):`, errorText);
-      
-      // Check if it's an auth error
-      if (response.status === 401 || errorText.includes('invalid access token') || errorText.includes('unauthorized')) {
-        return { needsRefresh: true, ordersProcessed };
-      }
-      
-      throw new Error(`ML API error (${response.status}): ${errorText}`);
+    if (!response || !response.ok) {
+      console.error(`[ml-sync-billing] Failed for period ${periodKey} after retries`);
+      break;
     }
 
     const data = await response.json();
     const results = data.results || [];
-    
-    console.log(`[ml-sync-billing] Period ${periodKey} offset ${offset}: found ${results.length} orders`);
+    const paging = data.paging || {};
+
+    console.log(`[ml-sync-billing] Period ${periodKey} offset ${offset}: ${results.length} orders`);
 
     for (const order of results) {
       const orderId = order.id?.toString();
       if (!orderId) continue;
 
-      // Create financial record from order data
-      const financial = {
-        order_id: orderId,
-        billing_period_key: periodKey,
-        revenue_products: order.total_amount || 0,
-        revenue_shipping: order.shipping?.cost || 0,
-        cost_sale_fee: 0,
-        cost_shipping_fee: 0,
-        cost_installment_fee: 0,
-        cost_cancellations: 0,
-      };
-
-      // Fetch order billing details if available
-      let billingRetries = 0;
-      const MAX_BILLING_RETRIES = 3;
-      let billingSuccess = false;
-
-      while (!billingSuccess && billingRetries < MAX_BILLING_RETRIES) {
-        try {
-          const billingUrl = `https://api.mercadolibre.com/orders/${orderId}/billing_info`;
-          const billingResp = await fetch(billingUrl, {
-            headers: { Authorization: `Bearer ${accessToken}` },
-          });
-
-          if (billingResp.ok) {
-            const billingData = await billingResp.json();
-            
-            // Extract fees from billing_info
-            if (billingData.seller) {
-              const charges = billingData.seller.charges || [];
-              for (const charge of charges) {
-                const chargeType = (charge.type || '').toLowerCase();
-                const amount = Math.abs(charge.value || 0);
-                
-                if (chargeType.includes('sale_fee') || chargeType.includes('commission')) {
-                  financial.cost_sale_fee += amount;
-                } else if (chargeType.includes('shipping')) {
-                  financial.cost_shipping_fee += amount;
-                } else if (chargeType.includes('financing') || chargeType.includes('installment')) {
-                  financial.cost_installment_fee += amount;
-                }
-              }
-            }
-            billingSuccess = true;
-          } else if (billingResp.status === 404) {
-            // Billing info not available for this order, that's ok
-            billingSuccess = true;
-          } else {
-            billingRetries++;
-            if (billingRetries < MAX_BILLING_RETRIES) {
-              await sleep(100 * billingRetries);
-            }
-          }
-        } catch (billingError) {
-          billingRetries++;
-          console.log(`[ml-sync-billing] Billing info error for order ${orderId} (retry ${billingRetries}):`, billingError);
-          if (billingRetries >= MAX_BILLING_RETRIES) {
-            // Continue without billing data
-            billingSuccess = true;
-          } else {
-            await sleep(100 * billingRetries);
-          }
+      const financial = await fetchOrderBillingWithRetry(
+        currentAccessToken,
+        currentRefreshToken,
+        accountId,
+        supabase,
+        order,
+        (newToken, newRefresh) => {
+          currentAccessToken = newToken;
+          currentRefreshToken = newRefresh;
+          updateTokens(newToken, newRefresh);
         }
+      );
+
+      if (financial) {
+        financial.billing_period_key = periodKey;
+        financials.push(financial);
       }
 
-      // Handle cancelled/refunded orders
-      if (order.status === 'cancelled') {
-        financial.cost_cancellations = order.total_amount || 0;
-        financial.revenue_products = 0;
-      }
-
-      allFinancials.push(financial);
       ordersProcessed++;
-      
-      // Rate limit: 50ms between billing requests
-      await sleep(50);
+      await sleep(100); // Rate limiting
     }
 
-    hasMore = results.length === limit;
+    const total = paging.total || 0;
     offset += limit;
+    hasMore = results.length === limit && offset < total;
 
-    // Rate limiting between pages
     await sleep(300);
   }
-  
-  return { needsRefresh: false, ordersProcessed };
+
+  return { financials, ordersProcessed, needsReconnect: false };
 }
 
-function extractOrderId(item: any): string | null {
-  // Try different locations where order_id might be
-  if (item.sales_info?.length > 0) {
-    return item.sales_info[0].order_id?.toString() || null;
-  }
-  if (item.order_id) {
-    return item.order_id.toString();
-  }
-  if (item.detail?.order_id) {
-    return item.detail.order_id.toString();
-  }
-  if (item.reference_id && item.reference_type === 'order') {
-    return item.reference_id.toString();
-  }
-  return null;
-}
+async function fetchOrderBillingWithRetry(
+  accessToken: string,
+  refreshToken: string,
+  accountId: string,
+  supabase: any,
+  order: any,
+  updateTokens: (access: string, refresh: string) => void
+): Promise<any | null> {
+  const orderId = order.id?.toString();
+  if (!orderId) return null;
 
-function extractFinancialValues(item: any, orderId: string, periodKey: string): any {
-  // Map charge types to our categories
-  const chargeType = item.charge_info?.type || item.type || '';
-  const amount = item.charge_info?.detail_amount || item.amount || 0;
-  const positiveAmount = Math.abs(amount);
+  let currentAccessToken = accessToken;
+  let currentRefreshToken = refreshToken;
 
-  // Determine category based on charge type
-  const result: any = {
+  const financial = {
     order_id: orderId,
-    billing_period_key: periodKey,
-    revenue_products: 0,
-    revenue_shipping: 0,
+    billing_period_key: null as string | null,
+    revenue_products: order.total_amount || 0,
+    revenue_shipping: order.shipping?.cost || 0,
     cost_sale_fee: 0,
     cost_shipping_fee: 0,
     cost_installment_fee: 0,
     cost_cancellations: 0,
+    shipment_id: order.shipping?.id?.toString() || null,
   };
 
-  const lowerType = chargeType.toLowerCase();
+  // Try to fetch billing_info with retries
+  let retries = 0;
+  const MAX_RETRIES = 10;
 
-  // Revenue types
-  if (lowerType.includes('venta') || lowerType.includes('sale') || lowerType === 'items') {
-    if (amount > 0) {
-      result.revenue_products = positiveAmount;
+  while (retries < MAX_RETRIES) {
+    try {
+      const billingUrl = `https://api.mercadolibre.com/orders/${orderId}/billing_info`;
+      const billingResp = await fetch(billingUrl, {
+        headers: { Authorization: `Bearer ${currentAccessToken}` },
+      });
+
+      if (billingResp.ok) {
+        const billingData = await billingResp.json();
+        
+        if (billingData.seller?.charges) {
+          for (const charge of billingData.seller.charges) {
+            const chargeType = (charge.type || '').toLowerCase();
+            const amount = Math.abs(charge.value || 0);
+            
+            if (chargeType.includes('sale_fee') || chargeType.includes('commission')) {
+              financial.cost_sale_fee += amount;
+            } else if (chargeType.includes('shipping')) {
+              financial.cost_shipping_fee += amount;
+            } else if (chargeType.includes('financing') || chargeType.includes('installment')) {
+              financial.cost_installment_fee += amount;
+            } else if (chargeType.includes('cancel') || chargeType.includes('refund')) {
+              financial.cost_cancellations += amount;
+            }
+          }
+        }
+        break; // Success
+      }
+
+      if (billingResp.status === 404) {
+        break; // No billing info, that's ok
+      }
+
+      if (billingResp.status === 401) {
+        const refreshResult = await refreshMercadoLibreToken(currentRefreshToken);
+        
+        if (refreshResult.success) {
+          currentAccessToken = refreshResult.access_token!;
+          currentRefreshToken = refreshResult.refresh_token!;
+          updateTokens(currentAccessToken, currentRefreshToken);
+          
+          await supabase
+            .from('ml_accounts')
+            .update({
+              access_token: currentAccessToken,
+              refresh_token: currentRefreshToken,
+              token_expires_at: new Date(Date.now() + (refreshResult.expires_in || 21600) * 1000).toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', accountId);
+        }
+      }
+
+      if (billingResp.status === 429) {
+        retries++;
+        await sleep(2000 * retries);
+        continue;
+      }
+
+      retries++;
+      await sleep(500 * retries);
+
+    } catch (error) {
+      retries++;
+      console.error(`[ml-sync-billing] Billing fetch error for ${orderId}:`, error);
+      await sleep(500 * retries);
     }
-  } else if (lowerType.includes('envío') || lowerType.includes('shipping') || lowerType.includes('flete')) {
-    if (amount > 0) {
-      result.revenue_shipping = positiveAmount;
-    } else {
-      result.cost_shipping_fee = positiveAmount;
-    }
-  }
-  // Cost types (negative amounts or specific fee types)
-  else if (lowerType.includes('tarifa') || lowerType.includes('comisión') || lowerType.includes('fee')) {
-    if (lowerType.includes('cuota') || lowerType.includes('installment') || lowerType.includes('financiamiento')) {
-      result.cost_installment_fee = positiveAmount;
-    } else if (lowerType.includes('envío') || lowerType.includes('shipping')) {
-      result.cost_shipping_fee = positiveAmount;
-    } else {
-      result.cost_sale_fee = positiveAmount;
-    }
-  }
-  else if (lowerType.includes('cancelación') || lowerType.includes('cancel') || lowerType.includes('reembolso')) {
-    result.cost_cancellations = positiveAmount;
-  }
-  // Default: if negative, it's a cost
-  else if (amount < 0) {
-    result.cost_sale_fee = positiveAmount;
   }
 
-  return result;
+  return financial;
+}
+
+async function batchUpsertFinancials(
+  supabase: any,
+  financials: any[],
+  jobId: string
+): Promise<number> {
+  const BATCH_SIZE = 50;
+  let upsertedCount = 0;
+
+  for (let i = 0; i < financials.length; i += BATCH_SIZE) {
+    const batch = financials.slice(i, i + BATCH_SIZE);
+    let retries = 0;
+    const MAX_RETRIES = 3;
+
+    while (retries < MAX_RETRIES) {
+      try {
+        const { error } = await supabase
+          .from('meli_order_financials_cache')
+          .upsert(batch, { onConflict: 'seller_id,order_id' });
+
+        if (error) throw error;
+
+        upsertedCount += batch.length;
+        console.log(`[ml-sync-billing] Upserted batch ${Math.floor(i / BATCH_SIZE) + 1}, total: ${upsertedCount}/${financials.length}`);
+        break;
+
+      } catch (error) {
+        retries++;
+        console.error(`[ml-sync-billing] Upsert error (${retries}/${MAX_RETRIES}):`, error);
+        if (retries >= MAX_RETRIES) {
+          console.error(`[ml-sync-billing] Batch failed after ${MAX_RETRIES} retries`);
+        }
+        await sleep(1000 * retries);
+      }
+    }
+
+    await sleep(200);
+  }
+
+  return upsertedCount;
 }
 
 function aggregateByOrder(financials: any[], userId: string, sellerId: string): any[] {
-  const orderMap = new Map<string, any>();
+  const byOrderId: Record<string, any> = {};
 
   for (const f of financials) {
-    const existing = orderMap.get(f.order_id);
-
-    if (existing) {
-      existing.revenue_products += f.revenue_products || 0;
-      existing.revenue_shipping += f.revenue_shipping || 0;
-      existing.cost_sale_fee += f.cost_sale_fee || 0;
-      existing.cost_shipping_fee += f.cost_shipping_fee || 0;
-      existing.cost_installment_fee += f.cost_installment_fee || 0;
-      existing.cost_cancellations += f.cost_cancellations || 0;
-      // Keep most recent period key
-      existing.billing_period_key = f.billing_period_key;
-    } else {
-      orderMap.set(f.order_id, {
+    const key = f.order_id;
+    if (!byOrderId[key]) {
+      byOrderId[key] = {
         user_id: userId,
         seller_id: sellerId,
         order_id: f.order_id,
+        shipment_id: f.shipment_id,
         billing_period_key: f.billing_period_key,
-        revenue_products: f.revenue_products || 0,
-        revenue_shipping: f.revenue_shipping || 0,
-        cost_sale_fee: f.cost_sale_fee || 0,
-        cost_shipping_fee: f.cost_shipping_fee || 0,
-        cost_installment_fee: f.cost_installment_fee || 0,
-        cost_cancellations: f.cost_cancellations || 0,
+        revenue_products: 0,
+        revenue_shipping: 0,
+        cost_sale_fee: 0,
+        cost_shipping_fee: 0,
+        cost_installment_fee: 0,
+        cost_cancellations: 0,
         synced_at: new Date().toISOString(),
-      });
+      };
     }
+
+    // Only set non-zero values (avoid overwriting with zeros)
+    if (f.revenue_products > 0) byOrderId[key].revenue_products = f.revenue_products;
+    if (f.revenue_shipping > 0) byOrderId[key].revenue_shipping = f.revenue_shipping;
+    
+    byOrderId[key].cost_sale_fee += f.cost_sale_fee || 0;
+    byOrderId[key].cost_shipping_fee += f.cost_shipping_fee || 0;
+    byOrderId[key].cost_installment_fee += f.cost_installment_fee || 0;
+    byOrderId[key].cost_cancellations += f.cost_cancellations || 0;
   }
 
-  return Array.from(orderMap.values());
+  return Object.values(byOrderId);
 }
 
-async function updateJobStatus(supabase: any, jobId: string, status: string, errorMessage?: string) {
-  await supabase
+async function updateJobStatus(
+  supabase: any,
+  jobId: string,
+  status: string,
+  errorMessage?: string
+) {
+  const updates: any = {
+    status,
+    completed_at: new Date().toISOString(),
+  };
+
+  if (errorMessage) {
+    updates.error_message = errorMessage;
+  }
+
+  const { error } = await supabase
     .from('sync_jobs')
-    .update({
-      status,
-      completed_at: new Date().toISOString(),
-      error_message: errorMessage || null,
-    })
+    .update(updates)
     .eq('id', jobId);
+
+  if (error) {
+    console.error(`[ml-sync-billing] Failed to update job status:`, error);
+  }
 }

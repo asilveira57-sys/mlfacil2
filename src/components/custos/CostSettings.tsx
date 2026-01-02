@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,8 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Save, Package, Calculator, RefreshCw, CheckCircle2, CloudOff, AlertTriangle, Link2 } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
+import { Save, Package, Calculator, RefreshCw, CheckCircle2, CloudOff, AlertTriangle, Link2, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface CostSettingsProps {
@@ -28,6 +29,13 @@ interface BillingStatus {
   last_sync: string | null;
 }
 
+interface SyncProgress {
+  status: string;
+  processed: number;
+  total: number;
+  error?: string;
+}
+
 export function CostSettings({ sellerId }: CostSettingsProps) {
   const [settings, setSettings] = useState<Settings>({
     packaging: { default_packaging_cost: 0, packaging_cost_mode: 'por_pedido' },
@@ -35,6 +43,8 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [syncMode, setSyncMode] = useState<'full' | 'delta'>('delta');
+  const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
   const [needsReconnect, setNeedsReconnect] = useState(false);
   const [billingStatus, setBillingStatus] = useState<BillingStatus>({
     total_orders: 0,
@@ -42,39 +52,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     last_sync: null,
   });
 
-  const loadSettings = async () => {
-    setLoading(true);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/settings?seller_id=${sellerId}`,
-        { headers: { Authorization: `Bearer ${session.access_token}` } }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        setSettings({
-          packaging: {
-            default_packaging_cost: data.packaging?.default_packaging_cost || 0,
-            packaging_cost_mode: data.packaging?.packaging_cost_mode || 'por_pedido',
-          },
-        });
-      }
-
-      // Load billing status
-      await loadBillingStatus(session.access_token);
-
-    } catch (error) {
-      console.error('Error loading settings:', error);
-      toast.error('Erro ao carregar configurações');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadBillingStatus = async (accessToken: string) => {
+  const loadBillingStatus = useCallback(async () => {
     try {
       // Count orders
       const { count: totalOrders } = await supabase
@@ -104,6 +82,38 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
       });
     } catch (error) {
       console.error('Error loading billing status:', error);
+    }
+  }, [sellerId]);
+
+  const loadSettings = async () => {
+    setLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/settings?seller_id=${sellerId}`,
+        { headers: { Authorization: `Bearer ${session.access_token}` } }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setSettings({
+          packaging: {
+            default_packaging_cost: data.packaging?.default_packaging_cost || 0,
+            packaging_cost_mode: data.packaging?.packaging_cost_mode || 'por_pedido',
+          },
+        });
+      }
+
+      // Load billing status
+      await loadBillingStatus();
+
+    } catch (error) {
+      console.error('Error loading settings:', error);
+      toast.error('Erro ao carregar configurações');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -146,69 +156,85 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     }
   };
 
-  const handleSyncBilling = async () => {
+  const handleSyncBilling = async (mode: 'full' | 'delta') => {
     setSyncing(true);
+    setSyncMode(mode);
+    setSyncProgress({ status: 'starting', processed: 0, total: 0 });
     setNeedsReconnect(false);
+    
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
       const response = await supabase.functions.invoke('ml-sync-billing', {
         headers: { Authorization: `Bearer ${session.access_token}` },
-        body: { seller_id: sellerId, months: 6 },
+        body: { seller_id: sellerId, months: 6, mode },
       });
 
       // Check for reconnection required error
       if (response.data?.code === 'RECONNECT_REQUIRED') {
         setNeedsReconnect(true);
         setSyncing(false);
+        setSyncProgress(null);
         toast.error('Conexão com o Mercado Livre expirou');
         return;
       }
 
       if (response.data?.job_id) {
-        toast.success('Sincronização de dados financeiros iniciada');
+        const jobId = response.data.job_id;
+        toast.success(`Sincronização ${mode === 'delta' ? 'incremental' : 'completa'} iniciada`);
         
-        // Poll for completion
+        // Poll for progress
         const pollInterval = setInterval(async () => {
           const { data: job } = await supabase
             .from('sync_jobs')
-            .select('status,error_message')
-            .eq('id', response.data.job_id)
+            .select('status, error_message, total_records, processed_records')
+            .eq('id', jobId)
             .single();
 
-          if (job?.status === 'done' || job?.status === 'error') {
-            clearInterval(pollInterval);
-            setSyncing(false);
-            if (job.status === 'done') {
-              toast.success('Dados financeiros sincronizados');
-              loadBillingStatus(session.access_token);
-            } else {
-              // Check if the error indicates reconnection needed
-              const errorMsg = job.error_message || '';
-              if (errorMsg.includes('RECONNECT_REQUIRED') || errorMsg.includes('invalid access token') || errorMsg.includes('unauthorized')) {
-                setNeedsReconnect(true);
-                toast.error('Conexão com o Mercado Livre expirou');
+          if (job) {
+            setSyncProgress({
+              status: job.status,
+              processed: job.processed_records || 0,
+              total: job.total_records || 0,
+              error: job.error_message || undefined,
+            });
+
+            if (job.status === 'done' || job.status === 'error') {
+              clearInterval(pollInterval);
+              setSyncing(false);
+              
+              if (job.status === 'done') {
+                toast.success('Dados financeiros sincronizados');
+                loadBillingStatus();
               } else {
-                toast.error(errorMsg || 'Erro na sincronização');
+                const errorMsg = job.error_message || '';
+                if (errorMsg.includes('RECONNECT_REQUIRED') || errorMsg.includes('invalid access token')) {
+                  setNeedsReconnect(true);
+                  toast.error('Conexão com o Mercado Livre expirou');
+                } else {
+                  toast.error(errorMsg || 'Erro na sincronização');
+                }
               }
+              
+              // Keep progress visible for a moment, then clear
+              setTimeout(() => setSyncProgress(null), 3000);
             }
           }
-        }, 2000);
+        }, 1500);
 
-        // Timeout after 2 minutes
-        setTimeout(() => {
-          clearInterval(pollInterval);
-          setSyncing(false);
-        }, 120000);
+        // No hard timeout - let it run until completion
+
       } else {
         toast.error('Erro ao iniciar sincronização');
         setSyncing(false);
+        setSyncProgress(null);
       }
     } catch (error) {
       console.error('Error syncing billing:', error);
       toast.error('Erro ao sincronizar dados financeiros');
       setSyncing(false);
+      setSyncProgress(null);
     }
   };
 
@@ -244,6 +270,18 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     });
   };
 
+  const getTimeSinceLastSync = () => {
+    if (!billingStatus.last_sync) return null;
+    const lastSync = new Date(billingStatus.last_sync);
+    const now = new Date();
+    const diffHours = Math.floor((now.getTime() - lastSync.getTime()) / (1000 * 60 * 60));
+    
+    if (diffHours < 1) return 'menos de 1 hora';
+    if (diffHours < 24) return `${diffHours} horas`;
+    const diffDays = Math.floor(diffHours / 24);
+    return `${diffDays} dias`;
+  };
+
   if (loading) {
     return (
       <div className="space-y-4">
@@ -255,6 +293,10 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
 
   const billingCoverage = billingStatus.total_orders > 0
     ? Math.round((billingStatus.orders_with_billing / billingStatus.total_orders) * 100)
+    : 0;
+
+  const progressPercent = syncProgress && syncProgress.total > 0 
+    ? Math.round((syncProgress.processed / syncProgress.total) * 100) 
     : 0;
 
   return (
@@ -286,11 +328,36 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Sync Progress */}
+          {syncProgress && (
+            <div className="p-4 bg-primary/5 rounded-lg border border-primary/20 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">
+                  {syncMode === 'delta' ? 'Sincronização Incremental' : 'Sincronização Completa'}
+                </span>
+                <Badge variant={syncProgress.status === 'done' ? 'default' : 'secondary'}>
+                  {syncProgress.status === 'processing' && 'Processando...'}
+                  {syncProgress.status === 'done' && 'Concluído'}
+                  {syncProgress.status === 'error' && 'Erro'}
+                  {syncProgress.status === 'starting' && 'Iniciando...'}
+                </Badge>
+              </div>
+              <Progress value={progressPercent} className="h-2" />
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>{syncProgress.processed} processados</span>
+                <span>{syncProgress.total > 0 ? `${progressPercent}%` : 'Calculando...'}</span>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">Última sincronização:</span>
                 <span className="text-sm font-medium">{formatDate(billingStatus.last_sync)}</span>
+                {billingStatus.last_sync && (
+                  <span className="text-xs text-muted-foreground">({getTimeSinceLastSync()} atrás)</span>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">Cobertura:</span>
@@ -313,18 +380,35 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
                 )}
               </div>
             </div>
-            <Button 
-              variant="outline" 
-              onClick={handleSyncBilling} 
-              disabled={syncing}
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
-              {syncing ? 'Sincronizando...' : 'Sincronizar Agora'}
-            </Button>
+            
+            <div className="flex gap-2">
+              {/* Delta Sync - preferred */}
+              <Button 
+                variant="default" 
+                onClick={() => handleSyncBilling('delta')} 
+                disabled={syncing}
+                title="Busca apenas pedidos atualizados desde a última sincronização"
+              >
+                <Zap className={`h-4 w-4 mr-2 ${syncing && syncMode === 'delta' ? 'animate-pulse' : ''}`} />
+                {syncing && syncMode === 'delta' ? 'Sincronizando...' : 'Atualizar'}
+              </Button>
+              
+              {/* Full Sync */}
+              <Button 
+                variant="outline" 
+                onClick={() => handleSyncBilling('full')} 
+                disabled={syncing}
+                title="Reprocessa todos os pedidos dos últimos 6 meses"
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${syncing && syncMode === 'full' ? 'animate-spin' : ''}`} />
+                {syncing && syncMode === 'full' ? 'Sincronizando...' : 'Completa'}
+              </Button>
+            </div>
           </div>
+          
           <p className="text-xs text-muted-foreground">
-            Os dados financeiros são sincronizados automaticamente ao conectar sua conta. 
-            Use o botão acima para buscar dados mais recentes.
+            <strong>Atualizar:</strong> Busca apenas pedidos novos/atualizados (mais rápido). 
+            <strong className="ml-2">Completa:</strong> Reprocessa todos os últimos 6 meses.
           </p>
         </CardContent>
       </Card>
