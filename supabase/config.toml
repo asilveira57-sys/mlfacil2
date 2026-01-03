@@ -53,3 +53,6 @@ verify_jwt = false
 
 [functions.competitor-engine]
 verify_jwt = false
+
+[functions.ml-sync-financial]
+verify_jwt = false

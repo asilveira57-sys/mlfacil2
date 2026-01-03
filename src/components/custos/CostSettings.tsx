@@ -9,7 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Progress } from '@/components/ui/progress';
-import { Save, Package, Calculator, RefreshCw, CheckCircle2, CloudOff, AlertTriangle, Link2, Zap } from 'lucide-react';
+import { Save, Package, Calculator, RefreshCw, CheckCircle2, CloudOff, AlertTriangle, Link2, Zap, Play } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface CostSettingsProps {
@@ -23,17 +23,19 @@ interface Settings {
   };
 }
 
+interface SyncState {
+  status: string;
+  movements_synced: number;
+  last_sync_finished_at: string | null;
+  last_error: string | null;
+  cursor_or_offset: string | null;
+}
+
 interface BillingStatus {
   total_orders: number;
   orders_with_billing: number;
+  movements_count: number;
   last_sync: string | null;
-}
-
-interface SyncProgress {
-  status: string;
-  processed: number;
-  total: number;
-  error?: string;
 }
 
 export function CostSettings({ sellerId }: CostSettingsProps) {
@@ -44,11 +46,12 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMode, setSyncMode] = useState<'full' | 'delta'>('delta');
-  const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
+  const [syncState, setSyncState] = useState<SyncState | null>(null);
   const [needsReconnect, setNeedsReconnect] = useState(false);
   const [billingStatus, setBillingStatus] = useState<BillingStatus>({
     total_orders: 0,
     orders_with_billing: 0,
+    movements_count: 0,
     last_sync: null,
   });
 
@@ -61,24 +64,41 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
         .eq('seller_id', sellerId)
         .eq('order_status', 'paid');
 
-      // Count orders with billing data
+      // Count orders with real financial data
       const { count: ordersWithBilling } = await supabase
-        .from('meli_order_financials_cache')
+        .from('order_cost_breakdown_cache')
+        .select('*', { count: 'exact', head: true })
+        .eq('seller_id', sellerId)
+        .eq('has_real_financial', true);
+
+      // Count movements
+      const { count: movementsCount } = await supabase
+        .from('meli_financial_movements_cache')
         .select('*', { count: 'exact', head: true })
         .eq('seller_id', sellerId);
 
-      // Get last sync
-      const { data: lastSync } = await supabase
-        .from('meli_order_financials_cache')
-        .select('synced_at')
+      // Get sync state
+      const { data: state } = await supabase
+        .from('meli_financial_sync_state')
+        .select('*')
         .eq('seller_id', sellerId)
-        .order('synced_at', { ascending: false })
-        .limit(1);
+        .maybeSingle();
+
+      if (state) {
+        setSyncState(state);
+        if (state.status === 'running') {
+          setSyncing(true);
+        }
+        if (state.last_error === 'RECONNECT_REQUIRED') {
+          setNeedsReconnect(true);
+        }
+      }
 
       setBillingStatus({
         total_orders: totalOrders || 0,
         orders_with_billing: ordersWithBilling || 0,
-        last_sync: lastSync?.[0]?.synced_at || null,
+        movements_count: movementsCount || 0,
+        last_sync: state?.last_sync_finished_at || null,
       });
     } catch (error) {
       console.error('Error loading billing status:', error);
@@ -106,7 +126,6 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
         });
       }
 
-      // Load billing status
       await loadBillingStatus();
 
     } catch (error) {
@@ -116,6 +135,39 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
       setLoading(false);
     }
   };
+
+  // Poll for sync progress
+  useEffect(() => {
+    if (!syncing || !sellerId) return;
+
+    const interval = setInterval(async () => {
+      const { data: state } = await supabase
+        .from('meli_financial_sync_state')
+        .select('*')
+        .eq('seller_id', sellerId)
+        .maybeSingle();
+
+      if (state) {
+        setSyncState(state);
+
+        if (state.status === 'idle') {
+          setSyncing(false);
+          toast.success(`Sincronização concluída: ${state.movements_synced} movimentos`);
+          loadBillingStatus();
+        } else if (state.status === 'error') {
+          setSyncing(false);
+          if (state.last_error === 'RECONNECT_REQUIRED') {
+            setNeedsReconnect(true);
+            toast.error('Conexão com o Mercado Livre expirou');
+          } else {
+            toast.error(state.last_error || 'Erro na sincronização');
+          }
+        }
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [syncing, sellerId, loadBillingStatus]);
 
   useEffect(() => {
     if (sellerId) {
@@ -156,85 +208,47 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     }
   };
 
-  const handleSyncBilling = async (mode: 'full' | 'delta') => {
+  const handleSyncFinancial = async (mode: 'full' | 'delta', continueSync = false) => {
     setSyncing(true);
     setSyncMode(mode);
-    setSyncProgress({ status: 'starting', processed: 0, total: 0 });
     setNeedsReconnect(false);
     
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      const response = await supabase.functions.invoke('ml-sync-billing', {
+      const response = await supabase.functions.invoke('ml-sync-financial', {
         headers: { Authorization: `Bearer ${session.access_token}` },
-        body: { seller_id: sellerId, months: 6, mode },
+        body: { 
+          seller_id: sellerId, 
+          days: mode === 'full' ? 180 : 30,
+          mode,
+          continue_sync: continueSync
+        },
       });
 
-      // Check for reconnection required error
       if (response.data?.code === 'RECONNECT_REQUIRED') {
         setNeedsReconnect(true);
         setSyncing(false);
-        setSyncProgress(null);
         toast.error('Conexão com o Mercado Livre expirou');
         return;
       }
 
-      if (response.data?.job_id) {
-        const jobId = response.data.job_id;
+      if (response.data?.status === 'already_running') {
+        toast.info('Sincronização já em andamento');
+        return;
+      }
+
+      if (response.data?.status === 'started') {
         toast.success(`Sincronização ${mode === 'delta' ? 'incremental' : 'completa'} iniciada`);
-        
-        // Poll for progress
-        const pollInterval = setInterval(async () => {
-          const { data: job } = await supabase
-            .from('sync_jobs')
-            .select('status, error_message, total_records, processed_records')
-            .eq('id', jobId)
-            .single();
-
-          if (job) {
-            setSyncProgress({
-              status: job.status,
-              processed: job.processed_records || 0,
-              total: job.total_records || 0,
-              error: job.error_message || undefined,
-            });
-
-            if (job.status === 'done' || job.status === 'error') {
-              clearInterval(pollInterval);
-              setSyncing(false);
-              
-              if (job.status === 'done') {
-                toast.success('Dados financeiros sincronizados');
-                loadBillingStatus();
-              } else {
-                const errorMsg = job.error_message || '';
-                if (errorMsg.includes('RECONNECT_REQUIRED') || errorMsg.includes('invalid access token')) {
-                  setNeedsReconnect(true);
-                  toast.error('Conexão com o Mercado Livre expirou');
-                } else {
-                  toast.error(errorMsg || 'Erro na sincronização');
-                }
-              }
-              
-              // Keep progress visible for a moment, then clear
-              setTimeout(() => setSyncProgress(null), 3000);
-            }
-          }
-        }, 1500);
-
-        // No hard timeout - let it run until completion
-
       } else {
         toast.error('Erro ao iniciar sincronização');
         setSyncing(false);
-        setSyncProgress(null);
       }
     } catch (error) {
-      console.error('Error syncing billing:', error);
+      console.error('Error syncing financial:', error);
       toast.error('Erro ao sincronizar dados financeiros');
       setSyncing(false);
-      setSyncProgress(null);
     }
   };
 
@@ -295,10 +309,6 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     ? Math.round((billingStatus.orders_with_billing / billingStatus.total_orders) * 100)
     : 0;
 
-  const progressPercent = syncProgress && syncProgress.total > 0 
-    ? Math.round((syncProgress.processed / syncProgress.total) * 100) 
-    : 0;
-
   return (
     <div className="space-y-6">
       {/* Reconnection Alert */}
@@ -316,7 +326,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
         </Alert>
       )}
 
-      {/* Billing Sync Status Card */}
+      {/* Financial Sync Status Card */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -324,29 +334,32 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
             Dados Financeiros do Mercado Livre
           </CardTitle>
           <CardDescription>
-            Os custos da venda (tarifa, frete, parcelamento) são obtidos automaticamente da API do ML
+            Os custos reais (tarifa, frete, parcelamento) são obtidos automaticamente da API do ML
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Sync Progress */}
-          {syncProgress && (
+          {syncing && syncState && (
             <div className="p-4 bg-primary/5 rounded-lg border border-primary/20 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">
                   {syncMode === 'delta' ? 'Sincronização Incremental' : 'Sincronização Completa'}
                 </span>
-                <Badge variant={syncProgress.status === 'done' ? 'default' : 'secondary'}>
-                  {syncProgress.status === 'processing' && 'Processando...'}
-                  {syncProgress.status === 'done' && 'Concluído'}
-                  {syncProgress.status === 'error' && 'Erro'}
-                  {syncProgress.status === 'starting' && 'Iniciando...'}
+                <Badge variant="secondary" className="animate-pulse">
+                  Processando...
                 </Badge>
               </div>
-              <Progress value={progressPercent} className="h-2" />
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>{syncProgress.processed} processados</span>
-                <span>{syncProgress.total > 0 ? `${progressPercent}%` : 'Calculando...'}</span>
+              <div className="flex items-center gap-4">
+                <RefreshCw className="h-4 w-4 animate-spin text-primary" />
+                <span className="text-sm text-muted-foreground">
+                  {syncState.movements_synced} movimentos sincronizados
+                </span>
               </div>
+              {syncState.cursor_or_offset && (
+                <p className="text-xs text-muted-foreground">
+                  Cursor: {syncState.cursor_or_offset}
+                </p>
+              )}
             </div>
           )}
 
@@ -358,6 +371,10 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
                 {billingStatus.last_sync && (
                   <span className="text-xs text-muted-foreground">({getTimeSinceLastSync()} atrás)</span>
                 )}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Movimentos:</span>
+                <span className="text-sm font-medium">{billingStatus.movements_count.toLocaleString()}</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">Cobertura:</span>
@@ -382,12 +399,25 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
             </div>
             
             <div className="flex gap-2">
-              {/* Delta Sync - preferred */}
+              {/* Continue sync if interrupted */}
+              {syncState?.status === 'error' && syncState.cursor_or_offset && (
+                <Button 
+                  variant="outline" 
+                  onClick={() => handleSyncFinancial(syncMode, true)} 
+                  disabled={syncing}
+                  title="Continuar sincronização de onde parou"
+                >
+                  <Play className="h-4 w-4 mr-2" />
+                  Continuar
+                </Button>
+              )}
+              
+              {/* Delta Sync */}
               <Button 
                 variant="default" 
-                onClick={() => handleSyncBilling('delta')} 
+                onClick={() => handleSyncFinancial('delta')} 
                 disabled={syncing}
-                title="Busca apenas pedidos atualizados desde a última sincronização"
+                title="Busca apenas movimentos novos (últimos 30 dias)"
               >
                 <Zap className={`h-4 w-4 mr-2 ${syncing && syncMode === 'delta' ? 'animate-pulse' : ''}`} />
                 {syncing && syncMode === 'delta' ? 'Sincronizando...' : 'Atualizar'}
@@ -396,9 +426,9 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
               {/* Full Sync */}
               <Button 
                 variant="outline" 
-                onClick={() => handleSyncBilling('full')} 
+                onClick={() => handleSyncFinancial('full')} 
                 disabled={syncing}
-                title="Reprocessa todos os pedidos dos últimos 6 meses"
+                title="Reprocessa todos os movimentos dos últimos 6 meses"
               >
                 <RefreshCw className={`h-4 w-4 mr-2 ${syncing && syncMode === 'full' ? 'animate-spin' : ''}`} />
                 {syncing && syncMode === 'full' ? 'Sincronizando...' : 'Completa'}
@@ -407,8 +437,8 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
           </div>
           
           <p className="text-xs text-muted-foreground">
-            <strong>Atualizar:</strong> Busca apenas pedidos novos/atualizados (mais rápido). 
-            <strong className="ml-2">Completa:</strong> Reprocessa todos os últimos 6 meses.
+            <strong>Atualizar:</strong> Busca movimentos dos últimos 30 dias (mais rápido). 
+            <strong className="ml-2">Completa:</strong> Reprocessa os últimos 6 meses.
           </p>
         </CardContent>
       </Card>
@@ -482,21 +512,20 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
             <ul className="list-disc list-inside mt-2 space-y-1">
               <li>
                 Embalagem: <strong>
-                  R$ {(settings.packaging.packaging_cost_mode === 'por_pedido'
-                    ? settings.packaging.default_packaging_cost
-                    : settings.packaging.default_packaging_cost * 2
-                  ).toFixed(2)}
+                  R$ {settings.packaging.packaging_cost_mode === 'por_pedido'
+                    ? settings.packaging.default_packaging_cost.toFixed(2)
+                    : (settings.packaging.default_packaging_cost * 2).toFixed(2)}
                 </strong>
+                {settings.packaging.packaging_cost_mode === 'por_item' && ' (2 × custo)'}
               </li>
-              <li>
-                Tarifas ML: <Badge variant="outline" className="ml-1 text-green-600 border-green-600">Dados Reais</Badge>
-                <span className="text-xs ml-1">(busca automática da API)</span>
-              </li>
+              <li>Taxas ML: <strong>Dados reais da API</strong></li>
+              <li>Custo produto: <strong>Do catálogo de custos</strong></li>
             </ul>
           </div>
         </CardContent>
       </Card>
 
+      {/* Save Button */}
       <div className="flex justify-end">
         <Button onClick={handleSave} disabled={saving}>
           <Save className="h-4 w-4 mr-2" />
