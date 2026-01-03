@@ -424,6 +424,39 @@ export type Database = {
         }
         Relationships: []
       }
+      financial_concept_map: {
+        Row: {
+          bucket: string
+          concept: string
+          created_at: string
+          id: string
+          notes_pt: string | null
+          seller_id: string
+          signal: string
+          user_id: string
+        }
+        Insert: {
+          bucket?: string
+          concept: string
+          created_at?: string
+          id?: string
+          notes_pt?: string | null
+          seller_id: string
+          signal?: string
+          user_id: string
+        }
+        Update: {
+          bucket?: string
+          concept?: string
+          created_at?: string
+          id?: string
+          notes_pt?: string | null
+          seller_id?: string
+          signal?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       highlights_items: {
         Row: {
           created_at: string
@@ -629,6 +662,105 @@ export type Database = {
           fee_percent_default?: number
           id?: string
           seller_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      meli_financial_movements_cache: {
+        Row: {
+          amount: number
+          concept: string
+          currency_id: string | null
+          id: string
+          last_sync_at: string
+          movement_date: string
+          movement_id: string
+          order_id: string | null
+          payment_id: string | null
+          raw_json: Json | null
+          seller_id: string
+          shipment_id: string | null
+          status: string | null
+          user_id: string
+        }
+        Insert: {
+          amount?: number
+          concept: string
+          currency_id?: string | null
+          id?: string
+          last_sync_at?: string
+          movement_date: string
+          movement_id: string
+          order_id?: string | null
+          payment_id?: string | null
+          raw_json?: Json | null
+          seller_id: string
+          shipment_id?: string | null
+          status?: string | null
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          concept?: string
+          currency_id?: string | null
+          id?: string
+          last_sync_at?: string
+          movement_date?: string
+          movement_id?: string
+          order_id?: string | null
+          payment_id?: string | null
+          raw_json?: Json | null
+          seller_id?: string
+          shipment_id?: string | null
+          status?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      meli_financial_sync_state: {
+        Row: {
+          created_at: string
+          cursor_or_offset: string | null
+          id: string
+          last_error: string | null
+          last_sync_finished_at: string | null
+          last_sync_started_at: string | null
+          last_synced_from: string | null
+          last_synced_to: string | null
+          movements_synced: number | null
+          seller_id: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          cursor_or_offset?: string | null
+          id?: string
+          last_error?: string | null
+          last_sync_finished_at?: string | null
+          last_sync_started_at?: string | null
+          last_synced_from?: string | null
+          last_synced_to?: string | null
+          movements_synced?: number | null
+          seller_id: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          cursor_or_offset?: string | null
+          id?: string
+          last_error?: string | null
+          last_sync_finished_at?: string | null
+          last_sync_started_at?: string | null
+          last_synced_from?: string | null
+          last_synced_to?: string | null
+          movements_synced?: number | null
+          seller_id?: string
+          status?: string
           updated_at?: string
           user_id?: string
         }
@@ -1207,62 +1339,101 @@ export type Database = {
       order_cost_breakdown_cache: {
         Row: {
           calculated_at: string
+          cancelamentos_reembolsos: number | null
           cost_fees: number
           cost_items_total: number
           cost_other: number
           cost_packaging: number
           cost_shipping: number
           cost_total: number
+          custo_diferenca_peso_medidas: number | null
+          custo_envio_declarado: number | null
+          has_real_financial: boolean | null
           id: string
           margin_percent: number
           missing_cost_items_count: number
+          missing_financial_count: number | null
           notes: string | null
           order_id: string
           profit_total: number
+          raw_summary_json: Json | null
+          receita_acrescimo: number | null
+          receita_envio: number | null
+          receita_produtos: number | null
           revenue_total: number
           seller_id: string
           shipment_id: string | null
           status: string
+          tarifa_venda_e_impostos: number | null
+          tarifas_envio: number | null
+          taxa_parcelamento_equivalente: number | null
+          total_liquido: number | null
           user_id: string
         }
         Insert: {
           calculated_at?: string
+          cancelamentos_reembolsos?: number | null
           cost_fees?: number
           cost_items_total?: number
           cost_other?: number
           cost_packaging?: number
           cost_shipping?: number
           cost_total?: number
+          custo_diferenca_peso_medidas?: number | null
+          custo_envio_declarado?: number | null
+          has_real_financial?: boolean | null
           id?: string
           margin_percent?: number
           missing_cost_items_count?: number
+          missing_financial_count?: number | null
           notes?: string | null
           order_id: string
           profit_total?: number
+          raw_summary_json?: Json | null
+          receita_acrescimo?: number | null
+          receita_envio?: number | null
+          receita_produtos?: number | null
           revenue_total?: number
           seller_id: string
           shipment_id?: string | null
           status?: string
+          tarifa_venda_e_impostos?: number | null
+          tarifas_envio?: number | null
+          taxa_parcelamento_equivalente?: number | null
+          total_liquido?: number | null
           user_id: string
         }
         Update: {
           calculated_at?: string
+          cancelamentos_reembolsos?: number | null
           cost_fees?: number
           cost_items_total?: number
           cost_other?: number
           cost_packaging?: number
           cost_shipping?: number
           cost_total?: number
+          custo_diferenca_peso_medidas?: number | null
+          custo_envio_declarado?: number | null
+          has_real_financial?: boolean | null
           id?: string
           margin_percent?: number
           missing_cost_items_count?: number
+          missing_financial_count?: number | null
           notes?: string | null
           order_id?: string
           profit_total?: number
+          raw_summary_json?: Json | null
+          receita_acrescimo?: number | null
+          receita_envio?: number | null
+          receita_produtos?: number | null
           revenue_total?: number
           seller_id?: string
           shipment_id?: string | null
           status?: string
+          tarifa_venda_e_impostos?: number | null
+          tarifas_envio?: number | null
+          taxa_parcelamento_equivalente?: number | null
+          total_liquido?: number | null
           user_id?: string
         }
         Relationships: []
