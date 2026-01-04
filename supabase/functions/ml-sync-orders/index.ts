@@ -11,6 +11,49 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
+const ML_APP_ID = Deno.env.get('ML_APP_ID')!;
+const ML_SECRET_KEY = Deno.env.get('ML_SECRET_KEY')!;
+
+// Token refresh function
+async function refreshMercadoLibreToken(refreshToken: string): Promise<{
+  success: boolean;
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+  error?: string;
+}> {
+  try {
+    const response = await fetch('https://api.mercadolibre.com/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: ML_APP_ID,
+        client_secret: ML_SECRET_KEY,
+        refresh_token: refreshToken,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[ml-sync-orders] Token refresh failed:', errorText);
+      return { success: false, error: errorText };
+    }
+
+    const data = await response.json();
+    console.log('[ml-sync-orders] Token refreshed successfully');
+    return {
+      success: true,
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+      expires_in: data.expires_in,
+    };
+  } catch (error) {
+    console.error('[ml-sync-orders] Token refresh error:', error);
+    return { success: false, error: String(error) };
+  }
+}
+
 interface MLOrderItem {
   item: {
     id: string;
@@ -67,16 +110,19 @@ const generateProductKey = (itemId: string, variationId: string | null, sku: str
   return `${itemId}:${variationId || '0'}`;
 };
 
-// Background processing function
+// Background processing function with token refresh support
 async function processOrdersInBackground(
   supabaseAdmin: ReturnType<typeof createClient>,
   userId: string,
   sellerId: string,
-  accessToken: string,
+  initialAccessToken: string,
+  accountId: string,
+  refreshToken: string,
   dateFrom: string | null,
   dateTo: string | null,
   jobId: string
 ) {
+  let accessToken = initialAccessToken;
   try {
     console.log(`[Job ${jobId}] Starting background sync for seller ${sellerId}`);
 
@@ -99,23 +145,71 @@ async function processOrdersInBackground(
 
     while (hasMore) {
       const paginatedUrl = `${mlUrl}&offset=${offset}&limit=${limit}`;
-      const mlResponse = await fetch(paginatedUrl, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-        },
-      });
+      
+      // Fetch with retry and token refresh
+      let mlResponse: Response | null = null;
+      let retryCount = 0;
+      const maxRetries = 3;
+      
+      while (retryCount < maxRetries) {
+        mlResponse = await fetch(paginatedUrl, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+          },
+        });
 
-      if (!mlResponse.ok) {
+        if (mlResponse.ok) {
+          break;
+        }
+
+        // Handle 401 - try to refresh token
+        if (mlResponse.status === 401 && retryCount < maxRetries - 1) {
+          console.log(`[Job ${jobId}] Got 401, attempting token refresh (attempt ${retryCount + 1})`);
+          
+          const refreshResult = await refreshMercadoLibreToken(refreshToken);
+          
+          if (refreshResult.success && refreshResult.access_token) {
+            accessToken = refreshResult.access_token;
+            
+            // Update token in database
+            await supabaseAdmin
+              .from('ml_accounts')
+              .update({
+                access_token: refreshResult.access_token,
+                refresh_token: refreshResult.refresh_token,
+                token_expires_at: new Date(Date.now() + (refreshResult.expires_in || 21600) * 1000).toISOString(),
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', accountId);
+            
+            console.log(`[Job ${jobId}] Token refreshed successfully, retrying...`);
+            retryCount++;
+            await sleep(1000);
+            continue;
+          } else {
+            console.error(`[Job ${jobId}] Token refresh failed:`, refreshResult.error);
+          }
+        }
+        
+        // Other errors or max retries reached
         const errorText = await mlResponse.text();
         console.error(`[Job ${jobId}] ML API error:`, errorText);
         
-        // Update job with error
         await supabaseAdmin.from('sync_jobs').update({
           status: 'error',
-          error_message: `ML API error: ${mlResponse.status}`,
+          error_message: `ML API error: ${mlResponse.status} - Token refresh failed. Por favor, reconecte sua conta ML.`,
           completed_at: new Date().toISOString(),
         }).eq('id', jobId);
         
+        return;
+      }
+      
+      if (!mlResponse || !mlResponse.ok) {
+        await supabaseAdmin.from('sync_jobs').update({
+          status: 'error',
+          error_message: 'Failed to fetch orders after retries',
+          completed_at: new Date().toISOString(),
+        }).eq('id', jobId);
         return;
       }
 
@@ -456,10 +550,10 @@ serve(async (req) => {
 
     console.log(`Syncing orders for seller: ${seller_id}`);
 
-    // Get ML account with access token
+    // Get ML account with access token AND refresh token
     const { data: mlAccount, error: mlError } = await supabaseAdmin
       .from('ml_accounts')
-      .select('access_token, ml_user_id')
+      .select('id, access_token, refresh_token, token_expires_at, ml_user_id')
       .eq('user_id', user.id)
       .eq('ml_user_id', seller_id)
       .eq('is_active', true)
@@ -471,6 +565,39 @@ serve(async (req) => {
         JSON.stringify({ error: 'ML account not found' }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
+    }
+
+    // Pre-check if token needs refresh BEFORE starting background job
+    let validAccessToken = mlAccount.access_token;
+    const tokenExpiresAt = new Date(mlAccount.token_expires_at);
+    const now = new Date();
+    
+    if (tokenExpiresAt.getTime() - now.getTime() < 5 * 60 * 1000) {
+      console.log('[ml-sync-orders] Token expiring soon, refreshing before sync...');
+      const refreshResult = await refreshMercadoLibreToken(mlAccount.refresh_token);
+      
+      if (!refreshResult.success) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'Token refresh failed - reconecte sua conta ML', 
+            code: 'RECONNECT_REQUIRED'
+          }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      await supabaseAdmin
+        .from('ml_accounts')
+        .update({
+          access_token: refreshResult.access_token,
+          refresh_token: refreshResult.refresh_token,
+          token_expires_at: new Date(Date.now() + (refreshResult.expires_in || 21600) * 1000).toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', mlAccount.id);
+
+      validAccessToken = refreshResult.access_token!;
+      console.log('[ml-sync-orders] Token refreshed successfully before sync');
     }
 
     // Create job record
@@ -496,7 +623,9 @@ serve(async (req) => {
           supabaseAdmin,
           user.id,
           seller_id,
-          mlAccount.access_token,
+          validAccessToken,
+          mlAccount.id,
+          mlAccount.refresh_token,
           date_from,
           date_to,
           jobId
@@ -508,7 +637,9 @@ serve(async (req) => {
         supabaseAdmin,
         user.id,
         seller_id,
-        mlAccount.access_token,
+        validAccessToken,
+        mlAccount.id,
+        mlAccount.refresh_token,
         date_from,
         date_to,
         jobId
