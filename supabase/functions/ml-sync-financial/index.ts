@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { seller_id, days = 30, mode = 'full', continue_sync = false } = body;
+    const { seller_id, days = 30, mode = 'full', continue_sync = false, action } = body;
 
     if (!seller_id) {
       return new Response(JSON.stringify({ error: 'seller_id is required' }), {
@@ -74,19 +74,22 @@ Deno.serve(async (req) => {
     let validAccessToken = account.access_token;
     const tokenExpiresAt = new Date(account.token_expires_at);
     const now = new Date();
-    
+
     if (tokenExpiresAt.getTime() - now.getTime() < 5 * 60 * 1000) {
       console.log(`[ml-sync-financial] Token expired, refreshing...`);
       const refreshResult = await refreshMercadoLibreToken(account.refresh_token);
-      
+
       if (!refreshResult.success) {
-        return new Response(JSON.stringify({ 
-          error: 'Token refresh failed', 
-          code: 'RECONNECT_REQUIRED'
-        }), {
-          status: 401,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        return new Response(
+          JSON.stringify({
+            error: 'Token refresh failed',
+            code: 'RECONNECT_REQUIRED',
+          }),
+          {
+            status: 401,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
       }
 
       await supabase
@@ -103,18 +106,58 @@ Deno.serve(async (req) => {
     }
 
     // Get or create sync state
-    let syncState = await getOrCreateSyncState(supabase, user.id, seller_id);
-    
-    // Check if already running
-    if (syncState.status === 'running' && !continue_sync) {
-      return new Response(JSON.stringify({ 
-        status: 'already_running',
-        movements_synced: syncState.movements_synced,
-        cursor: syncState.cursor_or_offset
-      }), {
+    const syncState = await getOrCreateSyncState(supabase, user.id, seller_id);
+
+    // Cancel request: stop current background loop (it checks status each batch)
+    if (action === 'cancel') {
+      await updateSyncState(supabase, seller_id, {
+        status: 'idle',
+        last_error: null,
+        last_sync_finished_at: new Date().toISOString(),
+      });
+
+      return new Response(JSON.stringify({ status: 'cancelled' }), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    }
+
+    // Detect stale running state (e.g. user navigated away and background died)
+    const updatedAtMs = syncState.updated_at ? new Date(syncState.updated_at).getTime() : 0;
+    const isStaleRunning =
+      syncState.status === 'running' &&
+      updatedAtMs > 0 &&
+      Date.now() - updatedAtMs > 10 * 60 * 1000;
+
+    if (isStaleRunning && !continue_sync) {
+      return new Response(
+        JSON.stringify({
+          status: 'stale_running',
+          movements_synced: syncState.movements_synced,
+          cursor: syncState.cursor_or_offset,
+          updated_at: syncState.updated_at,
+        }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // Check if already running
+    if (syncState.status === 'running' && !continue_sync) {
+      return new Response(
+        JSON.stringify({
+          status: 'already_running',
+          movements_synced: syncState.movements_synced,
+          cursor: syncState.cursor_or_offset,
+          updated_at: syncState.updated_at,
+        }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
     }
 
     // Calculate date range

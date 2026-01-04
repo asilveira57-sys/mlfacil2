@@ -9,7 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Progress } from '@/components/ui/progress';
-import { Save, Package, Calculator, RefreshCw, CheckCircle2, CloudOff, AlertTriangle, Link2, Zap, Play } from 'lucide-react';
+import { Save, Package, Calculator, RefreshCw, CheckCircle2, CloudOff, AlertTriangle, Link2, Zap, Play, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface CostSettingsProps {
@@ -29,6 +29,7 @@ interface SyncState {
   last_sync_finished_at: string | null;
   last_error: string | null;
   cursor_or_offset: string | null;
+  updated_at?: string | null;
 }
 
 interface BillingStatus {
@@ -45,6 +46,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [canceling, setCanceling] = useState(false);
   const [syncMode, setSyncMode] = useState<'full' | 'delta'>('delta');
   const [syncState, setSyncState] = useState<SyncState | null>(null);
   const [needsReconnect, setNeedsReconnect] = useState(false);
@@ -86,12 +88,21 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
 
       if (state) {
         setSyncState(state);
-        if (state.status === 'running') {
-          setSyncing(true);
-        }
+
+        const updatedAtMs = state.updated_at ? new Date(state.updated_at).getTime() : 0;
+        const isFreshRunning =
+          state.status === 'running' &&
+          updatedAtMs > 0 &&
+          Date.now() - updatedAtMs < 2 * 60 * 1000;
+
+        setSyncing(isFreshRunning);
+
         if (state.last_error === 'RECONNECT_REQUIRED') {
           setNeedsReconnect(true);
         }
+      } else {
+        setSyncState(null);
+        setSyncing(false);
       }
 
       setBillingStatus({
@@ -199,7 +210,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
       if (response.ok) {
         toast.success('Configurações salvas com sucesso');
       } else {
-        toast.error('Erro ao salvar configurações');
+        toast.error('Erro ao salvar configuraações');
       }
     } catch (error) {
       toast.error('Erro ao salvar configurações');
@@ -209,46 +220,100 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
   };
 
   const handleSyncFinancial = async (mode: 'full' | 'delta', continueSync = false) => {
-    setSyncing(true);
     setSyncMode(mode);
     setNeedsReconnect(false);
-    
+    setSyncing(true);
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
+      if (!session) {
+        setSyncing(false);
+        return;
+      }
 
-      const response = await supabase.functions.invoke('ml-sync-financial', {
+      const { data, error } = await supabase.functions.invoke('ml-sync-financial', {
         headers: { Authorization: `Bearer ${session.access_token}` },
-        body: { 
-          seller_id: sellerId, 
+        body: {
+          seller_id: sellerId,
           days: mode === 'full' ? 180 : 30,
           mode,
-          continue_sync: continueSync
+          continue_sync: continueSync,
         },
       });
 
-      if (response.data?.code === 'RECONNECT_REQUIRED') {
+      if (error) {
+        console.error('Error invoking ml-sync-financial:', error);
+        toast.error(error.message || 'Erro ao iniciar sincronização');
+        setSyncing(false);
+        return;
+      }
+
+      if (data?.code === 'RECONNECT_REQUIRED') {
         setNeedsReconnect(true);
         setSyncing(false);
         toast.error('Conexão com o Mercado Livre expirou');
         return;
       }
 
-      if (response.data?.status === 'already_running') {
-        toast.info('Sincronização já em andamento');
+      if (data?.status === 'stale_running') {
+        toast.warning('A sincronização anterior parece ter travado. Use “Continuar” ou “Completa”.');
+        setSyncing(false);
+        await loadBillingStatus();
         return;
       }
 
-      if (response.data?.status === 'started') {
-        toast.success(`Sincronização ${mode === 'delta' ? 'incremental' : 'completa'} iniciada`);
-      } else {
-        toast.error('Erro ao iniciar sincronização');
-        setSyncing(false);
+      if (data?.status === 'already_running') {
+        toast.info('Sincronização já em andamento');
+        await loadBillingStatus();
+        return;
       }
+
+      if (data?.status === 'started') {
+        toast.success(`Sincronização ${mode === 'delta' ? 'incremental' : 'completa'} iniciada`);
+        return;
+      }
+
+      toast.error('Erro ao iniciar sincronização');
+      setSyncing(false);
     } catch (error) {
       console.error('Error syncing financial:', error);
       toast.error('Erro ao sincronizar dados financeiros');
       setSyncing(false);
+    }
+  };
+
+  const handleCancelFinancialSync = async () => {
+    setCanceling(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const { data, error } = await supabase.functions.invoke('ml-sync-financial', {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: {
+          seller_id: sellerId,
+          action: 'cancel',
+        },
+      });
+
+      if (error) {
+        console.error('Error cancelling financial sync:', error);
+        toast.error('Erro ao cancelar sincronização');
+        return;
+      }
+
+      if (data?.status === 'cancelled') {
+        toast.success('Sincronização cancelada');
+      } else {
+        toast.success('Sincronização resetada');
+      }
+    } catch (error) {
+      console.error('Error cancelling financial sync:', error);
+      toast.error('Erro ao cancelar sincronização');
+    } finally {
+      setCanceling(false);
+      setSyncing(false);
+      await loadBillingStatus();
     }
   };
 
