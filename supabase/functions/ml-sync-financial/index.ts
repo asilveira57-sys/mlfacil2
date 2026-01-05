@@ -309,6 +309,18 @@ async function processFinancialMovements(
 
   try {
     while (hasMore) {
+      // Check if sync was cancelled (user clicked cancel button)
+      const { data: currentState } = await supabase
+        .from('meli_financial_sync_state')
+        .select('status')
+        .eq('seller_id', sellerId)
+        .maybeSingle();
+
+      if (currentState?.status === 'idle') {
+        console.log(`[ml-sync-financial] Sync cancelled by user at offset ${offset}`);
+        return;
+      }
+
       // Fetch movements from ML API
       const url = `https://api.mercadolibre.com/users/${sellerId}/billing/financial-transactions/search?date_from=${encodeURIComponent(dateFromStr)}&date_to=${encodeURIComponent(dateToStr)}&offset=${offset}&limit=${BATCH_SIZE}`;
       
