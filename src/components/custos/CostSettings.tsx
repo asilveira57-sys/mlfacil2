@@ -410,9 +410,21 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
                 <span className="text-sm font-medium">
                   {syncMode === 'delta' ? 'Sincronização Incremental' : 'Sincronização Completa'}
                 </span>
-                <Badge variant="secondary" className="animate-pulse">
-                  Processando...
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="animate-pulse">
+                    Processando...
+                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleCancelFinancialSync}
+                    disabled={canceling}
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                  >
+                    <XCircle className="h-4 w-4 mr-1" />
+                    {canceling ? 'Cancelando...' : 'Cancelar'}
+                  </Button>
+                </div>
               </div>
               <div className="flex items-center gap-4">
                 <RefreshCw className="h-4 w-4 animate-spin text-primary" />
