@@ -724,11 +724,15 @@ export type Database = {
           cursor_or_offset: string | null
           id: string
           last_error: string | null
+          last_heartbeat_at: string | null
+          last_offset: number | null
+          last_page_size: number | null
           last_sync_finished_at: string | null
           last_sync_started_at: string | null
           last_synced_from: string | null
           last_synced_to: string | null
           movements_synced: number | null
+          phase: string | null
           seller_id: string
           status: string
           updated_at: string
@@ -739,11 +743,15 @@ export type Database = {
           cursor_or_offset?: string | null
           id?: string
           last_error?: string | null
+          last_heartbeat_at?: string | null
+          last_offset?: number | null
+          last_page_size?: number | null
           last_sync_finished_at?: string | null
           last_sync_started_at?: string | null
           last_synced_from?: string | null
           last_synced_to?: string | null
           movements_synced?: number | null
+          phase?: string | null
           seller_id: string
           status?: string
           updated_at?: string
@@ -754,11 +762,15 @@ export type Database = {
           cursor_or_offset?: string | null
           id?: string
           last_error?: string | null
+          last_heartbeat_at?: string | null
+          last_offset?: number | null
+          last_page_size?: number | null
           last_sync_finished_at?: string | null
           last_sync_started_at?: string | null
           last_synced_from?: string | null
           last_synced_to?: string | null
           movements_synced?: number | null
+          phase?: string | null
           seller_id?: string
           status?: string
           updated_at?: string

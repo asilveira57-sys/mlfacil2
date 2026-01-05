@@ -14,6 +14,22 @@ const ML_SECRET_KEY = Deno.env.get('ML_SECRET_KEY')!;
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Fetch with timeout using AbortController
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 30000): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -112,6 +128,7 @@ Deno.serve(async (req) => {
     if (action === 'cancel') {
       await updateSyncState(supabase, seller_id, {
         status: 'idle',
+        phase: 'idle',
         last_error: null,
         last_sync_finished_at: new Date().toISOString(),
       });
@@ -123,11 +140,13 @@ Deno.serve(async (req) => {
     }
 
     // Detect stale running state (e.g. user navigated away and background died)
+    const heartbeatAt = syncState.last_heartbeat_at ? new Date(syncState.last_heartbeat_at).getTime() : 0;
     const updatedAtMs = syncState.updated_at ? new Date(syncState.updated_at).getTime() : 0;
+    const lastActivityMs = Math.max(heartbeatAt, updatedAtMs);
     const isStaleRunning =
       syncState.status === 'running' &&
-      updatedAtMs > 0 &&
-      Date.now() - updatedAtMs > 10 * 60 * 1000;
+      lastActivityMs > 0 &&
+      Date.now() - lastActivityMs > 3 * 60 * 1000; // 3 minutes without heartbeat
 
     if (isStaleRunning && !continue_sync) {
       return new Response(
@@ -135,6 +154,9 @@ Deno.serve(async (req) => {
           status: 'stale_running',
           movements_synced: syncState.movements_synced,
           cursor: syncState.cursor_or_offset,
+          phase: syncState.phase,
+          last_offset: syncState.last_offset,
+          last_heartbeat_at: syncState.last_heartbeat_at,
           updated_at: syncState.updated_at,
         }),
         {
@@ -151,6 +173,9 @@ Deno.serve(async (req) => {
           status: 'already_running',
           movements_synced: syncState.movements_synced,
           cursor: syncState.cursor_or_offset,
+          phase: syncState.phase,
+          last_offset: syncState.last_offset,
+          last_heartbeat_at: syncState.last_heartbeat_at,
           updated_at: syncState.updated_at,
         }),
         {
@@ -176,10 +201,12 @@ Deno.serve(async (req) => {
     // Update sync state to running
     await updateSyncState(supabase, seller_id, {
       status: 'running',
+      phase: 'starting',
       last_sync_started_at: new Date().toISOString(),
       last_synced_from: dateFrom.toISOString().split('T')[0],
       last_synced_to: dateTo.toISOString().split('T')[0],
       last_error: null,
+      last_heartbeat_at: new Date().toISOString(),
     });
 
     // Start background processing
@@ -225,7 +252,7 @@ async function refreshMercadoLibreToken(refreshToken: string): Promise<{
   error?: string;
 }> {
   try {
-    const response = await fetch('https://api.mercadolibre.com/oauth/token', {
+    const response = await fetchWithTimeout('https://api.mercadolibre.com/oauth/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -234,7 +261,7 @@ async function refreshMercadoLibreToken(refreshToken: string): Promise<{
         client_secret: ML_SECRET_KEY,
         refresh_token: refreshToken,
       }),
-    });
+    }, 15000);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -249,7 +276,10 @@ async function refreshMercadoLibreToken(refreshToken: string): Promise<{
       expires_in: data.expires_in,
     };
   } catch (error) {
-    return { success: false, error: String(error) };
+    const errorMsg = error instanceof Error && error.name === 'AbortError' 
+      ? 'Token refresh timeout' 
+      : String(error);
+    return { success: false, error: errorMsg };
   }
 }
 
@@ -269,6 +299,7 @@ async function getOrCreateSyncState(supabase: any, userId: string, sellerId: str
       user_id: userId,
       seller_id: sellerId,
       status: 'idle',
+      phase: 'idle',
       movements_synced: 0,
     })
     .select()
@@ -282,6 +313,17 @@ async function updateSyncState(supabase: any, sellerId: string, updates: any) {
     .from('meli_financial_sync_state')
     .update({ ...updates, updated_at: new Date().toISOString() })
     .eq('seller_id', sellerId);
+}
+
+// Helper to check if sync was cancelled
+async function isSyncCancelled(supabase: any, sellerId: string): Promise<boolean> {
+  const { data: currentState } = await supabase
+    .from('meli_financial_sync_state')
+    .select('status')
+    .eq('seller_id', sellerId)
+    .maybeSingle();
+
+  return currentState?.status === 'idle';
 }
 
 async function processFinancialMovements(
@@ -302,37 +344,48 @@ async function processFinancialMovements(
   let totalMovements = 0;
   let offset = startCursor ? parseInt(startCursor) : 0;
   const BATCH_SIZE = 50;
+  const FETCH_TIMEOUT_MS = 30000;
   let hasMore = true;
+  let pagesProcessed = 0;
 
   const dateFromStr = dateFrom.toISOString();
   const dateToStr = dateTo.toISOString();
 
   try {
+    // Update phase to fetching
+    await updateSyncState(supabase, sellerId, {
+      phase: 'fetching',
+      last_heartbeat_at: new Date().toISOString(),
+      last_offset: offset,
+    });
+
     while (hasMore) {
       // Check if sync was cancelled (user clicked cancel button)
-      const { data: currentState } = await supabase
-        .from('meli_financial_sync_state')
-        .select('status')
-        .eq('seller_id', sellerId)
-        .maybeSingle();
-
-      if (currentState?.status === 'idle') {
+      if (await isSyncCancelled(supabase, sellerId)) {
         console.log(`[ml-sync-financial] Sync cancelled by user at offset ${offset}`);
         return;
       }
 
-      // Fetch movements from ML API
+      // Update heartbeat before fetch
+      await updateSyncState(supabase, sellerId, {
+        phase: 'fetching',
+        last_heartbeat_at: new Date().toISOString(),
+        last_offset: offset,
+      });
+
+      // Fetch movements from ML API with timeout
       const url = `https://api.mercadolibre.com/users/${sellerId}/billing/financial-transactions/search?date_from=${encodeURIComponent(dateFromStr)}&date_to=${encodeURIComponent(dateToStr)}&offset=${offset}&limit=${BATCH_SIZE}`;
       
-      let response;
+      let response: Response | null = null;
       let retries = 0;
       const MAX_RETRIES = 10;
+      let lastError = '';
 
       while (retries < MAX_RETRIES) {
         try {
-          response = await fetch(url, {
+          response = await fetchWithTimeout(url, {
             headers: { Authorization: `Bearer ${currentAccessToken}` },
-          });
+          }, FETCH_TIMEOUT_MS);
 
           if (response.ok) break;
 
@@ -343,6 +396,7 @@ async function processFinancialMovements(
             if (!refreshResult.success) {
               await updateSyncState(supabase, sellerId, {
                 status: 'error',
+                phase: 'error',
                 last_error: 'RECONNECT_REQUIRED',
                 cursor_or_offset: String(offset),
               });
@@ -368,7 +422,12 @@ async function processFinancialMovements(
 
           if (response.status === 429) {
             retries++;
+            lastError = `RATE_LIMITED_AT_OFFSET_${offset}`;
             console.log(`[ml-sync-financial] Rate limited, waiting ${retries * 3}s...`);
+            await updateSyncState(supabase, sellerId, {
+              last_heartbeat_at: new Date().toISOString(),
+              last_error: lastError,
+            });
             await sleep(3000 * retries);
             continue;
           }
@@ -380,19 +439,31 @@ async function processFinancialMovements(
           }
 
           retries++;
+          lastError = `HTTP_${response.status}_AT_OFFSET_${offset}`;
           console.log(`[ml-sync-financial] Error ${response.status}, retry ${retries}/${MAX_RETRIES}`);
           await sleep(1000 * retries);
 
         } catch (fetchError) {
           retries++;
-          console.error(`[ml-sync-financial] Network error:`, fetchError);
+          const isTimeout = fetchError instanceof Error && fetchError.name === 'AbortError';
+          lastError = isTimeout ? `TIMEOUT_AT_OFFSET_${offset}` : `NETWORK_ERROR_AT_OFFSET_${offset}`;
+          console.error(`[ml-sync-financial] ${isTimeout ? 'Timeout' : 'Network error'}:`, fetchError);
+          await updateSyncState(supabase, sellerId, {
+            last_heartbeat_at: new Date().toISOString(),
+            last_error: lastError,
+          });
           await sleep(1000 * retries);
         }
       }
 
       // If main endpoint fails, try billing endpoint
       if (!response || !response.ok) {
-        console.log(`[ml-sync-financial] Trying billing orders approach...`);
+        console.log(`[ml-sync-financial] Main API failed, trying billing orders approach...`);
+        await updateSyncState(supabase, sellerId, {
+          phase: 'fallback_orders',
+          last_heartbeat_at: new Date().toISOString(),
+        });
+        
         const billingResult = await fetchBillingFromOrders(
           supabase,
           userId,
@@ -408,6 +479,7 @@ async function processFinancialMovements(
         if (billingResult.error) {
           await updateSyncState(supabase, sellerId, {
             status: 'error',
+            phase: 'error',
             last_error: billingResult.error,
             cursor_or_offset: String(offset),
             movements_synced: totalMovements,
@@ -423,13 +495,21 @@ async function processFinancialMovements(
       const data = await response.json();
       const results = data.results || [];
       const paging = data.paging || {};
+      const pageSize = results.length;
 
-      console.log(`[ml-sync-financial] Fetched ${results.length} movements at offset ${offset}`);
+      console.log(`[ml-sync-financial] Fetched ${pageSize} movements at offset ${offset}`);
 
-      if (results.length === 0) {
+      if (pageSize === 0) {
         hasMore = false;
         break;
       }
+
+      // Update phase to upserting
+      await updateSyncState(supabase, sellerId, {
+        phase: 'upserting',
+        last_heartbeat_at: new Date().toISOString(),
+        last_page_size: pageSize,
+      });
 
       // Transform and upsert movements - IMMEDIATELY
       const movementsToInsert = results.map((m: any) => ({
@@ -458,8 +538,8 @@ async function processFinancialMovements(
 
           if (!upsertError) {
             upsertSuccess = true;
-            totalMovements += results.length;
-            console.log(`[ml-sync-financial] Upserted ${results.length} movements, total: ${totalMovements}`);
+            totalMovements += pageSize;
+            console.log(`[ml-sync-financial] Upserted ${pageSize} movements, total: ${totalMovements}`);
             break;
           }
           console.error(`[ml-sync-financial] Upsert error:`, upsertError);
@@ -469,43 +549,71 @@ async function processFinancialMovements(
         await sleep(1000 * (upsertRetry + 1));
       }
 
-      // Update sync state with progress - cursor para retomar
+      // Update sync state with progress - use actual results.length for robust pagination
+      const nextOffset = offset + pageSize;
       await updateSyncState(supabase, sellerId, {
-        cursor_or_offset: String(offset + results.length),
+        phase: 'fetching',
+        cursor_or_offset: String(nextOffset),
         movements_synced: totalMovements,
+        last_heartbeat_at: new Date().toISOString(),
+        last_offset: nextOffset,
+        last_page_size: pageSize,
+        last_error: null,
       });
 
-      // Pagination
+      // Robust pagination: use actual page size, not BATCH_SIZE
       const total = paging.total || 0;
-      offset += BATCH_SIZE;
-      hasMore = results.length === BATCH_SIZE && offset < total;
+      offset = nextOffset;
+      hasMore = pageSize > 0 && (total > 0 ? offset < total : pageSize === BATCH_SIZE);
+      pagesProcessed++;
 
       // Rate limiting
       await sleep(300);
     }
 
+    // Check cancellation before consolidation
+    if (await isSyncCancelled(supabase, sellerId)) {
+      console.log(`[ml-sync-financial] Sync cancelled before consolidation`);
+      return;
+    }
+
     // Success - consolidate order costs
     console.log(`[ml-sync-financial] Sync complete, consolidating ${totalMovements} movements...`);
     
+    await updateSyncState(supabase, sellerId, {
+      phase: 'consolidating',
+      last_heartbeat_at: new Date().toISOString(),
+    });
+    
     await consolidateOrderCosts(supabase, userId, sellerId);
+    
+    // Final check for cancellation
+    if (await isSyncCancelled(supabase, sellerId)) {
+      console.log(`[ml-sync-financial] Sync cancelled during consolidation`);
+      return;
+    }
     
     await updateSyncState(supabase, sellerId, {
       status: 'idle',
+      phase: 'finished',
       last_sync_finished_at: new Date().toISOString(),
       cursor_or_offset: null,
       movements_synced: totalMovements,
       last_error: null,
+      last_heartbeat_at: new Date().toISOString(),
     });
 
-    console.log(`[ml-sync-financial] Completed successfully: ${totalMovements} movements`);
+    console.log(`[ml-sync-financial] Completed successfully: ${totalMovements} movements, ${pagesProcessed} pages`);
 
   } catch (error) {
     console.error('[ml-sync-financial] Background error:', error);
     await updateSyncState(supabase, sellerId, {
       status: 'error',
+      phase: 'error',
       last_error: String(error),
       cursor_or_offset: String(offset),
       movements_synced: totalMovements,
+      last_heartbeat_at: new Date().toISOString(),
     });
   }
 }
@@ -528,6 +636,7 @@ async function fetchBillingFromOrders(
   let currentRefreshToken = refreshToken;
   let offset = startOffset;
   const BATCH_SIZE = 50;
+  const FETCH_TIMEOUT_MS = 30000;
   let hasMore = true;
   let totalProcessed = 0;
 
@@ -535,17 +644,30 @@ async function fetchBillingFromOrders(
   const dateToStr = encodeURIComponent(dateTo.toISOString());
 
   while (hasMore) {
+    // Check cancellation
+    if (await isSyncCancelled(supabase, sellerId)) {
+      console.log(`[ml-sync-financial] Fallback cancelled at offset ${offset}`);
+      return { totalProcessed };
+    }
+
+    // Update heartbeat
+    await updateSyncState(supabase, sellerId, {
+      phase: 'fallback_orders',
+      last_heartbeat_at: new Date().toISOString(),
+      last_offset: offset,
+    });
+
     const ordersUrl = `https://api.mercadolibre.com/orders/search?seller=${sellerId}&order.date_created.from=${dateFromStr}&order.date_created.to=${dateToStr}&offset=${offset}&limit=${BATCH_SIZE}&sort=date_desc`;
     
-    let response;
+    let response: Response | null = null;
     let retries = 0;
     const MAX_RETRIES = 10;
 
     while (retries < MAX_RETRIES) {
       try {
-        response = await fetch(ordersUrl, {
+        response = await fetchWithTimeout(ordersUrl, {
           headers: { Authorization: `Bearer ${currentAccessToken}` },
-        });
+        }, FETCH_TIMEOUT_MS);
 
         if (response.ok) break;
 
@@ -574,6 +696,10 @@ async function fetchBillingFromOrders(
 
         if (response.status === 429) {
           retries++;
+          await updateSyncState(supabase, sellerId, {
+            last_heartbeat_at: new Date().toISOString(),
+            last_error: `RATE_LIMITED_ORDERS_OFFSET_${offset}`,
+          });
           await sleep(3000 * retries);
           continue;
         }
@@ -583,35 +709,47 @@ async function fetchBillingFromOrders(
 
       } catch (fetchError) {
         retries++;
+        const isTimeout = fetchError instanceof Error && fetchError.name === 'AbortError';
+        console.error(`[ml-sync-financial] Orders ${isTimeout ? 'timeout' : 'error'}:`, fetchError);
+        await updateSyncState(supabase, sellerId, {
+          last_heartbeat_at: new Date().toISOString(),
+          last_error: isTimeout ? `TIMEOUT_ORDERS_OFFSET_${offset}` : `NETWORK_ERROR_ORDERS_${offset}`,
+        });
         await sleep(1000 * retries);
       }
     }
 
     if (!response || !response.ok) {
-      return { totalProcessed, error: `Failed after ${MAX_RETRIES} retries` };
+      return { totalProcessed, error: `ORDERS_FAILED_AFTER_${MAX_RETRIES}_RETRIES_AT_OFFSET_${offset}` };
     }
 
     const data = await response.json();
     const orders = data.results || [];
     const paging = data.paging || {};
+    const pageSize = orders.length;
 
-    console.log(`[ml-sync-financial] Orders offset ${offset}: ${orders.length} orders`);
+    console.log(`[ml-sync-financial] Orders offset ${offset}: ${pageSize} orders`);
 
     // Process each order with billing_info
     const movements: any[] = [];
     
     for (const order of orders) {
+      // Check cancellation during order processing
+      if (await isSyncCancelled(supabase, sellerId)) {
+        return { totalProcessed };
+      }
+
       const orderId = order.id?.toString();
       if (!orderId) continue;
 
-      // Fetch billing_info with retries
+      // Fetch billing_info with retries and timeout
       let billingData = null;
-      for (let billingRetry = 0; billingRetry < 10; billingRetry++) {
+      for (let billingRetry = 0; billingRetry < 5; billingRetry++) {
         try {
           const billingUrl = `https://api.mercadolibre.com/orders/${orderId}/billing_info`;
-          const billingResp = await fetch(billingUrl, {
+          const billingResp = await fetchWithTimeout(billingUrl, {
             headers: { Authorization: `Bearer ${currentAccessToken}` },
-          });
+          }, 15000);
 
           if (billingResp.ok) {
             billingData = await billingResp.json();
@@ -718,20 +856,24 @@ async function fetchBillingFromOrders(
       }
     }
 
-    // Update progress
+    // Update progress using actual page size
+    const nextOffset = offset + pageSize;
     await supabase
       .from('meli_financial_sync_state')
       .update({
-        cursor_or_offset: String(offset + orders.length),
+        cursor_or_offset: String(nextOffset),
         movements_synced: totalProcessed,
+        last_offset: nextOffset,
+        last_page_size: pageSize,
         updated_at: new Date().toISOString(),
+        last_heartbeat_at: new Date().toISOString(),
       })
       .eq('seller_id', sellerId);
 
-    // Pagination
+    // Robust pagination
     const total = paging.total || 0;
-    offset += BATCH_SIZE;
-    hasMore = orders.length === BATCH_SIZE && offset < total;
+    offset = nextOffset;
+    hasMore = pageSize > 0 && (total > 0 ? offset < total : pageSize === BATCH_SIZE);
 
     await sleep(300);
   }
@@ -744,6 +886,12 @@ async function consolidateOrderCosts(supabase: any, userId: string, sellerId: st
   console.log(`[ml-sync-financial] Consolidating order costs...`);
 
   try {
+    // Check cancellation at start
+    if (await isSyncCancelled(supabase, sellerId)) {
+      console.log(`[ml-sync-financial] Consolidation cancelled at start`);
+      return;
+    }
+
     // Get all unique order_ids from movements
     const { data: orderIds } = await supabase
       .from('meli_financial_movements_cache')
@@ -789,6 +937,17 @@ async function consolidateOrderCosts(supabase: any, userId: string, sellerId: st
     // Process in batches
     const BATCH_SIZE = 100;
     for (let i = 0; i < uniqueOrderIds.length; i += BATCH_SIZE) {
+      // Check cancellation during consolidation
+      if (await isSyncCancelled(supabase, sellerId)) {
+        console.log(`[ml-sync-financial] Consolidation cancelled at batch ${i}`);
+        return;
+      }
+
+      // Update heartbeat during consolidation
+      await updateSyncState(supabase, sellerId, {
+        last_heartbeat_at: new Date().toISOString(),
+      });
+
       const batchOrderIds = uniqueOrderIds.slice(i, i + BATCH_SIZE);
       
       // Get movements for these orders
