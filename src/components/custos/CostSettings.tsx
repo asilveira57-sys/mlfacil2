@@ -9,7 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Progress } from '@/components/ui/progress';
-import { Save, Package, Calculator, RefreshCw, CheckCircle2, CloudOff, AlertTriangle, Link2, Zap, Play, XCircle } from 'lucide-react';
+import { Save, Package, Calculator, RefreshCw, CheckCircle2, CloudOff, AlertTriangle, Link2, Zap, Play, XCircle, Clock, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface CostSettingsProps {
@@ -30,6 +30,10 @@ interface SyncState {
   last_error: string | null;
   cursor_or_offset: string | null;
   updated_at?: string | null;
+  phase?: string | null;
+  last_heartbeat_at?: string | null;
+  last_offset?: number | null;
+  last_page_size?: number | null;
 }
 
 interface BillingStatus {
@@ -89,11 +93,15 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
       if (state) {
         setSyncState(state);
 
+        // Use heartbeat if available, otherwise fallback to updated_at
+        const heartbeatMs = state.last_heartbeat_at ? new Date(state.last_heartbeat_at).getTime() : 0;
         const updatedAtMs = state.updated_at ? new Date(state.updated_at).getTime() : 0;
+        const lastActivityMs = Math.max(heartbeatMs, updatedAtMs);
+        
         const isFreshRunning =
           state.status === 'running' &&
-          updatedAtMs > 0 &&
-          Date.now() - updatedAtMs < 2 * 60 * 1000;
+          lastActivityMs > 0 &&
+          Date.now() - lastActivityMs < 3 * 60 * 1000; // 3 minutes
 
         setSyncing(isFreshRunning);
 
@@ -361,6 +369,40 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     return `${diffDays} dias`;
   };
 
+  const getTimeSinceHeartbeat = () => {
+    const heartbeatMs = syncState?.last_heartbeat_at ? new Date(syncState.last_heartbeat_at).getTime() : 0;
+    const updatedMs = syncState?.updated_at ? new Date(syncState.updated_at).getTime() : 0;
+    const lastActivityMs = Math.max(heartbeatMs, updatedMs);
+    if (!lastActivityMs) return null;
+    const diffMinutes = Math.floor((Date.now() - lastActivityMs) / (1000 * 60));
+    if (diffMinutes < 1) return 'agora';
+    if (diffMinutes === 1) return '1 minuto';
+    return `${diffMinutes} minutos`;
+  };
+
+  const getPhaseLabel = (phase: string | null | undefined) => {
+    const phaseMap: Record<string, string> = {
+      idle: 'Aguardando',
+      starting: 'Iniciando...',
+      fetching: 'Buscando dados',
+      upserting: 'Salvando',
+      consolidating: 'Consolidando',
+      fallback_orders: 'Fallback (pedidos)',
+      finished: 'Concluído',
+      error: 'Erro',
+    };
+    return phaseMap[phase || ''] || phase || 'Desconhecido';
+  };
+
+  // Detect stale sync (running but no heartbeat for 3+ minutes)
+  const isStaleSync = () => {
+    if (syncState?.status !== 'running') return false;
+    const heartbeatMs = syncState?.last_heartbeat_at ? new Date(syncState.last_heartbeat_at).getTime() : 0;
+    const updatedMs = syncState?.updated_at ? new Date(syncState.updated_at).getTime() : 0;
+    const lastActivityMs = Math.max(heartbeatMs, updatedMs);
+    return lastActivityMs > 0 && Date.now() - lastActivityMs > 3 * 60 * 1000;
+  };
+
   if (loading) {
     return (
       <div className="space-y-4">
@@ -403,8 +445,44 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Stale Sync Warning */}
+          {isStaleSync() && (
+            <Alert variant="destructive" className="border-amber-500 bg-amber-500/10">
+              <Clock className="h-4 w-4" />
+              <AlertTitle>Sincronização parece travada</AlertTitle>
+              <AlertDescription className="flex items-center justify-between">
+                <span>
+                  Sem atividade há {getTimeSinceHeartbeat()}. 
+                  Fase: {getPhaseLabel(syncState?.phase)}. 
+                  Offset: {syncState?.last_offset || syncState?.cursor_or_offset || '0'}.
+                </span>
+                <div className="flex gap-2 ml-4">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => handleSyncFinancial(syncMode, true)}
+                    disabled={syncing}
+                  >
+                    <Play className="h-4 w-4 mr-1" />
+                    Continuar
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={handleCancelFinancialSync}
+                    disabled={canceling}
+                    className="text-destructive hover:text-destructive"
+                  >
+                    <RotateCcw className="h-4 w-4 mr-1" />
+                    Resetar
+                  </Button>
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
+
           {/* Sync Progress */}
-          {syncing && syncState && (
+          {syncing && syncState && !isStaleSync() && (
             <div className="p-4 bg-primary/5 rounded-lg border border-primary/20 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">
@@ -412,7 +490,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
                 </span>
                 <div className="flex items-center gap-2">
                   <Badge variant="secondary" className="animate-pulse">
-                    Processando...
+                    {getPhaseLabel(syncState.phase)}
                   </Badge>
                   <Button
                     variant="ghost"
@@ -430,11 +508,13 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
                 <RefreshCw className="h-4 w-4 animate-spin text-primary" />
                 <span className="text-sm text-muted-foreground">
                   {syncState.movements_synced} movimentos sincronizados
+                  {syncState.last_offset && ` • Offset: ${syncState.last_offset}`}
                 </span>
               </div>
-              {syncState.cursor_or_offset && (
+              {syncState.last_heartbeat_at && (
                 <p className="text-xs text-muted-foreground">
-                  Cursor: {syncState.cursor_or_offset}
+                  Última atividade: {getTimeSinceHeartbeat()} atrás
+                  {syncState.last_error && ` • ${syncState.last_error}`}
                 </p>
               )}
             </div>
