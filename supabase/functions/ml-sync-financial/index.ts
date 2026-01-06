@@ -373,97 +373,112 @@ async function processFinancialMovements(
         last_offset: offset,
       });
 
-      // Fetch movements from ML API with timeout
-      const url = `https://api.mercadolibre.com/users/${sellerId}/billing/financial-transactions/search?date_from=${encodeURIComponent(dateFromStr)}&date_to=${encodeURIComponent(dateToStr)}&offset=${offset}&limit=${BATCH_SIZE}`;
+      // Try multiple API endpoints - ML has different endpoints for different account types
+      const endpoints = [
+        `https://api.mercadolibre.com/billing/integration/movements/search?user_id=${sellerId}&date_from=${encodeURIComponent(dateFromStr)}&date_to=${encodeURIComponent(dateToStr)}&offset=${offset}&limit=${BATCH_SIZE}`,
+        `https://api.mercadolibre.com/users/${sellerId}/mercadopago_account/movements/search?date_from=${encodeURIComponent(dateFromStr)}&date_to=${encodeURIComponent(dateToStr)}&offset=${offset}&limit=${BATCH_SIZE}`,
+      ];
       
       let response: Response | null = null;
       let retries = 0;
-      const MAX_RETRIES = 10;
+      const MAX_RETRIES = 3;
       let lastError = '';
+      let endpointWorked = false;
 
-      while (retries < MAX_RETRIES) {
-        try {
-          response = await fetchWithTimeout(url, {
-            headers: { Authorization: `Bearer ${currentAccessToken}` },
-          }, FETCH_TIMEOUT_MS);
+      // Try each endpoint
+      for (const url of endpoints) {
+        if (endpointWorked) break;
+        
+        retries = 0;
+        while (retries < MAX_RETRIES) {
+          try {
+            response = await fetchWithTimeout(url, {
+              headers: { Authorization: `Bearer ${currentAccessToken}` },
+            }, FETCH_TIMEOUT_MS);
 
-          if (response.ok) break;
-
-          if (response.status === 401) {
-            console.log(`[ml-sync-financial] Auth error, refreshing token...`);
-            const refreshResult = await refreshMercadoLibreToken(currentRefreshToken);
-            
-            if (!refreshResult.success) {
-              await updateSyncState(supabase, sellerId, {
-                status: 'error',
-                phase: 'error',
-                last_error: 'RECONNECT_REQUIRED',
-                cursor_or_offset: String(offset),
-              });
-              return;
+            if (response.ok) {
+              endpointWorked = true;
+              console.log(`[ml-sync-financial] Endpoint worked: ${url.split('?')[0]}`);
+              break;
             }
-            
-            currentAccessToken = refreshResult.access_token!;
-            currentRefreshToken = refreshResult.refresh_token!;
-            
-            await supabase
-              .from('ml_accounts')
-              .update({
-                access_token: currentAccessToken,
-                refresh_token: currentRefreshToken,
-                token_expires_at: new Date(Date.now() + (refreshResult.expires_in || 21600) * 1000).toISOString(),
-              })
-              .eq('id', accountId);
-            
-            retries++;
-            await sleep(1000 * retries);
-            continue;
-          }
 
-          if (response.status === 429) {
+            if (response.status === 401) {
+              console.log(`[ml-sync-financial] Auth error, refreshing token...`);
+              const refreshResult = await refreshMercadoLibreToken(currentRefreshToken);
+              
+              if (!refreshResult.success) {
+                await updateSyncState(supabase, sellerId, {
+                  status: 'error',
+                  phase: 'error',
+                  last_error: 'RECONNECT_REQUIRED',
+                  cursor_or_offset: String(offset),
+                });
+                return;
+              }
+              
+              currentAccessToken = refreshResult.access_token!;
+              currentRefreshToken = refreshResult.refresh_token!;
+              
+              await supabase
+                .from('ml_accounts')
+                .update({
+                  access_token: currentAccessToken,
+                  refresh_token: currentRefreshToken,
+                  token_expires_at: new Date(Date.now() + (refreshResult.expires_in || 21600) * 1000).toISOString(),
+                })
+                .eq('id', accountId);
+              
+              retries++;
+              await sleep(1000 * retries);
+              continue;
+            }
+
+            if (response.status === 429) {
+              retries++;
+              lastError = `RATE_LIMITED_AT_OFFSET_${offset}`;
+              console.log(`[ml-sync-financial] Rate limited, waiting ${retries * 3}s...`);
+              await updateSyncState(supabase, sellerId, {
+                last_heartbeat_at: new Date().toISOString(),
+                last_error: lastError,
+              });
+              await sleep(3000 * retries);
+              continue;
+            }
+
+            // For 404 or other errors, try next endpoint
+            if (response.status === 404 || response.status === 403) {
+              console.log(`[ml-sync-financial] Endpoint returned ${response.status}, trying next...`);
+              break;
+            }
+
             retries++;
-            lastError = `RATE_LIMITED_AT_OFFSET_${offset}`;
-            console.log(`[ml-sync-financial] Rate limited, waiting ${retries * 3}s...`);
+            lastError = `HTTP_${response.status}_AT_OFFSET_${offset}`;
+            console.log(`[ml-sync-financial] Error ${response.status}, retry ${retries}/${MAX_RETRIES}`);
+            await sleep(1000 * retries);
+
+          } catch (fetchError) {
+            retries++;
+            const isTimeout = fetchError instanceof Error && fetchError.name === 'AbortError';
+            lastError = isTimeout ? `TIMEOUT_AT_OFFSET_${offset}` : `NETWORK_ERROR_AT_OFFSET_${offset}`;
+            console.error(`[ml-sync-financial] ${isTimeout ? 'Timeout' : 'Network error'}:`, fetchError);
             await updateSyncState(supabase, sellerId, {
               last_heartbeat_at: new Date().toISOString(),
               last_error: lastError,
             });
-            await sleep(3000 * retries);
-            continue;
+            await sleep(1000 * retries);
           }
-
-          // For 404, try alternative endpoint
-          if (response.status === 404) {
-            console.log(`[ml-sync-financial] API endpoint not found, trying alternative...`);
-            break;
-          }
-
-          retries++;
-          lastError = `HTTP_${response.status}_AT_OFFSET_${offset}`;
-          console.log(`[ml-sync-financial] Error ${response.status}, retry ${retries}/${MAX_RETRIES}`);
-          await sleep(1000 * retries);
-
-        } catch (fetchError) {
-          retries++;
-          const isTimeout = fetchError instanceof Error && fetchError.name === 'AbortError';
-          lastError = isTimeout ? `TIMEOUT_AT_OFFSET_${offset}` : `NETWORK_ERROR_AT_OFFSET_${offset}`;
-          console.error(`[ml-sync-financial] ${isTimeout ? 'Timeout' : 'Network error'}:`, fetchError);
-          await updateSyncState(supabase, sellerId, {
-            last_heartbeat_at: new Date().toISOString(),
-            last_error: lastError,
-          });
-          await sleep(1000 * retries);
         }
       }
 
-      // If main endpoint fails, try billing endpoint
-      if (!response || !response.ok) {
-        console.log(`[ml-sync-financial] Main API failed, trying billing orders approach...`);
+      // If all endpoints fail, use fallback with BUDGET
+      if (!endpointWorked || !response || !response.ok) {
+        console.log(`[ml-sync-financial] All API endpoints failed, using orders fallback with budget...`);
         await updateSyncState(supabase, sellerId, {
           phase: 'fallback_orders',
           last_heartbeat_at: new Date().toISOString(),
         });
         
+        const FALLBACK_PAGE_BUDGET = 20; // Process 20 pages per run, then save and continue
         const billingResult = await fetchBillingFromOrders(
           supabase,
           userId,
@@ -473,7 +488,8 @@ async function processFinancialMovements(
           accountId,
           dateFrom,
           dateTo,
-          offset
+          offset,
+          FALLBACK_PAGE_BUDGET
         );
         
         if (billingResult.error) {
@@ -481,13 +497,28 @@ async function processFinancialMovements(
             status: 'error',
             phase: 'error',
             last_error: billingResult.error,
-            cursor_or_offset: String(offset),
-            movements_synced: totalMovements,
+            cursor_or_offset: String(billingResult.lastOffset),
+            movements_synced: totalMovements + billingResult.totalProcessed,
           });
           return;
         }
         
-        totalMovements = billingResult.totalProcessed;
+        totalMovements += billingResult.totalProcessed;
+        
+        // If there's more to process, save state and let user continue
+        if (billingResult.hasMore) {
+          await updateSyncState(supabase, sellerId, {
+            status: 'paused',
+            phase: 'fallback_orders',
+            cursor_or_offset: String(billingResult.lastOffset),
+            movements_synced: totalMovements,
+            last_error: null,
+            last_heartbeat_at: new Date().toISOString(),
+          });
+          console.log(`[ml-sync-financial] Fallback paused at offset ${billingResult.lastOffset}, ${totalMovements} processed`);
+          return;
+        }
+        
         hasMore = false;
         break;
       }
@@ -618,7 +649,7 @@ async function processFinancialMovements(
   }
 }
 
-// Fallback: fetch billing from orders if transactions API not available
+// Fallback: fetch billing from orders with PAGE BUDGET to avoid timeout
 async function fetchBillingFromOrders(
   supabase: any,
   userId: string,
@@ -628,9 +659,10 @@ async function fetchBillingFromOrders(
   accountId: string,
   dateFrom: Date,
   dateTo: Date,
-  startOffset: number
-): Promise<{ totalProcessed: number; error?: string }> {
-  console.log(`[ml-sync-financial] Fetching billing from orders...`);
+  startOffset: number,
+  pageBudget: number = 50
+): Promise<{ totalProcessed: number; lastOffset: number; hasMore: boolean; error?: string }> {
+  console.log(`[ml-sync-financial] Fetching billing from orders, budget=${pageBudget} pages, startOffset=${startOffset}...`);
   
   let currentAccessToken = accessToken;
   let currentRefreshToken = refreshToken;
@@ -639,15 +671,16 @@ async function fetchBillingFromOrders(
   const FETCH_TIMEOUT_MS = 30000;
   let hasMore = true;
   let totalProcessed = 0;
+  let pagesProcessed = 0;
 
   const dateFromStr = encodeURIComponent(dateFrom.toISOString());
   const dateToStr = encodeURIComponent(dateTo.toISOString());
 
-  while (hasMore) {
+  while (hasMore && pagesProcessed < pageBudget) {
     // Check cancellation
     if (await isSyncCancelled(supabase, sellerId)) {
       console.log(`[ml-sync-financial] Fallback cancelled at offset ${offset}`);
-      return { totalProcessed };
+      return { totalProcessed, lastOffset: offset, hasMore };
     }
 
     // Update heartbeat
@@ -674,7 +707,7 @@ async function fetchBillingFromOrders(
         if (response.status === 401) {
           const refreshResult = await refreshMercadoLibreToken(currentRefreshToken);
           if (!refreshResult.success) {
-            return { totalProcessed, error: 'RECONNECT_REQUIRED' };
+            return { totalProcessed, lastOffset: offset, hasMore, error: 'RECONNECT_REQUIRED' };
           }
           
           currentAccessToken = refreshResult.access_token!;
@@ -720,7 +753,7 @@ async function fetchBillingFromOrders(
     }
 
     if (!response || !response.ok) {
-      return { totalProcessed, error: `ORDERS_FAILED_AFTER_${MAX_RETRIES}_RETRIES_AT_OFFSET_${offset}` };
+      return { totalProcessed, lastOffset: offset, hasMore, error: `ORDERS_FAILED_AFTER_${MAX_RETRIES}_RETRIES_AT_OFFSET_${offset}` };
     }
 
     const data = await response.json();
@@ -728,7 +761,7 @@ async function fetchBillingFromOrders(
     const paging = data.paging || {};
     const pageSize = orders.length;
 
-    console.log(`[ml-sync-financial] Orders offset ${offset}: ${pageSize} orders`);
+    console.log(`[ml-sync-financial] Orders offset ${offset}: ${pageSize} orders (page ${pagesProcessed + 1}/${pageBudget})`);
 
     // Process each order with billing_info
     const movements: any[] = [];
@@ -736,7 +769,7 @@ async function fetchBillingFromOrders(
     for (const order of orders) {
       // Check cancellation during order processing
       if (await isSyncCancelled(supabase, sellerId)) {
-        return { totalProcessed };
+        return { totalProcessed, lastOffset: offset, hasMore };
       }
 
       const orderId = order.id?.toString();
@@ -874,11 +907,13 @@ async function fetchBillingFromOrders(
     const total = paging.total || 0;
     offset = nextOffset;
     hasMore = pageSize > 0 && (total > 0 ? offset < total : pageSize === BATCH_SIZE);
+    pagesProcessed++;
 
     await sleep(300);
   }
 
-  return { totalProcessed };
+  console.log(`[ml-sync-financial] Fallback processed ${pagesProcessed} pages, ${totalProcessed} orders, hasMore=${hasMore}`);
+  return { totalProcessed, lastOffset: offset, hasMore };
 }
 
 // Consolidate movements into order_cost_breakdown_cache

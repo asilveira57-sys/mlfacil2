@@ -173,6 +173,13 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
           setSyncing(false);
           toast.success(`Sincronização concluída: ${state.movements_synced} movimentos`);
           loadBillingStatus();
+        } else if (state.status === 'paused') {
+          // Paused means fallback completed a budget, auto-continue
+          toast.info(`Processados ${state.movements_synced} itens, continuando...`);
+          // Auto-continue after a brief delay
+          setTimeout(() => {
+            handleSyncFinancial(syncMode, true);
+          }, 1000);
         } else if (state.status === 'error') {
           setSyncing(false);
           if (state.last_error === 'RECONNECT_REQUIRED') {
@@ -186,7 +193,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [syncing, sellerId, loadBillingStatus]);
+  }, [syncing, sellerId, loadBillingStatus, syncMode]);
 
   useEffect(() => {
     if (sellerId) {
@@ -387,12 +394,15 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
       fetching: 'Buscando dados',
       upserting: 'Salvando',
       consolidating: 'Consolidando',
-      fallback_orders: 'Fallback (pedidos)',
+      fallback_orders: 'Via pedidos',
       finished: 'Concluído',
       error: 'Erro',
     };
     return phaseMap[phase || ''] || phase || 'Desconhecido';
   };
+
+  // Check if sync is paused (fallback needs to continue)
+  const isPausedSync = () => syncState?.status === 'paused';
 
   // Detect stale sync (running but no heartbeat for 3+ minutes)
   const isStaleSync = () => {
