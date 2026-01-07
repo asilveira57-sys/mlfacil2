@@ -272,6 +272,7 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
   const periodDays = parseInt(params.period_days || '30');
   const status = params.status; // ok, incompleto
   const profitType = params.profit_type; // lucro, prejuizo
+  const ecommerceCost = params.ecommerce_cost; // with, without, all
   const search = params.search || '';
   const page = parseInt(params.page || '1');
   const pageSize = parseInt(params.page_size || '50');
@@ -293,6 +294,13 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
 
   if (status) {
     query = query.eq('status', status);
+  }
+
+  // Filter by e-commerce cost (cost_other)
+  if (ecommerceCost === 'with') {
+    query = query.gt('cost_other', 0);
+  } else if (ecommerceCost === 'without') {
+    query = query.or('cost_other.is.null,cost_other.eq.0');
   }
 
   const { data: breakdowns, error } = await query;

@@ -8,7 +8,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Search, AlertCircle, TrendingUp, TrendingDown, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Label } from '@/components/ui/label';
+import { Search, AlertCircle, TrendingUp, TrendingDown, RefreshCw, CheckCircle2, DollarSign, Save } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface CostOrdersProps {
@@ -23,6 +24,7 @@ interface OrderCost {
   cost_total: number;
   cost_fees: number;
   cost_shipping: number;
+  cost_other: number;
   profit_total: number;
   margin_percent: number;
   missing_cost_items_count: number;
@@ -47,11 +49,19 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const [periodDays, setPeriodDays] = useState('30');
   const [statusFilter, setStatusFilter] = useState('all');
   const [profitFilter, setProfitFilter] = useState('all');
+  const [ecommerceFilter, setEcommerceFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [totalOrders, setTotalOrders] = useState(0);
+  const [goToPageInput, setGoToPageInput] = useState('');
   const [selectedOrder, setSelectedOrder] = useState<OrderDetail | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  
+  // Edit e-commerce cost state
+  const [editingCostOther, setEditingCostOther] = useState<number>(0);
+  const [editingNotes, setEditingNotes] = useState<string>('');
+  const [savingExtra, setSavingExtra] = useState(false);
 
   const loadOrders = async () => {
     setLoading(true);
@@ -69,6 +79,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
 
       if (statusFilter !== 'all') params.set('status', statusFilter);
       if (profitFilter !== 'all') params.set('profit_type', profitFilter);
+      if (ecommerceFilter !== 'all') params.set('ecommerce_cost', ecommerceFilter);
 
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders?${params}`,
@@ -79,6 +90,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
         const data = await response.json();
         setOrders(data.orders || []);
         setTotalPages(data.total_pages || 1);
+        setTotalOrders(data.total || 0);
       }
     } catch (error) {
       console.error('Error loading orders:', error);
@@ -92,7 +104,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     if (sellerId) {
       loadOrders();
     }
-  }, [sellerId, periodDays, statusFilter, profitFilter, page]);
+  }, [sellerId, periodDays, statusFilter, profitFilter, ecommerceFilter, page]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -127,13 +139,67 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
           .eq('order_id', orderId)
           .maybeSingle();
 
-        setSelectedOrder({ ...data, billing });
+        const orderData = { ...data, billing };
+        setSelectedOrder(orderData);
+        setEditingCostOther(data.breakdown?.cost_other || 0);
+        setEditingNotes(data.breakdown?.notes || '');
       }
     } catch (error) {
       console.error('Error loading order detail:', error);
       toast.error('Erro ao carregar detalhes');
     } finally {
       setLoadingDetail(false);
+    }
+  };
+
+  const handleSaveExtra = async () => {
+    if (!selectedOrder) return;
+    
+    setSavingExtra(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders/update-extra`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            seller_id: sellerId,
+            order_id: selectedOrder.order?.order_id,
+            cost_other: editingCostOther,
+            notes: editingNotes,
+          }),
+        }
+      );
+
+      if (response.ok) {
+        toast.success('Custo e-commerce salvo com sucesso');
+        // Reload detail
+        await loadOrderDetail(selectedOrder.order?.order_id);
+        // Reload list
+        loadOrders();
+      } else {
+        toast.error('Erro ao salvar');
+      }
+    } catch (error) {
+      toast.error('Erro ao salvar custo e-commerce');
+    } finally {
+      setSavingExtra(false);
+    }
+  };
+
+  const handleGoToPage = () => {
+    const pageNum = parseInt(goToPageInput);
+    if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
+      setPage(pageNum);
+      setGoToPageInput('');
+    } else {
+      toast.error(`Página inválida. Digite um número entre 1 e ${totalPages}`);
     }
   };
 
@@ -154,11 +220,21 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     return (order.cost_fees > 0 || order.cost_shipping > 0);
   };
 
+  // Check if order has e-commerce cost
+  const hasEcommerceCost = (order: OrderCost) => {
+    return (order.cost_other || 0) > 0;
+  };
+
   return (
     <>
       <Card>
         <CardHeader>
-          <CardTitle>Custo por Pedido</CardTitle>
+          <CardTitle className="flex items-center justify-between">
+            <span>Custo por Pedido</span>
+            {totalOrders > 0 && (
+              <Badge variant="secondary">{totalOrders.toLocaleString()} pedidos</Badge>
+            )}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-4 mb-4">
@@ -181,6 +257,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                 <SelectItem value="15">15 dias</SelectItem>
                 <SelectItem value="30">30 dias</SelectItem>
                 <SelectItem value="90">90 dias</SelectItem>
+                <SelectItem value="180">6 meses</SelectItem>
               </SelectContent>
             </Select>
 
@@ -203,6 +280,17 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                 <SelectItem value="all">Todos</SelectItem>
                 <SelectItem value="lucro">Lucro</SelectItem>
                 <SelectItem value="prejuizo">Prejuízo</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={ecommerceFilter} onValueChange={(v) => { setEcommerceFilter(v); setPage(1); }}>
+              <SelectTrigger className="w-44">
+                <SelectValue placeholder="Custo E-commerce" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                <SelectItem value="with">Com custo e-commerce</SelectItem>
+                <SelectItem value="without">Sem custo e-commerce</SelectItem>
               </SelectContent>
             </Select>
 
@@ -289,6 +377,11 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                                   <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
                                 </span>
                               )}
+                              {hasEcommerceCost(order) && (
+                                <span title="Com custo e-commerce">
+                                  <DollarSign className="h-3.5 w-3.5 text-blue-600" />
+                                </span>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>
@@ -299,14 +392,43 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
               </div>
 
               {totalPages > 1 && (
-                <div className="flex justify-center gap-2 mt-4">
-                  <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
-                    Anterior
-                  </Button>
-                  <span className="py-2 px-4 text-sm">Página {page} de {totalPages}</span>
-                  <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
-                    Próxima
-                  </Button>
+                <div className="flex flex-wrap items-center justify-center gap-4 mt-4">
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(1)}>
+                      Primeira
+                    </Button>
+                    <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+                      Anterior
+                    </Button>
+                    <span className="py-2 px-4 text-sm">
+                      Página {page} de {totalPages}
+                    </span>
+                    <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+                      Próxima
+                    </Button>
+                    <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(totalPages)}>
+                      Última
+                    </Button>
+                  </div>
+                  
+                  {/* Go to page */}
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="goToPage" className="text-sm text-muted-foreground">Ir para:</Label>
+                    <Input
+                      id="goToPage"
+                      type="number"
+                      min="1"
+                      max={totalPages}
+                      value={goToPageInput}
+                      onChange={(e) => setGoToPageInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleGoToPage()}
+                      placeholder={String(page)}
+                      className="w-20 h-8"
+                    />
+                    <Button variant="outline" size="sm" onClick={handleGoToPage}>
+                      Ir
+                    </Button>
+                  </div>
                 </div>
               )}
             </>
@@ -422,7 +544,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                         {selectedOrder.billing.cost_installment_fee > 0 && (
                           <>
                             <div className="flex items-center gap-1">
-                              (-) Taxa Parcelamento:
+                              (-) Tarifa Parcelamento:
                               <CheckCircle2 className="h-3 w-3 text-green-600" />
                             </div>
                             <div className="text-right">{formatCurrency(selectedOrder.billing.cost_installment_fee)}</div>
@@ -432,7 +554,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                         {selectedOrder.billing.cost_shipping_fee > 0 && (
                           <>
                             <div className="flex items-center gap-1">
-                              (-) Custo de Frete:
+                              (-) Tarifa Frete:
                               <CheckCircle2 className="h-3 w-3 text-green-600" />
                             </div>
                             <div className="text-right">{formatCurrency(selectedOrder.billing.cost_shipping_fee)}</div>
@@ -441,18 +563,8 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                       </>
                     ) : (
                       <>
-                        <div className="flex items-center gap-1 text-muted-foreground">
-                          (-) Tarifas ML:
-                          <Badge variant="outline" className="text-xs">Sem dados</Badge>
-                        </div>
-                        <div className="text-right text-muted-foreground">-</div>
-                      </>
-                    )}
-
-                    {selectedOrder.breakdown.cost_other > 0 && (
-                      <>
-                        <div>(-) Outros Custos:</div>
-                        <div className="text-right">{formatCurrency(selectedOrder.breakdown.cost_other)}</div>
+                        <div>(-) Taxas ML (estimado):</div>
+                        <div className="text-right text-muted-foreground">{formatCurrency(selectedOrder.breakdown.cost_fees)}</div>
                       </>
                     )}
 
@@ -461,25 +573,52 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                       {formatCurrency(selectedOrder.breakdown.cost_total)}
                     </div>
 
-                    <div className="font-bold text-lg">Lucro:</div>
-                    <div className={`text-right font-bold text-lg ${selectedOrder.breakdown.profit_total >= 0 ? 'text-green-600' : 'text-destructive'}`}>
+                    <div className="border-t pt-2 font-medium">Lucro:</div>
+                    <div className={`text-right border-t pt-2 font-medium ${selectedOrder.breakdown.profit_total >= 0 ? 'text-green-600' : 'text-destructive'}`}>
                       {formatCurrency(selectedOrder.breakdown.profit_total)}
                     </div>
 
                     <div>Margem:</div>
-                    <div className="text-right font-medium">{selectedOrder.breakdown.margin_percent.toFixed(1)}%</div>
+                    <div className="text-right">{selectedOrder.breakdown.margin_percent?.toFixed(1)}%</div>
                   </div>
                 </div>
               )}
 
-              {selectedOrder.missing_costs > 0 && (
-                <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-950 rounded-lg border border-amber-200 dark:border-amber-800">
-                  <AlertCircle className="h-5 w-5 text-amber-600" />
-                  <span className="text-sm">
-                    {selectedOrder.missing_costs} item(ns) sem custo definido. Vá ao Catálogo para preencher.
-                  </span>
+              {/* E-commerce cost editor */}
+              <div className="border rounded-lg p-4 space-y-4">
+                <h4 className="font-medium flex items-center gap-2">
+                  <DollarSign className="h-4 w-4" />
+                  Custo E-commerce (Outros Custos)
+                </h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="costOther">Custo adicional (R$)</Label>
+                    <Input
+                      id="costOther"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={editingCostOther}
+                      onChange={(e) => setEditingCostOther(parseFloat(e.target.value) || 0)}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="notes">Observações</Label>
+                    <Input
+                      id="notes"
+                      value={editingNotes}
+                      onChange={(e) => setEditingNotes(e.target.value)}
+                      placeholder="Ex: Taxa de anúncio, desconto..."
+                      className="mt-1"
+                    />
+                  </div>
                 </div>
-              )}
+                <Button onClick={handleSaveExtra} disabled={savingExtra} size="sm">
+                  <Save className="h-4 w-4 mr-2" />
+                  {savingExtra ? 'Salvando...' : 'Salvar Custo'}
+                </Button>
+              </div>
             </div>
           ) : null}
         </DialogContent>

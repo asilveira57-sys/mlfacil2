@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -60,30 +60,29 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     movements_count: 0,
     last_sync: null,
   });
+  
+  // Auto-resume ref to prevent double triggers
+  const autoResumeTriggeredRef = useRef(false);
 
   const loadBillingStatus = useCallback(async () => {
     try {
-      // Count orders
       const { count: totalOrders } = await supabase
         .from('meli_orders_cache')
         .select('*', { count: 'exact', head: true })
         .eq('seller_id', sellerId)
         .eq('order_status', 'paid');
 
-      // Count orders with real financial data
       const { count: ordersWithBilling } = await supabase
         .from('order_cost_breakdown_cache')
         .select('*', { count: 'exact', head: true })
         .eq('seller_id', sellerId)
         .eq('has_real_financial', true);
 
-      // Count movements
       const { count: movementsCount } = await supabase
         .from('meli_financial_movements_cache')
         .select('*', { count: 'exact', head: true })
         .eq('seller_id', sellerId);
 
-      // Get sync state
       const { data: state } = await supabase
         .from('meli_financial_sync_state')
         .select('*')
@@ -93,7 +92,6 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
       if (state) {
         setSyncState(state);
 
-        // Use heartbeat if available, otherwise fallback to updated_at
         const heartbeatMs = state.last_heartbeat_at ? new Date(state.last_heartbeat_at).getTime() : 0;
         const updatedAtMs = state.updated_at ? new Date(state.updated_at).getTime() : 0;
         const lastActivityMs = Math.max(heartbeatMs, updatedAtMs);
@@ -101,7 +99,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
         const isFreshRunning =
           state.status === 'running' &&
           lastActivityMs > 0 &&
-          Date.now() - lastActivityMs < 3 * 60 * 1000; // 3 minutes
+          Date.now() - lastActivityMs < 3 * 60 * 1000;
 
         setSyncing(isFreshRunning);
 
@@ -155,9 +153,9 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     }
   };
 
-  // Poll for sync progress
+  // Poll for sync progress and handle auto-resume
   useEffect(() => {
-    if (!syncing || !sellerId) return;
+    if (!sellerId) return;
 
     const interval = setInterval(async () => {
       const { data: state } = await supabase
@@ -169,19 +167,29 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
       if (state) {
         setSyncState(state);
 
-        if (state.status === 'idle') {
+        if (state.status === 'idle' && syncing) {
           setSyncing(false);
-          toast.success(`Sincronização concluída: ${state.movements_synced} movimentos`);
+          autoResumeTriggeredRef.current = false;
+          toast.success(`Sincronização concluída: ${state.movements_synced} itens processados`);
           loadBillingStatus();
         } else if (state.status === 'paused') {
-          // Paused means fallback completed a budget, auto-continue
-          toast.info(`Processados ${state.movements_synced} itens, continuando...`);
-          // Auto-continue after a brief delay
-          setTimeout(() => {
-            handleSyncFinancial(syncMode, true);
-          }, 1000);
+          // Auto-resume when paused (micro-batch completed)
+          if (!autoResumeTriggeredRef.current) {
+            autoResumeTriggeredRef.current = true;
+            console.log('[CostSettings] Auto-resuming paused sync...');
+            toast.info(`Processados ${state.movements_synced} itens, continuando automaticamente...`);
+            
+            // Brief delay then auto-continue
+            setTimeout(() => {
+              handleSyncFinancial(syncMode, true);
+            }, 500);
+          }
+        } else if (state.status === 'running') {
+          setSyncing(true);
+          autoResumeTriggeredRef.current = false;
         } else if (state.status === 'error') {
           setSyncing(false);
+          autoResumeTriggeredRef.current = false;
           if (state.last_error === 'RECONNECT_REQUIRED') {
             setNeedsReconnect(true);
             toast.error('Conexão com o Mercado Livre expirou');
@@ -238,6 +246,11 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     setSyncMode(mode);
     setNeedsReconnect(false);
     setSyncing(true);
+    
+    // Reset auto-resume flag when manually starting
+    if (!continueSync) {
+      autoResumeTriggeredRef.current = false;
+    }
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -260,19 +273,22 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
         console.error('Error invoking ml-sync-financial:', error);
         toast.error(error.message || 'Erro ao iniciar sincronização');
         setSyncing(false);
+        autoResumeTriggeredRef.current = false;
         return;
       }
 
       if (data?.code === 'RECONNECT_REQUIRED') {
         setNeedsReconnect(true);
         setSyncing(false);
+        autoResumeTriggeredRef.current = false;
         toast.error('Conexão com o Mercado Livre expirou');
         return;
       }
 
       if (data?.status === 'stale_running') {
-        toast.warning('A sincronização anterior parece ter travado. Use “Continuar” ou “Completa”.');
+        toast.warning('A sincronização anterior parece ter travado. Use "Continuar" ou "Completa".');
         setSyncing(false);
+        autoResumeTriggeredRef.current = false;
         await loadBillingStatus();
         return;
       }
@@ -284,21 +300,26 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
       }
 
       if (data?.status === 'started') {
-        toast.success(`Sincronização ${mode === 'delta' ? 'incremental' : 'completa'} iniciada`);
+        if (!continueSync) {
+          toast.success(`Sincronização ${mode === 'delta' ? 'incremental' : 'completa'} iniciada`);
+        }
         return;
       }
 
       toast.error('Erro ao iniciar sincronização');
       setSyncing(false);
+      autoResumeTriggeredRef.current = false;
     } catch (error) {
       console.error('Error syncing financial:', error);
       toast.error('Erro ao sincronizar dados financeiros');
       setSyncing(false);
+      autoResumeTriggeredRef.current = false;
     }
   };
 
   const handleCancelFinancialSync = async () => {
     setCanceling(true);
+    autoResumeTriggeredRef.current = false;
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
@@ -401,7 +422,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     return phaseMap[phase || ''] || phase || 'Desconhecido';
   };
 
-  // Check if sync is paused (fallback needs to continue)
+  // Check if sync is paused (ready for auto-resume)
   const isPausedSync = () => syncState?.status === 'paused';
 
   // Detect stale sync (running but no heartbeat for 3+ minutes)
@@ -492,14 +513,14 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
           )}
 
           {/* Sync Progress */}
-          {syncing && syncState && !isStaleSync() && (
+          {(syncing || isPausedSync()) && syncState && !isStaleSync() && (
             <div className="p-4 bg-primary/5 rounded-lg border border-primary/20 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">
                   {syncMode === 'delta' ? 'Sincronização Incremental' : 'Sincronização Completa'}
                 </span>
                 <div className="flex items-center gap-2">
-                  <Badge variant="secondary" className="animate-pulse">
+                  <Badge variant="secondary" className={syncing ? 'animate-pulse' : ''}>
                     {getPhaseLabel(syncState.phase)}
                   </Badge>
                   <Button
@@ -515,9 +536,9 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
                 </div>
               </div>
               <div className="flex items-center gap-4">
-                <RefreshCw className="h-4 w-4 animate-spin text-primary" />
+                <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''} text-primary`} />
                 <span className="text-sm text-muted-foreground">
-                  {syncState.movements_synced} movimentos sincronizados
+                  {syncState.movements_synced} itens processados
                   {syncState.last_offset && ` • Offset: ${syncState.last_offset}`}
                 </span>
               </div>
@@ -583,7 +604,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
               <Button 
                 variant="default" 
                 onClick={() => handleSyncFinancial('delta')} 
-                disabled={syncing}
+                disabled={syncing || isPausedSync()}
                 title="Busca apenas movimentos novos (últimos 30 dias)"
               >
                 <Zap className={`h-4 w-4 mr-2 ${syncing && syncMode === 'delta' ? 'animate-pulse' : ''}`} />
@@ -594,7 +615,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
               <Button 
                 variant="outline" 
                 onClick={() => handleSyncFinancial('full')} 
-                disabled={syncing}
+                disabled={syncing || isPausedSync()}
                 title="Reprocessa todos os movimentos dos últimos 6 meses"
               >
                 <RefreshCw className={`h-4 w-4 mr-2 ${syncing && syncMode === 'full' ? 'animate-spin' : ''}`} />
@@ -605,7 +626,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
           
           <p className="text-xs text-muted-foreground">
             <strong>Atualizar:</strong> Busca movimentos dos últimos 30 dias (mais rápido). 
-            <strong className="ml-2">Completa:</strong> Reprocessa os últimos 6 meses.
+            <strong className="ml-2">Completa:</strong> Reprocessa os últimos 6 meses (100 itens por ciclo).
           </p>
         </CardContent>
       </Card>
