@@ -14,6 +14,12 @@ const ML_SECRET_KEY = Deno.env.get('ML_SECRET_KEY')!;
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// ===== BUDGET LIMITS =====
+// Maximum orders/movements per run (for micro-batches)
+const MAX_ITEMS_PER_RUN = 100;
+// Maximum runtime in ms (fail-safe)
+const MAX_RUNTIME_MS = 25000;
+
 // Fetch with timeout using AbortController
 async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 30000): Promise<Response> {
   const controller = new AbortController();
@@ -166,7 +172,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Check if already running
+    // Check if already running (not paused)
     if (syncState.status === 'running' && !continue_sync) {
       return new Response(
         JSON.stringify({
@@ -198,6 +204,16 @@ Deno.serve(async (req) => {
       dateFrom.setDate(dateFrom.getDate() - days);
     }
 
+    // Use existing offset if continuing (paused or stale)
+    const startOffset = (continue_sync || syncState.status === 'paused') 
+      ? (syncState.cursor_or_offset ? parseInt(syncState.cursor_or_offset) : 0)
+      : 0;
+    
+    // Preserve movements_synced when continuing
+    const startMovements = (continue_sync || syncState.status === 'paused')
+      ? (syncState.movements_synced || 0)
+      : 0;
+
     // Update sync state to running
     await updateSyncState(supabase, seller_id, {
       status: 'running',
@@ -207,6 +223,8 @@ Deno.serve(async (req) => {
       last_synced_to: dateTo.toISOString().split('T')[0],
       last_error: null,
       last_heartbeat_at: new Date().toISOString(),
+      cursor_or_offset: String(startOffset),
+      movements_synced: startMovements,
     });
 
     // Start background processing
@@ -220,7 +238,8 @@ Deno.serve(async (req) => {
         account.refresh_token,
         dateFrom,
         dateTo,
-        continue_sync ? syncState.cursor_or_offset : null
+        startOffset,
+        startMovements
       )
     );
 
@@ -229,6 +248,7 @@ Deno.serve(async (req) => {
       mode,
       date_from: dateFrom.toISOString(),
       date_to: dateTo.toISOString(),
+      start_offset: startOffset,
     }), {
       status: 202,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -335,18 +355,20 @@ async function processFinancialMovements(
   refreshToken: string,
   dateFrom: Date,
   dateTo: Date,
-  startCursor: string | null
+  startOffset: number,
+  startMovements: number
 ) {
-  console.log(`[ml-sync-financial] Background processing started`);
+  console.log(`[ml-sync-financial] Background processing started, offset=${startOffset}, movements=${startMovements}`);
   
+  const runStartTime = Date.now();
   let currentAccessToken = accessToken;
   let currentRefreshToken = refreshToken;
-  let totalMovements = 0;
-  let offset = startCursor ? parseInt(startCursor) : 0;
+  let totalMovements = startMovements;
+  let offset = startOffset;
   const BATCH_SIZE = 50;
   const FETCH_TIMEOUT_MS = 30000;
   let hasMore = true;
-  let pagesProcessed = 0;
+  let itemsThisRun = 0;
 
   const dateFromStr = dateFrom.toISOString();
   const dateToStr = dateTo.toISOString();
@@ -360,9 +382,36 @@ async function processFinancialMovements(
     });
 
     while (hasMore) {
-      // Check if sync was cancelled (user clicked cancel button)
+      // Check budgets: items or runtime
+      if (itemsThisRun >= MAX_ITEMS_PER_RUN) {
+        console.log(`[ml-sync-financial] Item budget reached (${itemsThisRun}/${MAX_ITEMS_PER_RUN}), pausing at offset ${offset}`);
+        await updateSyncState(supabase, sellerId, {
+          status: 'paused',
+          phase: 'fetching',
+          cursor_or_offset: String(offset),
+          movements_synced: totalMovements,
+          last_error: null,
+          last_heartbeat_at: new Date().toISOString(),
+        });
+        return;
+      }
+
+      if (Date.now() - runStartTime > MAX_RUNTIME_MS) {
+        console.log(`[ml-sync-financial] Runtime budget reached (${MAX_RUNTIME_MS}ms), pausing at offset ${offset}`);
+        await updateSyncState(supabase, sellerId, {
+          status: 'paused',
+          phase: 'fetching',
+          cursor_or_offset: String(offset),
+          movements_synced: totalMovements,
+          last_error: null,
+          last_heartbeat_at: new Date().toISOString(),
+        });
+        return;
+      }
+
+      // Check if sync was cancelled
       if (await isSyncCancelled(supabase, sellerId)) {
-        console.log(`[ml-sync-financial] Sync cancelled by user at offset ${offset}`);
+        console.log(`[ml-sync-financial] Sync cancelled at offset ${offset}`);
         return;
       }
 
@@ -373,7 +422,7 @@ async function processFinancialMovements(
         last_offset: offset,
       });
 
-      // Try multiple API endpoints - ML has different endpoints for different account types
+      // Try multiple API endpoints
       const endpoints = [
         `https://api.mercadolibre.com/billing/integration/movements/search?user_id=${sellerId}&date_from=${encodeURIComponent(dateFromStr)}&date_to=${encodeURIComponent(dateToStr)}&offset=${offset}&limit=${BATCH_SIZE}`,
         `https://api.mercadolibre.com/users/${sellerId}/mercadopago_account/movements/search?date_from=${encodeURIComponent(dateFromStr)}&date_to=${encodeURIComponent(dateToStr)}&offset=${offset}&limit=${BATCH_SIZE}`,
@@ -385,7 +434,6 @@ async function processFinancialMovements(
       let lastError = '';
       let endpointWorked = false;
 
-      // Try each endpoint
       for (const url of endpoints) {
         if (endpointWorked) break;
         
@@ -445,7 +493,6 @@ async function processFinancialMovements(
               continue;
             }
 
-            // For 404 or other errors, try next endpoint
             if (response.status === 404 || response.status === 403) {
               console.log(`[ml-sync-financial] Endpoint returned ${response.status}, trying next...`);
               break;
@@ -478,7 +525,6 @@ async function processFinancialMovements(
           last_heartbeat_at: new Date().toISOString(),
         });
         
-        const FALLBACK_PAGE_BUDGET = 20; // Process 20 pages per run, then save and continue
         const billingResult = await fetchBillingFromOrders(
           supabase,
           userId,
@@ -489,7 +535,7 @@ async function processFinancialMovements(
           dateFrom,
           dateTo,
           offset,
-          FALLBACK_PAGE_BUDGET
+          runStartTime
         );
         
         if (billingResult.error) {
@@ -505,8 +551,8 @@ async function processFinancialMovements(
         
         totalMovements += billingResult.totalProcessed;
         
-        // If there's more to process, save state and let user continue
-        if (billingResult.hasMore) {
+        // If paused due to budget, save state
+        if (billingResult.paused) {
           await updateSyncState(supabase, sellerId, {
             status: 'paused',
             phase: 'fallback_orders',
@@ -516,7 +562,32 @@ async function processFinancialMovements(
             last_heartbeat_at: new Date().toISOString(),
           });
           console.log(`[ml-sync-financial] Fallback paused at offset ${billingResult.lastOffset}, ${totalMovements} processed`);
+          
+          // Consolidate incrementally before pausing
+          await consolidateOrderCostsIncremental(supabase, userId, sellerId, billingResult.processedOrderIds || []);
           return;
+        }
+        
+        // If there's more to process, but hit budget, save state
+        if (billingResult.hasMore) {
+          await updateSyncState(supabase, sellerId, {
+            status: 'paused',
+            phase: 'fallback_orders',
+            cursor_or_offset: String(billingResult.lastOffset),
+            movements_synced: totalMovements,
+            last_error: null,
+            last_heartbeat_at: new Date().toISOString(),
+          });
+          console.log(`[ml-sync-financial] Fallback has more, paused at offset ${billingResult.lastOffset}`);
+          
+          // Consolidate incrementally
+          await consolidateOrderCostsIncremental(supabase, userId, sellerId, billingResult.processedOrderIds || []);
+          return;
+        }
+        
+        // Consolidate final batch
+        if (billingResult.processedOrderIds?.length) {
+          await consolidateOrderCostsIncremental(supabase, userId, sellerId, billingResult.processedOrderIds);
         }
         
         hasMore = false;
@@ -542,7 +613,7 @@ async function processFinancialMovements(
         last_page_size: pageSize,
       });
 
-      // Transform and upsert movements - IMMEDIATELY
+      // Transform and upsert movements
       const movementsToInsert = results.map((m: any) => ({
         user_id: userId,
         seller_id: sellerId,
@@ -559,7 +630,7 @@ async function processFinancialMovements(
         last_sync_at: new Date().toISOString(),
       }));
 
-      // Upsert batch with retries
+      // Upsert batch
       let upsertSuccess = false;
       for (let upsertRetry = 0; upsertRetry < 3; upsertRetry++) {
         try {
@@ -570,7 +641,8 @@ async function processFinancialMovements(
           if (!upsertError) {
             upsertSuccess = true;
             totalMovements += pageSize;
-            console.log(`[ml-sync-financial] Upserted ${pageSize} movements, total: ${totalMovements}`);
+            itemsThisRun += pageSize;
+            console.log(`[ml-sync-financial] Upserted ${pageSize} movements, total: ${totalMovements}, thisRun: ${itemsThisRun}`);
             break;
           }
           console.error(`[ml-sync-financial] Upsert error:`, upsertError);
@@ -580,7 +652,7 @@ async function processFinancialMovements(
         await sleep(1000 * (upsertRetry + 1));
       }
 
-      // Update sync state with progress - use actual results.length for robust pagination
+      // Update sync state with progress
       const nextOffset = offset + pageSize;
       await updateSyncState(supabase, sellerId, {
         phase: 'fetching',
@@ -592,11 +664,10 @@ async function processFinancialMovements(
         last_error: null,
       });
 
-      // Robust pagination: use actual page size, not BATCH_SIZE
+      // Pagination
       const total = paging.total || 0;
       offset = nextOffset;
       hasMore = pageSize > 0 && (total > 0 ? offset < total : pageSize === BATCH_SIZE);
-      pagesProcessed++;
 
       // Rate limiting
       await sleep(300);
@@ -634,7 +705,7 @@ async function processFinancialMovements(
       last_heartbeat_at: new Date().toISOString(),
     });
 
-    console.log(`[ml-sync-financial] Completed successfully: ${totalMovements} movements, ${pagesProcessed} pages`);
+    console.log(`[ml-sync-financial] Completed successfully: ${totalMovements} movements`);
 
   } catch (error) {
     console.error('[ml-sync-financial] Background error:', error);
@@ -649,7 +720,7 @@ async function processFinancialMovements(
   }
 }
 
-// Fallback: fetch billing from orders with PAGE BUDGET to avoid timeout
+// Fallback: fetch billing from orders with BUDGETS (items + runtime)
 async function fetchBillingFromOrders(
   supabase: any,
   userId: string,
@@ -660,9 +731,16 @@ async function fetchBillingFromOrders(
   dateFrom: Date,
   dateTo: Date,
   startOffset: number,
-  pageBudget: number = 50
-): Promise<{ totalProcessed: number; lastOffset: number; hasMore: boolean; error?: string }> {
-  console.log(`[ml-sync-financial] Fetching billing from orders, budget=${pageBudget} pages, startOffset=${startOffset}...`);
+  runStartTime: number
+): Promise<{ 
+  totalProcessed: number; 
+  lastOffset: number; 
+  hasMore: boolean; 
+  paused: boolean;
+  processedOrderIds: string[];
+  error?: string 
+}> {
+  console.log(`[ml-sync-financial] Fetching billing from orders, startOffset=${startOffset}...`);
   
   let currentAccessToken = accessToken;
   let currentRefreshToken = refreshToken;
@@ -671,16 +749,27 @@ async function fetchBillingFromOrders(
   const FETCH_TIMEOUT_MS = 30000;
   let hasMore = true;
   let totalProcessed = 0;
-  let pagesProcessed = 0;
+  const processedOrderIds: string[] = [];
 
   const dateFromStr = encodeURIComponent(dateFrom.toISOString());
   const dateToStr = encodeURIComponent(dateTo.toISOString());
 
-  while (hasMore && pagesProcessed < pageBudget) {
+  while (hasMore) {
+    // Check budgets
+    if (totalProcessed >= MAX_ITEMS_PER_RUN) {
+      console.log(`[ml-sync-financial] Fallback item budget reached (${totalProcessed}/${MAX_ITEMS_PER_RUN})`);
+      return { totalProcessed, lastOffset: offset, hasMore: true, paused: true, processedOrderIds };
+    }
+
+    if (Date.now() - runStartTime > MAX_RUNTIME_MS) {
+      console.log(`[ml-sync-financial] Fallback runtime budget reached`);
+      return { totalProcessed, lastOffset: offset, hasMore: true, paused: true, processedOrderIds };
+    }
+
     // Check cancellation
     if (await isSyncCancelled(supabase, sellerId)) {
       console.log(`[ml-sync-financial] Fallback cancelled at offset ${offset}`);
-      return { totalProcessed, lastOffset: offset, hasMore };
+      return { totalProcessed, lastOffset: offset, hasMore, paused: false, processedOrderIds };
     }
 
     // Update heartbeat
@@ -688,6 +777,7 @@ async function fetchBillingFromOrders(
       phase: 'fallback_orders',
       last_heartbeat_at: new Date().toISOString(),
       last_offset: offset,
+      movements_synced: totalProcessed,
     });
 
     const ordersUrl = `https://api.mercadolibre.com/orders/search?seller=${sellerId}&order.date_created.from=${dateFromStr}&order.date_created.to=${dateToStr}&offset=${offset}&limit=${BATCH_SIZE}&sort=date_desc`;
@@ -707,7 +797,7 @@ async function fetchBillingFromOrders(
         if (response.status === 401) {
           const refreshResult = await refreshMercadoLibreToken(currentRefreshToken);
           if (!refreshResult.success) {
-            return { totalProcessed, lastOffset: offset, hasMore, error: 'RECONNECT_REQUIRED' };
+            return { totalProcessed, lastOffset: offset, hasMore, paused: false, processedOrderIds, error: 'RECONNECT_REQUIRED' };
           }
           
           currentAccessToken = refreshResult.access_token!;
@@ -753,7 +843,7 @@ async function fetchBillingFromOrders(
     }
 
     if (!response || !response.ok) {
-      return { totalProcessed, lastOffset: offset, hasMore, error: `ORDERS_FAILED_AFTER_${MAX_RETRIES}_RETRIES_AT_OFFSET_${offset}` };
+      return { totalProcessed, lastOffset: offset, hasMore, paused: false, processedOrderIds, error: `ORDERS_FAILED_AT_OFFSET_${offset}` };
     }
 
     const data = await response.json();
@@ -761,21 +851,53 @@ async function fetchBillingFromOrders(
     const paging = data.paging || {};
     const pageSize = orders.length;
 
-    console.log(`[ml-sync-financial] Orders offset ${offset}: ${pageSize} orders (page ${pagesProcessed + 1}/${pageBudget})`);
+    console.log(`[ml-sync-financial] Orders offset ${offset}: ${pageSize} orders`);
+
+    if (pageSize === 0) {
+      hasMore = false;
+      break;
+    }
 
     // Process each order with billing_info
     const movements: any[] = [];
     
     for (const order of orders) {
-      // Check cancellation during order processing
+      // Check budgets during order processing
+      if (totalProcessed >= MAX_ITEMS_PER_RUN) {
+        console.log(`[ml-sync-financial] Mid-page item budget reached`);
+        // Save partial progress with current offset (not moved to next page yet)
+        return { totalProcessed, lastOffset: offset, hasMore: true, paused: true, processedOrderIds };
+      }
+
+      if (Date.now() - runStartTime > MAX_RUNTIME_MS) {
+        console.log(`[ml-sync-financial] Mid-page runtime budget reached`);
+        return { totalProcessed, lastOffset: offset, hasMore: true, paused: true, processedOrderIds };
+      }
+
+      // Check cancellation
       if (await isSyncCancelled(supabase, sellerId)) {
-        return { totalProcessed, lastOffset: offset, hasMore };
+        return { totalProcessed, lastOffset: offset, hasMore, paused: false, processedOrderIds };
       }
 
       const orderId = order.id?.toString();
       if (!orderId) continue;
 
-      // Fetch billing_info with retries and timeout
+      // Check if we already have billing for this order (skip if cached)
+      const { data: existingFinancial } = await supabase
+        .from('meli_order_financials_cache')
+        .select('order_id')
+        .eq('seller_id', sellerId)
+        .eq('order_id', orderId)
+        .maybeSingle();
+
+      if (existingFinancial) {
+        // Already have billing, skip API call but count as processed
+        totalProcessed++;
+        processedOrderIds.push(orderId);
+        continue;
+      }
+
+      // Fetch billing_info with retries
       let billingData = null;
       for (let billingRetry = 0; billingRetry < 5; billingRetry++) {
         try {
@@ -789,7 +911,7 @@ async function fetchBillingFromOrders(
             break;
           }
 
-          if (billingResp.status === 404) break; // No billing info
+          if (billingResp.status === 404) break;
           if (billingResp.status === 401) {
             const refreshResult = await refreshMercadoLibreToken(currentRefreshToken);
             if (refreshResult.success) {
@@ -814,7 +936,6 @@ async function fetchBillingFromOrders(
       }
 
       // Create movements from order + billing data
-      // Revenue from order
       movements.push({
         user_id: userId,
         seller_id: sellerId,
@@ -829,7 +950,6 @@ async function fetchBillingFromOrders(
         raw_json: { source: 'order', total_amount: order.total_amount },
       });
 
-      // Shipping revenue if paid
       if (order.shipping?.cost > 0) {
         movements.push({
           user_id: userId,
@@ -846,7 +966,6 @@ async function fetchBillingFromOrders(
         });
       }
 
-      // Parse billing_info charges
       if (billingData?.seller?.charges) {
         for (let idx = 0; idx < billingData.seller.charges.length; idx++) {
           const charge = billingData.seller.charges[idx];
@@ -857,7 +976,7 @@ async function fetchBillingFromOrders(
             order_id: orderId,
             shipment_id: order.shipping?.id?.toString() || null,
             concept: charge.type || 'charge',
-            amount: -(Math.abs(charge.value || 0)), // Negative for costs
+            amount: -(Math.abs(charge.value || 0)),
             currency_id: charge.currency_id || 'BRL',
             movement_date: order.date_created || new Date().toISOString(),
             status: 'charged',
@@ -866,8 +985,45 @@ async function fetchBillingFromOrders(
         }
       }
 
+      // Cache billing info for future
+      if (billingData) {
+        let saleFee = 0, shippingFee = 0, installmentFee = 0;
+        for (const charge of (billingData.seller?.charges || [])) {
+          const amount = Math.abs(charge.value || 0);
+          const type = (charge.type || '').toLowerCase();
+          if (type.includes('sale_fee') || type.includes('commission')) saleFee += amount;
+          else if (type.includes('shipping')) shippingFee += amount;
+          else if (type.includes('financing') || type.includes('installment')) installmentFee += amount;
+        }
+
+        await supabase
+          .from('meli_order_financials_cache')
+          .upsert({
+            user_id: userId,
+            seller_id: sellerId,
+            order_id: orderId,
+            shipment_id: order.shipping?.id?.toString() || null,
+            revenue_products: order.total_amount || 0,
+            revenue_shipping: order.shipping?.cost || 0,
+            cost_sale_fee: saleFee,
+            cost_shipping_fee: shippingFee,
+            cost_installment_fee: installmentFee,
+            synced_at: new Date().toISOString(),
+          }, { onConflict: 'seller_id,order_id' });
+      }
+
       totalProcessed++;
-      await sleep(100); // Rate limit
+      processedOrderIds.push(orderId);
+      
+      // Update heartbeat every 5 orders
+      if (totalProcessed % 5 === 0) {
+        await updateSyncState(supabase, sellerId, {
+          last_heartbeat_at: new Date().toISOString(),
+          movements_synced: totalProcessed,
+        });
+      }
+
+      await sleep(100);
     }
 
     // Upsert movements batch
@@ -889,7 +1045,7 @@ async function fetchBillingFromOrders(
       }
     }
 
-    // Update progress using actual page size
+    // Update offset after page complete
     const nextOffset = offset + pageSize;
     await supabase
       .from('meli_financial_sync_state')
@@ -903,46 +1059,25 @@ async function fetchBillingFromOrders(
       })
       .eq('seller_id', sellerId);
 
-    // Robust pagination
+    // Pagination
     const total = paging.total || 0;
     offset = nextOffset;
     hasMore = pageSize > 0 && (total > 0 ? offset < total : pageSize === BATCH_SIZE);
-    pagesProcessed++;
 
     await sleep(300);
   }
 
-  console.log(`[ml-sync-financial] Fallback processed ${pagesProcessed} pages, ${totalProcessed} orders, hasMore=${hasMore}`);
-  return { totalProcessed, lastOffset: offset, hasMore };
+  console.log(`[ml-sync-financial] Fallback completed: ${totalProcessed} orders`);
+  return { totalProcessed, lastOffset: offset, hasMore: false, paused: false, processedOrderIds };
 }
 
-// Consolidate movements into order_cost_breakdown_cache
-async function consolidateOrderCosts(supabase: any, userId: string, sellerId: string) {
-  console.log(`[ml-sync-financial] Consolidating order costs...`);
+// Incremental consolidation for a batch of order IDs
+async function consolidateOrderCostsIncremental(supabase: any, userId: string, sellerId: string, orderIds: string[]) {
+  if (!orderIds.length) return;
+  
+  console.log(`[ml-sync-financial] Incrementally consolidating ${orderIds.length} orders...`);
 
   try {
-    // Check cancellation at start
-    if (await isSyncCancelled(supabase, sellerId)) {
-      console.log(`[ml-sync-financial] Consolidation cancelled at start`);
-      return;
-    }
-
-    // Get all unique order_ids from movements
-    const { data: orderIds } = await supabase
-      .from('meli_financial_movements_cache')
-      .select('order_id')
-      .eq('seller_id', sellerId)
-      .not('order_id', 'is', null);
-
-    if (!orderIds || orderIds.length === 0) {
-      console.log(`[ml-sync-financial] No orders to consolidate`);
-      return;
-    }
-
-    const uniqueOrderIds = [...new Set(orderIds.map((r: any) => r.order_id))];
-    console.log(`[ml-sync-financial] Consolidating ${uniqueOrderIds.length} orders...`);
-
-    // Get concept mappings
     const { data: conceptMaps } = await supabase
       .from('financial_concept_map')
       .select('concept, bucket, signal')
@@ -953,7 +1088,6 @@ async function consolidateOrderCosts(supabase: any, userId: string, sellerId: st
       mappings[m.concept] = { bucket: m.bucket, signal: m.signal };
     }
 
-    // Default mappings
     const defaultMappings: Record<string, string> = {
       'order_revenue': 'receita_produtos',
       'shipping_revenue': 'receita_envio',
@@ -969,30 +1103,17 @@ async function consolidateOrderCosts(supabase: any, userId: string, sellerId: st
       'chargeback': 'cancelamentos_reembolsos',
     };
 
-    // Process in batches
-    const BATCH_SIZE = 100;
-    for (let i = 0; i < uniqueOrderIds.length; i += BATCH_SIZE) {
-      // Check cancellation during consolidation
-      if (await isSyncCancelled(supabase, sellerId)) {
-        console.log(`[ml-sync-financial] Consolidation cancelled at batch ${i}`);
-        return;
-      }
-
-      // Update heartbeat during consolidation
-      await updateSyncState(supabase, sellerId, {
-        last_heartbeat_at: new Date().toISOString(),
-      });
-
-      const batchOrderIds = uniqueOrderIds.slice(i, i + BATCH_SIZE);
+    // Process in small batches
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < orderIds.length; i += BATCH_SIZE) {
+      const batchOrderIds = orderIds.slice(i, i + BATCH_SIZE);
       
-      // Get movements for these orders
       const { data: movements } = await supabase
         .from('meli_financial_movements_cache')
         .select('*')
         .eq('seller_id', sellerId)
         .in('order_id', batchOrderIds);
 
-      // Aggregate by order
       const orderAggregates: Record<string, any> = {};
 
       for (const mov of (movements || [])) {
@@ -1024,7 +1145,6 @@ async function consolidateOrderCosts(supabase: any, userId: string, sellerId: st
         const concept = mov.concept?.toLowerCase() || '';
         let bucket = mappings[concept]?.bucket || null;
         
-        // Try default mappings
         if (!bucket) {
           for (const [key, val] of Object.entries(defaultMappings)) {
             if (concept.includes(key)) {
@@ -1043,7 +1163,6 @@ async function consolidateOrderCosts(supabase: any, userId: string, sellerId: st
         }
       }
 
-      // Calculate totals and upsert
       const breakdowns = Object.values(orderAggregates).map((agg: any) => {
         agg.total_liquido = 
           agg.receita_produtos + 
@@ -1065,6 +1184,39 @@ async function consolidateOrderCosts(supabase: any, userId: string, sellerId: st
           .upsert(breakdowns, { onConflict: 'seller_id,order_id' });
       }
     }
+
+    console.log(`[ml-sync-financial] Incremental consolidation done for ${orderIds.length} orders`);
+
+  } catch (error) {
+    console.error(`[ml-sync-financial] Incremental consolidation error:`, error);
+  }
+}
+
+// Full consolidation (used at end of complete sync)
+async function consolidateOrderCosts(supabase: any, userId: string, sellerId: string) {
+  console.log(`[ml-sync-financial] Consolidating all order costs...`);
+
+  try {
+    if (await isSyncCancelled(supabase, sellerId)) {
+      console.log(`[ml-sync-financial] Consolidation cancelled at start`);
+      return;
+    }
+
+    const { data: orderIds } = await supabase
+      .from('meli_financial_movements_cache')
+      .select('order_id')
+      .eq('seller_id', sellerId)
+      .not('order_id', 'is', null);
+
+    if (!orderIds || orderIds.length === 0) {
+      console.log(`[ml-sync-financial] No orders to consolidate`);
+      return;
+    }
+
+    const uniqueOrderIds = [...new Set(orderIds.map((r: any) => r.order_id))];
+    console.log(`[ml-sync-financial] Consolidating ${uniqueOrderIds.length} orders...`);
+
+    await consolidateOrderCostsIncremental(supabase, userId, sellerId, uniqueOrderIds as string[]);
 
     console.log(`[ml-sync-financial] Consolidated ${uniqueOrderIds.length} orders`);
 
