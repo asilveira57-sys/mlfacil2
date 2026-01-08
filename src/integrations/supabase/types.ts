@@ -1177,6 +1177,54 @@ export type Database = {
         }
         Relationships: []
       }
+      meli_shipment_costs_cache: {
+        Row: {
+          created_at: string
+          discounts_json: Json | null
+          gross_amount: number | null
+          id: string
+          order_id: string | null
+          raw_json: Json | null
+          receiver_cost: number | null
+          seller_id: string
+          sender_compensation: number | null
+          sender_cost: number | null
+          shipment_id: string
+          synced_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          discounts_json?: Json | null
+          gross_amount?: number | null
+          id?: string
+          order_id?: string | null
+          raw_json?: Json | null
+          receiver_cost?: number | null
+          seller_id: string
+          sender_compensation?: number | null
+          sender_cost?: number | null
+          shipment_id: string
+          synced_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          discounts_json?: Json | null
+          gross_amount?: number | null
+          id?: string
+          order_id?: string | null
+          raw_json?: Json | null
+          receiver_cost?: number | null
+          seller_id?: string
+          sender_compensation?: number | null
+          sender_cost?: number | null
+          shipment_id?: string
+          synced_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       meli_shipments_cache: {
         Row: {
           id: string
@@ -1350,6 +1398,7 @@ export type Database = {
       }
       order_cost_breakdown_cache: {
         Row: {
+          adjustments: number | null
           calculated_at: string
           cancelamentos_reembolsos: number | null
           cost_fees: number
@@ -1360,8 +1409,11 @@ export type Database = {
           cost_total: number
           custo_diferenca_peso_medidas: number | null
           custo_envio_declarado: number | null
+          fee_ml: number | null
+          has_real_cost: boolean | null
           has_real_financial: boolean | null
           id: string
+          installments_cost: number | null
           margin_percent: number
           missing_cost_items_count: number
           missing_financial_count: number | null
@@ -1369,20 +1421,25 @@ export type Database = {
           order_id: string
           profit_total: number
           raw_summary_json: Json | null
+          real_cost_synced_at: string | null
           receita_acrescimo: number | null
           receita_envio: number | null
           receita_produtos: number | null
           revenue_total: number
           seller_id: string
           shipment_id: string | null
+          shipping_cost_seller: number | null
+          source_refs: Json | null
           status: string
           tarifa_venda_e_impostos: number | null
           tarifas_envio: number | null
           taxa_parcelamento_equivalente: number | null
           total_liquido: number | null
+          total_marketplace_cost: number | null
           user_id: string
         }
         Insert: {
+          adjustments?: number | null
           calculated_at?: string
           cancelamentos_reembolsos?: number | null
           cost_fees?: number
@@ -1393,8 +1450,11 @@ export type Database = {
           cost_total?: number
           custo_diferenca_peso_medidas?: number | null
           custo_envio_declarado?: number | null
+          fee_ml?: number | null
+          has_real_cost?: boolean | null
           has_real_financial?: boolean | null
           id?: string
+          installments_cost?: number | null
           margin_percent?: number
           missing_cost_items_count?: number
           missing_financial_count?: number | null
@@ -1402,20 +1462,25 @@ export type Database = {
           order_id: string
           profit_total?: number
           raw_summary_json?: Json | null
+          real_cost_synced_at?: string | null
           receita_acrescimo?: number | null
           receita_envio?: number | null
           receita_produtos?: number | null
           revenue_total?: number
           seller_id: string
           shipment_id?: string | null
+          shipping_cost_seller?: number | null
+          source_refs?: Json | null
           status?: string
           tarifa_venda_e_impostos?: number | null
           tarifas_envio?: number | null
           taxa_parcelamento_equivalente?: number | null
           total_liquido?: number | null
+          total_marketplace_cost?: number | null
           user_id: string
         }
         Update: {
+          adjustments?: number | null
           calculated_at?: string
           cancelamentos_reembolsos?: number | null
           cost_fees?: number
@@ -1426,8 +1491,11 @@ export type Database = {
           cost_total?: number
           custo_diferenca_peso_medidas?: number | null
           custo_envio_declarado?: number | null
+          fee_ml?: number | null
+          has_real_cost?: boolean | null
           has_real_financial?: boolean | null
           id?: string
+          installments_cost?: number | null
           margin_percent?: number
           missing_cost_items_count?: number
           missing_financial_count?: number | null
@@ -1435,17 +1503,21 @@ export type Database = {
           order_id?: string
           profit_total?: number
           raw_summary_json?: Json | null
+          real_cost_synced_at?: string | null
           receita_acrescimo?: number | null
           receita_envio?: number | null
           receita_produtos?: number | null
           revenue_total?: number
           seller_id?: string
           shipment_id?: string | null
+          shipping_cost_seller?: number | null
+          source_refs?: Json | null
           status?: string
           tarifa_venda_e_impostos?: number | null
           tarifas_envio?: number | null
           taxa_parcelamento_equivalente?: number | null
           total_liquido?: number | null
+          total_marketplace_cost?: number | null
           user_id?: string
         }
         Relationships: []

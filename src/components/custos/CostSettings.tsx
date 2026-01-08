@@ -8,6 +8,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
 import { Save, Package, Calculator, RefreshCw, CheckCircle2, CloudOff, AlertTriangle, Link2, Zap, Play, XCircle, Clock, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
@@ -628,6 +629,52 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
             <strong>Atualizar:</strong> Busca movimentos dos últimos 30 dias (mais rápido). 
             <strong className="ml-2">Completa:</strong> Reprocessa os últimos 6 meses (100 itens por ciclo).
           </p>
+
+          <Separator className="my-4" />
+
+          {/* Real Costs Sync */}
+          <div className="flex items-center justify-between p-4 bg-green-500/10 border border-green-500/30 rounded-lg">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Sincronização de Custo Real</p>
+              <p className="text-xs text-muted-foreground">
+                Busca fee_ml, shipping_cost_seller, installments_cost via APIs billing + shipments/costs
+              </p>
+            </div>
+            <Button 
+              variant="outline" 
+              onClick={async () => {
+                try {
+                  const { data: { session } } = await supabase.auth.getSession();
+                  if (!session) return;
+                  
+                  toast.info('Iniciando sincronização de custo real...');
+                  
+                  const { data, error } = await supabase.functions.invoke('ml-sync-real-costs', {
+                    headers: { Authorization: `Bearer ${session.access_token}` },
+                    body: { seller_id: sellerId, days: 60 },
+                  });
+                  
+                  if (error) {
+                    toast.error(error.message || 'Erro ao iniciar sync');
+                    return;
+                  }
+                  
+                  if (data?.status === 'started') {
+                    toast.success('Sincronização de custo real iniciada (100 por ciclo)');
+                  } else {
+                    toast.info(data?.status || 'Sync em andamento');
+                  }
+                } catch (e) {
+                  toast.error('Erro ao sincronizar custos reais');
+                }
+              }}
+              disabled={syncing}
+              className="border-green-500/50 hover:bg-green-500/10"
+            >
+              <CheckCircle2 className="h-4 w-4 mr-2" />
+              Sincronizar Custo Real
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

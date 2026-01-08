@@ -6,12 +6,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { DollarSign, Package, TrendingUp, Calculator, RefreshCw, Settings, BarChart3, ArrowLeft } from 'lucide-react';
+import { DollarSign, Package, TrendingUp, Calculator, RefreshCw, Settings, BarChart3, ArrowLeft, FileSearch } from 'lucide-react';
 import { toast } from 'sonner';
 import { CostCatalog } from '@/components/custos/CostCatalog';
 import { CostSettings } from '@/components/custos/CostSettings';
 import { CostOrders } from '@/components/custos/CostOrders';
 import { CostAbcProfit } from '@/components/custos/CostAbcProfit';
+import { CostOrderDiagnostic } from '@/components/custos/CostOrderDiagnostic';
 
 interface MlAccount {
   id: string;
@@ -165,6 +166,7 @@ export default function Custos() {
             <TabsTrigger value="catalogo"><Package className="h-4 w-4 mr-2" />Catálogo</TabsTrigger>
             <TabsTrigger value="pedidos"><DollarSign className="h-4 w-4 mr-2" />Pedidos</TabsTrigger>
             <TabsTrigger value="abc"><TrendingUp className="h-4 w-4 mr-2" />ABC por Lucro</TabsTrigger>
+            <TabsTrigger value="diagnostico"><FileSearch className="h-4 w-4 mr-2" />Diagnóstico</TabsTrigger>
             <TabsTrigger value="config"><Settings className="h-4 w-4 mr-2" />Configurações</TabsTrigger>
           </TabsList>
 
@@ -243,6 +245,10 @@ export default function Custos() {
 
           <TabsContent value="abc">
             <CostAbcProfit sellerId={selectedSellerId || ''} />
+          </TabsContent>
+
+          <TabsContent value="diagnostico">
+            <CostOrderDiagnostic sellerId={selectedSellerId || ''} />
           </TabsContent>
 
           <TabsContent value="config">
