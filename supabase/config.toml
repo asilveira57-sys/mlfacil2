@@ -56,3 +56,6 @@ verify_jwt = false
 
 [functions.ml-sync-financial]
 verify_jwt = false
+
+[functions.ml-sync-real-costs]
+verify_jwt = false
