@@ -20,6 +20,7 @@ interface DiagnosticData {
   movements: any[];
   shipmentCosts: any;
   billingInfo: any;
+  billingDetails: any[];
 }
 
 export function CostOrderDiagnostic({ sellerId }: CostOrderDiagnosticProps) {
@@ -86,12 +87,21 @@ export function CostOrderDiagnostic({ sellerId }: CostOrderDiagnosticProps) {
         .eq('order_id', orderId.trim())
         .maybeSingle();
 
+      // Get billing details from new cache (Billing Reports API)
+      const { data: billingDetails } = await supabase
+        .from('meli_billing_details_cache')
+        .select('*')
+        .eq('seller_id', sellerId)
+        .eq('order_id', parseInt(orderId.trim()))
+        .order('created_at_meli', { ascending: false });
+
       setData({
         order,
         breakdown,
         movements: movements || [],
         shipmentCosts,
         billingInfo,
+        billingDetails: billingDetails || [],
       });
 
     } catch (error) {
@@ -347,11 +357,55 @@ export function CostOrderDiagnostic({ sellerId }: CostOrderDiagnosticProps) {
             </CardContent>
           </Card>
 
-          {/* Billing Info */}
+          {/* Billing Details (New - from Billing Reports API) */}
           <Card>
             <CardHeader>
               <CardTitle className="text-base">
-                Billing Info (Cache)
+                Billing Details - API ({data.billingDetails.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {data.billingDetails.length > 0 ? (
+                <ScrollArea className="h-64">
+                  <div className="space-y-2">
+                    {data.billingDetails.map((bd, i) => (
+                      <div key={i} className="flex items-center justify-between p-2 border rounded text-sm">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="font-mono text-xs">
+                              {bd.charge_type}
+                            </Badge>
+                            <span className="text-muted-foreground text-xs">
+                              {bd.period_key}
+                            </span>
+                          </div>
+                          <span className="text-xs text-muted-foreground">
+                            {bd.charge_description}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="font-medium text-red-600">
+                            {formatCurrency(bd.net_amount)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              ) : (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <AlertTriangle className="h-4 w-4" />
+                  <span>Nenhum detalhe de billing encontrado (Billing Reports API)</span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Billing Info (Legacy) */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">
+                Billing Info (Cache Legacy)
               </CardTitle>
             </CardHeader>
             <CardContent>

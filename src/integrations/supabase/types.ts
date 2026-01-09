@@ -667,6 +667,57 @@ export type Database = {
         }
         Relationships: []
       }
+      meli_billing_details_cache: {
+        Row: {
+          charge_description: string | null
+          charge_type: string
+          created_at_meli: string | null
+          currency_id: string | null
+          detail_id: string
+          fetched_at: string
+          gross_amount: number
+          id: string
+          net_amount: number
+          order_id: number | null
+          period_key: string
+          raw_data: Json | null
+          seller_id: string
+          shipment_id: number | null
+        }
+        Insert: {
+          charge_description?: string | null
+          charge_type: string
+          created_at_meli?: string | null
+          currency_id?: string | null
+          detail_id: string
+          fetched_at?: string
+          gross_amount?: number
+          id?: string
+          net_amount?: number
+          order_id?: number | null
+          period_key: string
+          raw_data?: Json | null
+          seller_id: string
+          shipment_id?: number | null
+        }
+        Update: {
+          charge_description?: string | null
+          charge_type?: string
+          created_at_meli?: string | null
+          currency_id?: string | null
+          detail_id?: string
+          fetched_at?: string
+          gross_amount?: number
+          id?: string
+          net_amount?: number
+          order_id?: number | null
+          period_key?: string
+          raw_data?: Json | null
+          seller_id?: string
+          shipment_id?: number | null
+        }
+        Relationships: []
+      }
       meli_financial_movements_cache: {
         Row: {
           amount: number
