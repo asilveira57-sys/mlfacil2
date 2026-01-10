@@ -12,9 +12,9 @@ const corsHeaders = {
 const ML_APP_ID = Deno.env.get('ML_APP_ID')!;
 const ML_SECRET_KEY = Deno.env.get('ML_SECRET_KEY')!;
 
-// Budget limits
-const MAX_ORDERS_PER_RUN = 100;
-const MAX_RUNTIME_MS = 25000;
+// Budget limits - more orders per run to reduce auto-resume cycles
+const MAX_ORDERS_PER_RUN = 500;
+const MAX_RUNTIME_MS = 50000;
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
