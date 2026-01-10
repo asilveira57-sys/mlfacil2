@@ -62,8 +62,14 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     last_sync: null,
   });
   
+  // Real costs sync state
+  const [realCostsSyncing, setRealCostsSyncing] = useState(false);
+  const [realCostsSyncState, setRealCostsSyncState] = useState<SyncState | null>(null);
+  const [realCostsStats, setRealCostsStats] = useState<{ synced: number; total: number }>({ synced: 0, total: 0 });
+  
   // Auto-resume ref to prevent double triggers
   const autoResumeTriggeredRef = useRef(false);
+  const realCostsAutoResumeRef = useRef(false);
 
   const loadBillingStatus = useCallback(async () => {
     try {
@@ -78,6 +84,13 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
         .select('*', { count: 'exact', head: true })
         .eq('seller_id', sellerId)
         .eq('has_real_financial', true);
+      
+      // Count orders with real costs (fee_ml or total_marketplace_cost > 0)
+      const { count: ordersWithRealCosts } = await supabase
+        .from('order_cost_breakdown_cache')
+        .select('*', { count: 'exact', head: true })
+        .eq('seller_id', sellerId)
+        .or('fee_ml.gt.0,total_marketplace_cost.gt.0');
 
       const { count: movementsCount } = await supabase
         .from('meli_financial_movements_cache')
@@ -92,6 +105,14 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
 
       if (state) {
         setSyncState(state);
+        
+        // Check if this is real_costs phase
+        if (state.phase === 'real_costs') {
+          setRealCostsSyncState(state);
+          const heartbeatMs = state.last_heartbeat_at ? new Date(state.last_heartbeat_at).getTime() : 0;
+          const isFreshRunning = state.status === 'running' && Date.now() - heartbeatMs < 3 * 60 * 1000;
+          setRealCostsSyncing(isFreshRunning || state.status === 'paused');
+        }
 
         const heartbeatMs = state.last_heartbeat_at ? new Date(state.last_heartbeat_at).getTime() : 0;
         const updatedAtMs = state.updated_at ? new Date(state.updated_at).getTime() : 0;
@@ -99,6 +120,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
         
         const isFreshRunning =
           state.status === 'running' &&
+          state.phase !== 'real_costs' &&
           lastActivityMs > 0 &&
           Date.now() - lastActivityMs < 3 * 60 * 1000;
 
@@ -111,6 +133,11 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
         setSyncState(null);
         setSyncing(false);
       }
+      
+      setRealCostsStats({
+        synced: ordersWithRealCosts || 0,
+        total: totalOrders || 0,
+      });
 
       setBillingStatus({
         total_orders: totalOrders || 0,
@@ -167,6 +194,37 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
 
       if (state) {
         setSyncState(state);
+        
+        // Handle real_costs phase separately
+        if (state.phase === 'real_costs') {
+          setRealCostsSyncState(state);
+          
+          if (state.status === 'idle' && realCostsSyncing) {
+            setRealCostsSyncing(false);
+            realCostsAutoResumeRef.current = false;
+            toast.success(`Custos reais sincronizados: ${state.movements_synced} pedidos processados`);
+            loadBillingStatus();
+          } else if (state.status === 'paused') {
+            // Auto-resume real costs sync when paused
+            if (!realCostsAutoResumeRef.current) {
+              realCostsAutoResumeRef.current = true;
+              console.log('[CostSettings] Auto-resuming real costs sync...');
+              toast.info(`Processados ${state.movements_synced} pedidos, continuando custos reais...`);
+              
+              setTimeout(() => {
+                handleSyncRealCosts(true);
+              }, 500);
+            }
+          } else if (state.status === 'running') {
+            setRealCostsSyncing(true);
+            realCostsAutoResumeRef.current = false;
+          } else if (state.status === 'error') {
+            setRealCostsSyncing(false);
+            realCostsAutoResumeRef.current = false;
+            toast.error(state.last_error || 'Erro na sincronização de custos reais');
+          }
+          return;
+        }
 
         if (state.status === 'idle' && syncing) {
           setSyncing(false);
@@ -202,7 +260,82 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [syncing, sellerId, loadBillingStatus, syncMode]);
+  }, [syncing, realCostsSyncing, sellerId, loadBillingStatus, syncMode]);
+  
+  // Handle real costs sync with auto-resume
+  const handleSyncRealCosts = async (continueSync = false) => {
+    if (!continueSync) {
+      realCostsAutoResumeRef.current = false;
+    }
+    setRealCostsSyncing(true);
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        setRealCostsSyncing(false);
+        return;
+      }
+      
+      const { data, error } = await supabase.functions.invoke('ml-sync-real-costs', {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: { 
+          seller_id: sellerId, 
+          days: 60,
+          continue_sync: continueSync,
+        },
+      });
+      
+      if (error) {
+        console.error('Error invoking ml-sync-real-costs:', error);
+        toast.error(error.message || 'Erro ao iniciar sincronização de custos reais');
+        setRealCostsSyncing(false);
+        realCostsAutoResumeRef.current = false;
+        return;
+      }
+      
+      if (data?.code === 'RECONNECT_REQUIRED') {
+        setNeedsReconnect(true);
+        setRealCostsSyncing(false);
+        realCostsAutoResumeRef.current = false;
+        toast.error('Conexão com o Mercado Livre expirou');
+        return;
+      }
+      
+      if (data?.status === 'started') {
+        if (!continueSync) {
+          toast.success('Sincronização de custos reais iniciada');
+        }
+      } else if (data?.status === 'already_running') {
+        toast.info('Sincronização já em andamento');
+      }
+    } catch (e) {
+      console.error('Error syncing real costs:', e);
+      toast.error('Erro ao sincronizar custos reais');
+      setRealCostsSyncing(false);
+      realCostsAutoResumeRef.current = false;
+    }
+  };
+  
+  // Cancel real costs sync
+  const handleCancelRealCostsSync = async () => {
+    realCostsAutoResumeRef.current = false;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      
+      await supabase.functions.invoke('ml-sync-real-costs', {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: { seller_id: sellerId, action: 'cancel' },
+      });
+      
+      toast.success('Sincronização de custos reais cancelada');
+    } catch (e) {
+      toast.error('Erro ao cancelar sincronização');
+    } finally {
+      setRealCostsSyncing(false);
+      await loadBillingStatus();
+    }
+  };
 
   useEffect(() => {
     if (sellerId) {
@@ -633,47 +766,82 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
           <Separator className="my-4" />
 
           {/* Real Costs Sync */}
-          <div className="flex items-center justify-between p-4 bg-green-500/10 border border-green-500/30 rounded-lg">
-            <div className="space-y-1">
-              <p className="text-sm font-medium">Sincronização de Custo Real</p>
-              <p className="text-xs text-muted-foreground">
-                Busca fee_ml, shipping_cost_seller, installments_cost via APIs billing + shipments/costs
-              </p>
+          <div className="p-4 bg-green-500/10 border border-green-500/30 rounded-lg space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="space-y-1">
+                <p className="text-sm font-medium flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-green-600" />
+                  Sincronização de Custo Real
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Busca tarifas ML (fee_ml), frete do vendedor (shipping_cost_seller) e parcelamento via APIs
+                </p>
+              </div>
+              <div className="flex gap-2">
+                {realCostsSyncing && (
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={handleCancelRealCostsSync}
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                  >
+                    <XCircle className="h-4 w-4 mr-1" />
+                    Cancelar
+                  </Button>
+                )}
+                <Button 
+                  variant="outline" 
+                  onClick={() => handleSyncRealCosts(false)}
+                  disabled={syncing || realCostsSyncing}
+                  className="border-green-500/50 hover:bg-green-500/10"
+                >
+                  {realCostsSyncing ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      Sincronizando...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="h-4 w-4 mr-2" />
+                      Sincronizar Custos
+                    </>
+                  )}
+                </Button>
+              </div>
             </div>
-            <Button 
-              variant="outline" 
-              onClick={async () => {
-                try {
-                  const { data: { session } } = await supabase.auth.getSession();
-                  if (!session) return;
-                  
-                  toast.info('Iniciando sincronização de custo real...');
-                  
-                  const { data, error } = await supabase.functions.invoke('ml-sync-real-costs', {
-                    headers: { Authorization: `Bearer ${session.access_token}` },
-                    body: { seller_id: sellerId, days: 60 },
-                  });
-                  
-                  if (error) {
-                    toast.error(error.message || 'Erro ao iniciar sync');
-                    return;
-                  }
-                  
-                  if (data?.status === 'started') {
-                    toast.success('Sincronização de custo real iniciada (100 por ciclo)');
-                  } else {
-                    toast.info(data?.status || 'Sync em andamento');
-                  }
-                } catch (e) {
-                  toast.error('Erro ao sincronizar custos reais');
-                }
-              }}
-              disabled={syncing}
-              className="border-green-500/50 hover:bg-green-500/10"
-            >
-              <CheckCircle2 className="h-4 w-4 mr-2" />
-              Sincronizar Custo Real
-            </Button>
+            
+            {/* Progress when syncing */}
+            {realCostsSyncing && realCostsSyncState && (
+              <div className="flex items-center gap-4 p-3 bg-background/50 rounded-md">
+                <RefreshCw className="h-4 w-4 animate-spin text-green-600" />
+                <div className="flex-1">
+                  <div className="flex items-center justify-between text-sm">
+                    <span>{realCostsSyncState.movements_synced || 0} pedidos processados</span>
+                    {realCostsSyncState.last_offset && (
+                      <span className="text-muted-foreground">Offset: {realCostsSyncState.last_offset}</span>
+                    )}
+                  </div>
+                  {realCostsStats.total > 0 && (
+                    <Progress 
+                      value={(realCostsSyncState.movements_synced || 0) / realCostsStats.total * 100} 
+                      className="h-1 mt-2" 
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+            
+            {/* Stats */}
+            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+              <span>
+                Cobertura: <strong className="text-foreground">{realCostsStats.synced}</strong> de {realCostsStats.total} pedidos com custos
+              </span>
+              {realCostsStats.total > 0 && (
+                <Badge variant="outline" className={realCostsStats.synced / realCostsStats.total >= 0.7 ? 'text-green-600 border-green-600' : 'text-amber-600 border-amber-600'}>
+                  {Math.round(realCostsStats.synced / realCostsStats.total * 100)}%
+                </Badge>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
