@@ -12,9 +12,10 @@ const corsHeaders = {
 const ML_APP_ID = Deno.env.get('ML_APP_ID')!;
 const ML_SECRET_KEY = Deno.env.get('ML_SECRET_KEY')!;
 
-// Budget limits - more orders per run to reduce auto-resume cycles
-const MAX_ORDERS_PER_RUN = 500;
-const MAX_RUNTIME_MS = 50000;
+// Budget limits - optimized for larger batches
+const MAX_ORDERS_PER_RUN = 800;
+const MAX_RUNTIME_MS = 55000;
+const BATCH_SIZE = 50;
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -53,25 +54,21 @@ function categorizeCharge(chargeType: string, description: string): 'sale_fee' |
   const type = chargeType.toLowerCase();
   const desc = description.toLowerCase();
   
-  // Sale fees (commission, taxes)
   if (type.includes('sale_fee') || type.includes('commission') || type.includes('cargo_por_venta') ||
       desc.includes('cargo por venta') || desc.includes('comisión') || desc.includes('commission')) {
     return 'sale_fee';
   }
   
-  // Shipping fees
   if (type.includes('shipping') || type.includes('envio') || type.includes('flete') ||
       desc.includes('mercado envíos') || desc.includes('envío') || desc.includes('flete')) {
     return 'shipping_fee';
   }
   
-  // Installment costs
   if (type.includes('financing') || type.includes('installment') || type.includes('cuota') ||
       desc.includes('cuota') || desc.includes('parcelamento') || desc.includes('financiamiento')) {
     return 'installment_cost';
   }
   
-  // Adjustments (refunds, compensations, bonuses)
   if (type.includes('refund') || type.includes('cancel') || type.includes('return') ||
       type.includes('bonus') || type.includes('compensation') || type.includes('adjustment') ||
       desc.includes('devolución') || desc.includes('compensación') || desc.includes('bonificación')) {
@@ -122,7 +119,7 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { seller_id, days = 30, continue_sync = false, action, months_back = 3 } = body;
+    const { seller_id, days = 60, continue_sync = false, action, months_back = 3, force_resume = false } = body;
 
     if (!seller_id) {
       return new Response(JSON.stringify({ error: 'seller_id is required' }), {
@@ -130,7 +127,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    console.log(`[ml-sync-real-costs] Starting for seller ${seller_id}, days=${days}, months_back=${months_back}`);
+    console.log(`[ml-sync-real-costs] Request for seller ${seller_id}, days=${days}, continue=${continue_sync}, force=${force_resume}`);
 
     // Get ML account
     const { data: account, error: accountError } = await supabase
@@ -176,8 +173,13 @@ Deno.serve(async (req) => {
     // Cancel action
     if (action === 'cancel') {
       await supabase.from('meli_financial_sync_state').update({
-        status: 'idle', phase: 'idle', last_error: null,
+        status: 'idle', 
+        phase: 'idle', 
+        last_error: null,
+        cursor_or_offset: null,
+        last_offset: null,
         last_sync_finished_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       }).eq('seller_id', seller_id);
       return new Response(JSON.stringify({ status: 'cancelled' }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -191,19 +193,26 @@ Deno.serve(async (req) => {
         phase: syncState?.phase || 'idle',
         movements_synced: syncState?.movements_synced || 0,
         cursor: syncState?.cursor_or_offset,
+        last_offset: syncState?.last_offset,
         last_heartbeat_at: syncState?.last_heartbeat_at,
       }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // Check if already running
+    // Check if already running (with staleness detection)
     const heartbeatAt = syncState?.last_heartbeat_at ? new Date(syncState.last_heartbeat_at).getTime() : 0;
     const isStaleRunning = syncState?.status === 'running' && syncState?.phase === 'real_costs' && 
-      Date.now() - heartbeatAt > 3 * 60 * 1000;
+      Date.now() - heartbeatAt > 2 * 60 * 1000; // 2 minutes without heartbeat = stale
 
-    if (syncState?.status === 'running' && syncState?.phase === 'real_costs' && !continue_sync && !isStaleRunning) {
-      return new Response(JSON.stringify({ status: 'already_running', movements_synced: syncState.movements_synced }), {
+    const canContinue = continue_sync || force_resume || syncState?.status === 'paused' || isStaleRunning;
+
+    if (syncState?.status === 'running' && syncState?.phase === 'real_costs' && !canContinue) {
+      return new Response(JSON.stringify({ 
+        status: 'already_running', 
+        movements_synced: syncState.movements_synced,
+        cursor: syncState.cursor_or_offset,
+      }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -217,12 +226,10 @@ Deno.serve(async (req) => {
     const periodKeys = getLastMonthsPeriodKeys(months_back);
 
     // Use existing offset if continuing
-    const startOffset = (continue_sync || syncState?.status === 'paused') 
-      ? parseInt(syncState?.cursor_or_offset || '0')
-      : 0;
-    const startProcessed = (continue_sync || syncState?.status === 'paused')
-      ? (syncState?.movements_synced || 0)
-      : 0;
+    const startOffset = canContinue ? parseInt(syncState?.cursor_or_offset || '0') : 0;
+    const startProcessed = canContinue ? (syncState?.movements_synced || 0) : 0;
+
+    console.log(`[ml-sync-real-costs] Starting from offset=${startOffset}, processed=${startProcessed}, stale=${isStaleRunning}`);
 
     // Update sync state to running
     await supabase.from('meli_financial_sync_state').upsert({
@@ -236,6 +243,8 @@ Deno.serve(async (req) => {
       last_error: null,
       last_heartbeat_at: new Date().toISOString(),
       cursor_or_offset: String(startOffset),
+      last_offset: startOffset,
+      last_page_size: BATCH_SIZE,
       movements_synced: startProcessed,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'seller_id,user_id' });
@@ -262,6 +271,7 @@ Deno.serve(async (req) => {
       date_from: dateFrom.toISOString(),
       date_to: dateTo.toISOString(),
       start_offset: startOffset,
+      start_processed: startProcessed,
       period_keys: periodKeys,
     }), {
       status: 202, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -282,7 +292,6 @@ async function fetchBillingDetails(
   accessToken: string,
   periodKeys: string[]
 ): Promise<Map<string, any[]>> {
-  // Map order_id -> list of billing details
   const orderBillingMap = new Map<string, any[]>();
   
   console.log(`[ml-sync-real-costs] Fetching billing reports for periods: ${periodKeys.join(', ')}`);
@@ -294,7 +303,6 @@ async function fetchBillingDetails(
     
     while (hasMore) {
       try {
-        // Using billing reports endpoint with ML group (Mercado Libre sales)
         const url = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/details?group=ML&offset=${offset}&limit=${limit}`;
         
         const resp = await fetchWithTimeout(url, {
@@ -303,7 +311,6 @@ async function fetchBillingDetails(
         
         if (!resp.ok) {
           console.log(`[ml-sync-real-costs] Billing report failed for ${periodKey}: ${resp.status}`);
-          // Try alternative endpoint for transactions
           break;
         }
         
@@ -317,46 +324,29 @@ async function fetchBillingDetails(
           break;
         }
         
-        // Process and cache each detail
         const cacheRows: any[] = [];
         
         for (const detail of details) {
-          // Extract order_id from references
           let orderId: string | null = null;
           let shipmentId: string | null = null;
           
-          // Check various reference formats
-          if (detail.reference_id) {
-            // Could be order_id directly
-            orderId = String(detail.reference_id);
-          }
-          if (detail.order_id) {
-            orderId = String(detail.order_id);
-          }
-          if (detail.shipment_id) {
-            shipmentId = String(detail.shipment_id);
-          }
+          if (detail.reference_id) orderId = String(detail.reference_id);
+          if (detail.order_id) orderId = String(detail.order_id);
+          if (detail.shipment_id) shipmentId = String(detail.shipment_id);
           
-          // Check nested references
           if (detail.references) {
             for (const ref of detail.references) {
-              if (ref.type === 'order' || ref.type === 'ORDER') {
-                orderId = String(ref.id);
-              }
-              if (ref.type === 'shipment' || ref.type === 'SHIPMENT') {
-                shipmentId = String(ref.id);
-              }
+              if (ref.type === 'order' || ref.type === 'ORDER') orderId = String(ref.id);
+              if (ref.type === 'shipment' || ref.type === 'SHIPMENT') shipmentId = String(ref.id);
             }
           }
           
-          // Skip if no order reference
           if (!orderId && !shipmentId) continue;
           
           const chargeType = detail.charge_type || detail.type || detail.concept || 'unknown';
           const description = detail.description || detail.detail || chargeType;
           const amount = Math.abs(detail.amount || detail.gross_amount || 0);
           
-          // Cache row
           const detailId = detail.id || `${periodKey}-${orderId || shipmentId}-${chargeType}-${Date.now()}`;
           cacheRows.push({
             seller_id: sellerId,
@@ -373,7 +363,6 @@ async function fetchBillingDetails(
             raw_data: detail,
           });
           
-          // Add to map if has order_id
           if (orderId) {
             if (!orderBillingMap.has(orderId)) {
               orderBillingMap.set(orderId, []);
@@ -387,7 +376,6 @@ async function fetchBillingDetails(
           }
         }
         
-        // Batch insert to cache
         if (cacheRows.length > 0) {
           const { error: cacheError } = await supabase
             .from('meli_billing_details_cache')
@@ -401,14 +389,14 @@ async function fetchBillingDetails(
         offset += details.length;
         hasMore = details.length === limit;
         
-        await sleep(200);
+        await sleep(150);
       } catch (e) {
         console.error(`[ml-sync-real-costs] Error fetching billing for ${periodKey}:`, e);
         break;
       }
     }
     
-    await sleep(300);
+    await sleep(200);
   }
   
   console.log(`[ml-sync-real-costs] Total orders with billing data: ${orderBillingMap.size}`);
@@ -429,14 +417,11 @@ async function estimateFee(
     }, 10000);
     
     if (!resp.ok) {
-      console.log(`[ml-sync-real-costs] listing_prices failed: ${resp.status}`);
-      // Fallback to common percentage (11%)
       return { fee: totalAmount * 0.11, source: 'estimated:fallback:11%' };
     }
     
     const data = await resp.json();
     
-    // Find sale_fee_details
     if (data.sale_fee_details) {
       const percentFee = data.sale_fee_details.percentage_fee || 0;
       const fixedFee = data.sale_fee_details.fixed_fee || 0;
@@ -444,7 +429,6 @@ async function estimateFee(
       return { fee: calculatedFee, source: `estimated:listing_prices:${percentFee}%` };
     }
     
-    // Alternative format
     if (Array.isArray(data)) {
       for (const item of data) {
         if (item.listing_type_id === listingTypeId) {
@@ -454,12 +438,27 @@ async function estimateFee(
       }
     }
     
-    // Default fallback
     return { fee: totalAmount * 0.11, source: 'estimated:fallback:11%' };
   } catch (e) {
-    console.log(`[ml-sync-real-costs] Fee estimation error:`, e);
     return { fee: totalAmount * 0.11, source: 'estimated:error:11%' };
   }
+}
+
+// Helper to update sync state consistently
+async function updateSyncState(
+  supabase: any,
+  sellerId: string,
+  updates: Record<string, any>
+) {
+  const fullUpdates = {
+    ...updates,
+    last_heartbeat_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  
+  await supabase.from('meli_financial_sync_state')
+    .update(fullUpdates)
+    .eq('seller_id', sellerId);
 }
 
 async function processRealCosts(
@@ -475,39 +474,30 @@ async function processRealCosts(
   startProcessed: number,
   periodKeys: string[]
 ) {
-  console.log(`[ml-sync-real-costs] Background processing started, offset=${startOffset}`);
+  console.log(`[ml-sync-real-costs] Background processing started, offset=${startOffset}, processed=${startProcessed}`);
   
   const runStartTime = Date.now();
   let currentAccessToken = accessToken;
   let currentRefreshToken = refreshTokenValue;
   let totalProcessed = startProcessed;
   let offset = startOffset;
-  const BATCH_SIZE = 50;
 
-  // Stats for logging
   const stats = {
     ordersInPeriod: 0,
     withBillingData: 0,
     withShipmentCosts: 0,
     withEstimatedFee: 0,
-    complete: 0,
-    examples: [] as any[],
+    skippedAlreadyProcessed: 0,
+    batchesSaved: 0,
   };
 
   try {
-    // Step 1: Fetch all billing reports first (if starting fresh)
+    // Step 1: Load billing data (from cache if continuing, or fetch fresh)
     let orderBillingMap = new Map<string, any[]>();
     
     if (startOffset === 0) {
-      orderBillingMap = await fetchBillingDetails(
-        supabase,
-        userId,
-        sellerId,
-        currentAccessToken,
-        periodKeys
-      );
+      orderBillingMap = await fetchBillingDetails(supabase, userId, sellerId, currentAccessToken, periodKeys);
     } else {
-      // Load from cache if continuing
       console.log(`[ml-sync-real-costs] Loading billing data from cache...`);
       const { data: cachedBilling } = await supabase
         .from('meli_billing_details_cache')
@@ -538,40 +528,33 @@ async function processRealCosts(
     
     while (hasMore) {
       // Check budgets
-      if (totalProcessed - startProcessed >= MAX_ORDERS_PER_RUN) {
-        console.log(`[ml-sync-real-costs] Budget reached (${MAX_ORDERS_PER_RUN}), pausing at offset ${offset}`);
-        await supabase.from('meli_financial_sync_state').update({
-          status: 'paused', phase: 'real_costs',
-          cursor_or_offset: String(offset),
-          movements_synced: totalProcessed,
-          last_heartbeat_at: new Date().toISOString(),
-        }).eq('seller_id', sellerId);
+      const ordersThisRun = totalProcessed - startProcessed;
+      const runtimeMs = Date.now() - runStartTime;
+      
+      if (ordersThisRun >= MAX_ORDERS_PER_RUN || runtimeMs > MAX_RUNTIME_MS) {
+        console.log(`[ml-sync-real-costs] Budget reached: orders=${ordersThisRun}, runtime=${runtimeMs}ms, pausing at offset ${offset}`);
         
-        console.log(`[ml-sync-real-costs] Stats: ${JSON.stringify(stats)}`);
-        return;
-      }
-
-      if (Date.now() - runStartTime > MAX_RUNTIME_MS) {
-        console.log(`[ml-sync-real-costs] Runtime budget reached, pausing at offset ${offset}`);
-        await supabase.from('meli_financial_sync_state').update({
-          status: 'paused', phase: 'real_costs',
+        await updateSyncState(supabase, sellerId, {
+          status: 'paused',
+          phase: 'real_costs',
           cursor_or_offset: String(offset),
+          last_offset: offset,
+          last_page_size: BATCH_SIZE,
           movements_synced: totalProcessed,
-          last_heartbeat_at: new Date().toISOString(),
-        }).eq('seller_id', sellerId);
+        });
         
-        console.log(`[ml-sync-real-costs] Stats: ${JSON.stringify(stats)}`);
+        console.log(`[ml-sync-real-costs] Paused. Stats: ${JSON.stringify(stats)}`);
         return;
       }
 
       // Update heartbeat
-      await supabase.from('meli_financial_sync_state').update({
-        last_heartbeat_at: new Date().toISOString(),
+      await updateSyncState(supabase, sellerId, {
         last_offset: offset,
         movements_synced: totalProcessed,
-      }).eq('seller_id', sellerId);
+        cursor_or_offset: String(offset),
+      });
 
-      // Fetch orders with shipment info
+      // Fetch orders batch
       const ordersUrl = `https://api.mercadolibre.com/orders/search?seller=${sellerId}&order.date_created.from=${dateFromStr}&order.date_created.to=${dateToStr}&offset=${offset}&limit=${BATCH_SIZE}&sort=date_desc`;
       
       let ordersResp: Response | null = null;
@@ -605,11 +588,12 @@ async function processRealCosts(
 
       if (!ordersResp || !ordersResp.ok) {
         console.error(`[ml-sync-real-costs] Failed to fetch orders at offset ${offset}`);
-        await supabase.from('meli_financial_sync_state').update({
-          status: 'error', phase: 'real_costs',
+        await updateSyncState(supabase, sellerId, {
+          status: 'error',
+          phase: 'real_costs',
           last_error: `Failed to fetch orders at offset ${offset}`,
           cursor_or_offset: String(offset),
-        }).eq('seller_id', sellerId);
+        });
         return;
       }
 
@@ -618,38 +602,63 @@ async function processRealCosts(
       const paging = ordersData.paging || {};
       
       stats.ordersInPeriod += orders.length;
-      console.log(`[ml-sync-real-costs] Fetched ${orders.length} orders at offset ${offset}`);
+      console.log(`[ml-sync-real-costs] Fetched ${orders.length} orders at offset ${offset}, total=${paging.total || 'unknown'}`);
 
       if (orders.length === 0) {
         hasMore = false;
         break;
       }
 
-      // Process each order
+      // OPTIMIZATION 1: Batch check already processed orders
+      const orderIds = orders.map((o: any) => String(o.id));
+      const { data: existingBreakdowns } = await supabase
+        .from('order_cost_breakdown_cache')
+        .select('order_id, has_real_cost')
+        .eq('seller_id', sellerId)
+        .in('order_id', orderIds);
+      
+      const alreadyProcessedSet = new Set(
+        (existingBreakdowns || [])
+          .filter((b: any) => b.has_real_cost)
+          .map((b: any) => String(b.order_id))
+      );
+
+      // OPTIMIZATION 2: Batch fetch cached shipment costs
+      const shipmentIds = orders
+        .filter((o: any) => o.shipping?.id)
+        .map((o: any) => String(o.shipping.id));
+      
+      const { data: cachedShipmentCosts } = await supabase
+        .from('meli_shipment_costs_cache')
+        .select('shipment_id, sender_cost')
+        .eq('seller_id', sellerId)
+        .in('shipment_id', shipmentIds);
+      
+      const shipmentCostMap = new Map(
+        (cachedShipmentCosts || []).map((s: any) => [String(s.shipment_id), s.sender_cost || 0])
+      );
+
+      // Process orders and collect rows for batch upsert
+      const breakdownRows: any[] = [];
+      const shipmentCacheRows: any[] = [];
+
       for (const order of orders) {
         const orderId = String(order.id);
         const shipmentId = order.shipping?.id ? String(order.shipping.id) : null;
         const totalAmount = order.total_amount || 0;
         
-        // Check if already processed with real cost
-        const { data: existingBreakdown } = await supabase
-          .from('order_cost_breakdown_cache')
-          .select('has_real_cost, real_cost_synced_at')
-          .eq('seller_id', sellerId)
-          .eq('order_id', orderId)
-          .maybeSingle();
-
-        if (existingBreakdown?.has_real_cost) {
+        // Skip already processed
+        if (alreadyProcessedSet.has(orderId)) {
+          stats.skippedAlreadyProcessed++;
           totalProcessed++;
           continue;
         }
 
-        const orderExample: any = { order_id: orderId, shipment_id: shipmentId, total_amount: totalAmount };
         let feeMl = 0, installmentsCost = 0, adjustments = 0;
         const sourceRefs: string[] = [];
         let hasRealBilling = false;
 
-        // Step 2: Check if we have billing data for this order
+        // Check billing data
         const billingCharges = orderBillingMap.get(orderId);
         
         if (billingCharges && billingCharges.length > 0) {
@@ -658,14 +667,12 @@ async function processRealCosts(
           
           for (const charge of billingCharges) {
             const amount = charge.amount;
-            
             switch (charge.category) {
               case 'sale_fee':
                 feeMl += amount;
                 sourceRefs.push(`billing:sale_fee:${amount.toFixed(2)}`);
                 break;
               case 'shipping_fee':
-                // Note: shipping from billing is seller's portion, may overlap with shipment costs
                 sourceRefs.push(`billing:shipping_fee:${amount.toFixed(2)}`);
                 break;
               case 'installment_cost':
@@ -678,43 +685,32 @@ async function processRealCosts(
                 break;
             }
           }
-          
-          orderExample.billing_charges = billingCharges.length;
-          orderExample.fee_ml_from_billing = feeMl;
         } else {
-          // Step 3: Fallback - estimate fee
+          // Fallback: estimate fee
           const estimation = await estimateFee(currentAccessToken, totalAmount);
           feeMl = estimation.fee;
           sourceRefs.push(estimation.source);
           stats.withEstimatedFee++;
-          orderExample.fee_ml_estimated = feeMl;
         }
 
-        // Step 4: Fetch shipment costs (if has shipment_id)
+        // Get shipment cost
         let shippingCostSeller = 0;
         if (shipmentId) {
           // Check cache first
-          const { data: cachedShipmentCost } = await supabase
-            .from('meli_shipment_costs_cache')
-            .select('sender_cost')
-            .eq('seller_id', sellerId)
-            .eq('shipment_id', shipmentId)
-            .maybeSingle();
-
-          if (cachedShipmentCost) {
-            shippingCostSeller = cachedShipmentCost.sender_cost || 0;
+          if (shipmentCostMap.has(shipmentId)) {
+            shippingCostSeller = shipmentCostMap.get(shipmentId) as number;
           } else {
+            // Fetch from API
             try {
               const costsResp = await fetchWithTimeout(
                 `https://api.mercadolibre.com/shipments/${shipmentId}/costs`,
                 { headers: { Authorization: `Bearer ${currentAccessToken}` } },
-                15000
+                10000
               );
               if (costsResp.ok) {
                 const costsData = await costsResp.json();
                 stats.withShipmentCosts++;
                 
-                // Extract seller cost from senders array
                 if (costsData.senders && Array.isArray(costsData.senders)) {
                   for (const sender of costsData.senders) {
                     if (String(sender.user_id) === sellerId) {
@@ -723,8 +719,8 @@ async function processRealCosts(
                   }
                 }
                 
-                // Cache shipment cost
-                await supabase.from('meli_shipment_costs_cache').upsert({
+                // Queue for batch cache insert
+                shipmentCacheRows.push({
                   user_id: userId,
                   seller_id: sellerId,
                   shipment_id: shipmentId,
@@ -736,55 +732,68 @@ async function processRealCosts(
                   discounts_json: costsData.senders?.[0]?.discounts || null,
                   raw_json: costsData,
                   synced_at: new Date().toISOString(),
-                }, { onConflict: 'seller_id,shipment_id' });
-
-                orderExample.shipment_costs = costsData;
+                });
+                
+                shipmentCostMap.set(shipmentId, shippingCostSeller);
               }
             } catch (e) {
-              console.log(`[ml-sync-real-costs] shipment costs failed for ${shipmentId}:`, e);
+              // Ignore shipment cost errors
             }
           }
           
           if (shippingCostSeller > 0) {
             sourceRefs.push(`shipment:cost:${shippingCostSeller.toFixed(2)}`);
           }
-          orderExample.shipping_cost_seller = shippingCostSeller;
         }
 
-        // Step 5: Calculate total_marketplace_cost
+        // Calculate total_marketplace_cost
         const totalMarketplaceCost = feeMl + shippingCostSeller + installmentsCost + adjustments;
-        orderExample.total_marketplace_cost = totalMarketplaceCost;
-        
         const hasRealCost = hasRealBilling || shippingCostSeller > 0;
-        if (hasRealCost || feeMl > 0) stats.complete++;
 
-        // Step 6: Update order_cost_breakdown_cache
-        await supabase.from('order_cost_breakdown_cache').upsert({
+        // Queue for batch upsert
+        breakdownRows.push({
           user_id: userId,
           seller_id: sellerId,
           order_id: orderId,
           shipment_id: shipmentId,
           fee_ml: feeMl,
+          fee_ml_source: hasRealBilling ? 'billing' : 'estimated',
           shipping_cost_seller: shippingCostSeller,
           installments_cost: installmentsCost,
           adjustments: adjustments,
           total_marketplace_cost: totalMarketplaceCost,
           source_refs: sourceRefs,
-          has_real_cost: hasRealBilling, // true only if from billing reports
+          has_real_cost: hasRealBilling,
           has_real_financial: hasRealCost,
           real_cost_synced_at: new Date().toISOString(),
           calculated_at: new Date().toISOString(),
-        }, { onConflict: 'seller_id,order_id' });
-
-        // Store example (first 3)
-        if (stats.examples.length < 3 && (hasRealCost || feeMl > 0)) {
-          stats.examples.push(orderExample);
-        }
+        });
 
         totalProcessed++;
         
-        // Rate limit
-        await sleep(50);
+        // Small delay between API calls
+        await sleep(30);
+      }
+
+      // OPTIMIZATION 3: Batch upsert breakdown rows
+      if (breakdownRows.length > 0) {
+        const { error: breakdownError } = await supabase
+          .from('order_cost_breakdown_cache')
+          .upsert(breakdownRows, { onConflict: 'seller_id,order_id' });
+        
+        if (breakdownError) {
+          console.error(`[ml-sync-real-costs] Breakdown batch error: ${breakdownError.message}`);
+        } else {
+          stats.batchesSaved++;
+          console.log(`[ml-sync-real-costs] Saved ${breakdownRows.length} breakdown rows`);
+        }
+      }
+
+      // Batch upsert shipment cache rows
+      if (shipmentCacheRows.length > 0) {
+        await supabase
+          .from('meli_shipment_costs_cache')
+          .upsert(shipmentCacheRows, { onConflict: 'seller_id,shipment_id' });
       }
 
       // Pagination
@@ -792,31 +801,32 @@ async function processRealCosts(
       const total = paging.total || 0;
       hasMore = orders.length > 0 && (total > 0 ? offset < total : orders.length === BATCH_SIZE);
       
-      await sleep(150);
+      await sleep(100);
     }
 
     // Complete
-    console.log(`[ml-sync-real-costs] Completed: ${totalProcessed} orders`);
+    console.log(`[ml-sync-real-costs] Completed: ${totalProcessed} orders processed`);
     console.log(`[ml-sync-real-costs] Final stats: ${JSON.stringify(stats)}`);
     
-    await supabase.from('meli_financial_sync_state').update({
+    await updateSyncState(supabase, sellerId, {
       status: 'idle',
       phase: 'finished',
       last_sync_finished_at: new Date().toISOString(),
       cursor_or_offset: null,
+      last_offset: null,
       movements_synced: totalProcessed,
       last_error: null,
-      last_heartbeat_at: new Date().toISOString(),
-    }).eq('seller_id', sellerId);
+    });
 
   } catch (error) {
     console.error('[ml-sync-real-costs] Error:', error);
-    await supabase.from('meli_financial_sync_state').update({
+    await updateSyncState(supabase, sellerId, {
       status: 'error',
       phase: 'real_costs',
       last_error: String(error),
       cursor_or_offset: String(offset),
+      last_offset: offset,
       movements_synced: totalProcessed,
-    }).eq('seller_id', sellerId);
+    });
   }
 }

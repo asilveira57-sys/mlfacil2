@@ -67,9 +67,10 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
   const [realCostsSyncState, setRealCostsSyncState] = useState<SyncState | null>(null);
   const [realCostsStats, setRealCostsStats] = useState<{ synced: number; total: number }>({ synced: 0, total: 0 });
   
-  // Auto-resume ref to prevent double triggers
+  // Auto-resume refs with last attempt timestamp
   const autoResumeTriggeredRef = useRef(false);
   const realCostsAutoResumeRef = useRef(false);
+  const lastAutoResumeAttemptRef = useRef(0);
 
   const loadBillingStatus = useCallback(async () => {
     try {
@@ -110,7 +111,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
         if (state.phase === 'real_costs') {
           setRealCostsSyncState(state);
           const heartbeatMs = state.last_heartbeat_at ? new Date(state.last_heartbeat_at).getTime() : 0;
-          const isFreshRunning = state.status === 'running' && Date.now() - heartbeatMs < 3 * 60 * 1000;
+          const isFreshRunning = state.status === 'running' && Date.now() - heartbeatMs < 2 * 60 * 1000;
           setRealCostsSyncing(isFreshRunning || state.status === 'paused');
         }
 
@@ -122,7 +123,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
           state.status === 'running' &&
           state.phase !== 'real_costs' &&
           lastActivityMs > 0 &&
-          Date.now() - lastActivityMs < 3 * 60 * 1000;
+          Date.now() - lastActivityMs < 2 * 60 * 1000;
 
         setSyncing(isFreshRunning);
 
@@ -181,7 +182,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     }
   };
 
-  // Poll for sync progress and handle auto-resume
+  // Poll for sync progress and handle auto-resume with watchdog
   useEffect(() => {
     if (!sellerId) return;
 
@@ -195,9 +196,13 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
       if (state) {
         setSyncState(state);
         
-        // Handle real_costs phase separately
+        // Handle real_costs phase
         if (state.phase === 'real_costs') {
           setRealCostsSyncState(state);
+          
+          const heartbeatMs = state.last_heartbeat_at ? new Date(state.last_heartbeat_at).getTime() : 0;
+          const timeSinceHeartbeat = Date.now() - heartbeatMs;
+          const timeSinceLastAttempt = Date.now() - lastAutoResumeAttemptRef.current;
           
           if (state.status === 'idle' && realCostsSyncing) {
             setRealCostsSyncing(false);
@@ -205,19 +210,29 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
             toast.success(`Custos reais sincronizados: ${state.movements_synced} pedidos processados`);
             loadBillingStatus();
           } else if (state.status === 'paused') {
-            // Auto-resume real costs sync when paused
-            if (!realCostsAutoResumeRef.current) {
+            // Watchdog: auto-resume if paused and enough time has passed since last attempt
+            const shouldResume = timeSinceLastAttempt > 3000; // 3 seconds cooldown
+            
+            if (shouldResume && !realCostsAutoResumeRef.current) {
               realCostsAutoResumeRef.current = true;
-              console.log('[CostSettings] Auto-resuming real costs sync...');
-              toast.info(`Processados ${state.movements_synced} pedidos, continuando custos reais...`);
+              lastAutoResumeAttemptRef.current = Date.now();
+              console.log('[CostSettings] Auto-resuming real costs sync (paused state)...');
+              toast.info(`Processados ${state.movements_synced} pedidos, continuando...`);
               
               setTimeout(() => {
                 handleSyncRealCosts(true);
               }, 500);
             }
           } else if (state.status === 'running') {
-            setRealCostsSyncing(true);
-            realCostsAutoResumeRef.current = false;
+            // Check for stale running (no heartbeat for 2+ minutes)
+            if (timeSinceHeartbeat > 2 * 60 * 1000 && timeSinceLastAttempt > 10000) {
+              console.log('[CostSettings] Stale running detected, force resuming...');
+              lastAutoResumeAttemptRef.current = Date.now();
+              handleSyncRealCosts(true, true); // force_resume
+            } else {
+              setRealCostsSyncing(true);
+              realCostsAutoResumeRef.current = false;
+            }
           } else if (state.status === 'error') {
             setRealCostsSyncing(false);
             realCostsAutoResumeRef.current = false;
@@ -238,7 +253,6 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
             console.log('[CostSettings] Auto-resuming paused sync...');
             toast.info(`Processados ${state.movements_synced} itens, continuando automaticamente...`);
             
-            // Brief delay then auto-continue
             setTimeout(() => {
               handleSyncFinancial(syncMode, true);
             }, 500);
@@ -263,9 +277,10 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
   }, [syncing, realCostsSyncing, sellerId, loadBillingStatus, syncMode]);
   
   // Handle real costs sync with auto-resume
-  const handleSyncRealCosts = async (continueSync = false) => {
+  const handleSyncRealCosts = async (continueSync = false, forceResume = false) => {
     if (!continueSync) {
       realCostsAutoResumeRef.current = false;
+      lastAutoResumeAttemptRef.current = 0;
     }
     setRealCostsSyncing(true);
     
@@ -282,6 +297,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
           seller_id: sellerId, 
           days: 60,
           continue_sync: continueSync,
+          force_resume: forceResume,
         },
       });
       
@@ -305,6 +321,8 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
         if (!continueSync) {
           toast.success('Sincronização de custos reais iniciada');
         }
+        // Reset auto-resume flag so next pause can trigger resume
+        realCostsAutoResumeRef.current = false;
       } else if (data?.status === 'already_running') {
         toast.info('Sincronização já em andamento');
       }
@@ -319,6 +337,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
   // Cancel real costs sync
   const handleCancelRealCostsSync = async () => {
     realCostsAutoResumeRef.current = false;
+    lastAutoResumeAttemptRef.current = 0;
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
@@ -531,9 +550,9 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     return `${diffDays} dias`;
   };
 
-  const getTimeSinceHeartbeat = () => {
-    const heartbeatMs = syncState?.last_heartbeat_at ? new Date(syncState.last_heartbeat_at).getTime() : 0;
-    const updatedMs = syncState?.updated_at ? new Date(syncState.updated_at).getTime() : 0;
+  const getTimeSinceHeartbeat = (state: SyncState | null = syncState) => {
+    const heartbeatMs = state?.last_heartbeat_at ? new Date(state.last_heartbeat_at).getTime() : 0;
+    const updatedMs = state?.updated_at ? new Date(state.updated_at).getTime() : 0;
     const lastActivityMs = Math.max(heartbeatMs, updatedMs);
     if (!lastActivityMs) return null;
     const diffMinutes = Math.floor((Date.now() - lastActivityMs) / (1000 * 60));
@@ -550,6 +569,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
       upserting: 'Salvando',
       consolidating: 'Consolidando',
       fallback_orders: 'Via pedidos',
+      real_costs: 'Custos reais',
       finished: 'Concluído',
       error: 'Erro',
     };
@@ -559,13 +579,22 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
   // Check if sync is paused (ready for auto-resume)
   const isPausedSync = () => syncState?.status === 'paused';
 
-  // Detect stale sync (running but no heartbeat for 3+ minutes)
-  const isStaleSync = () => {
-    if (syncState?.status !== 'running') return false;
-    const heartbeatMs = syncState?.last_heartbeat_at ? new Date(syncState.last_heartbeat_at).getTime() : 0;
-    const updatedMs = syncState?.updated_at ? new Date(syncState.updated_at).getTime() : 0;
+  // Detect stale sync (running but no heartbeat for 2+ minutes)
+  const isStaleSync = (state: SyncState | null = syncState) => {
+    if (state?.status !== 'running') return false;
+    const heartbeatMs = state?.last_heartbeat_at ? new Date(state.last_heartbeat_at).getTime() : 0;
+    const updatedMs = state?.updated_at ? new Date(state.updated_at).getTime() : 0;
     const lastActivityMs = Math.max(heartbeatMs, updatedMs);
-    return lastActivityMs > 0 && Date.now() - lastActivityMs > 3 * 60 * 1000;
+    return lastActivityMs > 0 && Date.now() - lastActivityMs > 2 * 60 * 1000;
+  };
+  
+  // Get the real cursor/offset to display
+  const getRealOffset = (state: SyncState | null) => {
+    if (!state) return null;
+    // Prefer cursor_or_offset as it's the most up-to-date
+    const cursorOffset = state.cursor_or_offset ? parseInt(state.cursor_or_offset) : null;
+    const lastOffset = state.last_offset;
+    return cursorOffset ?? lastOffset ?? null;
   };
 
   if (loading) {
@@ -619,7 +648,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
                 <span>
                   Sem atividade há {getTimeSinceHeartbeat()}. 
                   Fase: {getPhaseLabel(syncState?.phase)}. 
-                  Offset: {syncState?.last_offset || syncState?.cursor_or_offset || '0'}.
+                  Offset: {getRealOffset(syncState) || '0'}.
                 </span>
                 <div className="flex gap-2 ml-4">
                   <Button 
@@ -673,7 +702,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
                 <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''} text-primary`} />
                 <span className="text-sm text-muted-foreground">
                   {syncState.movements_synced} itens processados
-                  {syncState.last_offset && ` • Offset: ${syncState.last_offset}`}
+                  {getRealOffset(syncState) && ` • Offset: ${getRealOffset(syncState)}`}
                 </span>
               </div>
               {syncState.last_heartbeat_at && (
@@ -789,13 +818,25 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
                     Cancelar
                   </Button>
                 )}
+                {/* Force resume button when stale */}
+                {isStaleSync(realCostsSyncState) && (
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => handleSyncRealCosts(true, true)}
+                    className="border-amber-500/50 hover:bg-amber-500/10"
+                  >
+                    <RotateCcw className="h-4 w-4 mr-1" />
+                    Forçar Retomar
+                  </Button>
+                )}
                 <Button 
                   variant="outline" 
                   onClick={() => handleSyncRealCosts(false)}
-                  disabled={syncing || realCostsSyncing}
+                  disabled={syncing || (realCostsSyncing && !isStaleSync(realCostsSyncState))}
                   className="border-green-500/50 hover:bg-green-500/10"
                 >
-                  {realCostsSyncing ? (
+                  {realCostsSyncing && !isStaleSync(realCostsSyncState) ? (
                     <>
                       <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
                       Sincronizando...
@@ -812,21 +853,47 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
             
             {/* Progress when syncing */}
             {realCostsSyncing && realCostsSyncState && (
-              <div className="flex items-center gap-4 p-3 bg-background/50 rounded-md">
-                <RefreshCw className="h-4 w-4 animate-spin text-green-600" />
-                <div className="flex-1">
-                  <div className="flex items-center justify-between text-sm">
-                    <span>{realCostsSyncState.movements_synced || 0} pedidos processados</span>
-                    {realCostsSyncState.last_offset && (
-                      <span className="text-muted-foreground">Offset: {realCostsSyncState.last_offset}</span>
+              <div className="space-y-2">
+                {/* Stale warning for real costs */}
+                {isStaleSync(realCostsSyncState) && (
+                  <Alert variant="destructive" className="border-amber-500 bg-amber-500/10 py-2">
+                    <Clock className="h-4 w-4" />
+                    <AlertDescription className="text-sm">
+                      Sem atividade há {getTimeSinceHeartbeat(realCostsSyncState)}. 
+                      Status: {realCostsSyncState.status}. 
+                      Use "Forçar Retomar" para continuar.
+                    </AlertDescription>
+                  </Alert>
+                )}
+                
+                <div className="flex items-center gap-4 p-3 bg-background/50 rounded-md">
+                  <RefreshCw className={`h-4 w-4 ${!isStaleSync(realCostsSyncState) ? 'animate-spin' : ''} text-green-600`} />
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium">{realCostsSyncState.movements_synced || 0} pedidos processados</span>
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <Badge variant="secondary" className="text-xs">
+                          {realCostsSyncState.status === 'running' ? 'Processando' : 
+                           realCostsSyncState.status === 'paused' ? 'Pausado' : 
+                           realCostsSyncState.status}
+                        </Badge>
+                        {getRealOffset(realCostsSyncState) && (
+                          <span>Offset: {getRealOffset(realCostsSyncState)}</span>
+                        )}
+                      </div>
+                    </div>
+                    {realCostsStats.total > 0 && (
+                      <Progress 
+                        value={(realCostsSyncState.movements_synced || 0) / realCostsStats.total * 100} 
+                        className="h-1.5 mt-2" 
+                      />
+                    )}
+                    {realCostsSyncState.last_heartbeat_at && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Última atividade: {getTimeSinceHeartbeat(realCostsSyncState)} atrás
+                      </p>
                     )}
                   </div>
-                  {realCostsStats.total > 0 && (
-                    <Progress 
-                      value={(realCostsSyncState.movements_synced || 0) / realCostsStats.total * 100} 
-                      className="h-1 mt-2" 
-                    />
-                  )}
                 </div>
               </div>
             )}
@@ -919,22 +986,20 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
                     ? settings.packaging.default_packaging_cost.toFixed(2)
                     : (settings.packaging.default_packaging_cost * 2).toFixed(2)}
                 </strong>
-                {settings.packaging.packaging_cost_mode === 'por_item' && ' (2 × custo)'}
+                {settings.packaging.packaging_cost_mode === 'por_item' && ' (2x itens)'}
               </li>
-              <li>Taxas ML: <strong>Dados reais da API</strong></li>
-              <li>Custo produto: <strong>Do catálogo de custos</strong></li>
+              <li>Tarifa ML: <strong>~R$ 11,00</strong> (estimado 11%)</li>
+              <li>Frete vendedor: <strong>~R$ 15,00</strong> (exemplo)</li>
             </ul>
           </div>
         </CardContent>
       </Card>
 
       {/* Save Button */}
-      <div className="flex justify-end">
-        <Button onClick={handleSave} disabled={saving}>
-          <Save className="h-4 w-4 mr-2" />
-          {saving ? 'Salvando...' : 'Salvar Configurações'}
-        </Button>
-      </div>
+      <Button onClick={handleSave} disabled={saving} className="w-full">
+        <Save className="h-4 w-4 mr-2" />
+        {saving ? 'Salvando...' : 'Salvar Configurações'}
+      </Button>
     </div>
   );
 }
