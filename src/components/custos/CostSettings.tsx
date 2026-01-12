@@ -1,1005 +1,247 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { supabase } from '@/integrations/supabase/client';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Separator } from '@/components/ui/separator';
-import { Progress } from '@/components/ui/progress';
-import { Save, Package, Calculator, RefreshCw, CheckCircle2, CloudOff, AlertTriangle, Link2, Zap, Play, XCircle, Clock, RotateCcw } from 'lucide-react';
-import { toast } from 'sonner';
+import { useState, useEffect, useRef } from "react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import { RefreshCw, DollarSign, Percent, Package, Play, Pause, RotateCcw, AlertCircle, Clock, Loader2 } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
-interface CostSettingsProps {
-  sellerId: string;
-}
-
-interface Settings {
-  packaging: {
-    default_packaging_cost: number;
-    packaging_cost_mode: 'por_pedido' | 'por_item';
-  };
-}
-
-interface SyncState {
-  status: string;
-  movements_synced: number;
-  last_sync_finished_at: string | null;
-  last_error: string | null;
-  cursor_or_offset: string | null;
-  updated_at?: string | null;
-  phase?: string | null;
-  last_heartbeat_at?: string | null;
-  last_offset?: number | null;
-  last_page_size?: number | null;
-}
-
-interface BillingStatus {
-  total_orders: number;
-  orders_with_billing: number;
-  movements_count: number;
-  last_sync: string | null;
-}
+interface CostSettingsProps { sellerId: string; }
+interface RealCostsSyncState { status: string; processed: number; total: number; cursor_offset: number; scope_days: number | null; last_error: string | null; last_heartbeat_at: string | null; stats_json: { estimated?: number; billing?: number; with_shipping?: number } | null; }
+interface CoverageStats { total_paid: number; with_costs: number; coverage_percent: number; }
 
 export function CostSettings({ sellerId }: CostSettingsProps) {
-  const [settings, setSettings] = useState<Settings>({
-    packaging: { default_packaging_cost: 0, packaging_cost_mode: 'por_pedido' },
-  });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [canceling, setCanceling] = useState(false);
-  const [syncMode, setSyncMode] = useState<'full' | 'delta'>('delta');
-  const [syncState, setSyncState] = useState<SyncState | null>(null);
-  const [needsReconnect, setNeedsReconnect] = useState(false);
-  const [billingStatus, setBillingStatus] = useState<BillingStatus>({
-    total_orders: 0,
-    orders_with_billing: 0,
-    movements_count: 0,
-    last_sync: null,
-  });
-  
-  // Real costs sync state
-  const [realCostsSyncing, setRealCostsSyncing] = useState(false);
-  const [realCostsSyncState, setRealCostsSyncState] = useState<SyncState | null>(null);
-  const [realCostsStats, setRealCostsStats] = useState<{ synced: number; total: number }>({ synced: 0, total: 0 });
-  
-  // Auto-resume refs with last attempt timestamp
-  const autoResumeTriggeredRef = useRef(false);
-  const realCostsAutoResumeRef = useRef(false);
-  const lastAutoResumeAttemptRef = useRef(0);
+  const [packagingCost, setPackagingCost] = useState("0");
+  const [packagingMode, setPackagingMode] = useState("per_order");
+  const [feePercent, setFeePercent] = useState("17");
+  const [feeMode, setFeeMode] = useState("percent");
+  const [realCostsState, setRealCostsState] = useState<RealCostsSyncState | null>(null);
+  const [coverage, setCoverage] = useState<CoverageStats>({ total_paid: 0, with_costs: 0, coverage_percent: 0 });
+  const [syncScope, setSyncScope] = useState<string>("all");
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const autoResumeAttemptedRef = useRef(false);
 
-  const loadBillingStatus = useCallback(async () => {
-    try {
-      const { count: totalOrders } = await supabase
-        .from('meli_orders_cache')
-        .select('*', { count: 'exact', head: true })
-        .eq('seller_id', sellerId)
-        .eq('order_status', 'paid');
-
-      const { count: ordersWithBilling } = await supabase
-        .from('order_cost_breakdown_cache')
-        .select('*', { count: 'exact', head: true })
-        .eq('seller_id', sellerId)
-        .eq('has_real_financial', true);
-      
-      // Count orders with real costs (fee_ml or total_marketplace_cost > 0)
-      const { count: ordersWithRealCosts } = await supabase
-        .from('order_cost_breakdown_cache')
-        .select('*', { count: 'exact', head: true })
-        .eq('seller_id', sellerId)
-        .or('fee_ml.gt.0,total_marketplace_cost.gt.0');
-
-      const { count: movementsCount } = await supabase
-        .from('meli_financial_movements_cache')
-        .select('*', { count: 'exact', head: true })
-        .eq('seller_id', sellerId);
-
-      const { data: state } = await supabase
-        .from('meli_financial_sync_state')
-        .select('*')
-        .eq('seller_id', sellerId)
-        .maybeSingle();
-
-      if (state) {
-        setSyncState(state);
-        
-        // Check if this is real_costs phase
-        if (state.phase === 'real_costs') {
-          setRealCostsSyncState(state);
-          const heartbeatMs = state.last_heartbeat_at ? new Date(state.last_heartbeat_at).getTime() : 0;
-          const isFreshRunning = state.status === 'running' && Date.now() - heartbeatMs < 2 * 60 * 1000;
-          setRealCostsSyncing(isFreshRunning || state.status === 'paused');
-        }
-
-        const heartbeatMs = state.last_heartbeat_at ? new Date(state.last_heartbeat_at).getTime() : 0;
-        const updatedAtMs = state.updated_at ? new Date(state.updated_at).getTime() : 0;
-        const lastActivityMs = Math.max(heartbeatMs, updatedAtMs);
-        
-        const isFreshRunning =
-          state.status === 'running' &&
-          state.phase !== 'real_costs' &&
-          lastActivityMs > 0 &&
-          Date.now() - lastActivityMs < 2 * 60 * 1000;
-
-        setSyncing(isFreshRunning);
-
-        if (state.last_error === 'RECONNECT_REQUIRED') {
-          setNeedsReconnect(true);
-        }
-      } else {
-        setSyncState(null);
-        setSyncing(false);
-      }
-      
-      setRealCostsStats({
-        synced: ordersWithRealCosts || 0,
-        total: totalOrders || 0,
-      });
-
-      setBillingStatus({
-        total_orders: totalOrders || 0,
-        orders_with_billing: ordersWithBilling || 0,
-        movements_count: movementsCount || 0,
-        last_sync: state?.last_sync_finished_at || null,
-      });
-    } catch (error) {
-      console.error('Error loading billing status:', error);
-    }
+  useEffect(() => {
+    loadSettings();
+    loadRealCostsStatus();
+    pollIntervalRef.current = setInterval(loadRealCostsStatus, 3000);
+    return () => { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); };
   }, [sellerId]);
+
+  useEffect(() => {
+    if (!realCostsState) return;
+    if (realCostsState.status === 'paused' && !autoResumeAttemptedRef.current) {
+      autoResumeAttemptedRef.current = true;
+      handleContinueSync();
+    }
+    if (realCostsState.status !== 'paused') autoResumeAttemptedRef.current = false;
+  }, [realCostsState]);
 
   const loadSettings = async () => {
-    setLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/settings?seller_id=${sellerId}`,
-        { headers: { Authorization: `Bearer ${session.access_token}` } }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        setSettings({
-          packaging: {
-            default_packaging_cost: data.packaging?.default_packaging_cost || 0,
-            packaging_cost_mode: data.packaging?.packaging_cost_mode || 'por_pedido',
-          },
-        });
-      }
-
-      await loadBillingStatus();
-
-    } catch (error) {
-      console.error('Error loading settings:', error);
-      toast.error('Erro ao carregar configurações');
-    } finally {
+      const { data: packagingData } = await supabase.from("packaging_cost_settings").select("*").eq("seller_id", sellerId).maybeSingle();
+      if (packagingData) { setPackagingCost(packagingData.default_packaging_cost?.toString() || "0"); setPackagingMode(packagingData.packaging_cost_mode || "per_order"); }
+      const { data: feeData } = await supabase.from("marketplace_fee_rules").select("*").eq("seller_id", sellerId).maybeSingle();
+      if (feeData) { setFeePercent(feeData.fee_percent_default?.toString() || "17"); setFeeMode(feeData.fee_mode || "percent"); }
       setLoading(false);
-    }
+    } catch { setLoading(false); }
   };
 
-  // Poll for sync progress and handle auto-resume with watchdog
-  useEffect(() => {
-    if (!sellerId) return;
-
-    const interval = setInterval(async () => {
-      const { data: state } = await supabase
-        .from('meli_financial_sync_state')
-        .select('*')
-        .eq('seller_id', sellerId)
-        .maybeSingle();
-
-      if (state) {
-        setSyncState(state);
-        
-        // Handle real_costs phase
-        if (state.phase === 'real_costs') {
-          setRealCostsSyncState(state);
-          
-          const heartbeatMs = state.last_heartbeat_at ? new Date(state.last_heartbeat_at).getTime() : 0;
-          const timeSinceHeartbeat = Date.now() - heartbeatMs;
-          const timeSinceLastAttempt = Date.now() - lastAutoResumeAttemptRef.current;
-          
-          if (state.status === 'idle' && realCostsSyncing) {
-            setRealCostsSyncing(false);
-            realCostsAutoResumeRef.current = false;
-            toast.success(`Custos reais sincronizados: ${state.movements_synced} pedidos processados`);
-            loadBillingStatus();
-          } else if (state.status === 'paused') {
-            // Watchdog: auto-resume if paused and enough time has passed since last attempt
-            const shouldResume = timeSinceLastAttempt > 3000; // 3 seconds cooldown
-            
-            if (shouldResume && !realCostsAutoResumeRef.current) {
-              realCostsAutoResumeRef.current = true;
-              lastAutoResumeAttemptRef.current = Date.now();
-              console.log('[CostSettings] Auto-resuming real costs sync (paused state)...');
-              toast.info(`Processados ${state.movements_synced} pedidos, continuando...`);
-              
-              setTimeout(() => {
-                handleSyncRealCosts(true);
-              }, 500);
-            }
-          } else if (state.status === 'running') {
-            // Check for stale running (no heartbeat for 2+ minutes)
-            if (timeSinceHeartbeat > 2 * 60 * 1000 && timeSinceLastAttempt > 10000) {
-              console.log('[CostSettings] Stale running detected, force resuming...');
-              lastAutoResumeAttemptRef.current = Date.now();
-              handleSyncRealCosts(true, true); // force_resume
-            } else {
-              setRealCostsSyncing(true);
-              realCostsAutoResumeRef.current = false;
-            }
-          } else if (state.status === 'error') {
-            setRealCostsSyncing(false);
-            realCostsAutoResumeRef.current = false;
-            toast.error(state.last_error || 'Erro na sincronização de custos reais');
-          }
-          return;
-        }
-
-        if (state.status === 'idle' && syncing) {
-          setSyncing(false);
-          autoResumeTriggeredRef.current = false;
-          toast.success(`Sincronização concluída: ${state.movements_synced} itens processados`);
-          loadBillingStatus();
-        } else if (state.status === 'paused') {
-          // Auto-resume when paused (micro-batch completed)
-          if (!autoResumeTriggeredRef.current) {
-            autoResumeTriggeredRef.current = true;
-            console.log('[CostSettings] Auto-resuming paused sync...');
-            toast.info(`Processados ${state.movements_synced} itens, continuando automaticamente...`);
-            
-            setTimeout(() => {
-              handleSyncFinancial(syncMode, true);
-            }, 500);
-          }
-        } else if (state.status === 'running') {
-          setSyncing(true);
-          autoResumeTriggeredRef.current = false;
-        } else if (state.status === 'error') {
-          setSyncing(false);
-          autoResumeTriggeredRef.current = false;
-          if (state.last_error === 'RECONNECT_REQUIRED') {
-            setNeedsReconnect(true);
-            toast.error('Conexão com o Mercado Livre expirou');
-          } else {
-            toast.error(state.last_error || 'Erro na sincronização');
-          }
-        }
-      }
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [syncing, realCostsSyncing, sellerId, loadBillingStatus, syncMode]);
-  
-  // Handle real costs sync with auto-resume
-  const handleSyncRealCosts = async (continueSync = false, forceResume = false) => {
-    if (!continueSync) {
-      realCostsAutoResumeRef.current = false;
-      lastAutoResumeAttemptRef.current = 0;
-    }
-    setRealCostsSyncing(true);
-    
+  const loadRealCostsStatus = async () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        setRealCostsSyncing(false);
-        return;
-      }
-      
-      const { data, error } = await supabase.functions.invoke('ml-sync-real-costs', {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        body: { 
-          seller_id: sellerId, 
-          days: 60,
-          continue_sync: continueSync,
-          force_resume: forceResume,
-        },
-      });
-      
-      if (error) {
-        console.error('Error invoking ml-sync-real-costs:', error);
-        toast.error(error.message || 'Erro ao iniciar sincronização de custos reais');
-        setRealCostsSyncing(false);
-        realCostsAutoResumeRef.current = false;
-        return;
-      }
-      
-      if (data?.code === 'RECONNECT_REQUIRED') {
-        setNeedsReconnect(true);
-        setRealCostsSyncing(false);
-        realCostsAutoResumeRef.current = false;
-        toast.error('Conexão com o Mercado Livre expirou');
-        return;
-      }
-      
-      if (data?.status === 'started') {
-        if (!continueSync) {
-          toast.success('Sincronização de custos reais iniciada');
-        }
-        // Reset auto-resume flag so next pause can trigger resume
-        realCostsAutoResumeRef.current = false;
-      } else if (data?.status === 'already_running') {
-        toast.info('Sincronização já em andamento');
-      }
-    } catch (e) {
-      console.error('Error syncing real costs:', e);
-      toast.error('Erro ao sincronizar custos reais');
-      setRealCostsSyncing(false);
-      realCostsAutoResumeRef.current = false;
-    }
-  };
-  
-  // Cancel real costs sync
-  const handleCancelRealCostsSync = async () => {
-    realCostsAutoResumeRef.current = false;
-    lastAutoResumeAttemptRef.current = 0;
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-      
-      await supabase.functions.invoke('ml-sync-real-costs', {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        body: { seller_id: sellerId, action: 'cancel' },
-      });
-      
-      toast.success('Sincronização de custos reais cancelada');
-    } catch (e) {
-      toast.error('Erro ao cancelar sincronização');
-    } finally {
-      setRealCostsSyncing(false);
-      await loadBillingStatus();
-    }
+      const { data } = await supabase.functions.invoke("ml-sync-real-costs", { body: { seller_id: sellerId, action: "status" } });
+      if (data?.state) setRealCostsState(data.state);
+      if (data?.coverage) setCoverage(data.coverage);
+    } catch {}
   };
 
-  useEffect(() => {
-    if (sellerId) {
-      loadSettings();
-    }
-  }, [sellerId]);
-
-  const handleSave = async () => {
+  const handleSaveSettings = async () => {
     setSaving(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/settings/update`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            seller_id: sellerId,
-            packaging: settings.packaging,
-          }),
-        }
-      );
-
-      if (response.ok) {
-        toast.success('Configurações salvas com sucesso');
-      } else {
-        toast.error('Erro ao salvar configuraações');
-      }
-    } catch (error) {
-      toast.error('Erro ao salvar configurações');
-    } finally {
-      setSaving(false);
-    }
+      if (!session) throw new Error("Not authenticated");
+      await supabase.from("packaging_cost_settings").upsert({ user_id: session.user.id, seller_id: sellerId, default_packaging_cost: parseFloat(packagingCost) || 0, packaging_cost_mode: packagingMode, updated_at: new Date().toISOString() }, { onConflict: "seller_id" });
+      await supabase.from("marketplace_fee_rules").upsert({ user_id: session.user.id, seller_id: sellerId, fee_percent_default: parseFloat(feePercent) || 17, fee_mode: feeMode, updated_at: new Date().toISOString() }, { onConflict: "seller_id" });
+      toast.success("Configurações salvas!");
+    } catch { toast.error("Erro ao salvar configurações"); } finally { setSaving(false); }
   };
 
-  const handleSyncFinancial = async (mode: 'full' | 'delta', continueSync = false) => {
-    setSyncMode(mode);
-    setNeedsReconnect(false);
-    setSyncing(true);
-    
-    // Reset auto-resume flag when manually starting
-    if (!continueSync) {
-      autoResumeTriggeredRef.current = false;
-    }
-
+  const handleStartSync = async () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        setSyncing(false);
-        return;
-      }
-
-      const { data, error } = await supabase.functions.invoke('ml-sync-financial', {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        body: {
-          seller_id: sellerId,
-          days: mode === 'full' ? 180 : 30,
-          mode,
-          continue_sync: continueSync,
-        },
-      });
-
-      if (error) {
-        console.error('Error invoking ml-sync-financial:', error);
-        toast.error(error.message || 'Erro ao iniciar sincronização');
-        setSyncing(false);
-        autoResumeTriggeredRef.current = false;
-        return;
-      }
-
-      if (data?.code === 'RECONNECT_REQUIRED') {
-        setNeedsReconnect(true);
-        setSyncing(false);
-        autoResumeTriggeredRef.current = false;
-        toast.error('Conexão com o Mercado Livre expirou');
-        return;
-      }
-
-      if (data?.status === 'stale_running') {
-        toast.warning('A sincronização anterior parece ter travado. Use "Continuar" ou "Completa".');
-        setSyncing(false);
-        autoResumeTriggeredRef.current = false;
-        await loadBillingStatus();
-        return;
-      }
-
-      if (data?.status === 'already_running') {
-        toast.info('Sincronização já em andamento');
-        await loadBillingStatus();
-        return;
-      }
-
-      if (data?.status === 'started') {
-        if (!continueSync) {
-          toast.success(`Sincronização ${mode === 'delta' ? 'incremental' : 'completa'} iniciada`);
-        }
-        return;
-      }
-
-      toast.error('Erro ao iniciar sincronização');
-      setSyncing(false);
-      autoResumeTriggeredRef.current = false;
-    } catch (error) {
-      console.error('Error syncing financial:', error);
-      toast.error('Erro ao sincronizar dados financeiros');
-      setSyncing(false);
-      autoResumeTriggeredRef.current = false;
-    }
+      autoResumeAttemptedRef.current = false;
+      await supabase.functions.invoke("ml-sync-real-costs", { body: { seller_id: sellerId, action: "start", scope_days: syncScope === "all" ? null : parseInt(syncScope) } });
+      toast.success("Sincronização iniciada");
+      loadRealCostsStatus();
+    } catch { toast.error("Erro ao iniciar sincronização"); }
   };
 
-  const handleCancelFinancialSync = async () => {
-    setCanceling(true);
-    autoResumeTriggeredRef.current = false;
+  const handleContinueSync = async (forceResume = false) => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      const { data, error } = await supabase.functions.invoke('ml-sync-financial', {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        body: {
-          seller_id: sellerId,
-          action: 'cancel',
-        },
-      });
-
-      if (error) {
-        console.error('Error cancelling financial sync:', error);
-        toast.error('Erro ao cancelar sincronização');
-        return;
-      }
-
-      if (data?.status === 'cancelled') {
-        toast.success('Sincronização cancelada');
-      } else {
-        toast.success('Sincronização resetada');
-      }
-    } catch (error) {
-      console.error('Error cancelling financial sync:', error);
-      toast.error('Erro ao cancelar sincronização');
-    } finally {
-      setCanceling(false);
-      setSyncing(false);
-      await loadBillingStatus();
-    }
+      const { data } = await supabase.functions.invoke("ml-sync-real-costs", { body: { seller_id: sellerId, action: "continue", force_resume: forceResume } });
+      if (data?.message?.includes("complete")) { toast.success("Sincronização concluída!"); autoResumeAttemptedRef.current = false; }
+      loadRealCostsStatus();
+    } catch { autoResumeAttemptedRef.current = false; }
   };
 
-  const handleReconnect = async () => {
+  const handlePauseSync = async () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
+      await supabase.functions.invoke("ml-sync-real-costs", { body: { seller_id: sellerId, action: "pause" } });
+      toast.info("Sincronização pausada (progresso preservado)");
+      autoResumeAttemptedRef.current = true;
+      loadRealCostsStatus();
+    } catch { toast.error("Erro ao pausar sincronização"); }
+  };
 
-      const response = await supabase.functions.invoke('ml-auth-url', {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        body: {},
-      });
+  const handleResetSync = async () => {
+    try {
+      await supabase.functions.invoke("ml-sync-real-costs", { body: { seller_id: sellerId, action: "reset" } });
+      toast.success("Sincronização resetada");
+      setRealCostsState(null);
+      setShowResetConfirm(false);
+      loadRealCostsStatus();
+    } catch { toast.error("Erro ao resetar sincronização"); }
+  };
 
-      if (response.data?.url) {
-        window.location.href = response.data.url;
-      } else {
-        toast.error('Erro ao obter URL de autorização');
-      }
-    } catch (error) {
-      console.error('Error getting auth URL:', error);
-      toast.error('Erro ao reconectar');
+  const getStatusBadge = () => {
+    if (!realCostsState) return <Badge variant="secondary">Não iniciado</Badge>;
+    switch (realCostsState.status) {
+      case 'running': return <Badge className="bg-blue-500 text-white animate-pulse">Processando</Badge>;
+      case 'paused': return <Badge variant="outline" className="border-yellow-500 text-yellow-600">Pausado</Badge>;
+      case 'done': return <Badge className="bg-green-500 text-white">Concluído</Badge>;
+      case 'error': return <Badge variant="destructive">Erro</Badge>;
+      default: return <Badge variant="secondary">Aguardando</Badge>;
     }
   };
 
-  const formatDate = (date: string | null) => {
-    if (!date) return 'Nunca';
-    return new Date(date).toLocaleString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+  const formatLastActivity = () => {
+    if (!realCostsState?.last_heartbeat_at) return null;
+    const diff = Date.now() - new Date(realCostsState.last_heartbeat_at).getTime();
+    if (diff < 60000) return "agora";
+    if (diff < 3600000) return `há ${Math.floor(diff / 60000)} min`;
+    return `há ${Math.floor(diff / 3600000)}h`;
   };
 
-  const getTimeSinceLastSync = () => {
-    if (!billingStatus.last_sync) return null;
-    const lastSync = new Date(billingStatus.last_sync);
-    const now = new Date();
-    const diffHours = Math.floor((now.getTime() - lastSync.getTime()) / (1000 * 60 * 60));
-    
-    if (diffHours < 1) return 'menos de 1 hora';
-    if (diffHours < 24) return `${diffHours} horas`;
-    const diffDays = Math.floor(diffHours / 24);
-    return `${diffDays} dias`;
-  };
+  if (loading) return <div className="space-y-4"><Skeleton className="h-48 w-full" /><Skeleton className="h-48 w-full" /></div>;
 
-  const getTimeSinceHeartbeat = (state: SyncState | null = syncState) => {
-    const heartbeatMs = state?.last_heartbeat_at ? new Date(state.last_heartbeat_at).getTime() : 0;
-    const updatedMs = state?.updated_at ? new Date(state.updated_at).getTime() : 0;
-    const lastActivityMs = Math.max(heartbeatMs, updatedMs);
-    if (!lastActivityMs) return null;
-    const diffMinutes = Math.floor((Date.now() - lastActivityMs) / (1000 * 60));
-    if (diffMinutes < 1) return 'agora';
-    if (diffMinutes === 1) return '1 minuto';
-    return `${diffMinutes} minutos`;
-  };
-
-  const getPhaseLabel = (phase: string | null | undefined) => {
-    const phaseMap: Record<string, string> = {
-      idle: 'Aguardando',
-      starting: 'Iniciando...',
-      fetching: 'Buscando dados',
-      upserting: 'Salvando',
-      consolidating: 'Consolidando',
-      fallback_orders: 'Via pedidos',
-      real_costs: 'Custos reais',
-      finished: 'Concluído',
-      error: 'Erro',
-    };
-    return phaseMap[phase || ''] || phase || 'Desconhecido';
-  };
-
-  // Check if sync is paused (ready for auto-resume)
-  const isPausedSync = () => syncState?.status === 'paused';
-
-  // Detect stale sync (running but no heartbeat for 2+ minutes)
-  const isStaleSync = (state: SyncState | null = syncState) => {
-    if (state?.status !== 'running') return false;
-    const heartbeatMs = state?.last_heartbeat_at ? new Date(state.last_heartbeat_at).getTime() : 0;
-    const updatedMs = state?.updated_at ? new Date(state.updated_at).getTime() : 0;
-    const lastActivityMs = Math.max(heartbeatMs, updatedMs);
-    return lastActivityMs > 0 && Date.now() - lastActivityMs > 2 * 60 * 1000;
-  };
-  
-  // Get the real cursor/offset to display
-  const getRealOffset = (state: SyncState | null) => {
-    if (!state) return null;
-    // Prefer cursor_or_offset as it's the most up-to-date
-    const cursorOffset = state.cursor_or_offset ? parseInt(state.cursor_or_offset) : null;
-    const lastOffset = state.last_offset;
-    return cursorOffset ?? lastOffset ?? null;
-  };
-
-  if (loading) {
-    return (
-      <div className="space-y-4">
-        <Skeleton className="h-48 w-full" />
-        <Skeleton className="h-48 w-full" />
-      </div>
-    );
-  }
-
-  const billingCoverage = billingStatus.total_orders > 0
-    ? Math.round((billingStatus.orders_with_billing / billingStatus.total_orders) * 100)
-    : 0;
+  const progressPercent = realCostsState?.total > 0 ? Math.round((realCostsState.processed / realCostsState.total) * 100) : 0;
+  const isRunningOrPaused = realCostsState?.status === 'running' || realCostsState?.status === 'paused';
+  const canStart = !realCostsState || realCostsState.status === 'idle' || realCostsState.status === 'done' || realCostsState.status === 'error';
 
   return (
     <div className="space-y-6">
-      {/* Reconnection Alert */}
-      {needsReconnect && (
-        <Alert variant="destructive">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Reconexão necessária</AlertTitle>
-          <AlertDescription className="flex items-center justify-between">
-            <span>Sua conexão com o Mercado Livre expirou. Reconecte para sincronizar os dados financeiros.</span>
-            <Button variant="outline" size="sm" onClick={handleReconnect} className="ml-4">
-              <Link2 className="h-4 w-4 mr-2" />
-              Reconectar Conta
-            </Button>
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {/* Financial Sync Status Card */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CheckCircle2 className="h-5 w-5" />
-            Dados Financeiros do Mercado Livre
-          </CardTitle>
-          <CardDescription>
-            Os custos reais (tarifa, frete, parcelamento) são obtidos automaticamente da API do ML
-          </CardDescription>
+          <CardTitle className="flex items-center gap-2"><DollarSign className="h-5 w-5" />Sincronização de Custos Reais</CardTitle>
+          <CardDescription>Sincroniza taxas e custos de frete do Mercado Livre para cálculo de lucro real</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Stale Sync Warning */}
-          {isStaleSync() && (
-            <Alert variant="destructive" className="border-amber-500 bg-amber-500/10">
-              <Clock className="h-4 w-4" />
-              <AlertTitle>Sincronização parece travada</AlertTitle>
-              <AlertDescription className="flex items-center justify-between">
-                <span>
-                  Sem atividade há {getTimeSinceHeartbeat()}. 
-                  Fase: {getPhaseLabel(syncState?.phase)}. 
-                  Offset: {getRealOffset(syncState) || '0'}.
-                </span>
-                <div className="flex gap-2 ml-4">
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={() => handleSyncFinancial(syncMode, true)}
-                    disabled={syncing}
-                  >
-                    <Play className="h-4 w-4 mr-1" />
-                    Continuar
-                  </Button>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={handleCancelFinancialSync}
-                    disabled={canceling}
-                    className="text-destructive hover:text-destructive"
-                  >
-                    <RotateCcw className="h-4 w-4 mr-1" />
-                    Resetar
-                  </Button>
-                </div>
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {/* Sync Progress */}
-          {(syncing || isPausedSync()) && syncState && !isStaleSync() && (
-            <div className="p-4 bg-primary/5 rounded-lg border border-primary/20 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">
-                  {syncMode === 'delta' ? 'Sincronização Incremental' : 'Sincronização Completa'}
-                </span>
-                <div className="flex items-center gap-2">
-                  <Badge variant="secondary" className={syncing ? 'animate-pulse' : ''}>
-                    {getPhaseLabel(syncState.phase)}
-                  </Badge>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleCancelFinancialSync}
-                    disabled={canceling}
-                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                  >
-                    <XCircle className="h-4 w-4 mr-1" />
-                    {canceling ? 'Cancelando...' : 'Cancelar'}
-                  </Button>
-                </div>
-              </div>
-              <div className="flex items-center gap-4">
-                <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''} text-primary`} />
-                <span className="text-sm text-muted-foreground">
-                  {syncState.movements_synced} itens processados
-                  {getRealOffset(syncState) && ` • Offset: ${getRealOffset(syncState)}`}
-                </span>
-              </div>
-              {syncState.last_heartbeat_at && (
-                <p className="text-xs text-muted-foreground">
-                  Última atividade: {getTimeSinceHeartbeat()} atrás
-                  {syncState.last_error && ` • ${syncState.last_error}`}
-                </p>
-              )}
+          <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
+            <div>
+              <p className="text-sm text-muted-foreground">Cobertura</p>
+              <p className="text-2xl font-bold">{coverage.coverage_percent}%</p>
+              <p className="text-xs text-muted-foreground">{coverage.with_costs.toLocaleString()} de {coverage.total_paid.toLocaleString()} pedidos</p>
             </div>
-          )}
-
-          <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Última sincronização:</span>
-                <span className="text-sm font-medium">{formatDate(billingStatus.last_sync)}</span>
-                {billingStatus.last_sync && (
-                  <span className="text-xs text-muted-foreground">({getTimeSinceLastSync()} atrás)</span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Movimentos:</span>
-                <span className="text-sm font-medium">{billingStatus.movements_count.toLocaleString()}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Cobertura:</span>
-                <span className="text-sm font-medium">
-                  {billingStatus.orders_with_billing} de {billingStatus.total_orders} pedidos
-                </span>
-                {billingCoverage >= 80 ? (
-                  <Badge variant="outline" className="text-green-600 border-green-600">
-                    {billingCoverage}% com dados reais
-                  </Badge>
-                ) : billingCoverage > 0 ? (
-                  <Badge variant="outline" className="text-amber-600 border-amber-600">
-                    {billingCoverage}% com dados reais
-                  </Badge>
-                ) : (
-                  <Badge variant="outline" className="text-muted-foreground">
-                    <CloudOff className="h-3 w-3 mr-1" />
-                    Sem dados
-                  </Badge>
-                )}
-              </div>
-            </div>
-            
-            <div className="flex gap-2">
-              {/* Continue sync if interrupted */}
-              {syncState?.status === 'error' && syncState.cursor_or_offset && (
-                <Button 
-                  variant="outline" 
-                  onClick={() => handleSyncFinancial(syncMode, true)} 
-                  disabled={syncing}
-                  title="Continuar sincronização de onde parou"
-                >
-                  <Play className="h-4 w-4 mr-2" />
-                  Continuar
-                </Button>
-              )}
-              
-              {/* Delta Sync */}
-              <Button 
-                variant="default" 
-                onClick={() => handleSyncFinancial('delta')} 
-                disabled={syncing || isPausedSync()}
-                title="Busca apenas movimentos novos (últimos 30 dias)"
-              >
-                <Zap className={`h-4 w-4 mr-2 ${syncing && syncMode === 'delta' ? 'animate-pulse' : ''}`} />
-                {syncing && syncMode === 'delta' ? 'Sincronizando...' : 'Atualizar'}
-              </Button>
-              
-              {/* Full Sync */}
-              <Button 
-                variant="outline" 
-                onClick={() => handleSyncFinancial('full')} 
-                disabled={syncing || isPausedSync()}
-                title="Reprocessa todos os movimentos dos últimos 6 meses"
-              >
-                <RefreshCw className={`h-4 w-4 mr-2 ${syncing && syncMode === 'full' ? 'animate-spin' : ''}`} />
-                {syncing && syncMode === 'full' ? 'Sincronizando...' : 'Completa'}
-              </Button>
-            </div>
+            {getStatusBadge()}
           </div>
-          
-          <p className="text-xs text-muted-foreground">
-            <strong>Atualizar:</strong> Busca movimentos dos últimos 30 dias (mais rápido). 
-            <strong className="ml-2">Completa:</strong> Reprocessa os últimos 6 meses (100 itens por ciclo).
-          </p>
 
-          <Separator className="my-4" />
-
-          {/* Real Costs Sync */}
-          <div className="p-4 bg-green-500/10 border border-green-500/30 rounded-lg space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <p className="text-sm font-medium flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-green-600" />
-                  Sincronização de Custo Real
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Busca tarifas ML (fee_ml), frete do vendedor (shipping_cost_seller) e parcelamento via APIs
-                </p>
-              </div>
-              <div className="flex gap-2">
-                {realCostsSyncing && (
-                  <Button 
-                    variant="ghost" 
-                    size="sm"
-                    onClick={handleCancelRealCostsSync}
-                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                  >
-                    <XCircle className="h-4 w-4 mr-1" />
-                    Cancelar
-                  </Button>
-                )}
-                {/* Force resume button when stale */}
-                {isStaleSync(realCostsSyncState) && (
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={() => handleSyncRealCosts(true, true)}
-                    className="border-amber-500/50 hover:bg-amber-500/10"
-                  >
-                    <RotateCcw className="h-4 w-4 mr-1" />
-                    Forçar Retomar
-                  </Button>
-                )}
-                <Button 
-                  variant="outline" 
-                  onClick={() => handleSyncRealCosts(false)}
-                  disabled={syncing || (realCostsSyncing && !isStaleSync(realCostsSyncState))}
-                  className="border-green-500/50 hover:bg-green-500/10"
-                >
-                  {realCostsSyncing && !isStaleSync(realCostsSyncState) ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                      Sincronizando...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 className="h-4 w-4 mr-2" />
-                      Sincronizar Custos
-                    </>
-                  )}
-                </Button>
+          {isRunningOrPaused && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm"><span>Progresso desta execução</span><span className="font-medium">{progressPercent}%</span></div>
+              <Progress value={progressPercent} className="h-2" />
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>{realCostsState?.processed?.toLocaleString() || 0} / {realCostsState?.total?.toLocaleString() || 0} pedidos</span>
+                {realCostsState?.status === 'running' && <span className="flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" />Processando...</span>}
+                {realCostsState?.status === 'paused' && <span className="flex items-center gap-1 text-yellow-600"><Clock className="h-3 w-3" />Pausado - retomando...</span>}
               </div>
             </div>
-            
-            {/* Progress when syncing */}
-            {realCostsSyncing && realCostsSyncState && (
-              <div className="space-y-2">
-                {/* Stale warning for real costs */}
-                {isStaleSync(realCostsSyncState) && (
-                  <Alert variant="destructive" className="border-amber-500 bg-amber-500/10 py-2">
-                    <Clock className="h-4 w-4" />
-                    <AlertDescription className="text-sm">
-                      Sem atividade há {getTimeSinceHeartbeat(realCostsSyncState)}. 
-                      Status: {realCostsSyncState.status}. 
-                      Use "Forçar Retomar" para continuar.
-                    </AlertDescription>
-                  </Alert>
-                )}
-                
-                <div className="flex items-center gap-4 p-3 bg-background/50 rounded-md">
-                  <RefreshCw className={`h-4 w-4 ${!isStaleSync(realCostsSyncState) ? 'animate-spin' : ''} text-green-600`} />
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium">{realCostsSyncState.movements_synced || 0} pedidos processados</span>
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <Badge variant="secondary" className="text-xs">
-                          {realCostsSyncState.status === 'running' ? 'Processando' : 
-                           realCostsSyncState.status === 'paused' ? 'Pausado' : 
-                           realCostsSyncState.status}
-                        </Badge>
-                        {getRealOffset(realCostsSyncState) && (
-                          <span>Offset: {getRealOffset(realCostsSyncState)}</span>
-                        )}
-                      </div>
-                    </div>
-                    {realCostsStats.total > 0 && (
-                      <Progress 
-                        value={(realCostsSyncState.movements_synced || 0) / realCostsStats.total * 100} 
-                        className="h-1.5 mt-2" 
-                      />
-                    )}
-                    {realCostsSyncState.last_heartbeat_at && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Última atividade: {getTimeSinceHeartbeat(realCostsSyncState)} atrás
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
+          )}
+
+          {realCostsState?.stats_json && (
+            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+              <div className="p-2 bg-muted/50 rounded"><p className="font-medium">{realCostsState.stats_json.billing || 0}</p><p className="text-muted-foreground">Taxa real</p></div>
+              <div className="p-2 bg-muted/50 rounded"><p className="font-medium">{realCostsState.stats_json.estimated || 0}</p><p className="text-muted-foreground">Taxa estimada</p></div>
+              <div className="p-2 bg-muted/50 rounded"><p className="font-medium">{realCostsState.stats_json.with_shipping || 0}</p><p className="text-muted-foreground">Com frete</p></div>
+            </div>
+          )}
+
+          {realCostsState?.status === 'error' && realCostsState.last_error && (
+            <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
+              <div className="flex items-center gap-2 text-destructive"><AlertCircle className="h-4 w-4" /><span className="text-sm font-medium">Erro na sincronização</span></div>
+              <p className="text-xs text-muted-foreground mt-1">{realCostsState.last_error}</p>
+            </div>
+          )}
+
+          {formatLastActivity() && <p className="text-xs text-muted-foreground text-right">Última atividade: {formatLastActivity()}</p>}
+
+          {canStart && (
+            <div className="flex items-center gap-4">
+              <Label className="text-sm">Escopo:</Label>
+              <Select value={syncScope} onValueChange={setSyncScope}>
+                <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos os pedidos</SelectItem>
+                  <SelectItem value="60">Últimos 60 dias</SelectItem>
+                  <SelectItem value="90">Últimos 90 dias</SelectItem>
+                  <SelectItem value="180">Últimos 180 dias</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            {canStart && <Button onClick={handleStartSync} className="gap-2"><Play className="h-4 w-4" />Iniciar Sincronização</Button>}
+            {realCostsState?.status === 'running' && <Button variant="outline" onClick={handlePauseSync} className="gap-2"><Pause className="h-4 w-4" />Pausar</Button>}
+            {realCostsState?.status === 'paused' && (
+              <>
+                <Button onClick={() => handleContinueSync(false)} className="gap-2"><Play className="h-4 w-4" />Continuar</Button>
+                <Button variant="outline" onClick={() => handleContinueSync(true)} className="gap-2"><RefreshCw className="h-4 w-4" />Forçar Retomar</Button>
+              </>
             )}
-            
-            {/* Stats */}
-            <div className="flex items-center gap-4 text-xs text-muted-foreground">
-              <span>
-                Cobertura: <strong className="text-foreground">{realCostsStats.synced}</strong> de {realCostsStats.total} pedidos com custos
-              </span>
-              {realCostsStats.total > 0 && (
-                <Badge variant="outline" className={realCostsStats.synced / realCostsStats.total >= 0.7 ? 'text-green-600 border-green-600' : 'text-amber-600 border-amber-600'}>
-                  {Math.round(realCostsStats.synced / realCostsStats.total * 100)}%
-                </Badge>
-              )}
-            </div>
+            {isRunningOrPaused && <Button variant="ghost" onClick={() => setShowResetConfirm(true)} className="gap-2 text-destructive hover:text-destructive"><RotateCcw className="h-4 w-4" />Resetar</Button>}
+            {realCostsState?.status === 'done' && <Button variant="outline" onClick={handleStartSync} className="gap-2"><RefreshCw className="h-4 w-4" />Sincronizar Novamente</Button>}
           </div>
         </CardContent>
       </Card>
 
-      {/* Packaging Cost Card */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Package className="h-5 w-5" />
-            Custo de Embalagem
-          </CardTitle>
-          <CardDescription>
-            Defina o custo padrão de embalagem para seus pedidos
-          </CardDescription>
-        </CardHeader>
+        <CardHeader><CardTitle className="flex items-center gap-2"><Package className="h-5 w-5" />Custo de Embalagem</CardTitle><CardDescription>Configure o custo padrão de embalagem para cálculo de lucro</CardDescription></CardHeader>
         <CardContent className="space-y-4">
-          <div>
-            <Label htmlFor="packagingCost">Custo de embalagem (R$)</Label>
-            <Input
-              id="packagingCost"
-              type="number"
-              step="0.01"
-              min="0"
-              value={settings.packaging.default_packaging_cost}
-              onChange={(e) =>
-                setSettings(s => ({
-                  ...s,
-                  packaging: { ...s.packaging, default_packaging_cost: parseFloat(e.target.value) || 0 },
-                }))
-              }
-              className="w-48 mt-1"
-            />
-          </div>
-
-          <div>
-            <Label>Modo de aplicação</Label>
-            <RadioGroup
-              value={settings.packaging.packaging_cost_mode}
-              onValueChange={(value: 'por_pedido' | 'por_item') =>
-                setSettings(s => ({
-                  ...s,
-                  packaging: { ...s.packaging, packaging_cost_mode: value },
-                }))
-              }
-              className="mt-2"
-            >
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="por_pedido" id="porPedido" />
-                <Label htmlFor="porPedido" className="font-normal">Por pedido (1x por venda)</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="por_item" id="porItem" />
-                <Label htmlFor="porItem" className="font-normal">Por item (multiplica pela quantidade)</Label>
-              </div>
-            </RadioGroup>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2"><Label>Valor padrão (R$)</Label><Input type="number" step="0.01" value={packagingCost} onChange={(e) => setPackagingCost(e.target.value)} placeholder="0.00" /></div>
+            <div className="space-y-2"><Label>Modo de aplicação</Label><Select value={packagingMode} onValueChange={setPackagingMode}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="per_order">Por pedido</SelectItem><SelectItem value="per_item">Por item</SelectItem></SelectContent></Select></div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Preview Card */}
-      <Card className="bg-muted/50">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Calculator className="h-5 w-5" />
-            Preview do Cálculo
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-sm space-y-1 text-muted-foreground">
-            <p>Para um pedido de <strong>R$ 100,00</strong> com 2 itens:</p>
-            <ul className="list-disc list-inside mt-2 space-y-1">
-              <li>
-                Embalagem: <strong>
-                  R$ {settings.packaging.packaging_cost_mode === 'por_pedido'
-                    ? settings.packaging.default_packaging_cost.toFixed(2)
-                    : (settings.packaging.default_packaging_cost * 2).toFixed(2)}
-                </strong>
-                {settings.packaging.packaging_cost_mode === 'por_item' && ' (2x itens)'}
-              </li>
-              <li>Tarifa ML: <strong>~R$ 11,00</strong> (estimado 11%)</li>
-              <li>Frete vendedor: <strong>~R$ 15,00</strong> (exemplo)</li>
-            </ul>
+      <Card>
+        <CardHeader><CardTitle className="flex items-center gap-2"><Percent className="h-5 w-5" />Taxa de Venda (Fallback)</CardTitle><CardDescription>Taxa padrão para estimativa quando não houver dado real</CardDescription></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2"><Label>Taxa padrão (%)</Label><Input type="number" step="0.1" value={feePercent} onChange={(e) => setFeePercent(e.target.value)} placeholder="17" /></div>
+            <div className="space-y-2"><Label>Modo de cálculo</Label><Select value={feeMode} onValueChange={setFeeMode}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="percent">Percentual</SelectItem><SelectItem value="real">Usar dados reais (quando disponível)</SelectItem></SelectContent></Select></div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Save Button */}
-      <Button onClick={handleSave} disabled={saving} className="w-full">
-        <Save className="h-4 w-4 mr-2" />
-        {saving ? 'Salvando...' : 'Salvar Configurações'}
-      </Button>
+      <div className="flex justify-end"><Button onClick={handleSaveSettings} disabled={saving}>{saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Salvando...</> : "Salvar Configurações"}</Button></div>
+
+      <AlertDialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader><AlertDialogTitle>Resetar sincronização?</AlertDialogTitle><AlertDialogDescription>Esta ação irá apagar todo o progresso da sincronização atual. Os custos já calculados serão mantidos, mas você precisará iniciar a sincronização do zero.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleResetSync} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Resetar</AlertDialogAction></AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

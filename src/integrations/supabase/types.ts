@@ -919,6 +919,42 @@ export type Database = {
         }
         Relationships: []
       }
+      meli_listing_fee_cache: {
+        Row: {
+          created_at: string
+          fee_amount: number
+          fee_percent: number | null
+          id: string
+          listing_type_id: string
+          price_bucket: number
+          raw_json: Json | null
+          seller_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          fee_amount: number
+          fee_percent?: number | null
+          id?: string
+          listing_type_id?: string
+          price_bucket: number
+          raw_json?: Json | null
+          seller_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          fee_amount?: number
+          fee_percent?: number | null
+          id?: string
+          listing_type_id?: string
+          price_bucket?: number
+          raw_json?: Json | null
+          seller_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       meli_listings_cache: {
         Row: {
           available_quantity: number | null
@@ -1228,6 +1264,63 @@ export type Database = {
         }
         Relationships: []
       }
+      meli_real_costs_sync_state: {
+        Row: {
+          created_at: string
+          cursor_offset: number
+          finished_at: string | null
+          id: string
+          last_error: string | null
+          last_heartbeat_at: string | null
+          last_page_size: number | null
+          processed: number
+          scope_days: number | null
+          seller_id: string
+          started_at: string | null
+          stats_json: Json | null
+          status: string
+          total: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          cursor_offset?: number
+          finished_at?: string | null
+          id?: string
+          last_error?: string | null
+          last_heartbeat_at?: string | null
+          last_page_size?: number | null
+          processed?: number
+          scope_days?: number | null
+          seller_id: string
+          started_at?: string | null
+          stats_json?: Json | null
+          status?: string
+          total?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          cursor_offset?: number
+          finished_at?: string | null
+          id?: string
+          last_error?: string | null
+          last_heartbeat_at?: string | null
+          last_page_size?: number | null
+          processed?: number
+          scope_days?: number | null
+          seller_id?: string
+          started_at?: string | null
+          stats_json?: Json | null
+          status?: string
+          total?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       meli_shipment_costs_cache: {
         Row: {
           created_at: string
@@ -1461,6 +1554,7 @@ export type Database = {
           custo_diferenca_peso_medidas: number | null
           custo_envio_declarado: number | null
           fee_ml: number | null
+          fee_ml_source: string | null
           has_real_cost: boolean | null
           has_real_financial: boolean | null
           id: string
@@ -1502,6 +1596,7 @@ export type Database = {
           custo_diferenca_peso_medidas?: number | null
           custo_envio_declarado?: number | null
           fee_ml?: number | null
+          fee_ml_source?: string | null
           has_real_cost?: boolean | null
           has_real_financial?: boolean | null
           id?: string
@@ -1543,6 +1638,7 @@ export type Database = {
           custo_diferenca_peso_medidas?: number | null
           custo_envio_declarado?: number | null
           fee_ml?: number | null
+          fee_ml_source?: string | null
           has_real_cost?: boolean | null
           has_real_financial?: boolean | null
           id?: string
