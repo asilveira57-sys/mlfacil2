@@ -9,12 +9,36 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { RefreshCw, DollarSign, Percent, Package, Play, Pause, RotateCcw, AlertCircle, Clock, Loader2 } from "lucide-react";
+import { RefreshCw, DollarSign, Percent, Package, Play, Pause, RotateCcw, AlertCircle, Clock, Loader2, Database, FileText } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 interface CostSettingsProps { sellerId: string; }
-interface RealCostsSyncState { status: string; processed: number; total: number; cursor_offset: number; scope_days: number | null; last_error: string | null; last_heartbeat_at: string | null; stats_json: { estimated?: number; billing?: number; with_shipping?: number } | null; }
-interface CoverageStats { total_paid: number; with_costs: number; coverage_percent: number; }
+
+interface RealCostsSyncState { 
+  status: string; 
+  processed: number; 
+  total: number; 
+  cursor_offset: number; 
+  scope_days: number | null; 
+  last_error: string | null; 
+  last_heartbeat_at: string | null; 
+  stats_json: { billing?: number; pending?: number; with_shipping?: number } | null; 
+}
+
+interface CoverageStats { 
+  total_paid: number; 
+  with_real_billing: number; 
+  with_pending_billing: number;
+  total_processed: number;
+  coverage_percent: number; 
+}
+
+interface BillingStatus {
+  total_details: number;
+  unique_orders_with_billing: number;
+  latest_period: string | null;
+  last_sync_at: string | null;
+}
 
 export function CostSettings({ sellerId }: CostSettingsProps) {
   const [loading, setLoading] = useState(true);
@@ -24,16 +48,22 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
   const [feePercent, setFeePercent] = useState("17");
   const [feeMode, setFeeMode] = useState("percent");
   const [realCostsState, setRealCostsState] = useState<RealCostsSyncState | null>(null);
-  const [coverage, setCoverage] = useState<CoverageStats>({ total_paid: 0, with_costs: 0, coverage_percent: 0 });
+  const [coverage, setCoverage] = useState<CoverageStats>({ total_paid: 0, with_real_billing: 0, with_pending_billing: 0, total_processed: 0, coverage_percent: 0 });
+  const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
   const [syncScope, setSyncScope] = useState<string>("all");
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [syncingBilling, setSyncingBilling] = useState(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const autoResumeAttemptedRef = useRef(false);
 
   useEffect(() => {
     loadSettings();
     loadRealCostsStatus();
-    pollIntervalRef.current = setInterval(loadRealCostsStatus, 3000);
+    loadBillingStatus();
+    pollIntervalRef.current = setInterval(() => {
+      loadRealCostsStatus();
+      loadBillingStatus();
+    }, 3000);
     return () => { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); };
   }, [sellerId]);
 
@@ -66,6 +96,13 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     } catch {}
   };
 
+  const loadBillingStatus = async () => {
+    try {
+      const { data } = await supabase.functions.invoke("ml-sync-billing-details", { body: { seller_id: sellerId, action: "status" } });
+      if (data) setBillingStatus(data);
+    } catch {}
+  };
+
   const handleSaveSettings = async () => {
     setSaving(true);
     try {
@@ -75,6 +112,21 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
       await supabase.from("marketplace_fee_rules").upsert({ user_id: session.user.id, seller_id: sellerId, fee_percent_default: parseFloat(feePercent) || 17, fee_mode: feeMode, updated_at: new Date().toISOString() }, { onConflict: "seller_id" });
       toast.success("Configurações salvas!");
     } catch { toast.error("Erro ao salvar configurações"); } finally { setSaving(false); }
+  };
+
+  const handleSyncBilling = async () => {
+    setSyncingBilling(true);
+    try {
+      toast.info("Sincronizando taxas do Billing Reports...");
+      const { data, error } = await supabase.functions.invoke("ml-sync-billing-details", { body: { seller_id: sellerId, action: "sync" } });
+      if (error) throw error;
+      toast.success(`Billing sincronizado: ${data?.records_inserted || 0} registros`);
+      loadBillingStatus();
+    } catch (err: any) { 
+      toast.error("Erro ao sincronizar billing: " + (err?.message || "Erro desconhecido")); 
+    } finally { 
+      setSyncingBilling(false); 
+    }
   };
 
   const handleStartSync = async () => {
@@ -140,17 +192,73 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
 
   return (
     <div className="space-y-6">
-      <Card>
+      {/* Step 1: Sync Billing Details */}
+      <Card className="border-2 border-primary/20">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><DollarSign className="h-5 w-5" />Sincronização de Custos Reais</CardTitle>
-          <CardDescription>Sincroniza taxas e custos de frete do Mercado Livre para cálculo de lucro real</CardDescription>
+          <CardTitle className="flex items-center gap-2"><Database className="h-5 w-5" />Passo 1: Sincronizar Taxas (Billing Reports)</CardTitle>
+          <CardDescription>Busca as taxas exatas de cada pedido diretamente da API do Mercado Livre</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+            <div className="p-3 bg-muted rounded-lg">
+              <p className="text-2xl font-bold">{billingStatus?.total_details?.toLocaleString() || 0}</p>
+              <p className="text-xs text-muted-foreground">Movimentos</p>
+            </div>
+            <div className="p-3 bg-muted rounded-lg">
+              <p className="text-2xl font-bold">{billingStatus?.unique_orders_with_billing?.toLocaleString() || 0}</p>
+              <p className="text-xs text-muted-foreground">Pedidos com Billing</p>
+            </div>
+            <div className="p-3 bg-muted rounded-lg">
+              <p className="text-sm font-medium">{billingStatus?.latest_period || "—"}</p>
+              <p className="text-xs text-muted-foreground">Último Período</p>
+            </div>
+            <div className="p-3 bg-muted rounded-lg">
+              <p className="text-sm font-medium">{billingStatus?.last_sync_at ? new Date(billingStatus.last_sync_at).toLocaleDateString('pt-BR') : "—"}</p>
+              <p className="text-xs text-muted-foreground">Última Sync</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-sm">
+            <AlertCircle className="h-4 w-4 text-amber-600" />
+            <span className="text-amber-700 dark:text-amber-300">O Mercado Livre disponibiliza billing ~24h após a venda. Pedidos recentes aparecerão como "Pendente".</span>
+          </div>
+
+          <Button onClick={handleSyncBilling} disabled={syncingBilling} className="gap-2">
+            {syncingBilling ? <><Loader2 className="h-4 w-4 animate-spin" />Sincronizando...</> : <><FileText className="h-4 w-4" />Sincronizar Billing</>}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Step 2: Calculate Real Costs */}
+      <Card className="border-2 border-primary/20">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><DollarSign className="h-5 w-5" />Passo 2: Calcular Custos Reais</CardTitle>
+          <CardDescription>Cruza os dados de billing com os pedidos para calcular o custo total de marketplace</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+            <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
+              <p className="text-2xl font-bold text-green-600">{coverage.with_real_billing.toLocaleString()}</p>
+              <p className="text-xs text-green-700 dark:text-green-400">Com Taxa Real (Billing)</p>
+            </div>
+            <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+              <p className="text-2xl font-bold text-amber-600">{coverage.with_pending_billing.toLocaleString()}</p>
+              <p className="text-xs text-amber-700 dark:text-amber-400">Pendente (Aguardando)</p>
+            </div>
+            <div className="p-3 bg-muted rounded-lg">
+              <p className="text-2xl font-bold">{coverage.total_paid.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground">Total de Pedidos</p>
+            </div>
+            <div className="p-3 bg-muted rounded-lg">
+              <p className="text-2xl font-bold">{coverage.coverage_percent}%</p>
+              <p className="text-xs text-muted-foreground">Cobertura Real</p>
+            </div>
+          </div>
+
           <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
             <div>
-              <p className="text-sm text-muted-foreground">Cobertura</p>
-              <p className="text-2xl font-bold">{coverage.coverage_percent}%</p>
-              <p className="text-xs text-muted-foreground">{coverage.with_costs.toLocaleString()} de {coverage.total_paid.toLocaleString()} pedidos</p>
+              <p className="text-sm font-medium">Status da Sincronização</p>
+              <p className="text-xs text-muted-foreground">{coverage.total_processed.toLocaleString()} pedidos processados</p>
             </div>
             {getStatusBadge()}
           </div>
@@ -169,9 +277,18 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
 
           {realCostsState?.stats_json && (
             <div className="grid grid-cols-3 gap-2 text-center text-xs">
-              <div className="p-2 bg-muted/50 rounded"><p className="font-medium">{realCostsState.stats_json.billing || 0}</p><p className="text-muted-foreground">Taxa real</p></div>
-              <div className="p-2 bg-muted/50 rounded"><p className="font-medium">{realCostsState.stats_json.estimated || 0}</p><p className="text-muted-foreground">Taxa estimada</p></div>
-              <div className="p-2 bg-muted/50 rounded"><p className="font-medium">{realCostsState.stats_json.with_shipping || 0}</p><p className="text-muted-foreground">Com frete</p></div>
+              <div className="p-2 bg-green-50 dark:bg-green-900/20 rounded border border-green-200 dark:border-green-800">
+                <p className="font-medium text-green-600">{realCostsState.stats_json.billing || 0}</p>
+                <p className="text-green-700 dark:text-green-400">Taxa Real</p>
+              </div>
+              <div className="p-2 bg-amber-50 dark:bg-amber-900/20 rounded border border-amber-200 dark:border-amber-800">
+                <p className="font-medium text-amber-600">{realCostsState.stats_json.pending || 0}</p>
+                <p className="text-amber-700 dark:text-amber-400">Pendente</p>
+              </div>
+              <div className="p-2 bg-muted/50 rounded">
+                <p className="font-medium">{realCostsState.stats_json.with_shipping || 0}</p>
+                <p className="text-muted-foreground">Com Frete</p>
+              </div>
             </div>
           )}
 
@@ -200,7 +317,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
           )}
 
           <div className="flex flex-wrap gap-2">
-            {canStart && <Button onClick={handleStartSync} className="gap-2"><Play className="h-4 w-4" />Iniciar Sincronização</Button>}
+            {canStart && <Button onClick={handleStartSync} className="gap-2"><Play className="h-4 w-4" />Calcular Custos Reais</Button>}
             {realCostsState?.status === 'running' && <Button variant="outline" onClick={handlePauseSync} className="gap-2"><Pause className="h-4 w-4" />Pausar</Button>}
             {realCostsState?.status === 'paused' && (
               <>
@@ -209,7 +326,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
               </>
             )}
             {isRunningOrPaused && <Button variant="ghost" onClick={() => setShowResetConfirm(true)} className="gap-2 text-destructive hover:text-destructive"><RotateCcw className="h-4 w-4" />Resetar</Button>}
-            {realCostsState?.status === 'done' && <Button variant="outline" onClick={handleStartSync} className="gap-2"><RefreshCw className="h-4 w-4" />Sincronizar Novamente</Button>}
+            {realCostsState?.status === 'done' && <Button variant="outline" onClick={handleStartSync} className="gap-2"><RefreshCw className="h-4 w-4" />Recalcular</Button>}
           </div>
         </CardContent>
       </Card>
@@ -225,11 +342,14 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="flex items-center gap-2"><Percent className="h-5 w-5" />Taxa de Venda (Fallback)</CardTitle><CardDescription>Taxa padrão para estimativa quando não houver dado real</CardDescription></CardHeader>
+        <CardHeader><CardTitle className="flex items-center gap-2"><Percent className="h-5 w-5" />Taxa de Venda (Legado)</CardTitle><CardDescription>Esta configuração é mantida apenas para referência. O sistema agora usa exclusivamente dados reais da API.</CardDescription></CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2"><Label>Taxa padrão (%)</Label><Input type="number" step="0.1" value={feePercent} onChange={(e) => setFeePercent(e.target.value)} placeholder="17" /></div>
-            <div className="space-y-2"><Label>Modo de cálculo</Label><Select value={feeMode} onValueChange={setFeeMode}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="percent">Percentual</SelectItem><SelectItem value="real">Usar dados reais (quando disponível)</SelectItem></SelectContent></Select></div>
+          <div className="p-3 bg-muted rounded-lg text-sm text-muted-foreground">
+            <p>⚠️ O sistema não usa mais taxas estimadas. Pedidos sem dados de billing são marcados como "Pendente" até que o Mercado Livre disponibilize os dados (geralmente 24h após a venda).</p>
+          </div>
+          <div className="grid grid-cols-2 gap-4 opacity-50">
+            <div className="space-y-2"><Label>Taxa padrão (%)</Label><Input type="number" step="0.1" value={feePercent} onChange={(e) => setFeePercent(e.target.value)} placeholder="17" disabled /></div>
+            <div className="space-y-2"><Label>Modo de cálculo</Label><Select value={feeMode} onValueChange={setFeeMode} disabled><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="percent">Percentual</SelectItem><SelectItem value="real">Usar dados reais</SelectItem></SelectContent></Select></div>
           </div>
         </CardContent>
       </Card>
@@ -238,7 +358,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
 
       <AlertDialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
         <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>Resetar sincronização?</AlertDialogTitle><AlertDialogDescription>Esta ação irá apagar todo o progresso da sincronização atual. Os custos já calculados serão mantidos, mas você precisará iniciar a sincronização do zero.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogHeader><AlertDialogTitle>Resetar sincronização?</AlertDialogTitle><AlertDialogDescription>Esta ação irá apagar todo o progresso da sincronização atual E zerar os custos calculados. Você precisará sincronizar o billing e calcular os custos novamente.</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleResetSync} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Resetar</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
