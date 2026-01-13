@@ -63,9 +63,39 @@ Deno.serve(async (req) => {
 async function handleGetStatus(supabase: any, sellerId: string, corsHeaders: any) {
   const { data: state } = await supabase.from("meli_real_costs_sync_state").select("*").eq("seller_id", sellerId).maybeSingle();
   const { count: totalPaid } = await supabase.from("meli_orders_cache").select("*", { count: "exact", head: true }).eq("seller_id", sellerId).eq("order_status", "paid");
-  const { count: withCosts } = await supabase.from("order_cost_breakdown_cache").select("*", { count: "exact", head: true }).eq("seller_id", sellerId).gt("total_marketplace_cost", 0);
-  const coverage = { total_paid: totalPaid || 0, with_costs: withCosts || 0, coverage_percent: totalPaid > 0 ? Math.round((withCosts || 0) / totalPaid * 100) : 0 };
-  return new Response(JSON.stringify({ state: state || { status: "idle", processed: 0, total: 0, cursor_offset: 0 }, coverage }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  
+  // Count orders with REAL billing data (not pending or estimated)
+  const { count: withRealBilling } = await supabase
+    .from("order_cost_breakdown_cache")
+    .select("*", { count: "exact", head: true })
+    .eq("seller_id", sellerId)
+    .eq("fee_ml_source", "billing");
+
+  // Count orders with pending billing
+  const { count: withPendingBilling } = await supabase
+    .from("order_cost_breakdown_cache")
+    .select("*", { count: "exact", head: true })
+    .eq("seller_id", sellerId)
+    .eq("fee_ml_source", "pending");
+
+  // Count total processed
+  const { count: totalProcessed } = await supabase
+    .from("order_cost_breakdown_cache")
+    .select("*", { count: "exact", head: true })
+    .eq("seller_id", sellerId);
+
+  const coverage = { 
+    total_paid: totalPaid || 0, 
+    with_real_billing: withRealBilling || 0,
+    with_pending_billing: withPendingBilling || 0,
+    total_processed: totalProcessed || 0,
+    coverage_percent: totalPaid > 0 ? Math.round((withRealBilling || 0) / totalPaid * 100) : 0 
+  };
+
+  return new Response(JSON.stringify({ 
+    state: state || { status: "idle", processed: 0, total: 0, cursor_offset: 0 }, 
+    coverage 
+  }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
 async function handlePause(supabase: any, userId: string, sellerId: string, corsHeaders: any) {
@@ -75,6 +105,17 @@ async function handlePause(supabase: any, userId: string, sellerId: string, cors
 
 async function handleReset(supabase: any, userId: string, sellerId: string, corsHeaders: any) {
   await supabase.from("meli_real_costs_sync_state").delete().eq("seller_id", sellerId).eq("user_id", userId);
+  // Also reset the cost breakdown cache to pending state
+  await supabase.from("order_cost_breakdown_cache")
+    .update({ 
+      fee_ml: 0, 
+      fee_ml_source: "pending", 
+      total_marketplace_cost: 0,
+      has_real_financial: false,
+      real_cost_synced_at: null 
+    })
+    .eq("seller_id", sellerId)
+    .eq("user_id", userId);
   return new Response(JSON.stringify({ message: "Reset complete", state: null }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
@@ -94,82 +135,187 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
   const { count: total } = await totalQuery;
 
   if (!state) {
-    const { data: newState } = await supabase.from("meli_real_costs_sync_state").insert({ user_id: userId, seller_id: sellerId, status: "running", scope_days: scopeDays, processed: 0, total: total || 0, cursor_offset: 0, last_heartbeat_at: new Date().toISOString(), started_at: new Date().toISOString(), stats_json: { estimated: 0, billing: 0, with_shipping: 0 } }).select().single();
+    const { data: newState } = await supabase.from("meli_real_costs_sync_state").insert({ 
+      user_id: userId, seller_id: sellerId, status: "running", scope_days: scopeDays, 
+      processed: 0, total: total || 0, cursor_offset: 0, 
+      last_heartbeat_at: new Date().toISOString(), started_at: new Date().toISOString(), 
+      stats_json: { billing: 0, pending: 0, with_shipping: 0 } 
+    }).select().single();
     state = newState;
   } else {
     const upd: any = { status: "running", total: total || 0, last_heartbeat_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-    if (state.status === "idle" || state.status === "done") { upd.started_at = new Date().toISOString(); upd.processed = 0; upd.cursor_offset = 0; upd.stats_json = { estimated: 0, billing: 0, with_shipping: 0 }; }
+    if (state.status === "idle" || state.status === "done") { 
+      upd.started_at = new Date().toISOString(); 
+      upd.processed = 0; 
+      upd.cursor_offset = 0; 
+      upd.stats_json = { billing: 0, pending: 0, with_shipping: 0 }; 
+    }
     const { data: updated } = await supabase.from("meli_real_costs_sync_state").update(upd).eq("seller_id", sellerId).select().single();
     state = updated;
   }
 
+  // Get ML account for shipping costs API
   const { data: mlAccount } = await supabase.from("ml_accounts").select("access_token").eq("ml_user_id", sellerId).eq("is_active", true).maybeSingle();
-  if (!mlAccount) { await supabase.from("meli_real_costs_sync_state").update({ status: "error", last_error: "ML account not found" }).eq("seller_id", sellerId); return new Response(JSON.stringify({ error: "ML account not found" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }); }
+  if (!mlAccount) { 
+    await supabase.from("meli_real_costs_sync_state").update({ status: "error", last_error: "ML account not found" }).eq("seller_id", sellerId); 
+    return new Response(JSON.stringify({ error: "ML account not found" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }); 
+  }
 
   let currentOffset = state.cursor_offset, processedInRun = 0;
-  const stats = state.stats_json || { estimated: 0, billing: 0, with_shipping: 0 };
+  const stats = state.stats_json || { billing: 0, pending: 0, with_shipping: 0 };
 
   while (processedInRun < MAX_ORDERS_PER_RUN && Date.now() - startTime < MAX_RUNTIME_MS) {
     let q = supabase.from("meli_orders_cache").select("order_id, total_amount, shipment_id").eq("seller_id", sellerId).eq("order_status", "paid").order("created_at_meli", { ascending: true }).range(currentOffset, currentOffset + PAGE_SIZE - 1);
     if (state.scope_days) { const d = new Date(); d.setDate(d.getDate() - state.scope_days); q = q.gte("created_at_meli", d.toISOString()); }
     const { data: orders } = await q;
+    
     if (!orders?.length) {
       await supabase.from("meli_real_costs_sync_state").update({ status: "done", finished_at: new Date().toISOString(), updated_at: new Date().toISOString(), stats_json: stats }).eq("seller_id", sellerId);
       return new Response(JSON.stringify({ message: "Sync complete", processed: state.processed + processedInRun, total: state.total }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const orderIds = orders.map((o: any) => o.order_id);
-    const { data: existing } = await supabase.from("order_cost_breakdown_cache").select("order_id, real_cost_synced_at").eq("seller_id", sellerId).in("order_id", orderIds);
-    const existingMap = new Map<string, { order_id: string; real_cost_synced_at: string | null }>((existing || []).map((b: { order_id: string; real_cost_synced_at: string | null }) => [b.order_id, b]));
+    
+    // Check existing processed orders
+    const { data: existing } = await supabase.from("order_cost_breakdown_cache").select("order_id, real_cost_synced_at, fee_ml_source").eq("seller_id", sellerId).in("order_id", orderIds);
+    const existingMap = new Map<string, { order_id: string; real_cost_synced_at: string | null; fee_ml_source: string | null }>((existing || []).map((b: { order_id: string; real_cost_synced_at: string | null; fee_ml_source: string | null }) => [b.order_id, b]));
+    
+    // Fetch billing details for these orders from our cache
+    const { data: billingDetails } = await supabase
+      .from("meli_billing_details_cache")
+      .select("order_id, charge_type, gross_amount")
+      .eq("seller_id", sellerId)
+      .in("order_id", orderIds.map((id: string) => parseInt(id)));
+
+    // Group billing details by order_id
+    const billingByOrder = new Map<string, { fee_ml: number; shipping: number; installments: number; adjustments: number }>();
+    for (const detail of (billingDetails || [])) {
+      const orderId = String(detail.order_id);
+      if (!billingByOrder.has(orderId)) {
+        billingByOrder.set(orderId, { fee_ml: 0, shipping: 0, installments: 0, adjustments: 0 });
+      }
+      const entry = billingByOrder.get(orderId)!;
+      const chargeType = (detail.charge_type || "").toLowerCase();
+      const amount = detail.gross_amount || 0;
+
+      if (chargeType.includes("cargo por venta") || chargeType.includes("sale_fee") || chargeType === "sale_fee_amount") {
+        entry.fee_ml += amount;
+      } else if (chargeType.includes("mercado envíos") || chargeType.includes("shipping") || chargeType === "shipping_fee") {
+        entry.shipping += amount;
+      } else if (chargeType.includes("cuota") || chargeType.includes("installment")) {
+        entry.installments += amount;
+      } else if (chargeType.includes("ajuste") || chargeType.includes("adjustment")) {
+        entry.adjustments += amount;
+      }
+    }
+
     const rowsToUpsert: any[] = [];
 
     for (const order of orders) {
       const ex = existingMap.get(order.order_id);
-      if (ex?.real_cost_synced_at && Date.now() - new Date(ex.real_cost_synced_at).getTime() < 86400000) { processedInRun++; continue; }
-      const costs = await calcCosts(supabase, mlAccount.access_token, sellerId, userId, order, stats);
-      if (costs) rowsToUpsert.push(costs);
+      // Skip if already synced with billing data in the last 24h
+      if (ex?.real_cost_synced_at && ex.fee_ml_source === 'billing' && Date.now() - new Date(ex.real_cost_synced_at).getTime() < 86400000) { 
+        processedInRun++; 
+        continue; 
+      }
+
+      const billing = billingByOrder.get(order.order_id);
+      let feeML = 0, feeMLSource = "pending", shippingCostSeller = 0, installmentsCost = 0, adjustments = 0;
+      const sourceRefs: string[] = [];
+
+      if (billing && billing.fee_ml > 0) {
+        // We have real billing data!
+        feeML = billing.fee_ml;
+        feeMLSource = "billing";
+        shippingCostSeller = billing.shipping;
+        installmentsCost = billing.installments;
+        adjustments = billing.adjustments;
+        sourceRefs.push("billing:api");
+        stats.billing++;
+      } else {
+        // No billing data yet - mark as pending (NOT estimated!)
+        feeMLSource = "pending";
+        sourceRefs.push("billing:pending");
+        stats.pending++;
+      }
+
+      // Try to get shipping cost from shipment API if we don't have it from billing
+      if (order.shipment_id && shippingCostSeller === 0) {
+        const { data: sc } = await supabase.from("meli_shipment_costs_cache").select("sender_cost").eq("shipment_id", order.shipment_id).maybeSingle();
+        if (sc) { 
+          shippingCostSeller = sc.sender_cost || 0; 
+          sourceRefs.push("shipment:cache"); 
+          if (shippingCostSeller > 0) stats.with_shipping++;
+        } else {
+          try {
+            const r = await fetch(`https://api.mercadolibre.com/shipments/${order.shipment_id}/costs`, { 
+              headers: { Authorization: `Bearer ${mlAccount.access_token}` } 
+            });
+            if (r.ok) { 
+              const d = await r.json(); 
+              shippingCostSeller = d.sender?.cost || 0; 
+              sourceRefs.push("shipment:api"); 
+              if (shippingCostSeller > 0) stats.with_shipping++;
+              await supabase.from("meli_shipment_costs_cache").upsert({ 
+                user_id: userId, seller_id: sellerId, shipment_id: order.shipment_id, order_id: order.order_id, 
+                sender_cost: shippingCostSeller, gross_amount: d.gross_amount || 0, raw_json: d, 
+                synced_at: new Date().toISOString() 
+              }, { onConflict: "shipment_id" }); 
+            }
+          } catch {}
+        }
+      }
+
+      const totalMarketplaceCost = feeML + shippingCostSeller + installmentsCost + adjustments;
+
+      rowsToUpsert.push({ 
+        user_id: userId, 
+        seller_id: sellerId, 
+        order_id: order.order_id, 
+        shipment_id: order.shipment_id, 
+        fee_ml: feeML, 
+        fee_ml_source: feeMLSource, 
+        shipping_cost_seller: shippingCostSeller, 
+        installments_cost: installmentsCost, 
+        adjustments: adjustments, 
+        total_marketplace_cost: totalMarketplaceCost, 
+        has_real_financial: feeMLSource === "billing", 
+        has_real_cost: false, 
+        source_refs: { refs: sourceRefs }, 
+        real_cost_synced_at: new Date().toISOString(), 
+        calculated_at: new Date().toISOString(), 
+        status: feeMLSource === "billing" ? "calculated" : "pending" 
+      });
+      
       processedInRun++;
       if (Date.now() - startTime >= MAX_RUNTIME_MS) break;
     }
 
     if (rowsToUpsert.length) await supabase.from("order_cost_breakdown_cache").upsert(rowsToUpsert, { onConflict: "seller_id,order_id" });
     currentOffset += orders.length;
-    await supabase.from("meli_real_costs_sync_state").update({ cursor_offset: currentOffset, processed: state.processed + processedInRun, last_page_size: orders.length, last_heartbeat_at: new Date().toISOString(), updated_at: new Date().toISOString(), stats_json: stats }).eq("seller_id", sellerId);
+    await supabase.from("meli_real_costs_sync_state").update({ 
+      cursor_offset: currentOffset, 
+      processed: state.processed + processedInRun, 
+      last_page_size: orders.length, 
+      last_heartbeat_at: new Date().toISOString(), 
+      updated_at: new Date().toISOString(), 
+      stats_json: stats 
+    }).eq("seller_id", sellerId);
   }
 
-  await supabase.from("meli_real_costs_sync_state").update({ status: "paused", cursor_offset: currentOffset, processed: state.processed + processedInRun, last_heartbeat_at: new Date().toISOString(), updated_at: new Date().toISOString(), stats_json: stats }).eq("seller_id", sellerId);
-  return new Response(JSON.stringify({ message: "Paused (budget reached)", processed: state.processed + processedInRun, total: state.total, cursor_offset: currentOffset }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-}
-
-async function calcCosts(supabase: any, accessToken: string, sellerId: string, userId: string, order: any, stats: any) {
-  const { order_id, total_amount, shipment_id } = order;
-  let feeML = 0, feeMLSource = "estimated", shippingCostSeller = 0;
-  const sourceRefs: string[] = [];
-
-  if (shipment_id) {
-    const { data: sc } = await supabase.from("meli_shipment_costs_cache").select("sender_cost").eq("shipment_id", shipment_id).maybeSingle();
-    if (sc) { shippingCostSeller = sc.sender_cost || 0; sourceRefs.push("shipment:cache"); stats.with_shipping++; }
-    else {
-      try {
-        const r = await fetch(`https://api.mercadolibre.com/shipments/${shipment_id}/costs`, { headers: { Authorization: `Bearer ${accessToken}` } });
-        if (r.ok) { const d = await r.json(); shippingCostSeller = d.sender?.cost || 0; sourceRefs.push("shipment:api"); stats.with_shipping++; await supabase.from("meli_shipment_costs_cache").upsert({ user_id: userId, seller_id: sellerId, shipment_id, order_id, sender_cost: shippingCostSeller, gross_amount: d.gross_amount || 0, raw_json: d, synced_at: new Date().toISOString() }, { onConflict: "shipment_id" }); }
-      } catch {}
-    }
-  }
-
-  if (total_amount > 0) {
-    const priceBucket = Math.round(total_amount / 10) * 10;
-    const { data: cf } = await supabase.from("meli_listing_fee_cache").select("fee_amount").eq("seller_id", sellerId).eq("price_bucket", priceBucket).maybeSingle();
-    if (cf) { feeML = cf.fee_amount; sourceRefs.push("fee:cache"); }
-    else {
-      feeML = Math.round(total_amount * 0.17 * 100) / 100; sourceRefs.push("fee:estimated");
-      try {
-        const r = await fetch(`https://api.mercadolibre.com/sites/MLB/listing_prices?price=${total_amount}&listing_type_id=gold_pro`, { headers: { Authorization: `Bearer ${accessToken}` } });
-        if (r.ok) { const d = await r.json(); if (d.sale_fee_amount > 0) { feeML = d.sale_fee_amount; feeMLSource = "listing_prices"; sourceRefs.push("fee:listing_prices"); stats.billing++; await supabase.from("meli_listing_fee_cache").upsert({ seller_id: sellerId, listing_type_id: "gold_pro", price_bucket: priceBucket, fee_amount: feeML, fee_percent: d.sale_fee_percent, raw_json: d, updated_at: new Date().toISOString() }, { onConflict: "seller_id,listing_type_id,price_bucket" }); } }
-      } catch {}
-    }
-    if (feeMLSource === "estimated") stats.estimated++;
-  }
-
-  return { user_id: userId, seller_id: sellerId, order_id, shipment_id, fee_ml: feeML, fee_ml_source: feeMLSource, shipping_cost_seller: shippingCostSeller, installments_cost: 0, adjustments: 0, total_marketplace_cost: feeML + shippingCostSeller, has_real_financial: feeMLSource !== "estimated", has_real_cost: false, source_refs: { refs: sourceRefs }, real_cost_synced_at: new Date().toISOString(), calculated_at: new Date().toISOString(), status: "calculated" };
+  await supabase.from("meli_real_costs_sync_state").update({ 
+    status: "paused", 
+    cursor_offset: currentOffset, 
+    processed: state.processed + processedInRun, 
+    last_heartbeat_at: new Date().toISOString(), 
+    updated_at: new Date().toISOString(), 
+    stats_json: stats 
+  }).eq("seller_id", sellerId);
+  
+  return new Response(JSON.stringify({ 
+    message: "Paused (budget reached)", 
+    processed: state.processed + processedInRun, 
+    total: state.total, 
+    cursor_offset: currentOffset 
+  }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
