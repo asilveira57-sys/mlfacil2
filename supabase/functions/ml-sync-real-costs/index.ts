@@ -51,9 +51,10 @@ Deno.serve(async (req) => {
       return await handleStartOrContinue(supabase, user.id, seller_id, scope_days, force_resume, corsHeaders);
     }
     return await handleGetStatus(supabase, seller_id, corsHeaders);
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("Error:", err);
-    return new Response(JSON.stringify({ error: err.message }), {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return new Response(JSON.stringify({ error: message }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
@@ -119,7 +120,7 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
 
     const orderIds = orders.map((o: any) => o.order_id);
     const { data: existing } = await supabase.from("order_cost_breakdown_cache").select("order_id, real_cost_synced_at").eq("seller_id", sellerId).in("order_id", orderIds);
-    const existingMap = new Map((existing || []).map((b: any) => [b.order_id, b]));
+    const existingMap = new Map<string, { order_id: string; real_cost_synced_at: string | null }>((existing || []).map((b: { order_id: string; real_cost_synced_at: string | null }) => [b.order_id, b]));
     const rowsToUpsert: any[] = [];
 
     for (const order of orders) {
