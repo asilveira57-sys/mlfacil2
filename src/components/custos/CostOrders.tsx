@@ -598,79 +598,104 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
               </div>
 
               {selectedOrder.breakdown && (
-                <div className="bg-muted/50 rounded-lg p-4">
-                  <h4 className="font-medium mb-3">Resumo Financeiro</h4>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div>Receita Produtos:</div>
-                    <div className="text-right font-medium">{formatCurrency(selectedOrder.order?.total_amount || 0)}</div>
+                <div className="space-y-4">
+                  {/* Resumo Principal - Lucro do Produto (sem frete) */}
+                  <div className="bg-muted/50 rounded-lg p-4">
+                    <h4 className="font-medium mb-3 flex items-center gap-2">
+                      💰 Lucro do Produto
+                      <span className="text-xs text-muted-foreground font-normal">(sem impacto do frete)</span>
+                    </h4>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div>Receita Líquida (produtos):</div>
+                      <div className="text-right font-medium">{formatCurrency(selectedOrder.breakdown.revenue_net || selectedOrder.breakdown.revenue_total)}</div>
 
-                    {selectedOrder.billing?.revenue_shipping > 0 && (
-                      <>
-                        <div className="flex items-center gap-1">
-                          (+) Receita Frete:
-                          <CheckCircle2 className="h-3 w-3 text-green-600" />
-                        </div>
-                        <div className="text-right text-green-600">{formatCurrency(selectedOrder.billing.revenue_shipping)}</div>
-                      </>
-                    )}
+                      <div>(-) Custo dos Itens:</div>
+                      <div className="text-right">{formatCurrency(selectedOrder.breakdown.cost_items_total)}</div>
 
-                    <div className="border-t pt-2 font-medium">Receita Total:</div>
-                    <div className="text-right border-t pt-2 font-medium">{formatCurrency(selectedOrder.breakdown.revenue_total)}</div>
+                      <div>(-) Embalagem:</div>
+                      <div className="text-right">{formatCurrency(selectedOrder.breakdown.cost_packaging)}</div>
 
-                    <div>(-) Custo dos Itens:</div>
-                    <div className="text-right">{formatCurrency(selectedOrder.breakdown.cost_items_total)}</div>
+                      <div className="flex items-center gap-1">
+                        (-) Comissão ML:
+                        {selectedOrder.breakdown.commission_cost > 0 && <CheckCircle2 className="h-3 w-3 text-green-600" />}
+                      </div>
+                      <div className="text-right">{formatCurrency(selectedOrder.breakdown.commission_cost || selectedOrder.billing?.cost_sale_fee || 0)}</div>
 
-                    <div>(-) Embalagem:</div>
-                    <div className="text-right">{formatCurrency(selectedOrder.breakdown.cost_packaging)}</div>
+                      {(selectedOrder.breakdown.installments_cost > 0 || selectedOrder.billing?.cost_installment_fee > 0) && (
+                        <>
+                          <div className="flex items-center gap-1">
+                            (-) Taxa Parcelamento:
+                            <CheckCircle2 className="h-3 w-3 text-green-600" />
+                          </div>
+                          <div className="text-right">{formatCurrency(selectedOrder.breakdown.installments_cost || selectedOrder.billing?.cost_installment_fee || 0)}</div>
+                        </>
+                      )}
 
-                    {selectedOrder.billing ? (
-                      <>
-                        <div className="flex items-center gap-1">
-                          (-) Tarifa de Venda:
-                          <CheckCircle2 className="h-3 w-3 text-green-600" />
-                        </div>
-                        <div className="text-right">{formatCurrency(selectedOrder.billing.cost_sale_fee || 0)}</div>
+                      <div className="border-t pt-2 font-medium">Custo Net:</div>
+                      <div className="text-right border-t pt-2 font-medium text-destructive">
+                        {formatCurrency(selectedOrder.breakdown.cost_net || selectedOrder.breakdown.cost_total)}
+                      </div>
 
-                        {selectedOrder.billing.cost_installment_fee > 0 && (
-                          <>
-                            <div className="flex items-center gap-1">
-                              (-) Tarifa Parcelamento:
-                              <CheckCircle2 className="h-3 w-3 text-green-600" />
-                            </div>
-                            <div className="text-right">{formatCurrency(selectedOrder.billing.cost_installment_fee)}</div>
-                          </>
-                        )}
+                      <div className="border-t pt-2 font-medium text-lg">Lucro:</div>
+                      <div className={`text-right border-t pt-2 font-medium text-lg ${(selectedOrder.breakdown.profit_net ?? selectedOrder.breakdown.profit_total) >= 0 ? 'text-green-600' : 'text-destructive'}`}>
+                        {formatCurrency(selectedOrder.breakdown.profit_net ?? selectedOrder.breakdown.profit_total)}
+                      </div>
 
-                        {selectedOrder.billing.cost_shipping_fee > 0 && (
-                          <>
-                            <div className="flex items-center gap-1">
-                              (-) Tarifa Frete:
-                              <CheckCircle2 className="h-3 w-3 text-green-600" />
-                            </div>
-                            <div className="text-right">{formatCurrency(selectedOrder.billing.cost_shipping_fee)}</div>
-                          </>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        <div>(-) Taxas ML (estimado):</div>
-                        <div className="text-right text-muted-foreground">{formatCurrency(selectedOrder.breakdown.cost_fees)}</div>
-                      </>
-                    )}
-
-                    <div className="border-t pt-2 font-medium">Custo Total:</div>
-                    <div className="text-right border-t pt-2 font-medium text-destructive">
-                      {formatCurrency(selectedOrder.breakdown.cost_total)}
+                      <div>Margem:</div>
+                      <div className="text-right font-medium">{(selectedOrder.breakdown.margin_net ?? selectedOrder.breakdown.margin_percent)?.toFixed(1)}%</div>
                     </div>
-
-                    <div className="border-t pt-2 font-medium">Lucro:</div>
-                    <div className={`text-right border-t pt-2 font-medium ${selectedOrder.breakdown.profit_total >= 0 ? 'text-green-600' : 'text-destructive'}`}>
-                      {formatCurrency(selectedOrder.breakdown.profit_total)}
-                    </div>
-
-                    <div>Margem:</div>
-                    <div className="text-right">{selectedOrder.breakdown.margin_percent?.toFixed(1)}%</div>
                   </div>
+
+                  {/* Bloco Frete e Taxas - Separado */}
+                  <div className="border rounded-lg p-4">
+                    <h4 className="font-medium mb-3 flex items-center gap-2">
+                      🚚 Frete e Taxas
+                      <span className="text-xs text-muted-foreground font-normal">(não impacta lucro/margem principal)</span>
+                    </h4>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div className="flex items-center gap-1">
+                        Receita de Frete (cliente pagou):
+                        {(selectedOrder.breakdown.receita_envio > 0 || selectedOrder.billing?.revenue_shipping > 0) && 
+                          <CheckCircle2 className="h-3 w-3 text-green-600" />}
+                      </div>
+                      <div className="text-right text-green-600">
+                        +{formatCurrency(selectedOrder.breakdown.receita_envio || selectedOrder.billing?.revenue_shipping || 0)}
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        Custo de Frete (ML cobrou):
+                        {(selectedOrder.breakdown.shipping_cost_seller > 0 || selectedOrder.billing?.cost_shipping_fee > 0) && 
+                          <CheckCircle2 className="h-3 w-3 text-green-600" />}
+                      </div>
+                      <div className="text-right text-destructive">
+                        -{formatCurrency(selectedOrder.breakdown.shipping_cost_seller || selectedOrder.billing?.cost_shipping_fee || 0)}
+                      </div>
+
+                      <div className="border-t pt-2 font-medium">Saldo do Frete:</div>
+                      <div className={`text-right border-t pt-2 font-medium ${
+                        (selectedOrder.breakdown.shipping_balance ?? 0) >= 0 ? 'text-green-600' : 'text-destructive'
+                      }`}>
+                        {formatCurrency(selectedOrder.breakdown.shipping_balance ?? 
+                          ((selectedOrder.billing?.revenue_shipping || 0) - (selectedOrder.billing?.cost_shipping_fee || 0))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Status e Debug */}
+                  {selectedOrder.breakdown.missing_fields?.length > 0 && (
+                    <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
+                      <div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-200 text-sm">
+                        <AlertCircle className="h-4 w-4" />
+                        <span className="font-medium">Campos faltantes:</span>
+                        {selectedOrder.breakdown.missing_fields.map((field: string) => (
+                          <Badge key={field} variant="outline" className="text-yellow-700 border-yellow-400">
+                            {field}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

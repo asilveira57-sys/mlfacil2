@@ -553,17 +553,45 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
       let costFees = 0;
       let costShipping = 0;
       let revenueShipping = 0;
+      let commissionCost = 0;
+      let installmentsCost = 0;
 
       if (billing) {
         // Real data from ML billing API
-        costFees = (billing.cost_sale_fee || 0) + (billing.cost_installment_fee || 0);
+        commissionCost = billing.cost_sale_fee || 0;
+        installmentsCost = billing.cost_installment_fee || 0;
+        costFees = commissionCost + installmentsCost;
         costShipping = billing.cost_shipping_fee || 0;
         revenueShipping = billing.revenue_shipping || 0;
       }
 
-      // Total revenue includes shipping paid by buyer
-      const revenue = baseRevenue + revenueShipping;
+      // Total revenue includes shipping paid by buyer (for backwards compatibility)
+      const revenue = baseRevenue;
 
+      // === NEW SEPARATED CALCULATIONS ===
+      // Revenue NET = product revenue only (without shipping revenue)
+      const revenueNet = revenue - revenueShipping;
+      
+      // Cost NET = product costs + commission + packaging (WITHOUT shipping)
+      // This is the "real" cost of selling the product
+      const costNet = costItemsTotal + costPackaging + commissionCost + installmentsCost;
+      
+      // Profit NET = product profit (not impacted by shipping)
+      const profitNet = revenueNet - costNet;
+      
+      // Margin NET = product margin (not impacted by shipping)
+      const marginNet = revenueNet > 0 ? (profitNet / revenueNet) * 100 : 0;
+      
+      // Shipping balance = what customer paid - what ML charged
+      const shippingBalance = revenueShipping - costShipping;
+      
+      // Track missing fields
+      const missingFields: string[] = [];
+      if (missingCount > 0) missingFields.push('sem_custo_produto');
+      if (!billing) missingFields.push('sem_billing_real');
+      if (costShipping === 0 && order.shipment_id) missingFields.push('sem_frete_cobrado');
+
+      // Legacy calculations (for backwards compatibility)
       const costTotal = costItemsTotal + costPackaging + costFees + costShipping;
       const profit = revenue - costTotal;
       const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
@@ -581,10 +609,21 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
         cost_shipping: costShipping,
         cost_other: 0,
         cost_total: costTotal,
-        profit_total: profit,
-        margin_percent: margin,
+        profit_total: profitNet, // Changed to use NET profit (without shipping impact)
+        margin_percent: marginNet, // Changed to use NET margin (without shipping impact)
         missing_cost_items_count: missingCount,
-        status: missingCount > 0 ? 'incompleto' : 'ok',
+        status: missingCount > 0 ? 'incompleto' : (billing ? 'ok' : 'pending'),
+        // NEW separated fields
+        commission_cost: commissionCost,
+        installments_cost: installmentsCost,
+        shipping_cost_seller: costShipping,
+        receita_envio: revenueShipping,
+        shipping_balance: shippingBalance,
+        revenue_net: revenueNet,
+        cost_net: costNet,
+        profit_net: profitNet,
+        margin_net: marginNet,
+        missing_fields: missingFields,
       });
     }
 

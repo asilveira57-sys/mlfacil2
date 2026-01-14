@@ -1545,8 +1545,10 @@ export type Database = {
           adjustments: number | null
           calculated_at: string
           cancelamentos_reembolsos: number | null
+          commission_cost: number | null
           cost_fees: number
           cost_items_total: number
+          cost_net: number | null
           cost_other: number
           cost_packaging: number
           cost_shipping: number
@@ -1560,20 +1562,25 @@ export type Database = {
           has_real_financial: boolean | null
           id: string
           installments_cost: number | null
+          margin_net: number | null
           margin_percent: number
           missing_cost_items_count: number
+          missing_fields: string[] | null
           missing_financial_count: number | null
           notes: string | null
           order_id: string
+          profit_net: number | null
           profit_total: number
           raw_summary_json: Json | null
           real_cost_synced_at: string | null
           receita_acrescimo: number | null
           receita_envio: number | null
           receita_produtos: number | null
+          revenue_net: number | null
           revenue_total: number
           seller_id: string
           shipment_id: string | null
+          shipping_balance: number | null
           shipping_cost_seller: number | null
           source_refs: Json | null
           status: string
@@ -1588,8 +1595,10 @@ export type Database = {
           adjustments?: number | null
           calculated_at?: string
           cancelamentos_reembolsos?: number | null
+          commission_cost?: number | null
           cost_fees?: number
           cost_items_total?: number
+          cost_net?: number | null
           cost_other?: number
           cost_packaging?: number
           cost_shipping?: number
@@ -1603,20 +1612,25 @@ export type Database = {
           has_real_financial?: boolean | null
           id?: string
           installments_cost?: number | null
+          margin_net?: number | null
           margin_percent?: number
           missing_cost_items_count?: number
+          missing_fields?: string[] | null
           missing_financial_count?: number | null
           notes?: string | null
           order_id: string
+          profit_net?: number | null
           profit_total?: number
           raw_summary_json?: Json | null
           real_cost_synced_at?: string | null
           receita_acrescimo?: number | null
           receita_envio?: number | null
           receita_produtos?: number | null
+          revenue_net?: number | null
           revenue_total?: number
           seller_id: string
           shipment_id?: string | null
+          shipping_balance?: number | null
           shipping_cost_seller?: number | null
           source_refs?: Json | null
           status?: string
@@ -1631,8 +1645,10 @@ export type Database = {
           adjustments?: number | null
           calculated_at?: string
           cancelamentos_reembolsos?: number | null
+          commission_cost?: number | null
           cost_fees?: number
           cost_items_total?: number
+          cost_net?: number | null
           cost_other?: number
           cost_packaging?: number
           cost_shipping?: number
@@ -1646,20 +1662,25 @@ export type Database = {
           has_real_financial?: boolean | null
           id?: string
           installments_cost?: number | null
+          margin_net?: number | null
           margin_percent?: number
           missing_cost_items_count?: number
+          missing_fields?: string[] | null
           missing_financial_count?: number | null
           notes?: string | null
           order_id?: string
+          profit_net?: number | null
           profit_total?: number
           raw_summary_json?: Json | null
           real_cost_synced_at?: string | null
           receita_acrescimo?: number | null
           receita_envio?: number | null
           receita_produtos?: number | null
+          revenue_net?: number | null
           revenue_total?: number
           seller_id?: string
           shipment_id?: string | null
+          shipping_balance?: number | null
           shipping_cost_seller?: number | null
           source_refs?: Json | null
           status?: string
