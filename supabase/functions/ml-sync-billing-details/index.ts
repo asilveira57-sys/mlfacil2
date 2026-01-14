@@ -135,7 +135,8 @@ async function handleSync(supabase: any, userId: string, sellerId: string, corsH
   try {
     // Step 1: Fetch available billing periods (with token refresh retry)
     console.log(`[BillingDetails] Fetching billing periods...`);
-    const periodsUrl = `https://api.mercadolibre.com/billing/integration/monthly/periods?group=ML&limit=${MAX_PERIODS}`;
+    // document_type is REQUIRED for MLB: BILL or CREDIT_NOTE
+    const periodsUrl = `https://api.mercadolibre.com/billing/integration/monthly/periods?group=ML&document_type=BILL&limit=${MAX_PERIODS}`;
     
     let periodsRes = await fetch(periodsUrl, {
       headers: { Authorization: `Bearer ${accessToken}` },
