@@ -9,7 +9,8 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Search, AlertCircle, TrendingUp, TrendingDown, RefreshCw, CheckCircle2, DollarSign, Save } from 'lucide-react';
+import { Search, AlertCircle, TrendingUp, TrendingDown, RefreshCw, CheckCircle2, DollarSign, Save, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 interface CostOrdersProps {
@@ -62,6 +63,55 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const [editingCostOther, setEditingCostOther] = useState<number>(0);
   const [editingNotes, setEditingNotes] = useState<string>('');
   const [savingExtra, setSavingExtra] = useState(false);
+
+  // Sorting state
+  type SortKey = 'created_at_meli' | 'revenue_total' | 'cost_total' | 'profit_total' | 'margin_percent' | null;
+  type SortDirection = 'asc' | 'desc' | null;
+  const [sortKey, setSortKey] = useState<SortKey>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>(null);
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      if (sortDirection === 'desc') {
+        setSortDirection('asc');
+      } else if (sortDirection === 'asc') {
+        setSortKey(null);
+        setSortDirection(null);
+      }
+    } else {
+      setSortKey(key);
+      setSortDirection('desc');
+    }
+  };
+
+  const sortedOrders = [...orders].sort((a, b) => {
+    if (!sortKey || !sortDirection) return 0;
+    
+    let aValue: number | string | null;
+    let bValue: number | string | null;
+    
+    if (sortKey === 'created_at_meli') {
+      aValue = a.created_at_meli ? new Date(a.created_at_meli).getTime() : 0;
+      bValue = b.created_at_meli ? new Date(b.created_at_meli).getTime() : 0;
+    } else {
+      aValue = a[sortKey];
+      bValue = b[sortKey];
+    }
+    
+    if (sortDirection === 'desc') {
+      return (bValue as number) - (aValue as number);
+    }
+    return (aValue as number) - (bValue as number);
+  });
+
+  const SortIcon = ({ columnKey }: { columnKey: SortKey }) => {
+    if (sortKey !== columnKey) {
+      return <ArrowUpDown className="h-4 w-4 ml-1 opacity-50" />;
+    }
+    return sortDirection === 'desc' 
+      ? <ArrowDown className="h-4 w-4 ml-1" />
+      : <ArrowUp className="h-4 w-4 ml-1" />;
+  };
 
   const loadOrders = async () => {
     setLoading(true);
@@ -311,25 +361,65 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Data</TableHead>
+                      <TableHead 
+                        className="cursor-pointer select-none hover:bg-muted/80"
+                        onClick={() => handleSort('created_at_meli')}
+                      >
+                        <div className="flex items-center">
+                          Data
+                          <SortIcon columnKey="created_at_meli" />
+                        </div>
+                      </TableHead>
                       <TableHead>Pedido</TableHead>
                       <TableHead>Comprador</TableHead>
-                      <TableHead className="text-right">Receita</TableHead>
-                      <TableHead className="text-right">Custo</TableHead>
-                      <TableHead className="text-right">Lucro</TableHead>
-                      <TableHead className="text-right">Margem</TableHead>
+                      <TableHead 
+                        className="text-right cursor-pointer select-none hover:bg-muted/80"
+                        onClick={() => handleSort('revenue_total')}
+                      >
+                        <div className="flex items-center justify-end">
+                          Receita
+                          <SortIcon columnKey="revenue_total" />
+                        </div>
+                      </TableHead>
+                      <TableHead 
+                        className="text-right cursor-pointer select-none hover:bg-muted/80"
+                        onClick={() => handleSort('cost_total')}
+                      >
+                        <div className="flex items-center justify-end">
+                          Custo
+                          <SortIcon columnKey="cost_total" />
+                        </div>
+                      </TableHead>
+                      <TableHead 
+                        className="text-right cursor-pointer select-none hover:bg-muted/80"
+                        onClick={() => handleSort('profit_total')}
+                      >
+                        <div className="flex items-center justify-end">
+                          Lucro
+                          <SortIcon columnKey="profit_total" />
+                        </div>
+                      </TableHead>
+                      <TableHead 
+                        className="text-right cursor-pointer select-none hover:bg-muted/80"
+                        onClick={() => handleSort('margin_percent')}
+                      >
+                        <div className="flex items-center justify-end">
+                          Margem
+                          <SortIcon columnKey="margin_percent" />
+                        </div>
+                      </TableHead>
                       <TableHead>Status</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {orders.length === 0 ? (
+                    {sortedOrders.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                           Nenhum pedido encontrado. Clique em "Recalcular" para processar.
                         </TableCell>
                       </TableRow>
                     ) : (
-                      orders.map((order) => (
+                      sortedOrders.map((order) => (
                         <TableRow
                           key={order.id}
                           className="cursor-pointer hover:bg-muted/50"
