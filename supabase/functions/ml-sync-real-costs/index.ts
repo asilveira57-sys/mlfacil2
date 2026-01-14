@@ -144,11 +144,16 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
     state = newState;
   } else {
     const upd: any = { status: "running", total: total || 0, last_heartbeat_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-    if (state.status === "idle" || state.status === "done") { 
+    // Only reset when status is "idle" - "done" should allow continuing from where it left
+    if (state.status === "idle") { 
       upd.started_at = new Date().toISOString(); 
       upd.processed = 0; 
       upd.cursor_offset = 0; 
       upd.stats_json = { billing: 0, pending: 0, with_shipping: 0 }; 
+    }
+    // Update scope_days if provided
+    if (scopeDays && scopeDays !== state.scope_days) {
+      upd.scope_days = scopeDays;
     }
     const { data: updated } = await supabase.from("meli_real_costs_sync_state").update(upd).eq("seller_id", sellerId).select().single();
     state = updated;
@@ -196,16 +201,62 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
       }
       const entry = billingByOrder.get(orderId)!;
       const chargeType = (detail.charge_type || "").toLowerCase();
-      const amount = detail.gross_amount || 0;
+      const amount = Math.abs(detail.gross_amount || 0);
+      const isCredit = (detail.gross_amount || 0) < 0; // Negative = credit/refund
 
-      if (chargeType.includes("cargo por venta") || chargeType.includes("sale_fee") || chargeType === "sale_fee_amount") {
+      // Brazilian Portuguese charge types from MLB billing API
+      // Comissões ML + MP (sale fees)
+      if (chargeType.includes("custo por vender") || 
+          chargeType.includes("custo por cobrar") ||
+          chargeType.includes("cargo por venta") || 
+          chargeType.includes("sale_fee") || 
+          chargeType === "sale_fee_amount") {
+        if (isCredit) {
+          entry.adjustments -= amount; // Refund of fees
+        } else {
+          entry.fee_ml += amount;
+        }
+      } 
+      // Shipping fees (tarifas de envio)
+      else if (chargeType.includes("tarifa de envio") || 
+               chargeType.includes("envio extra") ||
+               chargeType.includes("envio intermunicipal") ||
+               chargeType.includes("mercado envíos") || 
+               chargeType.includes("shipping") || 
+               chargeType === "shipping_fee") {
+        if (isCredit) {
+          entry.adjustments -= amount;
+        } else {
+          entry.shipping += amount;
+        }
+      } 
+      // Installment fees (parcelamento)
+      else if (chargeType.includes("taxa de parcelamento") || 
+               chargeType.includes("cuota") || 
+               chargeType.includes("installment")) {
+        if (isCredit) {
+          entry.adjustments -= amount;
+        } else {
+          entry.installments += amount;
+        }
+      } 
+      // Adjustments and cancellations
+      else if (chargeType.includes("ajuste") || 
+               chargeType.includes("adjustment") ||
+               chargeType.includes("cancelamento") ||
+               chargeType.includes("reembolso") ||
+               chargeType.includes("bonificação") ||
+               chargeType.includes("estorno")) {
+        // Credits reduce costs, debits add to costs
+        if (isCredit) {
+          entry.adjustments -= amount;
+        } else {
+          entry.adjustments += amount;
+        }
+      }
+      // Any other charge type - add to fee_ml as fallback
+      else if (amount > 0 && !isCredit) {
         entry.fee_ml += amount;
-      } else if (chargeType.includes("mercado envíos") || chargeType.includes("shipping") || chargeType === "shipping_fee") {
-        entry.shipping += amount;
-      } else if (chargeType.includes("cuota") || chargeType.includes("installment")) {
-        entry.installments += amount;
-      } else if (chargeType.includes("ajuste") || chargeType.includes("adjustment")) {
-        entry.adjustments += amount;
       }
     }
 
