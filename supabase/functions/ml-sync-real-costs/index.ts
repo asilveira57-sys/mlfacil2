@@ -318,13 +318,33 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
       }
 
       const totalMarketplaceCost = feeML + shippingCostSeller + installmentsCost + adjustments;
+      
+      // NEW: Calculate net values (without shipping impact on profit/margin)
+      // For now, we store the shipping_cost_seller and will calculate shipping_revenue from order data
+      // The key insight: profit/margin should be based on product revenue only, not inflated by shipping
+      const revenueTotal = order.total_amount || 0;
+      // Note: receita_envio (shipping_revenue) needs to come from order or billing data
+      // For now we'll set it to 0 and let cost-engine populate it from order metadata
+      const shippingRevenue = 0; // Will be populated by cost-engine from order data
+      const revenueNet = revenueTotal - shippingRevenue; // Product revenue only
+      
+      // commission_cost = fee_ml (comissão ML) - separate from shipping
+      const commissionCost = feeML;
+      
+      // shipping_balance = shipping_revenue - shipping_cost_seller
+      const shippingBalance = shippingRevenue - shippingCostSeller;
+      
+      // Track missing fields for debugging
+      const missingFields: string[] = [];
+      if (feeMLSource === "pending") missingFields.push("sem_comissao");
+      if (shippingCostSeller === 0 && order.shipment_id) missingFields.push("sem_frete_cobrado");
 
       rowsToUpsert.push({ 
         user_id: userId, 
         seller_id: sellerId, 
         order_id: order.order_id, 
         shipment_id: order.shipment_id, 
-        revenue_total: order.total_amount || 0,
+        revenue_total: revenueTotal,
         created_at_meli: order.created_at_meli,
         fee_ml: feeML, 
         fee_ml_source: feeMLSource, 
@@ -337,7 +357,14 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
         source_refs: { refs: sourceRefs }, 
         real_cost_synced_at: new Date().toISOString(), 
         calculated_at: new Date().toISOString(), 
-        status: feeMLSource === "billing" ? "calculated" : "pending" 
+        status: feeMLSource === "billing" ? "calculated" : "pending",
+        // NEW separated fields
+        commission_cost: commissionCost,
+        receita_envio: shippingRevenue,
+        shipping_balance: shippingBalance,
+        revenue_net: revenueNet,
+        missing_fields: missingFields,
+        // cost_net, profit_net, margin_net will be calculated by cost-engine with product costs
       });
       
       processedInRun++;
