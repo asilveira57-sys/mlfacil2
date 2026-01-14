@@ -133,21 +133,29 @@ async function handleSync(supabase: any, userId: string, sellerId: string, corsH
   let periodsProcessed = 0;
 
   try {
-    // Step 1: Fetch available billing periods
+    // Step 1: Fetch available billing periods (with token refresh retry)
     console.log(`[BillingDetails] Fetching billing periods...`);
     const periodsUrl = `https://api.mercadolibre.com/billing/integration/monthly/periods?group=ML&limit=${MAX_PERIODS}`;
-    const periodsRes = await fetch(periodsUrl, {
+    
+    let periodsRes = await fetch(periodsUrl, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
 
+    // If 401, refresh token and RETRY the request
     if (periodsRes.status === 401) {
-      // Try to refresh token
-      accessToken = await refreshToken(supabase, sellerId, mlAccount.refresh_token);
-      if (!accessToken) {
-        return new Response(JSON.stringify({ error: "Token refresh failed" }), {
+      console.log(`[BillingDetails] Token expired, refreshing...`);
+      const newToken = await refreshToken(supabase, sellerId, mlAccount.refresh_token);
+      if (!newToken) {
+        return new Response(JSON.stringify({ error: "Token refresh failed. Please reconnect your Mercado Livre account." }), {
           status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+      accessToken = newToken;
+      
+      // RETRY with new token
+      periodsRes = await fetch(periodsUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
     }
 
     if (!periodsRes.ok) {
