@@ -165,7 +165,7 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
   const stats = state.stats_json || { billing: 0, pending: 0, with_shipping: 0 };
 
   while (processedInRun < MAX_ORDERS_PER_RUN && Date.now() - startTime < MAX_RUNTIME_MS) {
-    let q = supabase.from("meli_orders_cache").select("order_id, total_amount, shipment_id").eq("seller_id", sellerId).eq("order_status", "paid").order("created_at_meli", { ascending: true }).range(currentOffset, currentOffset + PAGE_SIZE - 1);
+    let q = supabase.from("meli_orders_cache").select("order_id, total_amount, shipment_id, created_at_meli").eq("seller_id", sellerId).eq("order_status", "paid").order("created_at_meli", { ascending: true }).range(currentOffset, currentOffset + PAGE_SIZE - 1);
     if (state.scope_days) { const d = new Date(); d.setDate(d.getDate() - state.scope_days); q = q.gte("created_at_meli", d.toISOString()); }
     const { data: orders } = await q;
     
@@ -273,6 +273,8 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
         seller_id: sellerId, 
         order_id: order.order_id, 
         shipment_id: order.shipment_id, 
+        revenue_total: order.total_amount || 0,
+        created_at_meli: order.created_at_meli,
         fee_ml: feeML, 
         fee_ml_source: feeMLSource, 
         shipping_cost_seller: shippingCostSeller, 
