@@ -185,7 +185,7 @@ async function handleSync(supabase: any, userId: string, sellerId: string, corsH
       let hasMore = true;
 
       while (hasMore && Date.now() - startTime < MAX_RUNTIME_MS) {
-        const detailsUrl = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/group/ML/details?limit=${PAGE_SIZE}&offset=${offset}`;
+        const detailsUrl = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/group/ML/details?document_type=BILL&limit=${PAGE_SIZE}&offset=${offset}`;
         
         const detailsRes = await fetch(detailsUrl, {
           headers: { Authorization: `Bearer ${accessToken}` },
