@@ -1551,6 +1551,7 @@ export type Database = {
           cost_packaging: number
           cost_shipping: number
           cost_total: number
+          created_at_meli: string | null
           custo_diferenca_peso_medidas: number | null
           custo_envio_declarado: number | null
           fee_ml: number | null
@@ -1593,6 +1594,7 @@ export type Database = {
           cost_packaging?: number
           cost_shipping?: number
           cost_total?: number
+          created_at_meli?: string | null
           custo_diferenca_peso_medidas?: number | null
           custo_envio_declarado?: number | null
           fee_ml?: number | null
@@ -1635,6 +1637,7 @@ export type Database = {
           cost_packaging?: number
           cost_shipping?: number
           cost_total?: number
+          created_at_meli?: string | null
           custo_diferenca_peso_medidas?: number | null
           custo_envio_declarado?: number | null
           fee_ml?: number | null

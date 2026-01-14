@@ -283,14 +283,14 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
   dateFrom.setDate(dateFrom.getDate() - periodDays);
   const dateFromStr = dateFrom.toISOString();
 
-  // Get order cost breakdowns
+  // Get order cost breakdowns - filter by order creation date, not calculation date
   let query = supabase
     .from('order_cost_breakdown_cache')
     .select('*')
     .eq('seller_id', sellerId)
     .eq('user_id', userId)
-    .gte('calculated_at', dateFromStr)
-    .order('calculated_at', { ascending: false });
+    .gte('created_at_meli', dateFromStr)
+    .order('created_at_meli', { ascending: false });
 
   if (status) {
     query = query.eq('status', status);
