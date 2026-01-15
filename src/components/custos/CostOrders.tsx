@@ -33,6 +33,16 @@ interface OrderCost {
   buyer_nickname: string | null;
   buyer_name: string | null;
   created_at_meli: string | null;
+  // New separated fields
+  shipping_cost_seller: number;
+  commission_cost: number;
+  receita_envio: number;
+  shipping_balance: number;
+  revenue_net: number;
+  cost_net: number;
+  profit_net: number;
+  margin_net: number;
+  missing_fields: string[];
 }
 
 interface OrderDetail {
@@ -51,6 +61,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const [statusFilter, setStatusFilter] = useState('all');
   const [profitFilter, setProfitFilter] = useState('all');
   const [ecommerceFilter, setEcommerceFilter] = useState('all');
+  const [shippingFilter, setShippingFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalOrders, setTotalOrders] = useState(0);
@@ -65,7 +76,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const [savingExtra, setSavingExtra] = useState(false);
 
   // Sorting state
-  type SortKey = 'created_at_meli' | 'revenue_total' | 'cost_total' | 'profit_total' | 'margin_percent' | null;
+  type SortKey = 'created_at_meli' | 'revenue_total' | 'cost_total' | 'shipping_cost_seller' | 'profit_total' | 'margin_percent' | null;
   type SortDirection = 'asc' | 'desc' | null;
   const [sortKey, setSortKey] = useState<SortKey>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
@@ -93,6 +104,9 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     if (sortKey === 'created_at_meli') {
       aValue = a.created_at_meli ? new Date(a.created_at_meli).getTime() : 0;
       bValue = b.created_at_meli ? new Date(b.created_at_meli).getTime() : 0;
+    } else if (sortKey === 'shipping_cost_seller') {
+      aValue = a.shipping_cost_seller || 0;
+      bValue = b.shipping_cost_seller || 0;
     } else {
       aValue = a[sortKey];
       bValue = b[sortKey];
@@ -103,6 +117,14 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     }
     return (aValue as number) - (bValue as number);
   });
+
+  // Count orders with high shipping costs
+  const highShippingCount = orders.filter(o => (o.shipping_cost_seller || 0) >= 100).length;
+  const veryHighShippingCount = orders.filter(o => (o.shipping_cost_seller || 0) >= 300).length;
+  const missingShippingCount = orders.filter(o => 
+    (o.shipping_cost_seller || 0) === 0 && 
+    o.missing_fields?.includes('sem_frete_cobrado')
+  ).length;
 
   const SortIcon = ({ columnKey }: { columnKey: SortKey }) => {
     if (sortKey !== columnKey) {
@@ -130,6 +152,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
       if (statusFilter !== 'all') params.set('status', statusFilter);
       if (profitFilter !== 'all') params.set('profit_type', profitFilter);
       if (ecommerceFilter !== 'all') params.set('ecommerce_cost', ecommerceFilter);
+      if (shippingFilter !== 'all') params.set('shipping_filter', shippingFilter);
 
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders?${params}`,
@@ -154,7 +177,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     if (sellerId) {
       loadOrders();
     }
-  }, [sellerId, periodDays, statusFilter, profitFilter, ecommerceFilter, page]);
+  }, [sellerId, periodDays, statusFilter, profitFilter, ecommerceFilter, shippingFilter, page]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -344,10 +367,55 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
               </SelectContent>
             </Select>
 
+            <Select value={shippingFilter} onValueChange={(v) => { setShippingFilter(v); setPage(1); }}>
+              <SelectTrigger className="w-44">
+                <SelectValue placeholder="Frete (ML)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Frete: Todos</SelectItem>
+                <SelectItem value="high">Frete alto (≥100)</SelectItem>
+                <SelectItem value="very_high">Frete muito alto (≥300)</SelectItem>
+                <SelectItem value="missing">Frete ausente</SelectItem>
+              </SelectContent>
+            </Select>
+
             <Button variant="outline" onClick={loadOrders} disabled={loading}>
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             </Button>
           </div>
+
+          {/* Shipping counters */}
+          {!loading && (highShippingCount > 0 || veryHighShippingCount > 0 || missingShippingCount > 0) && (
+            <div className="flex flex-wrap gap-2 mb-4">
+              {veryHighShippingCount > 0 && (
+                <Badge 
+                  variant="destructive" 
+                  className="cursor-pointer"
+                  onClick={() => { setShippingFilter('very_high'); setPage(1); }}
+                >
+                  🚨 {veryHighShippingCount} pedidos com frete ≥300
+                </Badge>
+              )}
+              {highShippingCount > 0 && (
+                <Badge 
+                  variant="secondary" 
+                  className="cursor-pointer"
+                  onClick={() => { setShippingFilter('high'); setPage(1); }}
+                >
+                  📦 {highShippingCount} pedidos com frete ≥100
+                </Badge>
+              )}
+              {missingShippingCount > 0 && (
+                <Badge 
+                  variant="outline" 
+                  className="cursor-pointer text-yellow-600 border-yellow-500"
+                  onClick={() => { setShippingFilter('missing'); setPage(1); }}
+                >
+                  ⚠️ {missingShippingCount} sem frete cobrado
+                </Badge>
+              )}
+            </div>
+          )}
 
           {loading ? (
             <div className="space-y-2">
@@ -392,6 +460,15 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                       </TableHead>
                       <TableHead 
                         className="text-right cursor-pointer select-none hover:bg-muted/80"
+                        onClick={() => handleSort('shipping_cost_seller')}
+                      >
+                        <div className="flex items-center justify-end">
+                          Frete (ML)
+                          <SortIcon columnKey="shipping_cost_seller" />
+                        </div>
+                      </TableHead>
+                      <TableHead 
+                        className="text-right cursor-pointer select-none hover:bg-muted/80"
                         onClick={() => handleSort('profit_total')}
                       >
                         <div className="flex items-center justify-end">
@@ -414,44 +491,65 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                   <TableBody>
                     {sortedOrders.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                           Nenhum pedido encontrado. Clique em "Recalcular" para processar.
                         </TableCell>
                       </TableRow>
                     ) : (
-                      sortedOrders.map((order) => (
-                        <TableRow
-                          key={order.id}
-                          className="cursor-pointer hover:bg-muted/50"
-                          onClick={() => loadOrderDetail(order.order_id)}
-                        >
-                          <TableCell>{formatDate(order.created_at_meli)}</TableCell>
-                          <TableCell>
-                            <div className="font-mono text-xs">{order.order_id}</div>
-                            {order.shipment_id && (
-                              <div className="text-xs text-muted-foreground">{order.shipment_id}</div>
-                            )}
-                          </TableCell>
-                          <TableCell>{order.buyer_nickname || order.buyer_name || '-'}</TableCell>
-                          <TableCell className="text-right font-medium">
-                            {formatCurrency(order.revenue_total)}
-                          </TableCell>
-                          <TableCell className="text-right text-destructive">
-                            {formatCurrency(order.cost_total)}
-                          </TableCell>
-                          <TableCell className={`text-right font-medium ${order.profit_total >= 0 ? 'text-green-600' : 'text-destructive'}`}>
-                            <span className="flex items-center justify-end gap-1">
-                              {order.profit_total >= 0 ? (
-                                <TrendingUp className="h-3 w-3" />
-                              ) : (
-                                <TrendingDown className="h-3 w-3" />
+                      sortedOrders.map((order) => {
+                        const shippingCost = order.shipping_cost_seller || 0;
+                        const isMissingShipping = shippingCost === 0 && order.missing_fields?.includes('sem_frete_cobrado');
+                        const isHighShipping = shippingCost >= 100;
+                        const isVeryHighShipping = shippingCost >= 300;
+                        
+                        return (
+                          <TableRow
+                            key={order.id}
+                            className="cursor-pointer hover:bg-muted/50"
+                            onClick={() => loadOrderDetail(order.order_id)}
+                          >
+                            <TableCell>{formatDate(order.created_at_meli)}</TableCell>
+                            <TableCell>
+                              <div className="font-mono text-xs">{order.order_id}</div>
+                              {order.shipment_id && (
+                                <div className="text-xs text-muted-foreground">{order.shipment_id}</div>
                               )}
-                              {formatCurrency(order.profit_total)}
-                            </span>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {order.margin_percent.toFixed(1)}%
-                          </TableCell>
+                            </TableCell>
+                            <TableCell>{order.buyer_nickname || order.buyer_name || '-'}</TableCell>
+                            <TableCell className="text-right font-medium">
+                              {formatCurrency(order.revenue_total)}
+                            </TableCell>
+                            <TableCell className="text-right text-destructive">
+                              {formatCurrency(order.cost_total)}
+                            </TableCell>
+                            <TableCell className={cn(
+                              "text-right",
+                              isMissingShipping && "text-yellow-600",
+                              isVeryHighShipping && "text-destructive font-bold",
+                              isHighShipping && !isVeryHighShipping && "text-orange-600 font-medium"
+                            )}>
+                              {isMissingShipping ? (
+                                <span className="flex items-center justify-end gap-1" title="Frete ausente na API">
+                                  <AlertCircle className="h-3 w-3" />
+                                  -
+                                </span>
+                              ) : (
+                                formatCurrency(shippingCost)
+                              )}
+                            </TableCell>
+                            <TableCell className={`text-right font-medium ${order.profit_total >= 0 ? 'text-green-600' : 'text-destructive'}`}>
+                              <span className="flex items-center justify-end gap-1">
+                                {order.profit_total >= 0 ? (
+                                  <TrendingUp className="h-3 w-3" />
+                                ) : (
+                                  <TrendingDown className="h-3 w-3" />
+                                )}
+                                {formatCurrency(order.profit_total)}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {order.margin_percent?.toFixed(1) || '0.0'}%
+                            </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-1">
                               {order.status === 'ok' ? (
@@ -475,7 +573,8 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                             </div>
                           </TableCell>
                         </TableRow>
-                      ))
+                        );
+                      })
                     )}
                   </TableBody>
                 </Table>

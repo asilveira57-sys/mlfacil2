@@ -273,6 +273,7 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
   const status = params.status; // ok, incompleto
   const profitType = params.profit_type; // lucro, prejuizo
   const ecommerceCost = params.ecommerce_cost; // with, without, all
+  const shippingFilter = params.shipping_filter; // high, very_high, missing, all
   const search = params.search || '';
   const page = parseInt(params.page || '1');
   const pageSize = parseInt(params.page_size || '50');
@@ -303,6 +304,15 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
     query = query.or('cost_other.is.null,cost_other.eq.0');
   }
 
+  // Filter by shipping cost
+  if (shippingFilter === 'high') {
+    query = query.gte('shipping_cost_seller', 100);
+  } else if (shippingFilter === 'very_high') {
+    query = query.gte('shipping_cost_seller', 300);
+  } else if (shippingFilter === 'missing') {
+    query = query.or('shipping_cost_seller.is.null,shipping_cost_seller.eq.0');
+  }
+
   const { data: breakdowns, error } = await query;
   if (error) throw error;
 
@@ -313,6 +323,14 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
     results = results.filter((r: any) => r.profit_total >= 0);
   } else if (profitType === 'prejuizo') {
     results = results.filter((r: any) => r.profit_total < 0);
+  }
+
+  // Additional filter for missing shipping (check missing_fields array)
+  if (shippingFilter === 'missing') {
+    results = results.filter((r: any) => 
+      r.missing_fields?.includes('sem_frete_cobrado') || 
+      (r.shipping_cost_seller === 0 || r.shipping_cost_seller === null)
+    );
   }
 
   // Get order details for search and display
