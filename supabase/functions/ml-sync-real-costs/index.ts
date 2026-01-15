@@ -47,6 +47,9 @@ Deno.serve(async (req) => {
     if (action === "status") return await handleGetStatus(supabase, seller_id, corsHeaders);
     if (action === "pause") return await handlePause(supabase, user.id, seller_id, corsHeaders);
     if (action === "reset") return await handleReset(supabase, user.id, seller_id, corsHeaders);
+    if (action === "reprocess_pending") {
+      return await handleReprocessPending(supabase, user.id, seller_id, scope_days, corsHeaders);
+    }
     if (action === "continue" || action === "start") {
       return await handleStartOrContinue(supabase, user.id, seller_id, scope_days, force_resume, corsHeaders);
     }
@@ -117,6 +120,188 @@ async function handleReset(supabase: any, userId: string, sellerId: string, cors
     .eq("seller_id", sellerId)
     .eq("user_id", userId);
   return new Response(JSON.stringify({ message: "Reset complete", state: null }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+
+async function handleReprocessPending(supabase: any, userId: string, sellerId: string, scopeDays: number | null, corsHeaders: any) {
+  const startTime = Date.now();
+  
+  // Get ML account for API calls
+  const { data: mlAccount } = await supabase.from("ml_accounts").select("access_token").eq("ml_user_id", sellerId).eq("is_active", true).maybeSingle();
+  if (!mlAccount) { 
+    return new Response(JSON.stringify({ error: "ML account not found" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }); 
+  }
+
+  // Find orders with pending billing (missing fee_ml or shipping_cost_seller = 0)
+  let query = supabase
+    .from("order_cost_breakdown_cache")
+    .select("order_id, shipment_id, revenue_total, created_at_meli, missing_fields")
+    .eq("seller_id", sellerId)
+    .or("fee_ml_source.eq.pending,shipping_cost_seller.eq.0,commission_cost.eq.0")
+    .order("created_at_meli", { ascending: false })
+    .limit(MAX_ORDERS_PER_RUN);
+  
+  if (scopeDays) {
+    const d = new Date();
+    d.setDate(d.getDate() - scopeDays);
+    query = query.gte("created_at_meli", d.toISOString());
+  }
+  
+  const { data: pendingOrders, error: queryError } = await query;
+  
+  if (queryError) {
+    return new Response(JSON.stringify({ error: queryError.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+  
+  if (!pendingOrders?.length) {
+    return new Response(JSON.stringify({ 
+      message: "Nenhum pedido pendente encontrado", 
+      processed: 0 
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+  
+  const orderIds = pendingOrders.map((o: any) => o.order_id);
+  
+  // Fetch billing details for these orders from our cache
+  const { data: billingDetails } = await supabase
+    .from("meli_billing_details_cache")
+    .select("order_id, charge_type, gross_amount")
+    .eq("seller_id", sellerId)
+    .in("order_id", orderIds.map((id: string) => parseInt(id)));
+
+  // Group billing details by order_id
+  const billingByOrder = new Map<string, { fee_ml: number; shipping: number; installments: number; adjustments: number }>();
+  for (const detail of (billingDetails || [])) {
+    const orderId = String(detail.order_id);
+    if (!billingByOrder.has(orderId)) {
+      billingByOrder.set(orderId, { fee_ml: 0, shipping: 0, installments: 0, adjustments: 0 });
+    }
+    const entry = billingByOrder.get(orderId)!;
+    const chargeType = (detail.charge_type || "").toLowerCase();
+    const amount = Math.abs(detail.gross_amount || 0);
+    const isCredit = (detail.gross_amount || 0) < 0;
+
+    if (chargeType.includes("custo por vender") || 
+        chargeType.includes("custo por cobrar") ||
+        chargeType.includes("cargo por venta") || 
+        chargeType.includes("sale_fee") || 
+        chargeType === "sale_fee_amount") {
+      if (isCredit) { entry.adjustments -= amount; } else { entry.fee_ml += amount; }
+    } else if (chargeType.includes("tarifa de envio") || 
+               chargeType.includes("envio extra") ||
+               chargeType.includes("envio intermunicipal") ||
+               chargeType.includes("mercado envíos") || 
+               chargeType.includes("shipping") || 
+               chargeType === "shipping_fee") {
+      if (isCredit) { entry.adjustments -= amount; } else { entry.shipping += amount; }
+    } else if (chargeType.includes("taxa de parcelamento") || 
+               chargeType.includes("cuota") || 
+               chargeType.includes("installment")) {
+      if (isCredit) { entry.adjustments -= amount; } else { entry.installments += amount; }
+    } else if (chargeType.includes("ajuste") || 
+               chargeType.includes("adjustment") ||
+               chargeType.includes("cancelamento") ||
+               chargeType.includes("reembolso") ||
+               chargeType.includes("bonificação") ||
+               chargeType.includes("estorno")) {
+      if (isCredit) { entry.adjustments -= amount; } else { entry.adjustments += amount; }
+    } else if (amount > 0 && !isCredit) {
+      entry.fee_ml += amount;
+    }
+  }
+
+  const rowsToUpsert: any[] = [];
+  let processedCount = 0;
+  let updatedCount = 0;
+  
+  for (const order of pendingOrders) {
+    if (Date.now() - startTime >= MAX_RUNTIME_MS) break;
+    
+    const billing = billingByOrder.get(order.order_id);
+    let feeML = 0, feeMLSource = "pending", shippingCostSeller = 0, installmentsCost = 0, adjustments = 0;
+    const sourceRefs: string[] = [];
+
+    if (billing && billing.fee_ml > 0) {
+      feeML = billing.fee_ml;
+      feeMLSource = "billing";
+      shippingCostSeller = billing.shipping;
+      installmentsCost = billing.installments;
+      adjustments = billing.adjustments;
+      sourceRefs.push("billing:api");
+      updatedCount++;
+    } else {
+      feeMLSource = "pending";
+      sourceRefs.push("billing:pending");
+    }
+
+    // Try to get shipping cost from shipment API if we don't have it
+    if (order.shipment_id && shippingCostSeller === 0) {
+      const { data: sc } = await supabase.from("meli_shipment_costs_cache").select("sender_cost").eq("shipment_id", order.shipment_id).maybeSingle();
+      if (sc) { 
+        shippingCostSeller = sc.sender_cost || 0; 
+        sourceRefs.push("shipment:cache"); 
+      } else {
+        try {
+          const r = await fetch(`https://api.mercadolibre.com/shipments/${order.shipment_id}/costs`, { 
+            headers: { Authorization: `Bearer ${mlAccount.access_token}` } 
+          });
+          if (r.ok) { 
+            const d = await r.json(); 
+            shippingCostSeller = d.sender?.cost || 0; 
+            sourceRefs.push("shipment:api"); 
+            await supabase.from("meli_shipment_costs_cache").upsert({ 
+              user_id: userId, seller_id: sellerId, shipment_id: order.shipment_id, order_id: order.order_id, 
+              sender_cost: shippingCostSeller, gross_amount: d.gross_amount || 0, raw_json: d, 
+              synced_at: new Date().toISOString() 
+            }, { onConflict: "shipment_id" }); 
+          }
+        } catch {}
+      }
+    }
+
+    const totalMarketplaceCost = feeML + shippingCostSeller + installmentsCost + adjustments;
+    const revenueTotal = order.revenue_total || 0;
+    const commissionCost = feeML;
+    
+    const missingFields: string[] = [];
+    if (feeMLSource === "pending") missingFields.push("sem_comissao");
+    if (shippingCostSeller === 0 && order.shipment_id) missingFields.push("sem_frete_cobrado");
+
+    rowsToUpsert.push({ 
+      user_id: userId, 
+      seller_id: sellerId, 
+      order_id: order.order_id, 
+      shipment_id: order.shipment_id, 
+      revenue_total: revenueTotal,
+      created_at_meli: order.created_at_meli,
+      fee_ml: feeML, 
+      fee_ml_source: feeMLSource, 
+      shipping_cost_seller: shippingCostSeller, 
+      installments_cost: installmentsCost, 
+      adjustments: adjustments, 
+      total_marketplace_cost: totalMarketplaceCost, 
+      has_real_financial: feeMLSource === "billing", 
+      has_real_cost: false, 
+      source_refs: { refs: sourceRefs }, 
+      real_cost_synced_at: new Date().toISOString(), 
+      calculated_at: new Date().toISOString(), 
+      status: feeMLSource === "billing" ? "calculated" : "pending",
+      commission_cost: commissionCost,
+      missing_fields: missingFields,
+    });
+    
+    processedCount++;
+  }
+
+  if (rowsToUpsert.length) {
+    await supabase.from("order_cost_breakdown_cache").upsert(rowsToUpsert, { onConflict: "seller_id,order_id" });
+  }
+
+  return new Response(JSON.stringify({ 
+    message: `Reprocessados ${processedCount} pedidos pendentes (${updatedCount} atualizados com dados reais)`,
+    processed: processedCount,
+    updated: updatedCount,
+    total_pending: pendingOrders.length
+  }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
 async function handleStartOrContinue(supabase: any, userId: string, sellerId: string, scopeDays: number | null, forceResume: boolean, corsHeaders: any) {

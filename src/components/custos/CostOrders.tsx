@@ -69,6 +69,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const [selectedOrder, setSelectedOrder] = useState<OrderDetail | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [reprocessingPending, setReprocessingPending] = useState(false);
   
   // Edit e-commerce cost state
   const [editingCostOther, setEditingCostOther] = useState<number>(0);
@@ -298,6 +299,42 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     return (order.cost_other || 0) > 0;
   };
 
+  // Count pending orders (missing shipping or commission)
+  const pendingCount = orders.filter(o => 
+    o.missing_fields?.length > 0 || 
+    (o.shipping_cost_seller || 0) === 0 || 
+    (o.commission_cost || 0) === 0
+  ).length;
+
+  const handleReprocessPending = async () => {
+    setReprocessingPending(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        toast.error('Sessão expirada');
+        return;
+      }
+
+      const { data, error } = await supabase.functions.invoke('ml-sync-real-costs', {
+        body: {
+          seller_id: sellerId,
+          action: 'reprocess_pending',
+          scope_days: parseInt(periodDays),
+        },
+      });
+
+      if (error) throw error;
+
+      toast.success(data.message || `Reprocessados ${data.processed || 0} pedidos pendentes`);
+      loadOrders();
+    } catch (err) {
+      console.error('Error reprocessing pending:', err);
+      toast.error('Erro ao reprocessar pedidos pendentes');
+    } finally {
+      setReprocessingPending(false);
+    }
+  };
+
   return (
     <>
       <Card>
@@ -382,6 +419,22 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
             <Button variant="outline" onClick={loadOrders} disabled={loading}>
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             </Button>
+
+            {pendingCount > 0 && (
+              <Button 
+                variant="secondary" 
+                onClick={handleReprocessPending} 
+                disabled={reprocessingPending || loading}
+                className="gap-2"
+              >
+                {reprocessingPending ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <AlertCircle className="h-4 w-4" />
+                )}
+                Reprocessar Pendentes ({pendingCount})
+              </Button>
+            )}
           </div>
 
           {/* Shipping counters */}
