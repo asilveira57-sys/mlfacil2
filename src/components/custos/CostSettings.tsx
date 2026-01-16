@@ -140,25 +140,40 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
         return;
       }
 
-      // Priority 2: Backfill paused? Resume it
-      if (backfillState?.status === 'paused' || backfillState?.status === 'running') {
-        // Check for stale running
-        if (backfillState.status === 'running' && backfillState.last_heartbeat_at) {
-          const lastHeartbeat = new Date(backfillState.last_heartbeat_at).getTime();
-          if (Date.now() - lastHeartbeat < 60000) return; // Not stale yet
-        }
+      // Priority 2: Backfill paused or stale running? Resume it
+      if (backfillState?.status === 'paused') {
+        setCurrentAutoStep("backfill");
+        isAutoResuming.current = true;
+        console.log("[Watchdog] Detected paused backfill, continuing...");
         
-        if (backfillState.status === 'paused' || (backfillState.status === 'running' && backfillState.last_heartbeat_at)) {
+        try {
+          await supabase.functions.invoke("ml-sync-real-costs", { 
+            body: { seller_id: sellerId, action: "continue_backfill" } 
+          });
+        } catch (err) {
+          console.error("[Watchdog] Error resuming backfill:", err);
+        } finally {
+          setTimeout(() => { isAutoResuming.current = false; }, 5000);
+        }
+        return;
+      }
+      
+      // Check for stale running backfill (no heartbeat for 60s)
+      if (backfillState?.status === 'running' && backfillState.last_heartbeat_at) {
+        const lastHeartbeat = new Date(backfillState.last_heartbeat_at).getTime();
+        const isStale = Date.now() - lastHeartbeat > 60000;
+        
+        if (isStale) {
           setCurrentAutoStep("backfill");
           isAutoResuming.current = true;
-          console.log("[Watchdog] Detected paused/stale backfill, continuing...");
+          console.log("[Watchdog] Detected stale running backfill, force continuing...");
           
           try {
             await supabase.functions.invoke("ml-sync-real-costs", { 
               body: { seller_id: sellerId, action: "continue_backfill" } 
             });
           } catch (err) {
-            console.error("[Watchdog] Error resuming backfill:", err);
+            console.error("[Watchdog] Error resuming stale backfill:", err);
           } finally {
             setTimeout(() => { isAutoResuming.current = false; }, 5000);
           }
