@@ -667,6 +667,54 @@ export type Database = {
         }
         Relationships: []
       }
+      meli_backfill_sync_state: {
+        Row: {
+          created_at: string | null
+          cursor_offset: number | null
+          finished_at: string | null
+          id: string
+          last_heartbeat_at: string | null
+          processed_orders: number | null
+          seller_id: string
+          started_at: string | null
+          status: string
+          total_orders: number | null
+          updated_at: string | null
+          user_id: string
+          with_billing: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          cursor_offset?: number | null
+          finished_at?: string | null
+          id?: string
+          last_heartbeat_at?: string | null
+          processed_orders?: number | null
+          seller_id: string
+          started_at?: string | null
+          status?: string
+          total_orders?: number | null
+          updated_at?: string | null
+          user_id: string
+          with_billing?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          cursor_offset?: number | null
+          finished_at?: string | null
+          id?: string
+          last_heartbeat_at?: string | null
+          processed_orders?: number | null
+          seller_id?: string
+          started_at?: string | null
+          status?: string
+          total_orders?: number | null
+          updated_at?: string | null
+          user_id?: string
+          with_billing?: number | null
+        }
+        Relationships: []
+      }
       meli_billing_details_cache: {
         Row: {
           charge_description: string | null
