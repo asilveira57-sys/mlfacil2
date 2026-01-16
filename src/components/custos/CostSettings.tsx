@@ -9,7 +9,7 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { RefreshCw, DollarSign, Percent, Package, Play, Pause, RotateCcw, AlertCircle, Clock, Loader2, Database, FileText } from "lucide-react";
+import { RefreshCw, DollarSign, Percent, Package, Play, Pause, RotateCcw, AlertCircle, Clock, Loader2, Database, FileText, AlertTriangle } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 interface CostSettingsProps { sellerId: string; }
@@ -265,24 +265,49 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
           <CardDescription>Cruza os dados de billing com os pedidos para calcular o custo total de marketplace</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
             <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
               <p className="text-2xl font-bold text-green-600">{coverage.with_real_billing.toLocaleString()}</p>
-              <p className="text-xs text-green-700 dark:text-green-400">Com Taxa Real (Billing)</p>
+              <p className="text-xs text-green-700 dark:text-green-400">Com Taxa Real</p>
             </div>
             <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
               <p className="text-2xl font-bold text-amber-600">{coverage.with_pending_billing.toLocaleString()}</p>
-              <p className="text-xs text-amber-700 dark:text-amber-400">Pendente (Aguardando)</p>
+              <p className="text-xs text-amber-700 dark:text-amber-400">Pendente</p>
+            </div>
+            <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
+              <p className="text-2xl font-bold text-red-600">{(coverage.missing_breakdown || 0).toLocaleString()}</p>
+              <p className="text-xs text-red-700 dark:text-red-400">Sem Registro</p>
             </div>
             <div className="p-3 bg-muted rounded-lg">
               <p className="text-2xl font-bold">{coverage.total_paid.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground">Total de Pedidos</p>
+              <p className="text-xs text-muted-foreground">Total Pedidos</p>
             </div>
             <div className="p-3 bg-muted rounded-lg">
               <p className="text-2xl font-bold">{coverage.coverage_percent}%</p>
               <p className="text-xs text-muted-foreground">Cobertura Real</p>
             </div>
           </div>
+
+          {/* Missing breakdown alert */}
+          {(coverage.missing_breakdown || 0) > 0 && (
+            <div className="flex items-center justify-between p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-red-600" />
+                <span className="text-sm text-red-700 dark:text-red-300">
+                  <strong>{coverage.missing_breakdown?.toLocaleString()}</strong> pedidos ainda não têm registro de custo
+                </span>
+              </div>
+              <Button 
+                onClick={handleBackfillMissing} 
+                disabled={backfilling} 
+                size="sm" 
+                variant="outline" 
+                className="gap-2 border-red-300 text-red-700 hover:bg-red-100"
+              >
+                {backfilling ? <><Loader2 className="h-3 w-3 animate-spin" />Criando...</> : "Criar Registros"}
+              </Button>
+            </div>
+          )}
 
           <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
             <div>
