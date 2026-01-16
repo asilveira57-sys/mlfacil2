@@ -54,6 +54,9 @@ Deno.serve(async (req) => {
     if (action === "backfill_missing") {
       return await handleBackfillMissing(supabase, user.id, seller_id, scope_days, corsHeaders);
     }
+    if (action === "continue_backfill") {
+      return await handleContinueBackfill(supabase, user.id, seller_id, corsHeaders);
+    }
     if (action === "continue" || action === "start") {
       return await handleStartOrContinue(supabase, user.id, seller_id, scope_days, force_resume, corsHeaders);
     }
@@ -408,7 +411,7 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
   }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
-// PAGINATED backfill for ALL missing orders
+// PAGINATED backfill for ALL missing orders - with state persistence
 async function handleBackfillMissing(supabase: any, userId: string, sellerId: string, scopeDays: number | null, corsHeaders: any) {
   const startTime = Date.now();
   
@@ -417,17 +420,14 @@ async function handleBackfillMissing(supabase: any, userId: string, sellerId: st
     return new Response(JSON.stringify({ error: "ML account not found" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }); 
   }
 
-  // Get sync state or create cursor
-  let { data: state } = await supabase
-    .from("meli_real_costs_sync_state")
+  // Get or create backfill state
+  let { data: backfillState } = await supabase
+    .from("meli_backfill_sync_state")
     .select("*")
     .eq("seller_id", sellerId)
     .maybeSingle();
 
-  // Use a different cursor tracking for backfill
-  let backfillOffset = 0;
-
-  // First, count total missing
+  // Count total orders
   let dateFilter: string | null = null;
   if (scopeDays) {
     const d = new Date();
@@ -435,14 +435,38 @@ async function handleBackfillMissing(supabase: any, userId: string, sellerId: st
     dateFilter = d.toISOString();
   }
 
-  // Get ALL paid orders and check against breakdown cache
-  // We need to iterate through ALL to find missing ones
-  let totalCreated = 0;
-  let withBilling = 0;
-  let batchOffset = 0;
+  let totalOrdersQuery = supabase.from("meli_orders_cache").select("*", { count: "exact", head: true }).eq("seller_id", sellerId).eq("order_status", "paid");
+  if (dateFilter) totalOrdersQuery = totalOrdersQuery.gte("created_at_meli", dateFilter);
+  const { count: totalOrders } = await totalOrdersQuery;
+
+  // Initialize or update state
+  if (!backfillState) {
+    const { data: newState } = await supabase.from("meli_backfill_sync_state").insert({
+      user_id: userId,
+      seller_id: sellerId,
+      status: "running",
+      cursor_offset: 0,
+      total_orders: totalOrders || 0,
+      processed_orders: 0,
+      with_billing: 0,
+      started_at: new Date().toISOString(),
+      last_heartbeat_at: new Date().toISOString(),
+    }).select().single();
+    backfillState = newState;
+  } else {
+    await supabase.from("meli_backfill_sync_state").update({
+      status: "running",
+      total_orders: totalOrders || 0,
+      last_heartbeat_at: new Date().toISOString(),
+    }).eq("seller_id", sellerId);
+  }
+
+  let batchOffset = backfillState?.cursor_offset || 0;
+  let totalCreated = backfillState?.processed_orders || 0;
+  let withBilling = backfillState?.with_billing || 0;
   const BATCH_SIZE = 200;
 
-  while (Date.now() - startTime < MAX_RUNTIME_MS && totalCreated < MAX_ORDERS_PER_RUN) {
+  while (Date.now() - startTime < MAX_RUNTIME_MS) {
     // Get batch of orders
     let ordersQuery = supabase
       .from("meli_orders_cache")
@@ -457,7 +481,21 @@ async function handleBackfillMissing(supabase: any, userId: string, sellerId: st
     }
 
     const { data: orders } = await ordersQuery;
-    if (!orders?.length) break;
+    if (!orders?.length) {
+      // All done
+      await supabase.from("meli_backfill_sync_state").update({
+        status: "done",
+        finished_at: new Date().toISOString(),
+        last_heartbeat_at: new Date().toISOString(),
+      }).eq("seller_id", sellerId);
+      
+      return new Response(JSON.stringify({ 
+        status: "done",
+        message: `Backfill completo! ${totalCreated} registros criados (${withBilling} com billing real)`,
+        processed: totalCreated,
+        with_billing: withBilling,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     // Check which ones already have breakdown
     const { data: existingBreakdowns } = await supabase
@@ -471,6 +509,10 @@ async function handleBackfillMissing(supabase: any, userId: string, sellerId: st
 
     if (missingOrders.length === 0) {
       batchOffset += orders.length;
+      await supabase.from("meli_backfill_sync_state").update({
+        cursor_offset: batchOffset,
+        last_heartbeat_at: new Date().toISOString(),
+      }).eq("seller_id", sellerId);
       continue;
     }
 
@@ -482,10 +524,10 @@ async function handleBackfillMissing(supabase: any, userId: string, sellerId: st
     const { billingByOrder, billingByShipment } = await aggregateBillingData(supabase, sellerId, orderIds, shipmentIds);
 
     const rowsToInsert: any[] = [];
+    let batchCreated = 0;
 
     for (const order of missingOrders) {
       if (Date.now() - startTime >= MAX_RUNTIME_MS) break;
-      if (totalCreated >= MAX_ORDERS_PER_RUN) break;
 
       const billing = billingByOrder.get(order.order_id);
       const shipmentBilling = order.shipment_id ? billingByShipment.get(order.shipment_id) : null;
@@ -539,10 +581,9 @@ async function handleBackfillMissing(supabase: any, userId: string, sellerId: st
       const totalMarketplaceCost = feeML + shippingCostSeller + installmentsCost + adjustments;
       const revenueTotal = order.total_amount || 0;
       
-      // FIXED: Update legacy fields
       const costFees = feeML + installmentsCost + adjustments;
       const costShipping = shippingCostSeller;
-      const costTotal = costFees + costShipping; // No item cost yet
+      const costTotal = costFees + costShipping;
       const profitTotal = revenueTotal - costTotal;
       const marginPercent = revenueTotal > 0 ? Math.round((profitTotal / revenueTotal) * 100) : 0;
       
@@ -571,7 +612,6 @@ async function handleBackfillMissing(supabase: any, userId: string, sellerId: st
         status: feeMLSource === "billing" ? "calculated" : "pending",
         commission_cost: feeML,
         missing_fields: missingFields,
-        // FIXED: Update legacy fields
         cost_fees: costFees,
         cost_shipping: costShipping,
         cost_total: costTotal,
@@ -579,6 +619,7 @@ async function handleBackfillMissing(supabase: any, userId: string, sellerId: st
         margin_percent: marginPercent,
       });
       
+      batchCreated++;
       totalCreated++;
     }
 
@@ -588,14 +629,51 @@ async function handleBackfillMissing(supabase: any, userId: string, sellerId: st
     }
 
     batchOffset += orders.length;
+    
+    // Update state after each batch
+    await supabase.from("meli_backfill_sync_state").update({
+      cursor_offset: batchOffset,
+      processed_orders: totalCreated,
+      with_billing: withBilling,
+      last_heartbeat_at: new Date().toISOString(),
+    }).eq("seller_id", sellerId);
   }
 
+  // Paused due to runtime limit
+  await supabase.from("meli_backfill_sync_state").update({
+    status: "paused",
+    cursor_offset: batchOffset,
+    processed_orders: totalCreated,
+    with_billing: withBilling,
+    last_heartbeat_at: new Date().toISOString(),
+  }).eq("seller_id", sellerId);
+
   return new Response(JSON.stringify({ 
-    message: `Criados ${totalCreated} registros de breakdown (${withBilling} com billing real)`,
+    status: "paused",
+    message: `Criados ${totalCreated} registros (pausado para continuar)`,
     processed: totalCreated,
     with_billing: withBilling,
-    batches_processed: Math.ceil(batchOffset / BATCH_SIZE),
+    cursor_offset: batchOffset,
   }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+
+// Continue backfill from saved cursor
+async function handleContinueBackfill(supabase: any, userId: string, sellerId: string, corsHeaders: any) {
+  const { data: backfillState } = await supabase
+    .from("meli_backfill_sync_state")
+    .select("*")
+    .eq("seller_id", sellerId)
+    .maybeSingle();
+
+  if (!backfillState || backfillState.status === 'done') {
+    return new Response(JSON.stringify({ 
+      status: "done",
+      message: "Backfill já completo ou não iniciado"
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
+  // Just call the main backfill function - it will use the saved cursor
+  return await handleBackfillMissing(supabase, userId, sellerId, null, corsHeaders);
 }
 
 async function handleStartOrContinue(supabase: any, userId: string, sellerId: string, scopeDays: number | null, forceResume: boolean, corsHeaders: any) {
