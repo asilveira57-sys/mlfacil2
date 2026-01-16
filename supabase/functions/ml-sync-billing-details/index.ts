@@ -5,8 +5,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const MAX_PERIODS = 12;
-const PAGE_SIZE = 500;
+const PERIODS_PER_PAGE = 12;
+const DETAILS_PAGE_SIZE = 1000;
 const MAX_RUNTIME_MS = 55000;
 
 interface BillingDetail {
@@ -23,6 +23,18 @@ interface BillingDetail {
   created_at_meli: string | null;
   fetched_at: string;
   raw_data: any;
+}
+
+interface SyncState {
+  status: string;
+  periods_offset: number;
+  periods_processed: number;
+  total_records: number;
+  oldest_period: string | null;
+  newest_period: string | null;
+  last_error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
 }
 
 Deno.serve(async (req) => {
@@ -51,7 +63,7 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { seller_id, action } = body;
+    const { seller_id, action, scope } = body;
 
     if (!seller_id) {
       return new Response(JSON.stringify({ error: "seller_id is required" }), {
@@ -64,7 +76,9 @@ Deno.serve(async (req) => {
     }
 
     if (action === "sync") {
-      return await handleSync(supabase, user.id, seller_id, corsHeaders);
+      // scope: "recent" (default, last 12 months), "history" (all available)
+      const syncScope = scope || "recent";
+      return await handleSync(supabase, user.id, seller_id, syncScope, corsHeaders);
     }
 
     return await handleGetStatus(supabase, seller_id, corsHeaders);
@@ -93,10 +107,29 @@ async function handleGetStatus(supabase: any, sellerId: string, corsHeaders: any
 
   const uniqueOrders = new Set((orderCount || []).map((r: any) => r.order_id)).size;
 
-  // Get most recent period synced
-  const { data: latestPeriod } = await supabase
+  // Count unique shipments with billing (for shipping cost coverage)
+  const { data: shipmentCount } = await supabase
     .from("meli_billing_details_cache")
-    .select("period_key, fetched_at")
+    .select("shipment_id")
+    .eq("seller_id", sellerId)
+    .not("shipment_id", "is", null);
+
+  const uniqueShipments = new Set((shipmentCount || []).map((r: any) => r.shipment_id)).size;
+
+  // Get distinct periods to understand coverage
+  const { data: periods } = await supabase
+    .from("meli_billing_details_cache")
+    .select("period_key")
+    .eq("seller_id", sellerId);
+
+  const uniquePeriods = [...new Set((periods || []).map((r: any) => r.period_key))].sort();
+  const oldestPeriod = uniquePeriods[0] || null;
+  const newestPeriod = uniquePeriods[uniquePeriods.length - 1] || null;
+
+  // Get most recent sync timestamp
+  const { data: latestSync } = await supabase
+    .from("meli_billing_details_cache")
+    .select("fetched_at")
     .eq("seller_id", sellerId)
     .order("fetched_at", { ascending: false })
     .limit(1)
@@ -105,14 +138,17 @@ async function handleGetStatus(supabase: any, sellerId: string, corsHeaders: any
   return new Response(JSON.stringify({
     total_details: totalDetails || 0,
     unique_orders_with_billing: uniqueOrders,
-    latest_period: latestPeriod?.period_key || null,
-    last_sync_at: latestPeriod?.fetched_at || null,
+    unique_shipments_with_billing: uniqueShipments,
+    periods_count: uniquePeriods.length,
+    oldest_period: oldestPeriod,
+    newest_period: newestPeriod,
+    last_sync_at: latestSync?.fetched_at || null,
   }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
-async function handleSync(supabase: any, userId: string, sellerId: string, corsHeaders: any) {
+async function handleSync(supabase: any, userId: string, sellerId: string, scope: string, corsHeaders: any) {
   const startTime = Date.now();
-  console.log(`[BillingDetails] Starting sync for seller ${sellerId}`);
+  console.log(`[BillingDetails] Starting sync for seller ${sellerId}, scope: ${scope}`);
 
   // Get ML account
   const { data: mlAccount } = await supabase
@@ -131,50 +167,74 @@ async function handleSync(supabase: any, userId: string, sellerId: string, corsH
   let accessToken = mlAccount.access_token;
   let totalInserted = 0;
   let periodsProcessed = 0;
+  let periodsOffset = 0;
+  let allPeriods: any[] = [];
 
   try {
-    // Step 1: Fetch available billing periods (with token refresh retry)
-    console.log(`[BillingDetails] Fetching billing periods...`);
-    // document_type is REQUIRED for MLB: BILL or CREDIT_NOTE
-    const periodsUrl = `https://api.mercadolibre.com/billing/integration/monthly/periods?group=ML&document_type=BILL&limit=${MAX_PERIODS}`;
+    // Step 1: Fetch ALL available billing periods using pagination
+    console.log(`[BillingDetails] Fetching billing periods with pagination...`);
     
-    let periodsRes = await fetch(periodsUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-
-    // If 401, refresh token and RETRY the request
-    if (periodsRes.status === 401) {
-      console.log(`[BillingDetails] Token expired, refreshing...`);
-      const newToken = await refreshToken(supabase, sellerId, mlAccount.refresh_token);
-      if (!newToken) {
-        return new Response(JSON.stringify({ error: "Token refresh failed. Please reconnect your Mercado Livre account." }), {
-          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      accessToken = newToken;
+    let hasMorePeriods = true;
+    while (hasMorePeriods && Date.now() - startTime < MAX_RUNTIME_MS) {
+      const periodsUrl = `https://api.mercadolibre.com/billing/integration/monthly/periods?group=ML&document_type=BILL&limit=${PERIODS_PER_PAGE}&offset=${periodsOffset}`;
       
-      // RETRY with new token
-      periodsRes = await fetch(periodsUrl, {
+      let periodsRes = await fetch(periodsUrl, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
+
+      // If 401, refresh token and RETRY the request
+      if (periodsRes.status === 401) {
+        console.log(`[BillingDetails] Token expired, refreshing...`);
+        const newToken = await refreshToken(supabase, sellerId, mlAccount.refresh_token);
+        if (!newToken) {
+          return new Response(JSON.stringify({ error: "Token refresh failed. Please reconnect your Mercado Livre account." }), {
+            status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        accessToken = newToken;
+        
+        // RETRY with new token
+        periodsRes = await fetch(periodsUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+      }
+
+      if (!periodsRes.ok) {
+        const errText = await periodsRes.text();
+        console.error(`[BillingDetails] Failed to fetch periods: ${errText}`);
+        return new Response(JSON.stringify({ error: "Failed to fetch billing periods", details: errText }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const periodsData = await periodsRes.json();
+      const periodsBatch = periodsData.results || [];
+      console.log(`[BillingDetails] Fetched ${periodsBatch.length} periods at offset ${periodsOffset}`);
+      
+      allPeriods = [...allPeriods, ...periodsBatch];
+      
+      // Check if there are more periods
+      if (periodsBatch.length < PERIODS_PER_PAGE) {
+        hasMorePeriods = false;
+      } else {
+        periodsOffset += PERIODS_PER_PAGE;
+        
+        // For "recent" scope, only fetch first batch (12 months)
+        if (scope === "recent") {
+          hasMorePeriods = false;
+        }
+      }
+      
+      // Small delay to avoid rate limiting
+      await new Promise(r => setTimeout(r, 100));
     }
 
-    if (!periodsRes.ok) {
-      const errText = await periodsRes.text();
-      console.error(`[BillingDetails] Failed to fetch periods: ${errText}`);
-      return new Response(JSON.stringify({ error: "Failed to fetch billing periods", details: errText }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const periodsData = await periodsRes.json();
-    const periods = periodsData.results || [];
-    console.log(`[BillingDetails] Found ${periods.length} periods`);
+    console.log(`[BillingDetails] Total periods found: ${allPeriods.length}`);
 
     // Step 2: Process each period
-    for (const period of periods) {
+    for (const period of allPeriods) {
       if (Date.now() - startTime >= MAX_RUNTIME_MS) {
-        console.log(`[BillingDetails] Runtime limit reached, pausing...`);
+        console.log(`[BillingDetails] Runtime limit reached, pausing at period ${periodsProcessed}...`);
         break;
       }
 
@@ -185,15 +245,16 @@ async function handleSync(supabase: any, userId: string, sellerId: string, corsH
       let hasMore = true;
 
       while (hasMore && Date.now() - startTime < MAX_RUNTIME_MS) {
-        const detailsUrl = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/group/ML/details?document_type=BILL&limit=${PAGE_SIZE}&offset=${offset}`;
+        const detailsUrl = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/group/ML/details?document_type=BILL&limit=${DETAILS_PAGE_SIZE}&offset=${offset}`;
         
         const detailsRes = await fetch(detailsUrl, {
           headers: { Authorization: `Bearer ${accessToken}` },
         });
 
         if (detailsRes.status === 401) {
-          accessToken = await refreshToken(supabase, sellerId, mlAccount.refresh_token);
-          if (!accessToken) break;
+          const newToken = await refreshToken(supabase, sellerId, mlAccount.refresh_token);
+          if (!newToken) break;
+          accessToken = newToken;
           continue; // Retry with new token
         }
 
@@ -255,7 +316,7 @@ async function handleSync(supabase: any, userId: string, sellerId: string, corsH
         }
 
         offset += results.length;
-        hasMore = results.length >= PAGE_SIZE;
+        hasMore = results.length >= DETAILS_PAGE_SIZE;
 
         // Small delay to avoid rate limiting
         await new Promise(r => setTimeout(r, 100));
@@ -264,12 +325,15 @@ async function handleSync(supabase: any, userId: string, sellerId: string, corsH
       periodsProcessed++;
     }
 
-    console.log(`[BillingDetails] Sync complete. Periods: ${periodsProcessed}, Records: ${totalInserted}`);
+    console.log(`[BillingDetails] Sync complete. Periods: ${periodsProcessed}/${allPeriods.length}, Records: ${totalInserted}`);
 
     return new Response(JSON.stringify({
       success: true,
+      scope: scope,
+      periods_found: allPeriods.length,
       periods_processed: periodsProcessed,
       records_inserted: totalInserted,
+      completed: periodsProcessed >= allPeriods.length,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (err: unknown) {

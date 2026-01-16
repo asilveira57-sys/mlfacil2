@@ -50,6 +50,9 @@ Deno.serve(async (req) => {
     if (action === "reprocess_pending") {
       return await handleReprocessPending(supabase, user.id, seller_id, scope_days, corsHeaders);
     }
+    if (action === "backfill_missing") {
+      return await handleBackfillMissing(supabase, user.id, seller_id, scope_days, corsHeaders);
+    }
     if (action === "continue" || action === "start") {
       return await handleStartOrContinue(supabase, user.id, seller_id, scope_days, force_resume, corsHeaders);
     }
@@ -87,11 +90,15 @@ async function handleGetStatus(supabase: any, sellerId: string, corsHeaders: any
     .select("*", { count: "exact", head: true })
     .eq("seller_id", sellerId);
 
+  // Count orders without any breakdown (not yet processed)
+  const missingBreakdown = (totalPaid || 0) - (totalProcessed || 0);
+
   const coverage = { 
     total_paid: totalPaid || 0, 
     with_real_billing: withRealBilling || 0,
     with_pending_billing: withPendingBilling || 0,
     total_processed: totalProcessed || 0,
+    missing_breakdown: missingBreakdown > 0 ? missingBreakdown : 0,
     coverage_percent: totalPaid > 0 ? Math.round((withRealBilling || 0) / totalPaid * 100) : 0 
   };
 
@@ -120,6 +127,100 @@ async function handleReset(supabase: any, userId: string, sellerId: string, cors
     .eq("seller_id", sellerId)
     .eq("user_id", userId);
   return new Response(JSON.stringify({ message: "Reset complete", state: null }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+
+// Helper function to aggregate billing details by order_id AND shipment_id
+async function aggregateBillingData(supabase: any, sellerId: string, orderIds: string[], shipmentIds: (string | null)[]) {
+  // Fetch billing details for orders
+  const { data: billingByOrderData } = await supabase
+    .from("meli_billing_details_cache")
+    .select("order_id, shipment_id, charge_type, gross_amount")
+    .eq("seller_id", sellerId)
+    .in("order_id", orderIds.map((id: string) => parseInt(id)));
+
+  // Also fetch billing by shipment_id for entries that don't have order_id
+  const validShipmentIds = shipmentIds.filter((s): s is string => s !== null);
+  const { data: billingByShipmentData } = validShipmentIds.length > 0 ? await supabase
+    .from("meli_billing_details_cache")
+    .select("order_id, shipment_id, charge_type, gross_amount")
+    .eq("seller_id", sellerId)
+    .is("order_id", null)
+    .in("shipment_id", validShipmentIds.map((id: string) => parseInt(id))) : { data: [] };
+
+  // Aggregate by order_id
+  const billingByOrder = new Map<string, { fee_ml: number; shipping: number; installments: number; adjustments: number }>();
+  // Aggregate by shipment_id (for entries without order_id)
+  const billingByShipment = new Map<string, { shipping: number; adjustments: number }>();
+
+  // Process order-based billing
+  for (const detail of (billingByOrderData || [])) {
+    const orderId = String(detail.order_id);
+    if (!billingByOrder.has(orderId)) {
+      billingByOrder.set(orderId, { fee_ml: 0, shipping: 0, installments: 0, adjustments: 0 });
+    }
+    processChargeType(billingByOrder.get(orderId)!, detail);
+  }
+
+  // Process shipment-based billing (no order_id)
+  for (const detail of (billingByShipmentData || [])) {
+    const shipmentId = String(detail.shipment_id);
+    if (!billingByShipment.has(shipmentId)) {
+      billingByShipment.set(shipmentId, { shipping: 0, adjustments: 0 });
+    }
+    const entry = billingByShipment.get(shipmentId)!;
+    const chargeType = (detail.charge_type || "").toLowerCase();
+    const amount = Math.abs(detail.gross_amount || 0);
+    const isCredit = (detail.gross_amount || 0) < 0;
+
+    // Only process shipping-related charges for shipment aggregation
+    if (chargeType.includes("tarifa de envio") || 
+        chargeType.includes("envio extra") ||
+        chargeType.includes("envio intermunicipal") ||
+        chargeType.includes("mercado envíos") || 
+        chargeType.includes("shipping") || 
+        chargeType === "shipping_fee") {
+      if (isCredit) { entry.adjustments -= amount; } else { entry.shipping += amount; }
+    } else if (chargeType.includes("ajuste") || chargeType.includes("estorno")) {
+      if (isCredit) { entry.adjustments -= amount; } else { entry.adjustments += amount; }
+    }
+  }
+
+  return { billingByOrder, billingByShipment };
+}
+
+function processChargeType(entry: { fee_ml: number; shipping: number; installments: number; adjustments: number }, detail: any) {
+  const chargeType = (detail.charge_type || "").toLowerCase();
+  const amount = Math.abs(detail.gross_amount || 0);
+  const isCredit = (detail.gross_amount || 0) < 0;
+
+  // Brazilian Portuguese charge types from MLB billing API
+  if (chargeType.includes("custo por vender") || 
+      chargeType.includes("custo por cobrar") ||
+      chargeType.includes("cargo por venta") || 
+      chargeType.includes("sale_fee") || 
+      chargeType === "sale_fee_amount") {
+    if (isCredit) { entry.adjustments -= amount; } else { entry.fee_ml += amount; }
+  } else if (chargeType.includes("tarifa de envio") || 
+             chargeType.includes("envio extra") ||
+             chargeType.includes("envio intermunicipal") ||
+             chargeType.includes("mercado envíos") || 
+             chargeType.includes("shipping") || 
+             chargeType === "shipping_fee") {
+    if (isCredit) { entry.adjustments -= amount; } else { entry.shipping += amount; }
+  } else if (chargeType.includes("taxa de parcelamento") || 
+             chargeType.includes("cuota") || 
+             chargeType.includes("installment")) {
+    if (isCredit) { entry.adjustments -= amount; } else { entry.installments += amount; }
+  } else if (chargeType.includes("ajuste") || 
+             chargeType.includes("adjustment") ||
+             chargeType.includes("cancelamento") ||
+             chargeType.includes("reembolso") ||
+             chargeType.includes("bonificação") ||
+             chargeType.includes("estorno")) {
+    if (isCredit) { entry.adjustments -= amount; } else { entry.adjustments += amount; }
+  } else if (amount > 0 && !isCredit) {
+    entry.fee_ml += amount;
+  }
 }
 
 async function handleReprocessPending(supabase: any, userId: string, sellerId: string, scopeDays: number | null, corsHeaders: any) {
@@ -160,54 +261,10 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
   }
   
   const orderIds = pendingOrders.map((o: any) => o.order_id);
-  
-  // Fetch billing details for these orders from our cache
-  const { data: billingDetails } = await supabase
-    .from("meli_billing_details_cache")
-    .select("order_id, charge_type, gross_amount")
-    .eq("seller_id", sellerId)
-    .in("order_id", orderIds.map((id: string) => parseInt(id)));
+  const shipmentIds = pendingOrders.map((o: any) => o.shipment_id);
 
-  // Group billing details by order_id
-  const billingByOrder = new Map<string, { fee_ml: number; shipping: number; installments: number; adjustments: number }>();
-  for (const detail of (billingDetails || [])) {
-    const orderId = String(detail.order_id);
-    if (!billingByOrder.has(orderId)) {
-      billingByOrder.set(orderId, { fee_ml: 0, shipping: 0, installments: 0, adjustments: 0 });
-    }
-    const entry = billingByOrder.get(orderId)!;
-    const chargeType = (detail.charge_type || "").toLowerCase();
-    const amount = Math.abs(detail.gross_amount || 0);
-    const isCredit = (detail.gross_amount || 0) < 0;
-
-    if (chargeType.includes("custo por vender") || 
-        chargeType.includes("custo por cobrar") ||
-        chargeType.includes("cargo por venta") || 
-        chargeType.includes("sale_fee") || 
-        chargeType === "sale_fee_amount") {
-      if (isCredit) { entry.adjustments -= amount; } else { entry.fee_ml += amount; }
-    } else if (chargeType.includes("tarifa de envio") || 
-               chargeType.includes("envio extra") ||
-               chargeType.includes("envio intermunicipal") ||
-               chargeType.includes("mercado envíos") || 
-               chargeType.includes("shipping") || 
-               chargeType === "shipping_fee") {
-      if (isCredit) { entry.adjustments -= amount; } else { entry.shipping += amount; }
-    } else if (chargeType.includes("taxa de parcelamento") || 
-               chargeType.includes("cuota") || 
-               chargeType.includes("installment")) {
-      if (isCredit) { entry.adjustments -= amount; } else { entry.installments += amount; }
-    } else if (chargeType.includes("ajuste") || 
-               chargeType.includes("adjustment") ||
-               chargeType.includes("cancelamento") ||
-               chargeType.includes("reembolso") ||
-               chargeType.includes("bonificação") ||
-               chargeType.includes("estorno")) {
-      if (isCredit) { entry.adjustments -= amount; } else { entry.adjustments += amount; }
-    } else if (amount > 0 && !isCredit) {
-      entry.fee_ml += amount;
-    }
-  }
+  // Use the aggregation helper
+  const { billingByOrder, billingByShipment } = await aggregateBillingData(supabase, sellerId, orderIds, shipmentIds);
 
   const rowsToUpsert: any[] = [];
   let processedCount = 0;
@@ -217,6 +274,8 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
     if (Date.now() - startTime >= MAX_RUNTIME_MS) break;
     
     const billing = billingByOrder.get(order.order_id);
+    const shipmentBilling = order.shipment_id ? billingByShipment.get(order.shipment_id) : null;
+    
     let feeML = 0, feeMLSource = "pending", shippingCostSeller = 0, installmentsCost = 0, adjustments = 0;
     const sourceRefs: string[] = [];
 
@@ -226,14 +285,21 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
       shippingCostSeller = billing.shipping;
       installmentsCost = billing.installments;
       adjustments = billing.adjustments;
-      sourceRefs.push("billing:api");
+      sourceRefs.push("billing:order");
       updatedCount++;
     } else {
       feeMLSource = "pending";
       sourceRefs.push("billing:pending");
     }
 
-    // Try to get shipping cost from shipment API if we don't have it
+    // If no shipping from order billing, try shipment billing
+    if (shippingCostSeller === 0 && shipmentBilling && shipmentBilling.shipping > 0) {
+      shippingCostSeller = shipmentBilling.shipping;
+      adjustments += shipmentBilling.adjustments;
+      sourceRefs.push("billing:shipment");
+    }
+
+    // Try to get shipping cost from shipment API if we still don't have it
     if (order.shipment_id && shippingCostSeller === 0) {
       const { data: sc } = await supabase.from("meli_shipment_costs_cache").select("sender_cost").eq("shipment_id", order.shipment_id).maybeSingle();
       if (sc) { 
@@ -304,6 +370,167 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
   }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
+// NEW: Backfill orders that don't have ANY breakdown record yet
+async function handleBackfillMissing(supabase: any, userId: string, sellerId: string, scopeDays: number | null, corsHeaders: any) {
+  const startTime = Date.now();
+  
+  // Get ML account for API calls
+  const { data: mlAccount } = await supabase.from("ml_accounts").select("access_token").eq("ml_user_id", sellerId).eq("is_active", true).maybeSingle();
+  if (!mlAccount) { 
+    return new Response(JSON.stringify({ error: "ML account not found" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }); 
+  }
+
+  // Find paid orders that DON'T have a breakdown record yet
+  let dateFilter = "";
+  if (scopeDays) {
+    const d = new Date();
+    d.setDate(d.getDate() - scopeDays);
+    dateFilter = d.toISOString();
+  }
+
+  // Get orders without breakdown
+  let ordersQuery = supabase
+    .from("meli_orders_cache")
+    .select("order_id, total_amount, shipment_id, created_at_meli")
+    .eq("seller_id", sellerId)
+    .eq("order_status", "paid")
+    .order("created_at_meli", { ascending: false })
+    .limit(MAX_ORDERS_PER_RUN);
+  
+  if (dateFilter) {
+    ordersQuery = ordersQuery.gte("created_at_meli", dateFilter);
+  }
+
+  const { data: allOrders } = await ordersQuery;
+  if (!allOrders?.length) {
+    return new Response(JSON.stringify({ message: "Nenhum pedido encontrado", processed: 0 }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
+  // Get existing breakdowns
+  const { data: existingBreakdowns } = await supabase
+    .from("order_cost_breakdown_cache")
+    .select("order_id")
+    .eq("seller_id", sellerId)
+    .in("order_id", allOrders.map((o: any) => o.order_id));
+
+  const existingSet = new Set((existingBreakdowns || []).map((b: any) => b.order_id));
+  const missingOrders = allOrders.filter((o: any) => !existingSet.has(o.order_id));
+
+  if (!missingOrders.length) {
+    return new Response(JSON.stringify({ message: "Todos os pedidos já têm breakdown", processed: 0 }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
+  console.log(`[BackfillMissing] Found ${missingOrders.length} orders without breakdown`);
+
+  const orderIds = missingOrders.map((o: any) => o.order_id);
+  const shipmentIds = missingOrders.map((o: any) => o.shipment_id);
+
+  // Use the aggregation helper
+  const { billingByOrder, billingByShipment } = await aggregateBillingData(supabase, sellerId, orderIds, shipmentIds);
+
+  const rowsToInsert: any[] = [];
+  let processedCount = 0;
+  let withBilling = 0;
+
+  for (const order of missingOrders) {
+    if (Date.now() - startTime >= MAX_RUNTIME_MS) break;
+
+    const billing = billingByOrder.get(order.order_id);
+    const shipmentBilling = order.shipment_id ? billingByShipment.get(order.shipment_id) : null;
+    
+    let feeML = 0, feeMLSource = "pending", shippingCostSeller = 0, installmentsCost = 0, adjustments = 0;
+    const sourceRefs: string[] = [];
+
+    if (billing && billing.fee_ml > 0) {
+      feeML = billing.fee_ml;
+      feeMLSource = "billing";
+      shippingCostSeller = billing.shipping;
+      installmentsCost = billing.installments;
+      adjustments = billing.adjustments;
+      sourceRefs.push("billing:order");
+      withBilling++;
+    } else {
+      feeMLSource = "pending";
+      sourceRefs.push("billing:pending");
+    }
+
+    // Check shipment billing for shipping
+    if (shippingCostSeller === 0 && shipmentBilling && shipmentBilling.shipping > 0) {
+      shippingCostSeller = shipmentBilling.shipping;
+      adjustments += shipmentBilling.adjustments;
+      sourceRefs.push("billing:shipment");
+    }
+
+    // Try shipment cache/API
+    if (order.shipment_id && shippingCostSeller === 0) {
+      const { data: sc } = await supabase.from("meli_shipment_costs_cache").select("sender_cost").eq("shipment_id", order.shipment_id).maybeSingle();
+      if (sc?.sender_cost) { 
+        shippingCostSeller = sc.sender_cost; 
+        sourceRefs.push("shipment:cache"); 
+      } else {
+        try {
+          const r = await fetch(`https://api.mercadolibre.com/shipments/${order.shipment_id}/costs`, { 
+            headers: { Authorization: `Bearer ${mlAccount.access_token}` } 
+          });
+          if (r.ok) { 
+            const d = await r.json(); 
+            shippingCostSeller = d.sender?.cost || 0; 
+            sourceRefs.push("shipment:api"); 
+            await supabase.from("meli_shipment_costs_cache").upsert({ 
+              user_id: userId, seller_id: sellerId, shipment_id: order.shipment_id, order_id: order.order_id, 
+              sender_cost: shippingCostSeller, gross_amount: d.gross_amount || 0, raw_json: d, 
+              synced_at: new Date().toISOString() 
+            }, { onConflict: "shipment_id" }); 
+          }
+        } catch {}
+      }
+    }
+
+    const totalMarketplaceCost = feeML + shippingCostSeller + installmentsCost + adjustments;
+    const revenueTotal = order.total_amount || 0;
+    
+    const missingFields: string[] = [];
+    if (feeMLSource === "pending") missingFields.push("sem_comissao");
+    if (shippingCostSeller === 0 && order.shipment_id) missingFields.push("sem_frete_cobrado");
+
+    rowsToInsert.push({ 
+      user_id: userId, 
+      seller_id: sellerId, 
+      order_id: order.order_id, 
+      shipment_id: order.shipment_id, 
+      revenue_total: revenueTotal,
+      created_at_meli: order.created_at_meli,
+      fee_ml: feeML, 
+      fee_ml_source: feeMLSource, 
+      shipping_cost_seller: shippingCostSeller, 
+      installments_cost: installmentsCost, 
+      adjustments: adjustments, 
+      total_marketplace_cost: totalMarketplaceCost, 
+      has_real_financial: feeMLSource === "billing", 
+      has_real_cost: false, 
+      source_refs: { refs: sourceRefs }, 
+      real_cost_synced_at: new Date().toISOString(), 
+      calculated_at: new Date().toISOString(), 
+      status: feeMLSource === "billing" ? "calculated" : "pending",
+      commission_cost: feeML,
+      missing_fields: missingFields,
+    });
+    
+    processedCount++;
+  }
+
+  if (rowsToInsert.length) {
+    await supabase.from("order_cost_breakdown_cache").upsert(rowsToInsert, { onConflict: "seller_id,order_id" });
+  }
+
+  return new Response(JSON.stringify({ 
+    message: `Criados ${processedCount} registros de breakdown (${withBilling} com billing real)`,
+    processed: processedCount,
+    with_billing: withBilling,
+    total_missing: missingOrders.length
+  }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+
 async function handleStartOrContinue(supabase: any, userId: string, sellerId: string, scopeDays: number | null, forceResume: boolean, corsHeaders: any) {
   const startTime = Date.now();
   let { data: state } = await supabase.from("meli_real_costs_sync_state").select("*").eq("seller_id", sellerId).maybeSingle();
@@ -315,31 +542,49 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
     }
   }
 
+  // CRITICAL FIX: Determine the effective scope consistently
+  // If scope_days is provided, use it. Otherwise, use state.scope_days. Otherwise, null (all).
+  const effectiveScope = scopeDays ?? state?.scope_days ?? null;
+
+  // Calculate total using the SAME effective scope
   let totalQuery = supabase.from("meli_orders_cache").select("*", { count: "exact", head: true }).eq("seller_id", sellerId).eq("order_status", "paid");
-  if (scopeDays) { const d = new Date(); d.setDate(d.getDate() - scopeDays); totalQuery = totalQuery.gte("created_at_meli", d.toISOString()); }
+  if (effectiveScope) { 
+    const d = new Date(); 
+    d.setDate(d.getDate() - effectiveScope); 
+    totalQuery = totalQuery.gte("created_at_meli", d.toISOString()); 
+  }
   const { count: total } = await totalQuery;
+
+  // Check if we need to reset due to scope change
+  const scopeChanged = state && state.scope_days !== effectiveScope;
 
   if (!state) {
     const { data: newState } = await supabase.from("meli_real_costs_sync_state").insert({ 
-      user_id: userId, seller_id: sellerId, status: "running", scope_days: scopeDays, 
+      user_id: userId, seller_id: sellerId, status: "running", scope_days: effectiveScope, 
       processed: 0, total: total || 0, cursor_offset: 0, 
       last_heartbeat_at: new Date().toISOString(), started_at: new Date().toISOString(), 
       stats_json: { billing: 0, pending: 0, with_shipping: 0 } 
     }).select().single();
     state = newState;
   } else {
-    const upd: any = { status: "running", total: total || 0, last_heartbeat_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-    // Only reset when status is "idle" - "done" should allow continuing from where it left
-    if (state.status === "idle") { 
+    const upd: any = { 
+      status: "running", 
+      total: total || 0, 
+      last_heartbeat_at: new Date().toISOString(), 
+      updated_at: new Date().toISOString(),
+      scope_days: effectiveScope 
+    };
+    
+    // Reset if idle, done, or scope changed
+    if (state.status === "idle" || state.status === "done" || scopeChanged) { 
       upd.started_at = new Date().toISOString(); 
       upd.processed = 0; 
       upd.cursor_offset = 0; 
       upd.stats_json = { billing: 0, pending: 0, with_shipping: 0 }; 
+      upd.finished_at = null;
+      console.log(`[RealCosts] Resetting sync: status=${state.status}, scopeChanged=${scopeChanged}`);
     }
-    // Update scope_days if provided
-    if (scopeDays && scopeDays !== state.scope_days) {
-      upd.scope_days = scopeDays;
-    }
+    
     const { data: updated } = await supabase.from("meli_real_costs_sync_state").update(upd).eq("seller_id", sellerId).select().single();
     state = updated;
   }
@@ -355,95 +600,46 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
   const stats = state.stats_json || { billing: 0, pending: 0, with_shipping: 0 };
 
   while (processedInRun < MAX_ORDERS_PER_RUN && Date.now() - startTime < MAX_RUNTIME_MS) {
-    let q = supabase.from("meli_orders_cache").select("order_id, total_amount, shipment_id, created_at_meli").eq("seller_id", sellerId).eq("order_status", "paid").order("created_at_meli", { ascending: true }).range(currentOffset, currentOffset + PAGE_SIZE - 1);
-    if (state.scope_days) { const d = new Date(); d.setDate(d.getDate() - state.scope_days); q = q.gte("created_at_meli", d.toISOString()); }
+    // CRITICAL: Use the SAME effectiveScope for pagination
+    let q = supabase.from("meli_orders_cache")
+      .select("order_id, total_amount, shipment_id, created_at_meli")
+      .eq("seller_id", sellerId)
+      .eq("order_status", "paid")
+      .order("created_at_meli", { ascending: true })
+      .range(currentOffset, currentOffset + PAGE_SIZE - 1);
+    
+    if (effectiveScope) { 
+      const d = new Date(); 
+      d.setDate(d.getDate() - effectiveScope); 
+      q = q.gte("created_at_meli", d.toISOString()); 
+    }
+    
     const { data: orders } = await q;
     
     if (!orders?.length) {
-      await supabase.from("meli_real_costs_sync_state").update({ status: "done", finished_at: new Date().toISOString(), updated_at: new Date().toISOString(), stats_json: stats }).eq("seller_id", sellerId);
+      await supabase.from("meli_real_costs_sync_state").update({ 
+        status: "done", 
+        finished_at: new Date().toISOString(), 
+        updated_at: new Date().toISOString(), 
+        stats_json: stats,
+        processed: state.processed + processedInRun,
+        cursor_offset: currentOffset
+      }).eq("seller_id", sellerId);
       return new Response(JSON.stringify({ message: "Sync complete", processed: state.processed + processedInRun, total: state.total }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const orderIds = orders.map((o: any) => o.order_id);
+    const shipmentIds = orders.map((o: any) => o.shipment_id);
     
     // Check existing processed orders
-    const { data: existing } = await supabase.from("order_cost_breakdown_cache").select("order_id, real_cost_synced_at, fee_ml_source").eq("seller_id", sellerId).in("order_id", orderIds);
-    const existingMap = new Map<string, { order_id: string; real_cost_synced_at: string | null; fee_ml_source: string | null }>((existing || []).map((b: { order_id: string; real_cost_synced_at: string | null; fee_ml_source: string | null }) => [b.order_id, b]));
-    
-    // Fetch billing details for these orders from our cache
-    const { data: billingDetails } = await supabase
-      .from("meli_billing_details_cache")
-      .select("order_id, charge_type, gross_amount")
+    const { data: existing } = await supabase.from("order_cost_breakdown_cache")
+      .select("order_id, real_cost_synced_at, fee_ml_source")
       .eq("seller_id", sellerId)
-      .in("order_id", orderIds.map((id: string) => parseInt(id)));
-
-    // Group billing details by order_id
-    const billingByOrder = new Map<string, { fee_ml: number; shipping: number; installments: number; adjustments: number }>();
-    for (const detail of (billingDetails || [])) {
-      const orderId = String(detail.order_id);
-      if (!billingByOrder.has(orderId)) {
-        billingByOrder.set(orderId, { fee_ml: 0, shipping: 0, installments: 0, adjustments: 0 });
-      }
-      const entry = billingByOrder.get(orderId)!;
-      const chargeType = (detail.charge_type || "").toLowerCase();
-      const amount = Math.abs(detail.gross_amount || 0);
-      const isCredit = (detail.gross_amount || 0) < 0; // Negative = credit/refund
-
-      // Brazilian Portuguese charge types from MLB billing API
-      // Comissões ML + MP (sale fees)
-      if (chargeType.includes("custo por vender") || 
-          chargeType.includes("custo por cobrar") ||
-          chargeType.includes("cargo por venta") || 
-          chargeType.includes("sale_fee") || 
-          chargeType === "sale_fee_amount") {
-        if (isCredit) {
-          entry.adjustments -= amount; // Refund of fees
-        } else {
-          entry.fee_ml += amount;
-        }
-      } 
-      // Shipping fees (tarifas de envio)
-      else if (chargeType.includes("tarifa de envio") || 
-               chargeType.includes("envio extra") ||
-               chargeType.includes("envio intermunicipal") ||
-               chargeType.includes("mercado envíos") || 
-               chargeType.includes("shipping") || 
-               chargeType === "shipping_fee") {
-        if (isCredit) {
-          entry.adjustments -= amount;
-        } else {
-          entry.shipping += amount;
-        }
-      } 
-      // Installment fees (parcelamento)
-      else if (chargeType.includes("taxa de parcelamento") || 
-               chargeType.includes("cuota") || 
-               chargeType.includes("installment")) {
-        if (isCredit) {
-          entry.adjustments -= amount;
-        } else {
-          entry.installments += amount;
-        }
-      } 
-      // Adjustments and cancellations
-      else if (chargeType.includes("ajuste") || 
-               chargeType.includes("adjustment") ||
-               chargeType.includes("cancelamento") ||
-               chargeType.includes("reembolso") ||
-               chargeType.includes("bonificação") ||
-               chargeType.includes("estorno")) {
-        // Credits reduce costs, debits add to costs
-        if (isCredit) {
-          entry.adjustments -= amount;
-        } else {
-          entry.adjustments += amount;
-        }
-      }
-      // Any other charge type - add to fee_ml as fallback
-      else if (amount > 0 && !isCredit) {
-        entry.fee_ml += amount;
-      }
-    }
+      .in("order_id", orderIds);
+    const existingMap = new Map<string, { order_id: string; real_cost_synced_at: string | null; fee_ml_source: string | null }>((existing || []).map((b: any) => [b.order_id, b]));
+    
+    // Use the aggregation helper for billing data
+    const { billingByOrder, billingByShipment } = await aggregateBillingData(supabase, sellerId, orderIds, shipmentIds);
 
     const rowsToUpsert: any[] = [];
 
@@ -456,23 +652,30 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
       }
 
       const billing = billingByOrder.get(order.order_id);
+      const shipmentBilling = order.shipment_id ? billingByShipment.get(order.shipment_id) : null;
+      
       let feeML = 0, feeMLSource = "pending", shippingCostSeller = 0, installmentsCost = 0, adjustments = 0;
       const sourceRefs: string[] = [];
 
       if (billing && billing.fee_ml > 0) {
-        // We have real billing data!
         feeML = billing.fee_ml;
         feeMLSource = "billing";
         shippingCostSeller = billing.shipping;
         installmentsCost = billing.installments;
         adjustments = billing.adjustments;
-        sourceRefs.push("billing:api");
+        sourceRefs.push("billing:order");
         stats.billing++;
       } else {
-        // No billing data yet - mark as pending (NOT estimated!)
         feeMLSource = "pending";
         sourceRefs.push("billing:pending");
         stats.pending++;
+      }
+
+      // Check shipment billing for shipping (when order billing has no shipping)
+      if (shippingCostSeller === 0 && shipmentBilling && shipmentBilling.shipping > 0) {
+        shippingCostSeller = shipmentBilling.shipping;
+        adjustments += shipmentBilling.adjustments;
+        sourceRefs.push("billing:shipment");
       }
 
       // Try to get shipping cost from shipment API if we don't have it from billing
@@ -503,23 +706,12 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
       }
 
       const totalMarketplaceCost = feeML + shippingCostSeller + installmentsCost + adjustments;
-      
-      // NEW: Calculate net values (without shipping impact on profit/margin)
-      // For now, we store the shipping_cost_seller and will calculate shipping_revenue from order data
-      // The key insight: profit/margin should be based on product revenue only, not inflated by shipping
       const revenueTotal = order.total_amount || 0;
-      // Note: receita_envio (shipping_revenue) needs to come from order or billing data
-      // For now we'll set it to 0 and let cost-engine populate it from order metadata
-      const shippingRevenue = 0; // Will be populated by cost-engine from order data
-      const revenueNet = revenueTotal - shippingRevenue; // Product revenue only
-      
-      // commission_cost = fee_ml (comissão ML) - separate from shipping
       const commissionCost = feeML;
-      
-      // shipping_balance = shipping_revenue - shipping_cost_seller
+      const shippingRevenue = 0; // Will be populated by cost-engine from order data
+      const revenueNet = revenueTotal - shippingRevenue;
       const shippingBalance = shippingRevenue - shippingCostSeller;
       
-      // Track missing fields for debugging
       const missingFields: string[] = [];
       if (feeMLSource === "pending") missingFields.push("sem_comissao");
       if (shippingCostSeller === 0 && order.shipment_id) missingFields.push("sem_frete_cobrado");
@@ -543,13 +735,11 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
         real_cost_synced_at: new Date().toISOString(), 
         calculated_at: new Date().toISOString(), 
         status: feeMLSource === "billing" ? "calculated" : "pending",
-        // NEW separated fields
         commission_cost: commissionCost,
         receita_envio: shippingRevenue,
         shipping_balance: shippingBalance,
         revenue_net: revenueNet,
         missing_fields: missingFields,
-        // cost_net, profit_net, margin_net will be calculated by cost-engine with product costs
       });
       
       processedInRun++;

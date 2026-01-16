@@ -36,7 +36,10 @@ interface CoverageStats {
 interface BillingStatus {
   total_details: number;
   unique_orders_with_billing: number;
-  latest_period: string | null;
+  unique_shipments_with_billing?: number;
+  periods_count?: number;
+  oldest_period: string | null;
+  newest_period: string | null;
   last_sync_at: string | null;
 }
 
@@ -48,11 +51,13 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
   const [feePercent, setFeePercent] = useState("17");
   const [feeMode, setFeeMode] = useState("percent");
   const [realCostsState, setRealCostsState] = useState<RealCostsSyncState | null>(null);
-  const [coverage, setCoverage] = useState<CoverageStats>({ total_paid: 0, with_real_billing: 0, with_pending_billing: 0, total_processed: 0, coverage_percent: 0 });
+  const [coverage, setCoverage] = useState<CoverageStats & { missing_breakdown?: number }>({ total_paid: 0, with_real_billing: 0, with_pending_billing: 0, total_processed: 0, coverage_percent: 0 });
   const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
   const [syncScope, setSyncScope] = useState<string>("all");
+  const [billingScope, setBillingScope] = useState<string>("recent");
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [syncingBilling, setSyncingBilling] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const autoResumeAttemptedRef = useRef(false);
 
@@ -114,18 +119,33 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     } catch { toast.error("Erro ao salvar configurações"); } finally { setSaving(false); }
   };
 
-  const handleSyncBilling = async () => {
+  const handleSyncBilling = async (scope: string = "recent") => {
     setSyncingBilling(true);
     try {
-      toast.info("Sincronizando taxas do Billing Reports...");
-      const { data, error } = await supabase.functions.invoke("ml-sync-billing-details", { body: { seller_id: sellerId, action: "sync" } });
+      toast.info(scope === "history" ? "Sincronizando histórico completo de billing..." : "Sincronizando billing recente (últimos 12 meses)...");
+      const { data, error } = await supabase.functions.invoke("ml-sync-billing-details", { body: { seller_id: sellerId, action: "sync", scope } });
       if (error) throw error;
-      toast.success(`Billing sincronizado: ${data?.records_inserted || 0} registros`);
+      toast.success(`Billing sincronizado: ${data?.records_inserted || 0} registros, ${data?.periods_processed || 0} períodos`);
       loadBillingStatus();
     } catch (err: any) { 
       toast.error("Erro ao sincronizar billing: " + (err?.message || "Erro desconhecido")); 
     } finally { 
       setSyncingBilling(false); 
+    }
+  };
+
+  const handleBackfillMissing = async () => {
+    setBackfilling(true);
+    try {
+      toast.info("Criando breakdown para pedidos sem registro...");
+      const { data, error } = await supabase.functions.invoke("ml-sync-real-costs", { body: { seller_id: sellerId, action: "backfill_missing", scope_days: syncScope === "all" ? null : parseInt(syncScope) } });
+      if (error) throw error;
+      toast.success(data?.message || "Backfill concluído");
+      loadRealCostsStatus();
+    } catch (err: any) { 
+      toast.error("Erro no backfill: " + (err?.message || "Erro desconhecido")); 
+    } finally { 
+      setBackfilling(false); 
     }
   };
 
@@ -199,7 +219,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
           <CardDescription>Busca as taxas exatas de cada pedido diretamente da API do Mercado Livre</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
             <div className="p-3 bg-muted rounded-lg">
               <p className="text-2xl font-bold">{billingStatus?.total_details?.toLocaleString() || 0}</p>
               <p className="text-xs text-muted-foreground">Movimentos</p>
@@ -209,8 +229,12 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
               <p className="text-xs text-muted-foreground">Pedidos com Billing</p>
             </div>
             <div className="p-3 bg-muted rounded-lg">
-              <p className="text-sm font-medium">{billingStatus?.latest_period || "—"}</p>
-              <p className="text-xs text-muted-foreground">Último Período</p>
+              <p className="text-2xl font-bold">{billingStatus?.periods_count || 0}</p>
+              <p className="text-xs text-muted-foreground">Períodos</p>
+            </div>
+            <div className="p-3 bg-muted rounded-lg">
+              <p className="text-sm font-medium">{billingStatus?.oldest_period || "—"}</p>
+              <p className="text-xs text-muted-foreground">Período Mais Antigo</p>
             </div>
             <div className="p-3 bg-muted rounded-lg">
               <p className="text-sm font-medium">{billingStatus?.last_sync_at ? new Date(billingStatus.last_sync_at).toLocaleDateString('pt-BR') : "—"}</p>
@@ -223,9 +247,14 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
             <span className="text-amber-700 dark:text-amber-300">O Mercado Livre disponibiliza billing ~24h após a venda. Pedidos recentes aparecerão como "Pendente".</span>
           </div>
 
-          <Button onClick={handleSyncBilling} disabled={syncingBilling} className="gap-2">
-            {syncingBilling ? <><Loader2 className="h-4 w-4 animate-spin" />Sincronizando...</> : <><FileText className="h-4 w-4" />Sincronizar Billing</>}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button onClick={() => handleSyncBilling("recent")} disabled={syncingBilling} variant="outline" className="gap-2">
+              {syncingBilling ? <><Loader2 className="h-4 w-4 animate-spin" />Sincronizando...</> : <><FileText className="h-4 w-4" />Últimos 12 Meses</>}
+            </Button>
+            <Button onClick={() => handleSyncBilling("history")} disabled={syncingBilling} className="gap-2">
+              {syncingBilling ? <><Loader2 className="h-4 w-4 animate-spin" />Sincronizando...</> : <><Database className="h-4 w-4" />Histórico Completo</>}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
