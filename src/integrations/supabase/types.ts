@@ -718,6 +718,69 @@ export type Database = {
         }
         Relationships: []
       }
+      meli_billing_details_sync_state: {
+        Row: {
+          created_at: string
+          details_offset: number | null
+          finished_at: string | null
+          id: string
+          last_error: string | null
+          last_heartbeat_at: string | null
+          period_key_cursor: string | null
+          periods_offset: number | null
+          processed_details: number | null
+          processed_periods: number | null
+          scope: string | null
+          seller_id: string
+          started_at: string | null
+          status: string
+          total_details: number | null
+          total_periods: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          details_offset?: number | null
+          finished_at?: string | null
+          id?: string
+          last_error?: string | null
+          last_heartbeat_at?: string | null
+          period_key_cursor?: string | null
+          periods_offset?: number | null
+          processed_details?: number | null
+          processed_periods?: number | null
+          scope?: string | null
+          seller_id: string
+          started_at?: string | null
+          status?: string
+          total_details?: number | null
+          total_periods?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          details_offset?: number | null
+          finished_at?: string | null
+          id?: string
+          last_error?: string | null
+          last_heartbeat_at?: string | null
+          period_key_cursor?: string | null
+          periods_offset?: number | null
+          processed_details?: number | null
+          processed_periods?: number | null
+          scope?: string | null
+          seller_id?: string
+          started_at?: string | null
+          status?: string
+          total_details?: number | null
+          total_periods?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       meli_financial_movements_cache: {
         Row: {
           amount: number

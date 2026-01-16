@@ -25,18 +25,6 @@ interface BillingDetail {
   raw_data: any;
 }
 
-interface SyncState {
-  status: string;
-  periods_offset: number;
-  periods_processed: number;
-  total_records: number;
-  oldest_period: string | null;
-  newest_period: string | null;
-  last_error: string | null;
-  started_at: string | null;
-  finished_at: string | null;
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -72,16 +60,19 @@ Deno.serve(async (req) => {
     }
 
     if (action === "status") {
-      return await handleGetStatus(supabase, seller_id, corsHeaders);
+      return await handleGetStatus(supabase, user.id, seller_id, corsHeaders);
     }
 
     if (action === "sync") {
-      // scope: "recent" (default, last 12 months), "history" (all available)
       const syncScope = scope || "recent";
       return await handleSync(supabase, user.id, seller_id, syncScope, corsHeaders);
     }
 
-    return await handleGetStatus(supabase, seller_id, corsHeaders);
+    if (action === "reset") {
+      return await handleReset(supabase, user.id, seller_id, corsHeaders);
+    }
+
+    return await handleGetStatus(supabase, user.id, seller_id, corsHeaders);
   } catch (err: unknown) {
     console.error("Error:", err);
     const message = err instanceof Error ? err.message : "Unknown error";
@@ -91,40 +82,54 @@ Deno.serve(async (req) => {
   }
 });
 
-async function handleGetStatus(supabase: any, sellerId: string, corsHeaders: any) {
-  // Count total billing details
-  const { count: totalDetails } = await supabase
-    .from("meli_billing_details_cache")
-    .select("*", { count: "exact", head: true })
-    .eq("seller_id", sellerId);
-
-  // Count unique orders with billing
-  const { data: orderCount } = await supabase
-    .from("meli_billing_details_cache")
-    .select("order_id")
+async function handleGetStatus(supabase: any, userId: string, sellerId: string, corsHeaders: any) {
+  // Get sync state
+  const { data: syncState } = await supabase
+    .from("meli_billing_details_sync_state")
+    .select("*")
     .eq("seller_id", sellerId)
-    .not("order_id", "is", null);
+    .maybeSingle();
 
-  const uniqueOrders = new Set((orderCount || []).map((r: any) => r.order_id)).size;
+  // PAGINATED COUNT - total billing details
+  let totalDetails = 0;
+  let offset = 0;
+  const PAGE = 1000;
+  while (true) {
+    const { data, error } = await supabase
+      .from("meli_billing_details_cache")
+      .select("id")
+      .eq("seller_id", sellerId)
+      .range(offset, offset + PAGE - 1);
+    if (error || !data?.length) break;
+    totalDetails += data.length;
+    if (data.length < PAGE) break;
+    offset += PAGE;
+  }
 
-  // Count unique shipments with billing (for shipping cost coverage)
-  const { data: shipmentCount } = await supabase
-    .from("meli_billing_details_cache")
-    .select("shipment_id")
-    .eq("seller_id", sellerId)
-    .not("shipment_id", "is", null);
+  // PAGINATED COUNT - unique orders with billing
+  const uniqueOrderIds = new Set<number>();
+  const uniqueShipmentIds = new Set<number>();
+  const uniquePeriodKeys = new Set<string>();
+  offset = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("meli_billing_details_cache")
+      .select("order_id, shipment_id, period_key")
+      .eq("seller_id", sellerId)
+      .range(offset, offset + PAGE - 1);
+    if (error || !data?.length) break;
+    for (const r of data) {
+      if (r.order_id) uniqueOrderIds.add(r.order_id);
+      if (r.shipment_id) uniqueShipmentIds.add(r.shipment_id);
+      if (r.period_key) uniquePeriodKeys.add(r.period_key);
+    }
+    if (data.length < PAGE) break;
+    offset += PAGE;
+  }
 
-  const uniqueShipments = new Set((shipmentCount || []).map((r: any) => r.shipment_id)).size;
-
-  // Get distinct periods to understand coverage
-  const { data: periods } = await supabase
-    .from("meli_billing_details_cache")
-    .select("period_key")
-    .eq("seller_id", sellerId);
-
-  const uniquePeriods = [...new Set((periods || []).map((r: any) => r.period_key))].sort();
-  const oldestPeriod = uniquePeriods[0] || null;
-  const newestPeriod = uniquePeriods[uniquePeriods.length - 1] || null;
+  const sortedPeriods = [...uniquePeriodKeys].sort();
+  const oldestPeriod = sortedPeriods[0] || null;
+  const newestPeriod = sortedPeriods[sortedPeriods.length - 1] || null;
 
   // Get most recent sync timestamp
   const { data: latestSync } = await supabase
@@ -136,19 +141,39 @@ async function handleGetStatus(supabase: any, sellerId: string, corsHeaders: any
     .maybeSingle();
 
   return new Response(JSON.stringify({
-    total_details: totalDetails || 0,
-    unique_orders_with_billing: uniqueOrders,
-    unique_shipments_with_billing: uniqueShipments,
-    periods_count: uniquePeriods.length,
+    total_details: totalDetails,
+    unique_orders_with_billing: uniqueOrderIds.size,
+    unique_shipments_with_billing: uniqueShipmentIds.size,
+    periods_count: uniquePeriodKeys.size,
     oldest_period: oldestPeriod,
     newest_period: newestPeriod,
     last_sync_at: latestSync?.fetched_at || null,
+    sync_state: syncState || null,
   }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+
+async function handleReset(supabase: any, userId: string, sellerId: string, corsHeaders: any) {
+  await supabase.from("meli_billing_details_sync_state").delete().eq("seller_id", sellerId).eq("user_id", userId);
+  return new Response(JSON.stringify({ message: "Reset complete" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
 async function handleSync(supabase: any, userId: string, sellerId: string, scope: string, corsHeaders: any) {
   const startTime = Date.now();
   console.log(`[BillingDetails] Starting sync for seller ${sellerId}, scope: ${scope}`);
+
+  // Get or create sync state
+  let { data: syncState } = await supabase
+    .from("meli_billing_details_sync_state")
+    .select("*")
+    .eq("seller_id", sellerId)
+    .maybeSingle();
+
+  // Check if scope changed - reset if so
+  if (syncState && syncState.scope !== scope) {
+    console.log(`[BillingDetails] Scope changed from ${syncState.scope} to ${scope}, resetting state`);
+    await supabase.from("meli_billing_details_sync_state").delete().eq("seller_id", sellerId);
+    syncState = null;
+  }
 
   // Get ML account
   const { data: mlAccount } = await supabase
@@ -166,34 +191,63 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
 
   let accessToken = mlAccount.access_token;
   let totalInserted = 0;
-  let periodsProcessed = 0;
-  let periodsOffset = 0;
-  let allPeriods: any[] = [];
+  let periodsProcessed = syncState?.processed_periods || 0;
+  let periodsOffset = syncState?.periods_offset || 0;
+  let currentPeriodKey = syncState?.period_key_cursor || null;
+  let currentDetailsOffset = syncState?.details_offset || 0;
+  
+  // Initialize or update state
+  if (!syncState) {
+    const { data: newState } = await supabase.from("meli_billing_details_sync_state").insert({
+      user_id: userId,
+      seller_id: sellerId,
+      status: "running",
+      scope: scope,
+      periods_offset: 0,
+      period_key_cursor: null,
+      details_offset: 0,
+      total_periods: 0,
+      processed_periods: 0,
+      total_details: 0,
+      processed_details: 0,
+      started_at: new Date().toISOString(),
+      last_heartbeat_at: new Date().toISOString(),
+    }).select().single();
+    syncState = newState;
+  } else {
+    await supabase.from("meli_billing_details_sync_state").update({
+      status: "running",
+      last_heartbeat_at: new Date().toISOString(),
+      last_error: null,
+    }).eq("seller_id", sellerId);
+  }
 
   try {
     // Step 1: Fetch ALL available billing periods using pagination
-    console.log(`[BillingDetails] Fetching billing periods with pagination...`);
+    console.log(`[BillingDetails] Fetching billing periods starting at offset ${periodsOffset}...`);
     
+    let allPeriods: any[] = [];
     let hasMorePeriods = true;
+    let tempOffset = 0;
+    
+    // First, fetch all periods to know the total
     while (hasMorePeriods && Date.now() - startTime < MAX_RUNTIME_MS) {
-      const periodsUrl = `https://api.mercadolibre.com/billing/integration/monthly/periods?group=ML&document_type=BILL&limit=${PERIODS_PER_PAGE}&offset=${periodsOffset}`;
+      const periodsUrl = `https://api.mercadolibre.com/billing/integration/monthly/periods?group=ML&document_type=BILL&limit=${PERIODS_PER_PAGE}&offset=${tempOffset}`;
       
       let periodsRes = await fetch(periodsUrl, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
 
-      // If 401, refresh token and RETRY the request
       if (periodsRes.status === 401) {
         console.log(`[BillingDetails] Token expired, refreshing...`);
         const newToken = await refreshToken(supabase, sellerId, mlAccount.refresh_token);
         if (!newToken) {
-          return new Response(JSON.stringify({ error: "Token refresh failed. Please reconnect your Mercado Livre account." }), {
+          await updateSyncState(supabase, sellerId, { status: "error", last_error: "Token refresh failed" });
+          return new Response(JSON.stringify({ error: "Token refresh failed" }), {
             status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
         accessToken = newToken;
-        
-        // RETRY with new token
         periodsRes = await fetch(periodsUrl, {
           headers: { Authorization: `Bearer ${accessToken}` },
         });
@@ -202,6 +256,7 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
       if (!periodsRes.ok) {
         const errText = await periodsRes.text();
         console.error(`[BillingDetails] Failed to fetch periods: ${errText}`);
+        await updateSyncState(supabase, sellerId, { status: "error", last_error: `API error: ${periodsRes.status}` });
         return new Response(JSON.stringify({ error: "Failed to fetch billing periods", details: errText }), {
           status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -209,39 +264,59 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
 
       const periodsData = await periodsRes.json();
       const periodsBatch = periodsData.results || [];
-      console.log(`[BillingDetails] Fetched ${periodsBatch.length} periods at offset ${periodsOffset}`);
+      console.log(`[BillingDetails] Fetched ${periodsBatch.length} periods at offset ${tempOffset}`);
       
       allPeriods = [...allPeriods, ...periodsBatch];
       
-      // Check if there are more periods
       if (periodsBatch.length < PERIODS_PER_PAGE) {
         hasMorePeriods = false;
       } else {
-        periodsOffset += PERIODS_PER_PAGE;
-        
-        // For "recent" scope, only fetch first batch (12 months)
-        if (scope === "recent") {
+        tempOffset += PERIODS_PER_PAGE;
+        if (scope === "recent" && tempOffset >= PERIODS_PER_PAGE) {
           hasMorePeriods = false;
         }
       }
       
-      // Small delay to avoid rate limiting
       await new Promise(r => setTimeout(r, 100));
     }
 
     console.log(`[BillingDetails] Total periods found: ${allPeriods.length}`);
+    
+    // Update total periods in state
+    await supabase.from("meli_billing_details_sync_state").update({
+      total_periods: allPeriods.length,
+      last_heartbeat_at: new Date().toISOString(),
+    }).eq("seller_id", sellerId);
 
-    // Step 2: Process each period
-    for (const period of allPeriods) {
+    // Step 2: Process periods starting from where we left off
+    for (let i = periodsOffset; i < allPeriods.length; i++) {
       if (Date.now() - startTime >= MAX_RUNTIME_MS) {
-        console.log(`[BillingDetails] Runtime limit reached, pausing at period ${periodsProcessed}...`);
-        break;
+        console.log(`[BillingDetails] Runtime limit reached, pausing at period ${i}...`);
+        await updateSyncState(supabase, sellerId, {
+          status: "paused",
+          periods_offset: i,
+          period_key_cursor: null,
+          details_offset: 0,
+          processed_periods: i,
+        });
+        return new Response(JSON.stringify({
+          success: true,
+          status: "paused",
+          scope: scope,
+          periods_found: allPeriods.length,
+          periods_processed: i,
+          records_inserted: totalInserted,
+          completed: false,
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
-      const periodKey = period.key; // e.g., "2026-01-01"
-      console.log(`[BillingDetails] Processing period: ${periodKey}`);
+      const period = allPeriods[i];
+      const periodKey = period.key;
+      console.log(`[BillingDetails] Processing period: ${periodKey} (${i + 1}/${allPeriods.length})`);
 
-      let offset = 0;
+      // If we're resuming mid-period, start from saved offset
+      let offset = (currentPeriodKey === periodKey) ? currentDetailsOffset : 0;
+      currentPeriodKey = periodKey;
       let hasMore = true;
 
       while (hasMore && Date.now() - startTime < MAX_RUNTIME_MS) {
@@ -253,15 +328,30 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
 
         if (detailsRes.status === 401) {
           const newToken = await refreshToken(supabase, sellerId, mlAccount.refresh_token);
-          if (!newToken) break;
+          if (!newToken) {
+            await updateSyncState(supabase, sellerId, { status: "error", last_error: "Token refresh failed during details fetch" });
+            break;
+          }
           accessToken = newToken;
-          continue; // Retry with new token
+          continue;
         }
 
         if (detailsRes.status === 429) {
-          console.log(`[BillingDetails] Rate limited, waiting 2s...`);
-          await new Promise(r => setTimeout(r, 2000));
-          continue;
+          console.log(`[BillingDetails] Rate limited, saving state and pausing...`);
+          await updateSyncState(supabase, sellerId, {
+            status: "paused",
+            periods_offset: i,
+            period_key_cursor: periodKey,
+            details_offset: offset,
+            last_error: "Rate limited - will resume",
+          });
+          return new Response(JSON.stringify({
+            success: true,
+            status: "paused",
+            reason: "rate_limited",
+            periods_processed: i,
+            records_inserted: totalInserted,
+          }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
 
         if (!detailsRes.ok) {
@@ -278,12 +368,18 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
           break;
         }
 
-        // Parse and prepare records
+        // Parse and prepare records - WITH SIGNED AMOUNTS
         const records: BillingDetail[] = [];
         for (const item of results) {
           const chargeInfo = item.charge_info || {};
           const salesInfo = (item.sales_info || [])[0] || {};
           const shippingInfo = item.shipping_info || {};
+
+          // CRITICAL: Keep the original sign of the amount
+          const detailAmount = chargeInfo.detail_amount || 0;
+          const chargeDesc = chargeInfo.charge_bonified_id 
+            ? `Bonified: ${chargeInfo.charge_bonified_id}` 
+            : (chargeInfo.transaction_detail || chargeInfo.concept_type || null);
 
           records.push({
             seller_id: sellerId,
@@ -292,9 +388,9 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
             order_id: salesInfo.order_id || null,
             shipment_id: shippingInfo.shipping_id || null,
             charge_type: chargeInfo.transaction_detail || chargeInfo.concept_type || "unknown",
-            charge_description: chargeInfo.charge_bonified_id ? `Bonified: ${chargeInfo.charge_bonified_id}` : null,
-            gross_amount: Math.abs(chargeInfo.detail_amount || 0),
-            net_amount: Math.abs(chargeInfo.detail_amount || 0),
+            charge_description: chargeDesc,
+            gross_amount: detailAmount, // Keep original sign!
+            net_amount: detailAmount,   // Keep original sign!
             currency_id: chargeInfo.currency_id || "BRL",
             created_at_meli: item.created_date || null,
             fetched_at: new Date().toISOString(),
@@ -315,37 +411,71 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
           }
         }
 
+        // Update state periodically
+        await supabase.from("meli_billing_details_sync_state").update({
+          period_key_cursor: periodKey,
+          details_offset: offset + results.length,
+          processed_details: (syncState?.processed_details || 0) + results.length,
+          last_heartbeat_at: new Date().toISOString(),
+        }).eq("seller_id", sellerId);
+
         offset += results.length;
         hasMore = results.length >= DETAILS_PAGE_SIZE;
 
-        // Small delay to avoid rate limiting
         await new Promise(r => setTimeout(r, 100));
       }
 
-      periodsProcessed++;
+      periodsProcessed = i + 1;
+      currentDetailsOffset = 0; // Reset for next period
+      
+      // Update progress
+      await supabase.from("meli_billing_details_sync_state").update({
+        processed_periods: periodsProcessed,
+        periods_offset: periodsProcessed,
+        period_key_cursor: null,
+        details_offset: 0,
+        last_heartbeat_at: new Date().toISOString(),
+      }).eq("seller_id", sellerId);
     }
+
+    // All done!
+    await updateSyncState(supabase, sellerId, {
+      status: "done",
+      finished_at: new Date().toISOString(),
+      processed_periods: allPeriods.length,
+    });
 
     console.log(`[BillingDetails] Sync complete. Periods: ${periodsProcessed}/${allPeriods.length}, Records: ${totalInserted}`);
 
     return new Response(JSON.stringify({
       success: true,
+      status: "done",
       scope: scope,
       periods_found: allPeriods.length,
       periods_processed: periodsProcessed,
       records_inserted: totalInserted,
-      completed: periodsProcessed >= allPeriods.length,
+      completed: true,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (err: unknown) {
     console.error(`[BillingDetails] Error:`, err);
     const message = err instanceof Error ? err.message : "Unknown error";
+    await updateSyncState(supabase, sellerId, { status: "error", last_error: message });
     return new Response(JSON.stringify({ error: message }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 }
 
-async function refreshToken(supabase: any, sellerId: string, refreshToken: string): Promise<string | null> {
+async function updateSyncState(supabase: any, sellerId: string, updates: any) {
+  await supabase.from("meli_billing_details_sync_state").update({
+    ...updates,
+    updated_at: new Date().toISOString(),
+    last_heartbeat_at: new Date().toISOString(),
+  }).eq("seller_id", sellerId);
+}
+
+async function refreshToken(supabase: any, sellerId: string, refreshTokenValue: string): Promise<string | null> {
   try {
     const appId = Deno.env.get("ML_APP_ID");
     const secretKey = Deno.env.get("ML_SECRET_KEY");
@@ -357,7 +487,7 @@ async function refreshToken(supabase: any, sellerId: string, refreshToken: strin
         grant_type: "refresh_token",
         client_id: appId!,
         client_secret: secretKey!,
-        refresh_token: refreshToken,
+        refresh_token: refreshTokenValue,
       }),
     });
 
