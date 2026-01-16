@@ -223,20 +223,40 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
   }
 
   try {
-    // Step 1: Fetch ALL available billing periods using pagination
+    // Step 1: Fetch ALL available billing periods using pagination with rate limit handling
     console.log(`[BillingDetails] Fetching billing periods starting at offset ${periodsOffset}...`);
     
     let allPeriods: any[] = [];
     let hasMorePeriods = true;
     let tempOffset = 0;
+    const MAX_RETRIES = 5;
+    
+    // Helper function for rate-limited API calls with exponential backoff
+    async function fetchWithRateLimitRetry(url: string, token: string, retries = 0): Promise<Response> {
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      
+      if (res.status === 429) {
+        if (retries >= MAX_RETRIES) {
+          console.log(`[BillingDetails] Max retries (${MAX_RETRIES}) reached for rate limit`);
+          return res; // Return the 429 response after max retries
+        }
+        // Exponential backoff: 15s, 30s, 60s, 120s, 240s
+        const waitSec = Math.min(15 * Math.pow(2, retries), 240);
+        console.log(`[BillingDetails] Rate limited, waiting ${waitSec}s before retry ${retries + 1}/${MAX_RETRIES}...`);
+        await new Promise(r => setTimeout(r, waitSec * 1000));
+        return fetchWithRateLimitRetry(url, token, retries + 1);
+      }
+      
+      return res;
+    }
     
     // First, fetch all periods to know the total
     while (hasMorePeriods && Date.now() - startTime < MAX_RUNTIME_MS) {
       const periodsUrl = `https://api.mercadolibre.com/billing/integration/monthly/periods?group=ML&document_type=BILL&limit=${PERIODS_PER_PAGE}&offset=${tempOffset}`;
       
-      let periodsRes = await fetch(periodsUrl, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      let periodsRes = await fetchWithRateLimitRetry(periodsUrl, accessToken);
 
       if (periodsRes.status === 401) {
         console.log(`[BillingDetails] Token expired, refreshing...`);
@@ -248,9 +268,24 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
           });
         }
         accessToken = newToken;
-        periodsRes = await fetch(periodsUrl, {
-          headers: { Authorization: `Bearer ${accessToken}` },
+        periodsRes = await fetchWithRateLimitRetry(periodsUrl, accessToken);
+      }
+      
+      // Handle rate limit after retries exhausted - pause and return
+      if (periodsRes.status === 429) {
+        console.log(`[BillingDetails] Rate limit persists after retries, pausing sync...`);
+        await updateSyncState(supabase, sellerId, {
+          status: "paused",
+          periods_offset: tempOffset,
+          last_error: "Rate limited during periods fetch - retry in 5 minutes",
         });
+        return new Response(JSON.stringify({
+          success: true,
+          status: "paused",
+          reason: "rate_limited",
+          message: "Rate limited by ML API. Please retry in 5 minutes.",
+          periods_found: allPeriods.length,
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
       if (!periodsRes.ok) {
@@ -277,7 +312,8 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
         }
       }
       
-      await new Promise(r => setTimeout(r, 100));
+      // Wait 12s between period fetches to stay under 5 req/min limit
+      await new Promise(r => setTimeout(r, 12000));
     }
 
     console.log(`[BillingDetails] Total periods found: ${allPeriods.length}`);
@@ -322,9 +358,7 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
       while (hasMore && Date.now() - startTime < MAX_RUNTIME_MS) {
         const detailsUrl = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/group/ML/details?document_type=BILL&limit=${DETAILS_PAGE_SIZE}&offset=${offset}`;
         
-        const detailsRes = await fetch(detailsUrl, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
+        let detailsRes = await fetchWithRateLimitRetry(detailsUrl, accessToken);
 
         if (detailsRes.status === 401) {
           const newToken = await refreshToken(supabase, sellerId, mlAccount.refresh_token);
@@ -337,18 +371,19 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
         }
 
         if (detailsRes.status === 429) {
-          console.log(`[BillingDetails] Rate limited, saving state and pausing...`);
+          console.log(`[BillingDetails] Rate limited on details after retries, saving state and pausing...`);
           await updateSyncState(supabase, sellerId, {
             status: "paused",
             periods_offset: i,
             period_key_cursor: periodKey,
             details_offset: offset,
-            last_error: "Rate limited - will resume",
+            last_error: "Rate limited - will resume in 5 minutes",
           });
           return new Response(JSON.stringify({
             success: true,
             status: "paused",
             reason: "rate_limited",
+            message: "Rate limited by ML API. Please retry in 5 minutes.",
             periods_processed: i,
             records_inserted: totalInserted,
           }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -422,7 +457,8 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
         offset += results.length;
         hasMore = results.length >= DETAILS_PAGE_SIZE;
 
-        await new Promise(r => setTimeout(r, 100));
+        // Wait 12s between details fetches to stay under 5 req/min limit
+        await new Promise(r => setTimeout(r, 12000));
       }
 
       periodsProcessed = i + 1;
