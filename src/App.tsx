@@ -3,7 +3,9 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useCostSyncWatchdog } from "@/hooks/useCostSyncWatchdog";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
@@ -16,6 +18,83 @@ import Custos from "./pages/Custos";
 import Concorrencia from "./pages/Concorrencia";
 import NotFound from "./pages/NotFound";
 
+// Global watchdog provider component
+function GlobalCostWatchdog() {
+  const [sellerId, setSellerId] = useState<string | null>(null);
+  const [enabled, setEnabled] = useState(false);
+
+  useEffect(() => {
+    // Load from localStorage
+    const storedSellerId = localStorage.getItem("cost_watchdog_seller_id");
+    const storedEnabled = localStorage.getItem("cost_watchdog_enabled") !== "false";
+    
+    if (storedSellerId) {
+      setSellerId(storedSellerId);
+      setEnabled(storedEnabled);
+    }
+
+    // Check auth and get first active seller
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        setSellerId(null);
+        setEnabled(false);
+        return;
+      }
+
+      // Get first active ML account if no stored seller
+      if (!storedSellerId) {
+        const { data: accounts } = await supabase
+          .from("ml_accounts")
+          .select("ml_user_id")
+          .eq("user_id", session.user.id)
+          .eq("is_active", true)
+          .limit(1);
+        
+        if (accounts?.[0]) {
+          setSellerId(accounts[0].ml_user_id);
+          localStorage.setItem("cost_watchdog_seller_id", accounts[0].ml_user_id);
+          setEnabled(true);
+        }
+      }
+    };
+
+    checkAuth();
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") {
+        setSellerId(null);
+        setEnabled(false);
+        localStorage.removeItem("cost_watchdog_seller_id");
+      } else if (event === "SIGNED_IN") {
+        checkAuth();
+      }
+    });
+
+    // Listen for storage changes (when CostSettings updates)
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === "cost_watchdog_enabled") {
+        setEnabled(e.newValue !== "false");
+      }
+      if (e.key === "cost_watchdog_seller_id") {
+        setSellerId(e.newValue);
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      subscription.unsubscribe();
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
+
+  // Run the global watchdog
+  useCostSyncWatchdog(sellerId, enabled);
+
+  return null;
+}
+
 const App = () => {
   const [queryClient] = useState(() => new QueryClient());
 
@@ -24,6 +103,7 @@ const App = () => {
       <TooltipProvider>
         <Toaster />
         <Sonner />
+        <GlobalCostWatchdog />
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Index />} />

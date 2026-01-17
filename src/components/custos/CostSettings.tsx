@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { RefreshCw, DollarSign, Percent, Package, Play, Pause, RotateCcw, AlertCircle, Clock, Loader2, Database, FileText, AlertTriangle, Zap, CheckCircle2 } from "lucide-react";
+import { RefreshCw, DollarSign, Percent, Package, Play, Pause, RotateCcw, AlertCircle, Clock, Loader2, Database, FileText, AlertTriangle, Zap, CheckCircle2, FastForward } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 interface CostSettingsProps { sellerId: string; }
@@ -78,17 +78,28 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
   const [syncScope, setSyncScope] = useState<string>("all");
   const [billingScope, setBillingScope] = useState<string>("recent");
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showResetProgressConfirm, setShowResetProgressConfirm] = useState(false);
   const [syncingBilling, setSyncingBilling] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
   
-  // Auto-sync watchdog state
-  const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
+  // Auto-sync watchdog state - synced with global via localStorage
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(() => {
+    return localStorage.getItem("cost_watchdog_enabled") !== "false";
+  });
   const [currentAutoStep, setCurrentAutoStep] = useState<string | null>(null);
   
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const watchdogRef = useRef<NodeJS.Timeout | null>(null);
-  const isAutoResuming = useRef(false);
   const lastBillingScope = useRef<string>("history");
+
+  // Sync sellerId to localStorage for global watchdog
+  useEffect(() => {
+    localStorage.setItem("cost_watchdog_seller_id", sellerId);
+  }, [sellerId]);
+
+  // Sync autoSyncEnabled to localStorage for global watchdog
+  useEffect(() => {
+    localStorage.setItem("cost_watchdog_enabled", autoSyncEnabled ? "true" : "false");
+  }, [autoSyncEnabled]);
 
   // Load initial data
   useEffect(() => {
@@ -97,7 +108,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     loadBillingStatus();
     loadBackfillState();
     
-    // Polling for status updates
+    // Polling for status updates (UI only, not action triggering)
     pollIntervalRef.current = setInterval(() => {
       loadRealCostsStatus();
       loadBillingStatus();
@@ -106,156 +117,24 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     
     return () => { 
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-      if (watchdogRef.current) clearInterval(watchdogRef.current);
     };
   }, [sellerId]);
 
-  // WATCHDOG: Autonomous sync orchestration
+  // Update current step based on state changes (for UI display only)
   useEffect(() => {
-    if (!autoSyncEnabled) {
+    const billingSyncState = billingStatus?.sync_state;
+    if (billingSyncState?.status === 'running' || billingSyncState?.status === 'paused') {
+      setCurrentAutoStep("billing");
+    } else if (backfillState?.status === 'running' || backfillState?.status === 'paused') {
+      setCurrentAutoStep("backfill");
+    } else if (realCostsState?.status === 'running' || realCostsState?.status === 'paused') {
+      setCurrentAutoStep("realcosts");
+    } else if ((coverage.missing_breakdown || 0) === 0 && coverage.with_pending_billing === 0 && coverage.with_real_billing > 0) {
       setCurrentAutoStep(null);
-      return;
+    } else {
+      setCurrentAutoStep(null);
     }
-
-    // Debounce auto-resume to prevent rapid-fire calls
-    if (isAutoResuming.current) return;
-
-    const runWatchdog = async () => {
-      // Priority 1: Billing sync paused? Resume it
-      const billingSyncState = billingStatus?.sync_state;
-      if (billingSyncState?.status === 'paused') {
-        setCurrentAutoStep("billing");
-        isAutoResuming.current = true;
-        console.log("[Watchdog] Detected paused billing sync, resuming...");
-        
-        try {
-          await supabase.functions.invoke("ml-sync-billing-details", { 
-            body: { seller_id: sellerId, action: "sync", scope: billingSyncState.scope || lastBillingScope.current } 
-          });
-        } catch (err) {
-          console.error("[Watchdog] Error resuming billing:", err);
-        } finally {
-          setTimeout(() => { isAutoResuming.current = false; }, 5000);
-        }
-        return;
-      }
-
-      // Priority 2: Backfill paused or stale running? Resume it
-      if (backfillState?.status === 'paused') {
-        setCurrentAutoStep("backfill");
-        isAutoResuming.current = true;
-        console.log("[Watchdog] Detected paused backfill, continuing...");
-        
-        try {
-          await supabase.functions.invoke("ml-sync-real-costs", { 
-            body: { seller_id: sellerId, action: "continue_backfill" } 
-          });
-        } catch (err) {
-          console.error("[Watchdog] Error resuming backfill:", err);
-        } finally {
-          setTimeout(() => { isAutoResuming.current = false; }, 5000);
-        }
-        return;
-      }
-      
-      // Check for stale running backfill (no heartbeat for 60s)
-      if (backfillState?.status === 'running' && backfillState.last_heartbeat_at) {
-        const lastHeartbeat = new Date(backfillState.last_heartbeat_at).getTime();
-        const isStale = Date.now() - lastHeartbeat > 60000;
-        
-        if (isStale) {
-          setCurrentAutoStep("backfill");
-          isAutoResuming.current = true;
-          console.log("[Watchdog] Detected stale running backfill, force continuing...");
-          
-          try {
-            await supabase.functions.invoke("ml-sync-real-costs", { 
-              body: { seller_id: sellerId, action: "continue_backfill" } 
-            });
-          } catch (err) {
-            console.error("[Watchdog] Error resuming stale backfill:", err);
-          } finally {
-            setTimeout(() => { isAutoResuming.current = false; }, 5000);
-          }
-          return;
-        }
-      }
-
-      // Priority 3: Billing done + missing breakdowns? Start backfill
-      if ((billingSyncState?.status === 'done' || !billingSyncState) && 
-          (coverage.missing_breakdown || 0) > 0 &&
-          (!backfillState || backfillState.status === 'idle' || backfillState.status === 'done')) {
-        setCurrentAutoStep("backfill");
-        isAutoResuming.current = true;
-        console.log("[Watchdog] Billing complete, starting backfill for missing orders...");
-        
-        try {
-          await supabase.functions.invoke("ml-sync-real-costs", { 
-            body: { seller_id: sellerId, action: "backfill_missing" } 
-          });
-        } catch (err) {
-          console.error("[Watchdog] Error starting backfill:", err);
-        } finally {
-          setTimeout(() => { isAutoResuming.current = false; }, 5000);
-        }
-        return;
-      }
-
-      // Priority 4: Real costs sync paused? Resume it
-      if (realCostsState?.status === 'paused') {
-        // Check if it was manually paused recently (skip for 30s after manual pause)
-        setCurrentAutoStep("realcosts");
-        isAutoResuming.current = true;
-        console.log("[Watchdog] Detected paused real costs sync, resuming...");
-        
-        try {
-          await supabase.functions.invoke("ml-sync-real-costs", { 
-            body: { seller_id: sellerId, action: "continue" } 
-          });
-        } catch (err) {
-          console.error("[Watchdog] Error resuming real costs:", err);
-        } finally {
-          setTimeout(() => { isAutoResuming.current = false; }, 5000);
-        }
-        return;
-      }
-
-      // Priority 5: All backfill done + pending billing > 0? Start real costs calculation
-      if (backfillState?.status === 'done' && 
-          (coverage.missing_breakdown || 0) === 0 &&
-          coverage.with_pending_billing > 0 &&
-          (!realCostsState || realCostsState.status === 'idle' || realCostsState.status === 'done')) {
-        setCurrentAutoStep("realcosts");
-        isAutoResuming.current = true;
-        console.log("[Watchdog] Backfill complete, starting real costs calculation...");
-        
-        try {
-          await supabase.functions.invoke("ml-sync-real-costs", { 
-            body: { seller_id: sellerId, action: "reprocess_pending" } 
-          });
-        } catch (err) {
-          console.error("[Watchdog] Error starting real costs:", err);
-        } finally {
-          setTimeout(() => { isAutoResuming.current = false; }, 5000);
-        }
-        return;
-      }
-
-      // All done!
-      if ((coverage.missing_breakdown || 0) === 0 && 
-          coverage.with_pending_billing === 0 && 
-          coverage.with_real_billing > 0) {
-        setCurrentAutoStep(null);
-      }
-    };
-
-    // Run watchdog every 5 seconds
-    watchdogRef.current = setInterval(runWatchdog, 5000);
-    
-    return () => { 
-      if (watchdogRef.current) clearInterval(watchdogRef.current);
-    };
-  }, [autoSyncEnabled, billingStatus, backfillState, realCostsState, coverage, sellerId]);
+  }, [billingStatus, backfillState, realCostsState, coverage]);
 
   const loadSettings = async () => {
     try {
@@ -383,6 +262,52 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
       setShowResetConfirm(false);
       loadRealCostsStatus();
     } catch { toast.error("Erro ao resetar sincronização"); }
+  };
+
+  const handleResetProgressOnly = async () => {
+    try {
+      // Reset ONLY state tables, not the breakdown data
+      await supabase.from("meli_real_costs_sync_state").delete().eq("seller_id", sellerId);
+      await supabase.from("meli_backfill_sync_state").delete().eq("seller_id", sellerId);
+      await supabase.from("meli_billing_details_sync_state").delete().eq("seller_id", sellerId);
+      toast.success("Progresso resetado (dados mantidos)");
+      setRealCostsState(null);
+      setBackfillState(null);
+      setShowResetProgressConfirm(false);
+      loadRealCostsStatus();
+      loadBillingStatus();
+      loadBackfillState();
+    } catch { toast.error("Erro ao resetar progresso"); }
+  };
+
+  const handleForceResumeBilling = async () => {
+    try {
+      toast.info("Forçando retomada do billing...");
+      await supabase.functions.invoke("ml-sync-billing-details", {
+        body: { seller_id: sellerId, action: "sync", scope: billingStatus?.sync_state?.scope || lastBillingScope.current }
+      });
+      loadBillingStatus();
+    } catch { toast.error("Erro ao retomar billing"); }
+  };
+
+  const handleForceResumeBackfill = async () => {
+    try {
+      toast.info("Forçando retomada do backfill...");
+      await supabase.functions.invoke("ml-sync-real-costs", {
+        body: { seller_id: sellerId, action: "continue_backfill" }
+      });
+      loadBackfillState();
+    } catch { toast.error("Erro ao retomar backfill"); }
+  };
+
+  const handleForceResumeRealCosts = async () => {
+    try {
+      toast.info("Forçando retomada dos custos...");
+      await supabase.functions.invoke("ml-sync-real-costs", {
+        body: { seller_id: sellerId, action: "continue", force_resume: true }
+      });
+      loadRealCostsStatus();
+    } catch { toast.error("Erro ao retomar custos"); }
   };
 
   const getStatusBadge = () => {
@@ -600,11 +525,18 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
                   {backfillState.processed_orders?.toLocaleString() || 0} processados
                 </span>
               </div>
-              {backfillState.status === 'paused' && autoSyncEnabled && (
-                <p className="text-xs text-green-600 flex items-center gap-1">
-                  <Clock className="h-3 w-3" />Continuando automaticamente...
-                </p>
-              )}
+              <div className="flex items-center justify-between">
+                {backfillState.status === 'paused' && autoSyncEnabled && (
+                  <p className="text-xs text-green-600 flex items-center gap-1">
+                    <Clock className="h-3 w-3" />Continuando automaticamente...
+                  </p>
+                )}
+                {backfillState.status === 'paused' && (
+                  <Button onClick={handleForceResumeBackfill} size="sm" variant="outline" className="gap-1">
+                    <FastForward className="h-3 w-3" />Forçar Retomar
+                  </Button>
+                )}
+              </div>
             </div>
           )}
 
@@ -713,7 +645,18 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
       <AlertDialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader><AlertDialogTitle>Resetar sincronização?</AlertDialogTitle><AlertDialogDescription>Esta ação irá apagar todo o progresso da sincronização atual E zerar os custos calculados. Você precisará sincronizar o billing e calcular os custos novamente.</AlertDialogDescription></AlertDialogHeader>
-          <AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleResetSync} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Resetar</AlertDialogAction></AlertDialogFooter>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <Button variant="outline" onClick={() => { setShowResetConfirm(false); setShowResetProgressConfirm(true); }}>Resetar Apenas Progresso</Button>
+            <AlertDialogAction onClick={handleResetSync} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Resetar Tudo</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showResetProgressConfirm} onOpenChange={setShowResetProgressConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader><AlertDialogTitle>Resetar apenas progresso?</AlertDialogTitle><AlertDialogDescription>Esta ação irá resetar apenas o progresso da sincronização. Os custos já calculados serão mantidos. Útil para destravar processos travados.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleResetProgressOnly}>Resetar Progresso</AlertDialogAction></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </div>
