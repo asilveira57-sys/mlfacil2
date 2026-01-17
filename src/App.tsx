@@ -20,20 +20,23 @@ import NotFound from "./pages/NotFound";
 
 // Global watchdog provider component
 function GlobalCostWatchdog() {
-  const [sellerId, setSellerId] = useState<string | null>(null);
-  const [enabled, setEnabled] = useState(false);
+  const [sellerId, setSellerId] = useState<string | null>(() => {
+    return localStorage.getItem("cost_watchdog_seller_id");
+  });
+  const [enabled, setEnabled] = useState(() => {
+    return localStorage.getItem("cost_watchdog_enabled") !== "false";
+  });
 
   useEffect(() => {
-    // Load from localStorage
-    const storedSellerId = localStorage.getItem("cost_watchdog_seller_id");
-    const storedEnabled = localStorage.getItem("cost_watchdog_enabled") !== "false";
-    
-    if (storedSellerId) {
-      setSellerId(storedSellerId);
-      setEnabled(storedEnabled);
-    }
+    const syncFromStorage = () => {
+      setSellerId(localStorage.getItem("cost_watchdog_seller_id"));
+      setEnabled(localStorage.getItem("cost_watchdog_enabled") !== "false");
+    };
 
-    // Check auth and get first active seller
+    // Initial sync
+    syncFromStorage();
+
+    // Check auth and get first active seller (only if none is stored)
     const checkAuth = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
@@ -42,7 +45,7 @@ function GlobalCostWatchdog() {
         return;
       }
 
-      // Get first active ML account if no stored seller
+      const storedSellerId = localStorage.getItem("cost_watchdog_seller_id");
       if (!storedSellerId) {
         const { data: accounts } = await supabase
           .from("ml_accounts")
@@ -50,11 +53,11 @@ function GlobalCostWatchdog() {
           .eq("user_id", session.user.id)
           .eq("is_active", true)
           .limit(1);
-        
+
         if (accounts?.[0]) {
-          setSellerId(accounts[0].ml_user_id);
           localStorage.setItem("cost_watchdog_seller_id", accounts[0].ml_user_id);
-          setEnabled(true);
+          localStorage.setItem("cost_watchdog_enabled", "true");
+          syncFromStorage();
         }
       }
     };
@@ -72,20 +75,28 @@ function GlobalCostWatchdog() {
       }
     });
 
-    // Listen for storage changes (when CostSettings updates)
+    // Cross-tab updates
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === "cost_watchdog_enabled") {
-        setEnabled(e.newValue !== "false");
-      }
-      if (e.key === "cost_watchdog_seller_id") {
-        setSellerId(e.newValue);
+      if (e.key === "cost_watchdog_enabled" || e.key === "cost_watchdog_seller_id") {
+        syncFromStorage();
       }
     };
+
+    // Same-tab updates (CostSettings dispatches this)
+    const handleWatchdogUpdate = () => syncFromStorage();
+
+    // Also resync when tab regains focus
+    const handleFocus = () => syncFromStorage();
+
     window.addEventListener("storage", handleStorage);
+    window.addEventListener("cost_watchdog_update", handleWatchdogUpdate as EventListener);
+    window.addEventListener("focus", handleFocus);
 
     return () => {
       subscription.unsubscribe();
       window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("cost_watchdog_update", handleWatchdogUpdate as EventListener);
+      window.removeEventListener("focus", handleFocus);
     };
   }, []);
 
