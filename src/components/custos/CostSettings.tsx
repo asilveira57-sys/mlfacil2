@@ -94,11 +94,15 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
   // Sync sellerId to localStorage for global watchdog
   useEffect(() => {
     localStorage.setItem("cost_watchdog_seller_id", sellerId);
+    // Same-tab notification (storage event doesn't fire in the same tab)
+    window.dispatchEvent(new Event("cost_watchdog_update"));
   }, [sellerId]);
 
   // Sync autoSyncEnabled to localStorage for global watchdog
   useEffect(() => {
     localStorage.setItem("cost_watchdog_enabled", autoSyncEnabled ? "true" : "false");
+    // Same-tab notification (storage event doesn't fire in the same tab)
+    window.dispatchEvent(new Event("cost_watchdog_update"));
   }, [autoSyncEnabled]);
 
   // Load initial data
