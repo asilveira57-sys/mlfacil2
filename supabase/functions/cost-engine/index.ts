@@ -405,24 +405,32 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
     );
   }
 
-  // Get order details for search and display
+  // Get order details for search and display - use batching to avoid .in() limit of 1000
   const orderIds = results.map((r: any) => r.order_id);
-  const { data: orders } = await supabase
-    .from('meli_orders_cache')
-    .select('order_id, buyer_nickname, buyer_name, created_at_meli')
-    .eq('seller_id', sellerId)
-    .in('order_id', orderIds);
+  const orderMap = new Map<string, any>();
+  
+  if (orderIds.length > 0) {
+    const batchSize = 500;
+    for (let i = 0; i < orderIds.length; i += batchSize) {
+      const batch = orderIds.slice(i, i + batchSize);
+      const { data: orders } = await supabase
+        .from('meli_orders_cache')
+        .select('order_id, buyer_nickname, buyer_name, created_at_meli')
+        .eq('seller_id', sellerId)
+        .in('order_id', batch);
+      
+      (orders || []).forEach((o: any) => orderMap.set(o.order_id, o));
+    }
+  }
 
-  const orderMap = new Map<string, any>((orders || []).map((o: any) => [o.order_id, o]));
-
-  // Merge data
+  // Merge data - preserve existing values if not found in cache
   results = results.map((r: any) => {
     const orderInfo = orderMap.get(r.order_id);
     return {
       ...r,
-      buyer_nickname: orderInfo?.buyer_nickname,
-      buyer_name: orderInfo?.buyer_name,
-      created_at_meli: orderInfo?.created_at_meli,
+      buyer_nickname: orderInfo?.buyer_nickname ?? r.buyer_nickname,
+      buyer_name: orderInfo?.buyer_name ?? r.buyer_name,
+      created_at_meli: orderInfo?.created_at_meli ?? r.created_at_meli,
     };
   });
 
