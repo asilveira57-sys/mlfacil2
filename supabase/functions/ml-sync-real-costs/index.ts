@@ -319,7 +319,10 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
     let feeML = 0, feeMLSource = "pending", shippingCostSeller = 0, installmentsCost = 0, adjustments = 0;
     const sourceRefs: string[] = [];
 
-    if (billing && billing.fee_ml > 0) {
+    // FIX: Consider "has billing" if ANY movement exists, even if fee_ml sums to 0
+    const hasBillingMovements = billing && (billing.fee_ml !== 0 || billing.shipping !== 0 || billing.installments !== 0 || billing.adjustments !== 0);
+    
+    if (hasBillingMovements) {
       feeML = billing.fee_ml;
       feeMLSource = "billing";
       shippingCostSeller = billing.shipping;
@@ -685,6 +688,7 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
         status: "done",
         total: totalPaid || 0,
         processed: totalPaid || 0,
+        cursor_offset: 0, // Reset for next run
         finished_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }).eq("seller_id", sellerId);
@@ -717,16 +721,25 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
       scope_days: effectiveScope 
     };
     
-    // Only reset cursor for FULL mode or scope change - NOT for incremental mode continuation
-    if (state.status === "idle" || (isFullMode && (state.status === "done" || scopeChanged))) { 
+    // FIX: For INCREMENTAL mode, ALWAYS reset cursor_offset to 0 because the set of pending orders is dynamic
+    // For FULL mode, reset only on idle/done/scope change
+    if (mode === "incremental") {
+      // Always start from 0 in incremental - the pending set changes between runs
       upd.started_at = new Date().toISOString(); 
       upd.processed = 0; 
       upd.cursor_offset = 0; 
       upd.stats_json = { billing: 0, pending: 0, with_shipping: 0, mode: mode }; 
       upd.finished_at = null;
-      console.log(`[RealCosts] Resetting sync: status=${state.status}, mode=${mode}, scopeChanged=${scopeChanged}`);
+      console.log(`[RealCosts] Incremental mode: resetting cursor to 0, needingSync=${needingSync}`);
+    } else if (state.status === "idle" || (isFullMode && (state.status === "done" || scopeChanged))) { 
+      upd.started_at = new Date().toISOString(); 
+      upd.processed = 0; 
+      upd.cursor_offset = 0; 
+      upd.stats_json = { billing: 0, pending: 0, with_shipping: 0, mode: mode }; 
+      upd.finished_at = null;
+      console.log(`[RealCosts] Full mode reset: status=${state.status}, scopeChanged=${scopeChanged}`);
     } else {
-      // INCREMENTAL: Update stats mode but don't reset cursor
+      // FULL mode continuation
       upd.stats_json = { ...(state.stats_json || {}), mode: mode };
       console.log(`[RealCosts] Continuing ${mode} mode from offset ${state.cursor_offset}`);
     }
@@ -793,7 +806,11 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
         let feeML = 0, feeMLSource = "pending", shippingCostSeller = 0, installmentsCost = 0, adjustments = 0;
         const sourceRefs: string[] = [];
 
-        if (billing && billing.fee_ml > 0) {
+        // FIX: Consider "has billing" if ANY movement exists for this order, even if fee_ml sums to 0
+        // This prevents orders from being stuck as "pending" when billing exists but values cancel out
+        const hasBillingMovements = billing && (billing.fee_ml !== 0 || billing.shipping !== 0 || billing.installments !== 0 || billing.adjustments !== 0);
+        
+        if (hasBillingMovements) {
           feeML = billing.fee_ml;
           feeMLSource = "billing";
           shippingCostSeller = billing.shipping;

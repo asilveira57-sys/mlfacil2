@@ -62,6 +62,8 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const [profitFilter, setProfitFilter] = useState('all');
   const [ecommerceFilter, setEcommerceFilter] = useState('all');
   const [shippingFilter, setShippingFilter] = useState('all');
+  const [billingFilter, setBillingFilter] = useState('all');
+  const [orderStatusFilter, setOrderStatusFilter] = useState('paid');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalOrders, setTotalOrders] = useState(0);
@@ -154,6 +156,8 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
       if (profitFilter !== 'all') params.set('profit_type', profitFilter);
       if (ecommerceFilter !== 'all') params.set('ecommerce_cost', ecommerceFilter);
       if (shippingFilter !== 'all') params.set('shipping_filter', shippingFilter);
+      if (billingFilter !== 'all') params.set('billing_filter', billingFilter);
+      if (orderStatusFilter !== 'paid') params.set('order_status', orderStatusFilter);
 
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders?${params}`,
@@ -178,7 +182,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     if (sellerId) {
       loadOrders();
     }
-  }, [sellerId, periodDays, statusFilter, profitFilter, ecommerceFilter, shippingFilter, page]);
+  }, [sellerId, periodDays, statusFilter, profitFilter, ecommerceFilter, shippingFilter, billingFilter, orderStatusFilter, page]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -413,6 +417,28 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                 <SelectItem value="high">Frete alto (≥100)</SelectItem>
                 <SelectItem value="very_high">Frete muito alto (≥300)</SelectItem>
                 <SelectItem value="missing">Frete ausente</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={billingFilter} onValueChange={(v) => { setBillingFilter(v); setPage(1); }}>
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="Taxa" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Taxa: Todas</SelectItem>
+                <SelectItem value="billing">Com taxa real</SelectItem>
+                <SelectItem value="pending">Pendente</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={orderStatusFilter} onValueChange={(v) => { setOrderStatusFilter(v); setPage(1); }}>
+              <SelectTrigger className="w-36">
+                <SelectValue placeholder="Pedidos" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="paid">Pagos</SelectItem>
+                <SelectItem value="cancelled">Cancelados</SelectItem>
+                <SelectItem value="all">Todos</SelectItem>
               </SelectContent>
             </Select>
 

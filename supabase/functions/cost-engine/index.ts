@@ -274,6 +274,8 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
   const profitType = params.profit_type; // lucro, prejuizo
   const ecommerceCost = params.ecommerce_cost; // with, without, all
   const shippingFilter = params.shipping_filter; // high, very_high, missing, all
+  const billingFilter = params.billing_filter; // billing, pending, all
+  const orderStatus = params.order_status; // paid, cancelled, all
   const search = params.search || '';
   const page = parseInt(params.page || '1');
   const pageSize = parseInt(params.page_size || '50');
@@ -283,6 +285,69 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
   const dateFrom = new Date();
   dateFrom.setDate(dateFrom.getDate() - periodDays);
   const dateFromStr = dateFrom.toISOString();
+
+  // Handle cancelled orders separately - they come from meli_orders_cache
+  if (orderStatus === 'cancelled') {
+    const { data: cancelledOrders } = await supabase
+      .from('meli_orders_cache')
+      .select('order_id, shipment_id, total_amount, buyer_nickname, buyer_name, created_at_meli, order_status')
+      .eq('seller_id', sellerId)
+      .in('order_status', ['cancelled', 'refunded', 'partially_refunded'])
+      .gte('created_at_meli', dateFromStr)
+      .order('created_at_meli', { ascending: false });
+
+    let results = (cancelledOrders || []).map((o: any) => ({
+      id: o.order_id,
+      order_id: o.order_id,
+      shipment_id: o.shipment_id,
+      revenue_total: o.total_amount || 0,
+      cost_total: 0,
+      cost_fees: 0,
+      cost_shipping: 0,
+      cost_other: 0,
+      profit_total: 0,
+      margin_percent: 0,
+      missing_cost_items_count: 0,
+      status: 'cancelled',
+      buyer_nickname: o.buyer_nickname,
+      buyer_name: o.buyer_name,
+      created_at_meli: o.created_at_meli,
+      shipping_cost_seller: 0,
+      commission_cost: 0,
+      receita_envio: 0,
+      shipping_balance: 0,
+      revenue_net: 0,
+      cost_net: 0,
+      profit_net: 0,
+      margin_net: 0,
+      missing_fields: [],
+      fee_ml_source: 'cancelled',
+    }));
+
+    // Apply search
+    if (search) {
+      const searchLower = search.toLowerCase();
+      results = results.filter((r: any) =>
+        r.order_id?.includes(search) ||
+        r.shipment_id?.includes(search) ||
+        r.buyer_nickname?.toLowerCase().includes(searchLower) ||
+        r.buyer_name?.toLowerCase().includes(searchLower)
+      );
+    }
+
+    const total = results.length;
+    const totalPages = Math.ceil(total / pageSize);
+    const offset = (page - 1) * pageSize;
+    const paginatedResults = results.slice(offset, offset + pageSize);
+
+    return {
+      orders: paginatedResults,
+      total,
+      page,
+      page_size: pageSize,
+      total_pages: totalPages,
+    };
+  }
 
   // Get order cost breakdowns - filter by order creation date, not calculation date
   let query = supabase
@@ -295,6 +360,13 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
 
   if (status) {
     query = query.eq('status', status);
+  }
+
+  // Filter by billing status (fee_ml_source)
+  if (billingFilter === 'billing') {
+    query = query.eq('fee_ml_source', 'billing');
+  } else if (billingFilter === 'pending') {
+    query = query.eq('fee_ml_source', 'pending');
   }
 
   // Filter by e-commerce cost (cost_other)
@@ -876,6 +948,17 @@ async function getSummary(supabase: any, userId: string, params: Record<string, 
   const incompleteCount = data.filter((b: any) => b.status === 'incompleto').length;
   const incompletePercent = data.length > 0 ? (incompleteCount / data.length) * 100 : 0;
 
+  // Get cancelled orders count and value
+  const { data: cancelledOrders } = await supabase
+    .from('meli_orders_cache')
+    .select('order_id, total_amount')
+    .eq('seller_id', sellerId)
+    .in('order_status', ['cancelled', 'refunded', 'partially_refunded'])
+    .gte('created_at_meli', dateFrom.toISOString());
+
+  const cancelledCount = cancelledOrders?.length || 0;
+  const cancelledVGV = (cancelledOrders || []).reduce((sum: number, o: any) => sum + Number(o.total_amount || 0), 0);
+
   // Top products by profit
   const { data: topProfit } = await supabase
     .from('product_profit_aggregate_cache')
@@ -903,6 +986,8 @@ async function getSummary(supabase: any, userId: string, params: Record<string, 
       order_count: data.length,
       incomplete_count: incompleteCount,
       incomplete_percent: incompletePercent,
+      cancelled_count: cancelledCount,
+      cancelled_vgv: cancelledVGV,
     },
     top_profit: topProfit || [],
     top_loss: (topLoss || []).filter((p: any) => p.profit_total < 0),
