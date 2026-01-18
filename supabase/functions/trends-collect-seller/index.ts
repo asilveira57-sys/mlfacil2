@@ -160,12 +160,196 @@ async function processCollection(
     }
 
     if (collectType === 'all' || collectType === 'sales') {
-      await collectItemSales(supabase, userId, sellerId, today);
+      // Check if we need to backfill sales data
+      const { count } = await supabase
+        .from('seller_item_sales_daily')
+        .select('*', { count: 'exact', head: true })
+        .eq('seller_id', sellerId)
+        .eq('user_id', userId);
+
+      if (count === null || count < 10) {
+        console.log(`[trends-collect-seller] Backfilling sales data (current count: ${count})`);
+        await backfillSalesData(supabase, userId, sellerId);
+      } else {
+        // Just collect today's sales
+        await collectItemSales(supabase, userId, sellerId, today);
+      }
     }
+
+    // Build monthly history after populating daily sales
+    await buildMonthlyHistory(supabase, userId, sellerId);
 
     console.log(`[trends-collect-seller] Collection completed for seller ${sellerId}`);
   } catch (error) {
     console.error('[trends-collect-seller] Background processing error:', error);
+  }
+}
+
+async function backfillSalesData(
+  supabase: any,
+  userId: string,
+  sellerId: string
+) {
+  try {
+    console.log('[trends-collect-seller] Starting sales backfill from meli_order_items_cache');
+
+    // Get date 30 days ago
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString();
+
+    // Get all paid orders from the last 30 days
+    const { data: orders, error: ordersError } = await supabase
+      .from('meli_orders_cache')
+      .select('order_id, created_at_meli')
+      .eq('seller_id', sellerId)
+      .eq('user_id', userId)
+      .eq('order_status', 'paid')
+      .gte('created_at_meli', thirtyDaysAgoStr)
+      .order('created_at_meli', { ascending: true });
+
+    if (ordersError || !orders?.length) {
+      console.log('[trends-collect-seller] No paid orders found for backfill');
+      return;
+    }
+
+    console.log(`[trends-collect-seller] Found ${orders.length} paid orders for backfill`);
+
+    const orderIds = orders.map((o: any) => o.order_id);
+    const orderDates = new Map<string, string>();
+    for (const order of orders) {
+      const date = order.created_at_meli.split('T')[0];
+      orderDates.set(order.order_id, date);
+    }
+
+    // Get all items for these orders
+    const { data: items, error: itemsError } = await supabase
+      .from('meli_order_items_cache')
+      .select('order_id, item_id, quantity, unit_price')
+      .eq('seller_id', sellerId)
+      .eq('user_id', userId)
+      .in('order_id', orderIds);
+
+    if (itemsError || !items?.length) {
+      console.log('[trends-collect-seller] No items found for orders');
+      return;
+    }
+
+    console.log(`[trends-collect-seller] Found ${items.length} order items for backfill`);
+
+    // Aggregate by item_id and date
+    const aggregated: Record<string, { quantity: number; revenue: number }> = {};
+    
+    for (const item of items) {
+      const orderDate = orderDates.get(item.order_id);
+      if (!orderDate) continue;
+      
+      const key = `${item.item_id}|${orderDate}`;
+      if (!aggregated[key]) {
+        aggregated[key] = { quantity: 0, revenue: 0 };
+      }
+      aggregated[key].quantity += item.quantity;
+      aggregated[key].revenue += item.quantity * Number(item.unit_price);
+    }
+
+    // Prepare upsert data
+    const salesToUpsert = Object.entries(aggregated).map(([key, { quantity, revenue }]) => {
+      const [item_id, sale_date] = key.split('|');
+      return {
+        user_id: userId,
+        seller_id: sellerId,
+        item_id,
+        sale_date,
+        quantity_sold: quantity,
+        revenue,
+      };
+    });
+
+    if (salesToUpsert.length === 0) {
+      console.log('[trends-collect-seller] No sales data to upsert');
+      return;
+    }
+
+    // Upsert in batches of 100
+    const batchSize = 100;
+    for (let i = 0; i < salesToUpsert.length; i += batchSize) {
+      const batch = salesToUpsert.slice(i, i + batchSize);
+      const { error: upsertError } = await supabase
+        .from('seller_item_sales_daily')
+        .upsert(batch, { onConflict: 'seller_id,item_id,sale_date' });
+
+      if (upsertError) {
+        console.error(`[trends-collect-seller] Failed to upsert batch ${i}:`, upsertError);
+      }
+    }
+
+    console.log(`[trends-collect-seller] Backfilled ${salesToUpsert.length} sales records`);
+  } catch (error) {
+    console.error('[trends-collect-seller] Backfill error:', error);
+  }
+}
+
+async function buildMonthlyHistory(
+  supabase: any,
+  userId: string,
+  sellerId: string
+) {
+  try {
+    console.log('[trends-collect-seller] Building monthly history from daily sales');
+
+    // Get all daily sales for aggregation
+    const { data: dailySales, error } = await supabase
+      .from('seller_item_sales_daily')
+      .select('item_id, sale_date, quantity_sold, revenue')
+      .eq('seller_id', sellerId)
+      .eq('user_id', userId);
+
+    if (error || !dailySales?.length) {
+      console.log('[trends-collect-seller] No daily sales for monthly aggregation');
+      return;
+    }
+
+    // Aggregate by item_id and month
+    const monthlyAgg: Record<string, { quantity: number; revenue: number }> = {};
+    
+    for (const sale of dailySales) {
+      const month = sale.sale_date.substring(0, 7); // YYYY-MM
+      const key = `${sale.item_id}|${month}`;
+      
+      if (!monthlyAgg[key]) {
+        monthlyAgg[key] = { quantity: 0, revenue: 0 };
+      }
+      monthlyAgg[key].quantity += sale.quantity_sold;
+      monthlyAgg[key].revenue += Number(sale.revenue);
+    }
+
+    // Prepare upsert data
+    const monthlyToUpsert = Object.entries(monthlyAgg).map(([key, { quantity, revenue }]) => {
+      const [item_id, sale_month] = key.split('|');
+      return {
+        user_id: userId,
+        seller_id: sellerId,
+        item_id,
+        sale_month: `${sale_month}-01`, // First day of month
+        quantity_sold: quantity,
+        revenue,
+      };
+    });
+
+    if (monthlyToUpsert.length === 0) return;
+
+    // Upsert monthly data
+    const { error: upsertError } = await supabase
+      .from('seller_item_sales_monthly')
+      .upsert(monthlyToUpsert, { onConflict: 'seller_id,item_id,sale_month' });
+
+    if (upsertError) {
+      console.error('[trends-collect-seller] Failed to upsert monthly sales:', upsertError);
+    } else {
+      console.log(`[trends-collect-seller] Upserted ${monthlyToUpsert.length} monthly records`);
+    }
+  } catch (error) {
+    console.error('[trends-collect-seller] Monthly aggregation error:', error);
   }
 }
 

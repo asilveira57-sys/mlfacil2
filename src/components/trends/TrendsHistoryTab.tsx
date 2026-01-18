@@ -75,7 +75,7 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
         .from('trend_snapshots')
         .select('snapshot_date, trends_data')
         .eq('site_id', 'MLB')
-        .is('category_id', null)
+        .or('category_id.is.null,category_id.eq.__ROOT__')
         .gte('snapshot_date', monthStart)
         .lt('snapshot_date', monthEnd)
         .order('snapshot_date', { ascending: false });
