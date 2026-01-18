@@ -7,7 +7,7 @@ const corsHeaders = {
 
 const MAX_ORDERS_PER_RUN = 800;
 const MAX_RUNTIME_MS = 50000;
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 200;
 const BILLING_PAGE_SIZE = 1000;
 const STALE_RUNNING_THRESHOLD_MS = 120000;
 
@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { seller_id, action, scope_days, force_resume } = body;
+    const { seller_id, action, scope_days, force_resume, mode } = body;
 
     if (!seller_id) {
       return new Response(JSON.stringify({ error: "seller_id is required" }), {
@@ -58,7 +58,9 @@ Deno.serve(async (req) => {
       return await handleContinueBackfill(supabase, user.id, seller_id, corsHeaders);
     }
     if (action === "continue" || action === "start") {
-      return await handleStartOrContinue(supabase, user.id, seller_id, scope_days, force_resume, corsHeaders);
+      // Default to incremental mode unless explicitly set to "full"
+      const syncMode = mode || "incremental";
+      return await handleStartOrContinue(supabase, user.id, seller_id, scope_days, force_resume, syncMode, corsHeaders);
     }
     return await handleGetStatus(supabase, seller_id, corsHeaders);
   } catch (err: unknown) {
@@ -93,13 +95,23 @@ async function handleGetStatus(supabase: any, sellerId: string, corsHeaders: any
 
   const missingBreakdown = (totalPaid || 0) - (totalProcessed || 0);
 
+  // Get count of orders needing sync (incremental mode target)
+  const { data: needingSyncData } = await supabase.rpc("count_orders_needing_cost_sync", { p_seller_id: sellerId });
+  const needingSync = needingSyncData?.[0] || { total_pending: 0, no_breakdown: 0, pending_billing: 0 };
+
   const coverage = { 
     total_paid: totalPaid || 0, 
     with_real_billing: withRealBilling || 0,
     with_pending_billing: withPendingBilling || 0,
     total_processed: totalProcessed || 0,
     missing_breakdown: missingBreakdown > 0 ? missingBreakdown : 0,
-    coverage_percent: totalPaid > 0 ? Math.round((withRealBilling || 0) / totalPaid * 100) : 0 
+    coverage_percent: totalPaid > 0 ? Math.round((withRealBilling || 0) / totalPaid * 100) : 0,
+    // Incremental mode stats
+    needing_sync: {
+      total: needingSync.total_pending || 0,
+      no_breakdown: needingSync.no_breakdown || 0,
+      pending_billing: needingSync.pending_billing || 0
+    }
   };
 
   return new Response(JSON.stringify({ 
@@ -421,26 +433,28 @@ async function handleBackfillMissing(supabase: any, userId: string, sellerId: st
   }
 
   // Get or create backfill state
-  let { data: backfillState } = await supabase
-    .from("meli_backfill_sync_state")
-    .select("*")
-    .eq("seller_id", sellerId)
-    .maybeSingle();
-
-  // Count total orders
-  let dateFilter: string | null = null;
+  let { data: bfState } = await supabase.from("meli_backfill_sync_state").select("*").eq("seller_id", sellerId).maybeSingle();
+  
+  // If there's a running/paused backfill, check stale
+  if (bfState && bfState.status === 'running') {
+    const lastHeartbeat = new Date(bfState.last_heartbeat_at || bfState.updated_at).getTime();
+    if (Date.now() - lastHeartbeat < STALE_RUNNING_THRESHOLD_MS) {
+      return new Response(JSON.stringify({ message: "Backfill already running", state: bfState }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+  }
+  
+  // Count total orders needing backfill
+  let totalQuery = supabase.from("meli_orders_cache").select("order_id", { count: "exact", head: true }).eq("seller_id", sellerId).eq("order_status", "paid");
   if (scopeDays) {
     const d = new Date();
     d.setDate(d.getDate() - scopeDays);
-    dateFilter = d.toISOString();
+    totalQuery = totalQuery.gte("created_at_meli", d.toISOString());
   }
+  const { count: totalOrders } = await totalQuery;
 
-  let totalOrdersQuery = supabase.from("meli_orders_cache").select("*", { count: "exact", head: true }).eq("seller_id", sellerId).eq("order_status", "paid");
-  if (dateFilter) totalOrdersQuery = totalOrdersQuery.gte("created_at_meli", dateFilter);
-  const { count: totalOrders } = await totalOrdersQuery;
-
-  // Initialize or update state
-  if (!backfillState) {
+  const cursorOffset = bfState?.cursor_offset || 0;
+  
+  if (!bfState) {
     const { data: newState } = await supabase.from("meli_backfill_sync_state").insert({
       user_id: userId,
       seller_id: sellerId,
@@ -450,88 +464,85 @@ async function handleBackfillMissing(supabase: any, userId: string, sellerId: st
       processed_orders: 0,
       with_billing: 0,
       started_at: new Date().toISOString(),
-      last_heartbeat_at: new Date().toISOString(),
+      last_heartbeat_at: new Date().toISOString()
     }).select().single();
-    backfillState = newState;
+    bfState = newState;
   } else {
     await supabase.from("meli_backfill_sync_state").update({
       status: "running",
       total_orders: totalOrders || 0,
       last_heartbeat_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
     }).eq("seller_id", sellerId);
   }
 
-  let batchOffset = backfillState?.cursor_offset || 0;
-  let totalCreated = backfillState?.processed_orders || 0;
-  let withBilling = backfillState?.with_billing || 0;
-  const BATCH_SIZE = 200;
+  let currentOffset = cursorOffset;
+  let processedInRun = 0;
+  let createdCount = 0;
+  let withBillingCount = bfState?.with_billing || 0;
 
-  while (Date.now() - startTime < MAX_RUNTIME_MS) {
-    // Get batch of orders
-    let ordersQuery = supabase
+  while (processedInRun < MAX_ORDERS_PER_RUN && Date.now() - startTime < MAX_RUNTIME_MS) {
+    let q = supabase
       .from("meli_orders_cache")
       .select("order_id, total_amount, shipment_id, created_at_meli")
       .eq("seller_id", sellerId)
       .eq("order_status", "paid")
       .order("created_at_meli", { ascending: true })
-      .range(batchOffset, batchOffset + BATCH_SIZE - 1);
+      .range(currentOffset, currentOffset + PAGE_SIZE - 1);
     
-    if (dateFilter) {
-      ordersQuery = ordersQuery.gte("created_at_meli", dateFilter);
+    if (scopeDays) {
+      const d = new Date();
+      d.setDate(d.getDate() - scopeDays);
+      q = q.gte("created_at_meli", d.toISOString());
     }
 
-    const { data: orders } = await ordersQuery;
+    const { data: orders } = await q;
+    
     if (!orders?.length) {
-      // All done
+      // Done!
       await supabase.from("meli_backfill_sync_state").update({
         status: "done",
         finished_at: new Date().toISOString(),
-        last_heartbeat_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        cursor_offset: currentOffset,
+        processed_orders: (bfState?.processed_orders || 0) + processedInRun,
+        with_billing: withBillingCount
       }).eq("seller_id", sellerId);
       
-      return new Response(JSON.stringify({ 
+      return new Response(JSON.stringify({
+        message: `Backfill concluído! Criados ${createdCount} registros`,
         status: "done",
-        message: `Backfill completo! ${totalCreated} registros criados (${withBilling} com billing real)`,
-        processed: totalCreated,
-        with_billing: withBilling,
+        processed: (bfState?.processed_orders || 0) + processedInRun,
+        created: createdCount,
+        with_billing: withBillingCount
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Check which ones already have breakdown
+    const orderIds = orders.map((o: any) => o.order_id);
+    const shipmentIds = orders.map((o: any) => o.shipment_id);
+
+    // Check which orders already have breakdowns
     const { data: existingBreakdowns } = await supabase
       .from("order_cost_breakdown_cache")
       .select("order_id")
       .eq("seller_id", sellerId)
-      .in("order_id", orders.map((o: any) => o.order_id));
-
+      .in("order_id", orderIds);
     const existingSet = new Set((existingBreakdowns || []).map((b: any) => b.order_id));
-    const missingOrders = orders.filter((o: any) => !existingSet.has(o.order_id));
 
-    if (missingOrders.length === 0) {
-      batchOffset += orders.length;
-      await supabase.from("meli_backfill_sync_state").update({
-        cursor_offset: batchOffset,
-        last_heartbeat_at: new Date().toISOString(),
-      }).eq("seller_id", sellerId);
-      continue;
-    }
-
-    console.log(`[BackfillMissing] Batch ${batchOffset}: ${missingOrders.length}/${orders.length} orders need creation`);
-
-    const orderIds = missingOrders.map((o: any) => o.order_id);
-    const shipmentIds = missingOrders.map((o: any) => o.shipment_id);
-
+    // Get billing data for orders
     const { billingByOrder, billingByShipment } = await aggregateBillingData(supabase, sellerId, orderIds, shipmentIds);
 
     const rowsToInsert: any[] = [];
-    let batchCreated = 0;
 
-    for (const order of missingOrders) {
-      if (Date.now() - startTime >= MAX_RUNTIME_MS) break;
+    for (const order of orders) {
+      if (existingSet.has(order.order_id)) {
+        processedInRun++;
+        continue;
+      }
 
       const billing = billingByOrder.get(order.order_id);
       const shipmentBilling = order.shipment_id ? billingByShipment.get(order.shipment_id) : null;
-      
+
       let feeML = 0, feeMLSource = "pending", shippingCostSeller = 0, installmentsCost = 0, adjustments = 0;
       const sourceRefs: string[] = [];
 
@@ -542,73 +553,50 @@ async function handleBackfillMissing(supabase: any, userId: string, sellerId: st
         installmentsCost = billing.installments;
         adjustments = billing.adjustments;
         sourceRefs.push("billing:order");
-        withBilling++;
+        withBillingCount++;
       } else {
         feeMLSource = "pending";
         sourceRefs.push("billing:pending");
       }
 
-      if (shippingCostSeller === 0 && shipmentBilling && shipmentBilling.shipping > 0) {
+      if (shippingCostSeller === 0 && shipmentBilling) {
         shippingCostSeller = shipmentBilling.shipping;
         adjustments += shipmentBilling.adjustments;
         sourceRefs.push("billing:shipment");
       }
 
-      if (order.shipment_id && shippingCostSeller === 0) {
-        const { data: sc } = await supabase.from("meli_shipment_costs_cache").select("sender_cost").eq("shipment_id", order.shipment_id).maybeSingle();
-        if (sc?.sender_cost) { 
-          shippingCostSeller = sc.sender_cost; 
-          sourceRefs.push("shipment:cache"); 
-        } else {
-          try {
-            const r = await fetch(`https://api.mercadolibre.com/shipments/${order.shipment_id}/costs`, { 
-              headers: { Authorization: `Bearer ${mlAccount.access_token}` } 
-            });
-            if (r.ok) { 
-              const d = await r.json(); 
-              shippingCostSeller = d.sender?.cost || 0; 
-              sourceRefs.push("shipment:api"); 
-              await supabase.from("meli_shipment_costs_cache").upsert({ 
-                user_id: userId, seller_id: sellerId, shipment_id: order.shipment_id, order_id: order.order_id, 
-                sender_cost: shippingCostSeller, gross_amount: d.gross_amount || 0, raw_json: d, 
-                synced_at: new Date().toISOString() 
-              }, { onConflict: "shipment_id" }); 
-            }
-          } catch {}
-        }
-      }
-
-      const totalMarketplaceCost = feeML + shippingCostSeller + installmentsCost + adjustments;
       const revenueTotal = order.total_amount || 0;
+      const totalMarketplaceCost = feeML + shippingCostSeller + installmentsCost + adjustments;
       
+      // Calculate derived fields
       const costFees = feeML + installmentsCost + adjustments;
       const costShipping = shippingCostSeller;
       const costTotal = costFees + costShipping;
       const profitTotal = revenueTotal - costTotal;
       const marginPercent = revenueTotal > 0 ? Math.round((profitTotal / revenueTotal) * 100) : 0;
-      
+
       const missingFields: string[] = [];
       if (feeMLSource === "pending") missingFields.push("sem_comissao");
       if (shippingCostSeller === 0 && order.shipment_id) missingFields.push("sem_frete_cobrado");
 
-      rowsToInsert.push({ 
-        user_id: userId, 
-        seller_id: sellerId, 
-        order_id: order.order_id, 
-        shipment_id: order.shipment_id, 
+      rowsToInsert.push({
+        user_id: userId,
+        seller_id: sellerId,
+        order_id: order.order_id,
+        shipment_id: order.shipment_id,
         revenue_total: revenueTotal,
         created_at_meli: order.created_at_meli,
-        fee_ml: feeML, 
-        fee_ml_source: feeMLSource, 
-        shipping_cost_seller: shippingCostSeller, 
-        installments_cost: installmentsCost, 
-        adjustments: adjustments, 
-        total_marketplace_cost: totalMarketplaceCost, 
-        has_real_financial: feeMLSource === "billing", 
-        has_real_cost: false, 
-        source_refs: { refs: sourceRefs }, 
-        real_cost_synced_at: new Date().toISOString(), 
-        calculated_at: new Date().toISOString(), 
+        fee_ml: feeML,
+        fee_ml_source: feeMLSource,
+        shipping_cost_seller: shippingCostSeller,
+        installments_cost: installmentsCost,
+        adjustments: adjustments,
+        total_marketplace_cost: totalMarketplaceCost,
+        has_real_financial: feeMLSource === "billing",
+        has_real_cost: false,
+        source_refs: { refs: sourceRefs },
+        real_cost_synced_at: new Date().toISOString(),
+        calculated_at: new Date().toISOString(),
         status: feeMLSource === "billing" ? "calculated" : "pending",
         commission_cost: feeML,
         missing_fields: missingFields,
@@ -616,67 +604,53 @@ async function handleBackfillMissing(supabase: any, userId: string, sellerId: st
         cost_shipping: costShipping,
         cost_total: costTotal,
         profit_total: profitTotal,
-        margin_percent: marginPercent,
+        margin_percent: marginPercent
       });
       
-      batchCreated++;
-      totalCreated++;
+      processedInRun++;
+      createdCount++;
     }
 
     if (rowsToInsert.length) {
-      const { error } = await supabase.from("order_cost_breakdown_cache").upsert(rowsToInsert, { onConflict: "seller_id,order_id" });
-      if (error) console.error(`[BackfillMissing] Upsert error:`, error);
+      await supabase.from("order_cost_breakdown_cache").insert(rowsToInsert);
     }
 
-    batchOffset += orders.length;
+    currentOffset += orders.length;
     
-    // Update state after each batch
+    // Update heartbeat
     await supabase.from("meli_backfill_sync_state").update({
-      cursor_offset: batchOffset,
-      processed_orders: totalCreated,
-      with_billing: withBilling,
-      last_heartbeat_at: new Date().toISOString(),
+      cursor_offset: currentOffset,
+      processed_orders: (bfState?.processed_orders || 0) + processedInRun,
+      with_billing: withBillingCount,
+      last_heartbeat_at: new Date().toISOString()
     }).eq("seller_id", sellerId);
   }
 
   // Paused due to runtime limit
   await supabase.from("meli_backfill_sync_state").update({
     status: "paused",
-    cursor_offset: batchOffset,
-    processed_orders: totalCreated,
-    with_billing: withBilling,
-    last_heartbeat_at: new Date().toISOString(),
+    cursor_offset: currentOffset,
+    processed_orders: (bfState?.processed_orders || 0) + processedInRun,
+    with_billing: withBillingCount,
+    updated_at: new Date().toISOString()
   }).eq("seller_id", sellerId);
 
-  return new Response(JSON.stringify({ 
+  return new Response(JSON.stringify({
+    message: `Backfill pausado. Processados ${processedInRun} nesta execução, criados ${createdCount}`,
     status: "paused",
-    message: `Criados ${totalCreated} registros (pausado para continuar)`,
-    processed: totalCreated,
-    with_billing: withBilling,
-    cursor_offset: batchOffset,
+    processed: (bfState?.processed_orders || 0) + processedInRun,
+    created: createdCount,
+    cursor_offset: currentOffset,
+    total: totalOrders
   }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
-// Continue backfill from saved cursor
 async function handleContinueBackfill(supabase: any, userId: string, sellerId: string, corsHeaders: any) {
-  const { data: backfillState } = await supabase
-    .from("meli_backfill_sync_state")
-    .select("*")
-    .eq("seller_id", sellerId)
-    .maybeSingle();
-
-  if (!backfillState || backfillState.status === 'done') {
-    return new Response(JSON.stringify({ 
-      status: "done",
-      message: "Backfill já completo ou não iniciado"
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  }
-
-  // Just call the main backfill function - it will use the saved cursor
   return await handleBackfillMissing(supabase, userId, sellerId, null, corsHeaders);
 }
 
-async function handleStartOrContinue(supabase: any, userId: string, sellerId: string, scopeDays: number | null, forceResume: boolean, corsHeaders: any) {
+// INCREMENTAL MODE: Only process orders that actually need processing
+async function handleStartOrContinue(supabase: any, userId: string, sellerId: string, scopeDays: number | null, forceResume: boolean, mode: string, corsHeaders: any) {
   const startTime = Date.now();
   let { data: state } = await supabase.from("meli_real_costs_sync_state").select("*").eq("seller_id", sellerId).maybeSingle();
 
@@ -689,40 +663,72 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
 
   const effectiveScope = scopeDays ?? state?.scope_days ?? null;
 
+  // Get total paid orders count
   let totalQuery = supabase.from("meli_orders_cache").select("*", { count: "exact", head: true }).eq("seller_id", sellerId).eq("order_status", "paid");
   if (effectiveScope) { 
     const d = new Date(); 
     d.setDate(d.getDate() - effectiveScope); 
     totalQuery = totalQuery.gte("created_at_meli", d.toISOString()); 
   }
-  const { count: total } = await totalQuery;
+  const { count: totalPaid } = await totalQuery;
+
+  // INCREMENTAL MODE: Get count of orders needing sync
+  const { data: needingSyncData } = await supabase.rpc("count_orders_needing_cost_sync", { p_seller_id: sellerId });
+  const needingSync = needingSyncData?.[0]?.total_pending || 0;
+  
+  console.log(`[RealCosts] Mode: ${mode}, Total paid: ${totalPaid}, Needing sync: ${needingSync}`);
+
+  // If nothing to process, mark as done immediately
+  if (needingSync === 0) {
+    if (state) {
+      await supabase.from("meli_real_costs_sync_state").update({
+        status: "done",
+        total: totalPaid || 0,
+        processed: totalPaid || 0,
+        finished_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }).eq("seller_id", sellerId);
+    }
+    return new Response(JSON.stringify({ 
+      message: "Nenhum pedido precisa de processamento", 
+      processed: 0, 
+      total: needingSync,
+      mode: "incremental"
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
 
   const scopeChanged = state && state.scope_days !== effectiveScope;
+  const isFullMode = mode === "full";
 
   if (!state) {
     const { data: newState } = await supabase.from("meli_real_costs_sync_state").insert({ 
       user_id: userId, seller_id: sellerId, status: "running", scope_days: effectiveScope, 
-      processed: 0, total: total || 0, cursor_offset: 0, 
+      processed: 0, total: isFullMode ? (totalPaid || 0) : needingSync, cursor_offset: 0, 
       last_heartbeat_at: new Date().toISOString(), started_at: new Date().toISOString(), 
-      stats_json: { billing: 0, pending: 0, with_shipping: 0 } 
+      stats_json: { billing: 0, pending: 0, with_shipping: 0, mode: mode } 
     }).select().single();
     state = newState;
   } else {
     const upd: any = { 
       status: "running", 
-      total: total || 0, 
+      total: isFullMode ? (totalPaid || 0) : needingSync, 
       last_heartbeat_at: new Date().toISOString(), 
       updated_at: new Date().toISOString(),
       scope_days: effectiveScope 
     };
     
-    if (state.status === "idle" || state.status === "done" || scopeChanged) { 
+    // Only reset cursor for FULL mode or scope change - NOT for incremental mode continuation
+    if (state.status === "idle" || (isFullMode && (state.status === "done" || scopeChanged))) { 
       upd.started_at = new Date().toISOString(); 
       upd.processed = 0; 
       upd.cursor_offset = 0; 
-      upd.stats_json = { billing: 0, pending: 0, with_shipping: 0 }; 
+      upd.stats_json = { billing: 0, pending: 0, with_shipping: 0, mode: mode }; 
       upd.finished_at = null;
-      console.log(`[RealCosts] Resetting sync: status=${state.status}, scopeChanged=${scopeChanged}`);
+      console.log(`[RealCosts] Resetting sync: status=${state.status}, mode=${mode}, scopeChanged=${scopeChanged}`);
+    } else {
+      // INCREMENTAL: Update stats mode but don't reset cursor
+      upd.stats_json = { ...(state.stats_json || {}), mode: mode };
+      console.log(`[RealCosts] Continuing ${mode} mode from offset ${state.cursor_offset}`);
     }
     
     const { data: updated } = await supabase.from("meli_real_costs_sync_state").update(upd).eq("seller_id", sellerId).select().single();
@@ -735,8 +741,185 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
     return new Response(JSON.stringify({ error: "ML account not found" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }); 
   }
 
-  let currentOffset = state.cursor_offset, processedInRun = 0;
-  const stats = state.stats_json || { billing: 0, pending: 0, with_shipping: 0 };
+  let processedInRun = 0;
+  const stats = state.stats_json || { billing: 0, pending: 0, with_shipping: 0, mode: mode };
+  
+  // INCREMENTAL MODE: Use the SQL function to get only orders needing sync
+  if (mode === "incremental") {
+    let currentOffset = state.cursor_offset || 0;
+    
+    while (processedInRun < MAX_ORDERS_PER_RUN && Date.now() - startTime < MAX_RUNTIME_MS) {
+      // Use the new RPC function to get only orders needing processing
+      const { data: ordersNeedingSync, error: rpcError } = await supabase.rpc("get_orders_needing_cost_sync", {
+        p_seller_id: sellerId,
+        p_limit: PAGE_SIZE,
+        p_offset: currentOffset
+      });
+      
+      if (rpcError) {
+        console.error("[RealCosts] RPC error:", rpcError);
+        break;
+      }
+      
+      if (!ordersNeedingSync?.length) {
+        // No more orders to process
+        await supabase.from("meli_real_costs_sync_state").update({ 
+          status: "done", 
+          finished_at: new Date().toISOString(), 
+          updated_at: new Date().toISOString(), 
+          stats_json: stats,
+          processed: state.processed + processedInRun,
+          cursor_offset: currentOffset
+        }).eq("seller_id", sellerId);
+        return new Response(JSON.stringify({ 
+          message: "Sync incremental concluído", 
+          processed: state.processed + processedInRun, 
+          total: needingSync,
+          mode: "incremental"
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      const orderIds = ordersNeedingSync.map((o: any) => o.order_id);
+      const shipmentIds = ordersNeedingSync.map((o: any) => o.shipment_id);
+      
+      const { billingByOrder, billingByShipment } = await aggregateBillingData(supabase, sellerId, orderIds, shipmentIds);
+
+      const rowsToUpsert: any[] = [];
+
+      for (const order of ordersNeedingSync) {
+        const billing = billingByOrder.get(order.order_id);
+        const shipmentBilling = order.shipment_id ? billingByShipment.get(order.shipment_id) : null;
+        
+        let feeML = 0, feeMLSource = "pending", shippingCostSeller = 0, installmentsCost = 0, adjustments = 0;
+        const sourceRefs: string[] = [];
+
+        if (billing && billing.fee_ml > 0) {
+          feeML = billing.fee_ml;
+          feeMLSource = "billing";
+          shippingCostSeller = billing.shipping;
+          installmentsCost = billing.installments;
+          adjustments = billing.adjustments;
+          sourceRefs.push("billing:order");
+          stats.billing = (stats.billing || 0) + 1;
+        } else {
+          feeMLSource = "pending";
+          sourceRefs.push("billing:pending");
+          stats.pending = (stats.pending || 0) + 1;
+        }
+
+        if (shippingCostSeller === 0 && shipmentBilling && shipmentBilling.shipping > 0) {
+          shippingCostSeller = shipmentBilling.shipping;
+          adjustments += shipmentBilling.adjustments;
+          sourceRefs.push("billing:shipment");
+        }
+
+        if (order.shipment_id && shippingCostSeller === 0) {
+          const { data: sc } = await supabase.from("meli_shipment_costs_cache").select("sender_cost").eq("shipment_id", order.shipment_id).maybeSingle();
+          if (sc) { 
+            shippingCostSeller = sc.sender_cost || 0; 
+            sourceRefs.push("shipment:cache"); 
+            if (shippingCostSeller > 0) stats.with_shipping = (stats.with_shipping || 0) + 1;
+          } else {
+            try {
+              const r = await fetch(`https://api.mercadolibre.com/shipments/${order.shipment_id}/costs`, { 
+                headers: { Authorization: `Bearer ${mlAccount.access_token}` } 
+              });
+              if (r.ok) { 
+                const d = await r.json(); 
+                shippingCostSeller = d.sender?.cost || 0; 
+                sourceRefs.push("shipment:api"); 
+                if (shippingCostSeller > 0) stats.with_shipping = (stats.with_shipping || 0) + 1;
+                await supabase.from("meli_shipment_costs_cache").upsert({ 
+                  user_id: userId, seller_id: sellerId, shipment_id: order.shipment_id, order_id: order.order_id, 
+                  sender_cost: shippingCostSeller, gross_amount: d.gross_amount || 0, raw_json: d, 
+                  synced_at: new Date().toISOString() 
+                }, { onConflict: "shipment_id" }); 
+              }
+            } catch {}
+          }
+        }
+
+        const totalMarketplaceCost = feeML + shippingCostSeller + installmentsCost + adjustments;
+        const revenueTotal = order.total_amount || 0;
+        const commissionCost = feeML;
+        
+        // Calculate derived fields
+        const costFees = feeML + installmentsCost + adjustments;
+        const costShipping = shippingCostSeller;
+        const costTotal = costFees + costShipping;
+        const profitTotal = revenueTotal - costTotal;
+        const marginPercent = revenueTotal > 0 ? Math.round((profitTotal / revenueTotal) * 100) : 0;
+
+        const missingFields: string[] = [];
+        if (feeMLSource === "pending") missingFields.push("sem_comissao");
+        if (shippingCostSeller === 0 && order.shipment_id) missingFields.push("sem_frete_cobrado");
+
+        rowsToUpsert.push({ 
+          user_id: userId, 
+          seller_id: sellerId, 
+          order_id: order.order_id, 
+          shipment_id: order.shipment_id, 
+          revenue_total: revenueTotal,
+          created_at_meli: order.created_at_meli,
+          fee_ml: feeML, 
+          fee_ml_source: feeMLSource, 
+          shipping_cost_seller: shippingCostSeller, 
+          installments_cost: installmentsCost, 
+          adjustments: adjustments, 
+          total_marketplace_cost: totalMarketplaceCost, 
+          has_real_financial: feeMLSource === "billing", 
+          has_real_cost: false, 
+          source_refs: { refs: sourceRefs }, 
+          real_cost_synced_at: new Date().toISOString(), 
+          calculated_at: new Date().toISOString(), 
+          status: feeMLSource === "billing" ? "calculated" : "pending",
+          commission_cost: commissionCost,
+          missing_fields: missingFields,
+          cost_fees: costFees,
+          cost_shipping: costShipping,
+          cost_total: costTotal,
+          profit_total: profitTotal,
+          margin_percent: marginPercent
+        });
+        
+        processedInRun++;
+      }
+
+      if (rowsToUpsert.length) {
+        await supabase.from("order_cost_breakdown_cache").upsert(rowsToUpsert, { onConflict: "seller_id,order_id" });
+      }
+
+      currentOffset += ordersNeedingSync.length;
+
+      // Update heartbeat
+      await supabase.from("meli_real_costs_sync_state").update({
+        cursor_offset: currentOffset,
+        processed: state.processed + processedInRun,
+        stats_json: stats,
+        last_heartbeat_at: new Date().toISOString()
+      }).eq("seller_id", sellerId);
+    }
+
+    // Paused due to runtime limit
+    await supabase.from("meli_real_costs_sync_state").update({ 
+      status: "paused", 
+      updated_at: new Date().toISOString(), 
+      stats_json: stats,
+      processed: state.processed + processedInRun,
+      cursor_offset: state.cursor_offset + processedInRun
+    }).eq("seller_id", sellerId);
+    
+    return new Response(JSON.stringify({ 
+      message: `Processados ${processedInRun} pedidos (incremental)`, 
+      processed: state.processed + processedInRun, 
+      total: needingSync,
+      status: "paused",
+      mode: "incremental"
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
+  // FULL MODE: Original logic scanning all orders
+  let currentOffset = state.cursor_offset;
 
   while (processedInRun < MAX_ORDERS_PER_RUN && Date.now() - startTime < MAX_RUNTIME_MS) {
     let q = supabase.from("meli_orders_cache")
@@ -763,7 +946,12 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
         processed: state.processed + processedInRun,
         cursor_offset: currentOffset
       }).eq("seller_id", sellerId);
-      return new Response(JSON.stringify({ message: "Sync complete", processed: state.processed + processedInRun, total: state.total }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ 
+        message: "Sync completo (full)", 
+        processed: state.processed + processedInRun, 
+        total: state.total,
+        mode: "full"
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const orderIds = orders.map((o: any) => o.order_id);
@@ -781,6 +969,7 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
 
     for (const order of orders) {
       const ex = existingMap.get(order.order_id);
+      // Skip if already synced with billing data in the last 24h
       if (ex?.real_cost_synced_at && ex.fee_ml_source === 'billing' && Date.now() - new Date(ex.real_cost_synced_at).getTime() < 86400000) { 
         processedInRun++; 
         continue; 
@@ -799,11 +988,11 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
         installmentsCost = billing.installments;
         adjustments = billing.adjustments;
         sourceRefs.push("billing:order");
-        stats.billing++;
+        stats.billing = (stats.billing || 0) + 1;
       } else {
         feeMLSource = "pending";
         sourceRefs.push("billing:pending");
-        stats.pending++;
+        stats.pending = (stats.pending || 0) + 1;
       }
 
       if (shippingCostSeller === 0 && shipmentBilling && shipmentBilling.shipping > 0) {
@@ -817,7 +1006,7 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
         if (sc) { 
           shippingCostSeller = sc.sender_cost || 0; 
           sourceRefs.push("shipment:cache"); 
-          if (shippingCostSeller > 0) stats.with_shipping++;
+          if (shippingCostSeller > 0) stats.with_shipping = (stats.with_shipping || 0) + 1;
         } else {
           try {
             const r = await fetch(`https://api.mercadolibre.com/shipments/${order.shipment_id}/costs`, { 
@@ -827,7 +1016,7 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
               const d = await r.json(); 
               shippingCostSeller = d.sender?.cost || 0; 
               sourceRefs.push("shipment:api"); 
-              if (shippingCostSeller > 0) stats.with_shipping++;
+              if (shippingCostSeller > 0) stats.with_shipping = (stats.with_shipping || 0) + 1;
               await supabase.from("meli_shipment_costs_cache").upsert({ 
                 user_id: userId, seller_id: sellerId, shipment_id: order.shipment_id, order_id: order.order_id, 
                 sender_cost: shippingCostSeller, gross_amount: d.gross_amount || 0, raw_json: d, 
@@ -849,13 +1038,12 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
       const costItemsTotal = ex?.cost_items_total || 0;
       const costPackaging = ex?.cost_packaging || 0;
       
-      // FIXED: Update legacy fields
       const costFees = feeML + installmentsCost + adjustments;
       const costShipping = shippingCostSeller;
       const costTotal = costItemsTotal + costPackaging + costFees + costShipping;
       const profitTotal = revenueTotal - costTotal;
       const marginPercent = revenueTotal > 0 ? Math.round((profitTotal / revenueTotal) * 100) : 0;
-      
+
       const missingFields: string[] = [];
       if (feeMLSource === "pending") missingFields.push("sem_comissao");
       if (shippingCostSeller === 0 && order.shipment_id) missingFields.push("sem_frete_cobrado");
@@ -880,47 +1068,46 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
         calculated_at: new Date().toISOString(), 
         status: feeMLSource === "billing" ? "calculated" : "pending",
         commission_cost: commissionCost,
-        receita_envio: shippingRevenue,
-        shipping_balance: shippingBalance,
         revenue_net: revenueNet,
+        shipping_balance: shippingBalance,
         missing_fields: missingFields,
-        // FIXED: Update legacy fields
         cost_fees: costFees,
         cost_shipping: costShipping,
         cost_total: costTotal,
         profit_total: profitTotal,
-        margin_percent: marginPercent,
+        margin_percent: marginPercent
       });
       
       processedInRun++;
-      if (Date.now() - startTime >= MAX_RUNTIME_MS) break;
     }
 
-    if (rowsToUpsert.length) await supabase.from("order_cost_breakdown_cache").upsert(rowsToUpsert, { onConflict: "seller_id,order_id" });
+    if (rowsToUpsert.length) {
+      await supabase.from("order_cost_breakdown_cache").upsert(rowsToUpsert, { onConflict: "seller_id,order_id" });
+    }
+
     currentOffset += orders.length;
-    await supabase.from("meli_real_costs_sync_state").update({ 
-      cursor_offset: currentOffset, 
-      processed: state.processed + processedInRun, 
-      last_page_size: orders.length, 
-      last_heartbeat_at: new Date().toISOString(), 
-      updated_at: new Date().toISOString(), 
-      stats_json: stats 
+
+    await supabase.from("meli_real_costs_sync_state").update({
+      cursor_offset: currentOffset,
+      processed: state.processed + processedInRun,
+      stats_json: stats,
+      last_heartbeat_at: new Date().toISOString()
     }).eq("seller_id", sellerId);
   }
 
   await supabase.from("meli_real_costs_sync_state").update({ 
     status: "paused", 
-    cursor_offset: currentOffset, 
-    processed: state.processed + processedInRun, 
-    last_heartbeat_at: new Date().toISOString(), 
     updated_at: new Date().toISOString(), 
-    stats_json: stats 
+    stats_json: stats,
+    processed: state.processed + processedInRun,
+    cursor_offset: currentOffset
   }).eq("seller_id", sellerId);
-  
+
   return new Response(JSON.stringify({ 
-    message: "Paused (budget reached)", 
+    message: `Processados ${processedInRun} pedidos (full)`, 
     processed: state.processed + processedInRun, 
-    total: state.total, 
-    cursor_offset: currentOffset 
+    total: state.total,
+    status: "paused",
+    mode: "full"
   }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
