@@ -564,12 +564,20 @@ async function refreshCatalogSnapshot(supabase: any, userId: string, body: any) 
     headers: { Authorization: `Bearer ${account.access_token}` },
   });
 
-  if (!searchResponse.ok) {
-    throw new Error('Failed to fetch catalog offers');
+  // If search fails, return empty offers instead of throwing
+  let offers: any[] = [];
+  let totalOffers = 0;
+  
+  if (searchResponse.ok) {
+    const searchData = await searchResponse.json();
+    offers = searchData.results || [];
+    totalOffers = searchData.paging?.total || offers.length;
+  } else {
+    // Log the error but continue with empty offers
+    const errorText = await searchResponse.text();
+    console.error(`[competitor-engine] Catalog search failed (${searchResponse.status}): ${errorText.slice(0, 200)}`);
+    // For some catalog products, search may not return offers - that's OK
   }
-
-  const searchData = await searchResponse.json();
-  const offers = searchData.results || [];
 
   // Calculate stats
   const prices = offers.map((o: any) => o.price).filter((p: number) => p > 0).sort((a: number, b: number) => a - b);
@@ -600,7 +608,7 @@ async function refreshCatalogSnapshot(supabase: any, userId: string, body: any) 
     expires_at: new Date(Date.now() + ttlHours * 60 * 60 * 1000).toISOString(),
     your_item_id,
     your_price,
-    total_offers: searchData.paging?.total || offers.length,
+    total_offers: totalOffers,
     market_price_min: prices[0] || null,
     market_price_median: prices.length > 0 ? prices[Math.floor(prices.length / 2)] : null,
     market_price_max: prices[prices.length - 1] || null,
