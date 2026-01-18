@@ -1,5 +1,5 @@
 // @ts-nocheck - Deno types not available in build context
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7?target=deno&no-check";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7/dist/module/index.js?target=deno&no-check";
 
 
 const corsHeaders = {
