@@ -2298,6 +2298,24 @@ export type Database = {
       }
     }
     Functions: {
+      count_orders_needing_cost_sync: {
+        Args: { p_seller_id: string }
+        Returns: {
+          no_breakdown: number
+          pending_billing: number
+          total_pending: number
+        }[]
+      }
+      get_orders_needing_cost_sync: {
+        Args: { p_limit?: number; p_offset?: number; p_seller_id: string }
+        Returns: {
+          created_at_meli: string
+          current_fee_ml_source: string
+          order_id: string
+          shipment_id: string
+          total_amount: number
+        }[]
+      }
       get_sales_metrics: {
         Args: { p_date_from?: string; p_date_to?: string; p_seller_id: string }
         Returns: Json
