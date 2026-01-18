@@ -6,9 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Eye, Package, Bell, TrendingUp, TrendingDown, ExternalLink, RefreshCw } from 'lucide-react';
+import { Eye, Package, Bell, TrendingUp, TrendingDown, ExternalLink, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react';
 import { useSellerTopVisited, useSellerTopSold, useAlerts, useTriggerCollection, useDismissAlert, useMarkAlertRead, SellerItem } from '@/hooks/useTrendsApi';
 import { TrendsItemDetailDrawer } from './TrendsItemDetailDrawer';
+import { toast } from 'sonner';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface TrendsSellerTabProps {
   sellerId: string | null;
@@ -26,10 +28,37 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
   const triggerCollection = useTriggerCollection();
   const dismissAlert = useDismissAlert();
   const markRead = useMarkAlertRead();
+  const queryClient = useQueryClient();
 
-  const handleSync = () => {
+  const handleSync = async () => {
     if (!sellerId) return;
-    triggerCollection.mutate({ sellerId, collectType: 'all' });
+    
+    toast.loading('Iniciando coleta de dados...', { id: 'collect-data' });
+    
+    triggerCollection.mutate(
+      { sellerId, collectType: 'all' },
+      {
+        onSuccess: () => {
+          toast.success('Coleta iniciada! Os dados serão atualizados em breve.', { 
+            id: 'collect-data',
+            duration: 5000,
+            icon: <CheckCircle className="h-4 w-4 text-green-500" />
+          });
+          // Invalidate queries after a delay to allow backend processing
+          setTimeout(() => {
+            queryClient.invalidateQueries({ queryKey: ['trends'] });
+            refetchVisited();
+            refetchSold();
+          }, 3000);
+        },
+        onError: (error) => {
+          toast.error(`Erro ao iniciar coleta: ${error.message}`, { 
+            id: 'collect-data',
+            icon: <AlertCircle className="h-4 w-4 text-red-500" />
+          });
+        }
+      }
+    );
   };
 
   const handleRefresh = () => {

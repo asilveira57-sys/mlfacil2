@@ -55,7 +55,6 @@ Deno.serve(async (req) => {
       .single();
 
     const salesThreshold = settings?.sales_spike_threshold || 50;
-    const visitsThreshold = settings?.visits_spike_threshold || 100;
 
     // Calculate date ranges
     const today = new Date();
@@ -64,52 +63,95 @@ Deno.serve(async (req) => {
     const fourteenDaysAgo = new Date(today);
     fourteenDaysAgo.setDate(today.getDate() - 14);
 
-    const todayStr = today.toISOString().split('T')[0];
-    const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0];
-    const fourteenDaysAgoStr = fourteenDaysAgo.toISOString().split('T')[0];
+    const sevenDaysAgoStr = sevenDaysAgo.toISOString();
+    const fourteenDaysAgoStr = fourteenDaysAgo.toISOString();
 
-    // Get sales for current period (7d)
-    const { data: currentSales } = await supabase
-      .from('seller_item_sales_daily')
-      .select('item_id, quantity_sold, revenue')
+    // Get all paid orders from last 14 days from meli_orders_cache
+    const { data: orders, error: ordersError } = await supabase
+      .from('meli_orders_cache')
+      .select('order_id, created_at_meli')
       .eq('seller_id', seller_id)
       .eq('user_id', user.id)
-      .gte('sale_date', sevenDaysAgoStr);
+      .eq('order_status', 'paid')
+      .gte('created_at_meli', fourteenDaysAgoStr);
 
-    // Get sales for previous period (7-14d)
-    const { data: previousSales } = await supabase
-      .from('seller_item_sales_daily')
-      .select('item_id, quantity_sold, revenue')
-      .eq('seller_id', seller_id)
-      .eq('user_id', user.id)
-      .gte('sale_date', fourteenDaysAgoStr)
-      .lt('sale_date', sevenDaysAgoStr);
+    if (ordersError) {
+      console.error('[trends-alerts-engine] Failed to fetch orders:', ordersError);
+      return new Response(JSON.stringify({ error: 'Failed to fetch orders' }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
-    // Aggregate by item
-    const aggregateSales = (data: any[]) => {
-      const result: Record<string, { quantity: number; revenue: number }> = {};
-      for (const row of data || []) {
-        if (!result[row.item_id]) {
-          result[row.item_id] = { quantity: 0, revenue: 0 };
-        }
-        result[row.item_id].quantity += row.quantity_sold;
-        result[row.item_id].revenue += Number(row.revenue);
+    if (!orders?.length) {
+      console.log('[trends-alerts-engine] No orders found for analysis');
+      return new Response(JSON.stringify({ 
+        success: true, 
+        alerts_checked: 0, 
+        alerts_created: 0,
+        message: 'No orders to analyze'
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Split orders into current (0-7d) and previous (7-14d) periods
+    const currentOrderIds: string[] = [];
+    const previousOrderIds: string[] = [];
+
+    for (const order of orders) {
+      const orderDate = new Date(order.created_at_meli);
+      if (orderDate >= sevenDaysAgo) {
+        currentOrderIds.push(order.order_id);
+      } else {
+        previousOrderIds.push(order.order_id);
       }
-      return result;
-    };
+    }
 
-    const currentAgg = aggregateSales(currentSales || []);
-    const previousAgg = aggregateSales(previousSales || []);
+    console.log(`[trends-alerts-engine] Current period orders: ${currentOrderIds.length}, Previous: ${previousOrderIds.length}`);
+
+    // Function to get and aggregate items for a list of orders
+    async function getItemsForOrders(orderIds: string[], userId: string) {
+      if (orderIds.length === 0) return {};
+      
+      const { data: items, error } = await supabase
+        .from('meli_order_items_cache')
+        .select('item_id, quantity, unit_price, title, thumbnail')
+        .eq('seller_id', seller_id)
+        .eq('user_id', userId)
+        .in('order_id', orderIds);
+
+      if (error) {
+        console.error('[trends-alerts-engine] Failed to fetch items:', error);
+        return {};
+      }
+
+      const aggregated: Record<string, { quantity: number; revenue: number; title?: string; thumbnail?: string }> = {};
+      for (const item of items || []) {
+        if (!aggregated[item.item_id]) {
+          aggregated[item.item_id] = { quantity: 0, revenue: 0, title: item.title, thumbnail: item.thumbnail };
+        }
+        aggregated[item.item_id].quantity += item.quantity;
+        aggregated[item.item_id].revenue += item.quantity * Number(item.unit_price);
+      }
+      return aggregated;
+    }
+
+    const currentAgg = await getItemsForOrders(currentOrderIds, user.id);
+    const previousAgg = await getItemsForOrders(previousOrderIds, user.id);
 
     // Find spikes and drops
     const alertsToCreate: any[] = [];
     const allItems = new Set([...Object.keys(currentAgg), ...Object.keys(previousAgg)]);
 
+    console.log(`[trends-alerts-engine] Analyzing ${allItems.size} unique items`);
+
     for (const itemId of allItems) {
       const curr = currentAgg[itemId] || { quantity: 0, revenue: 0 };
       const prev = previousAgg[itemId] || { quantity: 0, revenue: 0 };
+      const itemTitle = curr.title || prev.title || itemId;
 
-      // Sales spike
+      // Sales spike/drop detection
       if (prev.quantity > 0) {
         const changePercent = ((curr.quantity - prev.quantity) / prev.quantity) * 100;
         
@@ -120,9 +162,14 @@ Deno.serve(async (req) => {
             alert_type: 'sales_spike',
             item_id: itemId,
             title: `Vendas dispararam: +${changePercent.toFixed(0)}%`,
-            message: `${curr.quantity} vendas nos últimos 7 dias vs ${prev.quantity} no período anterior`,
+            message: `${itemTitle.substring(0, 50)}... - ${curr.quantity} vendas (7d) vs ${prev.quantity} (anterior)`,
             severity: changePercent >= 100 ? 'critical' : 'warning',
-            alert_data: { current: curr.quantity, previous: prev.quantity, change_percent: changePercent },
+            alert_data: { 
+              current: curr.quantity, 
+              previous: prev.quantity, 
+              change_percent: changePercent,
+              item_title: itemTitle
+            },
           });
         } else if (changePercent <= -salesThreshold) {
           alertsToCreate.push({
@@ -131,9 +178,14 @@ Deno.serve(async (req) => {
             alert_type: 'sales_drop',
             item_id: itemId,
             title: `Vendas caíram: ${changePercent.toFixed(0)}%`,
-            message: `${curr.quantity} vendas nos últimos 7 dias vs ${prev.quantity} no período anterior`,
+            message: `${itemTitle.substring(0, 50)}... - ${curr.quantity} vendas (7d) vs ${prev.quantity} (anterior)`,
             severity: changePercent <= -70 ? 'critical' : 'warning',
-            alert_data: { current: curr.quantity, previous: prev.quantity, change_percent: changePercent },
+            alert_data: { 
+              current: curr.quantity, 
+              previous: prev.quantity, 
+              change_percent: changePercent,
+              item_title: itemTitle
+            },
           });
         }
       } else if (curr.quantity >= 5) {
@@ -143,15 +195,20 @@ Deno.serve(async (req) => {
           seller_id,
           alert_type: 'sales_spike',
           item_id: itemId,
-          title: `Novo produto vendendo bem`,
-          message: `${curr.quantity} vendas nos últimos 7 dias`,
-          severity: 'info',
-          alert_data: { current: curr.quantity, previous: 0 },
+          title: `Novo produto vendendo bem!`,
+          message: `${itemTitle.substring(0, 50)}... - ${curr.quantity} vendas nos últimos 7 dias`,
+          severity: curr.quantity >= 10 ? 'warning' : 'info',
+          alert_data: { 
+            current: curr.quantity, 
+            previous: 0,
+            item_title: itemTitle
+          },
         });
       }
     }
 
     // Insert new alerts (avoid duplicates)
+    let alertsCreated = 0;
     if (alertsToCreate.length > 0) {
       // Check for existing similar alerts in the last 24 hours
       const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -179,6 +236,7 @@ Deno.serve(async (req) => {
         if (insertError) {
           console.error('[trends-alerts-engine] Failed to insert alerts:', insertError);
         } else {
+          alertsCreated = newAlerts.length;
           console.log(`[trends-alerts-engine] Created ${newAlerts.length} new alerts`);
         }
       }
@@ -187,7 +245,8 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ 
       success: true,
       alerts_checked: allItems.size,
-      alerts_created: alertsToCreate.length,
+      alerts_created: alertsCreated,
+      message: alertsCreated > 0 ? `Created ${alertsCreated} alerts` : 'No new alerts'
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

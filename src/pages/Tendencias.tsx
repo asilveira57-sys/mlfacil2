@@ -112,7 +112,10 @@ export default function Tendencias() {
           <TabsContent value="overview" className="space-y-6">
             {/* Summary Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <Card className="relative overflow-hidden group hover:shadow-lg transition-all duration-300">
+              <Card 
+                className="relative overflow-hidden group hover:shadow-lg transition-all duration-300 cursor-pointer"
+                onClick={() => setActiveTab('market')}
+              >
                 <div className="absolute inset-0 bg-gradient-to-br from-orange-500/10 to-transparent" />
                 <div className="absolute -right-4 -top-4 w-24 h-24 bg-orange-500/5 rounded-full blur-2xl group-hover:scale-150 transition-transform" />
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -127,6 +130,9 @@ export default function Tendencias() {
                   )}
                   <p className="text-xs text-muted-foreground mt-1">
                     {trends?.snapshot_date ? `Atualizado: ${new Date(trends.snapshot_date + 'T00:00:00').toLocaleDateString('pt-BR')}` : 'Aguardando dados'}
+                  </p>
+                  <p className="text-xs text-primary mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    Clique para ver detalhes →
                   </p>
                 </CardContent>
               </Card>
