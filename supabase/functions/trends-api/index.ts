@@ -236,16 +236,24 @@ async function getSellerTopVisited(supabase: any, userId: string, params: Record
     .sort((a, b) => b.visits - a.visits)
     .slice(0, 20);
 
-  // Enrich with item details from analyzed_items if available
+  // Enrich with item details from meli_order_items_cache (has actual data)
   const itemIds = items.map(i => i.item_id);
   const { data: itemDetails } = await supabase
-    .from('analyzed_items')
-    .select('item_id, title, thumbnail')
-    .in('item_id', itemIds);
+    .from('meli_order_items_cache')
+    .select('item_id, title, thumbnail, created_at_meli')
+    .in('item_id', itemIds)
+    .order('created_at_meli', { ascending: false });
 
-  const detailsMap = new Map<string, { item_id: string; title: string | null; thumbnail: string | null }>(
-    (itemDetails || []).map((i: { item_id: string; title: string | null; thumbnail: string | null }) => [i.item_id, i])
-  );
+  // Build map, preferring entries with thumbnails
+  const detailsMap = new Map<string, { item_id: string; title: string | null; thumbnail: string | null }>();
+  for (const item of itemDetails || []) {
+    const existing = detailsMap.get(item.item_id);
+    if (!existing) {
+      detailsMap.set(item.item_id, item);
+    } else if (!existing.thumbnail && item.thumbnail) {
+      detailsMap.set(item.item_id, item);
+    }
+  }
 
   return {
     items: items.map(i => {
@@ -296,16 +304,24 @@ async function getSellerTopSold(supabase: any, userId: string, params: Record<st
     .sort((a, b) => b.quantity - a.quantity)
     .slice(0, 20);
 
-  // Enrich with item details
+  // Enrich with item details from meli_order_items_cache (has actual data)
   const itemIds = items.map(i => i.item_id);
   const { data: itemDetails } = await supabase
-    .from('analyzed_items')
-    .select('item_id, title, thumbnail')
-    .in('item_id', itemIds);
+    .from('meli_order_items_cache')
+    .select('item_id, title, thumbnail, created_at_meli')
+    .in('item_id', itemIds)
+    .order('created_at_meli', { ascending: false });
 
-  const detailsMap = new Map<string, { item_id: string; title: string | null; thumbnail: string | null }>(
-    (itemDetails || []).map((i: { item_id: string; title: string | null; thumbnail: string | null }) => [i.item_id, i])
-  );
+  // Build map, preferring entries with thumbnails
+  const detailsMap = new Map<string, { item_id: string; title: string | null; thumbnail: string | null }>();
+  for (const item of itemDetails || []) {
+    const existing = detailsMap.get(item.item_id);
+    if (!existing) {
+      detailsMap.set(item.item_id, item);
+    } else if (!existing.thumbnail && item.thumbnail) {
+      detailsMap.set(item.item_id, item);
+    }
+  }
 
   return {
     items: items.map(i => {
