@@ -171,7 +171,7 @@ export default function Custos() {
           </TabsList>
 
           <TabsContent value="resumo">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm text-muted-foreground">Faturamento (30d)</CardTitle>
@@ -215,6 +215,19 @@ export default function Custos() {
                       {summary.summary.incomplete_percent.toFixed(0)}% pedidos sem custo
                     </p>
                   )}
+                </CardContent>
+              </Card>
+              <Card className="border-amber-200 dark:border-amber-800 bg-amber-50/30 dark:bg-amber-900/10">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm text-amber-700 dark:text-amber-400">Cancelados (30d)</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold text-amber-600">
+                    {summary?.summary?.cancelled_count || 0}
+                  </p>
+                  <p className="text-xs text-amber-600 mt-1">
+                    VGV: {summary?.summary?.cancelled_vgv ? formatCurrency(summary.summary.cancelled_vgv) : 'R$ 0,00'}
+                  </p>
                 </CardContent>
               </Card>
             </div>
