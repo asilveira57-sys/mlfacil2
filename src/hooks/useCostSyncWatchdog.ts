@@ -5,9 +5,13 @@ const WATCHDOG_INTERVAL_MS = 5000;
 const STALE_THRESHOLD_MS = 60000;
 const COOLDOWN_MS = 10000;
 
+// Billing is considered stale if last sync was > 6 hours ago
+const BILLING_STALE_THRESHOLD_MS = 6 * 60 * 60 * 1000;
+
 interface WatchdogState {
   billingStatus: 'idle' | 'running' | 'paused' | 'done' | 'error' | null;
   billingSyncScope: string | null;
+  billingLastFinished: string | null;
   backfillStatus: 'idle' | 'running' | 'paused' | 'done' | 'error' | null;
   backfillLastHeartbeat: string | null;
   realCostsStatus: 'idle' | 'running' | 'paused' | 'done' | 'error' | null;
@@ -20,6 +24,7 @@ export function useCostSyncWatchdog(sellerId: string | null, enabled: boolean) {
   const stateRef = useRef<WatchdogState>({
     billingStatus: null,
     billingSyncScope: null,
+    billingLastFinished: null,
     backfillStatus: null,
     backfillLastHeartbeat: null,
     realCostsStatus: null,
@@ -43,6 +48,7 @@ export function useCostSyncWatchdog(sellerId: string | null, enabled: boolean) {
       if (billingData?.sync_state) {
         stateRef.current.billingStatus = billingData.sync_state.status;
         stateRef.current.billingSyncScope = billingData.sync_state.scope;
+        stateRef.current.billingLastFinished = billingData.sync_state.finished_at;
       }
       
       // Fetch backfill state
@@ -87,6 +93,29 @@ export function useCostSyncWatchdog(sellerId: string | null, enabled: boolean) {
     if (Date.now() - lastActionRef.current < COOLDOWN_MS) return;
     
     const state = stateRef.current;
+
+    // Priority 0: Billing is stale (>6h since last sync) and not running -> Auto-sync
+    const billingIsStale = !state.billingLastFinished || 
+      (Date.now() - new Date(state.billingLastFinished).getTime() > BILLING_STALE_THRESHOLD_MS);
+    
+    if (billingIsStale && 
+        state.billingStatus !== 'running' && 
+        state.billingStatus !== 'paused' &&
+        state.pendingBilling > 0) {
+      console.log("[GlobalWatchdog] Billing is stale and has pending orders, triggering auto-sync...");
+      isResumingRef.current = true;
+      lastActionRef.current = Date.now();
+      try {
+        await supabase.functions.invoke("ml-sync-billing-details", {
+          body: { seller_id: sellerId, action: "sync", scope: "recent" }
+        });
+      } catch (err) {
+        console.error("[GlobalWatchdog] Error auto-syncing billing:", err);
+      } finally {
+        setTimeout(() => { isResumingRef.current = false; }, 10000);
+      }
+      return;
+    }
     
     // Priority 1: Billing paused -> Resume
     if (state.billingStatus === 'paused') {
