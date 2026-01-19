@@ -6,11 +6,12 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { TrendingUp, Search, Package, ExternalLink, Tag, RefreshCw, Clock, CheckCircle, AlertCircle } from 'lucide-react';
-import { useMarketTrends, useMarketHighlights } from '@/hooks/useTrendsApi';
+import { TrendingUp, Search, Package, ExternalLink, Tag, RefreshCw, Clock, CheckCircle, AlertCircle, Download } from 'lucide-react';
+import { useMarketTrends, useMarketHighlights, TrendItem, HighlightItem } from '@/hooks/useTrendsApi';
 import { useTrendsStatus } from '@/hooks/useTrendsStatus';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+
 // Common ML categories - aligned with backend POPULAR_CATEGORIES
 const CATEGORIES = [
   { id: 'all', label: 'Todas (Geral)' },
@@ -31,6 +32,42 @@ const CATEGORIES = [
   { id: 'MLB264586', label: 'Saúde' },
   { id: 'MLB1430', label: 'Roupas e Acessórios' },
 ];
+
+// Export keywords to CSV
+function exportKeywordsCSV(keywords: TrendItem[], categoryLabel: string, date: string) {
+  const header = 'Posição,Palavra-chave,URL\n';
+  const rows = keywords.map((k, idx) => 
+    `${idx + 1},"${k.keyword.replace(/"/g, '""')}",${k.url || ''}`
+  ).join('\n');
+  
+  const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `palavras-chave-${categoryLabel.replace(/\s+/g, '-').toLowerCase()}-${date}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Export highlights to CSV
+function exportHighlightsCSV(items: HighlightItem[], categoryLabel: string, date: string) {
+  const header = 'Posição,Título,Preço,Quantidade Vendida,Link\n';
+  const rows = items.map((item) => 
+    `${item.rank},"${(item.title || item.item_id).replace(/"/g, '""')}",${item.price || ''},${item.sold_quantity || ''},${item.permalink || ''}`
+  ).join('\n');
+  
+  const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `mais-vendidos-${categoryLabel.replace(/\s+/g, '-').toLowerCase()}-${date}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 export function TrendsMarketTab() {
   const [categoryId, setCategoryId] = useState('all');
@@ -55,6 +92,8 @@ export function TrendsMarketTab() {
   const lastUpdate = trendsStatus?.last_success_at || trendsStatus?.last_partial_at || trendsStatus?.last_run_at;
   const lastUpdateDate = lastUpdate ? new Date(lastUpdate) : null;
   const isRecent = lastUpdateDate && (Date.now() - lastUpdateDate.getTime()) < 24 * 60 * 60 * 1000;
+
+  const currentCategoryLabel = CATEGORIES.find(c => c.id === categoryId)?.label || 'Geral';
 
   const handleCollectHighlights = async () => {
     if (!categoryId || categoryId === 'all') return;
@@ -82,6 +121,22 @@ export function TrendsMarketTab() {
       console.error('Error collecting highlights:', err);
       toast.error('Erro ao coletar mais vendidos');
       setIsCollecting(false);
+    }
+  };
+
+  const handleExportKeywords = () => {
+    if (filteredTrends.length > 0) {
+      const date = trends?.snapshot_date || new Date().toISOString().split('T')[0];
+      exportKeywordsCSV(filteredTrends, currentCategoryLabel, date);
+      toast.success('CSV de palavras-chave exportado!');
+    }
+  };
+
+  const handleExportHighlights = () => {
+    if (highlights?.items && highlights.items.length > 0) {
+      const date = highlights.snapshot_date || new Date().toISOString().split('T')[0];
+      exportHighlightsCSV(highlights.items, currentCategoryLabel, date);
+      toast.success('CSV de mais vendidos exportado!');
     }
   };
 
@@ -153,11 +208,24 @@ export function TrendsMarketTab() {
                 <TrendingUp className="h-5 w-5 text-primary" />
                 Em Alta
               </div>
-              {trends?.snapshot_date && (
-                <Badge variant="outline" className="text-xs font-normal">
-                  {new Date(trends.snapshot_date + 'T00:00:00').toLocaleDateString('pt-BR')}
-                </Badge>
-              )}
+              <div className="flex items-center gap-2">
+                {trends?.snapshot_date && (
+                  <Badge variant="outline" className="text-xs font-normal">
+                    {new Date(trends.snapshot_date + 'T00:00:00').toLocaleDateString('pt-BR')}
+                  </Badge>
+                )}
+                {filteredTrends.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleExportKeywords}
+                    className="h-7 text-xs"
+                  >
+                    <Download className="h-3 w-3 mr-1" />
+                    CSV
+                  </Button>
+                )}
+              </div>
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -212,12 +280,26 @@ export function TrendsMarketTab() {
               <div className="flex items-center gap-2 text-lg">
                 <Package className="h-5 w-5 text-green-500" />
                 Mais Vendidos
+                {categoryId === 'all' && highlights?.items?.length > 0 && (
+                  <Badge variant="secondary" className="ml-1 text-xs">Top Geral</Badge>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 {highlights?.snapshot_date && (
                   <Badge variant="outline" className="text-xs font-normal">
                     {new Date(highlights.snapshot_date + 'T00:00:00').toLocaleDateString('pt-BR')}
                   </Badge>
+                )}
+                {highlights?.items && highlights.items.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleExportHighlights}
+                    className="h-7 text-xs"
+                  >
+                    <Download className="h-3 w-3 mr-1" />
+                    CSV
+                  </Button>
                 )}
                 {categoryId !== 'all' && !highlightsLoading && !highlights?.items?.length && (
                   <Button 
@@ -235,12 +317,7 @@ export function TrendsMarketTab() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {categoryId === 'all' ? (
-              <div className="text-center py-8">
-                <Package className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <p className="text-muted-foreground">Selecione uma categoria para ver os mais vendidos</p>
-              </div>
-            ) : highlightsLoading ? (
+            {highlightsLoading ? (
               <div className="space-y-3">
                 {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} className="h-16 w-full" />)}
               </div>
