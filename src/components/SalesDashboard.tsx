@@ -158,6 +158,9 @@ export function SalesDashboard() {
   const [isFirstLoad, setIsFirstLoad] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [syncPhase, setSyncPhase] = useState<1 | 2 | 3>(1);
+  
+  // Background sync indicator
+  const [isBackgroundSyncing, setIsBackgroundSyncing] = useState(false);
 
   const fetchSalesData = useCallback(async (filters?: DateFilter, attempt = 0): Promise<void> => {
     setIsLoading(true);
@@ -416,6 +419,33 @@ export function SalesDashboard() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Listen for background sync events
+  useEffect(() => {
+    const handleSyncStart = () => {
+      setIsBackgroundSyncing(true);
+    };
+
+    const handleSyncComplete = (event: CustomEvent) => {
+      // Refresh data when background sync completes
+      if (event.detail?.sellerId === sellerId || !sellerId) {
+        fetchSalesData();
+        toast({
+          title: "Dados atualizados",
+          description: "Sincronização em background concluída",
+        });
+      }
+      setIsBackgroundSyncing(false);
+    };
+
+    window.addEventListener("orders_sync_start", handleSyncStart as EventListener);
+    window.addEventListener("orders_sync_complete", handleSyncComplete as EventListener);
+
+    return () => {
+      window.removeEventListener("orders_sync_start", handleSyncStart as EventListener);
+      window.removeEventListener("orders_sync_complete", handleSyncComplete as EventListener);
+    };
+  }, [sellerId, toast]);
+
   // Show onboarding sync screen
   if (showOnboarding) {
     const progress = syncJob && syncJob.total_records > 0 
@@ -467,12 +497,20 @@ export function SalesDashboard() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h3 className="text-2xl font-bold text-foreground">Dashboard de Vendas</h3>
-          {salesData?.seller && (
-            <p className="text-muted-foreground">
-              Conta: {salesData.seller.nickname || salesData.seller.email}
-            </p>
+        <div className="flex items-center gap-3">
+          <div>
+            <h3 className="text-2xl font-bold text-foreground">Dashboard de Vendas</h3>
+            {salesData?.seller && (
+              <p className="text-muted-foreground">
+                Conta: {salesData.seller.nickname || salesData.seller.email}
+              </p>
+            )}
+          </div>
+          {isBackgroundSyncing && (
+            <div className="flex items-center gap-1.5 px-2 py-1 bg-muted rounded-md text-xs text-muted-foreground">
+              <RefreshCw className="w-3 h-3 animate-spin" />
+              <span>Sincronizando...</span>
+            </div>
           )}
         </div>
         <div className="flex items-center gap-2">

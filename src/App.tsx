@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCostSyncWatchdog } from "@/hooks/useCostSyncWatchdog";
+import { useOrdersSyncWatchdog } from "@/hooks/useOrdersSyncWatchdog";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
@@ -18,8 +19,8 @@ import Custos from "./pages/Custos";
 import Concorrencia from "./pages/Concorrencia";
 import NotFound from "./pages/NotFound";
 
-// Global watchdog provider component
-function GlobalCostWatchdog() {
+// Global watchdog provider component - handles both cost and orders sync
+function GlobalWatchdogs() {
   const [sellerId, setSellerId] = useState<string | null>(() => {
     return localStorage.getItem("cost_watchdog_seller_id");
   });
@@ -100,8 +101,9 @@ function GlobalCostWatchdog() {
     };
   }, []);
 
-  // Run the global watchdog
+  // Run both global watchdogs
   useCostSyncWatchdog(sellerId, enabled);
+  useOrdersSyncWatchdog(sellerId, enabled);
 
   return null;
 }
@@ -114,7 +116,7 @@ const App = () => {
       <TooltipProvider>
         <Toaster />
         <Sonner />
-        <GlobalCostWatchdog />
+        <GlobalWatchdogs />
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Index />} />
