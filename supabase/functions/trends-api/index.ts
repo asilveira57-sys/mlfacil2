@@ -134,11 +134,72 @@ async function getMarketTrends(supabase: any, params: Record<string, string>) {
 async function getMarketHighlights(supabase: any, params: Record<string, string>) {
   const siteId = params.site_id || 'MLB';
   const categoryId = params.category_id;
+  const fetchAll = params.all === 'true';
 
-  if (!categoryId) {
+  // If no category and not fetching all, return empty
+  if (!categoryId && !fetchAll) {
     return { items: [], message: 'Selecione uma categoria' };
   }
 
+  // Fetch all categories - get top items from each category, ranked globally
+  if (fetchAll) {
+    console.log('[trends-api] market/highlights fetching all categories');
+    
+    // Get latest snapshots for all categories
+    const { data: snapshots, error: snapError } = await supabase
+      .from('highlights_snapshots')
+      .select('id, snapshot_date, category_id')
+      .eq('site_id', siteId)
+      .order('snapshot_date', { ascending: false });
+
+    if (snapError) throw snapError;
+    if (!snapshots || snapshots.length === 0) {
+      return { items: [], message: 'Nenhum dado disponível' };
+    }
+
+    // Get the most recent snapshot per category
+    const latestByCategory = new Map<string, { id: string; snapshot_date: string }>();
+    for (const snap of snapshots) {
+      if (!latestByCategory.has(snap.category_id)) {
+        latestByCategory.set(snap.category_id, { id: snap.id, snapshot_date: snap.snapshot_date });
+      }
+    }
+
+    const snapshotIds = Array.from(latestByCategory.values()).map(s => s.id);
+    const mostRecentDate = snapshots[0]?.snapshot_date;
+
+    // Fetch items from all these snapshots
+    const { data: allItems, error: itemsError } = await supabase
+      .from('highlights_items')
+      .select('*')
+      .in('snapshot_id', snapshotIds)
+      .order('rank', { ascending: true });
+
+    if (itemsError) throw itemsError;
+
+    // Deduplicate by item_id (keep the one with best rank) and rank globally
+    const seenItems = new Map<string, any>();
+    for (const item of allItems || []) {
+      const key = item.item_id;
+      if (!seenItems.has(key) || item.rank < seenItems.get(key).rank) {
+        seenItems.set(key, item);
+      }
+    }
+
+    // Sort by original rank and take top 20
+    const rankedItems = Array.from(seenItems.values())
+      .sort((a, b) => a.rank - b.rank)
+      .slice(0, 20)
+      .map((item, idx) => ({ ...item, rank: idx + 1 }));
+
+    return {
+      items: rankedItems,
+      snapshot_date: mostRecentDate,
+      is_global: true,
+    };
+  }
+
+  // Single category flow
   const { data: snapshot, error: snapError } = await supabase
     .from('highlights_snapshots')
     .select('id, snapshot_date, category_id')
@@ -212,22 +273,30 @@ async function getSellerTopVisited(supabase: any, userId: string, params: Record
   const sellerId = params.seller_id;
   const days = parseInt(params.days || '7', 10);
 
+  console.log(`[trends-api] seller/top-visitados days=${days} seller=${sellerId}`);
+
   if (!sellerId) {
     return { items: [], message: 'Seller não selecionado' };
   }
 
-  const fromDate = new Date();
-  fromDate.setDate(fromDate.getDate() - days);
+  const today = new Date();
+  const fromDate = new Date(today);
+  fromDate.setDate(today.getDate() - days);
   const fromDateStr = fromDate.toISOString().split('T')[0];
+  const toDateStr = today.toISOString().split('T')[0];
+
+  console.log(`[trends-api] seller/top-visitados date range: ${fromDateStr} to ${toDateStr}`);
 
   const { data, error } = await supabase
     .from('seller_item_visits')
-    .select('item_id, visits_count')
+    .select('item_id, visits_count, visit_date')
     .eq('seller_id', sellerId)
     .eq('user_id', userId)
     .gte('visit_date', fromDateStr);
 
   if (error) throw error;
+
+  console.log(`[trends-api] seller/top-visitados found ${data?.length || 0} visit records`);
 
   // Aggregate by item
   const aggregated: Record<string, number> = {};
@@ -269,6 +338,7 @@ async function getSellerTopVisited(supabase: any, userId: string, params: Record
       };
     }),
     period_days: days,
+    data_range: { from: fromDateStr, to: toDateStr },
   };
 }
 
@@ -276,22 +346,30 @@ async function getSellerTopSold(supabase: any, userId: string, params: Record<st
   const sellerId = params.seller_id;
   const days = parseInt(params.days || '7', 10);
 
+  console.log(`[trends-api] seller/top-vendidos days=${days} seller=${sellerId}`);
+
   if (!sellerId) {
     return { items: [], message: 'Seller não selecionado' };
   }
 
-  const fromDate = new Date();
-  fromDate.setDate(fromDate.getDate() - days);
+  const today = new Date();
+  const fromDate = new Date(today);
+  fromDate.setDate(today.getDate() - days);
   const fromDateStr = fromDate.toISOString().split('T')[0];
+  const toDateStr = today.toISOString().split('T')[0];
+
+  console.log(`[trends-api] seller/top-vendidos date range: ${fromDateStr} to ${toDateStr}`);
 
   const { data, error } = await supabase
     .from('seller_item_sales_daily')
-    .select('item_id, quantity_sold, revenue')
+    .select('item_id, quantity_sold, revenue, sale_date')
     .eq('seller_id', sellerId)
     .eq('user_id', userId)
     .gte('sale_date', fromDateStr);
 
   if (error) throw error;
+
+  console.log(`[trends-api] seller/top-vendidos found ${data?.length || 0} sale records`);
 
   // Aggregate by item
   const aggregated: Record<string, { quantity: number; revenue: number }> = {};
@@ -337,6 +415,7 @@ async function getSellerTopSold(supabase: any, userId: string, params: Record<st
       };
     }),
     period_days: days,
+    data_range: { from: fromDateStr, to: toDateStr },
   };
 }
 

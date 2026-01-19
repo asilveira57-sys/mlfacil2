@@ -141,37 +141,39 @@ export function useMarketTrends(siteId: string = 'MLB', categoryId?: string) {
 
 export function useMarketHighlights(siteId: string = 'MLB', categoryId?: string) {
   return useQuery({
-    queryKey: ['trends', 'market', 'highlights', siteId, categoryId],
+    queryKey: ['trends', 'market', 'highlights', siteId, categoryId || 'all'],
     queryFn: () => callTrendsApi<{ items: HighlightItem[]; snapshot_date?: string; message?: string }>(
       'mercado/highlights',
-      { site_id: siteId, ...(categoryId ? { category_id: categoryId } : {}) }
+      { site_id: siteId, ...(categoryId ? { category_id: categoryId } : { all: 'true' }) }
     ),
-    enabled: !!categoryId,
+    enabled: true,
     staleTime: 5 * 60 * 1000,
   });
 }
 
 export function useSellerTopVisited(sellerId: string | null, days: number = 7) {
+  console.log('[useTrendsApi] useSellerTopVisited called with days:', days);
   return useQuery({
     queryKey: ['trends', 'seller', 'top-visited', sellerId, days],
-    queryFn: () => callTrendsApi<{ items: SellerItem[]; period_days: number }>(
+    queryFn: () => callTrendsApi<{ items: SellerItem[]; period_days: number; data_range?: { from: string; to: string } }>(
       'seller/top-visitados',
       { seller_id: sellerId!, days: String(days) }
     ),
     enabled: !!sellerId,
-    staleTime: 60 * 1000,
+    staleTime: 0, // Disable stale time to ensure fresh data
   });
 }
 
 export function useSellerTopSold(sellerId: string | null, days: number = 7) {
+  console.log('[useTrendsApi] useSellerTopSold called with days:', days);
   return useQuery({
     queryKey: ['trends', 'seller', 'top-sold', sellerId, days],
-    queryFn: () => callTrendsApi<{ items: SellerItem[]; period_days: number }>(
+    queryFn: () => callTrendsApi<{ items: SellerItem[]; period_days: number; data_range?: { from: string; to: string } }>(
       'seller/top-vendidos',
       { seller_id: sellerId!, days: String(days) }
     ),
     enabled: !!sellerId,
-    staleTime: 60 * 1000,
+    staleTime: 0, // Disable stale time to ensure fresh data
   });
 }
 
