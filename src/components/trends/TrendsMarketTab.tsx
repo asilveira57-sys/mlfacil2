@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
@@ -36,6 +36,10 @@ export function TrendsMarketTab() {
   const [categoryId, setCategoryId] = useState('all');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [isCollecting, setIsCollecting] = useState(false);
+
+  useEffect(() => {
+    console.log('[TrendsMarketTab] selectedCategory', categoryId);
+  }, [categoryId]);
 
   const actualCategoryId = categoryId === 'all' ? undefined : categoryId;
   const { data: trends, isLoading: trendsLoading } = useMarketTrends('MLB', actualCategoryId);
@@ -218,15 +222,19 @@ export function TrendsMarketTab() {
                       <span className="text-lg font-bold text-green-500 w-8 text-center">
                         {item.rank}
                       </span>
-                      {item.thumbnail && (
+                      {item.thumbnail ? (
                         <img 
                           src={item.thumbnail} 
                           alt="" 
                           className="w-12 h-12 rounded object-cover border border-border"
                         />
+                      ) : (
+                        <div className="w-12 h-12 rounded bg-muted flex items-center justify-center border border-border">
+                          <Package className="h-5 w-5 text-muted-foreground" />
+                        </div>
                       )}
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{item.title}</p>
+                        <p className="text-sm font-medium truncate">{item.title || item.item_id}</p>
                         <div className="flex items-center gap-2 mt-1">
                           {item.price && (
                             <Badge variant="outline" className="text-xs">

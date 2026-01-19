@@ -295,71 +295,136 @@ async function collectHighlights(
   today: string,
   accessToken: string
 ) {
-  try {
-    // First try the highlights API
-    const url = `https://api.mercadolibre.com/highlights/${siteId}/category/${categoryId}`;
+  const diagPrefix = `[trends-collect-public][highlights][${siteId}/${categoryId}]`;
 
-    console.log(`[trends-collect-public] Fetching highlights from ${url}`);
+  try {
+    console.log(`${diagPrefix} start today=${today}`);
+
+    // A) Log detalhado do highlights
+    const url = `https://api.mercadolibre.com/highlights/${siteId}/category/${categoryId}`;
+    console.log(`${diagPrefix} fetching highlights url=${url}`);
+
     const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}` }
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
 
-    let items: any[] = [];
+    const highlightsText = await response.text();
+    console.log(`${diagPrefix} highlights status=${response.status} ok=${response.ok}`);
+    if (!response.ok) {
+      console.error(`${diagPrefix} highlights error body=${highlightsText}`);
+    }
 
-    if (response.ok) {
-      const highlightsData = await response.json();
-      const content = highlightsData.content || [];
-      console.log(`[trends-collect-public] Highlights API returned ${content.length} items`);
+    let highlightsData: any = null;
+    try {
+      highlightsData = highlightsText ? JSON.parse(highlightsText) : null;
+    } catch (e) {
+      console.error(`${diagPrefix} highlights JSON parse failed`);
+    }
 
-      if (content.length > 0) {
-        // Use batch API to fetch all items at once (up to 20)
-        const itemIds = content.slice(0, 20).map((h: any) => h.id).join(',');
-        console.log(`[trends-collect-public] Fetching batch items: ${itemIds}`);
-        
-        const batchResponse = await fetch(
-          `https://api.mercadolibre.com/items?ids=${itemIds}`,
-          { headers: { Authorization: `Bearer ${accessToken}` } }
-        );
+    const content: any[] = Array.isArray(highlightsData?.content) ? highlightsData.content : [];
+    console.log(`${diagPrefix} highlights content.length=${content.length}`);
 
-        if (batchResponse.ok) {
-          const batchData = await batchResponse.json();
-          console.log(`[trends-collect-public] Batch API returned ${batchData.length} items`);
-          
-          items = batchData
-            .filter((item: any) => item.code === 200 && item.body)
-            .map((item: any, idx: number) => ({
-              item_id: item.body.id,
-              rank: idx + 1,
-              title: item.body.title,
-              thumbnail: item.body.thumbnail,
-              price: item.body.price,
-              sold_quantity: item.body.sold_quantity,
-              permalink: item.body.permalink,
-            }));
-          
-          console.log(`[trends-collect-public] Parsed ${items.length} valid items from batch`);
-        } else {
-          console.error(`[trends-collect-public] Batch API failed: ${batchResponse.status}`);
+    const contentSample = content.slice(0, 3).map((h: any) => ({ id: h?.id, type: h?.type }));
+    console.log(`${diagPrefix} highlights content.sample(3)=`, contentSample);
+
+    // Sempre gerar itens-base para nunca ficar 0 (mesmo sem enriquecimento)
+    // Também ajuda auditoria quando type != ITEM.
+    const baseFromHighlights = content
+      .slice(0, 20)
+      .filter((h: any) => !!h?.id)
+      .map((h: any, idx: number) => {
+        const rawType = String(h?.type ?? '').toUpperCase();
+        return {
+          item_id: String(h.id),
+          rank: idx + 1,
+          // se for ITEM, tentaremos preencher título/thumbnail depois
+          // se não for ITEM, deixamos um marcador para auditoria
+          title: rawType && rawType !== 'ITEM' ? `[${rawType}] ${String(h.id)}` : null,
+          thumbnail: null,
+          price: null,
+          sold_quantity: null,
+          permalink: null,
+          _raw_type: rawType,
+        };
+      });
+
+    // B) Log + enriquecimento em lote (somente ITEM)
+    const itemIdsForEnrichment = baseFromHighlights
+      .filter((it: any) => it._raw_type === 'ITEM')
+      .map((it: any) => it.item_id);
+
+    console.log(`${diagPrefix} enrich candidates (type=ITEM) count=${itemIdsForEnrichment.length}`);
+
+    const enrichedMap = new Map<string, any>();
+
+    if (itemIdsForEnrichment.length > 0) {
+      const idsParam = itemIdsForEnrichment.join(',');
+      const batchUrl = `https://api.mercadolibre.com/items?ids=${encodeURIComponent(idsParam)}`;
+      console.log(`${diagPrefix} fetching batch items url=${batchUrl}`);
+
+      const batchResponse = await fetch(batchUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      const batchText = await batchResponse.text();
+      console.log(`${diagPrefix} batch status=${batchResponse.status} ok=${batchResponse.ok}`);
+
+      if (!batchResponse.ok) {
+        console.error(`${diagPrefix} batch error body=${batchText}`);
+      } else {
+        let batchData: any[] = [];
+        try {
+          batchData = batchText ? JSON.parse(batchText) : [];
+        } catch {
+          console.error(`${diagPrefix} batch JSON parse failed`);
+        }
+
+        const okCount = (batchData || []).filter((x: any) => x?.code === 200).length;
+        const failCount = (batchData || []).length - okCount;
+        console.log(`${diagPrefix} batch parsed len=${(batchData || []).length} code200=${okCount} fail=${failCount}`);
+
+        for (const entry of batchData || []) {
+          if (entry?.code === 200 && entry?.body?.id) {
+            enrichedMap.set(String(entry.body.id), entry.body);
+          } else if (entry?.code && entry?.body) {
+            console.error(`${diagPrefix} batch entry error code=${entry.code} body=`, entry.body);
+          }
         }
       }
-    } else {
-      console.log(`[trends-collect-public] Highlights API failed with ${response.status}, trying search fallback`);
     }
 
-    // Fallback: if highlights API returned no items, use search API sorted by sold_quantity
+    // Aplica enriquecimento onde tiver code 200; mantém base mesmo quando falhar.
+    let items = baseFromHighlights.map((it: any) => {
+      const body = enrichedMap.get(it.item_id);
+      if (!body) return it;
+      return {
+        ...it,
+        title: body.title ?? it.title,
+        thumbnail: body.thumbnail ?? null,
+        price: body.price ?? null,
+        sold_quantity: body.sold_quantity ?? null,
+        permalink: body.permalink ?? null,
+      };
+    });
+
+    // Remove campo interno
+    items = items.map(({ _raw_type, ...rest }: any) => rest);
+
+    console.log(`${diagPrefix} final items before fallback count=${items.length}`);
+
+    // Fallback: se highlights não retornou nada, usar search.
     if (items.length === 0) {
-      console.log(`[trends-collect-public] Using search API fallback for ${categoryId}`);
+      console.log(`${diagPrefix} fallback to search (no items from highlights)`);
       items = await fetchBestSellersViaSearch(siteId, categoryId, accessToken);
+      console.log(`${diagPrefix} fallback search items count=${items.length}`);
     }
 
     if (items.length === 0) {
-      console.log(`[trends-collect-public] No items found for ${categoryId} via any method`);
+      console.log(`${diagPrefix} no items found via any method`);
       return;
     }
 
-    console.log(`[trends-collect-public] Got ${items.length} total items for ${categoryId}`);
-
-    // Check if snapshot exists
+    // Snapshot + persistência
     const { data: existing } = await supabase
       .from('highlights_snapshots')
       .select('id')
@@ -384,35 +449,41 @@ async function collectHighlights(
         .single();
 
       if (snapError || !newSnapshot) {
-        console.error('[trends-collect-public] Failed to create highlights snapshot:', snapError);
+        console.error(`${diagPrefix} failed to create highlights snapshot:`, snapError);
         return;
       }
       snapshotId = newSnapshot.id;
     }
 
     // Add snapshot_id to items
-    const itemsWithSnapshot = items.map(item => ({
+    const itemsWithSnapshot = items.map((item: any) => ({
       ...item,
-      snapshot_id: snapshotId
+      snapshot_id: snapshotId,
     }));
 
+    console.log(`${diagPrefix} saving snapshotId=${snapshotId} items=${itemsWithSnapshot.length}`);
+
     // Delete old items for this snapshot and insert new ones
-    await supabase
+    const { error: delError } = await supabase
       .from('highlights_items')
       .delete()
       .eq('snapshot_id', snapshotId);
+
+    if (delError) {
+      console.error(`${diagPrefix} delete previous items failed:`, delError);
+    }
 
     const { error: insertError } = await supabase
       .from('highlights_items')
       .insert(itemsWithSnapshot);
 
     if (insertError) {
-      console.error('[trends-collect-public] Failed to insert highlights items:', insertError);
+      console.error(`${diagPrefix} insert highlights items failed:`, insertError);
     } else {
-      console.log(`[trends-collect-public] Saved ${items.length} highlights items for ${categoryId}`);
+      console.log(`${diagPrefix} saved highlights items ok count=${itemsWithSnapshot.length}`);
     }
   } catch (error) {
-    console.error('[trends-collect-public] Error in collectHighlights:', error);
+    console.error(`${diagPrefix} error in collectHighlights:`, error);
   }
 }
 
@@ -422,35 +493,68 @@ async function fetchBestSellersViaSearch(
   categoryId: string,
   accessToken: string
 ): Promise<any[]> {
+  const diagPrefix = `[trends-collect-public][highlights][${siteId}/${categoryId}][search-fallback]`;
+
+  const url = `https://api.mercadolibre.com/sites/${siteId}/search?category=${categoryId}&sort=sold_quantity_desc&limit=20`;
+
+  // 1) tenta com token
   try {
-    const url = `https://api.mercadolibre.com/sites/${siteId}/search?category=${categoryId}&sort=sold_quantity_desc&limit=20`;
-    
-    console.log(`[trends-collect-public] Fetching best sellers via search: ${url}`);
+    console.log(`${diagPrefix} fetching url=${url} auth=on`);
     const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}` }
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
 
-    if (!response.ok) {
-      console.error(`[trends-collect-public] Search API failed: ${response.status}`);
-      return [];
+    const text = await response.text();
+    console.log(`${diagPrefix} status=${response.status} ok=${response.ok}`);
+
+    if (response.ok) {
+      const data = text ? JSON.parse(text) : {};
+      const results = data.results || [];
+      console.log(`${diagPrefix} results.length=${results.length}`);
+
+      return results.map((item: any, idx: number) => ({
+        item_id: item.id,
+        rank: idx + 1,
+        title: item.title,
+        thumbnail: item.thumbnail,
+        price: item.price,
+        sold_quantity: item.sold_quantity,
+        permalink: item.permalink,
+      }));
     }
 
-    const data = await response.json();
-    const results = data.results || [];
-    
-    console.log(`[trends-collect-public] Search API returned ${results.length} results`);
+    console.error(`${diagPrefix} error body=${text}`);
 
-    return results.map((item: any, idx: number) => ({
-      item_id: item.id,
-      rank: idx + 1,
-      title: item.title,
-      thumbnail: item.thumbnail,
-      price: item.price,
-      sold_quantity: item.sold_quantity,
-      permalink: item.permalink,
-    }));
+    // 2) se 403, tenta sem token (algumas rotas funcionam melhor público)
+    if (response.status === 403) {
+      console.warn(`${diagPrefix} got 403 with auth, retrying without auth`);
+      const resp2 = await fetch(url);
+      const text2 = await resp2.text();
+      console.log(`${diagPrefix} retry-noauth status=${resp2.status} ok=${resp2.ok}`);
+
+      if (!resp2.ok) {
+        console.error(`${diagPrefix} retry-noauth error body=${text2}`);
+        return [];
+      }
+
+      const data2 = text2 ? JSON.parse(text2) : {};
+      const results2 = data2.results || [];
+      console.log(`${diagPrefix} retry-noauth results.length=${results2.length}`);
+
+      return results2.map((item: any, idx: number) => ({
+        item_id: item.id,
+        rank: idx + 1,
+        title: item.title,
+        thumbnail: item.thumbnail,
+        price: item.price,
+        sold_quantity: item.sold_quantity,
+        permalink: item.permalink,
+      }));
+    }
+
+    return [];
   } catch (error) {
-    console.error('[trends-collect-public] Error in fetchBestSellersViaSearch:', error);
+    console.error(`${diagPrefix} error:`, error);
     return [];
   }
 }
