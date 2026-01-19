@@ -5,16 +5,22 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
-import { TrendingUp, Search, Package, ExternalLink, Tag } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { TrendingUp, Search, Package, ExternalLink, Tag, RefreshCw } from 'lucide-react';
 import { useMarketTrends, useMarketHighlights } from '@/hooks/useTrendsApi';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 
-// Common ML categories
+// Common ML categories - aligned with backend POPULAR_CATEGORIES
 const CATEGORIES = [
   { id: 'all', label: 'Todas (Geral)' },
   { id: 'MLB5672', label: 'Acessórios para Veículos' },
+  { id: 'MLB1384', label: 'Bebês' },
+  { id: 'MLB1574', label: 'Casa, Móveis e Decoração' },
   { id: 'MLB1051', label: 'Celulares e Telefones' },
   { id: 'MLB1648', label: 'Computadores' },
-  { id: 'MLB1144', label: 'Consoles e Videogames' },
+  { id: 'MLB1144', label: 'Eletrodomésticos' },
+  { id: 'MLB1000', label: 'Eletrônicos' },
   { id: 'MLB1276', label: 'Esportes e Fitness' },
   { id: 'MLB263532', label: 'Ferramentas' },
   { id: 'MLB1499', label: 'Indústria e Comércio' },
@@ -29,14 +35,44 @@ const CATEGORIES = [
 export function TrendsMarketTab() {
   const [categoryId, setCategoryId] = useState('all');
   const [searchKeyword, setSearchKeyword] = useState('');
+  const [isCollecting, setIsCollecting] = useState(false);
 
   const actualCategoryId = categoryId === 'all' ? undefined : categoryId;
   const { data: trends, isLoading: trendsLoading } = useMarketTrends('MLB', actualCategoryId);
-  const { data: highlights, isLoading: highlightsLoading } = useMarketHighlights('MLB', actualCategoryId);
+  const { data: highlights, isLoading: highlightsLoading, refetch: refetchHighlights } = useMarketHighlights('MLB', actualCategoryId);
 
   const filteredTrends = trends?.trends?.filter(t => 
     !searchKeyword || t.keyword.toLowerCase().includes(searchKeyword.toLowerCase())
   ) || [];
+
+  const handleCollectHighlights = async () => {
+    if (!categoryId || categoryId === 'all') return;
+    
+    setIsCollecting(true);
+    try {
+      const { error } = await supabase.functions.invoke('trends-collect-public', {
+        body: {
+          site_id: 'MLB',
+          category_id: categoryId,
+          collect_type: 'highlights'
+        }
+      });
+      
+      if (error) throw error;
+      
+      toast.success('Coleta iniciada! Aguarde alguns segundos e atualize a página.');
+      
+      // Refetch after a delay
+      setTimeout(() => {
+        refetchHighlights();
+        setIsCollecting(false);
+      }, 5000);
+    } catch (err) {
+      console.error('Error collecting highlights:', err);
+      toast.error('Erro ao coletar mais vendidos');
+      setIsCollecting(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -66,7 +102,7 @@ export function TrendsMarketTab() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Trends Card */}
         <Card>
           <CardHeader>
@@ -135,11 +171,25 @@ export function TrendsMarketTab() {
                 <Package className="h-5 w-5 text-green-500" />
                 Mais Vendidos
               </div>
-              {highlights?.snapshot_date && (
-                <Badge variant="outline" className="text-xs font-normal">
-                  {new Date(highlights.snapshot_date + 'T00:00:00').toLocaleDateString('pt-BR')}
-                </Badge>
-              )}
+              <div className="flex items-center gap-2">
+                {highlights?.snapshot_date && (
+                  <Badge variant="outline" className="text-xs font-normal">
+                    {new Date(highlights.snapshot_date + 'T00:00:00').toLocaleDateString('pt-BR')}
+                  </Badge>
+                )}
+                {categoryId !== 'all' && !highlightsLoading && !highlights?.items?.length && (
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    onClick={handleCollectHighlights}
+                    disabled={isCollecting}
+                    className="h-7 text-xs"
+                  >
+                    <RefreshCw className={`h-3 w-3 mr-1 ${isCollecting ? 'animate-spin' : ''}`} />
+                    Coletar
+                  </Button>
+                )}
+              </div>
             </CardTitle>
           </CardHeader>
           <CardContent>

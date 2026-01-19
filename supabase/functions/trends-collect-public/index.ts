@@ -296,7 +296,7 @@ async function collectHighlights(
   accessToken: string
 ) {
   try {
-    // Fetch highlights (best sellers) from ML API
+    // First try the highlights API
     const url = `https://api.mercadolibre.com/highlights/${siteId}/category/${categoryId}`;
 
     console.log(`[trends-collect-public] Fetching highlights from ${url}`);
@@ -304,29 +304,57 @@ async function collectHighlights(
       headers: { Authorization: `Bearer ${accessToken}` }
     });
 
-    if (!response.ok) {
-      if (response.status === 429) {
-        console.warn('[trends-collect-public] Rate limited on highlights');
-        return;
+    let items: any[] = [];
+
+    if (response.ok) {
+      const highlightsData = await response.json();
+      const content = highlightsData.content || [];
+      console.log(`[trends-collect-public] Highlights API returned ${content.length} items`);
+
+      if (content.length > 0) {
+        // Fetch item details for each highlight
+        for (let i = 0; i < content.length && i < 20; i++) {
+          const itemId = content[i].id;
+          await sleep(RATE_LIMIT_DELAY);
+
+          try {
+            const itemResponse = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
+              headers: { Authorization: `Bearer ${accessToken}` }
+            });
+            
+            if (itemResponse.ok) {
+              const itemData = await itemResponse.json();
+              items.push({
+                item_id: itemId,
+                rank: i + 1,
+                title: itemData.title,
+                thumbnail: itemData.thumbnail,
+                price: itemData.price,
+                sold_quantity: itemData.sold_quantity,
+                permalink: itemData.permalink,
+              });
+            }
+          } catch (error) {
+            console.error(`[trends-collect-public] Error fetching item ${itemId}:`, error);
+          }
+        }
       }
-      if (response.status === 404) {
-        console.log(`[trends-collect-public] No highlights for category ${categoryId}`);
-        return;
-      }
-      const errorText = await response.text();
-      console.error(`[trends-collect-public] Failed to fetch highlights: ${response.status} - ${errorText}`);
+    } else {
+      console.log(`[trends-collect-public] Highlights API failed with ${response.status}, trying search fallback`);
+    }
+
+    // Fallback: if highlights API returned no items, use search API sorted by sold_quantity
+    if (items.length === 0) {
+      console.log(`[trends-collect-public] Using search API fallback for ${categoryId}`);
+      items = await fetchBestSellersViaSearch(siteId, categoryId, accessToken);
+    }
+
+    if (items.length === 0) {
+      console.log(`[trends-collect-public] No items found for ${categoryId} via any method`);
       return;
     }
 
-    const highlightsData = await response.json();
-    const content = highlightsData.content || [];
-
-    if (content.length === 0) {
-      console.log(`[trends-collect-public] No highlights content for ${categoryId}`);
-      return;
-    }
-
-    console.log(`[trends-collect-public] Got ${content.length} highlights`);
+    console.log(`[trends-collect-public] Got ${items.length} total items for ${categoryId}`);
 
     // Check if snapshot exists
     const { data: existing } = await supabase
@@ -359,55 +387,68 @@ async function collectHighlights(
       snapshotId = newSnapshot.id;
     }
 
-    // Fetch item details for each highlight
-    const items: any[] = [];
-    for (let i = 0; i < content.length && i < 20; i++) {
-      const itemId = content[i].id;
-      
-      await sleep(RATE_LIMIT_DELAY);
+    // Add snapshot_id to items
+    const itemsWithSnapshot = items.map(item => ({
+      ...item,
+      snapshot_id: snapshotId
+    }));
 
-      try {
-        const itemResponse = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
-          headers: { Authorization: `Bearer ${accessToken}` }
-        });
-        
-        if (itemResponse.ok) {
-          const itemData = await itemResponse.json();
-          items.push({
-            snapshot_id: snapshotId,
-            item_id: itemId,
-            rank: i + 1,
-            title: itemData.title,
-            thumbnail: itemData.thumbnail,
-            price: itemData.price,
-            sold_quantity: itemData.sold_quantity,
-            permalink: itemData.permalink,
-          });
-        }
-      } catch (error) {
-        console.error(`[trends-collect-public] Error fetching item ${itemId}:`, error);
-      }
-    }
+    // Delete old items for this snapshot and insert new ones
+    await supabase
+      .from('highlights_items')
+      .delete()
+      .eq('snapshot_id', snapshotId);
 
-    if (items.length > 0) {
-      // Delete old items for this snapshot and insert new ones
-      await supabase
-        .from('highlights_items')
-        .delete()
-        .eq('snapshot_id', snapshotId);
+    const { error: insertError } = await supabase
+      .from('highlights_items')
+      .insert(itemsWithSnapshot);
 
-      const { error: insertError } = await supabase
-        .from('highlights_items')
-        .insert(items);
-
-      if (insertError) {
-        console.error('[trends-collect-public] Failed to insert highlights items:', insertError);
-      } else {
-        console.log(`[trends-collect-public] Saved ${items.length} highlights items for ${categoryId}`);
-      }
+    if (insertError) {
+      console.error('[trends-collect-public] Failed to insert highlights items:', insertError);
+    } else {
+      console.log(`[trends-collect-public] Saved ${items.length} highlights items for ${categoryId}`);
     }
   } catch (error) {
     console.error('[trends-collect-public] Error in collectHighlights:', error);
+  }
+}
+
+// Fallback: fetch best sellers via search API sorted by sold_quantity
+async function fetchBestSellersViaSearch(
+  siteId: string,
+  categoryId: string,
+  accessToken: string
+): Promise<any[]> {
+  try {
+    const url = `https://api.mercadolibre.com/sites/${siteId}/search?category=${categoryId}&sort=sold_quantity_desc&limit=20`;
+    
+    console.log(`[trends-collect-public] Fetching best sellers via search: ${url}`);
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+
+    if (!response.ok) {
+      console.error(`[trends-collect-public] Search API failed: ${response.status}`);
+      return [];
+    }
+
+    const data = await response.json();
+    const results = data.results || [];
+    
+    console.log(`[trends-collect-public] Search API returned ${results.length} results`);
+
+    return results.map((item: any, idx: number) => ({
+      item_id: item.id,
+      rank: idx + 1,
+      title: item.title,
+      thumbnail: item.thumbnail,
+      price: item.price,
+      sold_quantity: item.sold_quantity,
+      permalink: item.permalink,
+    }));
+  } catch (error) {
+    console.error('[trends-collect-public] Error in fetchBestSellersViaSearch:', error);
+    return [];
   }
 }
 
