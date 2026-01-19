@@ -350,16 +350,25 @@ export function TrendsMarketTab() {
                       )}
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">{item.title || item.item_id}</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          {item.price && (
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          {item.price ? (
                             <Badge variant="outline" className="text-xs">
                               R$ {item.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </Badge>
+                          ) : (
+                            <span className="text-xs text-muted-foreground italic">sem preço</span>
                           )}
-                          {item.sold_quantity && (
+                          {item.sold_quantity ? (
                             <span className="text-xs text-muted-foreground">
                               {item.sold_quantity.toLocaleString('pt-BR')} vendidos
                             </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground italic">qtd não informada</span>
+                          )}
+                          {item.estimated_revenue && item.estimated_revenue > 0 && (
+                            <Badge variant="secondary" className="text-xs">
+                              ~R$ {(item.estimated_revenue / 1000).toFixed(0)}k estimado
+                            </Badge>
                           )}
                         </div>
                       </div>

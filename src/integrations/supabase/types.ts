@@ -160,6 +160,42 @@ export type Database = {
           },
         ]
       }
+      category_tree_cache: {
+        Row: {
+          children_count: number | null
+          created_at: string | null
+          depth: number | null
+          fetched_at: string | null
+          id: string
+          name: string
+          parent_id: string | null
+          path: string[] | null
+          total_items_qty: number | null
+        }
+        Insert: {
+          children_count?: number | null
+          created_at?: string | null
+          depth?: number | null
+          fetched_at?: string | null
+          id: string
+          name: string
+          parent_id?: string | null
+          path?: string[] | null
+          total_items_qty?: number | null
+        }
+        Update: {
+          children_count?: number | null
+          created_at?: string | null
+          depth?: number | null
+          fetched_at?: string | null
+          id?: string
+          name?: string
+          parent_id?: string | null
+          path?: string[] | null
+          total_items_qty?: number | null
+        }
+        Relationships: []
+      }
       cep_cache: {
         Row: {
           city: string | null
@@ -461,6 +497,7 @@ export type Database = {
         Row: {
           created_at: string
           entity_type: string | null
+          estimated_revenue: number | null
           id: string
           item_id: string
           permalink: string | null
@@ -475,6 +512,7 @@ export type Database = {
         Insert: {
           created_at?: string
           entity_type?: string | null
+          estimated_revenue?: number | null
           id?: string
           item_id: string
           permalink?: string | null
@@ -489,6 +527,7 @@ export type Database = {
         Update: {
           created_at?: string
           entity_type?: string | null
+          estimated_revenue?: number | null
           id?: string
           item_id?: string
           permalink?: string | null
@@ -2078,27 +2117,50 @@ export type Database = {
       }
       public_categories: {
         Row: {
+          children_count: number | null
+          collect_subcategories: boolean | null
           created_at: string | null
+          depth: number | null
           id: string
           is_active: boolean | null
           name: string
+          parent_id: string | null
+          path: string[] | null
           priority: number | null
         }
         Insert: {
+          children_count?: number | null
+          collect_subcategories?: boolean | null
           created_at?: string | null
+          depth?: number | null
           id: string
           is_active?: boolean | null
           name: string
+          parent_id?: string | null
+          path?: string[] | null
           priority?: number | null
         }
         Update: {
+          children_count?: number | null
+          collect_subcategories?: boolean | null
           created_at?: string | null
+          depth?: number | null
           id?: string
           is_active?: boolean | null
           name?: string
+          parent_id?: string | null
+          path?: string[] | null
           priority?: number | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "public_categories_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "public_categories"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       public_trends_status: {
         Row: {
@@ -2108,8 +2170,10 @@ export type Database = {
           last_failed_at: string | null
           last_partial_at: string | null
           last_run_at: string | null
+          last_subcategory_sync_at: string | null
           last_success_at: string | null
           next_run_at: string | null
+          subcategories_collected: number | null
           total_categories: number | null
           updated_at: string | null
         }
@@ -2120,8 +2184,10 @@ export type Database = {
           last_failed_at?: string | null
           last_partial_at?: string | null
           last_run_at?: string | null
+          last_subcategory_sync_at?: string | null
           last_success_at?: string | null
           next_run_at?: string | null
+          subcategories_collected?: number | null
           total_categories?: number | null
           updated_at?: string | null
         }
@@ -2132,10 +2198,63 @@ export type Database = {
           last_failed_at?: string | null
           last_partial_at?: string | null
           last_run_at?: string | null
+          last_subcategory_sync_at?: string | null
           last_success_at?: string | null
           next_run_at?: string | null
+          subcategories_collected?: number | null
           total_categories?: number | null
           updated_at?: string | null
+        }
+        Relationships: []
+      }
+      seller_category_metrics: {
+        Row: {
+          avg_ticket: number | null
+          calculated_at: string | null
+          category_id: string
+          created_at: string | null
+          id: string
+          items_count: number | null
+          margin_percent: number | null
+          orders_count: number | null
+          period_key: string
+          quantity_sold: number | null
+          revenue: number | null
+          seller_id: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          avg_ticket?: number | null
+          calculated_at?: string | null
+          category_id: string
+          created_at?: string | null
+          id?: string
+          items_count?: number | null
+          margin_percent?: number | null
+          orders_count?: number | null
+          period_key: string
+          quantity_sold?: number | null
+          revenue?: number | null
+          seller_id: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          avg_ticket?: number | null
+          calculated_at?: string | null
+          category_id?: string
+          created_at?: string | null
+          id?: string
+          items_count?: number | null
+          margin_percent?: number | null
+          orders_count?: number | null
+          period_key?: string
+          quantity_sold?: number | null
+          revenue?: number | null
+          seller_id?: string
+          updated_at?: string | null
+          user_id?: string
         }
         Relationships: []
       }

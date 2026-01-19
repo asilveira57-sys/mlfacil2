@@ -15,6 +15,8 @@ export interface HighlightItem {
   price: number | null;
   sold_quantity: number | null;
   permalink: string | null;
+  estimated_revenue?: number | null;
+  entity_type?: string;
 }
 
 export interface SellerItem {
