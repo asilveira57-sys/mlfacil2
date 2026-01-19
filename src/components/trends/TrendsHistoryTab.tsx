@@ -4,13 +4,34 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { History, Calendar, TrendingUp, Store, AlertTriangle } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { History, Calendar, TrendingUp, Store, AlertTriangle, ChevronRight } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
 interface TrendsHistoryTabProps {
   sellerId: string | null;
 }
+
+// Categories available for filtering
+const CATEGORIES = [
+  { id: '__ROOT__', label: 'Todas (Geral)' },
+  { id: 'MLB5672', label: 'Acessórios para Veículos' },
+  { id: 'MLB1051', label: 'Celulares e Telefones' },
+  { id: 'MLB1648', label: 'Computadores' },
+  { id: 'MLB1144', label: 'Eletrodomésticos' },
+  { id: 'MLB1000', label: 'Eletrônicos' },
+  { id: 'MLB1276', label: 'Esportes e Fitness' },
+  { id: 'MLB263532', label: 'Ferramentas' },
+  { id: 'MLB1574', label: 'Casa, Móveis e Decoração' },
+  { id: 'MLB1499', label: 'Indústria e Comércio' },
+  { id: 'MLB1384', label: 'Bebês' },
+  { id: 'MLB1430', label: 'Artigos de Papelaria' },
+  { id: 'MLB1367', label: 'Antiguidades e Coleções' },
+  { id: 'MLB1368', label: 'Arte, Papelaria e Armarinho' },
+  { id: 'MLB1132', label: 'Brinquedos e Hobbies' },
+  { id: 'MLB1196', label: 'Calçados, Roupas e Bolsas' },
+];
 
 // Generate list of months from jan/2025 to today
 function generateMonthOptions() {
@@ -29,10 +50,22 @@ function generateMonthOptions() {
   return months.reverse(); // Most recent first
 }
 
+interface TrendKeyword {
+  keyword: string;
+  url?: string;
+}
+
+interface SnapshotData {
+  snapshot_date: string;
+  trends_data: TrendKeyword[];
+}
+
 export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
   const monthOptions = generateMonthOptions();
   const [selectedMonth, setSelectedMonth] = useState(monthOptions[0]?.key || '');
   const [sourceType, setSourceType] = useState<'seller' | 'market'>('seller');
+  const [selectedCategory, setSelectedCategory] = useState('__ROOT__');
+  const [expandedSnapshot, setExpandedSnapshot] = useState<SnapshotData | null>(null);
 
   // Fetch seller monthly history
   const { data: sellerHistory, isLoading: sellerLoading } = useQuery({
@@ -61,9 +94,9 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
     enabled: !!sellerId && sourceType === 'seller',
   });
 
-  // Fetch market snapshots history
+  // Fetch market snapshots history with category filter
   const { data: marketHistory, isLoading: marketLoading } = useQuery({
-    queryKey: ['trends', 'history', 'market', selectedMonth],
+    queryKey: ['trends', 'history', 'market', selectedMonth, selectedCategory],
     queryFn: async () => {
       const monthStart = `${selectedMonth}-01`;
       const [year, month] = selectedMonth.split('-').map(Number);
@@ -71,17 +104,30 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
       const nextYear = month === 12 ? year + 1 : year;
       const monthEnd = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
 
-      const { data, error } = await supabase
+      let query = supabase
         .from('trend_snapshots')
         .select('snapshot_date, trends_data')
         .eq('site_id', 'MLB')
-        .or('category_id.is.null,category_id.eq.__ROOT__')
         .gte('snapshot_date', monthStart)
         .lt('snapshot_date', monthEnd)
         .order('snapshot_date', { ascending: false });
 
+      // Filter by category
+      if (selectedCategory === '__ROOT__') {
+        query = query.or('category_id.is.null,category_id.eq.__ROOT__');
+      } else {
+        query = query.eq('category_id', selectedCategory);
+      }
+
+      const { data, error } = await query;
+
       if (error) throw error;
-      return data || [];
+      
+      // Parse trends_data from Json to TrendKeyword[]
+      return (data || []).map(item => ({
+        snapshot_date: item.snapshot_date,
+        trends_data: Array.isArray(item.trends_data) ? item.trends_data as unknown as TrendKeyword[] : []
+      })) as SnapshotData[];
     },
     enabled: sourceType === 'market',
   });
@@ -129,6 +175,24 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
             </SelectContent>
           </Select>
         </div>
+
+        {/* Category filter - only for market */}
+        {sourceType === 'market' && (
+          <div className="flex items-center gap-2">
+            <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+              <SelectTrigger className="w-[220px]">
+                <SelectValue placeholder="Categoria" />
+              </SelectTrigger>
+              <SelectContent>
+                {CATEGORIES.map((cat) => (
+                  <SelectItem key={cat.id} value={cat.id}>
+                    {cat.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
 
       {/* Content */}
@@ -137,6 +201,11 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
           <CardTitle className="flex items-center gap-2 text-lg">
             <History className="h-5 w-5 text-primary" />
             Histórico - {monthOptions.find(m => m.key === selectedMonth)?.label}
+            {sourceType === 'market' && selectedCategory !== '__ROOT__' && (
+              <Badge variant="secondary" className="ml-2">
+                {CATEGORIES.find(c => c.id === selectedCategory)?.label}
+              </Badge>
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -197,19 +266,25 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
                           {new Date(snapshot.snapshot_date + 'T00:00:00').toLocaleDateString('pt-BR')}
                         </Badge>
                         <span className="text-sm text-muted-foreground">
-                          {Array.isArray(snapshot.trends_data) ? snapshot.trends_data.length : 0} tendências
+                          {Array.isArray(snapshot.trends_data) ? snapshot.trends_data.length : 0} palavras-chave
                         </span>
                       </div>
                       {Array.isArray(snapshot.trends_data) && snapshot.trends_data.length > 0 && (
                         <div className="flex flex-wrap gap-2">
-                          {snapshot.trends_data.slice(0, 10).map((trend: { keyword: string }, idx: number) => (
+                          {snapshot.trends_data.slice(0, 10).map((trend: TrendKeyword, idx: number) => (
                             <Badge key={idx} variant="secondary" className="text-xs">
+                              <span className="text-muted-foreground mr-1">{idx + 1}.</span>
                               {trend.keyword}
                             </Badge>
                           ))}
                           {snapshot.trends_data.length > 10 && (
-                            <Badge variant="outline" className="text-xs">
+                            <Badge 
+                              variant="outline" 
+                              className="text-xs cursor-pointer hover:bg-primary hover:text-primary-foreground transition-colors"
+                              onClick={() => setExpandedSnapshot(snapshot)}
+                            >
                               +{snapshot.trends_data.length - 10} mais
+                              <ChevronRight className="h-3 w-3 ml-1" />
                             </Badge>
                           )}
                         </div>
@@ -221,7 +296,12 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
             ) : (
               <div className="text-center py-12">
                 <AlertTriangle className="h-12 w-12 text-amber-500 mx-auto mb-4" />
-                <p className="text-muted-foreground font-medium">Histórico indisponível antes da ativação do módulo</p>
+                <p className="text-muted-foreground font-medium">
+                  {selectedCategory !== '__ROOT__' 
+                    ? `Nenhum dado coletado para ${CATEGORIES.find(c => c.id === selectedCategory)?.label}`
+                    : 'Histórico indisponível antes da ativação do módulo'
+                  }
+                </p>
                 <p className="text-sm text-muted-foreground mt-2">
                   Fonte: snapshots do app
                 </p>
@@ -241,6 +321,52 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
           }
         </span>
       </div>
+
+      {/* Dialog for expanded keywords */}
+      <Dialog open={!!expandedSnapshot} onOpenChange={() => setExpandedSnapshot(null)}>
+        <DialogContent className="max-w-2xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5 text-primary" />
+              Palavras-chave em Alta
+              {expandedSnapshot && (
+                <Badge variant="outline" className="ml-2">
+                  {new Date(expandedSnapshot.snapshot_date + 'T00:00:00').toLocaleDateString('pt-BR')}
+                </Badge>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          <ScrollArea className="h-[60vh] pr-4">
+            <div className="grid grid-cols-1 gap-2">
+              {expandedSnapshot?.trends_data.map((trend: TrendKeyword, idx: number) => (
+                <div 
+                  key={idx} 
+                  className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg hover:bg-muted/80 transition-colors"
+                >
+                  <span className={`text-lg font-bold w-8 text-center ${
+                    idx < 3 ? 'text-primary' : 
+                    idx < 10 ? 'text-amber-500' : 
+                    'text-muted-foreground'
+                  }`}>
+                    {idx + 1}
+                  </span>
+                  <span className="font-medium flex-1">{trend.keyword}</span>
+                  {trend.url && (
+                    <a 
+                      href={trend.url} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-xs text-primary hover:underline"
+                    >
+                      Ver no ML
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
