@@ -6,11 +6,11 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { TrendingUp, Search, Package, ExternalLink, Tag, RefreshCw } from 'lucide-react';
+import { TrendingUp, Search, Package, ExternalLink, Tag, RefreshCw, Clock, CheckCircle, AlertCircle } from 'lucide-react';
 import { useMarketTrends, useMarketHighlights } from '@/hooks/useTrendsApi';
+import { useTrendsStatus } from '@/hooks/useTrendsStatus';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-
 // Common ML categories - aligned with backend POPULAR_CATEGORIES
 const CATEGORIES = [
   { id: 'all', label: 'Todas (Geral)' },
@@ -37,6 +37,8 @@ export function TrendsMarketTab() {
   const [searchKeyword, setSearchKeyword] = useState('');
   const [isCollecting, setIsCollecting] = useState(false);
 
+  const { data: trendsStatus } = useTrendsStatus();
+
   useEffect(() => {
     console.log('[TrendsMarketTab] selectedCategory', categoryId);
   }, [categoryId]);
@@ -48,6 +50,11 @@ export function TrendsMarketTab() {
   const filteredTrends = trends?.trends?.filter(t => 
     !searchKeyword || t.keyword.toLowerCase().includes(searchKeyword.toLowerCase())
   ) || [];
+
+  // Format last update date
+  const lastUpdate = trendsStatus?.last_success_at || trendsStatus?.last_partial_at || trendsStatus?.last_run_at;
+  const lastUpdateDate = lastUpdate ? new Date(lastUpdate) : null;
+  const isRecent = lastUpdateDate && (Date.now() - lastUpdateDate.getTime()) < 24 * 60 * 60 * 1000;
 
   const handleCollectHighlights = async () => {
     if (!categoryId || categoryId === 'all') return;
@@ -80,6 +87,37 @@ export function TrendsMarketTab() {
 
   return (
     <div className="space-y-6">
+      {/* Status Banner */}
+      {trendsStatus && (
+        <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg border">
+          {isRecent ? (
+            <CheckCircle className="h-4 w-4 text-green-500" />
+          ) : (
+            <AlertCircle className="h-4 w-4 text-amber-500" />
+          )}
+          <div className="flex-1 text-sm">
+            <span className="text-muted-foreground">Dados atualizados em: </span>
+            <span className="font-medium">
+              {lastUpdateDate?.toLocaleDateString('pt-BR', { 
+                day: '2-digit', 
+                month: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+              }) || 'Nunca'}
+            </span>
+            {trendsStatus.coverage_keywords > 0 && (
+              <span className="text-muted-foreground ml-2">
+                ({trendsStatus.coverage_keywords} categorias)
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Clock className="h-3 w-3" />
+            <span>Atualização diária às 02:30</span>
+          </div>
+        </div>
+      )}
+
       {/* Filters */}
       <div className="flex items-center gap-4 flex-wrap">
         <Select value={categoryId} onValueChange={setCategoryId}>
