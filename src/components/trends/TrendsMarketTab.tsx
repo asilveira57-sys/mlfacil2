@@ -385,7 +385,14 @@ export function TrendsMarketTab() {
                         </div>
                       )}
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{item.title || item.item_id}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium truncate">{item.title || item.item_id}</p>
+                          {item.entity_type === 'PRODUCT' && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-500/10 text-blue-600 border-blue-200">
+                              Catálogo
+                            </Badge>
+                          )}
+                        </div>
                         <div className="flex items-center gap-2 mt-1 flex-wrap">
                           {item.price ? (
                             <Badge variant="outline" className="text-xs">
@@ -394,7 +401,7 @@ export function TrendsMarketTab() {
                           ) : (
                             <span className="text-xs text-muted-foreground italic">sem preço</span>
                           )}
-                          {item.sold_quantity ? (
+                          {item.sold_quantity && item.sold_quantity > 0 ? (
                             <span className="text-xs text-muted-foreground">
                               {item.sold_quantity.toLocaleString('pt-BR')} vendidos
                             </span>
