@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { History, Calendar, TrendingUp, Store, AlertTriangle, ChevronRight, Package } from 'lucide-react';
+import { History, Calendar, TrendingUp, Store, AlertTriangle, ChevronRight, Package, Download } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -33,23 +34,6 @@ const CATEGORIES = [
   { id: 'MLB1196', label: 'Calçados, Roupas e Bolsas' },
 ];
 
-// Generate list of months from jan/2025 to today
-function generateMonthOptions() {
-  const months = [];
-  const start = new Date(2025, 0, 1); // Jan 2025
-  const now = new Date();
-  
-  let current = new Date(start);
-  while (current <= now) {
-    const key = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`;
-    const label = current.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-    months.push({ key, label });
-    current.setMonth(current.getMonth() + 1);
-  }
-  
-  return months.reverse(); // Most recent first
-}
-
 interface TrendKeyword {
   keyword: string;
   url?: string;
@@ -60,18 +44,124 @@ interface SnapshotData {
   trends_data: TrendKeyword[];
 }
 
+// Export keywords to CSV
+function exportToCSV(keywords: TrendKeyword[], date: string, categoryLabel: string) {
+  const header = 'Posição,Palavra-chave,URL\n';
+  const rows = keywords.map((k, idx) => 
+    `${idx + 1},"${k.keyword.replace(/"/g, '""')}",${k.url || ''}`
+  ).join('\n');
+  
+  const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `tendencias-${categoryLabel.replace(/\s+/g, '-').toLowerCase()}-${date}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
-  const monthOptions = generateMonthOptions();
-  const [selectedMonth, setSelectedMonth] = useState(monthOptions[0]?.key || '');
-  const [sourceType, setSourceType] = useState<'seller' | 'market'>('seller');
+  const [selectedMonth, setSelectedMonth] = useState('');
+  const [sourceType, setSourceType] = useState<'seller' | 'market'>('market');
   const [selectedCategory, setSelectedCategory] = useState('__ROOT__');
   const [expandedSnapshot, setExpandedSnapshot] = useState<SnapshotData | null>(null);
 
-  // Fetch seller monthly history with product details
+  // Fetch available months from trend_snapshots (for market)
+  const { data: availableMonthsMarket } = useQuery({
+    queryKey: ['trends', 'available-months', 'market', selectedCategory],
+    queryFn: async () => {
+      let query = supabase
+        .from('trend_snapshots')
+        .select('snapshot_date')
+        .eq('site_id', 'MLB')
+        .order('snapshot_date', { ascending: false });
+
+      if (selectedCategory === '__ROOT__') {
+        query = query.or('category_id.is.null,category_id.eq.__ROOT__');
+      } else {
+        query = query.eq('category_id', selectedCategory);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      // Extract unique months
+      const months = new Set<string>();
+      (data || []).forEach(item => {
+        const monthKey = item.snapshot_date.substring(0, 7);
+        months.add(monthKey);
+      });
+
+      return Array.from(months).map(key => {
+        const [year, month] = key.split('-').map(Number);
+        const date = new Date(year, month - 1, 1);
+        return {
+          key,
+          label: date.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+        };
+      });
+    },
+    enabled: sourceType === 'market',
+  });
+
+  // Fetch available months from seller_item_sales_monthly (for seller)
+  const { data: availableMonthsSeller } = useQuery({
+    queryKey: ['trends', 'available-months', 'seller', sellerId],
+    queryFn: async () => {
+      if (!sellerId) return [];
+
+      const { data, error } = await supabase
+        .from('seller_item_sales_monthly')
+        .select('sale_month')
+        .eq('seller_id', sellerId)
+        .order('sale_month', { ascending: false });
+
+      if (error) throw error;
+
+      // Extract unique months
+      const months = new Set<string>();
+      (data || []).forEach(item => {
+        const monthKey = item.sale_month.substring(0, 7);
+        months.add(monthKey);
+      });
+
+      return Array.from(months).map(key => {
+        const [year, month] = key.split('-').map(Number);
+        const date = new Date(year, month - 1, 1);
+        return {
+          key,
+          label: date.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+        };
+      });
+    },
+    enabled: sourceType === 'seller' && !!sellerId,
+  });
+
+  const monthOptions = sourceType === 'seller' ? (availableMonthsSeller || []) : (availableMonthsMarket || []);
+  
+  // Set default month when options change
+  if (monthOptions.length > 0 && !selectedMonth) {
+    setSelectedMonth(monthOptions[0].key);
+  }
+
+  // Reset month when switching source or category
+  const handleSourceChange = (newSource: 'seller' | 'market') => {
+    setSourceType(newSource);
+    setSelectedMonth('');
+  };
+
+  const handleCategoryChange = (newCategory: string) => {
+    setSelectedCategory(newCategory);
+    setSelectedMonth('');
+  };
+
+  // Fetch seller monthly history with product details (limit 50)
   const { data: sellerHistory, isLoading: sellerLoading } = useQuery({
     queryKey: ['trends', 'history', 'seller', sellerId, selectedMonth],
     queryFn: async () => {
-      if (!sellerId) return null;
+      if (!sellerId || !selectedMonth) return null;
       
       const monthStart = `${selectedMonth}-01`;
       const [year, month] = selectedMonth.split('-').map(Number);
@@ -86,7 +176,7 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
         .gte('sale_month', monthStart)
         .lt('sale_month', monthEnd)
         .order('revenue', { ascending: false })
-        .limit(20);
+        .limit(50);
 
       if (error) throw error;
       if (!data || data.length === 0) return [];
@@ -119,13 +209,15 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
         thumbnail: detailsMap.get(item.item_id)?.thumbnail || null,
       }));
     },
-    enabled: !!sellerId && sourceType === 'seller',
+    enabled: !!sellerId && sourceType === 'seller' && !!selectedMonth,
   });
 
   // Fetch market snapshots history with category filter
   const { data: marketHistory, isLoading: marketLoading } = useQuery({
     queryKey: ['trends', 'history', 'market', selectedMonth, selectedCategory],
     queryFn: async () => {
+      if (!selectedMonth) return [];
+      
       const monthStart = `${selectedMonth}-01`;
       const [year, month] = selectedMonth.split('-').map(Number);
       const nextMonth = month === 12 ? 1 : month + 1;
@@ -157,47 +249,32 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
         trends_data: Array.isArray(item.trends_data) ? item.trends_data as unknown as TrendKeyword[] : []
       })) as SnapshotData[];
     },
-    enabled: sourceType === 'market',
+    enabled: sourceType === 'market' && !!selectedMonth,
   });
 
   const isLoading = sourceType === 'seller' ? sellerLoading : marketLoading;
+  const currentCategoryLabel = CATEGORIES.find(c => c.id === selectedCategory)?.label || 'Geral';
 
   return (
     <div className="space-y-6">
       {/* Filters */}
       <div className="flex items-center gap-4 flex-wrap">
         <div className="flex items-center gap-2">
-          <Calendar className="h-4 w-4 text-muted-foreground" />
-          <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="Selecione o mês" />
-            </SelectTrigger>
-            <SelectContent>
-              {monthOptions.map((month) => (
-                <SelectItem key={month.key} value={month.key}>
-                  {month.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Select value={sourceType} onValueChange={(v) => setSourceType(v as 'seller' | 'market')}>
+          <Select value={sourceType} onValueChange={handleSourceChange}>
             <SelectTrigger className="w-[160px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="seller">
-                <div className="flex items-center gap-2">
-                  <Store className="h-4 w-4" />
-                  Seller
-                </div>
-              </SelectItem>
               <SelectItem value="market">
                 <div className="flex items-center gap-2">
                   <TrendingUp className="h-4 w-4" />
                   Mercado
+                </div>
+              </SelectItem>
+              <SelectItem value="seller">
+                <div className="flex items-center gap-2">
+                  <Store className="h-4 w-4" />
+                  Seller
                 </div>
               </SelectItem>
             </SelectContent>
@@ -207,7 +284,7 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
         {/* Category filter - only for market */}
         {sourceType === 'market' && (
           <div className="flex items-center gap-2">
-            <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+            <Select value={selectedCategory} onValueChange={handleCategoryChange}>
               <SelectTrigger className="w-[220px]">
                 <SelectValue placeholder="Categoria" />
               </SelectTrigger>
@@ -221,6 +298,28 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
             </Select>
           </div>
         )}
+
+        <div className="flex items-center gap-2">
+          <Calendar className="h-4 w-4 text-muted-foreground" />
+          <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Selecione o mês" />
+            </SelectTrigger>
+            <SelectContent>
+              {monthOptions.length > 0 ? (
+                monthOptions.map((month) => (
+                  <SelectItem key={month.key} value={month.key}>
+                    {month.label}
+                  </SelectItem>
+                ))
+              ) : (
+                <SelectItem value="none" disabled>
+                  Nenhum dado disponível
+                </SelectItem>
+              )}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {/* Content */}
@@ -228,29 +327,46 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <History className="h-5 w-5 text-primary" />
-            Histórico - {monthOptions.find(m => m.key === selectedMonth)?.label}
+            Histórico - {monthOptions.find(m => m.key === selectedMonth)?.label || 'Selecione um mês'}
             {sourceType === 'market' && selectedCategory !== '__ROOT__' && (
               <Badge variant="secondary" className="ml-2">
-                {CATEGORIES.find(c => c.id === selectedCategory)?.label}
+                {currentCategoryLabel}
               </Badge>
             )}
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
+          {monthOptions.length === 0 ? (
+            <div className="text-center py-12">
+              <AlertTriangle className="h-12 w-12 text-amber-500 mx-auto mb-4" />
+              <p className="text-muted-foreground font-medium">
+                {sourceType === 'seller' 
+                  ? 'Nenhum dado de vendas disponível para este seller'
+                  : `Nenhum dado coletado para ${currentCategoryLabel}`
+                }
+              </p>
+              <p className="text-sm text-muted-foreground mt-2">
+                Os dados aparecem após a coleta periódica do sistema
+              </p>
+            </div>
+          ) : isLoading ? (
             <div className="space-y-3">
               {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} className="h-16 w-full" />)}
             </div>
           ) : sourceType === 'seller' ? (
             sellerHistory && sellerHistory.length > 0 ? (
-              <ScrollArea className="h-[400px]">
+              <ScrollArea className="h-[500px]">
                 <div className="space-y-2 pr-4">
                   {sellerHistory.map((item, idx) => (
                     <div 
                       key={item.item_id} 
                       className="flex items-center gap-4 p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors"
                     >
-                      <span className="text-xl font-bold text-muted-foreground w-8 text-center">
+                      <span className={`text-xl font-bold w-8 text-center ${
+                        idx < 3 ? 'text-primary' : 
+                        idx < 10 ? 'text-amber-500' : 
+                        'text-muted-foreground'
+                      }`}>
                         {idx + 1}
                       </span>
                       {item.thumbnail ? (
@@ -285,7 +401,7 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
             ) : (
               <div className="text-center py-12">
                 <AlertTriangle className="h-12 w-12 text-amber-500 mx-auto mb-4" />
-                <p className="text-muted-foreground font-medium">Dados disponíveis a partir de jan/2025</p>
+                <p className="text-muted-foreground font-medium">Nenhuma venda neste período</p>
                 <p className="text-sm text-muted-foreground mt-2">
                   Fonte: dados agregados do seller
                 </p>
@@ -298,7 +414,7 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
             )
           ) : (
             marketHistory && marketHistory.length > 0 ? (
-              <ScrollArea className="h-[400px]">
+              <ScrollArea className="h-[500px]">
                 <div className="space-y-4 pr-4">
                   {marketHistory.map((snapshot) => (
                     <div 
@@ -341,13 +457,10 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
               <div className="text-center py-12">
                 <AlertTriangle className="h-12 w-12 text-amber-500 mx-auto mb-4" />
                 <p className="text-muted-foreground font-medium">
-                  {selectedCategory !== '__ROOT__' 
-                    ? `Nenhum dado coletado para ${CATEGORIES.find(c => c.id === selectedCategory)?.label}`
-                    : 'Histórico indisponível antes da ativação do módulo'
-                  }
+                  Nenhum snapshot encontrado para este período
                 </p>
                 <p className="text-sm text-muted-foreground mt-2">
-                  Fonte: snapshots do app
+                  Os dados são coletados diariamente pelo sistema
                 </p>
               </div>
             )
@@ -360,23 +473,39 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
         <AlertTriangle className="h-3 w-3" />
         <span>
           {sourceType === 'seller' 
-            ? 'Lacunas no histórico são sinalizadas visualmente'
+            ? 'Mostrando os 50 produtos mais vendidos do período'
             : 'Dados de mercado dependem de snapshots coletados periodicamente'
           }
         </span>
       </div>
 
-      {/* Dialog for expanded keywords */}
+      {/* Dialog for expanded keywords with CSV export */}
       <Dialog open={!!expandedSnapshot} onOpenChange={() => setExpandedSnapshot(null)}>
         <DialogContent className="max-w-2xl max-h-[80vh]">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <TrendingUp className="h-5 w-5 text-primary" />
-              Palavras-chave em Alta
+            <DialogTitle className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="h-5 w-5 text-primary" />
+                Palavras-chave em Alta
+                {expandedSnapshot && (
+                  <Badge variant="outline" className="ml-2">
+                    {new Date(expandedSnapshot.snapshot_date + 'T00:00:00').toLocaleDateString('pt-BR')}
+                  </Badge>
+                )}
+              </div>
               {expandedSnapshot && (
-                <Badge variant="outline" className="ml-2">
-                  {new Date(expandedSnapshot.snapshot_date + 'T00:00:00').toLocaleDateString('pt-BR')}
-                </Badge>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => exportToCSV(
+                    expandedSnapshot.trends_data, 
+                    expandedSnapshot.snapshot_date,
+                    currentCategoryLabel
+                  )}
+                >
+                  <Download className="h-4 w-4 mr-1" />
+                  CSV
+                </Button>
               )}
             </DialogTitle>
           </DialogHeader>
