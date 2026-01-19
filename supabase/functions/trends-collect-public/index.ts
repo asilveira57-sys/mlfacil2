@@ -312,31 +312,34 @@ async function collectHighlights(
       console.log(`[trends-collect-public] Highlights API returned ${content.length} items`);
 
       if (content.length > 0) {
-        // Fetch item details for each highlight
-        for (let i = 0; i < content.length && i < 20; i++) {
-          const itemId = content[i].id;
-          await sleep(RATE_LIMIT_DELAY);
+        // Use batch API to fetch all items at once (up to 20)
+        const itemIds = content.slice(0, 20).map((h: any) => h.id).join(',');
+        console.log(`[trends-collect-public] Fetching batch items: ${itemIds}`);
+        
+        const batchResponse = await fetch(
+          `https://api.mercadolibre.com/items?ids=${itemIds}`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
 
-          try {
-            const itemResponse = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
-              headers: { Authorization: `Bearer ${accessToken}` }
-            });
-            
-            if (itemResponse.ok) {
-              const itemData = await itemResponse.json();
-              items.push({
-                item_id: itemId,
-                rank: i + 1,
-                title: itemData.title,
-                thumbnail: itemData.thumbnail,
-                price: itemData.price,
-                sold_quantity: itemData.sold_quantity,
-                permalink: itemData.permalink,
-              });
-            }
-          } catch (error) {
-            console.error(`[trends-collect-public] Error fetching item ${itemId}:`, error);
-          }
+        if (batchResponse.ok) {
+          const batchData = await batchResponse.json();
+          console.log(`[trends-collect-public] Batch API returned ${batchData.length} items`);
+          
+          items = batchData
+            .filter((item: any) => item.code === 200 && item.body)
+            .map((item: any, idx: number) => ({
+              item_id: item.body.id,
+              rank: idx + 1,
+              title: item.body.title,
+              thumbnail: item.body.thumbnail,
+              price: item.body.price,
+              sold_quantity: item.body.sold_quantity,
+              permalink: item.body.permalink,
+            }));
+          
+          console.log(`[trends-collect-public] Parsed ${items.length} valid items from batch`);
+        } else {
+          console.error(`[trends-collect-public] Batch API failed: ${batchResponse.status}`);
         }
       }
     } else {
