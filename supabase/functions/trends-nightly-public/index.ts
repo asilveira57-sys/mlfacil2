@@ -7,6 +7,7 @@
  * - Lock global (evita execuções simultâneas)
  * - Coleta keywords/trends por categoria
  * - Coleta highlights (mais vendidos) com suporte PRODUCT/ITEM
+ * - Coleta subcategorias nível 1 para categorias configuradas
  * - Resiliência (retry, timeouts, falha parcial)
  * - Observabilidade (job_runs, job_run_steps)
  */
@@ -24,8 +25,8 @@ const ML_SECRET_KEY = Deno.env.get('ML_SECRET_KEY')!;
 // Constants
 const JOB_NAME = 'public_trends_nightly';
 const LOCK_KEY = 'public_trends_nightly';
-const LOCK_TTL_MINUTES = 45;
-const REQUEST_TIMEOUT_MS = 12000;
+const LOCK_TTL_MINUTES = 60;
+const REQUEST_TIMEOUT_MS = 15000;
 const RATE_LIMIT_DELAY_MS = 500;
 const RETRY_DELAYS = [1000, 2000, 4000]; // backoff
 const RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 504];
@@ -33,6 +34,7 @@ const RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 504];
 interface JobMetrics {
   categoriesProcessed: number;
   categoriesFailed: number;
+  subcategoriesProcessed: number;
   keywordsSaved: number;
   highlightsSaved: number;
   itemsEnriched: number;
@@ -43,6 +45,18 @@ interface CategoryConfig {
   name: string;
   is_active: boolean;
   priority: number;
+  parent_id: string | null;
+  depth: number;
+  collect_subcategories: boolean;
+}
+
+interface SubcategoryInfo {
+  id: string;
+  name: string;
+  parent_id: string;
+  depth: number;
+  path: string[];
+  total_items_in_category?: number;
 }
 
 Deno.serve(async (req) => {
@@ -63,7 +77,6 @@ Deno.serve(async (req) => {
     if (!lockAcquired) {
       console.log(`${logPrefix} Lock already held, skipping execution`);
       
-      // Create skipped job run
       await supabase.from('job_runs').insert({
         job_name: JOB_NAME,
         status: 'skipped',
@@ -103,7 +116,7 @@ Deno.serve(async (req) => {
 
     if (accError || !mlAccount) {
       console.error(`${logPrefix} No active ML account found`);
-      await finalizeJobRun(supabase, jobRunId, 'failed', { categoriesProcessed: 0, categoriesFailed: 0, keywordsSaved: 0, highlightsSaved: 0, itemsEnriched: 0 }, 'No active ML account');
+      await finalizeJobRun(supabase, jobRunId, 'failed', createEmptyMetrics(), 'No active ML account');
       await releaseLock(supabase, LOCK_KEY);
       return new Response(JSON.stringify({ status: 'failed', error: 'No active ML account' }), {
         status: 400,
@@ -117,7 +130,7 @@ Deno.serve(async (req) => {
       const refreshed = await refreshToken(supabase, mlAccount.ml_user_id, mlAccount.user_id, mlAccount.refresh_token);
       if (!refreshed) {
         console.error(`${logPrefix} Token refresh failed`);
-        await finalizeJobRun(supabase, jobRunId, 'failed', { categoriesProcessed: 0, categoriesFailed: 0, keywordsSaved: 0, highlightsSaved: 0, itemsEnriched: 0 }, 'Token refresh failed');
+        await finalizeJobRun(supabase, jobRunId, 'failed', createEmptyMetrics(), 'Token refresh failed');
         await releaseLock(supabase, LOCK_KEY);
         return new Response(JSON.stringify({ status: 'failed', error: 'Token refresh failed' }), {
           status: 401,
@@ -130,29 +143,23 @@ Deno.serve(async (req) => {
     // 4) Get categories from public_categories
     const { data: categories, error: catError } = await supabase
       .from('public_categories')
-      .select('id, name, is_active, priority')
+      .select('id, name, is_active, priority, parent_id, depth, collect_subcategories')
       .eq('is_active', true)
+      .is('parent_id', null) // Only get main categories
       .order('priority', { ascending: true });
 
     if (catError) {
       console.error(`${logPrefix} Failed to fetch categories:`, catError);
-      await finalizeJobRun(supabase, jobRunId, 'failed', { categoriesProcessed: 0, categoriesFailed: 0, keywordsSaved: 0, highlightsSaved: 0, itemsEnriched: 0 }, 'Failed to fetch categories');
+      await finalizeJobRun(supabase, jobRunId, 'failed', createEmptyMetrics(), 'Failed to fetch categories');
       await releaseLock(supabase, LOCK_KEY);
       throw new Error('Failed to fetch categories');
     }
 
     const activeCategories: CategoryConfig[] = categories || [];
-    console.log(`${logPrefix} Processing ${activeCategories.length} categories`);
+    console.log(`${logPrefix} Processing ${activeCategories.length} main categories`);
 
     // 5) Process categories sequentially
-    const metrics: JobMetrics = {
-      categoriesProcessed: 0,
-      categoriesFailed: 0,
-      keywordsSaved: 0,
-      highlightsSaved: 0,
-      itemsEnriched: 0,
-    };
-
+    const metrics: JobMetrics = createEmptyMetrics();
     const today = new Date().toISOString().split('T')[0];
     const siteId = 'MLB';
 
@@ -161,7 +168,7 @@ Deno.serve(async (req) => {
       console.log(`${catPrefix} Starting...`);
 
       try {
-        // a) Collect trends/keywords
+        // a) Collect trends/keywords for main category
         const trendsResult = await collectTrendsWithRetry(supabase, jobRunId, siteId, category.id, today, accessToken);
         if (trendsResult.success) {
           metrics.keywordsSaved += trendsResult.count;
@@ -175,7 +182,44 @@ Deno.serve(async (req) => {
             metrics.highlightsSaved += highlightsResult.snapshotSaved ? 1 : 0;
             metrics.itemsEnriched += highlightsResult.itemsEnriched;
           }
-          await sleep(RATE_LIMIT_DELAY_MS * 2);
+          await sleep(RATE_LIMIT_DELAY_MS);
+        }
+
+        // c) Fetch and process subcategories (level 1) if enabled
+        if (category.collect_subcategories && category.id !== '__ROOT__') {
+          console.log(`${catPrefix} Fetching subcategories...`);
+          const subcategories = await fetchSubcategories(siteId, category.id, accessToken);
+          console.log(`${catPrefix} Found ${subcategories.length} subcategories`);
+
+          // Save subcategories to cache
+          await saveSubcategoriesToCache(supabase, subcategories);
+
+          // Process top subcategories (limit to 5 per main category to avoid rate limits)
+          const topSubcategories = subcategories.slice(0, 5);
+          for (const subcat of topSubcategories) {
+            try {
+              console.log(`${catPrefix} Processing subcategory ${subcat.id}...`);
+              
+              // Collect trends for subcategory
+              const subTrendsResult = await collectTrendsWithRetry(supabase, jobRunId, siteId, subcat.id, today, accessToken);
+              if (subTrendsResult.success) {
+                metrics.keywordsSaved += subTrendsResult.count;
+              }
+              await sleep(RATE_LIMIT_DELAY_MS);
+
+              // Collect highlights for subcategory
+              const subHighlightsResult = await collectHighlightsWithRetry(supabase, jobRunId, siteId, subcat.id, today, accessToken);
+              if (subHighlightsResult.success) {
+                metrics.highlightsSaved += subHighlightsResult.snapshotSaved ? 1 : 0;
+                metrics.itemsEnriched += subHighlightsResult.itemsEnriched;
+              }
+              await sleep(RATE_LIMIT_DELAY_MS);
+
+              metrics.subcategoriesProcessed++;
+            } catch (subError) {
+              console.error(`${catPrefix} Subcategory ${subcat.id} failed:`, subError);
+            }
+          }
         }
 
         metrics.categoriesProcessed++;
@@ -184,7 +228,6 @@ Deno.serve(async (req) => {
         console.error(`${catPrefix} Failed:`, error);
         metrics.categoriesFailed++;
         
-        // Log step failure
         await supabase.from('job_run_steps').insert({
           job_run_id: jobRunId,
           category_id: category.id,
@@ -241,6 +284,86 @@ Deno.serve(async (req) => {
   }
 });
 
+function createEmptyMetrics(): JobMetrics {
+  return {
+    categoriesProcessed: 0,
+    categoriesFailed: 0,
+    subcategoriesProcessed: 0,
+    keywordsSaved: 0,
+    highlightsSaved: 0,
+    itemsEnriched: 0,
+  };
+}
+
+// =====================================================
+// SUBCATEGORIES FETCHING
+// =====================================================
+
+async function fetchSubcategories(
+  siteId: string,
+  categoryId: string,
+  accessToken: string
+): Promise<SubcategoryInfo[]> {
+  const prefix = `[fetchSubcategories][${categoryId}]`;
+  
+  try {
+    const url = `https://api.mercadolibre.com/categories/${categoryId}`;
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!response.ok) {
+      console.error(`${prefix} Failed: ${response.status}`);
+      return [];
+    }
+
+    const categoryData = await response.json();
+    const childrenIds = categoryData.children_categories || [];
+    
+    const subcategories: SubcategoryInfo[] = childrenIds.map((child: any) => ({
+      id: child.id,
+      name: child.name,
+      parent_id: categoryId,
+      depth: 1,
+      path: [categoryId, child.id],
+      total_items_in_category: child.total_items_in_category || 0,
+    }));
+
+    // Sort by total_items_in_category descending (most relevant first)
+    subcategories.sort((a, b) => (b.total_items_in_category || 0) - (a.total_items_in_category || 0));
+
+    return subcategories;
+  } catch (error) {
+    console.error(`${prefix} Error:`, error);
+    return [];
+  }
+}
+
+async function saveSubcategoriesToCache(
+  supabase: any,
+  subcategories: SubcategoryInfo[]
+): Promise<void> {
+  if (subcategories.length === 0) return;
+
+  const rows = subcategories.map((sub) => ({
+    id: sub.id,
+    parent_id: sub.parent_id,
+    name: sub.name,
+    path: sub.path,
+    depth: sub.depth,
+    total_items_qty: sub.total_items_in_category || 0,
+    fetched_at: new Date().toISOString(),
+  }));
+
+  const { error } = await supabase
+    .from('category_tree_cache')
+    .upsert(rows, { onConflict: 'id' });
+
+  if (error) {
+    console.error('[saveSubcategoriesToCache] Error:', error);
+  }
+}
+
 // =====================================================
 // LOCK MANAGEMENT
 // =====================================================
@@ -267,7 +390,6 @@ async function acquireLock(supabase: any, lockKey: string, ttlMinutes: number): 
     });
 
   if (error) {
-    // Lock already exists
     console.log('[acquireLock] Lock already held:', error.message);
     return false;
   }
@@ -351,7 +473,6 @@ async function collectTrendsWithRetry(
     try {
       const result = await collectTrends(supabase, siteId, categoryId, today, accessToken);
       
-      // Log success step
       await supabase.from('job_run_steps').insert({
         job_run_id: jobRunId,
         category_id: categoryId,
@@ -375,7 +496,6 @@ async function collectTrendsWithRetry(
         continue;
       }
 
-      // Log failure step
       await supabase.from('job_run_steps').insert({
         job_run_id: jobRunId,
         category_id: categoryId,
@@ -470,7 +590,7 @@ async function collectTrends(
 }
 
 // =====================================================
-// HIGHLIGHTS COLLECTION (with PRODUCT support)
+// HIGHLIGHTS COLLECTION (with PRODUCT support + estimated_revenue)
 // =====================================================
 
 interface HighlightsResult {
@@ -564,7 +684,6 @@ async function collectHighlights(
 
     if (!response.ok) {
       console.error(`${prefix} highlights error body=${text}`);
-      // Try fallback
       if (response.status === 403) {
         console.log(`${prefix} Trying fallback search`);
         return await collectHighlightsViaSearch(supabase, siteId, categoryId, today, accessToken);
@@ -605,7 +724,6 @@ async function collectHighlights(
     } else if (rawType === 'PRODUCT' || rawType === 'USER_PRODUCT') {
       products.push({ id: entry.id, rank: items.length + products.length + 1 });
     } else {
-      // Unknown type, save as item for audit
       items.push({ id: entry.id, rank: items.length + products.length + 1, unknownType: rawType });
     }
   }
@@ -637,6 +755,10 @@ async function collectHighlights(
 
         for (const item of items) {
           const body = bodyMap.get(item.id);
+          const price = body?.price || null;
+          const soldQty = body?.sold_quantity || null;
+          const estimatedRevenue = (price && soldQty) ? price * soldQty : null;
+          
           enrichedItems.push({
             item_id: item.id,
             entity_type: 'ITEM',
@@ -644,14 +766,14 @@ async function collectHighlights(
             rank: item.rank,
             title: body?.title || (item.unknownType ? `[${item.unknownType}] ${item.id}` : item.id),
             thumbnail: body?.thumbnail || null,
-            price: body?.price || null,
-            sold_quantity: body?.sold_quantity || null,
+            price,
+            sold_quantity: soldQty,
             permalink: body?.permalink || null,
+            estimated_revenue: estimatedRevenue,
           });
           if (body?.title) itemsEnriched++;
         }
       } else {
-        // Fallback: save without enrichment
         for (const item of items) {
           enrichedItems.push({
             item_id: item.id,
@@ -663,6 +785,7 @@ async function collectHighlights(
             price: null,
             sold_quantity: null,
             permalink: null,
+            estimated_revenue: null,
           });
         }
       }
@@ -679,12 +802,13 @@ async function collectHighlights(
           price: null,
           sold_quantity: null,
           permalink: null,
+          estimated_revenue: null,
         });
       }
     }
   }
 
-  // 4) Enrich products
+  // 4) Enrich products - get representative item for price/sold_quantity
   for (const product of products) {
     try {
       const productUrl = `https://api.mercadolibre.com/products/${product.id}`;
@@ -698,16 +822,36 @@ async function collectHighlights(
       let soldQuantity: number | null = null;
       let permalink: string | null = null;
       let representativeItemId: string | null = null;
+      let estimatedRevenue: number | null = null;
 
       if (productRes.ok) {
         const productData = await productRes.json();
         title = productData.name || productData.title || product.id;
         thumbnail = productData.pictures?.[0]?.url || productData.thumbnail || null;
 
-        // Try to get a representative item
+        // Try to get a representative item for price/sold_quantity
         if (productData.buy_box_winner?.item_id) {
           representativeItemId = productData.buy_box_winner.item_id;
           price = productData.buy_box_winner.price || null;
+          
+          // Fetch the actual item to get sold_quantity
+          try {
+            const itemRes = await fetch(`https://api.mercadolibre.com/items/${representativeItemId}`, {
+              headers: { Authorization: `Bearer ${accessToken}` },
+            });
+            if (itemRes.ok) {
+              const itemData = await itemRes.json();
+              soldQuantity = itemData.sold_quantity || null;
+              permalink = itemData.permalink || null;
+              if (!thumbnail) thumbnail = itemData.thumbnail || null;
+            }
+          } catch (e) {
+            console.log(`${prefix} Failed to fetch representative item ${representativeItemId}`);
+          }
+        }
+        
+        if (price && soldQuantity) {
+          estimatedRevenue = price * soldQuantity;
         }
         
         itemsEnriched++;
@@ -726,6 +870,7 @@ async function collectHighlights(
         price,
         sold_quantity: soldQuantity,
         permalink,
+        estimated_revenue: estimatedRevenue,
       });
 
       await sleep(100); // Small delay between product fetches
@@ -741,6 +886,7 @@ async function collectHighlights(
         price: null,
         sold_quantity: null,
         permalink: null,
+        estimated_revenue: null,
       });
     }
   }
@@ -767,7 +913,6 @@ async function collectHighlightsViaSearch(
     let response = await fetch(url);
     
     if (!response.ok) {
-      // Try with token
       response = await fetch(url, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
@@ -781,17 +926,24 @@ async function collectHighlightsViaSearch(
     const searchData = await response.json();
     const results = searchData.results || [];
 
-    const enrichedItems = results.slice(0, 20).map((item: any, idx: number) => ({
-      item_id: item.id,
-      entity_type: 'ITEM',
-      product_id: item.catalog_product_id || null,
-      rank: idx + 1,
-      title: item.title || item.id,
-      thumbnail: item.thumbnail || null,
-      price: item.price || null,
-      sold_quantity: item.sold_quantity || null,
-      permalink: item.permalink || null,
-    }));
+    const enrichedItems = results.slice(0, 20).map((item: any, idx: number) => {
+      const price = item.price || null;
+      const soldQty = item.sold_quantity || null;
+      const estimatedRevenue = (price && soldQty) ? price * soldQty : null;
+      
+      return {
+        item_id: item.id,
+        entity_type: 'ITEM',
+        product_id: item.catalog_product_id || null,
+        rank: idx + 1,
+        title: item.title || item.id,
+        thumbnail: item.thumbnail || null,
+        price,
+        sold_quantity: soldQty,
+        permalink: item.permalink || null,
+        estimated_revenue: estimatedRevenue,
+      };
+    });
 
     const itemsEnriched = enrichedItems.filter((i: any) => i.title && i.title !== i.item_id).length;
 
@@ -902,6 +1054,8 @@ async function updatePublicTrendsStatus(
     total_categories: totalCategories,
     coverage_keywords: metrics.keywordsSaved > 0 ? metrics.categoriesProcessed : 0,
     coverage_highlights: metrics.highlightsSaved,
+    subcategories_collected: metrics.subcategoriesProcessed,
+    last_subcategory_sync_at: metrics.subcategoriesProcessed > 0 ? now : undefined,
     next_run_at: nextRun.toISOString(),
     updated_at: now,
   };
