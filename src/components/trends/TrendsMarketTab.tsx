@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { TrendingUp, Search, Package, ExternalLink, Tag, RefreshCw, Clock, CheckCircle, AlertCircle, Download } from 'lucide-react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { TrendingUp, Search, Package, ExternalLink, Tag, RefreshCw, Clock, CheckCircle, AlertCircle, Download, FolderTree, ChevronDown, ChevronUp } from 'lucide-react';
 import { useMarketTrends, useMarketHighlights, TrendItem, HighlightItem } from '@/hooks/useTrendsApi';
 import { useTrendsStatus } from '@/hooks/useTrendsStatus';
+import { useCategoryBreadcrumb } from '@/hooks/useSubcategories';
+import { SubcategoryNavigator } from './SubcategoryNavigator';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -70,19 +72,21 @@ function exportHighlightsCSV(items: HighlightItem[], categoryLabel: string, date
 }
 
 export function TrendsMarketTab() {
-  const [categoryId, setCategoryId] = useState('all');
+  const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [categoryName, setCategoryName] = useState<string>('Todas');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [isCollecting, setIsCollecting] = useState(false);
+  const [showNavigator, setShowNavigator] = useState(false);
 
   const { data: trendsStatus } = useTrendsStatus();
+  const { data: breadcrumb } = useCategoryBreadcrumb(categoryId);
 
   useEffect(() => {
     console.log('[TrendsMarketTab] selectedCategory', categoryId);
   }, [categoryId]);
 
-  const actualCategoryId = categoryId === 'all' ? undefined : categoryId;
-  const { data: trends, isLoading: trendsLoading } = useMarketTrends('MLB', actualCategoryId);
-  const { data: highlights, isLoading: highlightsLoading, refetch: refetchHighlights } = useMarketHighlights('MLB', actualCategoryId);
+  const { data: trends, isLoading: trendsLoading } = useMarketTrends('MLB', categoryId || undefined);
+  const { data: highlights, isLoading: highlightsLoading, refetch: refetchHighlights } = useMarketHighlights('MLB', categoryId || undefined);
 
   const filteredTrends = trends?.trends?.filter(t => 
     !searchKeyword || t.keyword.toLowerCase().includes(searchKeyword.toLowerCase())
@@ -93,10 +97,10 @@ export function TrendsMarketTab() {
   const lastUpdateDate = lastUpdate ? new Date(lastUpdate) : null;
   const isRecent = lastUpdateDate && (Date.now() - lastUpdateDate.getTime()) < 24 * 60 * 60 * 1000;
 
-  const currentCategoryLabel = CATEGORIES.find(c => c.id === categoryId)?.label || 'Geral';
+  const currentCategoryLabel = categoryName || 'Geral';
 
   const handleCollectHighlights = async () => {
-    if (!categoryId || categoryId === 'all') return;
+    if (!categoryId) return;
     
     setIsCollecting(true);
     try {
@@ -140,6 +144,26 @@ export function TrendsMarketTab() {
     }
   };
 
+  const handleCategorySelect = (id: string, name: string) => {
+    setCategoryId(id || null);
+    setCategoryName(name);
+    setShowNavigator(false);
+  };
+
+  const handleBreadcrumbClick = (id: string) => {
+    const item = breadcrumb?.find(b => b.id === id);
+    if (item) {
+      setCategoryId(id);
+      setCategoryName(item.name);
+    }
+  };
+
+  // Transform CATEGORIES for navigator
+  const navigatorCategories = CATEGORIES.filter(c => c.id !== 'all').map(c => ({
+    id: c.id,
+    name: c.label,
+  }));
+
   return (
     <div className="space-y-6">
       {/* Status Banner */}
@@ -175,18 +199,30 @@ export function TrendsMarketTab() {
 
       {/* Filters */}
       <div className="flex items-center gap-4 flex-wrap">
-        <Select value={categoryId} onValueChange={setCategoryId}>
-          <SelectTrigger className="w-[250px]">
-            <SelectValue placeholder="Selecione uma categoria" />
-          </SelectTrigger>
-          <SelectContent>
-            {CATEGORIES.map((cat) => (
-              <SelectItem key={cat.id} value={cat.id}>
-                {cat.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <Collapsible open={showNavigator} onOpenChange={setShowNavigator}>
+          <CollapsibleTrigger asChild>
+            <Button variant="outline" className="w-[280px] justify-between">
+              <div className="flex items-center gap-2">
+                <FolderTree className="h-4 w-4 text-muted-foreground" />
+                <span className="truncate">{categoryName}</span>
+              </div>
+              {showNavigator ? (
+                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              )}
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="absolute z-50 mt-2 w-[320px]">
+            <SubcategoryNavigator
+              categories={navigatorCategories}
+              selectedId={categoryId}
+              onSelect={handleCategorySelect}
+              breadcrumb={breadcrumb}
+              onBreadcrumbClick={handleBreadcrumbClick}
+            />
+          </CollapsibleContent>
+        </Collapsible>
 
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -280,7 +316,7 @@ export function TrendsMarketTab() {
               <div className="flex items-center gap-2 text-lg">
                 <Package className="h-5 w-5 text-green-500" />
                 Mais Vendidos
-                {categoryId === 'all' && highlights?.items?.length > 0 && (
+                {!categoryId && highlights?.items?.length > 0 && (
                   <Badge variant="secondary" className="ml-1 text-xs">Top Geral</Badge>
                 )}
               </div>
@@ -301,7 +337,7 @@ export function TrendsMarketTab() {
                     CSV
                   </Button>
                 )}
-                {categoryId !== 'all' && !highlightsLoading && !highlights?.items?.length && (
+                {categoryId && !highlightsLoading && !highlights?.items?.length && (
                   <Button 
                     size="sm" 
                     variant="outline" 
