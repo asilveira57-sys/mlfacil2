@@ -460,10 +460,12 @@ export type Database = {
       highlights_items: {
         Row: {
           created_at: string
+          entity_type: string | null
           id: string
           item_id: string
           permalink: string | null
           price: number | null
+          product_id: string | null
           rank: number
           snapshot_id: string
           sold_quantity: number | null
@@ -472,10 +474,12 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          entity_type?: string | null
           id?: string
           item_id: string
           permalink?: string | null
           price?: number | null
+          product_id?: string | null
           rank: number
           snapshot_id: string
           sold_quantity?: number | null
@@ -484,10 +488,12 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          entity_type?: string | null
           id?: string
           item_id?: string
           permalink?: string | null
           price?: number | null
+          product_id?: string | null
           rank?: number
           snapshot_id?: string
           sold_quantity?: number | null
@@ -592,6 +598,128 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      job_locks: {
+        Row: {
+          created_at: string | null
+          expires_at: string
+          lock_key: string
+          locked_at: string
+          locked_by: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          expires_at: string
+          lock_key: string
+          locked_at?: string
+          locked_by?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          expires_at?: string
+          lock_key?: string
+          locked_at?: string
+          locked_by?: string | null
+        }
+        Relationships: []
+      }
+      job_run_steps: {
+        Row: {
+          category_id: string
+          created_at: string | null
+          error_code: string | null
+          error_message: string | null
+          finished_at: string | null
+          id: string
+          items_count: number | null
+          job_run_id: string | null
+          retry_count: number | null
+          started_at: string | null
+          status: string
+          step_type: string
+        }
+        Insert: {
+          category_id: string
+          created_at?: string | null
+          error_code?: string | null
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          items_count?: number | null
+          job_run_id?: string | null
+          retry_count?: number | null
+          started_at?: string | null
+          status?: string
+          step_type: string
+        }
+        Update: {
+          category_id?: string
+          created_at?: string | null
+          error_code?: string | null
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          items_count?: number | null
+          job_run_id?: string | null
+          retry_count?: number | null
+          started_at?: string | null
+          status?: string
+          step_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_run_steps_job_run_id_fkey"
+            columns: ["job_run_id"]
+            isOneToOne: false
+            referencedRelation: "job_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      job_runs: {
+        Row: {
+          categories_failed: number | null
+          categories_processed: number | null
+          created_at: string | null
+          error_message: string | null
+          finished_at: string | null
+          highlights_saved: number | null
+          id: string
+          items_enriched: number | null
+          job_name: string
+          keywords_saved: number | null
+          started_at: string
+          status: string
+        }
+        Insert: {
+          categories_failed?: number | null
+          categories_processed?: number | null
+          created_at?: string | null
+          error_message?: string | null
+          finished_at?: string | null
+          highlights_saved?: number | null
+          id?: string
+          items_enriched?: number | null
+          job_name: string
+          keywords_saved?: number | null
+          started_at?: string
+          status?: string
+        }
+        Update: {
+          categories_failed?: number | null
+          categories_processed?: number | null
+          created_at?: string | null
+          error_message?: string | null
+          finished_at?: string | null
+          highlights_saved?: number | null
+          id?: string
+          items_enriched?: number | null
+          job_name?: string
+          keywords_saved?: number | null
+          started_at?: string
+          status?: string
+        }
+        Relationships: []
       }
       keywords_tracking: {
         Row: {
@@ -1945,6 +2073,69 @@ export type Database = {
           full_name?: string | null
           id?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      public_categories: {
+        Row: {
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          priority: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          id: string
+          is_active?: boolean | null
+          name: string
+          priority?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          priority?: number | null
+        }
+        Relationships: []
+      }
+      public_trends_status: {
+        Row: {
+          coverage_highlights: number | null
+          coverage_keywords: number | null
+          id: string
+          last_failed_at: string | null
+          last_partial_at: string | null
+          last_run_at: string | null
+          last_success_at: string | null
+          next_run_at: string | null
+          total_categories: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          coverage_highlights?: number | null
+          coverage_keywords?: number | null
+          id?: string
+          last_failed_at?: string | null
+          last_partial_at?: string | null
+          last_run_at?: string | null
+          last_success_at?: string | null
+          next_run_at?: string | null
+          total_categories?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          coverage_highlights?: number | null
+          coverage_keywords?: number | null
+          id?: string
+          last_failed_at?: string | null
+          last_partial_at?: string | null
+          last_run_at?: string | null
+          last_success_at?: string | null
+          next_run_at?: string | null
+          total_categories?: number | null
+          updated_at?: string | null
         }
         Relationships: []
       }
