@@ -99,7 +99,7 @@ export function TrendsMarketTab() {
 
   const currentCategoryLabel = categoryName || 'Geral';
 
-  const handleCollectHighlights = async () => {
+  const handleCollectAll = async () => {
     if (!categoryId) return;
     
     setIsCollecting(true);
@@ -108,7 +108,7 @@ export function TrendsMarketTab() {
         body: {
           site_id: 'MLB',
           category_id: categoryId,
-          collect_type: 'highlights'
+          collect_type: 'all' // Collect both trends and highlights
         }
       });
       
@@ -122,8 +122,8 @@ export function TrendsMarketTab() {
         setIsCollecting(false);
       }, 5000);
     } catch (err) {
-      console.error('Error collecting highlights:', err);
-      toast.error('Erro ao coletar mais vendidos');
+      console.error('Error collecting data:', err);
+      toast.error('Erro ao coletar dados');
       setIsCollecting(false);
     }
   };
@@ -337,11 +337,11 @@ export function TrendsMarketTab() {
                     CSV
                   </Button>
                 )}
-                {categoryId && !highlightsLoading && !highlights?.items?.length && (
+                {categoryId && !highlightsLoading && (
                   <Button 
                     size="sm" 
                     variant="outline" 
-                    onClick={handleCollectHighlights}
+                    onClick={handleCollectAll}
                     disabled={isCollecting}
                     className="h-7 text-xs"
                   >

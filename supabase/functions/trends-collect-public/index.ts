@@ -327,12 +327,13 @@ async function collectHighlights(
     const contentSample = content.slice(0, 3).map((h: any) => ({ id: h?.id, type: h?.type }));
     console.log(`${diagPrefix} highlights content.sample(3)=`, contentSample);
 
-    // Separate ITEM and PRODUCT entities
+    // Separate ITEM and PRODUCT entities (USER_PRODUCT is also a PRODUCT type)
     const baseFromHighlights = content
       .slice(0, 20)
       .filter((h: any) => !!h?.id)
       .map((h: any, idx: number) => {
         const rawType = String(h?.type ?? '').toUpperCase();
+        const isProductType = rawType === 'PRODUCT' || rawType === 'USER_PRODUCT';
         return {
           item_id: String(h.id),
           rank: idx + 1,
@@ -341,8 +342,8 @@ async function collectHighlights(
           price: null as number | null,
           sold_quantity: null as number | null,
           permalink: null as string | null,
-          entity_type: rawType === 'PRODUCT' ? 'PRODUCT' : 'ITEM',
-          product_id: rawType === 'PRODUCT' ? String(h.id) : null,
+          entity_type: isProductType ? 'PRODUCT' : 'ITEM',
+          product_id: isProductType ? String(h.id) : null,
           estimated_revenue: null as number | null,
           _raw_type: rawType,
         };
