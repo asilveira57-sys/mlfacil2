@@ -300,7 +300,7 @@ async function collectHighlights(
   try {
     console.log(`${diagPrefix} start today=${today}`);
 
-    // A) Log detalhado do highlights
+    // A) Fetch highlights from ML API
     const url = `https://api.mercadolibre.com/highlights/${siteId}/category/${categoryId}`;
     console.log(`${diagPrefix} fetching highlights url=${url}`);
 
@@ -327,8 +327,7 @@ async function collectHighlights(
     const contentSample = content.slice(0, 3).map((h: any) => ({ id: h?.id, type: h?.type }));
     console.log(`${diagPrefix} highlights content.sample(3)=`, contentSample);
 
-    // Sempre gerar itens-base para nunca ficar 0 (mesmo sem enriquecimento)
-    // Também ajuda auditoria quando type != ITEM.
+    // Separate ITEM and PRODUCT entities
     const baseFromHighlights = content
       .slice(0, 20)
       .filter((h: any) => !!h?.id)
@@ -337,28 +336,27 @@ async function collectHighlights(
         return {
           item_id: String(h.id),
           rank: idx + 1,
-          // se for ITEM, tentaremos preencher título/thumbnail depois
-          // se não for ITEM, deixamos um marcador para auditoria
-          title: rawType && rawType !== 'ITEM' ? `[${rawType}] ${String(h.id)}` : null,
-          thumbnail: null,
-          price: null,
-          sold_quantity: null,
-          permalink: null,
+          title: null as string | null,
+          thumbnail: null as string | null,
+          price: null as number | null,
+          sold_quantity: null as number | null,
+          permalink: null as string | null,
+          entity_type: rawType === 'PRODUCT' ? 'PRODUCT' : 'ITEM',
+          product_id: rawType === 'PRODUCT' ? String(h.id) : null,
+          estimated_revenue: null as number | null,
           _raw_type: rawType,
         };
       });
 
-    // B) Log + enriquecimento em lote (somente ITEM)
-    const itemIdsForEnrichment = baseFromHighlights
-      .filter((it: any) => it._raw_type === 'ITEM')
-      .map((it: any) => it.item_id);
+    // B) Enrich ITEM entities in batch
+    const itemEntries = baseFromHighlights.filter((it: any) => it.entity_type === 'ITEM');
+    const itemIds = itemEntries.map((it: any) => it.item_id);
+    console.log(`${diagPrefix} ITEM candidates count=${itemIds.length}`);
 
-    console.log(`${diagPrefix} enrich candidates (type=ITEM) count=${itemIdsForEnrichment.length}`);
+    const enrichedItemMap = new Map<string, any>();
 
-    const enrichedMap = new Map<string, any>();
-
-    if (itemIdsForEnrichment.length > 0) {
-      const idsParam = itemIdsForEnrichment.join(',');
+    if (itemIds.length > 0) {
+      const idsParam = itemIds.join(',');
       const batchUrl = `https://api.mercadolibre.com/items?ids=${encodeURIComponent(idsParam)}`;
       console.log(`${diagPrefix} fetching batch items url=${batchUrl}`);
 
@@ -369,9 +367,7 @@ async function collectHighlights(
       const batchText = await batchResponse.text();
       console.log(`${diagPrefix} batch status=${batchResponse.status} ok=${batchResponse.ok}`);
 
-      if (!batchResponse.ok) {
-        console.error(`${diagPrefix} batch error body=${batchText}`);
-      } else {
+      if (batchResponse.ok) {
         let batchData: any[] = [];
         try {
           batchData = batchText ? JSON.parse(batchText) : [];
@@ -380,39 +376,159 @@ async function collectHighlights(
         }
 
         const okCount = (batchData || []).filter((x: any) => x?.code === 200).length;
-        const failCount = (batchData || []).length - okCount;
-        console.log(`${diagPrefix} batch parsed len=${(batchData || []).length} code200=${okCount} fail=${failCount}`);
+        console.log(`${diagPrefix} batch parsed len=${(batchData || []).length} code200=${okCount}`);
 
         for (const entry of batchData || []) {
           if (entry?.code === 200 && entry?.body?.id) {
-            enrichedMap.set(String(entry.body.id), entry.body);
-          } else if (entry?.code && entry?.body) {
-            console.error(`${diagPrefix} batch entry error code=${entry.code} body=`, entry.body);
+            enrichedItemMap.set(String(entry.body.id), entry.body);
           }
         }
       }
     }
 
-    // Aplica enriquecimento onde tiver code 200; mantém base mesmo quando falhar.
+    // C) Enrich PRODUCT entities
+    const productEntries = baseFromHighlights.filter((it: any) => it.entity_type === 'PRODUCT');
+    console.log(`${diagPrefix} PRODUCT candidates count=${productEntries.length}`);
+
+    const enrichedProductMap = new Map<string, any>();
+
+    for (const entry of productEntries) {
+      const productId = entry.item_id;
+      try {
+        // Fetch product details
+        const productUrl = `https://api.mercadolibre.com/products/${productId}`;
+        console.log(`${diagPrefix} fetching product ${productId}`);
+        
+        const productRes = await fetch(productUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+
+        if (!productRes.ok) {
+          console.warn(`${diagPrefix} product ${productId} fetch failed status=${productRes.status}`);
+          // Set placeholder title for PRODUCT
+          enrichedProductMap.set(productId, {
+            title: `[Catálogo] ${productId}`,
+            thumbnail: null,
+            price: null,
+            sold_quantity: null,
+            permalink: null,
+          });
+          continue;
+        }
+
+        const productData = await productRes.json();
+        let title = productData.name || productData.title || `[Catálogo] ${productId}`;
+        let thumbnail = productData.pictures?.[0]?.url || null;
+        let price: number | null = null;
+        let soldQuantity: number | null = null;
+        let permalink: string | null = null;
+
+        // Find representative item for price and sold_quantity
+        const buyBoxItemId = productData.buy_box_winner?.item_id;
+        if (buyBoxItemId) {
+          console.log(`${diagPrefix} fetching buy_box_winner item ${buyBoxItemId}`);
+          await sleep(RATE_LIMIT_DELAY);
+          
+          const itemRes = await fetch(`https://api.mercadolibre.com/items/${buyBoxItemId}`, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+
+          if (itemRes.ok) {
+            const itemData = await itemRes.json();
+            price = itemData.price ?? null;
+            soldQuantity = itemData.sold_quantity ?? null;
+            permalink = itemData.permalink ?? null;
+            // Use item thumbnail if product doesn't have one
+            if (!thumbnail) {
+              thumbnail = itemData.thumbnail ?? null;
+            }
+          }
+        } else {
+          // Try to get first item from main_features or search
+          const representativeItemId = productData.main_features?.[0]?.item_id;
+          if (representativeItemId) {
+            console.log(`${diagPrefix} fetching representative item ${representativeItemId}`);
+            await sleep(RATE_LIMIT_DELAY);
+            
+            const itemRes = await fetch(`https://api.mercadolibre.com/items/${representativeItemId}`, {
+              headers: { Authorization: `Bearer ${accessToken}` },
+            });
+
+            if (itemRes.ok) {
+              const itemData = await itemRes.json();
+              price = itemData.price ?? null;
+              soldQuantity = itemData.sold_quantity ?? null;
+              permalink = itemData.permalink ?? null;
+              if (!thumbnail) {
+                thumbnail = itemData.thumbnail ?? null;
+              }
+            }
+          }
+        }
+
+        enrichedProductMap.set(productId, {
+          title,
+          thumbnail,
+          price,
+          sold_quantity: soldQuantity,
+          permalink,
+        });
+
+        await sleep(RATE_LIMIT_DELAY);
+      } catch (err) {
+        console.error(`${diagPrefix} error enriching product ${productId}:`, err);
+        enrichedProductMap.set(productId, {
+          title: `[Catálogo] ${productId}`,
+          thumbnail: null,
+          price: null,
+          sold_quantity: null,
+          permalink: null,
+        });
+      }
+    }
+
+    // D) Apply enrichment to all items
     let items = baseFromHighlights.map((it: any) => {
-      const body = enrichedMap.get(it.item_id);
-      if (!body) return it;
-      return {
-        ...it,
-        title: body.title ?? it.title,
-        thumbnail: body.thumbnail ?? null,
-        price: body.price ?? null,
-        sold_quantity: body.sold_quantity ?? null,
-        permalink: body.permalink ?? null,
-      };
+      if (it.entity_type === 'ITEM') {
+        const body = enrichedItemMap.get(it.item_id);
+        if (body) {
+          const price = body.price ?? null;
+          const soldQty = body.sold_quantity ?? null;
+          return {
+            ...it,
+            title: body.title ?? null,
+            thumbnail: body.thumbnail ?? null,
+            price,
+            sold_quantity: soldQty,
+            permalink: body.permalink ?? null,
+            estimated_revenue: (price && soldQty) ? price * soldQty : null,
+          };
+        }
+      } else if (it.entity_type === 'PRODUCT') {
+        const enriched = enrichedProductMap.get(it.item_id);
+        if (enriched) {
+          const price = enriched.price ?? null;
+          const soldQty = enriched.sold_quantity ?? null;
+          return {
+            ...it,
+            title: enriched.title,
+            thumbnail: enriched.thumbnail,
+            price,
+            sold_quantity: soldQty,
+            permalink: enriched.permalink,
+            estimated_revenue: (price && soldQty) ? price * soldQty : null,
+          };
+        }
+      }
+      return it;
     });
 
-    // Remove campo interno
+    // Remove internal field
     items = items.map(({ _raw_type, ...rest }: any) => rest);
 
     console.log(`${diagPrefix} final items before fallback count=${items.length}`);
 
-    // Fallback: se highlights não retornou nada, usar search.
+    // Fallback: if highlights returned nothing, use search
     if (items.length === 0) {
       console.log(`${diagPrefix} fallback to search (no items from highlights)`);
       items = await fetchBestSellersViaSearch(siteId, categoryId, accessToken);
@@ -424,7 +540,7 @@ async function collectHighlights(
       return;
     }
 
-    // Snapshot + persistência
+    // Snapshot + persistence
     const { data: existing } = await supabase
       .from('highlights_snapshots')
       .select('id')
