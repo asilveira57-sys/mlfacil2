@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { History, Calendar, TrendingUp, Store, AlertTriangle, ChevronRight } from 'lucide-react';
+import { History, Calendar, TrendingUp, Store, AlertTriangle, ChevronRight, Package } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -67,7 +67,7 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
   const [selectedCategory, setSelectedCategory] = useState('__ROOT__');
   const [expandedSnapshot, setExpandedSnapshot] = useState<SnapshotData | null>(null);
 
-  // Fetch seller monthly history
+  // Fetch seller monthly history with product details
   const { data: sellerHistory, isLoading: sellerLoading } = useQuery({
     queryKey: ['trends', 'history', 'seller', sellerId, selectedMonth],
     queryFn: async () => {
@@ -89,7 +89,35 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
         .limit(20);
 
       if (error) throw error;
-      return data || [];
+      if (!data || data.length === 0) return [];
+
+      // Fetch product details (title, thumbnail) from meli_order_items_cache
+      const itemIds = [...new Set(data.map(d => d.item_id))];
+      const { data: itemDetails } = await supabase
+        .from('meli_order_items_cache')
+        .select('item_id, title, thumbnail')
+        .in('item_id', itemIds)
+        .order('created_at_meli', { ascending: false });
+
+      // Create a map for quick lookup (use first occurrence for each item_id)
+      const detailsMap = new Map<string, { title: string | null; thumbnail: string | null }>();
+      if (itemDetails) {
+        for (const detail of itemDetails) {
+          if (!detailsMap.has(detail.item_id)) {
+            detailsMap.set(detail.item_id, { 
+              title: detail.title, 
+              thumbnail: detail.thumbnail 
+            });
+          }
+        }
+      }
+
+      // Merge details with sales data
+      return data.map(item => ({
+        ...item,
+        title: detailsMap.get(item.item_id)?.title || null,
+        thumbnail: detailsMap.get(item.item_id)?.thumbnail || null,
+      }));
     },
     enabled: !!sellerId && sourceType === 'seller',
   });
@@ -220,13 +248,29 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
                   {sellerHistory.map((item, idx) => (
                     <div 
                       key={item.item_id} 
-                      className="flex items-center gap-4 p-3 bg-muted/50 rounded-lg"
+                      className="flex items-center gap-4 p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors"
                     >
                       <span className="text-xl font-bold text-muted-foreground w-8 text-center">
                         {idx + 1}
                       </span>
+                      {item.thumbnail ? (
+                        <img 
+                          src={item.thumbnail} 
+                          alt="" 
+                          className="w-12 h-12 rounded-lg object-cover border border-border flex-shrink-0"
+                        />
+                      ) : (
+                        <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
+                          <Package className="h-5 w-5 text-muted-foreground" />
+                        </div>
+                      )}
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium truncate">{item.item_id}</p>
+                        <p className="font-medium truncate">
+                          {item.title || item.item_id}
+                        </p>
+                        {item.title && (
+                          <p className="text-xs text-muted-foreground">{item.item_id}</p>
+                        )}
                       </div>
                       <div className="flex items-center gap-4">
                         <Badge variant="secondary">{item.quantity_sold} un</Badge>
