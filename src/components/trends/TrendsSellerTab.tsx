@@ -6,9 +6,10 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Eye, Package, Bell, TrendingUp, TrendingDown, ExternalLink, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react';
+import { Eye, Package, Bell, TrendingUp, TrendingDown, ExternalLink, RefreshCw, CheckCircle, AlertCircle, BarChart3 } from 'lucide-react';
 import { useSellerTopVisited, useSellerTopSold, useAlerts, useTriggerCollection, useDismissAlert, useMarkAlertRead, SellerItem } from '@/hooks/useTrendsApi';
 import { TrendsItemDetailDrawer } from './TrendsItemDetailDrawer';
+import { SellerMarketComparison } from './SellerMarketComparison';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -18,7 +19,7 @@ interface TrendsSellerTabProps {
 
 export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
   const [periodDays, setPeriodDays] = useState<number>(7);
-  const [activeSubTab, setActiveSubTab] = useState('visited');
+  const [activeSubTab, setActiveSubTab] = useState('comparison');
   const [selectedItem, setSelectedItem] = useState<SellerItem | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -124,14 +125,18 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
 
       {/* Sub Tabs */}
       <Tabs value={activeSubTab} onValueChange={setActiveSubTab}>
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="comparison" className="gap-2">
+            <BarChart3 className="h-4 w-4" />
+            Comparativo
+          </TabsTrigger>
           <TabsTrigger value="visited" className="gap-2">
             <Eye className="h-4 w-4" />
-            Mais Visitados
+            Visitados
           </TabsTrigger>
           <TabsTrigger value="sold" className="gap-2">
             <Package className="h-4 w-4" />
-            Mais Vendidos
+            Vendidos
           </TabsTrigger>
           <TabsTrigger value="alerts" className="gap-2">
             <Bell className="h-4 w-4" />
@@ -141,6 +146,11 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
             )}
           </TabsTrigger>
         </TabsList>
+
+        {/* Market Comparison */}
+        <TabsContent value="comparison">
+          <SellerMarketComparison sellerId={sellerId} />
+        </TabsContent>
 
         {/* Top Visited */}
         <TabsContent value="visited">
