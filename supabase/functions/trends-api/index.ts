@@ -141,7 +141,7 @@ async function getMarketHighlights(supabase: any, params: Record<string, string>
 
   const { data: snapshot, error: snapError } = await supabase
     .from('highlights_snapshots')
-    .select('id, snapshot_date')
+    .select('id, snapshot_date, category_id')
     .eq('site_id', siteId)
     .eq('category_id', categoryId)
     .order('snapshot_date', { ascending: false })
@@ -151,6 +151,10 @@ async function getMarketHighlights(supabase: any, params: Record<string, string>
   if (snapError && snapError.code !== 'PGRST116') {
     throw snapError;
   }
+
+  console.log(
+    `[trends-api] market/highlights paramCategory=${categoryId} snapshotCategory=${snapshot?.category_id || 'null'}`
+  );
 
   if (!snapshot) {
     return { items: [], message: 'Histórico indisponível antes da ativação do módulo' };
