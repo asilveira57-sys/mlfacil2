@@ -127,7 +127,8 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const veryHighShippingCount = orders.filter(o => (o.shipping_cost_seller || 0) >= 300).length;
   const missingShippingCount = orders.filter(o => 
     (o.shipping_cost_seller || 0) === 0 && 
-    o.missing_fields?.includes('sem_frete_cobrado')
+    o.missing_fields?.includes('sem_frete_cobrado') &&
+    o.fee_ml_source !== 'no_charges'
   ).length;
 
   const SortIcon = ({ columnKey }: { columnKey: SortKey }) => {
@@ -304,12 +305,8 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     return (order.cost_other || 0) > 0;
   };
 
-  // Count pending orders (missing shipping or commission)
-  const pendingCount = orders.filter(o => 
-    o.missing_fields?.length > 0 || 
-    (o.shipping_cost_seller || 0) === 0 || 
-    (o.commission_cost || 0) === 0
-  ).length;
+  // Count pending orders specifically by billing status (fee_ml_source)
+  const pendingCount = orders.filter(o => o.fee_ml_source === 'pending').length;
 
   const handleReprocessPending = async () => {
     setReprocessingPending(true);
@@ -579,7 +576,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                     ) : (
                       sortedOrders.map((order) => {
                         const shippingCost = order.shipping_cost_seller || 0;
-                        const isMissingShipping = shippingCost === 0 && order.missing_fields?.includes('sem_frete_cobrado');
+                        const isMissingShipping = shippingCost === 0 && order.missing_fields?.includes('sem_frete_cobrado') && order.fee_ml_source !== 'no_charges';
                         const isHighShipping = shippingCost >= 100;
                         const isVeryHighShipping = shippingCost >= 300;
                         
@@ -642,7 +639,11 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                                 </Badge>
                               )}
                               {order.fee_ml_source === 'no_charges' && (
-                                <Badge variant="secondary" className="flex items-center gap-1 text-purple-600 border-purple-300 bg-purple-50" title="Pedido sem taxas de marketplace (ex: pickup, frete grátis absorvido, promoção)">
+                                <Badge
+                                  variant="secondary"
+                                  className="flex items-center gap-1"
+                                  title="Pedido sem taxas de marketplace (ex: pickup, frete grátis absorvido, promoção)"
+                                >
                                   <Package className="h-3 w-3" />
                                   Sem Taxas
                                 </Badge>
