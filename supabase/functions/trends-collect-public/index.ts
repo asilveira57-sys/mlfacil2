@@ -13,18 +13,24 @@ const ML_APP_ID = Deno.env.get('ML_APP_ID')!;
 const ML_SECRET_KEY = Deno.env.get('ML_SECRET_KEY')!;
 const RATE_LIMIT_DELAY = 500; // ms between API calls
 
-// Popular categories to collect
+// Popular categories to collect (aligned with frontend CATEGORIES)
 const POPULAR_CATEGORIES = [
   { id: 'MLB5672', name: 'Acessórios para Veículos' },
+  { id: 'MLB1384', name: 'Bebês' },
+  { id: 'MLB1574', name: 'Casa, Móveis e Decoração' },
   { id: 'MLB1051', name: 'Celulares e Telefones' },
   { id: 'MLB1648', name: 'Computadores' },
   { id: 'MLB1144', name: 'Eletrodomésticos' },
   { id: 'MLB1000', name: 'Eletrônicos' },
   { id: 'MLB1276', name: 'Esportes e Fitness' },
   { id: 'MLB263532', name: 'Ferramentas' },
-  { id: 'MLB1574', name: 'Casa, Móveis e Decoração' },
   { id: 'MLB1499', name: 'Indústria e Comércio' },
-  { id: 'MLB1384', name: 'Bebês' },
+  { id: 'MLB1182', name: 'Instrumentos Musicais' },
+  { id: 'MLB3937', name: 'Joias e Relógios' },
+  { id: 'MLB1196', name: 'Livros, Revistas e Comics' },
+  { id: 'MLB1168', name: 'Música, Filmes e Seriados' },
+  { id: 'MLB264586', name: 'Saúde' },
+  { id: 'MLB1430', name: 'Roupas e Acessórios' },
 ];
 
 Deno.serve(async (req) => {
@@ -355,6 +361,7 @@ async function collectHighlights(
     console.log(`${diagPrefix} ITEM candidates count=${itemIds.length}`);
 
     const enrichedItemMap = new Map<string, any>();
+    const failedItemIds: string[] = [];
 
     if (itemIds.length > 0) {
       const idsParam = itemIds.join(',');
@@ -382,8 +389,73 @@ async function collectHighlights(
         for (const entry of batchData || []) {
           if (entry?.code === 200 && entry?.body?.id) {
             enrichedItemMap.set(String(entry.body.id), entry.body);
+          } else if (entry?.body?.id) {
+            // Item failed - might be a PRODUCT misclassified as ITEM
+            failedItemIds.push(String(entry.body.id));
           }
         }
+        
+        // Also track items that weren't in the response at all
+        for (const itemId of itemIds) {
+          if (!enrichedItemMap.has(itemId) && !failedItemIds.includes(itemId)) {
+            failedItemIds.push(itemId);
+          }
+        }
+      } else {
+        // All items failed - add all to failedItemIds
+        failedItemIds.push(...itemIds);
+      }
+    }
+    
+    // Try to enrich failed ITEMs as PRODUCTs (some highlights return PRODUCT IDs with type=ITEM)
+    console.log(`${diagPrefix} failedItemIds count=${failedItemIds.length}`);
+    for (const itemId of failedItemIds) {
+      try {
+        const productUrl = `https://api.mercadolibre.com/products/${itemId}`;
+        const productRes = await fetch(productUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        
+        if (productRes.ok) {
+          const productData = await productRes.json();
+          console.log(`${diagPrefix} item ${itemId} is actually a PRODUCT`);
+          
+          let price: number | null = null;
+          let soldQuantity: number | null = null;
+          let permalink: string | null = null;
+          let thumbnail = productData.pictures?.[0]?.url || null;
+          
+          // Try to get representative item for price/sold_quantity
+          const buyBoxItemId = productData.buy_box_winner?.item_id;
+          if (buyBoxItemId) {
+            price = productData.buy_box_winner.price || null;
+            await sleep(RATE_LIMIT_DELAY);
+            
+            const itemRes = await fetch(`https://api.mercadolibre.com/items/${buyBoxItemId}`, {
+              headers: { Authorization: `Bearer ${accessToken}` },
+            });
+            if (itemRes.ok) {
+              const itemData = await itemRes.json();
+              soldQuantity = itemData.sold_quantity ?? null;
+              permalink = itemData.permalink ?? null;
+              if (!thumbnail) thumbnail = itemData.thumbnail ?? null;
+            }
+          }
+          
+          enrichedItemMap.set(itemId, {
+            id: itemId,
+            title: productData.name || productData.title || `[Catálogo] ${itemId}`,
+            thumbnail,
+            price,
+            sold_quantity: soldQuantity,
+            permalink,
+            _isProduct: true,
+            _productId: itemId,
+          });
+        }
+        await sleep(RATE_LIMIT_DELAY);
+      } catch (err) {
+        console.warn(`${diagPrefix} failed to enrich ${itemId} as product:`, err);
       }
     }
 
@@ -495,8 +567,13 @@ async function collectHighlights(
         if (body) {
           const price = body.price ?? null;
           const soldQty = body.sold_quantity ?? null;
+          // Check if this was actually a PRODUCT misclassified as ITEM
+          const entityType = body._isProduct ? 'PRODUCT' : 'ITEM';
+          const productId = body._isProduct ? body._productId : null;
           return {
             ...it,
+            entity_type: entityType,
+            product_id: productId,
             title: body.title ?? null,
             thumbnail: body.thumbnail ?? null,
             price,
@@ -524,10 +601,50 @@ async function collectHighlights(
       return it;
     });
 
-    // Remove internal field
+    // Remove internal fields
     items = items.map(({ _raw_type, ...rest }: any) => rest);
 
     console.log(`${diagPrefix} final items before fallback count=${items.length}`);
+    
+    // Check enrichment quality - if >50% have no price, use search fallback
+    const itemsWithPrice = items.filter((i: any) => i.price !== null);
+    console.log(`${diagPrefix} items with price=${itemsWithPrice.length}/${items.length}`);
+    
+    if (items.length > 0 && itemsWithPrice.length < items.length * 0.3) {
+      console.log(`${diagPrefix} low enrichment quality, using search fallback`);
+      const searchItems = await fetchBestSellersViaSearch(siteId, categoryId, accessToken);
+      if (searchItems.length > 0) {
+        // Merge: prefer search data (has price/qty) but keep ranking from highlights
+        const searchMap = new Map(searchItems.map((s: any) => [s.item_id, s]));
+        items = items.map((it: any, idx: number) => {
+          const searchItem = searchMap.get(it.item_id);
+          if (searchItem && searchItem.price) {
+            return {
+              ...it,
+              title: searchItem.title || it.title,
+              thumbnail: searchItem.thumbnail || it.thumbnail,
+              price: searchItem.price,
+              sold_quantity: searchItem.sold_quantity,
+              permalink: searchItem.permalink || it.permalink,
+              estimated_revenue: searchItem.price && searchItem.sold_quantity ? searchItem.price * searchItem.sold_quantity : null,
+            };
+          }
+          return it;
+        });
+        
+        // If still low quality, just use search results directly
+        const updatedWithPrice = items.filter((i: any) => i.price !== null);
+        if (updatedWithPrice.length < items.length * 0.3 && searchItems.length >= 10) {
+          console.log(`${diagPrefix} replacing with search results entirely`);
+          items = searchItems.map((s: any, idx: number) => ({
+            ...s,
+            rank: idx + 1,
+            entity_type: 'ITEM',
+            product_id: null,
+          }));
+        }
+      }
+    }
 
     // Fallback: if highlights returned nothing, use search
     if (items.length === 0) {
