@@ -1,4 +1,5 @@
 // @ts-nocheck - Deno types not available in build context
+// Force clean redeploy v2
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7/dist/module/index.js?target=deno&no-check";
 
 
