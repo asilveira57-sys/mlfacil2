@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -6,8 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Eye, Package, Bell, TrendingUp, TrendingDown, ExternalLink, RefreshCw, CheckCircle, AlertCircle, BarChart3 } from 'lucide-react';
-import { useSellerTopVisited, useSellerTopSold, useAlerts, useTriggerCollection, useDismissAlert, useMarkAlertRead, SellerItem } from '@/hooks/useTrendsApi';
+import { Eye, Package, Bell, TrendingUp, TrendingDown, ExternalLink, RefreshCw, CheckCircle, AlertCircle, BarChart3, ArrowRightLeft, Percent } from 'lucide-react';
+import { useSellerPerformance, useAlerts, useTriggerCollection, useDismissAlert, useMarkAlertRead, PerformanceItem, SellerItem } from '@/hooks/useTrendsApi';
 import { TrendsItemDetailDrawer } from './TrendsItemDetailDrawer';
 import { SellerMarketComparison } from './SellerMarketComparison';
 import { toast } from 'sonner';
@@ -17,19 +17,39 @@ interface TrendsSellerTabProps {
   sellerId: string | null;
 }
 
+function formatConversionBadge(rate: number) {
+  if (rate >= 5) return { className: 'bg-green-500/10 text-green-600 border-green-500/30', label: 'Excelente' };
+  if (rate >= 2) return { className: 'bg-yellow-500/10 text-yellow-600 border-yellow-500/30', label: 'Bom' };
+  return { className: 'bg-muted text-muted-foreground', label: 'Baixa' };
+}
+
 export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
   const [periodDays, setPeriodDays] = useState<number>(7);
   const [activeSubTab, setActiveSubTab] = useState('comparison');
   const [selectedItem, setSelectedItem] = useState<SellerItem | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  const { data: topVisited, isLoading: visitedLoading, refetch: refetchVisited } = useSellerTopVisited(sellerId, periodDays);
-  const { data: topSold, isLoading: soldLoading, refetch: refetchSold } = useSellerTopSold(sellerId, periodDays);
+  const { data: performanceData, isLoading: performanceLoading, refetch: refetchPerformance } = useSellerPerformance(sellerId, periodDays);
   const { data: alertsData, isLoading: alertsLoading } = useAlerts(sellerId, true);
   const triggerCollection = useTriggerCollection();
   const dismissAlert = useDismissAlert();
   const markRead = useMarkAlertRead();
   const queryClient = useQueryClient();
+
+  // Sort items by visits or quantity depending on tab
+  const topVisitedItems = useMemo(() => {
+    if (!performanceData?.items) return [];
+    return [...performanceData.items]
+      .sort((a, b) => b.visits - a.visits)
+      .slice(0, 20);
+  }, [performanceData]);
+
+  const topSoldItems = useMemo(() => {
+    if (!performanceData?.items) return [];
+    return [...performanceData.items]
+      .sort((a, b) => b.quantity - a.quantity)
+      .slice(0, 20);
+  }, [performanceData]);
 
   const handleSync = async () => {
     if (!sellerId) return;
@@ -48,8 +68,7 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
           // Invalidate queries after a delay to allow backend processing
           setTimeout(() => {
             queryClient.invalidateQueries({ queryKey: ['trends'] });
-            refetchVisited();
-            refetchSold();
+            refetchPerformance();
           }, 3000);
         },
         onError: (error) => {
@@ -63,12 +82,18 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
   };
 
   const handleRefresh = () => {
-    refetchVisited();
-    refetchSold();
+    refetchPerformance();
   };
 
-  const handleItemClick = (item: SellerItem) => {
-    setSelectedItem(item);
+  const handleItemClick = (item: PerformanceItem) => {
+    setSelectedItem({
+      item_id: item.item_id,
+      title: item.title,
+      thumbnail: item.thumbnail,
+      visits: item.visits,
+      quantity: item.quantity,
+      revenue: item.revenue,
+    });
     setDrawerOpen(true);
   };
 
@@ -88,13 +113,34 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Select value={String(periodDays)} onValueChange={(v) => setPeriodDays(Number(v))}>
-            <SelectTrigger className="w-[140px]">
+            <SelectTrigger className="w-[180px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="7">Últimos 7 dias</SelectItem>
-              <SelectItem value="30">Últimos 30 dias</SelectItem>
-              <SelectItem value="90">Últimos 90 dias</SelectItem>
+              <SelectItem value="7">
+                <div className="flex items-center justify-between w-full gap-2">
+                  <span>Últimos 7 dias</span>
+                  {performanceData?.has_limited_data && performanceData.period_actual < 7 && (
+                    <Badge variant="outline" className="text-xs">{performanceData.period_actual}d</Badge>
+                  )}
+                </div>
+              </SelectItem>
+              <SelectItem value="30">
+                <div className="flex items-center justify-between w-full gap-2">
+                  <span>Últimos 30 dias</span>
+                  {performanceData?.has_limited_data && periodDays === 30 && (
+                    <Badge variant="outline" className="text-xs">{performanceData.period_actual}d</Badge>
+                  )}
+                </div>
+              </SelectItem>
+              <SelectItem value="90">
+                <div className="flex items-center justify-between w-full gap-2">
+                  <span>Últimos 90 dias</span>
+                  {performanceData?.has_limited_data && periodDays === 90 && (
+                    <Badge variant="outline" className="text-xs">{performanceData.period_actual}d</Badge>
+                  )}
+                </div>
+              </SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -122,6 +168,45 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
           </Button>
         </div>
       </div>
+
+      {/* Data Range Banner */}
+      {performanceData && (
+        <div className="bg-muted/50 rounded-lg p-4 border">
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center gap-6">
+              <div className="flex items-center gap-2">
+                <ArrowRightLeft className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Período Sincronizado</span>
+              </div>
+              <div className="text-sm text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {new Date(performanceData.data_range.effective.from).toLocaleDateString('pt-BR')}
+                </span>
+                <span className="mx-2">até</span>
+                <span className="font-medium text-foreground">
+                  {new Date(performanceData.data_range.effective.to).toLocaleDateString('pt-BR')}
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <Badge variant={performanceData.has_limited_data ? "secondary" : "default"}>
+                {performanceData.period_actual} dias analisados
+              </Badge>
+              {performanceData.has_limited_data && (
+                <span className="text-xs text-amber-600">
+                  de {performanceData.period_requested} solicitados
+                </span>
+              )}
+            </div>
+          </div>
+          {performanceData.has_limited_data && (
+            <p className="text-xs text-muted-foreground mt-2">
+              💡 A coleta de visitas iniciou em {new Date(performanceData.data_range.visits.from).toLocaleDateString('pt-BR')}. 
+              Dados anteriores a esta data não estão disponíveis.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Sub Tabs */}
       <Tabs value={activeSubTab} onValueChange={setActiveSubTab}>
@@ -152,83 +237,79 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
           <SellerMarketComparison sellerId={sellerId} />
         </TabsContent>
 
-        {/* Top Visited */}
+        {/* Top Visited - with cross metrics */}
         <TabsContent value="visited">
           <Card className="border-blue-500/20">
             <CardHeader className="bg-blue-500/5">
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Eye className="h-5 w-5 text-blue-500" />
-                Produtos Mais Visitados ({periodDays}d)
+                Produtos Mais Visitados
               </CardTitle>
               <p className="text-sm text-muted-foreground">
-                Ranking por número de visualizações no período
+                Ranking por número de visualizações com métricas de conversão
               </p>
-              {topVisited?.data_range && (
-                <div className="mt-2 text-xs text-muted-foreground flex items-center gap-1">
-                  <span>Dados disponíveis: {new Date(topVisited.data_range.from).toLocaleDateString('pt-BR')} - {new Date(topVisited.data_range.to).toLocaleDateString('pt-BR')}</span>
-                  {(() => {
-                    const fromDate = new Date(topVisited.data_range.from);
-                    const toDate = new Date(topVisited.data_range.to);
-                    const actualDays = Math.ceil((toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-                    if (actualDays < periodDays) {
-                      return (
-                        <Badge variant="outline" className="ml-2 text-xs bg-amber-500/10 text-amber-600 border-amber-500/30">
-                          Apenas {actualDays} dias de dados
-                        </Badge>
-                      );
-                    }
-                    return null;
-                  })()}
-                </div>
-              )}
             </CardHeader>
             <CardContent className="pt-4">
-              {visitedLoading ? (
+              {performanceLoading ? (
                 <div className="space-y-3">
                   {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} className="h-16 w-full" />)}
                 </div>
-              ) : topVisited?.items?.length ? (
+              ) : topVisitedItems.length ? (
                 <ScrollArea className="h-[400px]">
                   <div className="space-y-2 pr-4">
-                    {topVisited.items.map((item, idx) => (
-                      <div 
-                        key={item.item_id} 
-                        className="flex items-center gap-4 p-3 bg-blue-500/5 rounded-lg hover:bg-blue-500/10 transition-colors cursor-pointer border border-blue-500/10"
-                        onClick={() => handleItemClick(item)}
-                      >
-                        <span className="text-2xl font-bold text-blue-500 w-8 text-center">
-                          {idx + 1}
-                        </span>
-                        {item.thumbnail && (
-                          <img 
-                            src={item.thumbnail} 
-                            alt="" 
-                            className="w-14 h-14 rounded-lg object-cover border border-border"
-                          />
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium truncate">{item.title}</p>
-                          <p className="text-sm text-muted-foreground">{item.item_id}</p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-center gap-2 bg-blue-500/10 px-3 py-1.5 rounded-lg">
-                            <Eye className="h-4 w-4 text-blue-500" />
-                            <span className="font-bold text-blue-600 dark:text-blue-400">
-                              {item.visits?.toLocaleString('pt-BR')}
-                            </span>
+                    {topVisitedItems.map((item, idx) => {
+                      const convBadge = formatConversionBadge(item.conversion_rate);
+                      return (
+                        <div 
+                          key={item.item_id} 
+                          className="flex items-center gap-4 p-3 bg-blue-500/5 rounded-lg hover:bg-blue-500/10 transition-colors cursor-pointer border border-blue-500/10"
+                          onClick={() => handleItemClick(item)}
+                        >
+                          <span className="text-2xl font-bold text-blue-500 w-8 text-center">
+                            {idx + 1}
+                          </span>
+                          {item.thumbnail && (
+                            <img 
+                              src={item.thumbnail} 
+                              alt="" 
+                              className="w-14 h-14 rounded-lg object-cover border border-border"
+                            />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium truncate">{item.title}</p>
+                            <p className="text-sm text-muted-foreground">{item.item_id}</p>
                           </div>
-                          <a
-                            href={`https://produto.mercadolivre.com.br/${item.item_id.replace(/^(MLB)(\d+)$/, '$1-$2')}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-muted-foreground hover:text-primary"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <ExternalLink className="h-4 w-4" />
-                          </a>
+                          <div className="flex items-center gap-3">
+                            {/* Visits - primary */}
+                            <div className="flex items-center gap-2 bg-blue-500/10 px-3 py-1.5 rounded-lg">
+                              <Eye className="h-4 w-4 text-blue-500" />
+                              <span className="font-bold text-blue-600 dark:text-blue-400">
+                                {item.visits.toLocaleString('pt-BR')}
+                              </span>
+                            </div>
+                            {/* Sales - secondary */}
+                            <div className="flex items-center gap-2 bg-green-500/10 px-2 py-1 rounded">
+                              <Package className="h-3 w-3 text-green-500" />
+                              <span className="text-sm text-green-600 dark:text-green-400">{item.quantity} un</span>
+                            </div>
+                            {/* Conversion */}
+                            <Badge variant="outline" className={`text-xs ${convBadge.className}`}>
+                              <Percent className="h-3 w-3 mr-1" />
+                              {item.conversion_rate.toFixed(1)}%
+                            </Badge>
+                            <a
+                              href={`https://produto.mercadolivre.com.br/${item.item_id.replace(/^(MLB)(\d+)$/, '$1-$2')}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-muted-foreground hover:text-primary"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <ExternalLink className="h-4 w-4" />
+                            </a>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </ScrollArea>
               ) : (
@@ -242,90 +323,84 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
           </Card>
         </TabsContent>
 
-        {/* Top Sold */}
+        {/* Top Sold - with cross metrics */}
         <TabsContent value="sold">
           <Card className="border-green-500/20">
             <CardHeader className="bg-green-500/5">
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Package className="h-5 w-5 text-green-500" />
-                Produtos Mais Vendidos ({periodDays}d)
+                Produtos Mais Vendidos
               </CardTitle>
               <p className="text-sm text-muted-foreground">
-                Ranking por quantidade vendida e receita gerada
+                Ranking por quantidade vendida com métricas de conversão
               </p>
-              {topSold?.data_range && (
-                <div className="mt-2 text-xs text-muted-foreground flex items-center gap-1">
-                  <span>Dados disponíveis: {new Date(topSold.data_range.from).toLocaleDateString('pt-BR')} - {new Date(topSold.data_range.to).toLocaleDateString('pt-BR')}</span>
-                  {(() => {
-                    const fromDate = new Date(topSold.data_range.from);
-                    const toDate = new Date(topSold.data_range.to);
-                    const actualDays = Math.ceil((toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-                    if (actualDays < periodDays) {
-                      return (
-                        <Badge variant="outline" className="ml-2 text-xs bg-amber-500/10 text-amber-600 border-amber-500/30">
-                          Apenas {actualDays} dias de dados
-                        </Badge>
-                      );
-                    }
-                    return null;
-                  })()}
-                </div>
-              )}
             </CardHeader>
             <CardContent className="pt-4">
-              {soldLoading ? (
+              {performanceLoading ? (
                 <div className="space-y-3">
                   {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} className="h-16 w-full" />)}
                 </div>
-              ) : topSold?.items?.length ? (
+              ) : topSoldItems.length ? (
                 <ScrollArea className="h-[400px]">
                   <div className="space-y-2 pr-4">
-                    {topSold.items.map((item, idx) => (
-                      <div 
-                        key={item.item_id} 
-                        className="flex items-center gap-4 p-3 bg-green-500/5 rounded-lg hover:bg-green-500/10 transition-colors cursor-pointer border border-green-500/10"
-                        onClick={() => handleItemClick(item)}
-                      >
-                        <span className="text-2xl font-bold text-green-500 w-8 text-center">
-                          {idx + 1}
-                        </span>
-                        {item.thumbnail && (
-                          <img 
-                            src={item.thumbnail} 
-                            alt="" 
-                            className="w-14 h-14 rounded-lg object-cover border border-border"
-                          />
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium truncate">{item.title}</p>
-                          <p className="text-sm text-muted-foreground">{item.item_id}</p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <div className="flex flex-col items-end gap-1">
-                            <div className="flex items-center gap-2 bg-green-500/10 px-3 py-1.5 rounded-lg">
-                              <Package className="h-4 w-4 text-green-500" />
-                              <span className="font-bold text-green-600 dark:text-green-400">
-                                {item.quantity} un
-                              </span>
-                            </div>
-                            {item.revenue !== undefined && (
+                    {topSoldItems.map((item, idx) => {
+                      const convBadge = formatConversionBadge(item.conversion_rate);
+                      return (
+                        <div 
+                          key={item.item_id} 
+                          className="flex items-center gap-4 p-3 bg-green-500/5 rounded-lg hover:bg-green-500/10 transition-colors cursor-pointer border border-green-500/10"
+                          onClick={() => handleItemClick(item)}
+                        >
+                          <span className="text-2xl font-bold text-green-500 w-8 text-center">
+                            {idx + 1}
+                          </span>
+                          {item.thumbnail && (
+                            <img 
+                              src={item.thumbnail} 
+                              alt="" 
+                              className="w-14 h-14 rounded-lg object-cover border border-border"
+                            />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium truncate">{item.title}</p>
+                            <p className="text-sm text-muted-foreground">{item.item_id}</p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            {/* Sales - primary */}
+                            <div className="flex flex-col items-end gap-0.5">
+                              <div className="flex items-center gap-2 bg-green-500/10 px-3 py-1.5 rounded-lg">
+                                <Package className="h-4 w-4 text-green-500" />
+                                <span className="font-bold text-green-600 dark:text-green-400">
+                                  {item.quantity} un
+                                </span>
+                              </div>
                               <span className="text-sm font-medium text-green-600 dark:text-green-400">
                                 R$ {item.revenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                               </span>
-                            )}
+                            </div>
+                            {/* Visits - secondary */}
+                            <div className="flex items-center gap-2 bg-blue-500/10 px-2 py-1 rounded">
+                              <Eye className="h-3 w-3 text-blue-500" />
+                              <span className="text-sm text-blue-600 dark:text-blue-400">{item.visits.toLocaleString('pt-BR')}</span>
+                            </div>
+                            {/* Conversion */}
+                            <Badge variant="outline" className={`text-xs ${convBadge.className}`}>
+                              <Percent className="h-3 w-3 mr-1" />
+                              {item.conversion_rate.toFixed(1)}%
+                            </Badge>
+                            <a
+                              href={`https://produto.mercadolivre.com.br/${item.item_id.replace(/^(MLB)(\d+)$/, '$1-$2')}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-muted-foreground hover:text-primary"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <ExternalLink className="h-4 w-4" />
+                            </a>
                           </div>
-                          <a
-                            href={`https://produto.mercadolivre.com.br/${item.item_id.replace(/^(MLB)(\d+)$/, '$1-$2')}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-muted-foreground hover:text-primary"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <ExternalLink className="h-4 w-4" />
-                          </a>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </ScrollArea>
               ) : (

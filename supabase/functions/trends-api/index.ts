@@ -59,6 +59,9 @@ Deno.serve(async (req) => {
       case 'seller/top-vendidos':
         result = await getSellerTopSold(supabase, user.id, params);
         break;
+      case 'seller/performance':
+        result = await getSellerPerformance(supabase, user.id, params);
+        break;
       case 'seller/historico':
         result = await getSellerHistory(supabase, user.id, params);
         break;
@@ -416,6 +419,166 @@ async function getSellerTopSold(supabase: any, userId: string, params: Record<st
     }),
     period_days: days,
     data_range: { from: fromDateStr, to: toDateStr },
+  };
+}
+
+async function getSellerPerformance(supabase: any, userId: string, params: Record<string, string>) {
+  const sellerId = params.seller_id;
+  const days = parseInt(params.days || '7', 10);
+
+  console.log(`[trends-api] seller/performance days=${days} seller=${sellerId}`);
+
+  if (!sellerId) {
+    return { items: [], message: 'Seller não selecionado' };
+  }
+
+  const today = new Date();
+  const requestedFromDate = new Date(today);
+  requestedFromDate.setDate(today.getDate() - days);
+  const todayStr = today.toISOString().split('T')[0];
+
+  // 1. Get actual data range for visits
+  const { data: visitMinMax } = await supabase
+    .from('seller_item_visits')
+    .select('visit_date')
+    .eq('seller_id', sellerId)
+    .eq('user_id', userId)
+    .order('visit_date', { ascending: true })
+    .limit(1);
+
+  const { data: visitMaxRow } = await supabase
+    .from('seller_item_visits')
+    .select('visit_date')
+    .eq('seller_id', sellerId)
+    .eq('user_id', userId)
+    .order('visit_date', { ascending: false })
+    .limit(1);
+
+  // 2. Get actual data range for sales
+  const { data: salesMinMax } = await supabase
+    .from('seller_item_sales_daily')
+    .select('sale_date')
+    .eq('seller_id', sellerId)
+    .eq('user_id', userId)
+    .order('sale_date', { ascending: true })
+    .limit(1);
+
+  const { data: salesMaxRow } = await supabase
+    .from('seller_item_sales_daily')
+    .select('sale_date')
+    .eq('seller_id', sellerId)
+    .eq('user_id', userId)
+    .order('sale_date', { ascending: false })
+    .limit(1);
+
+  const visitsMinDate = visitMinMax?.[0]?.visit_date || todayStr;
+  const visitsMaxDate = visitMaxRow?.[0]?.visit_date || todayStr;
+  const salesMinDate = salesMinMax?.[0]?.sale_date || todayStr;
+  const salesMaxDate = salesMaxRow?.[0]?.sale_date || todayStr;
+
+  // 3. Calculate intersection (period where both data types exist)
+  const effectiveMinDate = visitsMinDate > salesMinDate ? visitsMinDate : salesMinDate;
+  const effectiveMaxDate = visitsMaxDate < salesMaxDate ? visitsMaxDate : salesMaxDate;
+
+  // 4. Apply user filter limited to available data
+  const requestedFromStr = requestedFromDate.toISOString().split('T')[0];
+  const actualFromDate = requestedFromStr > effectiveMinDate ? requestedFromStr : effectiveMinDate;
+
+  // Calculate actual days being analyzed
+  const actualFromTs = new Date(actualFromDate).getTime();
+  const effectiveMaxTs = new Date(effectiveMaxDate).getTime();
+  const actualDays = Math.max(1, Math.ceil((effectiveMaxTs - actualFromTs) / (1000 * 60 * 60 * 24)) + 1);
+
+  console.log(`[trends-api] seller/performance effective range: ${actualFromDate} to ${effectiveMaxDate} (${actualDays} days)`);
+
+  // 5. Fetch visits in synchronized period
+  const { data: visitsData, error: visitsError } = await supabase
+    .from('seller_item_visits')
+    .select('item_id, visits_count')
+    .eq('seller_id', sellerId)
+    .eq('user_id', userId)
+    .gte('visit_date', actualFromDate)
+    .lte('visit_date', effectiveMaxDate);
+
+  if (visitsError) throw visitsError;
+
+  // 6. Fetch sales in synchronized period
+  const { data: salesData, error: salesError } = await supabase
+    .from('seller_item_sales_daily')
+    .select('item_id, quantity_sold, revenue')
+    .eq('seller_id', sellerId)
+    .eq('user_id', userId)
+    .gte('sale_date', actualFromDate)
+    .lte('sale_date', effectiveMaxDate);
+
+  if (salesError) throw salesError;
+
+  // 7. Aggregate by item
+  const itemMap: Record<string, { visits: number; quantity: number; revenue: number }> = {};
+
+  for (const row of visitsData || []) {
+    if (!itemMap[row.item_id]) {
+      itemMap[row.item_id] = { visits: 0, quantity: 0, revenue: 0 };
+    }
+    itemMap[row.item_id].visits += row.visits_count;
+  }
+
+  for (const row of salesData || []) {
+    if (!itemMap[row.item_id]) {
+      itemMap[row.item_id] = { visits: 0, quantity: 0, revenue: 0 };
+    }
+    itemMap[row.item_id].quantity += row.quantity_sold;
+    itemMap[row.item_id].revenue += Number(row.revenue);
+  }
+
+  // 8. Calculate conversion and prepare items
+  const items = Object.entries(itemMap)
+    .map(([item_id, data]) => ({
+      item_id,
+      visits: data.visits,
+      quantity: data.quantity,
+      revenue: data.revenue,
+      conversion_rate: data.visits > 0 ? (data.quantity / data.visits) * 100 : 0,
+    }))
+    .filter(item => item.visits > 0 || item.quantity > 0); // Filter out items with no activity
+
+  // 9. Enrich with item details
+  const itemIds = items.map(i => i.item_id);
+  const { data: itemDetails } = await supabase
+    .from('meli_order_items_cache')
+    .select('item_id, title, thumbnail, created_at_meli')
+    .in('item_id', itemIds)
+    .order('created_at_meli', { ascending: false });
+
+  const detailsMap = new Map<string, { title: string | null; thumbnail: string | null }>();
+  for (const item of itemDetails || []) {
+    const existing = detailsMap.get(item.item_id);
+    if (!existing) {
+      detailsMap.set(item.item_id, { title: item.title, thumbnail: item.thumbnail });
+    } else if (!existing.thumbnail && item.thumbnail) {
+      detailsMap.set(item.item_id, { title: item.title, thumbnail: item.thumbnail });
+    }
+  }
+
+  const enrichedItems = items.map(item => {
+    const detail = detailsMap.get(item.item_id);
+    return {
+      ...item,
+      title: detail?.title || item.item_id,
+      thumbnail: detail?.thumbnail || null,
+    };
+  });
+
+  return {
+    items: enrichedItems,
+    data_range: {
+      visits: { from: visitsMinDate, to: visitsMaxDate },
+      sales: { from: salesMinDate, to: salesMaxDate },
+      effective: { from: actualFromDate, to: effectiveMaxDate },
+    },
+    period_requested: days,
+    period_actual: actualDays,
+    has_limited_data: actualDays < days,
   };
 }
 

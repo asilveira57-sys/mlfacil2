@@ -26,6 +26,29 @@ export interface SellerItem {
   visits?: number;
   quantity?: number;
   revenue?: number;
+  conversion_rate?: number;
+}
+
+export interface PerformanceItem {
+  item_id: string;
+  title: string;
+  thumbnail: string | null;
+  visits: number;
+  quantity: number;
+  revenue: number;
+  conversion_rate: number;
+}
+
+export interface PerformanceData {
+  items: PerformanceItem[];
+  data_range: {
+    visits: { from: string; to: string };
+    sales: { from: string; to: string };
+    effective: { from: string; to: string };
+  };
+  period_requested: number;
+  period_actual: number;
+  has_limited_data: boolean;
 }
 
 export interface TrendAlert {
@@ -176,6 +199,19 @@ export function useSellerTopSold(sellerId: string | null, days: number = 7) {
     ),
     enabled: !!sellerId,
     staleTime: 0, // Disable stale time to ensure fresh data
+  });
+}
+
+export function useSellerPerformance(sellerId: string | null, days: number = 7) {
+  console.log('[useTrendsApi] useSellerPerformance called with days:', days);
+  return useQuery({
+    queryKey: ['trends', 'seller', 'performance', sellerId, days],
+    queryFn: () => callTrendsApi<PerformanceData>(
+      'seller/performance',
+      { seller_id: sellerId!, days: String(days) }
+    ),
+    enabled: !!sellerId,
+    staleTime: 0,
   });
 }
 
