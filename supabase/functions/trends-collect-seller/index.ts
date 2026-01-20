@@ -402,15 +402,24 @@ async function collectItemVisits(
         }
 
         const data = await response.json();
-        const totalVisits = data.total_visits || 0;
-
-        visitsToUpsert.push({
-          user_id: userId,
-          seller_id: sellerId,
-          item_id: itemId,
-          visit_date: today,
-          visits_count: totalVisits,
-        });
+        
+        // Parse daily breakdown from results array instead of using total
+        if (data.results && Array.isArray(data.results)) {
+          for (const dayData of data.results) {
+            const visitDate = dayData.date?.split('T')[0];
+            const dailyVisits = dayData.total || 0;
+            
+            if (visitDate && dailyVisits >= 0) {
+              visitsToUpsert.push({
+                user_id: userId,
+                seller_id: sellerId,
+                item_id: itemId,
+                visit_date: visitDate,
+                visits_count: dailyVisits,
+              });
+            }
+          }
+        }
       } catch (error) {
         console.error(`[trends-collect-seller] Error collecting visits for ${itemId}:`, error);
       }
