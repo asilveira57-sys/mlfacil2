@@ -152,11 +152,12 @@ async function aggregateBillingData(supabase: any, sellerId: string, orderIds: s
   const billingByShipment = new Map<string, { shipping: number; adjustments: number }>();
 
   // Paginated fetch for order billing
-  const numericOrderIds = orderIds.map(id => parseInt(id)).filter(id => !isNaN(id));
-  if (numericOrderIds.length > 0) {
+  // FIX: Use string matching to avoid BigInt precision loss with parseInt()
+  const validOrderIds = orderIds.filter(id => /^\d+$/.test(id));
+  if (validOrderIds.length > 0) {
     // Process in chunks to avoid query size limits
-    for (let i = 0; i < numericOrderIds.length; i += 100) {
-      const chunk = numericOrderIds.slice(i, i + 100);
+    for (let i = 0; i < validOrderIds.length; i += 100) {
+      const chunk = validOrderIds.slice(i, i + 100);
       let offset = 0;
       while (true) {
         const { data, error } = await supabase
@@ -183,11 +184,11 @@ async function aggregateBillingData(supabase: any, sellerId: string, orderIds: s
   }
 
   // Paginated fetch for shipment billing (entries without order_id)
-  const validShipmentIds = shipmentIds.filter((s): s is string => s !== null);
-  const numericShipmentIds = validShipmentIds.map(id => parseInt(id)).filter(id => !isNaN(id));
-  if (numericShipmentIds.length > 0) {
-    for (let i = 0; i < numericShipmentIds.length; i += 100) {
-      const chunk = numericShipmentIds.slice(i, i + 100);
+  // FIX: Use string matching to avoid BigInt precision loss with parseInt()
+  const validShipmentIds = shipmentIds.filter((s): s is string => s !== null && /^\d+$/.test(s));
+  if (validShipmentIds.length > 0) {
+    for (let i = 0; i < validShipmentIds.length; i += 100) {
+      const chunk = validShipmentIds.slice(i, i + 100);
       let offset = 0;
       while (true) {
         const { data, error } = await supabase
@@ -322,6 +323,11 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
     // FIX: Consider "has billing" if ANY movement exists, even if fee_ml sums to 0
     const hasBillingMovements = billing && (billing.fee_ml !== 0 || billing.shipping !== 0 || billing.installments !== 0 || billing.adjustments !== 0);
     
+    // FIX: For old orders (>7 days) without billing, assume no charges instead of leaving pending
+    const ORDER_AGE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+    const orderAge = order.created_at_meli ? Date.now() - new Date(order.created_at_meli).getTime() : 0;
+    const isOldOrder = orderAge > ORDER_AGE_THRESHOLD_MS;
+    
     if (hasBillingMovements) {
       feeML = billing.fee_ml;
       feeMLSource = "billing";
@@ -329,6 +335,11 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
       installmentsCost = billing.installments;
       adjustments = billing.adjustments;
       sourceRefs.push("billing:order");
+      updatedCount++;
+    } else if (isOldOrder) {
+      // Old order with no billing data - assume no marketplace charges (e.g., pickup, free shipping)
+      feeMLSource = "no_charges";
+      sourceRefs.push("billing:no_charges_assumed");
       updatedCount++;
     } else {
       feeMLSource = "pending";
@@ -395,12 +406,12 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
       installments_cost: installmentsCost, 
       adjustments: adjustments, 
       total_marketplace_cost: totalMarketplaceCost, 
-      has_real_financial: feeMLSource === "billing", 
+      has_real_financial: feeMLSource === "billing" || feeMLSource === "no_charges", 
       has_real_cost: false, 
       source_refs: { refs: sourceRefs }, 
       real_cost_synced_at: new Date().toISOString(), 
       calculated_at: new Date().toISOString(), 
-      status: feeMLSource === "billing" ? "calculated" : "pending",
+      status: (feeMLSource === "billing" || feeMLSource === "no_charges") ? "calculated" : "pending",
       commission_cost: commissionCost,
       missing_fields: missingFields,
       // FIXED: Update legacy fields
