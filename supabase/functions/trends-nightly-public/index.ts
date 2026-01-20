@@ -733,6 +733,7 @@ async function collectHighlights(
   // 3) Enrich items in batch
   const enrichedItems: any[] = [];
   let itemsEnriched = 0;
+  const failedItemIds: string[] = [];
 
   if (items.length > 0) {
     const itemIds = items.map((i) => i.id).join(',');
@@ -750,54 +751,109 @@ async function collectHighlights(
         for (const entry of batchData || []) {
           if (entry?.code === 200 && entry?.body?.id) {
             bodyMap.set(entry.body.id, entry.body);
+          } else if (entry?.body?.id) {
+            failedItemIds.push(entry.body.id);
+          }
+        }
+        
+        // Track items not in response
+        for (const item of items) {
+          if (!bodyMap.has(item.id) && !failedItemIds.includes(item.id)) {
+            failedItemIds.push(item.id);
           }
         }
 
         for (const item of items) {
           const body = bodyMap.get(item.id);
-          const price = body?.price || null;
-          const soldQty = body?.sold_quantity || null;
-          const estimatedRevenue = (price && soldQty) ? price * soldQty : null;
-          
-          enrichedItems.push({
-            item_id: item.id,
-            entity_type: 'ITEM',
-            product_id: null,
-            rank: item.rank,
-            title: body?.title || (item.unknownType ? `[${item.unknownType}] ${item.id}` : item.id),
-            thumbnail: body?.thumbnail || null,
-            price,
-            sold_quantity: soldQty,
-            permalink: body?.permalink || null,
-            estimated_revenue: estimatedRevenue,
-          });
-          if (body?.title) itemsEnriched++;
+          if (body) {
+            const price = body?.price || null;
+            const soldQty = body?.sold_quantity || null;
+            const estimatedRevenue = (price && soldQty) ? price * soldQty : null;
+            
+            enrichedItems.push({
+              item_id: item.id,
+              entity_type: 'ITEM',
+              product_id: null,
+              rank: item.rank,
+              title: body?.title || (item.unknownType ? `[${item.unknownType}] ${item.id}` : item.id),
+              thumbnail: body?.thumbnail || null,
+              price,
+              sold_quantity: soldQty,
+              permalink: body?.permalink || null,
+              estimated_revenue: estimatedRevenue,
+            });
+            if (body?.title) itemsEnriched++;
+          }
         }
       } else {
-        for (const item of items) {
-          enrichedItems.push({
-            item_id: item.id,
-            entity_type: 'ITEM',
-            product_id: null,
-            rank: item.rank,
-            title: item.unknownType ? `[${item.unknownType}] ${item.id}` : item.id,
-            thumbnail: null,
-            price: null,
-            sold_quantity: null,
-            permalink: null,
-            estimated_revenue: null,
-          });
-        }
+        // All failed - add to failedItemIds
+        failedItemIds.push(...items.map((i) => i.id));
       }
     } catch (err) {
       console.error(`${prefix} batch items error:`, err);
-      for (const item of items) {
+      failedItemIds.push(...items.map((i) => i.id));
+    }
+  }
+  
+  // Try to enrich failed ITEMs as PRODUCTs (some highlights return PRODUCT IDs with type=ITEM)
+  console.log(`${prefix} failedItemIds=${failedItemIds.length}`);
+  for (const itemId of failedItemIds) {
+    const item = items.find((i) => i.id === itemId);
+    if (!item) continue;
+    
+    try {
+      const productUrl = `https://api.mercadolibre.com/products/${itemId}`;
+      const productRes = await fetch(productUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      
+      if (productRes.ok) {
+        const productData = await productRes.json();
+        console.log(`${prefix} item ${itemId} is actually a PRODUCT`);
+        
+        let price: number | null = null;
+        let soldQuantity: number | null = null;
+        let permalink: string | null = null;
+        let thumbnail = productData.pictures?.[0]?.url || null;
+        
+        // Try to get representative item for price/sold_quantity
+        const buyBoxItemId = productData.buy_box_winner?.item_id;
+        if (buyBoxItemId) {
+          price = productData.buy_box_winner.price || null;
+          await sleep(100);
+          
+          const itemRes = await fetch(`https://api.mercadolibre.com/items/${buyBoxItemId}`, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          if (itemRes.ok) {
+            const itemData = await itemRes.json();
+            soldQuantity = itemData.sold_quantity ?? null;
+            permalink = itemData.permalink ?? null;
+            if (!thumbnail) thumbnail = itemData.thumbnail ?? null;
+          }
+        }
+        
         enrichedItems.push({
-          item_id: item.id,
+          item_id: itemId,
+          entity_type: 'PRODUCT',
+          product_id: itemId,
+          rank: item.rank,
+          title: productData.name || productData.title || `[Catálogo] ${itemId}`,
+          thumbnail,
+          price,
+          sold_quantity: soldQuantity,
+          permalink,
+          estimated_revenue: (price && soldQuantity) ? price * soldQuantity : null,
+        });
+        itemsEnriched++;
+      } else {
+        // Fallback placeholder
+        enrichedItems.push({
+          item_id: itemId,
           entity_type: 'ITEM',
           product_id: null,
           rank: item.rank,
-          title: item.id,
+          title: item.unknownType ? `[${item.unknownType}] ${itemId}` : itemId,
           thumbnail: null,
           price: null,
           sold_quantity: null,
@@ -805,6 +861,21 @@ async function collectHighlights(
           estimated_revenue: null,
         });
       }
+      await sleep(100);
+    } catch (err) {
+      console.warn(`${prefix} failed to enrich ${itemId} as product:`, err);
+      enrichedItems.push({
+        item_id: itemId,
+        entity_type: 'ITEM',
+        product_id: null,
+        rank: item.rank,
+        title: item.unknownType ? `[${item.unknownType}] ${itemId}` : itemId,
+        thumbnail: null,
+        price: null,
+        sold_quantity: null,
+        permalink: null,
+        estimated_revenue: null,
+      });
     }
   }
 
@@ -893,6 +964,19 @@ async function collectHighlights(
 
   // Re-sort by rank
   enrichedItems.sort((a, b) => a.rank - b.rank);
+  
+  // Check enrichment quality - if >70% have no price, use search fallback
+  const itemsWithPrice = enrichedItems.filter((i: any) => i.price !== null);
+  console.log(`${prefix} items with price=${itemsWithPrice.length}/${enrichedItems.length}`);
+  
+  if (enrichedItems.length > 0 && itemsWithPrice.length < enrichedItems.length * 0.3) {
+    console.log(`${prefix} low enrichment quality, trying search fallback`);
+    const searchResult = await collectHighlightsViaSearch(supabase, siteId, categoryId, today, accessToken);
+    if (searchResult.success && searchResult.itemsEnriched > itemsWithPrice.length) {
+      console.log(`${prefix} search fallback provided better data`);
+      return searchResult;
+    }
+  }
 
   // 5) Save to database
   return await saveHighlightsSnapshot(supabase, siteId, categoryId, today, enrichedItems, itemsEnriched);
