@@ -154,14 +154,17 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
 
         {/* Top Visited */}
         <TabsContent value="visited">
-          <Card>
-            <CardHeader>
+          <Card className="border-blue-500/20">
+            <CardHeader className="bg-blue-500/5">
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Eye className="h-5 w-5 text-blue-500" />
                 Produtos Mais Visitados ({periodDays}d)
               </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Ranking por número de visualizações no período
+              </p>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-4">
               {visitedLoading ? (
                 <div className="space-y-3">
                   {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} className="h-16 w-full" />)}
@@ -172,10 +175,10 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
                     {topVisited.items.map((item, idx) => (
                       <div 
                         key={item.item_id} 
-                        className="flex items-center gap-4 p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors cursor-pointer"
+                        className="flex items-center gap-4 p-3 bg-blue-500/5 rounded-lg hover:bg-blue-500/10 transition-colors cursor-pointer border border-blue-500/10"
                         onClick={() => handleItemClick(item)}
                       >
-                        <span className="text-2xl font-bold text-muted-foreground w-8 text-center">
+                        <span className="text-2xl font-bold text-blue-500 w-8 text-center">
                           {idx + 1}
                         </span>
                         {item.thumbnail && (
@@ -190,9 +193,12 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
                           <p className="text-sm text-muted-foreground">{item.item_id}</p>
                         </div>
                         <div className="flex items-center gap-3">
-                          <Badge variant="secondary" className="text-lg px-3 py-1">
-                            {item.visits?.toLocaleString('pt-BR')} visitas
-                          </Badge>
+                          <div className="flex items-center gap-2 bg-blue-500/10 px-3 py-1.5 rounded-lg">
+                            <Eye className="h-4 w-4 text-blue-500" />
+                            <span className="font-bold text-blue-600 dark:text-blue-400">
+                              {item.visits?.toLocaleString('pt-BR')}
+                            </span>
+                          </div>
                           <a
                             href={`https://produto.mercadolivre.com.br/${item.item_id.replace(/^(MLB)(\d+)$/, '$1-$2')}`}
                             target="_blank"
@@ -220,14 +226,17 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
 
         {/* Top Sold */}
         <TabsContent value="sold">
-          <Card>
-            <CardHeader>
+          <Card className="border-green-500/20">
+            <CardHeader className="bg-green-500/5">
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Package className="h-5 w-5 text-green-500" />
                 Produtos Mais Vendidos ({periodDays}d)
               </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Ranking por quantidade vendida e receita gerada
+              </p>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-4">
               {soldLoading ? (
                 <div className="space-y-3">
                   {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} className="h-16 w-full" />)}
@@ -238,10 +247,10 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
                     {topSold.items.map((item, idx) => (
                       <div 
                         key={item.item_id} 
-                        className="flex items-center gap-4 p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors cursor-pointer"
+                        className="flex items-center gap-4 p-3 bg-green-500/5 rounded-lg hover:bg-green-500/10 transition-colors cursor-pointer border border-green-500/10"
                         onClick={() => handleItemClick(item)}
                       >
-                        <span className="text-2xl font-bold text-muted-foreground w-8 text-center">
+                        <span className="text-2xl font-bold text-green-500 w-8 text-center">
                           {idx + 1}
                         </span>
                         {item.thumbnail && (
@@ -256,14 +265,17 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
                           <p className="text-sm text-muted-foreground">{item.item_id}</p>
                         </div>
                         <div className="flex items-center gap-3">
-                          <div className="text-right">
-                            <Badge variant="default" className="text-lg px-3 py-1">
-                              {item.quantity} vendas
-                            </Badge>
+                          <div className="flex flex-col items-end gap-1">
+                            <div className="flex items-center gap-2 bg-green-500/10 px-3 py-1.5 rounded-lg">
+                              <Package className="h-4 w-4 text-green-500" />
+                              <span className="font-bold text-green-600 dark:text-green-400">
+                                {item.quantity} un
+                              </span>
+                            </div>
                             {item.revenue !== undefined && (
-                              <p className="text-sm text-muted-foreground mt-1">
+                              <span className="text-sm font-medium text-green-600 dark:text-green-400">
                                 R$ {item.revenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                              </p>
+                              </span>
                             )}
                           </div>
                           <a
