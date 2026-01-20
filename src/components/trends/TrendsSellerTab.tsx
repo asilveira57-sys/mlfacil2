@@ -163,6 +163,24 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
               <p className="text-sm text-muted-foreground">
                 Ranking por número de visualizações no período
               </p>
+              {topVisited?.data_range && (
+                <div className="mt-2 text-xs text-muted-foreground flex items-center gap-1">
+                  <span>Dados disponíveis: {new Date(topVisited.data_range.from).toLocaleDateString('pt-BR')} - {new Date(topVisited.data_range.to).toLocaleDateString('pt-BR')}</span>
+                  {(() => {
+                    const fromDate = new Date(topVisited.data_range.from);
+                    const toDate = new Date(topVisited.data_range.to);
+                    const actualDays = Math.ceil((toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                    if (actualDays < periodDays) {
+                      return (
+                        <Badge variant="outline" className="ml-2 text-xs bg-amber-500/10 text-amber-600 border-amber-500/30">
+                          Apenas {actualDays} dias de dados
+                        </Badge>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+              )}
             </CardHeader>
             <CardContent className="pt-4">
               {visitedLoading ? (
@@ -235,6 +253,24 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
               <p className="text-sm text-muted-foreground">
                 Ranking por quantidade vendida e receita gerada
               </p>
+              {topSold?.data_range && (
+                <div className="mt-2 text-xs text-muted-foreground flex items-center gap-1">
+                  <span>Dados disponíveis: {new Date(topSold.data_range.from).toLocaleDateString('pt-BR')} - {new Date(topSold.data_range.to).toLocaleDateString('pt-BR')}</span>
+                  {(() => {
+                    const fromDate = new Date(topSold.data_range.from);
+                    const toDate = new Date(topSold.data_range.to);
+                    const actualDays = Math.ceil((toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                    if (actualDays < periodDays) {
+                      return (
+                        <Badge variant="outline" className="ml-2 text-xs bg-amber-500/10 text-amber-600 border-amber-500/30">
+                          Apenas {actualDays} dias de dados
+                        </Badge>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+              )}
             </CardHeader>
             <CardContent className="pt-4">
               {soldLoading ? (
