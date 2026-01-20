@@ -946,7 +946,7 @@ async function getSummary(supabase: any, userId: string, params: Record<string, 
     .select('revenue_total, cost_total, profit_total, margin_percent, status, missing_cost_items_count')
     .eq('seller_id', sellerId)
     .eq('user_id', userId)
-    .gte('calculated_at', dateFrom.toISOString());
+    .gte('created_at_meli', dateFrom.toISOString());
 
   const data = breakdowns || [];
   const totalRevenue = data.reduce((sum: number, b: any) => sum + Number(b.revenue_total), 0);
