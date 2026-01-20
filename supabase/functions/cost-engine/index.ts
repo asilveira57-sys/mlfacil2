@@ -367,6 +367,8 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
     query = query.eq('fee_ml_source', 'billing');
   } else if (billingFilter === 'pending') {
     query = query.eq('fee_ml_source', 'pending');
+  } else if (billingFilter === 'no_charges') {
+    query = query.eq('fee_ml_source', 'no_charges');
   }
 
   // Filter by e-commerce cost (cost_other)

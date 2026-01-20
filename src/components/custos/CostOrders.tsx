@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Search, AlertCircle, TrendingUp, TrendingDown, RefreshCw, CheckCircle2, DollarSign, Save, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Search, AlertCircle, TrendingUp, TrendingDown, RefreshCw, CheckCircle2, DollarSign, Save, ArrowUpDown, ArrowUp, ArrowDown, Package } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -43,6 +43,7 @@ interface OrderCost {
   profit_net: number;
   margin_net: number;
   missing_fields: string[];
+  fee_ml_source: string | null;
 }
 
 interface OrderDetail {
@@ -427,6 +428,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
               <SelectContent>
                 <SelectItem value="all">Taxa: Todas</SelectItem>
                 <SelectItem value="billing">Com taxa real</SelectItem>
+                <SelectItem value="no_charges">Sem taxas (pickup)</SelectItem>
                 <SelectItem value="pending">Pendente</SelectItem>
               </SelectContent>
             </Select>
@@ -630,13 +632,19 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                               {order.margin_percent?.toFixed(1) || '0.0'}%
                             </TableCell>
                           <TableCell>
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-1 flex-wrap">
                               {order.status === 'ok' ? (
                                 <Badge variant="outline" className="text-green-600 border-green-600">OK</Badge>
                               ) : (
                                 <Badge variant="destructive" className="flex items-center gap-1 w-fit">
                                   <AlertCircle className="h-3 w-3" />
                                   {order.missing_cost_items_count} s/ custo
+                                </Badge>
+                              )}
+                              {order.fee_ml_source === 'no_charges' && (
+                                <Badge variant="secondary" className="flex items-center gap-1 text-purple-600 border-purple-300 bg-purple-50" title="Pedido sem taxas de marketplace (ex: pickup, frete grátis absorvido, promoção)">
+                                  <Package className="h-3 w-3" />
+                                  Sem Taxas
                                 </Badge>
                               )}
                               {hasRealData(order) && (
