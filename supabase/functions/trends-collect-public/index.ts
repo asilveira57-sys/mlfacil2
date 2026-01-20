@@ -606,43 +606,30 @@ async function collectHighlights(
 
     console.log(`${diagPrefix} final items before fallback count=${items.length}`);
     
-    // Check enrichment quality - if >50% have no price, use search fallback
+    // Check enrichment quality - if >70% have no price, use search as primary source
     const itemsWithPrice = items.filter((i: any) => i.price !== null);
     console.log(`${diagPrefix} items with price=${itemsWithPrice.length}/${items.length}`);
     
     if (items.length > 0 && itemsWithPrice.length < items.length * 0.3) {
-      console.log(`${diagPrefix} low enrichment quality, using search fallback`);
+      console.log(`${diagPrefix} low enrichment quality (<30% with price), using search as primary`);
       const searchItems = await fetchBestSellersViaSearch(siteId, categoryId, accessToken);
-      if (searchItems.length > 0) {
-        // Merge: prefer search data (has price/qty) but keep ranking from highlights
-        const searchMap = new Map(searchItems.map((s: any) => [s.item_id, s]));
-        items = items.map((it: any, idx: number) => {
-          const searchItem = searchMap.get(it.item_id);
-          if (searchItem && searchItem.price) {
-            return {
-              ...it,
-              title: searchItem.title || it.title,
-              thumbnail: searchItem.thumbnail || it.thumbnail,
-              price: searchItem.price,
-              sold_quantity: searchItem.sold_quantity,
-              permalink: searchItem.permalink || it.permalink,
-              estimated_revenue: searchItem.price && searchItem.sold_quantity ? searchItem.price * searchItem.sold_quantity : null,
-            };
-          }
-          return it;
-        });
-        
-        // If still low quality, just use search results directly
-        const updatedWithPrice = items.filter((i: any) => i.price !== null);
-        if (updatedWithPrice.length < items.length * 0.3 && searchItems.length >= 10) {
-          console.log(`${diagPrefix} replacing with search results entirely`);
-          items = searchItems.map((s: any, idx: number) => ({
-            ...s,
-            rank: idx + 1,
-            entity_type: 'ITEM',
-            product_id: null,
-          }));
-        }
+      console.log(`${diagPrefix} search returned ${searchItems.length} items`);
+      
+      if (searchItems.length >= 5) {
+        // Use search results directly - they have reliable price/sold_quantity
+        items = searchItems.map((s: any, idx: number) => ({
+          item_id: s.item_id,
+          rank: idx + 1,
+          title: s.title,
+          thumbnail: s.thumbnail,
+          price: s.price,
+          sold_quantity: s.sold_quantity,
+          permalink: s.permalink,
+          entity_type: 'ITEM',
+          product_id: null,
+          estimated_revenue: (s.price && s.sold_quantity) ? s.price * s.sold_quantity : null,
+        }));
+        console.log(`${diagPrefix} replaced with search results: ${items.length} items`);
       }
     }
 
