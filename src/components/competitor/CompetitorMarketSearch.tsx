@@ -105,84 +105,42 @@ function calculateStats(prices: number[]): Partial<MarketSnapshot> {
   };
 }
 
-async function fetchFromMLPublic(
+async function fetchViaProxy(
+  sellerId: string,
   queryTerm: string,
   categoryId: string,
   condition: string,
-  shipping: string
+  shipping: string,
+  sessionToken: string
 ): Promise<MarketSnapshot> {
-  const params = new URLSearchParams();
-  if (queryTerm) params.set('q', queryTerm);
-  if (categoryId) params.set('category', categoryId);
-  params.set('limit', '50');
+  const filters: any = {};
+  if (condition && condition !== 'all') filters.condition = condition;
+  if (shipping && shipping !== 'all') filters.shipping = shipping;
 
-  if (condition && condition !== 'all') {
-    params.set('ITEM_CONDITION', condition);
-  }
-  if (shipping === 'full') {
-    params.set('shipping', 'fulfillment');
-  }
-
-  const url = `https://api.mercadolibre.com/sites/MLB/search?${params.toString()}`;
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`ML API error: ${response.status}`);
-  }
+  const response = await fetch(
+    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/competitor-engine/market/proxy-search`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${sessionToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        seller_id: sellerId,
+        query_term: queryTerm.trim() || undefined,
+        category_id: categoryId.trim() || undefined,
+        filters: Object.keys(filters).length > 0 ? filters : undefined,
+      }),
+    }
+  );
 
   const data = await response.json();
-  const results = data.results || [];
-  const totalResults = data.paging?.total || results.length;
+  
+  if (data.error) {
+    throw new Error(data.message || `Proxy error: ${response.status}`);
+  }
 
-  // Extract prices
-  const prices = results.map((r: any) => r.price).filter((p: number) => p > 0);
-  const priceStats = calculateStats(prices);
-
-  // Condition counts
-  const conditionCounts: Record<string, number> = {};
-  results.forEach((r: any) => {
-    const cond = r.condition || 'unknown';
-    conditionCounts[cond] = (conditionCounts[cond] || 0) + 1;
-  });
-
-  // Shipping counts
-  const shippingCounts: Record<string, number> = { free: 0, full: 0, paid: 0 };
-  results.forEach((r: any) => {
-    if (r.shipping?.logistic_type === 'fulfillment') {
-      shippingCounts.full++;
-    } else if (r.shipping?.free_shipping) {
-      shippingCounts.free++;
-    } else {
-      shippingCounts.paid++;
-    }
-  });
-
-  // Top competitors
-  const topCompetitors = results.slice(0, 10).map((r: any) => ({
-    item_id: r.id,
-    title: r.title,
-    price: r.price,
-    permalink: r.permalink,
-    seller_id: r.seller?.id,
-    seller_nickname: r.seller?.nickname,
-    condition: r.condition,
-    sold_quantity: r.sold_quantity || 0,
-    shipping_free: r.shipping?.free_shipping || false,
-    shipping_full: r.shipping?.logistic_type === 'fulfillment',
-    thumbnail: r.thumbnail,
-  }));
-
-  return {
-    query_term: queryTerm || null,
-    category_id: categoryId || null,
-    total_results: totalResults,
-    ...priceStats,
-    top_competitors_json: topCompetitors,
-    collected_at: new Date().toISOString(),
-    from_cache: false,
-    condition_counts: conditionCounts,
-    shipping_counts: shippingCounts,
-  } as MarketSnapshot;
+  return data as MarketSnapshot;
 }
 
 export function CompetitorMarketSearch({ sellerId }: CompetitorMarketSearchProps) {
@@ -250,8 +208,8 @@ export function CompetitorMarketSearch({ sellerId }: CompetitorMarketSearchProps
 
       // Check if backend returned ML_FORBIDDEN_SEARCH error
       if (data.error && data.error_code === 'ML_FORBIDDEN_SEARCH') {
-        console.warn('[CompetitorMarketSearch] Backend blocked, trying browser fallback...');
-        await handleBrowserFallback(cacheKey);
+        console.warn('[CompetitorMarketSearch] Backend blocked, trying proxy fallback...');
+        await handleProxyFallback(cacheKey, session.access_token);
         return;
       }
 
@@ -275,9 +233,14 @@ export function CompetitorMarketSearch({ sellerId }: CompetitorMarketSearchProps
     } catch (error: any) {
       console.error('Error searching:', error);
 
-      // Try browser fallback on any error
+      // Try proxy fallback on any error
       try {
-        await handleBrowserFallback(cacheKey);
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          await handleProxyFallback(cacheKey, session.access_token);
+        } else {
+          throw new Error('Sessão expirada');
+        }
       } catch (fallbackError: any) {
         console.error('Fallback also failed:', fallbackError);
         setErrorState(fallbackError.message || 'Erro na pesquisa. Tente novamente.');
@@ -288,10 +251,17 @@ export function CompetitorMarketSearch({ sellerId }: CompetitorMarketSearchProps
     }
   };
 
-  const handleBrowserFallback = async (cacheKey: string) => {
+  const handleProxyFallback = async (cacheKey: string, sessionToken: string) => {
     try {
-      toast.info('Tentando busca alternativa...');
-      const fallbackResult = await fetchFromMLPublic(queryTerm, categoryId, condition, shipping);
+      toast.info('Tentando busca alternativa via proxy...');
+      const fallbackResult = await fetchViaProxy(
+        sellerId,
+        queryTerm,
+        categoryId,
+        condition,
+        shipping,
+        sessionToken
+      );
       setResult(fallbackResult);
       setCompatMode(true);
       setErrorState(null);

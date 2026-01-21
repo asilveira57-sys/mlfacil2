@@ -70,6 +70,9 @@ Deno.serve(async (req) => {
       case 'market/search':
         result = await searchMarket(supabase, user.id, body);
         break;
+      case 'market/proxy-search':
+        result = await proxySearchMarket(supabase, user.id, body);
+        break;
       case 'market/snapshot':
         result = await getMarketSnapshot(supabase, user.id, params);
         break;
@@ -406,49 +409,43 @@ async function searchMarket(supabase: any, userId: string, body: any) {
   searchUrl += params.toString();
   console.log('[competitor-engine] Searching:', searchUrl);
 
-  // NOTE: Mercado Livre's public search endpoints can respond with 403 when called
-  // with certain auth tokens / default runtime user-agent. We'll try without auth
-  // first (public), with a browser-like UA, and fall back to auth if needed.
-  const baseHeaders: Record<string, string> = {
-    accept: 'application/json, text/plain, */*',
-    'accept-language': 'pt-BR,pt;q=0.9,en;q=0.8',
-    // In server runtimes this is allowed; it helps avoid WAF blocks that return 403.
-    'user-agent':
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-    // Some WAF rules expect a browser origin/referer pair.
-    origin: 'https://www.mercadolivre.com.br',
-    referer: 'https://www.mercadolivre.com.br/',
-    pragma: 'no-cache',
-    'cache-control': 'no-cache',
-    'sec-fetch-dest': 'empty',
-    'sec-fetch-mode': 'cors',
-    'sec-fetch-site': 'same-site',
-  };
-
   const requestId = crypto.randomUUID();
   const startTime = Date.now();
   
-  let response = await fetch(searchUrl, { headers: baseHeaders });
-  const publicStatus = response.status;
+  // TRY AUTH FIRST with CLEAN headers (no browser spoofing - avoids ML WAF conflicts)
+  const authHeaders: Record<string, string> = {
+    'Authorization': `Bearer ${account.access_token}`,
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+  };
 
-  // Fall back to tokened request only if public request fails
-  if (!response.ok && account?.access_token) {
-    response = await fetch(searchUrl, {
-      headers: { ...baseHeaders, Authorization: `Bearer ${account.access_token}` },
-    });
+  let response = await fetch(searchUrl, { headers: authHeaders });
+  const authStatus = response.status;
+
+  // Fall back to public request with browser-like headers if auth fails
+  if (!response.ok) {
+    console.log(`[competitor-engine] Auth request failed (${authStatus}), trying public...`);
+    const browserHeaders: Record<string, string> = {
+      'accept': 'application/json, text/plain, */*',
+      'accept-language': 'pt-BR,pt;q=0.9,en;q=0.8',
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+      'origin': 'https://www.mercadolivre.com.br',
+      'referer': 'https://www.mercadolivre.com.br/',
+    };
+    response = await fetch(searchUrl, { headers: browserHeaders });
   }
 
   const elapsedMs = Date.now() - startTime;
-  console.log(`[competitor-engine] Search completed | request_id=${requestId} | term="${query_term}" | filters=${JSON.stringify(filters)} | public_status=${publicStatus} | final_status=${response.status} | elapsed=${elapsedMs}ms`);
+  console.log(`[competitor-engine] Search completed | request_id=${requestId} | term="${query_term}" | filters=${JSON.stringify(filters)} | auth_status=${authStatus} | final_status=${response.status} | elapsed=${elapsedMs}ms`);
 
-  // Handle 403 Forbidden - return structured error for frontend fallback
+  // Handle 403 Forbidden - return structured error for frontend to use proxy fallback
   if (response.status === 403) {
     console.warn(`[competitor-engine] ML returned 403 Forbidden | request_id=${requestId}`);
     return {
       error: true,
       error_code: 'ML_FORBIDDEN_SEARCH',
       httpStatus: 403,
-      message: 'Busca via servidor foi bloqueada pelo Mercado Livre. O front-end pode usar fallback.',
+      message: 'Busca via servidor foi bloqueada pelo Mercado Livre. Use o proxy de busca.',
       request_id: requestId,
       query_term,
       category_id,
@@ -511,6 +508,138 @@ async function searchMarket(supabase: any, userId: string, body: any) {
     .upsert(snapshot, { onConflict: 'seller_id,snapshot_key' });
 
   return { ...snapshot, from_cache: false };
+}
+
+// ================== PROXY SEARCH (for frontend fallback) ==================
+
+async function proxySearchMarket(supabase: any, userId: string, body: any) {
+  const { seller_id, query_term, category_id, filters } = body;
+  
+  if (!seller_id) throw new Error('seller_id is required');
+  if (!query_term && !category_id) throw new Error('query_term or category_id is required');
+
+  // Get ML account for API access
+  const { data: account } = await supabase
+    .from('ml_accounts')
+    .select('access_token')
+    .eq('ml_user_id', seller_id)
+    .eq('user_id', userId)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (!account) throw new Error('ML account not found');
+
+  // Build search URL
+  const params = new URLSearchParams();
+  if (query_term) params.set('q', query_term);
+  if (category_id) params.set('category', category_id);
+  params.set('limit', '50');
+
+  if (filters) {
+    if (filters.condition && filters.condition !== 'all') {
+      params.set('ITEM_CONDITION', filters.condition);
+    }
+    if (filters.shipping === 'full') {
+      params.set('shipping', 'fulfillment');
+    }
+  }
+
+  const searchUrl = `https://api.mercadolibre.com/sites/MLB/search?${params.toString()}`;
+  const requestId = crypto.randomUUID();
+  const startTime = Date.now();
+
+  console.log(`[competitor-engine] Proxy search | request_id=${requestId} | url=${searchUrl}`);
+
+  // Use AUTH with clean headers (most reliable)
+  const response = await fetch(searchUrl, {
+    headers: {
+      'Authorization': `Bearer ${account.access_token}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
+  });
+
+  const elapsedMs = Date.now() - startTime;
+  console.log(`[competitor-engine] Proxy search completed | request_id=${requestId} | status=${response.status} | elapsed=${elapsedMs}ms`);
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`[competitor-engine] Proxy search failed (${response.status}):`, errorText);
+    return {
+      error: true,
+      error_code: response.status === 403 ? 'ML_FORBIDDEN_SEARCH' : 'ML_SEARCH_FAILED',
+      httpStatus: response.status,
+      message: `Proxy search failed: ${response.status}`,
+      request_id: requestId,
+    };
+  }
+
+  const data = await response.json();
+  const results = data.results || [];
+  const totalResults = data.paging?.total || results.length;
+
+  // Calculate price distribution
+  const prices = results.map((r: any) => r.price).filter((p: number) => p > 0).sort((a: number, b: number) => a - b);
+  const priceStats = calculatePricePercentiles(prices);
+
+  // Calculate IQR
+  const p25 = priceStats.p25_price || 0;
+  const p75 = priceStats.p75_price || 0;
+  const iqr = p75 - p25;
+
+  // Condition counts
+  const conditionCounts: Record<string, number> = {};
+  results.forEach((r: any) => {
+    const cond = r.condition || 'unknown';
+    conditionCounts[cond] = (conditionCounts[cond] || 0) + 1;
+  });
+
+  // Shipping counts
+  const shippingCounts: Record<string, number> = { free: 0, full: 0, paid: 0 };
+  results.forEach((r: any) => {
+    if (r.shipping?.logistic_type === 'fulfillment') {
+      shippingCounts.full++;
+    } else if (r.shipping?.free_shipping) {
+      shippingCounts.free++;
+    } else {
+      shippingCounts.paid++;
+    }
+  });
+
+  // Top/bottom prices
+  const top10Prices = prices.slice(-10).reverse();
+  const bottom10Prices = prices.slice(0, 10);
+
+  // Top competitors
+  const topCompetitors = results.slice(0, 10).map((r: any) => ({
+    item_id: r.id,
+    title: r.title,
+    price: r.price,
+    permalink: r.permalink,
+    seller_id: r.seller?.id,
+    seller_nickname: r.seller?.nickname,
+    condition: r.condition,
+    sold_quantity: r.sold_quantity || 0,
+    shipping_free: r.shipping?.free_shipping || false,
+    shipping_full: r.shipping?.logistic_type === 'fulfillment',
+    thumbnail: r.thumbnail,
+  }));
+
+  return {
+    query_term,
+    category_id,
+    total_results: totalResults,
+    ...priceStats,
+    iqr,
+    top_competitors_json: topCompetitors,
+    collected_at: new Date().toISOString(),
+    from_cache: false,
+    condition_counts: conditionCounts,
+    shipping_counts: shippingCounts,
+    top_10_prices: top10Prices,
+    bottom_10_prices: bottom10Prices,
+    request_id: requestId,
+  };
 }
 
 async function getMarketSnapshot(supabase: any, userId: string, params: Record<string, string>) {
