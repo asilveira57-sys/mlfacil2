@@ -425,7 +425,11 @@ async function searchMarket(supabase: any, userId: string, body: any) {
     'sec-fetch-site': 'same-site',
   };
 
+  const requestId = crypto.randomUUID();
+  const startTime = Date.now();
+  
   let response = await fetch(searchUrl, { headers: baseHeaders });
+  const publicStatus = response.status;
 
   // Fall back to tokened request only if public request fails
   if (!response.ok && account?.access_token) {
@@ -434,10 +438,34 @@ async function searchMarket(supabase: any, userId: string, body: any) {
     });
   }
 
+  const elapsedMs = Date.now() - startTime;
+  console.log(`[competitor-engine] Search completed | request_id=${requestId} | term="${query_term}" | filters=${JSON.stringify(filters)} | public_status=${publicStatus} | final_status=${response.status} | elapsed=${elapsedMs}ms`);
+
+  // Handle 403 Forbidden - return structured error for frontend fallback
+  if (response.status === 403) {
+    console.warn(`[competitor-engine] ML returned 403 Forbidden | request_id=${requestId}`);
+    return {
+      error: true,
+      error_code: 'ML_FORBIDDEN_SEARCH',
+      httpStatus: 403,
+      message: 'Busca via servidor foi bloqueada pelo Mercado Livre. O front-end pode usar fallback.',
+      request_id: requestId,
+      query_term,
+      category_id,
+      filters,
+    };
+  }
+
   if (!response.ok) {
     const errorText = await response.text();
     console.error(`[competitor-engine] Search failed (${response.status}):`, errorText);
-    throw new Error(`Failed to search market (${response.status})`);
+    return {
+      error: true,
+      error_code: 'ML_SEARCH_FAILED',
+      httpStatus: response.status,
+      message: `Falha na busca: ${response.status}`,
+      request_id: requestId,
+    };
   }
 
   const data = await response.json();

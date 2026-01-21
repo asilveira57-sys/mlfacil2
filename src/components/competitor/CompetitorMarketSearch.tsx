@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -6,8 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Search, RefreshCw, TrendingUp, TrendingDown, DollarSign } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Search, RefreshCw, DollarSign, AlertTriangle, Info } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface CompetitorMarketSearchProps {
@@ -15,8 +15,8 @@ interface CompetitorMarketSearchProps {
 }
 
 interface MarketSnapshot {
-  id: string;
-  snapshot_key: string;
+  id?: string;
+  snapshot_key?: string;
   query_term: string | null;
   category_id: string | null;
   total_results: number;
@@ -31,6 +31,158 @@ interface MarketSnapshot {
   top_competitors_json: any[];
   collected_at: string;
   from_cache?: boolean;
+  // Extended stats for frontend fallback
+  condition_counts?: Record<string, number>;
+  shipping_counts?: Record<string, number>;
+  bottom_10_prices?: number[];
+  top_10_prices?: number[];
+  iqr?: number;
+}
+
+interface BackendErrorResponse {
+  error: boolean;
+  error_code: string;
+  httpStatus: number;
+  message: string;
+  request_id?: string;
+  query_term?: string;
+  category_id?: string;
+  filters?: any;
+}
+
+// Browser cache for fallback results (10 minutes TTL)
+const searchCache = new Map<string, { data: MarketSnapshot; timestamp: number }>();
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+function getCacheKey(queryTerm: string, categoryId: string, condition: string, shipping: string): string {
+  return `${queryTerm}|${categoryId}|${condition}|${shipping}`;
+}
+
+function calculateStats(prices: number[]): Partial<MarketSnapshot> {
+  if (prices.length === 0) {
+    return {
+      min_price: null,
+      max_price: null,
+      avg_price: null,
+      p10_price: null,
+      p25_price: null,
+      p50_price: null,
+      p75_price: null,
+      p90_price: null,
+      iqr: 0,
+      top_10_prices: [],
+      bottom_10_prices: [],
+    };
+  }
+
+  const sorted = [...prices].sort((a, b) => a - b);
+  const len = sorted.length;
+
+  const percentile = (p: number) => {
+    const idx = (p / 100) * (len - 1);
+    const lower = Math.floor(idx);
+    const upper = Math.ceil(idx);
+    if (lower === upper) return sorted[lower];
+    return sorted[lower] + (sorted[upper] - sorted[lower]) * (idx - lower);
+  };
+
+  const sum = sorted.reduce((a, b) => a + b, 0);
+  const p25 = percentile(25);
+  const p75 = percentile(75);
+
+  return {
+    min_price: sorted[0],
+    max_price: sorted[len - 1],
+    avg_price: sum / len,
+    p10_price: percentile(10),
+    p25_price: p25,
+    p50_price: percentile(50),
+    p75_price: p75,
+    p90_price: percentile(90),
+    iqr: p75 - p25,
+    top_10_prices: sorted.slice(-10).reverse(),
+    bottom_10_prices: sorted.slice(0, 10),
+  };
+}
+
+async function fetchFromMLPublic(
+  queryTerm: string,
+  categoryId: string,
+  condition: string,
+  shipping: string
+): Promise<MarketSnapshot> {
+  const params = new URLSearchParams();
+  if (queryTerm) params.set('q', queryTerm);
+  if (categoryId) params.set('category', categoryId);
+  params.set('limit', '50');
+
+  if (condition && condition !== 'all') {
+    params.set('ITEM_CONDITION', condition);
+  }
+  if (shipping === 'full') {
+    params.set('shipping', 'fulfillment');
+  }
+
+  const url = `https://api.mercadolibre.com/sites/MLB/search?${params.toString()}`;
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`ML API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const results = data.results || [];
+  const totalResults = data.paging?.total || results.length;
+
+  // Extract prices
+  const prices = results.map((r: any) => r.price).filter((p: number) => p > 0);
+  const priceStats = calculateStats(prices);
+
+  // Condition counts
+  const conditionCounts: Record<string, number> = {};
+  results.forEach((r: any) => {
+    const cond = r.condition || 'unknown';
+    conditionCounts[cond] = (conditionCounts[cond] || 0) + 1;
+  });
+
+  // Shipping counts
+  const shippingCounts: Record<string, number> = { free: 0, full: 0, paid: 0 };
+  results.forEach((r: any) => {
+    if (r.shipping?.logistic_type === 'fulfillment') {
+      shippingCounts.full++;
+    } else if (r.shipping?.free_shipping) {
+      shippingCounts.free++;
+    } else {
+      shippingCounts.paid++;
+    }
+  });
+
+  // Top competitors
+  const topCompetitors = results.slice(0, 10).map((r: any) => ({
+    item_id: r.id,
+    title: r.title,
+    price: r.price,
+    permalink: r.permalink,
+    seller_id: r.seller?.id,
+    seller_nickname: r.seller?.nickname,
+    condition: r.condition,
+    sold_quantity: r.sold_quantity || 0,
+    shipping_free: r.shipping?.free_shipping || false,
+    shipping_full: r.shipping?.logistic_type === 'fulfillment',
+    thumbnail: r.thumbnail,
+  }));
+
+  return {
+    query_term: queryTerm || null,
+    category_id: categoryId || null,
+    total_results: totalResults,
+    ...priceStats,
+    top_competitors_json: topCompetitors,
+    collected_at: new Date().toISOString(),
+    from_cache: false,
+    condition_counts: conditionCounts,
+    shipping_counts: shippingCounts,
+  } as MarketSnapshot;
 }
 
 export function CompetitorMarketSearch({ sellerId }: CompetitorMarketSearchProps) {
@@ -40,6 +192,9 @@ export function CompetitorMarketSearch({ sellerId }: CompetitorMarketSearchProps
   const [shipping, setShipping] = useState('all');
   const [searching, setSearching] = useState(false);
   const [result, setResult] = useState<MarketSnapshot | null>(null);
+  const [compatMode, setCompatMode] = useState(false);
+  const [errorState, setErrorState] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const handleSearch = async () => {
     if (!queryTerm.trim() && !categoryId.trim()) {
@@ -47,15 +202,33 @@ export function CompetitorMarketSearch({ sellerId }: CompetitorMarketSearchProps
       return;
     }
 
+    // Check browser cache first
+    const cacheKey = getCacheKey(queryTerm, categoryId, condition, shipping);
+    const cached = searchCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      setResult({ ...cached.data, from_cache: true });
+      setCompatMode(cached.data.condition_counts !== undefined); // was from fallback
+      setErrorState(null);
+      toast.info('Resultado do cache local');
+      return;
+    }
+
     setSearching(true);
+    setErrorState(null);
+    setCompatMode(false);
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
+      if (!session) {
+        toast.error('Sessão expirada');
+        return;
+      }
 
       const filters: any = {};
-      if (condition) filters.condition = condition;
-      if (shipping) filters.shipping = shipping;
+      if (condition && condition !== 'all') filters.condition = condition;
+      if (shipping && shipping !== 'all') filters.shipping = shipping;
 
+      // Try backend first
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/competitor-engine/market/search`,
         {
@@ -73,23 +246,62 @@ export function CompetitorMarketSearch({ sellerId }: CompetitorMarketSearchProps
         }
       );
 
-      if (response.ok) {
-        const data = await response.json();
-        setResult(data);
-        if (data.from_cache) {
-          toast.info('Resultado do cache (ainda válido)');
-        } else {
-          toast.success('Pesquisa concluída');
-        }
-      } else {
-        const error = await response.json();
-        toast.error(error.error || 'Erro na pesquisa');
+      const data = await response.json();
+
+      // Check if backend returned ML_FORBIDDEN_SEARCH error
+      if (data.error && data.error_code === 'ML_FORBIDDEN_SEARCH') {
+        console.warn('[CompetitorMarketSearch] Backend blocked, trying browser fallback...');
+        await handleBrowserFallback(cacheKey);
+        return;
       }
-    } catch (error) {
+
+      // Check for other errors
+      if (data.error) {
+        throw new Error(data.message || 'Erro na pesquisa');
+      }
+
+      // Success from backend
+      setResult(data);
+      setCompatMode(false);
+
+      // Cache the result
+      searchCache.set(cacheKey, { data, timestamp: Date.now() });
+
+      if (data.from_cache) {
+        toast.info('Resultado do cache (ainda válido)');
+      } else {
+        toast.success('Pesquisa concluída');
+      }
+    } catch (error: any) {
       console.error('Error searching:', error);
-      toast.error('Erro ao pesquisar mercado');
+
+      // Try browser fallback on any error
+      try {
+        await handleBrowserFallback(cacheKey);
+      } catch (fallbackError: any) {
+        console.error('Fallback also failed:', fallbackError);
+        setErrorState(fallbackError.message || 'Erro na pesquisa. Tente novamente.');
+        toast.error('Falha na pesquisa');
+      }
     } finally {
       setSearching(false);
+    }
+  };
+
+  const handleBrowserFallback = async (cacheKey: string) => {
+    try {
+      toast.info('Tentando busca alternativa...');
+      const fallbackResult = await fetchFromMLPublic(queryTerm, categoryId, condition, shipping);
+      setResult(fallbackResult);
+      setCompatMode(true);
+      setErrorState(null);
+
+      // Cache the fallback result
+      searchCache.set(cacheKey, { data: fallbackResult, timestamp: Date.now() });
+
+      toast.success('Busca concluída (modo compatível)');
+    } catch (err: any) {
+      throw err;
     }
   };
 
@@ -109,6 +321,16 @@ export function CompetitorMarketSearch({ sellerId }: CompetitorMarketSearchProps
 
   return (
     <div className="space-y-6">
+      {/* Compat Mode Banner */}
+      {compatMode && result && (
+        <Alert className="bg-amber-500/10 border-amber-500/30">
+          <Info className="h-4 w-4 text-amber-500" />
+          <AlertDescription className="text-amber-700 dark:text-amber-400">
+            Busca em modo compatível — os dados foram obtidos diretamente do Mercado Livre.
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Search Form */}
       <Card>
         <CardHeader>
@@ -127,6 +349,7 @@ export function CompetitorMarketSearch({ sellerId }: CompetitorMarketSearchProps
                 value={queryTerm}
                 onChange={(e) => setQueryTerm(e.target.value)}
                 className="mt-1"
+                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
               />
             </div>
             <div>
@@ -177,15 +400,35 @@ export function CompetitorMarketSearch({ sellerId }: CompetitorMarketSearchProps
         </CardContent>
       </Card>
 
+      {/* Error State */}
+      {errorState && (
+        <Card className="border-destructive/50">
+          <CardContent className="p-6 text-center">
+            <AlertTriangle className="h-12 w-12 mx-auto mb-4 text-destructive" />
+            <h3 className="font-semibold mb-2">Erro na pesquisa</h3>
+            <p className="text-muted-foreground mb-4">{errorState}</p>
+            <Button onClick={handleSearch} variant="outline">
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Tentar novamente
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Results */}
-      {result && (
+      {result && !errorState && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
               <span>Resultado da Pesquisa</span>
-              {result.from_cache && (
-                <Badge variant="outline">Cache</Badge>
-              )}
+              <div className="flex gap-2">
+                {result.from_cache && (
+                  <Badge variant="outline">Cache</Badge>
+                )}
+                {compatMode && (
+                  <Badge className="bg-amber-500/10 text-amber-600 border-amber-500/30">Modo Compatível</Badge>
+                )}
+              </div>
             </CardTitle>
             <CardDescription>
               {result.query_term && `Termo: "${result.query_term}"`}
@@ -224,6 +467,60 @@ export function CompetitorMarketSearch({ sellerId }: CompetitorMarketSearchProps
                 </div>
               </div>
             </div>
+
+            {/* Extended Stats (from fallback) */}
+            {result.iqr !== undefined && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="p-3 bg-muted/50 rounded-lg text-center">
+                  <p className="text-xs text-muted-foreground">Média</p>
+                  <p className="font-semibold">{formatCurrency(result.avg_price)}</p>
+                </div>
+                <div className="p-3 bg-muted/50 rounded-lg text-center">
+                  <p className="text-xs text-muted-foreground">IQR (P75-P25)</p>
+                  <p className="font-semibold">{formatCurrency(result.iqr)}</p>
+                </div>
+                <div className="p-3 bg-muted/50 rounded-lg text-center">
+                  <p className="text-xs text-muted-foreground">P10</p>
+                  <p className="font-semibold">{formatCurrency(result.p10_price)}</p>
+                </div>
+                <div className="p-3 bg-muted/50 rounded-lg text-center">
+                  <p className="text-xs text-muted-foreground">P90</p>
+                  <p className="font-semibold">{formatCurrency(result.p90_price)}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Condition & Shipping Counts (from fallback) */}
+            {result.condition_counts && (
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="p-4 bg-muted/30 rounded-lg">
+                  <p className="text-sm font-medium mb-2">Por Condição</p>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(result.condition_counts).map(([cond, count]) => (
+                      <Badge key={cond} variant="outline">
+                        {cond === 'new' ? 'Novo' : cond === 'used' ? 'Usado' : cond}: {count}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+                {result.shipping_counts && (
+                  <div className="p-4 bg-muted/30 rounded-lg">
+                    <p className="text-sm font-medium mb-2">Por Tipo de Envio</p>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge className="bg-green-500/10 text-green-600 border-green-500/30">
+                        Full: {result.shipping_counts.full}
+                      </Badge>
+                      <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/30">
+                        Frete Grátis: {result.shipping_counts.free}
+                      </Badge>
+                      <Badge variant="outline">
+                        Pago: {result.shipping_counts.paid}
+                      </Badge>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Price Range Bar */}
             {result.min_price && result.max_price && result.p50_price && (
@@ -276,6 +573,32 @@ export function CompetitorMarketSearch({ sellerId }: CompetitorMarketSearchProps
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* Bottom/Top 10 Prices (from fallback) */}
+            {result.bottom_10_prices && result.bottom_10_prices.length > 0 && (
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="p-4 bg-green-500/5 border border-green-500/20 rounded-lg">
+                  <p className="text-sm font-medium mb-2 text-green-700 dark:text-green-400">10 Menores Preços</p>
+                  <div className="flex flex-wrap gap-1">
+                    {result.bottom_10_prices.map((price, idx) => (
+                      <Badge key={idx} variant="outline" className="text-xs">
+                        {formatCurrency(price)}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+                <div className="p-4 bg-red-500/5 border border-red-500/20 rounded-lg">
+                  <p className="text-sm font-medium mb-2 text-red-700 dark:text-red-400">10 Maiores Preços</p>
+                  <div className="flex flex-wrap gap-1">
+                    {result.top_10_prices?.map((price, idx) => (
+                      <Badge key={idx} variant="outline" className="text-xs">
+                        {formatCurrency(price)}
+                      </Badge>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
