@@ -392,8 +392,13 @@ async function searchMarket(supabase: any, userId: string, body: any) {
 
   // Apply filters
   if (filters) {
-    if (filters.condition) params.set('ITEM_CONDITION', filters.condition);
-    if (filters.shipping === 'full') params.set('shipping', 'fulfillment');
+    // Only add ITEM_CONDITION if it's a valid value (not 'all')
+    if (filters.condition && filters.condition !== 'all') {
+      params.set('ITEM_CONDITION', filters.condition);
+    }
+    if (filters.shipping && filters.shipping !== 'all' && filters.shipping === 'full') {
+      params.set('shipping', 'fulfillment');
+    }
     if (filters.price_min) params.set('price', `${filters.price_min}-*`);
     if (filters.price_max) params.set('price', `*-${filters.price_max}`);
   }
