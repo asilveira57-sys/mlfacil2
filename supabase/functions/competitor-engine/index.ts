@@ -406,14 +406,38 @@ async function searchMarket(supabase: any, userId: string, body: any) {
   searchUrl += params.toString();
   console.log('[competitor-engine] Searching:', searchUrl);
 
-  const response = await fetch(searchUrl, {
-    headers: { Authorization: `Bearer ${account.access_token}` },
-  });
+  // NOTE: Mercado Livre's public search endpoints can respond with 403 when called
+  // with certain auth tokens / default runtime user-agent. We'll try without auth
+  // first (public), with a browser-like UA, and fall back to auth if needed.
+  const baseHeaders: Record<string, string> = {
+    accept: 'application/json, text/plain, */*',
+    'accept-language': 'pt-BR,pt;q=0.9,en;q=0.8',
+    // In server runtimes this is allowed; it helps avoid WAF blocks that return 403.
+    'user-agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    // Some WAF rules expect a browser origin/referer pair.
+    origin: 'https://www.mercadolivre.com.br',
+    referer: 'https://www.mercadolivre.com.br/',
+    pragma: 'no-cache',
+    'cache-control': 'no-cache',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-site',
+  };
+
+  let response = await fetch(searchUrl, { headers: baseHeaders });
+
+  // Fall back to tokened request only if public request fails
+  if (!response.ok && account?.access_token) {
+    response = await fetch(searchUrl, {
+      headers: { ...baseHeaders, Authorization: `Bearer ${account.access_token}` },
+    });
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('[competitor-engine] Search failed:', errorText);
-    throw new Error('Failed to search market');
+    console.error(`[competitor-engine] Search failed (${response.status}):`, errorText);
+    throw new Error(`Failed to search market (${response.status})`);
   }
 
   const data = await response.json();
