@@ -208,7 +208,7 @@ async function handleSnapshot(supabase: any, userId: string, sellerId: string, c
       listing_type_id: listing.listing_type_id,
       logistic_type: listing.logistic_type,
       catalog_product_id: listing.catalog_product_id,
-      health: listing.health,
+      health: listing.health ? Math.round(listing.health * 100) : null,
       visits_7d: visits7d,
       sales_7d: sales7d,
       conversion_rate_7d: Math.round(conversion7d * 100) / 100,
