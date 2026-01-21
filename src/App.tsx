@@ -17,6 +17,7 @@ import AbcAnalysis from "./pages/AbcAnalysis";
 import Tendencias from "./pages/Tendencias";
 import Custos from "./pages/Custos";
 import Concorrencia from "./pages/Concorrencia";
+import Radiografia from "./pages/Radiografia";
 import NotFound from "./pages/NotFound";
 
 // Global watchdog provider component - handles both cost and orders sync
@@ -129,6 +130,7 @@ const App = () => {
             <Route path="/tendencias" element={<Tendencias />} />
             <Route path="/custos" element={<Custos />} />
             <Route path="/concorrencia" element={<Concorrencia />} />
+            <Route path="/radiografia" element={<Radiografia />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
