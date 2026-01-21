@@ -68,3 +68,6 @@ verify_jwt = false
 
 [functions.ml-sync-billing-details]
 verify_jwt = false
+
+[functions.radiography-engine]
+verify_jwt = false
