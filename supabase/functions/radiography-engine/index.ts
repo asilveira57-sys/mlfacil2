@@ -180,8 +180,15 @@ async function handleSnapshot(supabase: any, userId: string, sellerId: string, c
 
   const snapshots: any[] = [];
   const events: any[] = [];
+  const processedItemIds = new Set<string>();
 
   for (const listing of listings) {
+    // Skip duplicates - only process each item_id once
+    if (processedItemIds.has(listing.item_id)) {
+      continue;
+    }
+    processedItemIds.add(listing.item_id);
+
     const visits7d = visitsByItem.get(listing.item_id) || 0;
     const sales7d = salesByItem.get(listing.item_id) || 0;
     const conversion7d = visits7d > 0 ? (sales7d / visits7d) * 100 : 0;
@@ -225,6 +232,8 @@ async function handleSnapshot(supabase: any, userId: string, sellerId: string, c
       events.push(...detectedEvents);
     }
   }
+
+  console.log(`[Radiography] Unique items to process: ${processedItemIds.size} (from ${listings.length} total)`)
 
   // Upsert snapshots
   if (snapshots.length > 0) {
