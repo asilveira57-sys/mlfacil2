@@ -798,6 +798,281 @@ export type Database = {
           },
         ]
       }
+      listing_events: {
+        Row: {
+          blocks_affected: string[] | null
+          created_at: string
+          detected_at: string
+          event_category: string
+          event_type: string
+          id: string
+          impact_direction: string | null
+          is_processed: boolean | null
+          item_id: string
+          observation_pt: string | null
+          origin: string
+          score_after: Json | null
+          score_before: Json | null
+          score_delta: Json | null
+          seller_id: string
+          severity: string | null
+          snapshot_id: string | null
+          state_after: Json | null
+          state_before: Json | null
+        }
+        Insert: {
+          blocks_affected?: string[] | null
+          created_at?: string
+          detected_at?: string
+          event_category: string
+          event_type: string
+          id?: string
+          impact_direction?: string | null
+          is_processed?: boolean | null
+          item_id: string
+          observation_pt?: string | null
+          origin: string
+          score_after?: Json | null
+          score_before?: Json | null
+          score_delta?: Json | null
+          seller_id: string
+          severity?: string | null
+          snapshot_id?: string | null
+          state_after?: Json | null
+          state_before?: Json | null
+        }
+        Update: {
+          blocks_affected?: string[] | null
+          created_at?: string
+          detected_at?: string
+          event_category?: string
+          event_type?: string
+          id?: string
+          impact_direction?: string | null
+          is_processed?: boolean | null
+          item_id?: string
+          observation_pt?: string | null
+          origin?: string
+          score_after?: Json | null
+          score_before?: Json | null
+          score_delta?: Json | null
+          seller_id?: string
+          severity?: string | null
+          snapshot_id?: string | null
+          state_after?: Json | null
+          state_before?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "listing_events_snapshot_id_fkey"
+            columns: ["snapshot_id"]
+            isOneToOne: false
+            referencedRelation: "listing_snapshots"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      listing_monitor_config: {
+        Row: {
+          alert_on_critical: boolean | null
+          auto_monitor_enabled: boolean | null
+          created_at: string
+          id: string
+          last_snapshot_at: string | null
+          min_sales_to_monitor: number | null
+          monitor_active_only: boolean | null
+          seller_id: string
+          snapshot_frequency_hours: number | null
+          total_items_monitored: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          alert_on_critical?: boolean | null
+          auto_monitor_enabled?: boolean | null
+          created_at?: string
+          id?: string
+          last_snapshot_at?: string | null
+          min_sales_to_monitor?: number | null
+          monitor_active_only?: boolean | null
+          seller_id: string
+          snapshot_frequency_hours?: number | null
+          total_items_monitored?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          alert_on_critical?: boolean | null
+          auto_monitor_enabled?: boolean | null
+          created_at?: string
+          id?: string
+          last_snapshot_at?: string | null
+          min_sales_to_monitor?: number | null
+          monitor_active_only?: boolean | null
+          seller_id?: string
+          snapshot_frequency_hours?: number | null
+          total_items_monitored?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      listing_radiography: {
+        Row: {
+          analysis_date: string
+          cause_effect_insights: Json | null
+          created_at: string
+          event_timeline: Json | null
+          id: string
+          is_current: boolean | null
+          item_id: string
+          narrative_pt: string | null
+          period_analyzed_days: number | null
+          period_summary: string | null
+          score_breakdown: Json | null
+          seller_id: string
+          suggested_actions: Json | null
+          updated_at: string
+        }
+        Insert: {
+          analysis_date?: string
+          cause_effect_insights?: Json | null
+          created_at?: string
+          event_timeline?: Json | null
+          id?: string
+          is_current?: boolean | null
+          item_id: string
+          narrative_pt?: string | null
+          period_analyzed_days?: number | null
+          period_summary?: string | null
+          score_breakdown?: Json | null
+          seller_id: string
+          suggested_actions?: Json | null
+          updated_at?: string
+        }
+        Update: {
+          analysis_date?: string
+          cause_effect_insights?: Json | null
+          created_at?: string
+          event_timeline?: Json | null
+          id?: string
+          is_current?: boolean | null
+          item_id?: string
+          narrative_pt?: string | null
+          period_analyzed_days?: number | null
+          period_summary?: string | null
+          score_breakdown?: Json | null
+          seller_id?: string
+          suggested_actions?: Json | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      listing_snapshots: {
+        Row: {
+          attributes_count: number | null
+          available_quantity: number | null
+          catalog_product_id: string | null
+          conversion_rate_7d: number | null
+          created_at: string
+          description_length: number | null
+          has_clip: boolean | null
+          has_video: boolean | null
+          health: number | null
+          id: string
+          item_id: string
+          listing_type_id: string | null
+          logistic_type: string | null
+          original_price: number | null
+          photo_count: number | null
+          price: number | null
+          raw_data: Json | null
+          sales_7d: number | null
+          score_clip: number | null
+          score_competitividade: number | null
+          score_logistica: number | null
+          score_performance: number | null
+          score_semantica: number | null
+          score_total: number | null
+          score_visual: number | null
+          seller_id: string
+          snapshot_date: string
+          sold_quantity: number | null
+          status: string | null
+          title: string | null
+          title_length: number | null
+          visits_7d: number | null
+        }
+        Insert: {
+          attributes_count?: number | null
+          available_quantity?: number | null
+          catalog_product_id?: string | null
+          conversion_rate_7d?: number | null
+          created_at?: string
+          description_length?: number | null
+          has_clip?: boolean | null
+          has_video?: boolean | null
+          health?: number | null
+          id?: string
+          item_id: string
+          listing_type_id?: string | null
+          logistic_type?: string | null
+          original_price?: number | null
+          photo_count?: number | null
+          price?: number | null
+          raw_data?: Json | null
+          sales_7d?: number | null
+          score_clip?: number | null
+          score_competitividade?: number | null
+          score_logistica?: number | null
+          score_performance?: number | null
+          score_semantica?: number | null
+          score_total?: number | null
+          score_visual?: number | null
+          seller_id: string
+          snapshot_date?: string
+          sold_quantity?: number | null
+          status?: string | null
+          title?: string | null
+          title_length?: number | null
+          visits_7d?: number | null
+        }
+        Update: {
+          attributes_count?: number | null
+          available_quantity?: number | null
+          catalog_product_id?: string | null
+          conversion_rate_7d?: number | null
+          created_at?: string
+          description_length?: number | null
+          has_clip?: boolean | null
+          has_video?: boolean | null
+          health?: number | null
+          id?: string
+          item_id?: string
+          listing_type_id?: string | null
+          logistic_type?: string | null
+          original_price?: number | null
+          photo_count?: number | null
+          price?: number | null
+          raw_data?: Json | null
+          sales_7d?: number | null
+          score_clip?: number | null
+          score_competitividade?: number | null
+          score_logistica?: number | null
+          score_performance?: number | null
+          score_semantica?: number | null
+          score_total?: number | null
+          score_visual?: number | null
+          seller_id?: string
+          snapshot_date?: string
+          sold_quantity?: number | null
+          status?: string | null
+          title?: string | null
+          title_length?: number | null
+          visits_7d?: number | null
+        }
+        Relationships: []
+      }
       marketplace_fee_rules: {
         Row: {
           channel: string
