@@ -36,8 +36,8 @@ interface MarketSnapshot {
 export function CompetitorMarketSearch({ sellerId }: CompetitorMarketSearchProps) {
   const [queryTerm, setQueryTerm] = useState('');
   const [categoryId, setCategoryId] = useState('');
-  const [condition, setCondition] = useState('');
-  const [shipping, setShipping] = useState('');
+  const [condition, setCondition] = useState('all');
+  const [shipping, setShipping] = useState('all');
   const [searching, setSearching] = useState(false);
   const [result, setResult] = useState<MarketSnapshot | null>(null);
 
@@ -149,7 +149,7 @@ export function CompetitorMarketSearch({ sellerId }: CompetitorMarketSearchProps
                   <SelectValue placeholder="Todas" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Todas</SelectItem>
+                  <SelectItem value="all">Todas</SelectItem>
                   <SelectItem value="new">Novo</SelectItem>
                   <SelectItem value="used">Usado</SelectItem>
                 </SelectContent>
@@ -162,7 +162,7 @@ export function CompetitorMarketSearch({ sellerId }: CompetitorMarketSearchProps
                   <SelectValue placeholder="Todos" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Todos</SelectItem>
+                  <SelectItem value="all">Todos</SelectItem>
                   <SelectItem value="full">Full (Fulfillment)</SelectItem>
                 </SelectContent>
               </Select>
