@@ -306,13 +306,16 @@ async function handleDeepAnalysis(supabase: any, userId: string, sellerId: strin
     .eq("item_id", itemId)
     .order("detected_at", { ascending: false });
 
-  // Get current listing data
-  const { data: listing } = await supabase
+  // Get current listing data (handle duplicates by getting most recent)
+  const { data: listingRows } = await supabase
     .from("meli_listings_cache")
     .select("*")
     .eq("seller_id", sellerId)
     .eq("item_id", itemId)
-    .maybeSingle();
+    .order("last_sync_at", { ascending: false })
+    .limit(1);
+  
+  const listing = listingRows?.[0] || null;
 
   // Calculate detailed score breakdown
   const latestSnapshot = snapshots[0];

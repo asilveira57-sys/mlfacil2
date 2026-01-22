@@ -21,6 +21,7 @@ import {
   RefreshCw
 } from "lucide-react";
 import { useRadiography, Radiography, ListingEvent } from "@/hooks/useRadiography";
+import { supabase } from "@/integrations/supabase/client";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -52,9 +53,29 @@ export function RadiographyDetailDrawer({
   useEffect(() => {
     if (open && itemId && sellerId) {
       setRadiography(null);
-      analyzeItem(itemId).then((data) => {
-        if (data?.listing) {
+      setListing(null);
+      
+      analyzeItem(itemId).then(async (data) => {
+        if (data?.listing?.title && data?.listing?.thumbnail) {
+          // Backend returned complete listing data
           setListing(data.listing);
+        } else {
+          // Fallback: fetch directly from cache to get thumbnail + title
+          console.log("[RadiographyDrawer] Fallback: fetching listing from cache");
+          const { data: fallbackListing } = await supabase
+            .from('meli_listings_cache')
+            .select('title, thumbnail, permalink, price, status')
+            .eq('item_id', itemId)
+            .order('last_sync_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          
+          if (fallbackListing) {
+            setListing(fallbackListing);
+          } else {
+            // Still no data, keep itemId as fallback
+            setListing({ title: itemId, thumbnail: null, permalink: null });
+          }
         }
       });
       fetchEvents(itemId);
