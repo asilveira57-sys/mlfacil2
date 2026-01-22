@@ -143,6 +143,95 @@ async function fetchViaProxy(
   return data as MarketSnapshot;
 }
 
+// Direct browser-to-ML public API search (JSONP alternative using iframe/postMessage)
+async function fetchViaPublicML(
+  queryTerm: string,
+  categoryId: string,
+  condition: string,
+  shipping: string
+): Promise<MarketSnapshot> {
+  // Build URL for public ML API
+  const params = new URLSearchParams();
+  if (queryTerm.trim()) params.set('q', queryTerm.trim());
+  if (categoryId.trim()) params.set('category', categoryId.trim());
+  params.set('limit', '50');
+  
+  if (condition && condition !== 'all') {
+    params.set('ITEM_CONDITION', condition);
+  }
+  if (shipping === 'full') {
+    params.set('shipping', 'fulfillment');
+  }
+
+  const searchUrl = `https://api.mercadolibre.com/sites/MLB/search?${params.toString()}`;
+  
+  // Try direct fetch (may work on some browsers/networks)
+  const response = await fetch(searchUrl, {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`ML API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const results = data.results || [];
+  const totalResults = data.paging?.total || results.length;
+
+  // Extract prices and calculate stats
+  const prices = results.map((r: any) => r.price).filter((p: number) => p > 0);
+  const stats = calculateStats(prices);
+
+  // Condition counts
+  const conditionCounts: Record<string, number> = {};
+  results.forEach((r: any) => {
+    const cond = r.condition || 'unknown';
+    conditionCounts[cond] = (conditionCounts[cond] || 0) + 1;
+  });
+
+  // Shipping counts
+  const shippingCounts: Record<string, number> = { free: 0, full: 0, paid: 0 };
+  results.forEach((r: any) => {
+    if (r.shipping?.logistic_type === 'fulfillment') {
+      shippingCounts.full++;
+    } else if (r.shipping?.free_shipping) {
+      shippingCounts.free++;
+    } else {
+      shippingCounts.paid++;
+    }
+  });
+
+  // Top competitors
+  const topCompetitors = results.slice(0, 10).map((r: any) => ({
+    item_id: r.id,
+    title: r.title,
+    price: r.price,
+    permalink: r.permalink,
+    seller_id: r.seller?.id,
+    seller_nickname: r.seller?.nickname,
+    condition: r.condition,
+    sold_quantity: r.sold_quantity || 0,
+    shipping_free: r.shipping?.free_shipping || false,
+    shipping_full: r.shipping?.logistic_type === 'fulfillment',
+    thumbnail: r.thumbnail,
+  }));
+
+  return {
+    query_term: queryTerm.trim() || null,
+    category_id: categoryId.trim() || null,
+    total_results: totalResults,
+    ...stats,
+    top_competitors_json: topCompetitors,
+    collected_at: new Date().toISOString(),
+    from_cache: false,
+    condition_counts: conditionCounts,
+    shipping_counts: shippingCounts,
+  } as MarketSnapshot;
+}
+
 export function CompetitorMarketSearch({ sellerId }: CompetitorMarketSearchProps) {
   const [queryTerm, setQueryTerm] = useState('');
   const [categoryId, setCategoryId] = useState('');
@@ -252,6 +341,7 @@ export function CompetitorMarketSearch({ sellerId }: CompetitorMarketSearchProps
   };
 
   const handleProxyFallback = async (cacheKey: string, sessionToken: string) => {
+    // First try proxy
     try {
       toast.info('Tentando busca alternativa via proxy...');
       const fallbackResult = await fetchViaProxy(
@@ -270,8 +360,31 @@ export function CompetitorMarketSearch({ sellerId }: CompetitorMarketSearchProps
       searchCache.set(cacheKey, { data: fallbackResult, timestamp: Date.now() });
 
       toast.success('Busca concluída (modo compatível)');
-    } catch (err: any) {
-      throw err;
+      return;
+    } catch (proxyErr: any) {
+      console.warn('[CompetitorMarketSearch] Proxy failed, trying direct browser fetch...', proxyErr.message);
+    }
+    
+    // If proxy also fails, try direct browser-to-ML
+    try {
+      toast.info('Tentando busca direta do navegador...');
+      const directResult = await fetchViaPublicML(
+        queryTerm,
+        categoryId,
+        condition,
+        shipping
+      );
+      setResult(directResult);
+      setCompatMode(true);
+      setErrorState(null);
+
+      // Cache the result
+      searchCache.set(cacheKey, { data: directResult, timestamp: Date.now() });
+
+      toast.success('Busca concluída (modo direto)');
+    } catch (directErr: any) {
+      console.error('[CompetitorMarketSearch] Direct fetch also failed:', directErr);
+      throw new Error('Servidor e navegador bloqueados pelo ML. Tente novamente mais tarde.');
     }
   };
 
