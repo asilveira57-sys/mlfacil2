@@ -1,9 +1,9 @@
 import { useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
-const WATCHDOG_INTERVAL_MS = 5000;
-const STALE_THRESHOLD_MS = 60000;
-const COOLDOWN_MS = 10000;
+const WATCHDOG_INTERVAL_MS = 15000; // Check every 15s instead of 5s
+const STALE_THRESHOLD_MS = 120000; // 2 minutes instead of 1
+const COOLDOWN_MS = 30000; // 30 second cooldown between actions
 
 // Billing is considered stale if last sync was > 6 hours ago
 const BILLING_STALE_THRESHOLD_MS = 6 * 60 * 60 * 1000;
@@ -33,9 +33,10 @@ export function useCostSyncWatchdog(sellerId: string | null, enabled: boolean) {
     pendingBilling: 0,
   });
   
-  const lastActionRef = useRef<number>(0);
-  const isResumingRef = useRef(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+const lastActionRef = useRef<number>(0);
+const isResumingRef = useRef(false);
+const intervalRef = useRef<NodeJS.Timeout | null>(null);
+const lastResumeAttemptRef = useRef<{ [key: string]: number }>({});
 
   const fetchState = useCallback(async () => {
     if (!sellerId) return;
@@ -112,16 +113,21 @@ export function useCostSyncWatchdog(sellerId: string | null, enabled: boolean) {
       } catch (err) {
         console.error("[GlobalWatchdog] Error auto-syncing billing:", err);
       } finally {
-        setTimeout(() => { isResumingRef.current = false; }, 10000);
+        setTimeout(() => { isResumingRef.current = false; }, 15000);
       }
       return;
     }
     
-    // Priority 1: Billing paused -> Resume
+    // Priority 1: Billing paused -> Resume (with debounce)
     if (state.billingStatus === 'paused') {
+      const lastResume = lastResumeAttemptRef.current['billing'] || 0;
+      if (Date.now() - lastResume < 60000) {
+        return;
+      }
       console.log("[GlobalWatchdog] Resuming paused billing sync...");
       isResumingRef.current = true;
       lastActionRef.current = Date.now();
+      lastResumeAttemptRef.current['billing'] = Date.now();
       try {
         await supabase.functions.invoke("ml-sync-billing-details", {
           body: { seller_id: sellerId, action: "sync", scope: state.billingSyncScope || "history" }
@@ -129,16 +135,21 @@ export function useCostSyncWatchdog(sellerId: string | null, enabled: boolean) {
       } catch (err) {
         console.error("[GlobalWatchdog] Error resuming billing:", err);
       } finally {
-        setTimeout(() => { isResumingRef.current = false; }, 5000);
+        setTimeout(() => { isResumingRef.current = false; }, 15000);
       }
       return;
     }
     
-    // Priority 2: Backfill paused -> Resume
+    // Priority 2: Backfill paused -> Resume (with debounce)
     if (state.backfillStatus === 'paused') {
+      const lastResume = lastResumeAttemptRef.current['backfill'] || 0;
+      if (Date.now() - lastResume < 60000) {
+        return;
+      }
       console.log("[GlobalWatchdog] Resuming paused backfill...");
       isResumingRef.current = true;
       lastActionRef.current = Date.now();
+      lastResumeAttemptRef.current['backfill'] = Date.now();
       try {
         await supabase.functions.invoke("ml-sync-real-costs", {
           body: { seller_id: sellerId, action: "continue_backfill" }
@@ -146,16 +157,21 @@ export function useCostSyncWatchdog(sellerId: string | null, enabled: boolean) {
       } catch (err) {
         console.error("[GlobalWatchdog] Error resuming backfill:", err);
       } finally {
-        setTimeout(() => { isResumingRef.current = false; }, 5000);
+        setTimeout(() => { isResumingRef.current = false; }, 15000);
       }
       return;
     }
     
     // Priority 2b: Backfill stale running -> Force resume
     if (state.backfillStatus === 'running' && isStale(state.backfillLastHeartbeat)) {
+      const lastResume = lastResumeAttemptRef.current['backfillStale'] || 0;
+      if (Date.now() - lastResume < 60000) {
+        return;
+      }
       console.log("[GlobalWatchdog] Force resuming stale backfill...");
       isResumingRef.current = true;
       lastActionRef.current = Date.now();
+      lastResumeAttemptRef.current['backfillStale'] = Date.now();
       try {
         await supabase.functions.invoke("ml-sync-real-costs", {
           body: { seller_id: sellerId, action: "continue_backfill" }
@@ -163,7 +179,7 @@ export function useCostSyncWatchdog(sellerId: string | null, enabled: boolean) {
       } catch (err) {
         console.error("[GlobalWatchdog] Error force resuming backfill:", err);
       } finally {
-        setTimeout(() => { isResumingRef.current = false; }, 5000);
+        setTimeout(() => { isResumingRef.current = false; }, 15000);
       }
       return;
     }
@@ -172,9 +188,14 @@ export function useCostSyncWatchdog(sellerId: string | null, enabled: boolean) {
     if (state.missingBreakdown > 0 && 
         (!state.backfillStatus || state.backfillStatus === 'idle' || state.backfillStatus === 'done') &&
         (state.billingStatus === 'done' || !state.billingStatus)) {
+      const lastResume = lastResumeAttemptRef.current['startBackfill'] || 0;
+      if (Date.now() - lastResume < 60000) {
+        return;
+      }
       console.log("[GlobalWatchdog] Starting backfill for missing orders...");
       isResumingRef.current = true;
       lastActionRef.current = Date.now();
+      lastResumeAttemptRef.current['startBackfill'] = Date.now();
       try {
         await supabase.functions.invoke("ml-sync-real-costs", {
           body: { seller_id: sellerId, action: "backfill_missing" }
@@ -182,16 +203,22 @@ export function useCostSyncWatchdog(sellerId: string | null, enabled: boolean) {
       } catch (err) {
         console.error("[GlobalWatchdog] Error starting backfill:", err);
       } finally {
-        setTimeout(() => { isResumingRef.current = false; }, 5000);
+        setTimeout(() => { isResumingRef.current = false; }, 15000);
       }
       return;
     }
     
-    // Priority 4: Real costs paused -> Resume
+    // Priority 4: Real costs paused -> Resume (with debounce per status)
     if (state.realCostsStatus === 'paused') {
+      const lastResume = lastResumeAttemptRef.current['realCosts'] || 0;
+      // Don't resume if we just resumed in the last 60 seconds (sync likely just paused again)
+      if (Date.now() - lastResume < 60000) {
+        return;
+      }
       console.log("[GlobalWatchdog] Resuming paused real costs sync...");
       isResumingRef.current = true;
       lastActionRef.current = Date.now();
+      lastResumeAttemptRef.current['realCosts'] = Date.now();
       try {
         await supabase.functions.invoke("ml-sync-real-costs", {
           body: { seller_id: sellerId, action: "continue" }
@@ -199,16 +226,21 @@ export function useCostSyncWatchdog(sellerId: string | null, enabled: boolean) {
       } catch (err) {
         console.error("[GlobalWatchdog] Error resuming real costs:", err);
       } finally {
-        setTimeout(() => { isResumingRef.current = false; }, 5000);
+        setTimeout(() => { isResumingRef.current = false; }, 15000);
       }
       return;
     }
     
     // Priority 4b: Real costs stale running -> Force resume
     if (state.realCostsStatus === 'running' && isStale(state.realCostsLastHeartbeat)) {
+      const lastResume = lastResumeAttemptRef.current['realCostsStale'] || 0;
+      if (Date.now() - lastResume < 60000) {
+        return;
+      }
       console.log("[GlobalWatchdog] Force resuming stale real costs sync...");
       isResumingRef.current = true;
       lastActionRef.current = Date.now();
+      lastResumeAttemptRef.current['realCostsStale'] = Date.now();
       try {
         await supabase.functions.invoke("ml-sync-real-costs", {
           body: { seller_id: sellerId, action: "continue", force_resume: true }
@@ -216,7 +248,7 @@ export function useCostSyncWatchdog(sellerId: string | null, enabled: boolean) {
       } catch (err) {
         console.error("[GlobalWatchdog] Error force resuming real costs:", err);
       } finally {
-        setTimeout(() => { isResumingRef.current = false; }, 5000);
+        setTimeout(() => { isResumingRef.current = false; }, 15000);
       }
       return;
     }
@@ -226,9 +258,14 @@ export function useCostSyncWatchdog(sellerId: string | null, enabled: boolean) {
         state.missingBreakdown === 0 &&
         state.backfillStatus === 'done' &&
         (!state.realCostsStatus || state.realCostsStatus === 'idle' || state.realCostsStatus === 'done')) {
+      const lastResume = lastResumeAttemptRef.current['reprocess'] || 0;
+      if (Date.now() - lastResume < 60000) {
+        return;
+      }
       console.log("[GlobalWatchdog] Starting reprocess pending...");
       isResumingRef.current = true;
       lastActionRef.current = Date.now();
+      lastResumeAttemptRef.current['reprocess'] = Date.now();
       try {
         await supabase.functions.invoke("ml-sync-real-costs", {
           body: { seller_id: sellerId, action: "reprocess_pending" }
@@ -236,7 +273,7 @@ export function useCostSyncWatchdog(sellerId: string | null, enabled: boolean) {
       } catch (err) {
         console.error("[GlobalWatchdog] Error reprocessing pending:", err);
       } finally {
-        setTimeout(() => { isResumingRef.current = false; }, 5000);
+        setTimeout(() => { isResumingRef.current = false; }, 15000);
       }
     }
   }, [sellerId, enabled, isStale]);
