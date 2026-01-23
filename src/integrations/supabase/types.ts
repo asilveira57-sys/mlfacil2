@@ -229,6 +229,110 @@ export type Database = {
         }
         Relationships: []
       }
+      companies: {
+        Row: {
+          billing_type: string
+          created_at: string | null
+          display_name: string
+          id: string
+          is_active: boolean | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          billing_type?: string
+          created_at?: string | null
+          display_name: string
+          id?: string
+          is_active?: boolean | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          billing_type?: string
+          created_at?: string | null
+          display_name?: string
+          id?: string
+          is_active?: boolean | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      company_billing: {
+        Row: {
+          billing_type: string
+          cep: string | null
+          city: string | null
+          cnpj: string | null
+          company_id: string
+          complement: string | null
+          cpf: string | null
+          created_at: string | null
+          district: string | null
+          id: string
+          is_complete: boolean | null
+          legal_name: string | null
+          number: string | null
+          state: string | null
+          state_registration: string | null
+          state_registration_isento: boolean | null
+          street: string | null
+          trade_name: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          billing_type?: string
+          cep?: string | null
+          city?: string | null
+          cnpj?: string | null
+          company_id: string
+          complement?: string | null
+          cpf?: string | null
+          created_at?: string | null
+          district?: string | null
+          id?: string
+          is_complete?: boolean | null
+          legal_name?: string | null
+          number?: string | null
+          state?: string | null
+          state_registration?: string | null
+          state_registration_isento?: boolean | null
+          street?: string | null
+          trade_name?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          billing_type?: string
+          cep?: string | null
+          city?: string | null
+          cnpj?: string | null
+          company_id?: string
+          complement?: string | null
+          cpf?: string | null
+          created_at?: string | null
+          district?: string | null
+          id?: string
+          is_complete?: boolean | null
+          legal_name?: string | null
+          number?: string | null
+          state?: string | null
+          state_registration?: string | null
+          state_registration_isento?: boolean | null
+          street?: string | null
+          trade_name?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_billing_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       competitor_alerts: {
         Row: {
           alert_type: string
@@ -460,6 +564,62 @@ export type Database = {
         }
         Relationships: []
       }
+      erp_integrations: {
+        Row: {
+          api_key: string | null
+          api_user: string | null
+          company_id: string
+          created_at: string | null
+          id: string
+          last_sync_at: string | null
+          last_test_at: string | null
+          provider: string
+          status: string
+          sync_costs: boolean | null
+          sync_invoicing: boolean | null
+          sync_orders: boolean | null
+          updated_at: string | null
+        }
+        Insert: {
+          api_key?: string | null
+          api_user?: string | null
+          company_id: string
+          created_at?: string | null
+          id?: string
+          last_sync_at?: string | null
+          last_test_at?: string | null
+          provider: string
+          status?: string
+          sync_costs?: boolean | null
+          sync_invoicing?: boolean | null
+          sync_orders?: boolean | null
+          updated_at?: string | null
+        }
+        Update: {
+          api_key?: string | null
+          api_user?: string | null
+          company_id?: string
+          created_at?: string | null
+          id?: string
+          last_sync_at?: string | null
+          last_test_at?: string | null
+          provider?: string
+          status?: string
+          sync_costs?: boolean | null
+          sync_invoicing?: boolean | null
+          sync_orders?: boolean | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "erp_integrations_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       financial_concept_map: {
         Row: {
           bucket: string
@@ -572,6 +732,50 @@ export type Database = {
           snapshot_date?: string
         }
         Relationships: []
+      }
+      invoice_queue: {
+        Row: {
+          company_id: string
+          created_at: string | null
+          error_message: string | null
+          id: string
+          payload: Json | null
+          period_end: string
+          period_start: string
+          status: string
+          updated_at: string | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          payload?: Json | null
+          period_end: string
+          period_start: string
+          status?: string
+          updated_at?: string | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          payload?: Json | null
+          period_end?: string
+          period_start?: string
+          status?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_queue_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       item_metrics: {
         Row: {
@@ -1072,6 +1276,62 @@ export type Database = {
           visits_7d?: number | null
         }
         Relationships: []
+      }
+      marketplace_accounts: {
+        Row: {
+          access_token: string | null
+          account_label: string
+          company_id: string
+          created_at: string | null
+          external_user_id: string | null
+          id: string
+          is_active: boolean | null
+          last_sync_at: string | null
+          provider: string
+          refresh_token: string | null
+          status: string
+          token_expires_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          access_token?: string | null
+          account_label: string
+          company_id: string
+          created_at?: string | null
+          external_user_id?: string | null
+          id?: string
+          is_active?: boolean | null
+          last_sync_at?: string | null
+          provider?: string
+          refresh_token?: string | null
+          status?: string
+          token_expires_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          access_token?: string | null
+          account_label?: string
+          company_id?: string
+          created_at?: string | null
+          external_user_id?: string | null
+          id?: string
+          is_active?: boolean | null
+          last_sync_at?: string | null
+          provider?: string
+          refresh_token?: string | null
+          status?: string
+          token_expires_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketplace_accounts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       marketplace_fee_rules: {
         Row: {
@@ -2276,6 +2536,63 @@ export type Database = {
         }
         Relationships: []
       }
+      payments: {
+        Row: {
+          amount_cents: number
+          company_id: string | null
+          created_at: string | null
+          currency: string | null
+          description: string | null
+          gateway_payment_id: string | null
+          id: string
+          paid_at: string | null
+          status: string
+          subscription_id: string | null
+          user_id: string
+        }
+        Insert: {
+          amount_cents: number
+          company_id?: string | null
+          created_at?: string | null
+          currency?: string | null
+          description?: string | null
+          gateway_payment_id?: string | null
+          id?: string
+          paid_at?: string | null
+          status: string
+          subscription_id?: string | null
+          user_id: string
+        }
+        Update: {
+          amount_cents?: number
+          company_id?: string | null
+          created_at?: string | null
+          currency?: string | null
+          description?: string | null
+          gateway_payment_id?: string | null
+          id?: string
+          paid_at?: string | null
+          status?: string
+          subscription_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payments_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payments_subscription_id_fkey"
+            columns: ["subscription_id"]
+            isOneToOne: false
+            referencedRelation: "subscriptions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       product_cost_catalog: {
         Row: {
           cost_currency: string
@@ -2368,25 +2685,73 @@ export type Database = {
       }
       profiles: {
         Row: {
+          address_cep: string | null
+          address_city: string | null
+          address_complement: string | null
+          address_district: string | null
+          address_number: string | null
+          address_state: string | null
+          address_street: string | null
           company_name: string | null
+          cpf: string | null
           created_at: string
-          full_name: string | null
+          email: string | null
+          email_verified: boolean | null
+          full_name: string
           id: string
+          instagram_url: string | null
+          linkedin_url: string | null
+          other_url: string | null
+          photo_url: string | null
           updated_at: string
+          user_id: string | null
+          whatsapp: string | null
         }
         Insert: {
+          address_cep?: string | null
+          address_city?: string | null
+          address_complement?: string | null
+          address_district?: string | null
+          address_number?: string | null
+          address_state?: string | null
+          address_street?: string | null
           company_name?: string | null
+          cpf?: string | null
           created_at?: string
-          full_name?: string | null
+          email?: string | null
+          email_verified?: boolean | null
+          full_name: string
           id: string
+          instagram_url?: string | null
+          linkedin_url?: string | null
+          other_url?: string | null
+          photo_url?: string | null
           updated_at?: string
+          user_id?: string | null
+          whatsapp?: string | null
         }
         Update: {
+          address_cep?: string | null
+          address_city?: string | null
+          address_complement?: string | null
+          address_district?: string | null
+          address_number?: string | null
+          address_state?: string | null
+          address_street?: string | null
           company_name?: string | null
+          cpf?: string | null
           created_at?: string
-          full_name?: string | null
+          email?: string | null
+          email_verified?: boolean | null
+          full_name?: string
           id?: string
+          instagram_url?: string | null
+          linkedin_url?: string | null
+          other_url?: string | null
+          photo_url?: string | null
           updated_at?: string
+          user_id?: string | null
+          whatsapp?: string | null
         }
         Relationships: []
       }
@@ -2701,6 +3066,65 @@ export type Database = {
         }
         Relationships: []
       }
+      subscriptions: {
+        Row: {
+          company_id: string | null
+          created_at: string | null
+          current_period_end: string | null
+          current_period_start: string | null
+          gateway: string
+          gateway_customer_id: string | null
+          gateway_subscription_id: string | null
+          id: string
+          plan_name: string | null
+          plan_price_cents: number | null
+          plan_type: string
+          status: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          company_id?: string | null
+          created_at?: string | null
+          current_period_end?: string | null
+          current_period_start?: string | null
+          gateway?: string
+          gateway_customer_id?: string | null
+          gateway_subscription_id?: string | null
+          id?: string
+          plan_name?: string | null
+          plan_price_cents?: number | null
+          plan_type?: string
+          status?: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          company_id?: string | null
+          created_at?: string | null
+          current_period_end?: string | null
+          current_period_start?: string | null
+          gateway?: string
+          gateway_customer_id?: string | null
+          gateway_subscription_id?: string | null
+          id?: string
+          plan_name?: string | null
+          plan_price_cents?: number | null
+          plan_type?: string
+          status?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "subscriptions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sync_jobs: {
         Row: {
           completed_at: string | null
@@ -2853,6 +3277,48 @@ export type Database = {
           trends_data?: Json | null
         }
         Relationships: []
+      }
+      user_context: {
+        Row: {
+          active_company_id: string | null
+          active_marketplace_account_id: string | null
+          created_at: string | null
+          id: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          active_company_id?: string | null
+          active_marketplace_account_id?: string | null
+          created_at?: string | null
+          id?: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          active_company_id?: string | null
+          active_marketplace_account_id?: string | null
+          created_at?: string | null
+          id?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_context_active_company_id_fkey"
+            columns: ["active_company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_context_active_marketplace_account_id_fkey"
+            columns: ["active_marketplace_account_id"]
+            isOneToOne: false
+            referencedRelation: "marketplace_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_feature_flags: {
         Row: {
