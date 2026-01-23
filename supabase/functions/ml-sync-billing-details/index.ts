@@ -1,6 +1,6 @@
 // @ts-nocheck - Deno types not available in build context
-// Force clean redeploy v2
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7/dist/module/index.js?target=deno&no-check";
+// Force clean redeploy v3 - fix BOOT_ERROR
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7?target=deno";
 
 
 const corsHeaders = {
