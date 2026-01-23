@@ -51,9 +51,9 @@ function TendenciasContent() {
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState<MlAccount[]>([]);
   const [isReloading, setIsReloading] = useState(false);
-  const { setAccount, setCategory, setSubcategory, effectiveCategoryId } = useTrends();
+  const { state, setAccount, setSubcategory, hasCategory } = useTrends();
   
-  const { collectPublicData, reload, snapshotDate, isLoading } = useTrendsController();
+  const { collectPublicData, reload, snapshotDate, eligibility, isLoading } = useTrendsController();
   const [isCollecting, setIsCollecting] = useState(false);
 
   // Load accounts on mount
@@ -139,7 +139,13 @@ function TendenciasContent() {
         />
 
         {/* 6. Seller Goals (Conditional) */}
-        <SellerGoalsSection />
+        <SellerGoalsSection
+          eligibility={eligibility}
+          isLoading={isLoading}
+          sellerId={state.selectedAccountId}
+          periodDays={state.selectedPeriod}
+          hasCategory={hasCategory}
+        />
 
         {/* 7. Technical Footer */}
         <TechnicalFooterAccordion
