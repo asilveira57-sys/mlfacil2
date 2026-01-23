@@ -1,20 +1,30 @@
 import { useState } from 'react';
-import { Lock, HelpCircle } from 'lucide-react';
+import { Lock, HelpCircle, Info } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { CriteriaModal } from './CriteriaModal';
-import { ELIGIBILITY_TEXTS } from '@/hooks/useCategoryEligibility';
+import { DataState, ELIGIBILITY_TEXTS } from '@/hooks/useCategoryEligibility';
 
 interface BlockedCardProps {
   title: string;
   icon?: React.ReactNode;
+  dataState?: DataState;
+  blockReason?: string | null;
   className?: string;
 }
 
+/**
+ * Card bloqueado para seções seller-based quando não elegível
+ * 
+ * REGRA 3: Fallback só pode ser conceitual, nunca técnico
+ * Este card mostra alternativa (dados de mercado) sem tentar forçar a API
+ */
 export function BlockedCard({ 
   title, 
   icon,
+  dataState = 'DADOS_BLOQUEADOS_POR_POLITICA',
+  blockReason,
   className = '' 
 }: BlockedCardProps) {
   const [showCriteria, setShowCriteria] = useState(false);
@@ -42,8 +52,15 @@ export function BlockedCard({
           <div className="flex flex-col items-center justify-center py-8 text-center">
             <Lock className="h-10 w-10 text-muted-foreground mb-4" />
             <p className="text-sm text-muted-foreground max-w-xs">
-              {ELIGIBILITY_TEXTS.blocked.description}
+              {blockReason || ELIGIBILITY_TEXTS.blocked.description}
             </p>
+            
+            {/* Indicador de estado de dados para debug/transparência */}
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-4 bg-muted/50 rounded px-2 py-1">
+              <Info className="h-3 w-3" />
+              <span>Estado: <code className="font-mono text-xs">{dataState}</code></span>
+            </div>
+            
             <Button 
               variant="link" 
               size="sm" 
