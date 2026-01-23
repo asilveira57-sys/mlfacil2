@@ -23,7 +23,12 @@ export default function Tendencias() {
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState<MlAccount[]>([]);
   const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
+
+  const handleNavigateToMarket = () => {
+    setActiveTab('market');
+  };
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -340,7 +345,11 @@ export default function Tendencias() {
 
           {/* Seller Tab */}
           <TabsContent value="seller">
-            <TrendsSellerTab sellerId={selectedSellerId} />
+            <TrendsSellerTab 
+              sellerId={selectedSellerId} 
+              categoryId={selectedCategoryId}
+              onNavigateToMarket={handleNavigateToMarket}
+            />
           </TabsContent>
 
           {/* History Tab */}

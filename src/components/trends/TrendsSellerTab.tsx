@@ -10,11 +10,16 @@ import { Eye, Package, Bell, TrendingUp, TrendingDown, ExternalLink, RefreshCw, 
 import { useSellerPerformance, useAlerts, useTriggerCollection, useDismissAlert, useMarkAlertRead, PerformanceItem, SellerItem } from '@/hooks/useTrendsApi';
 import { TrendsItemDetailDrawer } from './TrendsItemDetailDrawer';
 import { SellerMarketComparison } from './SellerMarketComparison';
+import { EligibilityBanner } from './EligibilityBanner';
+import { BlockedCard } from './BlockedCard';
+import { useCategoryEligibility, shouldCallSellerEndpoint } from '@/hooks/useCategoryEligibility';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 
 interface TrendsSellerTabProps {
   sellerId: string | null;
+  categoryId?: string | null;
+  onNavigateToMarket?: () => void;
 }
 
 function formatConversionBadge(rate: number) {
@@ -23,13 +28,26 @@ function formatConversionBadge(rate: number) {
   return { className: 'bg-muted text-muted-foreground', label: 'Baixa' };
 }
 
-export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
-  const [periodDays, setPeriodDays] = useState<number>(7);
+export function TrendsSellerTab({ sellerId, categoryId, onNavigateToMarket }: TrendsSellerTabProps) {
+  const [periodDays, setPeriodDays] = useState<number>(30);
   const [activeSubTab, setActiveSubTab] = useState('comparison');
   const [selectedItem, setSelectedItem] = useState<SellerItem | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  const { data: performanceData, isLoading: performanceLoading, refetch: refetchPerformance } = useSellerPerformance(sellerId, periodDays);
+  // Elegibilidade da categoria
+  const { data: eligibility, isLoading: eligibilityLoading } = useCategoryEligibility(
+    sellerId,
+    categoryId || null,
+    periodDays
+  );
+
+  const isEligible = shouldCallSellerEndpoint(eligibility);
+  const showSellerData = isEligible || !categoryId; // Se não tem categoria, mostra dados globais
+
+  const { data: performanceData, isLoading: performanceLoading, refetch: refetchPerformance } = useSellerPerformance(
+    showSellerData ? sellerId : null, 
+    periodDays
+  );
   const { data: alertsData, isLoading: alertsLoading } = useAlerts(sellerId, true);
   const triggerCollection = useTriggerCollection();
   const dismissAlert = useDismissAlert();
@@ -169,8 +187,18 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
         </div>
       </div>
 
-      {/* Data Range Banner */}
-      {performanceData && (
+      {/* Eligibility Banner - só mostra se categoria selecionada e não elegível */}
+      {categoryId && eligibility && !eligibilityLoading && !isEligible && (
+        <EligibilityBanner
+          state={eligibility.state}
+          ordersCount={eligibility.ordersCount}
+          thresholdOrders={eligibility.thresholdOrders}
+          onActionClick={onNavigateToMarket}
+        />
+      )}
+
+      {/* Data Range Banner - só mostra se tem dados */}
+      {showSellerData && performanceData && (
         <div className="bg-muted/50 rounded-lg p-4 border">
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div className="flex items-center gap-6">
@@ -193,7 +221,7 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
                 {performanceData.period_actual} dias analisados
               </Badge>
               {performanceData.has_limited_data && (
-                <span className="text-xs text-amber-600">
+                <span className="text-xs text-muted-foreground">
                   de {performanceData.period_requested} solicitados
                 </span>
               )}
@@ -232,17 +260,24 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
           </TabsTrigger>
         </TabsList>
 
-        {/* Market Comparison */}
+        {/* Market Comparison - sempre mostra */}
         <TabsContent value="comparison">
-          <SellerMarketComparison sellerId={sellerId} />
+          {categoryId && !isEligible ? (
+            <BlockedCard title="Comparativo de Mercado" icon={<BarChart3 className="h-5 w-5" />} />
+          ) : (
+            <SellerMarketComparison sellerId={sellerId} />
+          )}
         </TabsContent>
 
         {/* Top Visited - with cross metrics */}
         <TabsContent value="visited">
-          <Card className="border-blue-500/20">
-            <CardHeader className="bg-blue-500/5">
+          {categoryId && !isEligible ? (
+            <BlockedCard title="Produtos Mais Visitados" icon={<Eye className="h-5 w-5" />} />
+          ) : (
+          <Card className="border-primary/20">
+            <CardHeader className="bg-primary/5">
               <CardTitle className="flex items-center gap-2 text-lg">
-                <Eye className="h-5 w-5 text-blue-500" />
+                <Eye className="h-5 w-5 text-primary" />
                 Produtos Mais Visitados
               </CardTitle>
               <p className="text-sm text-muted-foreground">
@@ -321,14 +356,18 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
               )}
             </CardContent>
           </Card>
+          )}
         </TabsContent>
 
         {/* Top Sold - with cross metrics */}
         <TabsContent value="sold">
-          <Card className="border-green-500/20">
-            <CardHeader className="bg-green-500/5">
+          {categoryId && !isEligible ? (
+            <BlockedCard title="Produtos Mais Vendidos" icon={<Package className="h-5 w-5" />} />
+          ) : (
+          <Card className="border-primary/20">
+            <CardHeader className="bg-primary/5">
               <CardTitle className="flex items-center gap-2 text-lg">
-                <Package className="h-5 w-5 text-green-500" />
+                <Package className="h-5 w-5 text-primary" />
                 Produtos Mais Vendidos
               </CardTitle>
               <p className="text-sm text-muted-foreground">
@@ -412,6 +451,7 @@ export function TrendsSellerTab({ sellerId }: TrendsSellerTabProps) {
               )}
             </CardContent>
           </Card>
+          )}
         </TabsContent>
 
         {/* Alerts */}

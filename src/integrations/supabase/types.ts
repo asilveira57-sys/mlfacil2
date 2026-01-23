@@ -2482,6 +2482,75 @@ export type Database = {
         }
         Relationships: []
       }
+      seller_category_eligibility: {
+        Row: {
+          api_attempts_count: number
+          block_reason: string | null
+          blocked_until: string | null
+          calculated_at: string
+          category_id: string
+          created_at: string
+          eligibility_state: string
+          expires_at: string
+          id: string
+          last_api_attempt_at: string | null
+          last_error: string | null
+          orders_count: number
+          period_key: string
+          revenue: number
+          seller_id: string
+          threshold_orders: number
+          threshold_revenue: number
+          units_sold: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          api_attempts_count?: number
+          block_reason?: string | null
+          blocked_until?: string | null
+          calculated_at?: string
+          category_id: string
+          created_at?: string
+          eligibility_state?: string
+          expires_at?: string
+          id?: string
+          last_api_attempt_at?: string | null
+          last_error?: string | null
+          orders_count?: number
+          period_key?: string
+          revenue?: number
+          seller_id: string
+          threshold_orders?: number
+          threshold_revenue?: number
+          units_sold?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          api_attempts_count?: number
+          block_reason?: string | null
+          blocked_until?: string | null
+          calculated_at?: string
+          category_id?: string
+          created_at?: string
+          eligibility_state?: string
+          expires_at?: string
+          id?: string
+          last_api_attempt_at?: string | null
+          last_error?: string | null
+          orders_count?: number
+          period_key?: string
+          revenue?: number
+          seller_id?: string
+          threshold_orders?: number
+          threshold_revenue?: number
+          units_sold?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       seller_category_metrics: {
         Row: {
           avg_ticket: number | null
@@ -2883,6 +2952,21 @@ export type Database = {
       }
     }
     Functions: {
+      calculate_category_eligibility: {
+        Args: {
+          p_category_id: string
+          p_period_days?: number
+          p_seller_id: string
+          p_threshold_orders?: number
+          p_user_id: string
+        }
+        Returns: {
+          eligibility_state: string
+          orders_count: number
+          revenue: number
+          units_sold: number
+        }[]
+      }
       count_orders_needing_cost_sync: {
         Args: { p_seller_id: string }
         Returns: {
