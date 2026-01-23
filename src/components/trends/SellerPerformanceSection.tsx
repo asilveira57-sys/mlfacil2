@@ -1,128 +1,41 @@
 import { useState } from 'react';
-import { BarChart3, Target, TrendingUp, HelpCircle, Lock } from 'lucide-react';
+import { Target, Lock, HelpCircle, BarChart3 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { CriteriaModal } from './CriteriaModal';
-import { 
-  CategoryEligibility, 
-  DataState,
-  hasPermission 
-} from '@/hooks/useCategoryEligibility';
+import { EligibilityCriteriaModal } from './EligibilityCriteriaModal';
+import { CategoryEligibility, EligibilityState, hasPermission } from '@/hooks/useCategoryEligibility';
 
 interface SellerPerformanceSectionProps {
+  categoriaStatus: EligibilityState;
+  categoryId: string | null;
+  periodo: number;
   eligibility: CategoryEligibility | undefined;
   isLoading: boolean;
   sellerId: string | null;
-  periodDays: number;
 }
 
-export function SellerPerformanceSection({
-  eligibility,
-  isLoading,
-  sellerId,
-  periodDays,
-}: SellerPerformanceSectionProps) {
-  const [showCriteria, setShowCriteria] = useState(false);
-
-  const canFetch = hasPermission(eligibility, 'canFetchSellerPerformance');
-  const dataState = eligibility?.dataState || 'DADOS_PUBLICOS_MERCADO';
-
-  // Loading state
-  if (isLoading) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Target className="h-5 w-5 text-primary" />
-            Metas e Desempenho
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            <Skeleton className="h-20 w-full" />
-            <Skeleton className="h-20 w-full" />
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  // Blocked state - show locked card
-  if (!canFetch) {
-    return (
-      <>
-        <Card className="relative overflow-hidden opacity-80">
-          <div className="absolute inset-0 bg-background/40 backdrop-blur-[1px] z-10" />
-          
-          <CardHeader className="relative z-20">
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-lg text-muted-foreground">
-                <Target className="h-5 w-5" />
-                Metas e Desempenho
-              </CardTitle>
-              <Badge variant="secondary" className="gap-1">
-                <Lock className="h-3 w-3" />
-                Bloqueado
-              </Badge>
-            </div>
-          </CardHeader>
-          
-          <CardContent className="relative z-20">
-            <div className="flex flex-col items-center justify-center py-8 text-center">
-              <Lock className="h-10 w-10 text-muted-foreground mb-4" />
-              <p className="text-sm text-muted-foreground max-w-md">
-                {dataState === 'DADOS_BLOQUEADOS_POR_POLITICA' 
-                  ? 'O Mercado Livre libera metas e comparativos apenas após um volume mínimo de vendas na categoria.'
-                  : 'Sem vendas registradas, não há dados de desempenho disponíveis para esta categoria.'
-                }
-              </p>
-              <Button 
-                variant="link" 
-                size="sm" 
-                className="mt-3 text-primary"
-                onClick={() => setShowCriteria(true)}
-              >
-                <HelpCircle className="h-3 w-3 mr-1" />
-                Entender critérios
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <CriteriaModal 
-          open={showCriteria} 
-          onOpenChange={setShowCriteria} 
-        />
-      </>
-    );
-  }
-
-  // Eligible state - show actual performance data
-  // TODO: Integrate with actual seller performance hooks
+function SellerPerformanceCards({ eligibility, periodo }: { eligibility: CategoryEligibility | undefined; periodo: number }) {
+  const ticketMedio = eligibility?.ordersCount && eligibility.ordersCount > 0 ? eligibility.revenue / eligibility.ordersCount : 0;
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-lg">
           <Target className="h-5 w-5 text-primary" />
           Metas e Desempenho
-          <Badge variant="default" className="ml-2 bg-green-500/10 text-green-600 border-green-500/30">
-            Disponível
-          </Badge>
+          <Badge variant="default" className="ml-2 bg-green-500/10 text-green-600 border-green-500/30">Disponível</Badge>
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
           <div className="p-4 bg-primary/5 rounded-lg">
-            <p className="text-xs text-muted-foreground mb-1">Vendas no Período</p>
+            <p className="text-xs text-muted-foreground mb-1">Unidades</p>
             <p className="text-2xl font-bold">{eligibility?.unitsSold || 0}</p>
           </div>
           <div className="p-4 bg-green-500/5 rounded-lg">
             <p className="text-xs text-muted-foreground mb-1">Faturamento</p>
-            <p className="text-2xl font-bold text-green-600">
-              R$ {((eligibility?.revenue || 0) / 1000).toFixed(1)}k
-            </p>
+            <p className="text-2xl font-bold text-green-600">R$ {((eligibility?.revenue || 0) / 1000).toFixed(1)}k</p>
           </div>
           <div className="p-4 bg-blue-500/5 rounded-lg">
             <p className="text-xs text-muted-foreground mb-1">Pedidos</p>
@@ -130,19 +43,71 @@ export function SellerPerformanceSection({
           </div>
           <div className="p-4 bg-amber-500/5 rounded-lg">
             <p className="text-xs text-muted-foreground mb-1">Ticket Médio</p>
-            <p className="text-2xl font-bold text-amber-600">
-              R$ {eligibility?.ordersCount 
-                ? ((eligibility.revenue || 0) / eligibility.ordersCount).toFixed(0) 
-                : 0
-              }
-            </p>
+            <p className="text-2xl font-bold text-amber-600">R$ {ticketMedio.toFixed(0)}</p>
           </div>
         </div>
-        
-        <p className="text-xs text-muted-foreground mt-4">
-          Dados baseados nos últimos {periodDays} dias
-        </p>
+        <div className="p-4 bg-muted/30 rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-medium">Evolução no Período</span>
+          </div>
+          <p className="text-xs text-muted-foreground">Dados baseados nos últimos {periodo} dias.</p>
+        </div>
       </CardContent>
     </Card>
+  );
+}
+
+function SellerPerformanceBlockedCard({ categoriaStatus, onOpenCriteria }: { categoriaStatus: EligibilityState; onOpenCriteria: () => void }) {
+  return (
+    <Card className="border-dashed">
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center gap-2 text-lg text-muted-foreground">
+            <Target className="h-5 w-5" />
+            Metas e Desempenho
+          </CardTitle>
+          <Badge variant="secondary" className="gap-1"><Lock className="h-3 w-3" />Bloqueado</Badge>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col items-center justify-center py-8 text-center bg-muted/30 rounded-lg">
+          <Lock className="h-10 w-10 text-muted-foreground mb-4" />
+          <p className="text-sm text-muted-foreground max-w-md mb-2">
+            {categoriaStatus === 'inactive' ? 'Sem vendas registradas.' : 'Liberado após volume mínimo de vendas.'}
+          </p>
+          <Button variant="link" size="sm" className="mt-3 text-primary" onClick={onOpenCriteria}>
+            <HelpCircle className="h-3 w-3 mr-1" />Entender critérios
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+export function SellerPerformanceSection({ categoriaStatus, categoryId, periodo, eligibility, isLoading, sellerId }: SellerPerformanceSectionProps) {
+  const [showCriteria, setShowCriteria] = useState(false);
+  const canFetch = hasPermission(eligibility, 'canFetchSellerGoals');
+
+  if (!categoryId) return null;
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg"><Target className="h-5 w-5 text-primary" />Metas e Desempenho</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">{[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24 w-full" />)}</div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <>
+      {canFetch ? <SellerPerformanceCards eligibility={eligibility} periodo={periodo} /> : <SellerPerformanceBlockedCard categoriaStatus={categoriaStatus} onOpenCriteria={() => setShowCriteria(true)} />}
+      <EligibilityCriteriaModal open={showCriteria} onOpenChange={setShowCriteria} />
+    </>
   );
 }
