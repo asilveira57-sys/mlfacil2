@@ -933,13 +933,13 @@ async function enrichMissingItemData(
     }
   }
 
-  // Strategy 3: For still-missing catalog items, search ML API by catalog_product_id
+  // Strategy 3: For still-missing catalog items, use ML Products API directly
   const stillMissing = itemsNeedingEnrichment.filter(
     (i) => i.item_id.startsWith('MLBU') && !enrichmentMap.has(i.item_id)
   );
 
   if (stillMissing.length > 0) {
-    console.log(`[trends-api] Searching ML API for ${stillMissing.length} catalog items`);
+    console.log(`[trends-api] Fetching ${stillMissing.length} catalog products from ML API`);
     
     // Get ML account for authenticated requests
     const { data: mlAccount } = await supabase
@@ -950,35 +950,52 @@ async function enrichMissingItemData(
       .maybeSingle();
 
     const accessToken = mlAccount?.access_token;
+    const headers: Record<string, string> = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
 
-    for (const item of stillMissing.slice(0, 5)) { // Limit to 5 to avoid rate limits
+    for (const item of stillMissing.slice(0, 8)) { // Limit to 8 to avoid rate limits
       try {
-        // Search for items with this catalog_product_id in the category
-        const searchUrl = `https://api.mercadolibre.com/sites/MLB/search?catalog_product_id=${item.item_id}&category=${categoryId}&limit=1`;
-        const headers: Record<string, string> = {};
-        if (accessToken) {
-          headers['Authorization'] = `Bearer ${accessToken}`;
-        }
-
-        const searchRes = await fetch(searchUrl, { headers });
+        // First try: Products API (for catalog items MLBU*)
+        const productUrl = `https://api.mercadolibre.com/products/${item.item_id}`;
+        const productRes = await fetch(productUrl, { headers });
         
-        if (searchRes.ok) {
-          const searchData = await searchRes.json();
-          const firstResult = searchData.results?.[0];
+        if (productRes.ok) {
+          const productData = await productRes.json();
+          const thumbnail = productData.pictures?.[0]?.url || productData.main_picture?.url || null;
+          const title = productData.name || productData.short_description?.content || null;
           
-          if (firstResult) {
+          if (title || thumbnail) {
             enrichmentMap.set(item.item_id, {
-              title: firstResult.title,
-              thumbnail: firstResult.thumbnail,
-              price: firstResult.price,
-              sold_quantity: firstResult.sold_quantity,
+              title: title || `Catálogo ${item.item_id.slice(-8)}`,
+              thumbnail,
+              price: productData.buy_box_winner?.price ?? undefined,
+              sold_quantity: undefined,
             });
-            console.log(`[trends-api] Enriched catalog ${item.item_id} via search`);
+            console.log(`[trends-api] Enriched ${item.item_id} via Products API: ${title?.slice(0, 40)}`);
+          }
+        } else if (productRes.status === 403 || productRes.status === 404) {
+          // Fallback: Search API with catalog_product_id filter
+          console.log(`[trends-api] Products API failed for ${item.item_id}, trying search fallback`);
+          const searchUrl = `https://api.mercadolibre.com/sites/MLB/search?catalog_product_id=${item.item_id}&limit=1`;
+          const searchRes = await fetch(searchUrl, { headers });
+          
+          if (searchRes.ok) {
+            const searchData = await searchRes.json();
+            const firstResult = searchData.results?.[0];
+            
+            if (firstResult) {
+              enrichmentMap.set(item.item_id, {
+                title: firstResult.title,
+                thumbnail: firstResult.thumbnail,
+                price: firstResult.price,
+                sold_quantity: firstResult.sold_quantity,
+              });
+              console.log(`[trends-api] Enriched ${item.item_id} via search fallback`);
+            }
           }
         }
         
         // Rate limit delay
-        await new Promise((r) => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, 250));
       } catch (err) {
         console.warn(`[trends-api] Failed to enrich ${item.item_id}:`, err);
       }
