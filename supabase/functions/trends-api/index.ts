@@ -232,8 +232,11 @@ async function getMarketHighlights(supabase: any, params: Record<string, string>
 
   if (itemsError) throw itemsError;
 
+  // Enrich items missing title/thumbnail (especially catalog items MLBU*)
+  const enrichedItems = await enrichMissingItemData(supabase, items || [], categoryId);
+
   return {
-    items: items || [],
+    items: enrichedItems,
     snapshot_date: snapshot.snapshot_date,
   };
 }
@@ -863,4 +866,137 @@ async function getOverview(supabase: any, userId: string, params: Record<string,
     seller_stats: sellerStats,
     market_available: !!latestTrend,
   };
+}
+
+// ================== ENRICHMENT HELPER ==================
+
+/**
+ * Enriches items missing title or thumbnail by searching ML public API
+ * This handles catalog items (MLBU*) that often don't have metadata in highlights
+ */
+async function enrichMissingItemData(
+  supabase: any,
+  items: any[],
+  categoryId: string
+): Promise<any[]> {
+  const itemsNeedingEnrichment = items.filter(
+    (item) => !item.title || item.title.startsWith('[Catálogo]') || !item.thumbnail
+  );
+
+  if (itemsNeedingEnrichment.length === 0) {
+    return items;
+  }
+
+  console.log(`[trends-api] Enriching ${itemsNeedingEnrichment.length} items with missing data`);
+
+  // Build a map for quick lookup
+  const enrichmentMap = new Map<string, { title?: string; thumbnail?: string; price?: number; sold_quantity?: number }>();
+
+  // Strategy 1: Try to get from meli_listings_cache first (fastest)
+  const itemIds = itemsNeedingEnrichment.map((i) => i.item_id);
+  const { data: cachedItems } = await supabase
+    .from('meli_listings_cache')
+    .select('item_id, title, thumbnail, price, sold_quantity')
+    .in('item_id', itemIds)
+    .order('last_sync_at', { ascending: false });
+
+  for (const cached of cachedItems || []) {
+    if (cached.title && cached.thumbnail) {
+      enrichmentMap.set(cached.item_id, {
+        title: cached.title,
+        thumbnail: cached.thumbnail,
+        price: cached.price,
+        sold_quantity: cached.sold_quantity,
+      });
+    }
+  }
+
+  // Strategy 2: For catalog items (MLBU*), try meli_order_items_cache
+  const catalogIds = itemsNeedingEnrichment
+    .filter((i) => i.item_id.startsWith('MLBU') && !enrichmentMap.has(i.item_id))
+    .map((i) => i.item_id);
+
+  if (catalogIds.length > 0) {
+    const { data: orderItems } = await supabase
+      .from('meli_order_items_cache')
+      .select('catalog_product_id, title, thumbnail')
+      .in('catalog_product_id', catalogIds)
+      .order('created_at_meli', { ascending: false });
+
+    for (const item of orderItems || []) {
+      if (item.catalog_product_id && item.title && !enrichmentMap.has(item.catalog_product_id)) {
+        enrichmentMap.set(item.catalog_product_id, {
+          title: item.title,
+          thumbnail: item.thumbnail,
+        });
+      }
+    }
+  }
+
+  // Strategy 3: For still-missing catalog items, search ML API by catalog_product_id
+  const stillMissing = itemsNeedingEnrichment.filter(
+    (i) => i.item_id.startsWith('MLBU') && !enrichmentMap.has(i.item_id)
+  );
+
+  if (stillMissing.length > 0) {
+    console.log(`[trends-api] Searching ML API for ${stillMissing.length} catalog items`);
+    
+    // Get ML account for authenticated requests
+    const { data: mlAccount } = await supabase
+      .from('ml_accounts')
+      .select('access_token')
+      .eq('is_active', true)
+      .limit(1)
+      .maybeSingle();
+
+    const accessToken = mlAccount?.access_token;
+
+    for (const item of stillMissing.slice(0, 5)) { // Limit to 5 to avoid rate limits
+      try {
+        // Search for items with this catalog_product_id in the category
+        const searchUrl = `https://api.mercadolibre.com/sites/MLB/search?catalog_product_id=${item.item_id}&category=${categoryId}&limit=1`;
+        const headers: Record<string, string> = {};
+        if (accessToken) {
+          headers['Authorization'] = `Bearer ${accessToken}`;
+        }
+
+        const searchRes = await fetch(searchUrl, { headers });
+        
+        if (searchRes.ok) {
+          const searchData = await searchRes.json();
+          const firstResult = searchData.results?.[0];
+          
+          if (firstResult) {
+            enrichmentMap.set(item.item_id, {
+              title: firstResult.title,
+              thumbnail: firstResult.thumbnail,
+              price: firstResult.price,
+              sold_quantity: firstResult.sold_quantity,
+            });
+            console.log(`[trends-api] Enriched catalog ${item.item_id} via search`);
+          }
+        }
+        
+        // Rate limit delay
+        await new Promise((r) => setTimeout(r, 200));
+      } catch (err) {
+        console.warn(`[trends-api] Failed to enrich ${item.item_id}:`, err);
+      }
+    }
+  }
+
+  // Apply enrichment to items
+  return items.map((item) => {
+    const enriched = enrichmentMap.get(item.item_id);
+    if (enriched) {
+      return {
+        ...item,
+        title: enriched.title || item.title,
+        thumbnail: enriched.thumbnail || item.thumbnail,
+        price: enriched.price ?? item.price,
+        sold_quantity: enriched.sold_quantity ?? item.sold_quantity,
+      };
+    }
+    return item;
+  });
 }
