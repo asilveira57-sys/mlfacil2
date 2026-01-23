@@ -207,16 +207,31 @@ function trendsReducer(state: TrendsState, action: TrendsAction): TrendsState {
       };
       
     case 'SET_CATEGORY':
+      console.log('[TrendsContext] SET_CATEGORY:', { categoryId: action.categoryId, categoryName: action.categoryName });
       return {
         ...state,
         selectedCategoryId: action.categoryId,
         selectedSubcategoryId: null,
         categoryName: action.categoryName,
-        // Clear seller data when category changes
+        // Reset capabilities para reavaliação
+        capabilities: {
+          canUseSellerInsights: false,
+          reason: action.categoryId ? 'NO_CATEGORY' : state.capabilities.reason,
+        },
+        // Limpar TODOS os dados ao trocar categoria (market + seller)
         data: {
-          ...state.data,
+          marketTrends: [],
+          keywords: [],
+          bestSellers: [],
+          marketSubcategories: [],
           sellerSubcategories: null,
           sellerGoals: null,
+        },
+        // Reset UI flags
+        ui: {
+          ...state.ui,
+          emptyFlags: initialUIState.emptyFlags,
+          errors: initialUIState.errors,
         },
       };
       

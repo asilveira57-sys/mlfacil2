@@ -98,13 +98,10 @@ export function TrendsHeaderBar({
   const { data: breadcrumb } = useCategoryBreadcrumb(effectiveCategoryId);
   
   const handleCategorySelect = (id: string, name: string) => {
-    if (state.selectedCategoryId && id !== state.selectedCategoryId) {
-      // Selecting a subcategory
-      setSubcategory(id);
-    } else {
-      // Selecting main category
-      setCategory(id || null, name);
-    }
+    // SEMPRE atualizar a categoria principal ao selecionar
+    // O SubcategoryNavigator gerencia subcategorias via expansão separadamente
+    console.log('[TrendsHeaderBar] Category selected:', { id, name });
+    setCategory(id || null, name);
     setShowNavigator(false);
   };
   
