@@ -1,17 +1,61 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
-import { TrendingUp, BarChart3, Store, History, Bell, Eye, ShoppingCart, ArrowLeft } from 'lucide-react';
-import { useOverview, useAlerts, useMarketTrends, useSellerTopVisited, useSellerTopSold } from '@/hooks/useTrendsApi';
-import { TrendsSellerTab } from '@/components/trends/TrendsSellerTab';
-import { TrendsHistoryTab } from '@/components/trends/TrendsHistoryTab';
-import { TrendsMarketTab } from '@/components/trends/TrendsMarketTab';
+import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { 
+  TrendingUp, 
+  ArrowLeft, 
+  FolderTree, 
+  ChevronDown, 
+  ChevronUp,
+  CheckCircle,
+  AlertTriangle,
+  Info,
+  Clock,
+  RefreshCw
+} from 'lucide-react';
+import { useMarketTrends, useMarketHighlights } from '@/hooks/useTrendsApi';
+import { useTrendsStatus } from '@/hooks/useTrendsStatus';
+import { useCategoryEligibility, EligibilityState } from '@/hooks/useCategoryEligibility';
+import { useCategoryBreadcrumb } from '@/hooks/useSubcategories';
+import { SubcategoryNavigator } from '@/components/trends/SubcategoryNavigator';
+import { CategoryStatusCard } from '@/components/trends/CategoryStatusCard';
+import { MarketOverviewCard } from '@/components/trends/MarketOverviewCard';
+import { SubcategoriesHighlightCard } from '@/components/trends/SubcategoriesHighlightCard';
+import { KeywordsTrendCard } from '@/components/trends/KeywordsTrendCard';
+import { TopSellersMarketCard } from '@/components/trends/TopSellersMarketCard';
+import { SellerPerformanceSection } from '@/components/trends/SellerPerformanceSection';
+import { RecommendationsSection } from '@/components/trends/RecommendationsSection';
+import { toast } from 'sonner';
+
+// Categories list
+const CATEGORIES = [
+  { id: 'MLB5672', label: 'Acessórios para Veículos' },
+  { id: 'MLB1367', label: 'Antiguidades e Coleções' },
+  { id: 'MLB1375', label: 'Artigos para Fumadores' },
+  { id: 'MLB1384', label: 'Bebês' },
+  { id: 'MLB1246', label: 'Beleza e Cuidado Pessoal' },
+  { id: 'MLB1132', label: 'Brinquedos e Hobbies' },
+  { id: 'MLB1039', label: 'Câmeras e Acessórios' },
+  { id: 'MLB1574', label: 'Casa, Móveis e Decoração' },
+  { id: 'MLB1051', label: 'Celulares e Telefones' },
+  { id: 'MLB1648', label: 'Computadores' },
+  { id: 'MLB1500', label: 'Construção' },
+  { id: 'MLB1144', label: 'Eletrodomésticos' },
+  { id: 'MLB1000', label: 'Eletrônicos' },
+  { id: 'MLB1276', label: 'Esportes e Fitness' },
+  { id: 'MLB263532', label: 'Ferramentas' },
+  { id: 'MLB1499', label: 'Indústria e Comércio' },
+  { id: 'MLB1182', label: 'Instrumentos Musicais' },
+  { id: 'MLB3937', label: 'Joias e Relógios' },
+  { id: 'MLB1196', label: 'Livros, Revistas e Comics' },
+  { id: 'MLB1168', label: 'Música, Filmes e Seriados' },
+  { id: 'MLB1430', label: 'Roupas e Acessórios' },
+  { id: 'MLB264586', label: 'Saúde' },
+];
 
 interface MlAccount {
   id: string;
@@ -19,17 +63,65 @@ interface MlAccount {
   nickname: string | null;
 }
 
+// Badge component for eligibility state
+function EligibilityBadge({ state }: { state: EligibilityState }) {
+  const config = {
+    eligible: { 
+      icon: CheckCircle, 
+      label: 'Elegível', 
+      className: 'bg-green-500/10 text-green-600 border-green-500/30' 
+    },
+    low_base: { 
+      icon: AlertTriangle, 
+      label: 'Pouca Base', 
+      className: 'bg-amber-500/10 text-amber-600 border-amber-500/30' 
+    },
+    inactive: { 
+      icon: Info, 
+      label: 'Sem Vendas', 
+      className: 'bg-muted text-muted-foreground' 
+    },
+    unknown: { 
+      icon: Info, 
+      label: 'Verificando', 
+      className: 'bg-muted text-muted-foreground' 
+    },
+    loading: { 
+      icon: RefreshCw, 
+      label: 'Carregando', 
+      className: 'bg-muted text-muted-foreground' 
+    },
+  };
+  
+  const { icon: Icon, label, className } = config[state];
+  
+  return (
+    <Badge variant="outline" className={`gap-1 ${className}`}>
+      <Icon className={`h-3 w-3 ${state === 'loading' ? 'animate-spin' : ''}`} />
+      {label}
+    </Badge>
+  );
+}
+
 export default function Tendencias() {
   const navigate = useNavigate();
+  
+  // Account state
   const [accounts, setAccounts] = useState<MlAccount[]>([]);
   const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null);
-  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState('overview');
+  
+  // Category state
+  const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [categoryName, setCategoryName] = useState<string>('Selecionar Categoria');
+  const [showNavigator, setShowNavigator] = useState(false);
+  
+  // Period state
+  const [periodDays, setPeriodDays] = useState<number>(30);
+  
+  // Collection state
+  const [isCollecting, setIsCollecting] = useState(false);
 
-  const handleNavigateToMarket = () => {
-    setActiveTab('market');
-  };
-
+  // Auth check and load accounts
   useEffect(() => {
     const checkAuth = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -53,29 +145,98 @@ export default function Tendencias() {
     checkAuth();
   }, [navigate]);
 
-  const { data: overview, isLoading: overviewLoading } = useOverview(selectedSellerId);
-  const { data: alerts } = useAlerts(selectedSellerId);
-  const { data: trends, isLoading: trendsLoading } = useMarketTrends();
-  const { data: topVisited, isLoading: visitedLoading } = useSellerTopVisited(selectedSellerId, 7);
-  const { data: topSold, isLoading: soldLoading } = useSellerTopSold(selectedSellerId, 7);
+  // Data hooks - ALWAYS fetched (market data doesn't depend on eligibility)
+  const { data: trendsStatus } = useTrendsStatus();
+  const { data: breadcrumb } = useCategoryBreadcrumb(categoryId);
+  const { data: trends, isLoading: trendsLoading } = useMarketTrends('MLB', categoryId || undefined);
+  const { data: highlights, isLoading: highlightsLoading, refetch: refetchHighlights } = useMarketHighlights('MLB', categoryId || undefined);
+  
+  // Eligibility - RULE 1: Check BEFORE any seller API call
+  const { data: eligibility, isLoading: eligibilityLoading } = useCategoryEligibility(
+    selectedSellerId,
+    categoryId,
+    periodDays
+  );
+
+  // Transform categories for navigator
+  const navigatorCategories = CATEGORIES.map(c => ({
+    id: c.id,
+    name: c.label,
+  }));
+
+  // Handlers
+  const handleCategorySelect = (id: string, name: string) => {
+    setCategoryId(id || null);
+    setCategoryName(name);
+    setShowNavigator(false);
+  };
+
+  const handleBreadcrumbClick = (id: string) => {
+    const item = breadcrumb?.find(b => b.id === id);
+    if (item) {
+      setCategoryId(id);
+      setCategoryName(item.name);
+    }
+  };
+
+  const handleCollectData = async () => {
+    if (!categoryId) return;
+    
+    setIsCollecting(true);
+    try {
+      const { error } = await supabase.functions.invoke('trends-collect-public', {
+        body: {
+          site_id: 'MLB',
+          category_id: categoryId,
+          collect_type: 'all'
+        }
+      });
+      
+      if (error) throw error;
+      
+      toast.success('Coleta iniciada! Aguarde alguns segundos.');
+      
+      setTimeout(() => {
+        refetchHighlights();
+        setIsCollecting(false);
+      }, 5000);
+    } catch (err) {
+      console.error('Error collecting data:', err);
+      toast.error('Erro ao coletar dados');
+      setIsCollecting(false);
+    }
+  };
+
+  // Derived state
+  const eligibilityState: EligibilityState = eligibilityLoading 
+    ? 'loading' 
+    : eligibility?.eligibilityState || 'unknown';
+  
+  const filteredTrends = trends?.trends || [];
 
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-10">
+      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-20">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-4">
             <div className="flex items-center gap-3">
               <Button variant="ghost" size="icon" onClick={() => navigate('/dashboard')}>
                 <ArrowLeft className="h-5 w-5" />
               </Button>
-              <TrendingUp className="h-6 w-6 text-orange-500" />
-              <h1 className="text-xl font-semibold">Tendências</h1>
+              <TrendingUp className="h-6 w-6 text-primary" />
+              <div>
+                <h1 className="text-xl font-semibold">Tendências de Mercado</h1>
+                <p className="text-xs text-muted-foreground hidden sm:block">
+                  Análise baseada em dados públicos do Mercado Livre e, quando disponível, no seu histórico
+                </p>
+              </div>
             </div>
             
+            {/* Account Selector */}
             {accounts.length > 0 && (
               <Select value={selectedSellerId || ''} onValueChange={setSelectedSellerId}>
-                <SelectTrigger className="w-[200px]">
+                <SelectTrigger className="w-[180px]">
                   <SelectValue placeholder="Selecionar conta" />
                 </SelectTrigger>
                 <SelectContent>
@@ -91,272 +252,136 @@ export default function Tendencias() {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="container mx-auto px-4 py-6">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid">
-            <TabsTrigger value="overview" className="gap-2">
-              <BarChart3 className="h-4 w-4" />
-              <span className="hidden sm:inline">Visão Geral</span>
-            </TabsTrigger>
-            <TabsTrigger value="market" className="gap-2">
-              <TrendingUp className="h-4 w-4" />
-              <span className="hidden sm:inline">Mercado</span>
-            </TabsTrigger>
-            <TabsTrigger value="seller" className="gap-2">
-              <Store className="h-4 w-4" />
-              <span className="hidden sm:inline">Seller</span>
-            </TabsTrigger>
-            <TabsTrigger value="history" className="gap-2">
-              <History className="h-4 w-4" />
-              <span className="hidden sm:inline">Histórico</span>
-            </TabsTrigger>
-          </TabsList>
+      {/* Filters Bar */}
+      <div className="border-b bg-muted/30">
+        <div className="container mx-auto px-4 py-3">
+          <div className="flex items-center gap-4 flex-wrap">
+            {/* Period Selector */}
+            <Select value={String(periodDays)} onValueChange={(v) => setPeriodDays(Number(v))}>
+              <SelectTrigger className="w-[150px]">
+                <Clock className="h-4 w-4 mr-2 text-muted-foreground" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="7">Últimos 7 dias</SelectItem>
+                <SelectItem value="30">Últimos 30 dias</SelectItem>
+                <SelectItem value="90">Últimos 90 dias</SelectItem>
+              </SelectContent>
+            </Select>
 
-          {/* Overview Tab */}
-          <TabsContent value="overview" className="space-y-6">
-            {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <Card 
-                className="relative overflow-hidden group hover:shadow-lg transition-all duration-300 cursor-pointer"
-                onClick={() => setActiveTab('market')}
-              >
-                <div className="absolute inset-0 bg-gradient-to-br from-orange-500/10 to-transparent" />
-                <div className="absolute -right-4 -top-4 w-24 h-24 bg-orange-500/5 rounded-full blur-2xl group-hover:scale-150 transition-transform" />
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">Em Alta no ML</CardTitle>
-                  <TrendingUp className="h-4 w-4 text-orange-500" />
-                </CardHeader>
-                <CardContent>
-                  {trendsLoading ? (
-                    <Skeleton className="h-8 w-16" />
+            {/* Category Selector */}
+            <Collapsible open={showNavigator} onOpenChange={setShowNavigator}>
+              <CollapsibleTrigger asChild>
+                <Button variant="outline" className="w-[260px] justify-between">
+                  <div className="flex items-center gap-2">
+                    <FolderTree className="h-4 w-4 text-muted-foreground" />
+                    <span className="truncate">{categoryName}</span>
+                  </div>
+                  {showNavigator ? (
+                    <ChevronUp className="h-4 w-4 text-muted-foreground" />
                   ) : (
-                    <p className="text-2xl font-bold">{trends?.trends?.length || 0}</p>
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
                   )}
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {trends?.snapshot_date ? `Atualizado: ${new Date(trends.snapshot_date + 'T00:00:00').toLocaleDateString('pt-BR')}` : 'Aguardando dados'}
-                  </p>
-                  <p className="text-xs text-primary mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    Clique para ver detalhes →
-                  </p>
-                </CardContent>
-              </Card>
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="absolute z-50 mt-2 w-[320px]">
+                <SubcategoryNavigator
+                  categories={navigatorCategories}
+                  selectedId={categoryId}
+                  onSelect={handleCategorySelect}
+                  breadcrumb={breadcrumb}
+                  onBreadcrumbClick={handleBreadcrumbClick}
+                />
+              </CollapsibleContent>
+            </Collapsible>
 
-              <Card className="relative overflow-hidden group hover:shadow-lg transition-all duration-300">
-                <div className="absolute inset-0 bg-gradient-to-br from-red-500/10 to-transparent" />
-                <div className="absolute -right-4 -top-4 w-24 h-24 bg-red-500/5 rounded-full blur-2xl group-hover:scale-150 transition-transform" />
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">Alertas Abertos</CardTitle>
-                  <Bell className="h-4 w-4 text-red-500" />
-                </CardHeader>
-                <CardContent>
-                  {overviewLoading ? (
-                    <Skeleton className="h-8 w-16" />
-                  ) : (
-                    <p className="text-2xl font-bold">{overview?.alerts_count || 0}</p>
-                  )}
-                  <p className="text-xs text-muted-foreground mt-1">Não lidos</p>
-                </CardContent>
-              </Card>
+            {/* Eligibility Badge */}
+            {categoryId && (
+              <EligibilityBadge state={eligibilityState} />
+            )}
 
-              <Card className="relative overflow-hidden group hover:shadow-lg transition-all duration-300">
-                <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-transparent" />
-                <div className="absolute -right-4 -top-4 w-24 h-24 bg-blue-500/5 rounded-full blur-2xl group-hover:scale-150 transition-transform" />
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">Visitas 7d</CardTitle>
-                  <Eye className="h-4 w-4 text-blue-500" />
-                </CardHeader>
-                <CardContent>
-                  {overviewLoading ? (
-                    <Skeleton className="h-8 w-16" />
-                  ) : (
-                    <p className="text-2xl font-bold">{overview?.seller_stats?.visits_7d?.toLocaleString('pt-BR') || 0}</p>
-                  )}
-                  <p className="text-xs text-muted-foreground mt-1">Total de visitas</p>
-                </CardContent>
-              </Card>
+            {/* Status Info */}
+            {trendsStatus && (
+              <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+                <Clock className="h-3 w-3" />
+                <span>
+                  Atualizado: {trendsStatus.last_success_at 
+                    ? new Date(trendsStatus.last_success_at).toLocaleDateString('pt-BR')
+                    : 'Nunca'
+                  }
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
-              <Card className="relative overflow-hidden group hover:shadow-lg transition-all duration-300">
-                <div className="absolute inset-0 bg-gradient-to-br from-green-500/10 to-transparent" />
-                <div className="absolute -right-4 -top-4 w-24 h-24 bg-green-500/5 rounded-full blur-2xl group-hover:scale-150 transition-transform" />
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">Vendas 7d</CardTitle>
-                  <ShoppingCart className="h-4 w-4 text-green-500" />
-                </CardHeader>
-                <CardContent>
-                  {overviewLoading ? (
-                    <Skeleton className="h-8 w-16" />
-                  ) : (
-                    <>
-                      <p className="text-2xl font-bold">{overview?.seller_stats?.sales_7d || 0}</p>
-                      {overview?.seller_stats?.growth_7d_vs_28d && (
-                        <Badge 
-                          variant={Number(overview.seller_stats.growth_7d_vs_28d) >= 0 ? 'default' : 'destructive'} 
-                          className="mt-1"
-                        >
-                          {Number(overview.seller_stats.growth_7d_vs_28d) >= 0 ? '+' : ''}{overview.seller_stats.growth_7d_vs_28d}% vs 28d
-                        </Badge>
-                      )}
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+      {/* Main Content - Ordered Sections */}
+      <main className="container mx-auto px-4 py-6 space-y-6">
+        
+        {/* Section 1: Category Status (only when category selected) */}
+        {categoryId && (
+          <CategoryStatusCard
+            eligibility={eligibility}
+            isLoading={eligibilityLoading}
+            categoryName={categoryName}
+          />
+        )}
 
-            {/* Quick Lists */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Top Trends */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <TrendingUp className="h-5 w-5 text-orange-500" />
-                    Top em Alta
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {trendsLoading ? (
-                    <div className="space-y-2">
-                      {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} className="h-10 w-full" />)}
-                    </div>
-                  ) : trends?.trends?.length ? (
-                    <div className="space-y-2">
-                      {trends.trends.slice(0, 5).map((trend, idx) => (
-                        <div key={idx} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors">
-                          <span className="text-lg font-bold text-orange-500 w-6">{idx + 1}</span>
-                          <span className="text-sm">{trend.keyword}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-muted-foreground text-center py-4">Sem dados disponíveis</p>
-                  )}
-                </CardContent>
-              </Card>
+        {/* Section 2 & 3: Market Overview + Subcategories */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <MarketOverviewCard
+            categoryName={categoryName}
+            trendsCount={filteredTrends.length}
+            highlightsCount={highlights?.items?.length || 0}
+            snapshotDate={trends?.snapshot_date}
+            isLoading={trendsLoading}
+          />
+          
+          <SubcategoriesHighlightCard
+            parentCategoryId={categoryId}
+            onSubcategoryClick={handleCategorySelect}
+          />
+        </div>
 
-              {/* Alerts */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Bell className="h-5 w-5 text-red-500" />
-                    Alertas do Seller
-                    {alerts && alerts.unread_count > 0 && (
-                      <Badge variant="destructive">{alerts.unread_count}</Badge>
-                    )}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {alerts?.alerts?.length ? (
-                    <div className="space-y-2">
-                      {alerts.alerts.slice(0, 5).map((alert) => (
-                        <div key={alert.id} className="flex items-center justify-between p-2 bg-muted/50 rounded-lg">
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-sm truncate">{alert.title}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {new Date(alert.triggered_at).toLocaleDateString('pt-BR')}
-                            </p>
-                          </div>
-                          <Badge variant={alert.severity === 'critical' ? 'destructive' : 'secondary'}>
-                            {alert.severity}
-                          </Badge>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-muted-foreground text-center py-4">Nenhum alerta</p>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+        {/* Section 4: Keywords Trend */}
+        <KeywordsTrendCard
+          keywords={filteredTrends}
+          snapshotDate={trends?.snapshot_date}
+          isLoading={trendsLoading}
+          categoryLabel={categoryName}
+        />
 
-            {/* Top Items */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Eye className="h-5 w-5 text-blue-500" />
-                    Mais Visitados (7d)
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {visitedLoading ? (
-                    <div className="space-y-2">
-                      {[1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-full" />)}
-                    </div>
-                  ) : topVisited?.items?.length ? (
-                    <div className="space-y-2">
-                      {topVisited.items.slice(0, 5).map((item, idx) => (
-                        <div key={item.item_id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50">
-                          <span className="text-lg font-bold text-muted-foreground w-6">{idx + 1}</span>
-                          {item.thumbnail && (
-                            <img src={item.thumbnail} alt="" className="w-10 h-10 rounded object-cover" />
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">{item.title}</p>
-                          </div>
-                          <Badge variant="outline">{item.visits?.toLocaleString('pt-BR')}</Badge>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-muted-foreground text-center py-4">Sem dados de visitas</p>
-                  )}
-                </CardContent>
-              </Card>
+        {/* Section 5: Top Sellers Market */}
+        <TopSellersMarketCard
+          items={highlights?.items || []}
+          snapshotDate={highlights?.snapshot_date}
+          isLoading={highlightsLoading}
+          categoryLabel={categoryName}
+          onCollect={handleCollectData}
+          isCollecting={isCollecting}
+          showCollectButton={!!categoryId}
+        />
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <ShoppingCart className="h-5 w-5 text-green-500" />
-                    Mais Vendidos (7d)
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {soldLoading ? (
-                    <div className="space-y-2">
-                      {[1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-full" />)}
-                    </div>
-                  ) : topSold?.items?.length ? (
-                    <div className="space-y-2">
-                      {topSold.items.slice(0, 5).map((item, idx) => (
-                        <div key={item.item_id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50">
-                          <span className="text-lg font-bold text-muted-foreground w-6">{idx + 1}</span>
-                          {item.thumbnail && (
-                            <img src={item.thumbnail} alt="" className="w-10 h-10 rounded object-cover" />
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">{item.title}</p>
-                          </div>
-                          <Badge variant="outline">{item.quantity} un</Badge>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-muted-foreground text-center py-4">Sem dados de vendas</p>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
+        {/* Section 6: Seller Performance (Conditional) */}
+        {categoryId && (
+          <SellerPerformanceSection
+            eligibility={eligibility}
+            isLoading={eligibilityLoading}
+            sellerId={selectedSellerId}
+            periodDays={periodDays}
+          />
+        )}
 
-          {/* Market Tab */}
-          <TabsContent value="market">
-            <TrendsMarketTab />
-          </TabsContent>
+        {/* Section 7: Strategic Recommendations */}
+        {categoryId && (
+          <RecommendationsSection
+            eligibility={eligibility}
+            isLoading={eligibilityLoading}
+            categoryName={categoryName}
+          />
+        )}
 
-          {/* Seller Tab */}
-          <TabsContent value="seller">
-            <TrendsSellerTab 
-              sellerId={selectedSellerId} 
-              categoryId={selectedCategoryId}
-              onNavigateToMarket={handleNavigateToMarket}
-            />
-          </TabsContent>
-
-          {/* History Tab */}
-          <TabsContent value="history">
-            <TrendsHistoryTab sellerId={selectedSellerId} />
-          </TabsContent>
-        </Tabs>
       </main>
     </div>
   );
