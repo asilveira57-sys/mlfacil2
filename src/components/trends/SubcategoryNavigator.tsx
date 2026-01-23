@@ -19,13 +19,21 @@ interface SubcategoryNodeProps {
 
 function SubcategoryNode({ category, depth, selectedId, onSelect }: SubcategoryNodeProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [hasAttemptedExpand, setHasAttemptedExpand] = useState(false);
   const { data: children, isLoading } = useSubcategories(category.id, isExpanded);
 
-  const hasChildren = (category.children_count ?? 0) > 0 || (children && children.length > 0);
+  // After attempting to expand, we know if it has children
+  const hasChildren = hasAttemptedExpand 
+    ? (children && children.length > 0)
+    : true; // Assume has children before attempting (expand by attempt)
+  
   const isSelected = selectedId === category.id;
 
   const handleToggle = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!hasAttemptedExpand) {
+      setHasAttemptedExpand(true);
+    }
     setIsExpanded(!isExpanded);
   };
 
@@ -44,6 +52,7 @@ function SubcategoryNode({ category, depth, selectedId, onSelect }: SubcategoryN
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
         onClick={handleSelect}
       >
+        {/* Always show expand button (expand by attempt) */}
         {hasChildren ? (
           <button
             onClick={handleToggle}
@@ -72,17 +81,27 @@ function SubcategoryNode({ category, depth, selectedId, onSelect }: SubcategoryN
         <span className="flex-1 truncate text-sm">{category.name}</span>
       </div>
 
-      {isExpanded && children && children.length > 0 && (
+      {/* Expanded state with children or empty message */}
+      {isExpanded && (
         <div>
-          {children.map((child) => (
-            <SubcategoryNode
-              key={child.id}
-              category={child}
-              depth={depth + 1}
-              selectedId={selectedId}
-              onSelect={onSelect}
-            />
-          ))}
+          {isLoading ? null : children && children.length > 0 ? (
+            children.map((child) => (
+              <SubcategoryNode
+                key={child.id}
+                category={child}
+                depth={depth + 1}
+                selectedId={selectedId}
+                onSelect={onSelect}
+              />
+            ))
+          ) : hasAttemptedExpand ? (
+            <div 
+              className="text-xs text-muted-foreground italic py-1"
+              style={{ paddingLeft: `${(depth + 1) * 16 + 24}px` }}
+            >
+              Sem subcategorias
+            </div>
+          ) : null}
         </div>
       )}
     </div>
