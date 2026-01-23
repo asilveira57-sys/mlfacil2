@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Camera, CheckCircle2, AlertCircle, Instagram, Linkedin, Link2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 interface ProfileData {
   fullName: string;
@@ -30,6 +31,7 @@ interface ProfileData {
 
 const SettingsProfile = () => {
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [loadingCep, setLoadingCep] = useState(false);
   const [profile, setProfile] = useState<ProfileData>({
     fullName: "",
@@ -49,6 +51,68 @@ const SettingsProfile = () => {
     state: "",
     avatarUrl: "",
   });
+
+  // Load profile on mount
+  useEffect(() => {
+    const loadProfile = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          setLoading(false);
+          return;
+        }
+
+        // Load from profiles table
+        const { data: profileData, error } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (error) {
+          console.error("Error loading profile:", error);
+          toast.error("Erro ao carregar perfil");
+          setLoading(false);
+          return;
+        }
+
+        if (profileData) {
+          setProfile({
+            fullName: profileData.full_name || "",
+            cpf: profileData.cpf || "",
+            email: profileData.email || user.email || "",
+            emailVerified: !!user.email_confirmed_at,
+            whatsapp: profileData.whatsapp || "",
+            instagram: profileData.instagram_url || "",
+            linkedin: profileData.linkedin_url || "",
+            otherLink: profileData.other_url || "",
+            cep: profileData.address_cep || "",
+            street: profileData.address_street || "",
+            number: profileData.address_number || "",
+            complement: profileData.address_complement || "",
+            neighborhood: profileData.address_district || "",
+            city: profileData.address_city || "",
+            state: profileData.address_state || "",
+            avatarUrl: profileData.photo_url || "",
+          });
+        } else {
+          // If no profile exists, at least set email from auth
+          setProfile(prev => ({
+            ...prev,
+            email: user.email || "",
+            emailVerified: !!user.email_confirmed_at,
+          }));
+        }
+      } catch (err) {
+        console.error("Error loading profile:", err);
+        toast.error("Erro ao carregar perfil");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadProfile();
+  }, []);
 
   const formatCPF = (value: string) => {
     const numbers = value.replace(/\D/g, "").slice(0, 11);
@@ -110,7 +174,6 @@ const SettingsProfile = () => {
     const numbers = cpf.replace(/\D/g, "");
     if (numbers.length !== 11) return false;
     if (/^(\d)\1+$/.test(numbers)) return false;
-    // Simplified validation
     return true;
   };
 
@@ -130,15 +193,76 @@ const SettingsProfile = () => {
 
     setSaving(true);
     try {
-      // TODO: Save to backend
-      await new Promise((r) => setTimeout(r, 1000));
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast.error("Usuário não autenticado");
+        return;
+      }
+
+      // Check if profile exists
+      const { data: existingProfile } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      const profileData = {
+        full_name: profile.fullName,
+        cpf: profile.cpf || null,
+        email: profile.email || null,
+        whatsapp: profile.whatsapp || null,
+        instagram_url: profile.instagram || null,
+        linkedin_url: profile.linkedin || null,
+        other_url: profile.otherLink || null,
+        address_cep: profile.cep || null,
+        address_street: profile.street || null,
+        address_number: profile.number || null,
+        address_complement: profile.complement || null,
+        address_district: profile.neighborhood || null,
+        address_city: profile.city || null,
+        address_state: profile.state || null,
+        photo_url: profile.avatarUrl || null,
+      };
+
+      let error;
+      if (existingProfile) {
+        // Update existing
+        const result = await supabase
+          .from("profiles")
+          .update(profileData)
+          .eq("user_id", user.id);
+        error = result.error;
+      } else {
+        // Insert new - cast to any to bypass strict type checking for user_id
+        const insertData = { ...profileData, user_id: user.id } as any;
+        const result = await supabase
+          .from("profiles")
+          .insert(insertData);
+        error = result.error;
+      }
+
+      if (error) {
+        console.error("Error saving profile:", error);
+        toast.error("Erro ao salvar perfil");
+        return;
+      }
+
       toast.success("Perfil salvo com sucesso!");
-    } catch {
+    } catch (err) {
+      console.error("Error saving profile:", err);
       toast.error("Erro ao salvar perfil");
     } finally {
       setSaving(false);
     }
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
