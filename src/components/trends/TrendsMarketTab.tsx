@@ -14,25 +14,35 @@ import { SubcategoryNavigator } from './SubcategoryNavigator';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
-// Common ML categories - aligned with backend POPULAR_CATEGORIES
+// Common ML categories - aligned with backend public_categories table
 const CATEGORIES = [
   { id: 'all', label: 'Todas (Geral)' },
   { id: 'MLB5672', label: 'Acessórios para Veículos' },
+  { id: 'MLB1367', label: 'Antiguidades e Coleções' },
+  { id: 'MLB1375', label: 'Artigos para Fumadores' },
   { id: 'MLB1384', label: 'Bebês' },
+  { id: 'MLB1246', label: 'Beleza e Cuidado Pessoal' },
+  { id: 'MLB1132', label: 'Brinquedos e Hobbies' },
+  { id: 'MLB1039', label: 'Câmeras e Acessórios' },
   { id: 'MLB1574', label: 'Casa, Móveis e Decoração' },
   { id: 'MLB1051', label: 'Celulares e Telefones' },
   { id: 'MLB1648', label: 'Computadores' },
+  { id: 'MLB1500', label: 'Construção' },
   { id: 'MLB1144', label: 'Eletrodomésticos' },
   { id: 'MLB1000', label: 'Eletrônicos' },
   { id: 'MLB1276', label: 'Esportes e Fitness' },
   { id: 'MLB263532', label: 'Ferramentas' },
+  { id: 'MLB218519', label: 'Imóveis' },
   { id: 'MLB1499', label: 'Indústria e Comércio' },
   { id: 'MLB1182', label: 'Instrumentos Musicais' },
   { id: 'MLB3937', label: 'Joias e Relógios' },
   { id: 'MLB1196', label: 'Livros, Revistas e Comics' },
   { id: 'MLB1168', label: 'Música, Filmes e Seriados' },
-  { id: 'MLB264586', label: 'Saúde' },
+  { id: 'MLB1953', label: 'Outras Categorias' },
   { id: 'MLB1430', label: 'Roupas e Acessórios' },
+  { id: 'MLB264586', label: 'Saúde' },
+  { id: 'MLB1540', label: 'Serviços' },
+  { id: 'MLB1743', label: 'Veículos' },
 ];
 
 // Export keywords to CSV
@@ -190,9 +200,9 @@ export function TrendsMarketTab() {
               </span>
             )}
           </div>
-          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+        <div className="flex items-center gap-1 text-xs text-muted-foreground">
             <Clock className="h-3 w-3" />
-            <span>Atualização diária às 02:30</span>
+            <span>Atualização diária às 02:00</span>
           </div>
         </div>
       )}

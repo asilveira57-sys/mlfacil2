@@ -1,15 +1,15 @@
 /**
  * trends-nightly-public
  * Job noturno para coleta de tendências públicas do mercado.
- * Roda via cron (02:30) ou manual (admin).
+ * Roda via cron (02:00 BRT) ou manual (admin).
  * 
- * Funcionalidades:
- * - Lock global (evita execuções simultâneas)
- * - Coleta keywords/trends por categoria
- * - Coleta highlights (mais vendidos) com suporte PRODUCT/ITEM
- * - Coleta subcategorias nível 1 para categorias configuradas
- * - Resiliência (retry, timeouts, falha parcial)
- * - Observabilidade (job_runs, job_run_steps)
+ * Funcionalidades v2:
+ * - Lock global com auto-recovery de jobs stuck
+ * - Timeout global (50min) com checkpoints
+ * - Rate limiting inteligente (20 req/min)
+ * - Coleta recursiva de subcategorias até nível 2
+ * - Fallback de keywords via títulos de highlights
+ * - 25+ categorias principais
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -22,14 +22,57 @@ const corsHeaders = {
 const ML_APP_ID = Deno.env.get('ML_APP_ID')!;
 const ML_SECRET_KEY = Deno.env.get('ML_SECRET_KEY')!;
 
-// Constants
+// =====================================================
+// CONSTANTS & CONFIGURATION
+// =====================================================
 const JOB_NAME = 'public_trends_nightly';
 const LOCK_KEY = 'public_trends_nightly';
 const LOCK_TTL_MINUTES = 60;
+
+// Timeout and rate limiting
+const JOB_TIMEOUT_MS = 50 * 60 * 1000; // 50 minutes (safe margin for 55min edge limit)
 const REQUEST_TIMEOUT_MS = 15000;
-const RATE_LIMIT_DELAY_MS = 500;
-const RETRY_DELAYS = [1000, 2000, 4000]; // backoff
+const RATE_LIMIT_DELAY_MS = 800; // Increased from 500
+const RETRY_DELAYS = [1000, 2000, 4000];
 const RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 504];
+
+// Subcategory collection settings
+const MAX_SUBCATEGORIES_PER_LEVEL = 10; // Increased from 5
+const MAX_SUBCATEGORY_DEPTH = 2; // Collect level 1 and level 2
+
+// Global rate limiter
+interface RateLimiter {
+  requestsThisMinute: number;
+  lastResetTime: number;
+  maxPerMinute: number;
+}
+
+const rateLimiter: RateLimiter = {
+  requestsThisMinute: 0,
+  lastResetTime: Date.now(),
+  maxPerMinute: 20,
+};
+
+async function checkRateLimit(): Promise<void> {
+  const now = Date.now();
+  
+  // Reset counter every minute
+  if (now - rateLimiter.lastResetTime > 60000) {
+    rateLimiter.requestsThisMinute = 0;
+    rateLimiter.lastResetTime = now;
+  }
+  
+  // If at limit, wait until next minute
+  if (rateLimiter.requestsThisMinute >= rateLimiter.maxPerMinute) {
+    const waitTime = 60000 - (now - rateLimiter.lastResetTime) + 1000;
+    console.log(`[RateLimiter] Waiting ${Math.round(waitTime / 1000)}s to reset`);
+    await sleep(waitTime);
+    rateLimiter.requestsThisMinute = 0;
+    rateLimiter.lastResetTime = Date.now();
+  }
+  
+  rateLimiter.requestsThisMinute++;
+}
 
 interface JobMetrics {
   categoriesProcessed: number;
@@ -59,6 +102,21 @@ interface SubcategoryInfo {
   total_items_in_category?: number;
 }
 
+// Global job state for timeout checking
+let jobStartTime: number;
+
+function isTimedOut(): boolean {
+  return Date.now() - jobStartTime > JOB_TIMEOUT_MS;
+}
+
+function getRemainingTime(): number {
+  return Math.max(0, JOB_TIMEOUT_MS - (Date.now() - jobStartTime));
+}
+
+// =====================================================
+// MAIN HANDLER
+// =====================================================
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -69,9 +127,33 @@ Deno.serve(async (req) => {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   const logPrefix = '[trends-nightly-public]';
+  jobStartTime = Date.now();
   console.log(`${logPrefix} Job started at ${new Date().toISOString()}`);
 
   try {
+    // 0) Auto-recover stuck jobs (running > 1 hour)
+    const { data: stuckJobs } = await supabase
+      .from('job_runs')
+      .update({ 
+        status: 'failed', 
+        error_message: 'Timeout auto-recovery',
+        finished_at: new Date().toISOString()
+      })
+      .eq('job_name', JOB_NAME)
+      .eq('status', 'running')
+      .lt('created_at', new Date(Date.now() - 60 * 60 * 1000).toISOString())
+      .select('id');
+    
+    if (stuckJobs?.length) {
+      console.log(`${logPrefix} Recovered ${stuckJobs.length} stuck jobs`);
+    }
+
+    // Clean expired locks
+    await supabase
+      .from('job_locks')
+      .delete()
+      .lt('expires_at', new Date().toISOString());
+
     // 1) Try to acquire lock
     const lockAcquired = await acquireLock(supabase, LOCK_KEY, LOCK_TTL_MINUTES);
     if (!lockAcquired) {
@@ -145,7 +227,7 @@ Deno.serve(async (req) => {
       .from('public_categories')
       .select('id, name, is_active, priority, parent_id, depth, collect_subcategories')
       .eq('is_active', true)
-      .is('parent_id', null) // Only get main categories
+      .is('parent_id', null)
       .order('priority', { ascending: true });
 
     if (catError) {
@@ -164,11 +246,18 @@ Deno.serve(async (req) => {
     const siteId = 'MLB';
 
     for (const category of activeCategories) {
+      // Check timeout before each category
+      if (isTimedOut()) {
+        console.log(`${logPrefix} Timeout reached, stopping gracefully`);
+        break;
+      }
+
       const catPrefix = `${logPrefix}[${category.id}]`;
-      console.log(`${catPrefix} Starting...`);
+      console.log(`${catPrefix} Starting... (remaining: ${Math.round(getRemainingTime() / 1000)}s)`);
 
       try {
         // a) Collect trends/keywords for main category
+        await checkRateLimit();
         const trendsResult = await collectTrendsWithRetry(supabase, jobRunId, siteId, category.id, today, accessToken);
         if (trendsResult.success) {
           metrics.keywordsSaved += trendsResult.count;
@@ -177,6 +266,7 @@ Deno.serve(async (req) => {
 
         // b) Collect highlights (skip for __ROOT__)
         if (category.id !== '__ROOT__') {
+          await checkRateLimit();
           const highlightsResult = await collectHighlightsWithRetry(supabase, jobRunId, siteId, category.id, today, accessToken);
           if (highlightsResult.success) {
             metrics.highlightsSaved += highlightsResult.snapshotSaved ? 1 : 0;
@@ -185,41 +275,23 @@ Deno.serve(async (req) => {
           await sleep(RATE_LIMIT_DELAY_MS);
         }
 
-        // c) Fetch and process subcategories (level 1) if enabled
+        // c) Recursively process subcategories if enabled
         if (category.collect_subcategories && category.id !== '__ROOT__') {
-          console.log(`${catPrefix} Fetching subcategories...`);
-          const subcategories = await fetchSubcategories(siteId, category.id, accessToken);
-          console.log(`${catPrefix} Found ${subcategories.length} subcategories`);
-
-          // Save subcategories to cache
-          await saveSubcategoriesToCache(supabase, subcategories);
-
-          // Process top subcategories (limit to 5 per main category to avoid rate limits)
-          const topSubcategories = subcategories.slice(0, 5);
-          for (const subcat of topSubcategories) {
-            try {
-              console.log(`${catPrefix} Processing subcategory ${subcat.id}...`);
-              
-              // Collect trends for subcategory
-              const subTrendsResult = await collectTrendsWithRetry(supabase, jobRunId, siteId, subcat.id, today, accessToken);
-              if (subTrendsResult.success) {
-                metrics.keywordsSaved += subTrendsResult.count;
-              }
-              await sleep(RATE_LIMIT_DELAY_MS);
-
-              // Collect highlights for subcategory
-              const subHighlightsResult = await collectHighlightsWithRetry(supabase, jobRunId, siteId, subcat.id, today, accessToken);
-              if (subHighlightsResult.success) {
-                metrics.highlightsSaved += subHighlightsResult.snapshotSaved ? 1 : 0;
-                metrics.itemsEnriched += subHighlightsResult.itemsEnriched;
-              }
-              await sleep(RATE_LIMIT_DELAY_MS);
-
-              metrics.subcategoriesProcessed++;
-            } catch (subError) {
-              console.error(`${catPrefix} Subcategory ${subcat.id} failed:`, subError);
-            }
-          }
+          const subcatMetrics = await processSubcategoriesRecursive(
+            supabase,
+            jobRunId,
+            siteId,
+            category.id,
+            today,
+            accessToken,
+            1, // Start at depth 1
+            [category.id]
+          );
+          
+          metrics.subcategoriesProcessed += subcatMetrics.subcategoriesProcessed;
+          metrics.keywordsSaved += subcatMetrics.keywordsSaved;
+          metrics.highlightsSaved += subcatMetrics.highlightsSaved;
+          metrics.itemsEnriched += subcatMetrics.itemsEnriched;
         }
 
         metrics.categoriesProcessed++;
@@ -242,7 +314,7 @@ Deno.serve(async (req) => {
 
     // 6) Determine final status
     let finalStatus: 'success' | 'partial_success' | 'failed';
-    if (metrics.categoriesFailed === 0) {
+    if (metrics.categoriesFailed === 0 && !isTimedOut()) {
       finalStatus = 'success';
     } else if (metrics.categoriesProcessed > 0) {
       finalStatus = 'partial_success';
@@ -251,7 +323,7 @@ Deno.serve(async (req) => {
     }
 
     // 7) Finalize job run
-    await finalizeJobRun(supabase, jobRunId, finalStatus, metrics, null);
+    await finalizeJobRun(supabase, jobRunId, finalStatus, metrics, isTimedOut() ? 'Completed with timeout' : null);
 
     // 8) Update public_trends_status
     await updatePublicTrendsStatus(supabase, finalStatus, metrics, activeCategories.length);
@@ -259,12 +331,14 @@ Deno.serve(async (req) => {
     // 9) Release lock
     await releaseLock(supabase, LOCK_KEY);
 
-    console.log(`${logPrefix} Job completed with status: ${finalStatus}`, metrics);
+    const duration = Math.round((Date.now() - jobStartTime) / 1000);
+    console.log(`${logPrefix} Job completed in ${duration}s with status: ${finalStatus}`, metrics);
 
     return new Response(JSON.stringify({ 
       status: finalStatus, 
       metrics,
       jobRunId,
+      durationSeconds: duration,
     }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -296,6 +370,110 @@ function createEmptyMetrics(): JobMetrics {
 }
 
 // =====================================================
+// RECURSIVE SUBCATEGORY PROCESSING
+// =====================================================
+
+interface SubcategoryMetrics {
+  subcategoriesProcessed: number;
+  keywordsSaved: number;
+  highlightsSaved: number;
+  itemsEnriched: number;
+}
+
+async function processSubcategoriesRecursive(
+  supabase: any,
+  jobRunId: string,
+  siteId: string,
+  parentCategoryId: string,
+  today: string,
+  accessToken: string,
+  currentDepth: number,
+  path: string[]
+): Promise<SubcategoryMetrics> {
+  const metrics: SubcategoryMetrics = {
+    subcategoriesProcessed: 0,
+    keywordsSaved: 0,
+    highlightsSaved: 0,
+    itemsEnriched: 0,
+  };
+
+  // Check depth and timeout
+  if (currentDepth > MAX_SUBCATEGORY_DEPTH || isTimedOut()) {
+    return metrics;
+  }
+
+  const prefix = `[processSubcategories][${parentCategoryId}][depth=${currentDepth}]`;
+  console.log(`${prefix} Fetching subcategories...`);
+
+  try {
+    await checkRateLimit();
+    const subcategories = await fetchSubcategories(siteId, parentCategoryId, accessToken);
+    console.log(`${prefix} Found ${subcategories.length} subcategories`);
+
+    // Save to cache
+    await saveSubcategoriesToCache(supabase, subcategories);
+
+    // Process top N subcategories
+    const toProcess = subcategories.slice(0, MAX_SUBCATEGORIES_PER_LEVEL);
+
+    for (const subcat of toProcess) {
+      if (isTimedOut()) {
+        console.log(`${prefix} Timeout reached, stopping subcategory processing`);
+        break;
+      }
+
+      try {
+        console.log(`${prefix} Processing ${subcat.id}...`);
+        
+        // Collect trends
+        await checkRateLimit();
+        const trendsResult = await collectTrendsWithRetry(supabase, jobRunId, siteId, subcat.id, today, accessToken);
+        if (trendsResult.success) {
+          metrics.keywordsSaved += trendsResult.count;
+        }
+        await sleep(RATE_LIMIT_DELAY_MS);
+
+        // Collect highlights
+        await checkRateLimit();
+        const highlightsResult = await collectHighlightsWithRetry(supabase, jobRunId, siteId, subcat.id, today, accessToken);
+        if (highlightsResult.success) {
+          metrics.highlightsSaved += highlightsResult.snapshotSaved ? 1 : 0;
+          metrics.itemsEnriched += highlightsResult.itemsEnriched;
+        }
+        await sleep(RATE_LIMIT_DELAY_MS);
+
+        metrics.subcategoriesProcessed++;
+
+        // Recurse to next level
+        if (currentDepth < MAX_SUBCATEGORY_DEPTH) {
+          const childMetrics = await processSubcategoriesRecursive(
+            supabase,
+            jobRunId,
+            siteId,
+            subcat.id,
+            today,
+            accessToken,
+            currentDepth + 1,
+            [...path, subcat.id]
+          );
+          
+          metrics.subcategoriesProcessed += childMetrics.subcategoriesProcessed;
+          metrics.keywordsSaved += childMetrics.keywordsSaved;
+          metrics.highlightsSaved += childMetrics.highlightsSaved;
+          metrics.itemsEnriched += childMetrics.itemsEnriched;
+        }
+      } catch (error) {
+        console.error(`${prefix} Subcategory ${subcat.id} failed:`, error);
+      }
+    }
+  } catch (error) {
+    console.error(`${prefix} Error fetching subcategories:`, error);
+  }
+
+  return metrics;
+}
+
+// =====================================================
 // SUBCATEGORIES FETCHING
 // =====================================================
 
@@ -308,12 +486,18 @@ async function fetchSubcategories(
   
   try {
     const url = `https://api.mercadolibre.com/categories/${categoryId}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    
     const response = await fetch(url, {
       headers: { Authorization: `Bearer ${accessToken}` },
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
 
     if (!response.ok) {
-      console.error(`${prefix} Failed: ${response.status}`);
+      const text = await response.text();
+      console.error(`${prefix} Failed: ${response.status} - ${text}`);
       return [];
     }
 
@@ -333,8 +517,12 @@ async function fetchSubcategories(
     subcategories.sort((a, b) => (b.total_items_in_category || 0) - (a.total_items_in_category || 0));
 
     return subcategories;
-  } catch (error) {
-    console.error(`${prefix} Error:`, error);
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      console.error(`${prefix} Timeout`);
+    } else {
+      console.error(`${prefix} Error:`, error);
+    }
     return [];
   }
 }
@@ -473,6 +661,15 @@ async function collectTrendsWithRetry(
     try {
       const result = await collectTrends(supabase, siteId, categoryId, today, accessToken);
       
+      // If no trends found, try keyword extraction fallback
+      if (result.count === 0) {
+        const fallbackResult = await extractKeywordsFromHighlights(supabase, siteId, categoryId, today);
+        if (fallbackResult.count > 0) {
+          result.count = fallbackResult.count;
+          result.success = true;
+        }
+      }
+      
       await supabase.from('job_run_steps').insert({
         job_run_id: jobRunId,
         category_id: categoryId,
@@ -589,8 +786,94 @@ async function collectTrends(
   }
 }
 
+// Fallback: extract keywords from highlight titles when trends API returns empty
+async function extractKeywordsFromHighlights(
+  supabase: any,
+  siteId: string,
+  categoryId: string,
+  today: string
+): Promise<TrendsResult> {
+  const prefix = `[extractKeywordsFromHighlights][${categoryId}]`;
+  
+  try {
+    // Get recent highlights for this category
+    const { data: highlights } = await supabase
+      .from('highlights_items')
+      .select('title, snapshot_id')
+      .eq('snapshot_id', supabase.from('highlights_snapshots')
+        .select('id')
+        .eq('category_id', categoryId)
+        .order('snapshot_date', { ascending: false })
+        .limit(1))
+      .limit(20);
+    
+    if (!highlights?.length) {
+      console.log(`${prefix} No highlights found for keyword extraction`);
+      return { success: false, count: 0 };
+    }
+
+    // Extract keywords from titles
+    const wordCounts = new Map<string, number>();
+    const stopWords = new Set(['de', 'para', 'com', 'em', 'e', 'ou', 'a', 'o', 'as', 'os', 'um', 'uma', 'do', 'da', 'dos', 'das', 'no', 'na', 'nos', 'nas', 'por', 'que', 'se', 'ao', 'à']);
+    
+    for (const item of highlights) {
+      if (!item.title) continue;
+      const words = item.title.toLowerCase()
+        .replace(/[^\w\sàáâãéêíóôõúç]/g, '')
+        .split(/\s+/)
+        .filter((w: string) => w.length > 2 && !stopWords.has(w));
+      
+      for (const word of words) {
+        wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
+      }
+    }
+    
+    // Get top 20 keywords by frequency
+    const sortedKeywords = Array.from(wordCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([keyword], idx) => ({ keyword, url: `https://lista.mercadolivre.com.br/${encodeURIComponent(keyword)}` }));
+    
+    if (sortedKeywords.length === 0) {
+      return { success: false, count: 0 };
+    }
+
+    // Save as synthetic trends
+    const categoryDbValue = categoryId === '__ROOT__' ? '__ROOT__' : categoryId;
+    const { data: existing } = await supabase
+      .from('trend_snapshots')
+      .select('id')
+      .eq('site_id', siteId)
+      .eq('category_id', categoryDbValue)
+      .eq('snapshot_date', today)
+      .maybeSingle();
+
+    if (existing) {
+      await supabase
+        .from('trend_snapshots')
+        .update({ trends_data: sortedKeywords })
+        .eq('id', existing.id);
+    } else {
+      await supabase
+        .from('trend_snapshots')
+        .insert({
+          site_id: siteId,
+          category_id: categoryDbValue,
+          snapshot_date: today,
+          trends_data: sortedKeywords,
+        });
+    }
+
+    console.log(`${prefix} Extracted ${sortedKeywords.length} synthetic keywords from titles`);
+    return { success: true, count: sortedKeywords.length };
+  } catch (error) {
+    console.error(`${prefix} Error:`, error);
+    return { success: false, count: 0 };
+  }
+}
+
 // =====================================================
-// HIGHLIGHTS COLLECTION (with PRODUCT support + estimated_revenue)
+// HIGHLIGHTS COLLECTION
 // =====================================================
 
 interface HighlightsResult {
@@ -740,6 +1023,7 @@ async function collectHighlights(
     const batchUrl = `https://api.mercadolibre.com/items?ids=${encodeURIComponent(itemIds)}`;
     
     try {
+      await checkRateLimit();
       const batchRes = await fetch(batchUrl, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
@@ -756,7 +1040,6 @@ async function collectHighlights(
           }
         }
         
-        // Track items not in response
         for (const item of items) {
           if (!bodyMap.has(item.id) && !failedItemIds.includes(item.id)) {
             failedItemIds.push(item.id);
@@ -786,7 +1069,6 @@ async function collectHighlights(
           }
         }
       } else {
-        // All failed - add to failedItemIds
         failedItemIds.push(...items.map((i) => i.id));
       }
     } catch (err) {
@@ -795,13 +1077,14 @@ async function collectHighlights(
     }
   }
   
-  // Try to enrich failed ITEMs as PRODUCTs (some highlights return PRODUCT IDs with type=ITEM)
+  // Try to enrich failed ITEMs as PRODUCTs
   console.log(`${prefix} failedItemIds=${failedItemIds.length}`);
   for (const itemId of failedItemIds) {
     const item = items.find((i) => i.id === itemId);
     if (!item) continue;
     
     try {
+      await checkRateLimit();
       const productUrl = `https://api.mercadolibre.com/products/${itemId}`;
       const productRes = await fetch(productUrl, {
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -816,12 +1099,12 @@ async function collectHighlights(
         let permalink: string | null = null;
         let thumbnail = productData.pictures?.[0]?.url || null;
         
-        // Try to get representative item for price/sold_quantity
         const buyBoxItemId = productData.buy_box_winner?.item_id;
         if (buyBoxItemId) {
           price = productData.buy_box_winner.price || null;
           await sleep(100);
           
+          await checkRateLimit();
           const itemRes = await fetch(`https://api.mercadolibre.com/items/${buyBoxItemId}`, {
             headers: { Authorization: `Bearer ${accessToken}` },
           });
@@ -847,7 +1130,6 @@ async function collectHighlights(
         });
         itemsEnriched++;
       } else {
-        // Fallback placeholder
         enrichedItems.push({
           item_id: itemId,
           entity_type: 'ITEM',
@@ -879,9 +1161,10 @@ async function collectHighlights(
     }
   }
 
-  // 4) Enrich products - get representative item for price/sold_quantity
+  // 4) Enrich products
   for (const product of products) {
     try {
+      await checkRateLimit();
       const productUrl = `https://api.mercadolibre.com/products/${product.id}`;
       const productRes = await fetch(productUrl, {
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -900,13 +1183,12 @@ async function collectHighlights(
         title = productData.name || productData.title || product.id;
         thumbnail = productData.pictures?.[0]?.url || productData.thumbnail || null;
 
-        // Try to get a representative item for price/sold_quantity
         if (productData.buy_box_winner?.item_id) {
           representativeItemId = productData.buy_box_winner.item_id;
           price = productData.buy_box_winner.price || null;
           
-          // Fetch the actual item to get sold_quantity
           try {
+            await checkRateLimit();
             const itemRes = await fetch(`https://api.mercadolibre.com/items/${representativeItemId}`, {
               headers: { Authorization: `Bearer ${accessToken}` },
             });
@@ -944,7 +1226,7 @@ async function collectHighlights(
         estimated_revenue: estimatedRevenue,
       });
 
-      await sleep(100); // Small delay between product fetches
+      await sleep(100);
     } catch (err) {
       console.error(`${prefix} product ${product.id} error:`, err);
       enrichedItems.push({
@@ -965,7 +1247,7 @@ async function collectHighlights(
   // Re-sort by rank
   enrichedItems.sort((a, b) => a.rank - b.rank);
   
-  // Check enrichment quality - if >70% have no price, use search fallback
+  // Check enrichment quality
   const itemsWithPrice = enrichedItems.filter((i: any) => i.price !== null);
   console.log(`${prefix} items with price=${itemsWithPrice.length}/${enrichedItems.length}`);
   
@@ -993,10 +1275,12 @@ async function collectHighlightsViaSearch(
   const url = `https://api.mercadolibre.com/sites/${siteId}/search?category=${categoryId}&sort=sold_quantity_desc&limit=20`;
 
   try {
+    await checkRateLimit();
     // Try without token first (public)
     let response = await fetch(url);
     
     if (!response.ok) {
+      await checkRateLimit();
       response = await fetch(url, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
@@ -1131,7 +1415,7 @@ async function updatePublicTrendsStatus(
   const now = new Date().toISOString();
   const nextRun = new Date();
   nextRun.setDate(nextRun.getDate() + 1);
-  nextRun.setHours(2, 30, 0, 0);
+  nextRun.setHours(2, 0, 0, 0); // Updated to 02:00
 
   const updateData: any = {
     last_run_at: now,
