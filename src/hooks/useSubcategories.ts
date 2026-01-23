@@ -48,6 +48,10 @@ export function useSubcategories(parentId: string | null, enabled: boolean = tru
           return [];
         }
 
+        // Calculate correct depth from path_from_root
+        const pathFromRoot = data.path_from_root?.map((p: { id: string }) => p.id) || [parentId];
+        const actualDepth = pathFromRoot.length;
+
         // Map children to subcategories
         const subcategories: Subcategory[] = data.children_categories.map((child: {
           id: string;
@@ -57,9 +61,9 @@ export function useSubcategories(parentId: string | null, enabled: boolean = tru
           id: child.id,
           name: child.name,
           parent_id: parentId,
-          depth: 1,
-          path: [parentId, child.id],
-          children_count: 0, // Will be determined when expanded
+          depth: actualDepth, // Use actual depth from path_from_root
+          path: [...pathFromRoot, child.id],
+          children_count: 1, // Assume has children (expand by attempt)
           total_items_qty: child.total_items_in_this_category,
         }));
 

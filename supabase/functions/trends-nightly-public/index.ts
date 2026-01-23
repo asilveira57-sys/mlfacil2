@@ -37,8 +37,8 @@ const RETRY_DELAYS = [1000, 2000, 4000];
 const RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 504];
 
 // Subcategory collection settings
-const MAX_SUBCATEGORIES_PER_LEVEL = 10; // Increased from 5
-const MAX_SUBCATEGORY_DEPTH = 2; // Collect level 1 and level 2
+const MAX_SUBCATEGORIES_PER_LEVEL = 8; // Balanced for depth 3
+const MAX_SUBCATEGORY_DEPTH = 3; // Collect level 1, 2, and 3
 
 // Global rate limiter
 interface RateLimiter {
@@ -407,7 +407,7 @@ async function processSubcategoriesRecursive(
 
   try {
     await checkRateLimit();
-    const subcategories = await fetchSubcategories(siteId, parentCategoryId, accessToken);
+    const subcategories = await fetchSubcategories(siteId, parentCategoryId, accessToken, currentDepth, path);
     console.log(`${prefix} Found ${subcategories.length} subcategories`);
 
     // Save to cache
@@ -439,6 +439,16 @@ async function processSubcategoriesRecursive(
         if (highlightsResult.success) {
           metrics.highlightsSaved += highlightsResult.snapshotSaved ? 1 : 0;
           metrics.itemsEnriched += highlightsResult.itemsEnriched;
+          
+          // Fallback: If no keywords but highlights exist, extract keywords from titles
+          if (trendsResult.count === 0 && highlightsResult.itemsEnriched > 0) {
+            const fallbackResult = await extractKeywordsFromHighlights(supabase, siteId, subcat.id, today);
+            const fallbackKeywords = fallbackResult.count;
+            if (fallbackKeywords > 0) {
+              console.log(`${prefix} Fallback keywords from highlights: ${fallbackKeywords}`);
+              metrics.keywordsSaved += fallbackKeywords;
+            }
+          }
         }
         await sleep(RATE_LIMIT_DELAY_MS);
 
@@ -480,9 +490,11 @@ async function processSubcategoriesRecursive(
 async function fetchSubcategories(
   siteId: string,
   categoryId: string,
-  accessToken: string
+  accessToken: string,
+  currentDepth: number = 1,
+  parentPath: string[] = []
 ): Promise<SubcategoryInfo[]> {
-  const prefix = `[fetchSubcategories][${categoryId}]`;
+  const prefix = `[fetchSubcategories][${categoryId}][depth=${currentDepth}]`;
   
   try {
     const url = `https://api.mercadolibre.com/categories/${categoryId}`;
@@ -504,17 +516,23 @@ async function fetchSubcategories(
     const categoryData = await response.json();
     const childrenIds = categoryData.children_categories || [];
     
+    // Build correct path from path_from_root if available
+    const basePath = categoryData.path_from_root?.map((p: any) => p.id) || parentPath;
+    const actualDepth = basePath.length;
+    
     const subcategories: SubcategoryInfo[] = childrenIds.map((child: any) => ({
       id: child.id,
       name: child.name,
       parent_id: categoryId,
-      depth: 1,
-      path: [categoryId, child.id],
+      depth: actualDepth, // Use actual depth from API
+      path: [...basePath, child.id],
       total_items_in_category: child.total_items_in_category || 0,
     }));
 
     // Sort by total_items_in_category descending (most relevant first)
     subcategories.sort((a, b) => (b.total_items_in_category || 0) - (a.total_items_in_category || 0));
+    
+    console.log(`${prefix} Found ${subcategories.length} subcategories at depth ${actualDepth}`);
 
     return subcategories;
   } catch (error: any) {
