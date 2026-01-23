@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 
 interface MarketOverviewCardProps {
+  categoryId: string | null;
   categoryName: string;
   trendsCount: number;
   highlightsCount: number;
@@ -12,6 +13,7 @@ interface MarketOverviewCardProps {
 }
 
 export function MarketOverviewCard({
+  categoryId,
   categoryName,
   trendsCount,
   highlightsCount,
