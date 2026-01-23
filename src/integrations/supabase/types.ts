@@ -3455,6 +3455,19 @@ export type Database = {
         Args: { p_date_from?: string; p_date_to?: string; p_seller_id: string }
         Returns: Json
       }
+      get_user_full_context: { Args: { p_user_id: string }; Returns: Json }
+      initialize_new_user: {
+        Args: { p_email: string; p_full_name?: string; p_user_id: string }
+        Returns: Json
+      }
+      set_user_active_context: {
+        Args: {
+          p_company_id?: string
+          p_marketplace_account_id?: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never
