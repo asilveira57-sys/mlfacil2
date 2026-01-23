@@ -12,7 +12,7 @@ import { TrendsItemDetailDrawer } from './TrendsItemDetailDrawer';
 import { SellerMarketComparison } from './SellerMarketComparison';
 import { EligibilityBanner } from './EligibilityBanner';
 import { BlockedCard } from './BlockedCard';
-import { useCategoryEligibility, shouldCallSellerEndpoint } from '@/hooks/useCategoryEligibility';
+import { useCategoryEligibility, shouldCallSellerEndpoint, hasPermission } from '@/hooks/useCategoryEligibility';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -187,10 +187,11 @@ export function TrendsSellerTab({ sellerId, categoryId, onNavigateToMarket }: Tr
         </div>
       </div>
 
-      {/* Eligibility Banner - só mostra se categoria selecionada e não elegível */}
+      {/* Eligibility Banner - só mostra se categoria selecionada e dados bloqueados */}
       {categoryId && eligibility && !eligibilityLoading && !isEligible && (
         <EligibilityBanner
-          state={eligibility.state}
+          eligibilityState={eligibility.eligibilityState}
+          dataState={eligibility.dataState}
           ordersCount={eligibility.ordersCount}
           thresholdOrders={eligibility.thresholdOrders}
           onActionClick={onNavigateToMarket}
@@ -260,19 +261,29 @@ export function TrendsSellerTab({ sellerId, categoryId, onNavigateToMarket }: Tr
           </TabsTrigger>
         </TabsList>
 
-        {/* Market Comparison - sempre mostra */}
+        {/* Market Comparison - só mostra se permissão */}
         <TabsContent value="comparison">
-          {categoryId && !isEligible ? (
-            <BlockedCard title="Comparativo de Mercado" icon={<BarChart3 className="h-5 w-5" />} />
+          {categoryId && !hasPermission(eligibility, 'canFetchSellerComparison') ? (
+            <BlockedCard 
+              title="Comparativo de Mercado" 
+              icon={<BarChart3 className="h-5 w-5" />}
+              dataState={eligibility?.dataState}
+              blockReason={eligibility?.blockReason}
+            />
           ) : (
             <SellerMarketComparison sellerId={sellerId} />
           )}
         </TabsContent>
 
-        {/* Top Visited - with cross metrics */}
+        {/* Top Visited - só mostra se permissão */}
         <TabsContent value="visited">
-          {categoryId && !isEligible ? (
-            <BlockedCard title="Produtos Mais Visitados" icon={<Eye className="h-5 w-5" />} />
+          {categoryId && !hasPermission(eligibility, 'canFetchSellerPerformance') ? (
+            <BlockedCard 
+              title="Produtos Mais Visitados" 
+              icon={<Eye className="h-5 w-5" />}
+              dataState={eligibility?.dataState}
+              blockReason={eligibility?.blockReason}
+            />
           ) : (
           <Card className="border-primary/20">
             <CardHeader className="bg-primary/5">
@@ -359,10 +370,15 @@ export function TrendsSellerTab({ sellerId, categoryId, onNavigateToMarket }: Tr
           )}
         </TabsContent>
 
-        {/* Top Sold - with cross metrics */}
+        {/* Top Sold - só mostra se permissão */}
         <TabsContent value="sold">
-          {categoryId && !isEligible ? (
-            <BlockedCard title="Produtos Mais Vendidos" icon={<Package className="h-5 w-5" />} />
+          {categoryId && !hasPermission(eligibility, 'canFetchSellerPerformance') ? (
+            <BlockedCard 
+              title="Produtos Mais Vendidos" 
+              icon={<Package className="h-5 w-5" />}
+              dataState={eligibility?.dataState}
+              blockReason={eligibility?.blockReason}
+            />
           ) : (
           <Card className="border-primary/20">
             <CardHeader className="bg-primary/5">
