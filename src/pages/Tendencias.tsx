@@ -1,8 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { 
@@ -11,25 +10,24 @@ import {
   FolderTree, 
   ChevronDown, 
   ChevronUp,
-  CheckCircle,
-  AlertTriangle,
-  Info,
   Clock,
-  RefreshCw
+  RefreshCw,
+  User
 } from 'lucide-react';
 import { useMarketTrends, useMarketHighlights } from '@/hooks/useTrendsApi';
 import { useTrendsStatus } from '@/hooks/useTrendsStatus';
-import { useCategoryEligibility, EligibilityState } from '@/hooks/useCategoryEligibility';
+import { useCategoryEligibility } from '@/hooks/useCategoryEligibility';
 import { useCategoryBreadcrumb } from '@/hooks/useSubcategories';
 import { SubcategoryNavigator } from '@/components/trends/SubcategoryNavigator';
-import { CategoryStatusCard } from '@/components/trends/CategoryStatusCard';
-import { MarketOverviewCard } from '@/components/trends/MarketOverviewCard';
-import { SubcategoriesHighlightCard } from '@/components/trends/SubcategoriesHighlightCard';
-import { KeywordsTrendCard } from '@/components/trends/KeywordsTrendCard';
-import { TopSellersMarketCard } from '@/components/trends/TopSellersMarketCard';
-import { SellerPerformanceSection } from '@/components/trends/SellerPerformanceSection';
-import { RecommendationsSection } from '@/components/trends/RecommendationsSection';
+import { StatusBanner } from '@/components/trends/StatusBanner';
+import { KPICards } from '@/components/trends/KPICards';
+import { TrendsKeywordsSection } from '@/components/trends/TrendsKeywordsSection';
+import { TopSellersRankingSection } from '@/components/trends/TopSellersRankingSection';
+import { SubcategoriesSection } from '@/components/trends/SubcategoriesSection';
+import { SellerGoalsSection } from '@/components/trends/SellerGoalsSection';
+import { TechnicalFooter } from '@/components/trends/TechnicalFooter';
 import { toast } from 'sonner';
+import { useQueryClient } from '@tanstack/react-query';
 
 // Categories list
 const CATEGORIES = [
@@ -63,48 +61,9 @@ interface MlAccount {
   nickname: string | null;
 }
 
-// Badge component for eligibility state
-function EligibilityBadge({ state }: { state: EligibilityState }) {
-  const config = {
-    eligible: { 
-      icon: CheckCircle, 
-      label: 'Elegível', 
-      className: 'bg-green-500/10 text-green-600 border-green-500/30' 
-    },
-    low_base: { 
-      icon: AlertTriangle, 
-      label: 'Pouca Base', 
-      className: 'bg-amber-500/10 text-amber-600 border-amber-500/30' 
-    },
-    inactive: { 
-      icon: Info, 
-      label: 'Sem Vendas', 
-      className: 'bg-muted text-muted-foreground' 
-    },
-    unknown: { 
-      icon: Info, 
-      label: 'Verificando', 
-      className: 'bg-muted text-muted-foreground' 
-    },
-    loading: { 
-      icon: RefreshCw, 
-      label: 'Carregando', 
-      className: 'bg-muted text-muted-foreground' 
-    },
-  };
-  
-  const { icon: Icon, label, className } = config[state];
-  
-  return (
-    <Badge variant="outline" className={`gap-1 ${className}`}>
-      <Icon className={`h-3 w-3 ${state === 'loading' ? 'animate-spin' : ''}`} />
-      {label}
-    </Badge>
-  );
-}
-
 export default function Tendencias() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   
   // Account state
   const [accounts, setAccounts] = useState<MlAccount[]>([]);
@@ -120,6 +79,7 @@ export default function Tendencias() {
   
   // Collection state
   const [isCollecting, setIsCollecting] = useState(false);
+  const [isReloading, setIsReloading] = useState(false);
 
   // Auth check and load accounts
   useEffect(() => {
@@ -145,7 +105,7 @@ export default function Tendencias() {
     checkAuth();
   }, [navigate]);
 
-  // Data hooks - ALWAYS fetched (market data doesn't depend on eligibility)
+  // Data hooks - Market data (always fetched)
   const { data: trendsStatus } = useTrendsStatus();
   const { data: breadcrumb } = useCategoryBreadcrumb(categoryId);
   const { data: trends, isLoading: trendsLoading } = useMarketTrends('MLB', categoryId || undefined);
@@ -165,21 +125,21 @@ export default function Tendencias() {
   }));
 
   // Handlers
-  const handleCategorySelect = (id: string, name: string) => {
+  const handleCategorySelect = useCallback((id: string, name: string) => {
     setCategoryId(id || null);
     setCategoryName(name);
     setShowNavigator(false);
-  };
+  }, []);
 
-  const handleBreadcrumbClick = (id: string) => {
+  const handleBreadcrumbClick = useCallback((id: string) => {
     const item = breadcrumb?.find(b => b.id === id);
     if (item) {
       setCategoryId(id);
       setCategoryName(item.name);
     }
-  };
+  }, [breadcrumb]);
 
-  const handleCollectData = async () => {
+  const handleCollectData = useCallback(async () => {
     if (!categoryId) return;
     
     setIsCollecting(true);
@@ -196,27 +156,46 @@ export default function Tendencias() {
       
       toast.success('Coleta iniciada! Aguarde alguns segundos.');
       
-      setTimeout(() => {
+      // Polling for updates
+      let attempts = 0;
+      const maxAttempts = 10;
+      const pollInterval = setInterval(() => {
+        attempts++;
         refetchHighlights();
-        setIsCollecting(false);
-      }, 5000);
+        if (attempts >= maxAttempts) {
+          clearInterval(pollInterval);
+          setIsCollecting(false);
+        }
+      }, 3000);
+      
     } catch (err) {
       console.error('Error collecting data:', err);
       toast.error('Erro ao coletar dados');
       setIsCollecting(false);
     }
-  };
+  }, [categoryId, refetchHighlights]);
+
+  const handleReload = useCallback(() => {
+    setIsReloading(true);
+    queryClient.invalidateQueries({ queryKey: ['trends'] });
+    queryClient.invalidateQueries({ queryKey: ['market-trends'] });
+    queryClient.invalidateQueries({ queryKey: ['market-highlights'] });
+    queryClient.invalidateQueries({ queryKey: ['category-eligibility'] });
+    
+    setTimeout(() => setIsReloading(false), 2000);
+    toast.success('Dados recarregados');
+  }, [queryClient]);
 
   // Derived state
-  const eligibilityState: EligibilityState = eligibilityLoading 
-    ? 'loading' 
-    : eligibility?.eligibilityState || 'unknown';
-  
+  const dataState = eligibility?.dataState || 'DADOS_PUBLICOS_MERCADO';
   const filteredTrends = trends?.trends || [];
+  const hasSeller = !!selectedSellerId;
+  const hasCategory = !!categoryId;
+  const isLoading = trendsLoading || highlightsLoading || (eligibilityLoading && hasCategory);
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
+    <div className="min-h-screen bg-background flex flex-col">
+      {/* 1. Fixed Top Bar */}
       <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-20">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between flex-wrap gap-4">
@@ -228,161 +207,159 @@ export default function Tendencias() {
               <div>
                 <h1 className="text-xl font-semibold">Tendências de Mercado</h1>
                 <p className="text-xs text-muted-foreground hidden sm:block">
-                  Análise baseada em dados públicos do Mercado Livre e, quando disponível, no seu histórico
+                  Análise baseada em dados públicos e seu histórico de vendas
                 </p>
               </div>
             </div>
-            
-            {/* Account Selector */}
-            {accounts.length > 0 && (
-              <Select value={selectedSellerId || ''} onValueChange={setSelectedSellerId}>
+          </div>
+        </div>
+
+        {/* Controls Row */}
+        <div className="border-t bg-muted/30">
+          <div className="container mx-auto px-4 py-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              {/* Account Selector */}
+              <Select value={selectedSellerId || 'none'} onValueChange={(v) => setSelectedSellerId(v === 'none' ? null : v)}>
                 <SelectTrigger className="w-[180px]">
+                  <User className="h-4 w-4 mr-2 text-muted-foreground" />
                   <SelectValue placeholder="Selecionar conta" />
                 </SelectTrigger>
                 <SelectContent>
-                  {accounts.map((acc) => (
-                    <SelectItem key={acc.id} value={acc.ml_user_id}>
-                      {acc.nickname || acc.ml_user_id}
-                    </SelectItem>
-                  ))}
+                  {accounts.length === 0 ? (
+                    <SelectItem value="none" disabled>Nenhuma conta</SelectItem>
+                  ) : (
+                    accounts.map((acc) => (
+                      <SelectItem key={acc.id} value={acc.ml_user_id}>
+                        {acc.nickname || acc.ml_user_id}
+                      </SelectItem>
+                    ))
+                  )}
                 </SelectContent>
               </Select>
-            )}
+
+              {/* Period Selector */}
+              <Select value={String(periodDays)} onValueChange={(v) => setPeriodDays(Number(v))}>
+                <SelectTrigger className="w-[150px]">
+                  <Clock className="h-4 w-4 mr-2 text-muted-foreground" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="7">Últimos 7 dias</SelectItem>
+                  <SelectItem value="30">Últimos 30 dias</SelectItem>
+                  <SelectItem value="90">Últimos 90 dias</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {/* Category Selector */}
+              <Collapsible open={showNavigator} onOpenChange={setShowNavigator}>
+                <CollapsibleTrigger asChild>
+                  <Button variant="outline" className="w-[240px] justify-between">
+                    <div className="flex items-center gap-2">
+                      <FolderTree className="h-4 w-4 text-muted-foreground" />
+                      <span className="truncate">{categoryName}</span>
+                    </div>
+                    {showNavigator ? (
+                      <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="absolute z-50 mt-2 w-[320px]">
+                  <SubcategoryNavigator
+                    categories={navigatorCategories}
+                    selectedId={categoryId}
+                    onSelect={handleCategorySelect}
+                    breadcrumb={breadcrumb}
+                    onBreadcrumbClick={handleBreadcrumbClick}
+                  />
+                </CollapsibleContent>
+              </Collapsible>
+
+              {/* Reload Button */}
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={handleReload}
+                disabled={isReloading}
+                className="ml-auto"
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${isReloading ? 'animate-spin' : ''}`} />
+                Atualizar
+              </Button>
+            </div>
           </div>
         </div>
       </header>
 
-      {/* Filters Bar */}
-      <div className="border-b bg-muted/30">
-        <div className="container mx-auto px-4 py-3">
-          <div className="flex items-center gap-4 flex-wrap">
-            {/* Period Selector */}
-            <Select value={String(periodDays)} onValueChange={(v) => setPeriodDays(Number(v))}>
-              <SelectTrigger className="w-[150px]">
-                <Clock className="h-4 w-4 mr-2 text-muted-foreground" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="7">Últimos 7 dias</SelectItem>
-                <SelectItem value="30">Últimos 30 dias</SelectItem>
-                <SelectItem value="90">Últimos 90 dias</SelectItem>
-              </SelectContent>
-            </Select>
-
-            {/* Category Selector */}
-            <Collapsible open={showNavigator} onOpenChange={setShowNavigator}>
-              <CollapsibleTrigger asChild>
-                <Button variant="outline" className="w-[260px] justify-between">
-                  <div className="flex items-center gap-2">
-                    <FolderTree className="h-4 w-4 text-muted-foreground" />
-                    <span className="truncate">{categoryName}</span>
-                  </div>
-                  {showNavigator ? (
-                    <ChevronUp className="h-4 w-4 text-muted-foreground" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                  )}
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="absolute z-50 mt-2 w-[320px]">
-                <SubcategoryNavigator
-                  categories={navigatorCategories}
-                  selectedId={categoryId}
-                  onSelect={handleCategorySelect}
-                  breadcrumb={breadcrumb}
-                  onBreadcrumbClick={handleBreadcrumbClick}
-                />
-              </CollapsibleContent>
-            </Collapsible>
-
-            {/* Eligibility Badge */}
-            {categoryId && (
-              <EligibilityBadge state={eligibilityState} />
-            )}
-
-            {/* Status Info */}
-            {trendsStatus && (
-              <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-                <Clock className="h-3 w-3" />
-                <span>
-                  Atualizado: {trendsStatus.last_success_at 
-                    ? new Date(trendsStatus.last_success_at).toLocaleDateString('pt-BR')
-                    : 'Nunca'
-                  }
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Main Content - Ordered Sections */}
-      <main className="container mx-auto px-4 py-6 space-y-6">
+      {/* Main Content */}
+      <main className="flex-1 container mx-auto px-4 py-6 space-y-6">
         
-        {/* Section 1: Category Status (only when category selected) */}
-        {categoryId && (
-          <CategoryStatusCard
-            eligibility={eligibility}
-            isLoading={eligibilityLoading}
-            categoryName={categoryName}
-          />
-        )}
-
-        {/* Section 2 & 3: Market Overview + Subcategories */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <MarketOverviewCard
-            categoryName={categoryName}
-            trendsCount={filteredTrends.length}
-            highlightsCount={highlights?.items?.length || 0}
-            snapshotDate={trends?.snapshot_date}
-            isLoading={trendsLoading}
-          />
-          
-          <SubcategoriesHighlightCard
-            parentCategoryId={categoryId}
-            onSubcategoryClick={handleCategorySelect}
-          />
-        </div>
-
-        {/* Section 4: Keywords Trend */}
-        <KeywordsTrendCard
-          keywords={filteredTrends}
-          snapshotDate={trends?.snapshot_date}
-          isLoading={trendsLoading}
-          categoryLabel={categoryName}
+        {/* 2. Status Banner */}
+        <StatusBanner
+          dataState={dataState}
+          isLoading={isLoading && hasCategory && hasSeller}
+          hasCategory={hasCategory}
+          hasSeller={hasSeller}
         />
 
-        {/* Section 5: Top Sellers Market */}
-        <TopSellersMarketCard
-          items={highlights?.items || []}
-          snapshotDate={highlights?.snapshot_date}
-          isLoading={highlightsLoading}
+        {/* 3. KPI Cards */}
+        <KPICards
+          eligibility={eligibility}
+          isLoading={isLoading}
+          trendsCount={filteredTrends.length}
+          highlightsCount={highlights?.items?.length || 0}
+          categoryName={categoryName}
+          hasCategory={hasCategory}
+        />
+
+        {/* 4. Trends & Keywords Section */}
+        <TrendsKeywordsSection
+          keywords={filteredTrends}
+          isLoading={trendsLoading}
+          dataState={dataState}
+          snapshotDate={trends?.snapshot_date}
           categoryLabel={categoryName}
+          hasCategory={hasCategory}
+        />
+
+        {/* 5. Top Sellers Ranking */}
+        <TopSellersRankingSection
+          items={highlights?.items || []}
+          isLoading={highlightsLoading}
+          snapshotDate={highlights?.snapshot_date}
+          categoryLabel={categoryName}
+          hasCategory={hasCategory}
           onCollect={handleCollectData}
           isCollecting={isCollecting}
-          showCollectButton={!!categoryId}
         />
 
-        {/* Section 6: Seller Performance (Conditional) */}
-        {categoryId && (
-          <SellerPerformanceSection
-            eligibility={eligibility}
-            isLoading={eligibilityLoading}
-            sellerId={selectedSellerId}
-            periodDays={periodDays}
-          />
-        )}
+        {/* 6. Subcategories Section */}
+        <SubcategoriesSection
+          eligibility={eligibility}
+          isLoading={eligibilityLoading}
+          parentCategoryId={categoryId}
+          onSubcategoryClick={handleCategorySelect}
+        />
 
-        {/* Section 7: Strategic Recommendations */}
-        {categoryId && (
-          <RecommendationsSection
-            eligibility={eligibility}
-            isLoading={eligibilityLoading}
-            categoryName={categoryName}
-          />
-        )}
+        {/* 7. Seller Goals Section (Conditional) */}
+        <SellerGoalsSection
+          eligibility={eligibility}
+          isLoading={eligibilityLoading}
+          sellerId={selectedSellerId}
+          periodDays={periodDays}
+          hasCategory={hasCategory}
+        />
 
       </main>
+
+      {/* 8. Technical Footer */}
+      <TechnicalFooter
+        lastUpdate={trendsStatus?.last_success_at || trendsStatus?.last_run_at}
+        dataState={dataState}
+        onReload={handleReload}
+        isReloading={isReloading}
+      />
     </div>
   );
 }
