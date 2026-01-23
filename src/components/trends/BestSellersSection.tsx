@@ -216,7 +216,13 @@ export function BestSellersSection({ onCollect, isCollecting, snapshotDate }: Be
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.bestSellers.map((item, index) => (
+            {data.bestSellers
+              .filter(item => {
+                // Filtrar itens sem dados mínimos (title ou thumbnail necessário)
+                const hasMinData = item.title || item.thumbnail;
+                return hasMinData;
+              })
+              .map((item, index) => (
               <TableRow key={item.item_id}>
                 <TableCell>
                   <Badge variant={index < 3 ? 'default' : 'outline'}>
@@ -225,15 +231,19 @@ export function BestSellersSection({ onCollect, isCollecting, snapshotDate }: Be
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-3">
-                    {item.thumbnail && (
+                    {item.thumbnail ? (
                       <img 
                         src={item.thumbnail} 
                         alt="" 
                         className="h-10 w-10 rounded object-cover bg-muted"
                       />
+                    ) : (
+                      <div className="h-10 w-10 rounded bg-muted flex items-center justify-center">
+                        <Trophy className="h-4 w-4 text-muted-foreground/50" />
+                      </div>
                     )}
                     <span className="font-medium line-clamp-2 text-sm">
-                      {item.title || 'Sem título'}
+                      {item.title || `MLB${item.item_id.slice(-8)}`}
                     </span>
                   </div>
                 </TableCell>
