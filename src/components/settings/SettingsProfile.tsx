@@ -233,8 +233,12 @@ const SettingsProfile = () => {
           .eq("user_id", user.id);
         error = result.error;
       } else {
-        // Insert new - cast to any to bypass strict type checking for user_id
-        const insertData = { ...profileData, user_id: user.id } as any;
+        // Insert new - generate UUID for id and include user_id
+        const insertData = { 
+          id: crypto.randomUUID(),
+          ...profileData, 
+          user_id: user.id 
+        } as any;
         const result = await supabase
           .from("profiles")
           .insert(insertData);
