@@ -1,0 +1,304 @@
+import { useState, useEffect } from 'react';
+import { Link, useParams, useLocation } from 'react-router-dom';
+import { useBlog } from '@/hooks/useBlog';
+import { BlogPostCard } from '@/components/blog/public/BlogPostCard';
+import { BlogPostContent } from '@/components/blog/public/BlogPostContent';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import type { BlogPost, BlogCategory } from '@/types/blog';
+
+// SEO Head component
+function BlogSEO({ post, category }: { post?: BlogPost | null; category?: BlogCategory | null }) {
+  useEffect(() => {
+    if (post) {
+      document.title = post.meta_title || post.titulo;
+      
+      // Meta description
+      const metaDesc = document.querySelector('meta[name="description"]');
+      if (metaDesc) {
+        metaDesc.setAttribute('content', post.meta_description || post.resumo || '');
+      } else {
+        const meta = document.createElement('meta');
+        meta.name = 'description';
+        meta.content = post.meta_description || post.resumo || '';
+        document.head.appendChild(meta);
+      }
+      
+      // Meta keywords
+      if (post.meta_keywords) {
+        let metaKeywords = document.querySelector('meta[name="keywords"]');
+        if (!metaKeywords) {
+          metaKeywords = document.createElement('meta');
+          metaKeywords.setAttribute('name', 'keywords');
+          document.head.appendChild(metaKeywords);
+        }
+        metaKeywords.setAttribute('content', post.meta_keywords);
+      }
+      
+      // Canonical URL
+      let canonical = document.querySelector('link[rel="canonical"]');
+      if (!canonical) {
+        canonical = document.createElement('link');
+        canonical.setAttribute('rel', 'canonical');
+        document.head.appendChild(canonical);
+      }
+      canonical.setAttribute('href', post.canonical_url || window.location.href);
+      
+    } else if (category) {
+      document.title = `${category.nome} - Blog`;
+    } else {
+      document.title = 'Blog - ML Fácil';
+    }
+    
+    return () => {
+      document.title = 'ML Fácil';
+    };
+  }, [post, category]);
+  
+  return null;
+}
+
+// Blog List Page
+function BlogListPage() {
+  const { fetchPublishedPosts, fetchCategories, loading } = useBlog();
+  const [posts, setPosts] = useState<BlogPost[]>([]);
+  const [categories, setCategories] = useState<BlogCategory[]>([]);
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    const [postsData, categoriesData] = await Promise.all([
+      fetchPublishedPosts({ limit: 20 }),
+      fetchCategories()
+    ]);
+    setPosts(postsData);
+    setCategories(categoriesData);
+  };
+
+  if (loading && posts.length === 0) {
+    return (
+      <div className="container mx-auto py-12 px-4 max-w-6xl">
+        <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
+          {[1, 2, 3, 4, 5, 6].map(i => (
+            <Skeleton key={i} className="h-[400px] rounded-lg" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <BlogSEO />
+      <div className="container mx-auto py-12 px-4 max-w-6xl">
+        {/* Header */}
+        <header className="text-center mb-12">
+          <h1 className="text-4xl font-bold mb-4">Blog</h1>
+          <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
+            Dicas, estratégias e novidades sobre vendas no Mercado Livre
+          </p>
+        </header>
+
+        {/* Categories */}
+        {categories.length > 0 && (
+          <div className="flex flex-wrap justify-center gap-2 mb-12">
+            <Link to="/blog">
+              <Badge variant="secondary" className="text-sm px-4 py-1">
+                Todos
+              </Badge>
+            </Link>
+            {categories.map(cat => (
+              <Link key={cat.id} to={`/blog/categoria/${cat.slug}`}>
+                <Badge variant="outline" className="text-sm px-4 py-1 hover:bg-secondary">
+                  {cat.nome}
+                </Badge>
+              </Link>
+            ))}
+          </div>
+        )}
+
+        {/* Posts Grid */}
+        {posts.length === 0 ? (
+          <div className="text-center py-20">
+            <p className="text-muted-foreground text-lg">
+              Nenhum post publicado ainda.
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
+            {posts.map(post => (
+              <BlogPostCard key={post.id} post={post} />
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// Category Page
+function BlogCategoryPage() {
+  const { slug } = useParams();
+  const { fetchPublishedPosts, fetchCategoryBySlug } = useBlog();
+  const [posts, setPosts] = useState<BlogPost[]>([]);
+  const [category, setCategory] = useState<BlogCategory | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (slug) {
+      loadData(slug);
+    }
+  }, [slug]);
+
+  const loadData = async (categorySlug: string) => {
+    setLoading(true);
+    const [categoryData, postsData] = await Promise.all([
+      fetchCategoryBySlug(categorySlug),
+      fetchPublishedPosts({ categorySlug })
+    ]);
+    setCategory(categoryData);
+    setPosts(postsData);
+    setLoading(false);
+  };
+
+  if (loading) {
+    return (
+      <div className="container mx-auto py-12 px-4 max-w-6xl">
+        <Skeleton className="h-12 w-64 mb-8" />
+        <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
+          {[1, 2, 3].map(i => (
+            <Skeleton key={i} className="h-[400px] rounded-lg" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (!category) {
+    return (
+      <div className="container mx-auto py-20 px-4 text-center">
+        <h1 className="text-2xl font-bold mb-4">Categoria não encontrada</h1>
+        <Link to="/blog" className="text-primary hover:underline">
+          Voltar ao blog
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <BlogSEO category={category} />
+      <div className="container mx-auto py-12 px-4 max-w-6xl">
+        <header className="mb-12">
+          <Link to="/blog" className="text-sm text-muted-foreground hover:text-foreground mb-2 block">
+            ← Voltar ao Blog
+          </Link>
+          <h1 className="text-4xl font-bold mb-2">{category.nome}</h1>
+          {category.descricao && (
+            <p className="text-xl text-muted-foreground">{category.descricao}</p>
+          )}
+        </header>
+
+        {posts.length === 0 ? (
+          <div className="text-center py-20">
+            <p className="text-muted-foreground text-lg">
+              Nenhum post nesta categoria ainda.
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
+            {posts.map(post => (
+              <BlogPostCard key={post.id} post={post} />
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// Single Post Page
+function BlogPostPage() {
+  const { slug } = useParams();
+  const { fetchPostBySlug } = useBlog();
+  const [post, setPost] = useState<BlogPost | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+
+  useEffect(() => {
+    if (slug) {
+      loadPost(slug);
+    }
+  }, [slug]);
+
+  const loadPost = async (postSlug: string) => {
+    setLoading(true);
+    const data = await fetchPostBySlug(postSlug);
+    if (data && data.status === 'publicado') {
+      setPost(data);
+    } else {
+      setNotFound(true);
+    }
+    setLoading(false);
+  };
+
+  if (loading) {
+    return (
+      <div className="container mx-auto py-12 px-4 max-w-4xl">
+        <Skeleton className="h-8 w-32 mb-6" />
+        <Skeleton className="h-16 w-full mb-4" />
+        <Skeleton className="h-6 w-3/4 mb-8" />
+        <Skeleton className="aspect-video w-full mb-8" />
+        <div className="space-y-4">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-3/4" />
+        </div>
+      </div>
+    );
+  }
+
+  if (notFound || !post) {
+    return (
+      <div className="container mx-auto py-20 px-4 text-center">
+        <h1 className="text-2xl font-bold mb-4">Post não encontrado</h1>
+        <Link to="/blog" className="text-primary hover:underline">
+          Voltar ao blog
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <BlogSEO post={post} />
+      <div className="container mx-auto py-12 px-4">
+        <BlogPostContent post={post} />
+      </div>
+    </>
+  );
+}
+
+// Main Blog Component with routing
+const Blog = () => {
+  const { slug } = useParams();
+  const loc = useLocation();
+  
+  // Determine which view to show based on path
+  const isCategory = loc.pathname.includes('/blog/categoria/');
+  const isPost = slug && !isCategory;
+
+  if (isCategory) {
+    return <BlogCategoryPage />;
+  }
+  
+  if (isPost) {
+    return <BlogPostPage />;
+  }
+  
+  return <BlogListPage />;
+};
+
+export default Blog;

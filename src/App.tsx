@@ -20,6 +20,8 @@ import Custos from "./pages/Custos";
 import Concorrencia from "./pages/Concorrencia";
 import Radiografia from "./pages/Radiografia";
 import Settings from "./pages/Settings";
+import Blog from "./pages/Blog";
+import BlogAdmin from "./pages/BlogAdmin";
 import NotFound from "./pages/NotFound";
 
 // Global watchdog provider component - handles both cost and orders sync
@@ -135,6 +137,11 @@ const App = () => {
             <Route path="/concorrencia" element={<Concorrencia />} />
             <Route path="/radiografia" element={<Radiografia />} />
             <Route path="/settings" element={<Settings />} />
+            {/* Blog routes */}
+            <Route path="/blog" element={<Blog />} />
+            <Route path="/blog/:slug" element={<Blog />} />
+            <Route path="/blog/categoria/:slug" element={<Blog />} />
+            <Route path="/admin/blog/*" element={<BlogAdmin />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
