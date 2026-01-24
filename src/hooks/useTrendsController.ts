@@ -273,15 +273,20 @@ export function useTrendsController(options: ControllerOptions = {}) {
       
       toast.success('Coleta iniciada. Aguarde alguns segundos.');
       
-      // Single poll attempt after 5 seconds - NO AUTOMATIC RETRY
-      setTimeout(() => {
-        refetchHighlights();
-      }, 5000);
+      // Progressive polling - 3s, 6s, 10s - gives time for enrichment
+      const pollIntervals = [3000, 6000, 10000];
+      pollIntervals.forEach((delay) => {
+        setTimeout(() => {
+          queryClient.invalidateQueries({ queryKey: ['market-trends'] });
+          queryClient.invalidateQueries({ queryKey: ['market-highlights'] });
+          refetchHighlights();
+        }, delay);
+      });
     } catch (err) {
       console.error('[TrendsController] Error collecting data:', err);
       toast.error('Erro ao coletar dados. Tente novamente manualmente.');
     }
-  }, [effectiveCategoryId, refetchHighlights]);
+  }, [effectiveCategoryId, refetchHighlights, queryClient]);
   
   /**
    * Manual reload - invalidates all queries

@@ -16,10 +16,15 @@ const RATE_LIMIT_DELAY = 500; // ms between API calls
 // Popular categories to collect (aligned with frontend CATEGORIES)
 const POPULAR_CATEGORIES = [
   { id: 'MLB5672', name: 'Acessórios para Veículos' },
+  { id: 'MLB1367', name: 'Antiguidades e Coleções' },
   { id: 'MLB1384', name: 'Bebês' },
+  { id: 'MLB1246', name: 'Beleza e Cuidado Pessoal' },
+  { id: 'MLB1132', name: 'Brinquedos e Hobbies' },
+  { id: 'MLB1039', name: 'Câmeras e Acessórios' },
   { id: 'MLB1574', name: 'Casa, Móveis e Decoração' },
   { id: 'MLB1051', name: 'Celulares e Telefones' },
   { id: 'MLB1648', name: 'Computadores' },
+  { id: 'MLB1500', name: 'Construção' },
   { id: 'MLB1144', name: 'Eletrodomésticos' },
   { id: 'MLB1000', name: 'Eletrônicos' },
   { id: 'MLB1276', name: 'Esportes e Fitness' },
@@ -478,7 +483,35 @@ async function collectHighlights(
 
         if (!productRes.ok) {
           console.warn(`${diagPrefix} product ${productId} fetch failed status=${productRes.status}`);
-          // Set placeholder title for PRODUCT
+          
+          // Fallback: Search API with catalog_product_id for MLBU items
+          if (productRes.status === 403 || productRes.status === 404) {
+            console.log(`${diagPrefix} trying search fallback for ${productId}`);
+            const searchUrl = `https://api.mercadolibre.com/sites/MLB/search?catalog_product_id=${productId}&limit=1`;
+            const searchRes = await fetch(searchUrl, {
+              headers: { Authorization: `Bearer ${accessToken}` },
+            });
+            
+            if (searchRes.ok) {
+              const searchData = await searchRes.json();
+              const firstResult = searchData.results?.[0];
+              
+              if (firstResult) {
+                enrichedProductMap.set(productId, {
+                  title: firstResult.title || `[Catálogo] ${productId}`,
+                  thumbnail: firstResult.thumbnail || null,
+                  price: firstResult.price ?? null,
+                  sold_quantity: firstResult.sold_quantity ?? null,
+                  permalink: firstResult.permalink || null,
+                });
+                console.log(`${diagPrefix} enriched ${productId} via search fallback`);
+                await sleep(RATE_LIMIT_DELAY);
+                continue;
+              }
+            }
+          }
+          
+          // Set placeholder title for PRODUCT if all strategies failed
           enrichedProductMap.set(productId, {
             title: `[Catálogo] ${productId}`,
             thumbnail: null,
