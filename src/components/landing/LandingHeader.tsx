@@ -2,21 +2,22 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { BarChart3, Menu, X } from "lucide-react";
-import { cn } from "@/lib/utils";
-
-const navItems = [
-  { label: "Recursos", href: "#recursos" },
-  { label: "Como funciona", href: "#como-funciona" },
-  { label: "Integrações", href: "#integracoes" },
-  { label: "Planos", href: "#planos" },
-  { label: "Blog", href: "/blog" },
-  { label: "Suporte", href: "#faq" },
-];
+import { BarChart3, Menu } from "lucide-react";
+import { useSiteContentContext } from "@/contexts/SiteContentContext";
 
 export function LandingHeader() {
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { getText } = useSiteContentContext();
+
+  const navItems = [
+    { label: getText('home.header.menu_recursos'), href: "#recursos" },
+    { label: getText('home.header.menu_como_funciona'), href: "#como-funciona" },
+    { label: getText('home.header.menu_integracoes'), href: "#integracoes" },
+    { label: getText('home.header.menu_planos'), href: "#planos" },
+    { label: getText('home.header.menu_blog'), href: "/blog" },
+    { label: getText('home.header.menu_suporte'), href: "#faq" },
+  ];
 
   const handleNavClick = (href: string) => {
     setMobileMenuOpen(false);
@@ -40,7 +41,7 @@ export function LandingHeader() {
               <BarChart3 className="w-6 h-6 text-primary-foreground" />
             </div>
             <span className="text-xl font-bold text-foreground hidden sm:block">
-              ML Analyzer Pro
+              {getText('home.header.logo_name')}
             </span>
           </Link>
 
@@ -63,10 +64,10 @@ export function LandingHeader() {
               variant="ghost" 
               onClick={() => navigate("/auth")}
             >
-              Entrar
+              {getText('home.header.btn_entrar')}
             </Button>
             <Button onClick={() => navigate("/auth")}>
-              Criar conta
+              {getText('home.header.btn_criar_conta')}
             </Button>
           </div>
 
@@ -95,12 +96,12 @@ export function LandingHeader() {
                     variant="outline" 
                     onClick={() => { navigate("/auth"); setMobileMenuOpen(false); }}
                   >
-                    Entrar
+                    {getText('home.header.btn_entrar')}
                   </Button>
                   <Button 
                     onClick={() => { navigate("/auth"); setMobileMenuOpen(false); }}
                   >
-                    Criar conta
+                    {getText('home.header.btn_criar_conta')}
                   </Button>
                 </div>
               </div>

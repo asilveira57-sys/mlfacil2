@@ -6,36 +6,46 @@ import {
   Users,
   Check
 } from "lucide-react";
-
-const integrations = [
-  {
-    icon: CreditCard,
-    title: "Mercado Pago",
-    description: "Pagamentos por assinatura e avulsos integrados nativamente."
-  },
-  {
-    icon: FileCheck,
-    title: "Notas e Faturamento",
-    description: "Acompanhe notas fiscais e histórico de cobranças."
-  },
-  {
-    icon: Shield,
-    title: "Segurança & LGPD",
-    description: "Dados criptografados e conformidade com legislação brasileira."
-  },
-  {
-    icon: Users,
-    title: "Multiconta",
-    description: "Gerencie múltiplas contas do Mercado Livre em um só painel."
-  }
-];
+import { useSiteContentContext } from "@/contexts/SiteContentContext";
 
 export function LandingIntegrations() {
+  const { getText } = useSiteContentContext();
+
+  const integrations = [
+    {
+      icon: CreditCard,
+      title: getText('home.integrations.item1.title'),
+      description: getText('home.integrations.item1.description')
+    },
+    {
+      icon: FileCheck,
+      title: getText('home.integrations.item2.title'),
+      description: getText('home.integrations.item2.description')
+    },
+    {
+      icon: Shield,
+      title: getText('home.integrations.item3.title'),
+      description: getText('home.integrations.item3.description')
+    },
+    {
+      icon: Users,
+      title: getText('home.integrations.item4.title'),
+      description: getText('home.integrations.item4.description')
+    }
+  ];
+
+  const securityBadges = [
+    getText('home.integrations.badge1'),
+    getText('home.integrations.badge2'),
+    getText('home.integrations.badge3'),
+    getText('home.integrations.badge4')
+  ];
+
   return (
     <Section id="integracoes">
       <SectionHeader
-        title="Integrações e Segurança"
-        subtitle="Conectado com as principais ferramentas e preparado para proteger seus dados."
+        title={getText('home.integrations.title')}
+        subtitle={getText('home.integrations.subtitle')}
       />
 
       <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -59,22 +69,12 @@ export function LandingIntegrations() {
 
       {/* Security badges */}
       <div className="mt-12 flex flex-wrap items-center justify-center gap-8">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <Check className="w-5 h-5 text-success" />
-          <span className="text-sm">SSL 256-bit</span>
-        </div>
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <Check className="w-5 h-5 text-success" />
-          <span className="text-sm">LGPD Compliant</span>
-        </div>
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <Check className="w-5 h-5 text-success" />
-          <span className="text-sm">Backup diário</span>
-        </div>
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <Check className="w-5 h-5 text-success" />
-          <span className="text-sm">99.9% Uptime</span>
-        </div>
+        {securityBadges.map((badge, index) => (
+          <div key={index} className="flex items-center gap-2 text-muted-foreground">
+            <Check className="w-5 h-5 text-success" />
+            <span className="text-sm">{badge}</span>
+          </div>
+        ))}
       </div>
     </Section>
   );
