@@ -280,6 +280,113 @@ export type Database = {
           },
         ]
       }
+      blog_categories: {
+        Row: {
+          created_at: string
+          descricao: string | null
+          id: string
+          nome: string
+          slug: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          nome: string
+          slug: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          nome?: string
+          slug?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      blog_posts: {
+        Row: {
+          autor: string | null
+          canonical_url: string | null
+          categoria_id: string | null
+          conteudo_principal: string | null
+          created_at: string
+          data_agendada: string | null
+          data_publicacao: string | null
+          id: string
+          imagem_capa: string | null
+          meta_description: string | null
+          meta_keywords: string | null
+          meta_title: string | null
+          modulo_referencia_id: string | null
+          modulo_vinculado: string | null
+          origem: string | null
+          resumo: string | null
+          slug: string
+          status: string
+          tags: string[] | null
+          titulo: string
+          updated_at: string
+        }
+        Insert: {
+          autor?: string | null
+          canonical_url?: string | null
+          categoria_id?: string | null
+          conteudo_principal?: string | null
+          created_at?: string
+          data_agendada?: string | null
+          data_publicacao?: string | null
+          id?: string
+          imagem_capa?: string | null
+          meta_description?: string | null
+          meta_keywords?: string | null
+          meta_title?: string | null
+          modulo_referencia_id?: string | null
+          modulo_vinculado?: string | null
+          origem?: string | null
+          resumo?: string | null
+          slug: string
+          status?: string
+          tags?: string[] | null
+          titulo: string
+          updated_at?: string
+        }
+        Update: {
+          autor?: string | null
+          canonical_url?: string | null
+          categoria_id?: string | null
+          conteudo_principal?: string | null
+          created_at?: string
+          data_agendada?: string | null
+          data_publicacao?: string | null
+          id?: string
+          imagem_capa?: string | null
+          meta_description?: string | null
+          meta_keywords?: string | null
+          meta_title?: string | null
+          modulo_referencia_id?: string | null
+          modulo_vinculado?: string | null
+          origem?: string | null
+          resumo?: string | null
+          slug?: string
+          status?: string
+          tags?: string[] | null
+          titulo?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "blog_posts_categoria_id_fkey"
+            columns: ["categoria_id"]
+            isOneToOne: false
+            referencedRelation: "blog_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       category_tree_cache: {
         Row: {
           children_count: number | null
@@ -3591,6 +3698,8 @@ export type Database = {
           total_pending: number
         }[]
       }
+      generate_blog_slug: { Args: { title: string }; Returns: string }
+      generate_category_slug: { Args: { name: string }; Returns: string }
       get_orders_needing_cost_sync: {
         Args: { p_limit?: number; p_offset?: number; p_seller_id: string }
         Returns: {
