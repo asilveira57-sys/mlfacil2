@@ -1,11 +1,27 @@
 import { useCallback, useRef } from 'react';
 import { CategoryDetails, CategoryMetrics, CacheEntry } from '@/types/trends-explorer';
+import { useTrendsGlobalCache } from './useTrendsGlobalCache';
+
+/**
+ * TRENDS CACHE - Hybrid Global/Account caching for category data
+ * 
+ * Uses GLOBAL cache for:
+ * - Category details (name, path, tree structure) - 12h TTL
+ * - This is public metadata that doesn't change per account
+ * 
+ * Uses ACCOUNT-SPECIFIC pattern for:
+ * - Metrics that depend on seller eligibility (handled by useTrendsAccountCache)
+ * 
+ * Category tree and breadcrumb data is stored in useTrendsGlobalCache (30-day TTL)
+ */
 
 // TTL in milliseconds
 const DETAILS_TTL = 12 * 60 * 60 * 1000; // 12 hours
 const METRICS_TTL = 45 * 60 * 1000; // 45 minutes
 
-// In-memory cache (session-level)
+// In-memory cache (session-level) for category details and metrics
+// Details use GLOBAL keys (categoryId only)
+// Metrics may include account context when needed
 const memoryCache = {
   details: new Map<string, CacheEntry<CategoryDetails>>(),
   metrics: new Map<string, CacheEntry<CategoryMetrics>>(),
@@ -19,6 +35,7 @@ const inflightRequests = {
 
 export function useTrendsCache() {
   const cacheHits = useRef({ memory: 0, db: 0, network: 0 });
+  const globalCache = useTrendsGlobalCache();
 
   // Check if cache entry is still valid
   const isValid = useCallback(<T>(entry: CacheEntry<T> | undefined): boolean => {
@@ -26,7 +43,7 @@ export function useTrendsCache() {
     return Date.now() - entry.cached_at < entry.ttl_ms;
   }, []);
 
-  // Get from memory cache
+  // Get from memory cache (GLOBAL for details, session for metrics)
   const getFromMemory = useCallback(<T>(
     type: 'details' | 'metrics',
     categoryId: string
@@ -99,7 +116,18 @@ export function useTrendsCache() {
     ...cacheHits.current,
     detailsSize: memoryCache.details.size,
     metricsSize: memoryCache.metrics.size,
-  }), []);
+    globalStats: globalCache.getStats(),
+  }), [globalCache]);
+
+  // Get category from global cache (30-day TTL, cross-session)
+  const getCategoryFromGlobalCache = useCallback((categoryId: string) => {
+    return globalCache.getCategoryFromMemory(categoryId);
+  }, [globalCache]);
+
+  // Prewarm global category cache
+  const prewarmCategories = useCallback((categories: Array<{ category_id: string; name: string; path?: string[]; parent_id?: string | null; children_count?: number }>) => {
+    globalCache.prewarmCategories(categories);
+  }, [globalCache]);
 
   return {
     getFromMemory,
@@ -108,5 +136,7 @@ export function useTrendsCache() {
     invalidate,
     clearAll,
     getStats,
+    getCategoryFromGlobalCache,
+    prewarmCategories,
   };
 }
