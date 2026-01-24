@@ -17,7 +17,7 @@ export interface MercadoDataAdapter {
   searchCategories(query: string, parentId: string | null): Promise<MercadoCategoryItem[]>;
 }
 
-// Mock data generator
+// Mock data generator - DETERMINISTIC to avoid random "no children" issues
 function generateMockCategories(parentId: string | null): MercadoCategoryItem[] {
   const rootCategories = [
     { id: 'MLB5672', name: 'Acessórios para Veículos', share: 8.5 },
@@ -34,27 +34,117 @@ function generateMockCategories(parentId: string | null): MercadoCategoryItem[] 
     { id: 'MLB1500', name: 'Construção', share: 4.2 },
   ];
 
-  const subcategories: Record<string, { id: string; name: string; share: number }[]> = {
+  // Subcategories defined deterministically - all parent categories have children
+  const subcategories: Record<string, { id: string; name: string; share: number; hasChildren: boolean }[]> = {
+    'MLB5672': [
+      { id: 'MLB5673', name: 'Peças para Carros', share: 35.2, hasChildren: true },
+      { id: 'MLB5674', name: 'Acessórios Automotivos', share: 28.5, hasChildren: true },
+      { id: 'MLB5675', name: 'Peças para Motos', share: 22.3, hasChildren: false },
+      { id: 'MLB5676', name: 'Pneus e Rodas', share: 14.0, hasChildren: false },
+    ],
+    'MLB1246': [
+      { id: 'MLB1247', name: 'Maquiagem', share: 32.5, hasChildren: true },
+      { id: 'MLB1248', name: 'Cuidados com a Pele', share: 28.3, hasChildren: true },
+      { id: 'MLB1249', name: 'Perfumes', share: 24.7, hasChildren: false },
+      { id: 'MLB1250', name: 'Cuidados com o Cabelo', share: 14.5, hasChildren: false },
+    ],
+    'MLB1132': [
+      { id: 'MLB1133', name: 'Bonecos e Figuras', share: 25.0, hasChildren: true },
+      { id: 'MLB1134', name: 'Jogos de Tabuleiro', share: 22.5, hasChildren: false },
+      { id: 'MLB1135', name: 'Veículos de Brinquedo', share: 20.0, hasChildren: false },
+      { id: 'MLB1136', name: 'Blocos de Montar', share: 32.5, hasChildren: true },
+    ],
     'MLB1051': [
-      { id: 'MLB1055', name: 'Celulares e Smartphones', share: 45.2 },
-      { id: 'MLB1058', name: 'Acessórios para Celulares', share: 28.7 },
-      { id: 'MLB1057', name: 'Capas e Películas', share: 15.3 },
-      { id: 'MLB1059', name: 'Peças de Reposição', share: 10.8 },
+      { id: 'MLB1055', name: 'Celulares e Smartphones', share: 45.2, hasChildren: true },
+      { id: 'MLB1058', name: 'Acessórios para Celulares', share: 28.7, hasChildren: true },
+      { id: 'MLB1057', name: 'Capas e Películas', share: 15.3, hasChildren: false },
+      { id: 'MLB1059', name: 'Peças de Reposição', share: 10.8, hasChildren: false },
     ],
     'MLB1000': [
-      { id: 'MLB1002', name: 'Áudio', share: 22.5 },
-      { id: 'MLB1003', name: 'TV e Vídeo', share: 31.8 },
-      { id: 'MLB1004', name: 'Games', share: 25.4 },
-      { id: 'MLB1005', name: 'Fotografia', share: 12.3 },
-      { id: 'MLB1006', name: 'Drones', share: 8.0 },
+      { id: 'MLB1002', name: 'Áudio', share: 22.5, hasChildren: true },
+      { id: 'MLB1003', name: 'TV e Vídeo', share: 31.8, hasChildren: true },
+      { id: 'MLB1004', name: 'Games', share: 25.4, hasChildren: true },
+      { id: 'MLB1005', name: 'Fotografia', share: 12.3, hasChildren: false },
+      { id: 'MLB1006', name: 'Drones', share: 8.0, hasChildren: false },
     ],
     'MLB1574': [
-      { id: 'MLB1575', name: 'Móveis para Casa', share: 35.2 },
-      { id: 'MLB1576', name: 'Decoração', share: 28.5 },
-      { id: 'MLB1577', name: 'Iluminação', share: 18.3 },
-      { id: 'MLB1578', name: 'Organização', share: 12.0 },
-      { id: 'MLB1579', name: 'Cama, Mesa e Banho', share: 6.0 },
+      { id: 'MLB1575', name: 'Móveis para Casa', share: 35.2, hasChildren: true },
+      { id: 'MLB1576', name: 'Decoração', share: 28.5, hasChildren: true },
+      { id: 'MLB1577', name: 'Iluminação', share: 18.3, hasChildren: false },
+      { id: 'MLB1578', name: 'Organização', share: 12.0, hasChildren: false },
+      { id: 'MLB1579', name: 'Cama, Mesa e Banho', share: 6.0, hasChildren: false },
     ],
+    'MLB1648': [
+      { id: 'MLB1649', name: 'Notebooks', share: 38.5, hasChildren: true },
+      { id: 'MLB1650', name: 'Desktops', share: 22.3, hasChildren: false },
+      { id: 'MLB1651', name: 'Componentes', share: 25.7, hasChildren: true },
+      { id: 'MLB1652', name: 'Periféricos', share: 13.5, hasChildren: false },
+    ],
+    'MLB1144': [
+      { id: 'MLB1145', name: 'Geladeiras', share: 28.5, hasChildren: false },
+      { id: 'MLB1146', name: 'Máquinas de Lavar', share: 25.3, hasChildren: false },
+      { id: 'MLB1147', name: 'Ar Condicionado', share: 22.7, hasChildren: false },
+      { id: 'MLB1148', name: 'Fogões', share: 23.5, hasChildren: false },
+    ],
+    'MLB1276': [
+      { id: 'MLB1277', name: 'Academia e Fitness', share: 32.5, hasChildren: true },
+      { id: 'MLB1278', name: 'Esportes Aquáticos', share: 18.3, hasChildren: false },
+      { id: 'MLB1279', name: 'Ciclismo', share: 22.7, hasChildren: true },
+      { id: 'MLB1280', name: 'Camping e Trilha', share: 26.5, hasChildren: false },
+    ],
+    'MLB1430': [
+      { id: 'MLB1431', name: 'Roupas Masculinas', share: 35.2, hasChildren: true },
+      { id: 'MLB1432', name: 'Roupas Femininas', share: 42.5, hasChildren: true },
+      { id: 'MLB1433', name: 'Calçados', share: 22.3, hasChildren: true },
+    ],
+    'MLB264586': [
+      { id: 'MLB264587', name: 'Vitaminas e Suplementos', share: 45.0, hasChildren: false },
+      { id: 'MLB264588', name: 'Equipamentos Médicos', share: 35.0, hasChildren: false },
+      { id: 'MLB264589', name: 'Cuidados Pessoais', share: 20.0, hasChildren: false },
+    ],
+    'MLB1500': [
+      { id: 'MLB1501', name: 'Ferramentas', share: 40.0, hasChildren: true },
+      { id: 'MLB1502', name: 'Materiais Elétricos', share: 30.0, hasChildren: false },
+      { id: 'MLB1503', name: 'Materiais de Construção', share: 30.0, hasChildren: false },
+    ],
+    // Level 3 subcategories
+    'MLB1055': [
+      { id: 'MLB10551', name: 'Apple', share: 35.0, hasChildren: false },
+      { id: 'MLB10552', name: 'Samsung', share: 28.0, hasChildren: false },
+      { id: 'MLB10553', name: 'Xiaomi', share: 22.0, hasChildren: false },
+      { id: 'MLB10554', name: 'Motorola', share: 15.0, hasChildren: false },
+    ],
+    'MLB1058': [
+      { id: 'MLB10581', name: 'Carregadores', share: 30.0, hasChildren: false },
+      { id: 'MLB10582', name: 'Fones de Ouvido', share: 35.0, hasChildren: false },
+      { id: 'MLB10583', name: 'Suportes', share: 20.0, hasChildren: false },
+      { id: 'MLB10584', name: 'Cabos', share: 15.0, hasChildren: false },
+    ],
+    'MLB1004': [
+      { id: 'MLB10041', name: 'PlayStation', share: 35.0, hasChildren: false },
+      { id: 'MLB10042', name: 'Xbox', share: 28.0, hasChildren: false },
+      { id: 'MLB10043', name: 'Nintendo', share: 22.0, hasChildren: false },
+      { id: 'MLB10044', name: 'PC Gaming', share: 15.0, hasChildren: false },
+    ],
+  };
+
+  // Generate deterministic counts based on category ID
+  const getCount = (id: string): number => {
+    let hash = 0;
+    for (let i = 0; i < id.length; i++) {
+      hash = ((hash << 5) - hash) + id.charCodeAt(i);
+      hash |= 0;
+    }
+    return Math.abs(hash % 500000) + 10000;
+  };
+
+  const getDelta = (id: string): number => {
+    let hash = 0;
+    for (let i = 0; i < id.length; i++) {
+      hash = ((hash << 3) - hash) + id.charCodeAt(i);
+      hash |= 0;
+    }
+    return ((hash % 100) - 50) / 10;
   };
 
   if (!parentId) {
@@ -62,28 +152,46 @@ function generateMockCategories(parentId: string | null): MercadoCategoryItem[] 
       id: cat.id,
       name: cat.name,
       share_percent: cat.share,
-      total_count: Math.floor(Math.random() * 500000) + 10000,
+      total_count: getCount(cat.id),
       parent_id: null,
-      has_children: true,
-      delta_24h: (Math.random() - 0.5) * 10,
+      has_children: true, // All root categories have children
+      delta_24h: getDelta(cat.id),
       is_favorite: index < 2,
       path: [cat.name],
     }));
   }
 
-  const children = subcategories[parentId] || [];
-  const parentCat = rootCategories.find(c => c.id === parentId);
+  const children = subcategories[parentId];
+  
+  // If no children defined, return empty array
+  if (!children) {
+    return [];
+  }
+  
+  // Find parent name for path
+  const findCategoryName = (id: string): string | null => {
+    const root = rootCategories.find(c => c.id === id);
+    if (root) return root.name;
+    
+    for (const subs of Object.values(subcategories)) {
+      const found = subs.find(c => c.id === id);
+      if (found) return found.name;
+    }
+    return null;
+  };
+  
+  const parentName = findCategoryName(parentId);
   
   return children.map(cat => ({
     id: cat.id,
     name: cat.name,
     share_percent: cat.share,
-    total_count: Math.floor(Math.random() * 100000) + 1000,
+    total_count: getCount(cat.id),
     parent_id: parentId,
-    has_children: Math.random() > 0.5,
-    delta_24h: (Math.random() - 0.5) * 8,
+    has_children: cat.hasChildren, // Use deterministic value
+    delta_24h: getDelta(cat.id),
     is_favorite: false,
-    path: parentCat ? [parentCat.name, cat.name] : [cat.name],
+    path: parentName ? [parentName, cat.name] : [cat.name],
   }));
 }
 

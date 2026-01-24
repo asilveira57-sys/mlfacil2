@@ -1,9 +1,10 @@
-import { createContext, useContext, useReducer, useCallback, ReactNode, useRef, useMemo } from 'react';
+import { createContext, useContext, useReducer, useCallback, ReactNode, useRef, useMemo, useEffect } from 'react';
 import { MercadoCategoryItem, MercadoCategoryDetails, MercadoCategoryMetrics, MercadoDrawerType } from '@/types/mercado';
 import { createMercadoAdapter, MercadoDataAdapter } from '@/adapters/mercado-data-adapter';
 import { useMercadoCache } from '@/hooks/useMercadoCache';
 import { useMercadoTelemetry } from '@/hooks/useMercadoTelemetry';
 import { useMercadoGridCache } from '@/hooks/useMercadoGridCache';
+import { useMercadoChildrenCache } from '@/hooks/useMercadoChildrenCache';
 
 // State
 interface MercadoState {
@@ -164,7 +165,7 @@ interface MercadoContextValue {
   adapter: MercadoDataAdapter;
   
   // Actions
-  loadCategories: () => Promise<void>;
+  loadCategories: (forceRefresh?: boolean) => Promise<void>;
   navigateTo: (categoryId: string, categoryName: string) => Promise<void>;
   goBack: () => void;
   goToRoot: () => void;
@@ -200,6 +201,7 @@ export function MercadoProvider({ children }: MercadoProviderProps) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const cache = useMercadoCache();
   const gridCache = useMercadoGridCache();
+  const childrenCache = useMercadoChildrenCache();
   const telemetry = useMercadoTelemetry();
   
   // Memoize adapter to prevent recreation
@@ -207,6 +209,9 @@ export function MercadoProvider({ children }: MercadoProviderProps) {
   
   // Track inflight requests to avoid duplicates
   const inflightCategoriesRef = useRef<Map<string, Promise<MercadoCategoryItem[]>>>(new Map());
+  
+  // Track if initial warming has been done
+  const hasWarmedRef = useRef(false);
   
   // Use ref for current parent to avoid recreating callbacks
   const currentParentIdRef = useRef(state.currentParentId);
@@ -216,23 +221,98 @@ export function MercadoProvider({ children }: MercadoProviderProps) {
   const categoriesRef = useRef(state.categories);
   categoriesRef.current = state.categories;
 
-  const loadCategories = useCallback(async () => {
+  // Background warming for top categories - define first to be used in loadCategories
+  const warmTopCategoriesRef = useRef<(categories: MercadoCategoryItem[]) => void>(() => {});
+  warmTopCategoriesRef.current = useCallback((categories: MercadoCategoryItem[]) => {
+    if (!categories.length) return;
+    
+    // Get top 10 by share_percent that have children
+    const topCategories = [...categories]
+      .filter(c => c.has_children)
+      .sort((a, b) => b.share_percent - a.share_percent)
+      .slice(0, 10)
+      .map(c => c.id);
+    
+    if (topCategories.length > 0) {
+      childrenCache.warmChildren(topCategories, (parentId) => adapter.listCategories(parentId));
+    }
+  }, [adapter, childrenCache]);
+
+  // Helper to handle categories loaded - use ref to avoid recreation
+  const handleCategoriesLoadedRef = useRef<(parentId: string | null, categories: MercadoCategoryItem[], hadExpiredCache: boolean) => void>(() => {});
+  handleCategoriesLoadedRef.current = useCallback((parentId: string | null, categories: MercadoCategoryItem[], hadExpiredCache: boolean) => {
+    // If empty and not root, mark as having no children
+    if (categories.length === 0 && parentId) {
+      childrenCache.markNoChildren(parentId);
+    } else {
+      // Save to both caches
+      childrenCache.setChildren(parentId, categories);
+    }
+    
+    // Update grid cache maintaining order if we had expired cache
+    if (hadExpiredCache) {
+      const orderedCategories = gridCache.updateCacheValues(parentId, categories);
+      dispatch({ type: 'SET_CATEGORIES', payload: orderedCategories });
+    } else {
+      gridCache.setCache(parentId, categories);
+      dispatch({ type: 'SET_CATEGORIES', payload: categories });
+    }
+    
+    // Trigger background warming
+    warmTopCategoriesRef.current(categories);
+  }, [gridCache, childrenCache]);
+
+  const loadCategories = useCallback(async (forceRefresh = false) => {
     const parentId = currentParentIdRef.current;
     const cacheKey = parentId ?? '__root__';
     
-    // Check for valid cache first - render immediately
-    const cachedData = gridCache.getCached(parentId);
-    if (cachedData) {
-      telemetry.log({
-        event_type: 'cache_hit',
-        category_id: cacheKey,
-        data_type: 'grid',
-        duration_ms: 0,
-        timestamp: new Date().toISOString(),
-        cache_source: 'memory',
-      });
-      dispatch({ type: 'SET_CATEGORIES', payload: cachedData.categories });
-      return; // Don't fetch if cache is valid
+    // Check children cache first (30-day TTL)
+    if (!forceRefresh) {
+      const cachedChildren = childrenCache.getChildren(parentId);
+      if (cachedChildren && cachedChildren.children.length > 0) {
+        telemetry.log({
+          event_type: 'cache_hit',
+          category_id: cacheKey,
+          data_type: 'grid',
+          duration_ms: 0,
+          timestamp: new Date().toISOString(),
+          cache_source: 'children',
+        });
+        dispatch({ type: 'SET_CATEGORIES', payload: cachedChildren.children });
+        
+        // Trigger background warming for visible categories (via ref to avoid dep)
+        warmTopCategoriesRef.current(cachedChildren.children);
+        return;
+      }
+      
+      // Check if verified to have no children
+      if (parentId && childrenCache.hasNoChildren(parentId)) {
+        dispatch({ type: 'SET_CATEGORIES', payload: [] });
+        return;
+      }
+    }
+    
+    // Check for valid grid cache (45min TTL) - render immediately
+    if (!forceRefresh) {
+      const cachedData = gridCache.getCached(parentId);
+      if (cachedData) {
+        telemetry.log({
+          event_type: 'cache_hit',
+          category_id: cacheKey,
+          data_type: 'grid',
+          duration_ms: 0,
+          timestamp: new Date().toISOString(),
+          cache_source: 'memory',
+        });
+        dispatch({ type: 'SET_CATEGORIES', payload: cachedData.categories });
+        
+        // Also save to children cache for longer TTL
+        childrenCache.setChildren(parentId, cachedData.categories);
+        
+        // Trigger background warming
+        warmTopCategoriesRef.current(cachedData.categories);
+        return;
+      }
     }
     
     // Check for expired cache - show stale data while refreshing
@@ -249,14 +329,7 @@ export function MercadoProvider({ children }: MercadoProviderProps) {
     if (existingRequest) {
       try {
         const categories = await existingRequest;
-        // Update values without changing order if we had cached data
-        if (expiredCache) {
-          const orderedCategories = gridCache.updateCacheValues(parentId, categories);
-          dispatch({ type: 'SET_CATEGORIES', payload: orderedCategories });
-        } else {
-          gridCache.setCache(parentId, categories);
-          dispatch({ type: 'SET_CATEGORIES', payload: categories });
-        }
+        handleCategoriesLoadedRef.current(parentId, categories, !!expiredCache);
       } finally {
         dispatch({ type: 'SET_LOADING_CATEGORIES', payload: false });
         dispatch({ type: 'SET_BACKGROUND_REFRESH', payload: false });
@@ -270,15 +343,7 @@ export function MercadoProvider({ children }: MercadoProviderProps) {
     
     try {
       const categories = await fetchPromise;
-      
-      // Update values without changing order if we had cached data
-      if (expiredCache) {
-        const orderedCategories = gridCache.updateCacheValues(parentId, categories);
-        dispatch({ type: 'SET_CATEGORIES', payload: orderedCategories });
-      } else {
-        gridCache.setCache(parentId, categories);
-        dispatch({ type: 'SET_CATEGORIES', payload: categories });
-      }
+      handleCategoriesLoadedRef.current(parentId, categories, !!expiredCache);
     } catch (error) {
       dispatch({ type: 'SET_ERROR', payload: 'Falha ao carregar categorias' });
     } finally {
@@ -286,7 +351,15 @@ export function MercadoProvider({ children }: MercadoProviderProps) {
       dispatch({ type: 'SET_LOADING_CATEGORIES', payload: false });
       dispatch({ type: 'SET_BACKGROUND_REFRESH', payload: false });
     }
-  }, [adapter, gridCache, telemetry]);
+  }, [adapter, gridCache, childrenCache, telemetry]);
+
+  // Initial warming on mount
+  useEffect(() => {
+    if (!hasWarmedRef.current && state.categories.length > 0) {
+      hasWarmedRef.current = true;
+      warmTopCategoriesRef.current(state.categories);
+    }
+  }, [state.categories]);
 
   const navigateTo = useCallback(async (categoryId: string, categoryName: string) => {
     dispatch({ type: 'NAVIGATE_TO', payload: { parentId: categoryId, name: categoryName } });

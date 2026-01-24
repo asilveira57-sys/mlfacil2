@@ -165,7 +165,7 @@ export const MercadoCategoryCard = memo(function MercadoCategoryCard({
 
         {/* Actions - fixed height at bottom */}
         <div className="flex items-center gap-1.5 mt-auto min-h-[32px]">
-          {category.has_children && (
+          {category.has_children ? (
             <Button
               variant="outline"
               size="sm"
@@ -174,6 +174,17 @@ export const MercadoCategoryCard = memo(function MercadoCategoryCard({
             >
               <ChevronRight className="h-3.5 w-3.5" />
               Navegar
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 h-8 text-xs gap-1 opacity-50 cursor-not-allowed"
+              disabled
+              title="Esta categoria não possui subcategorias"
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+              Sem subs
             </Button>
           )}
           <Button
