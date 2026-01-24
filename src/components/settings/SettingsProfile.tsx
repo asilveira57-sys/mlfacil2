@@ -233,11 +233,12 @@ const SettingsProfile = () => {
           .eq("user_id", user.id);
         error = result.error;
       } else {
-        // Insert new - generate UUID for id and include user_id
-        const insertData = { 
-          id: crypto.randomUUID(),
-          ...profileData, 
-          user_id: user.id 
+        // Insert new - `profiles.id` precisa ser o mesmo UUID do usuário autenticado
+        // por causa do FK: profiles(id) -> auth.users(id)
+        const insertData = {
+          id: user.id,
+          user_id: user.id,
+          ...profileData,
         } as any;
         const result = await supabase
           .from("profiles")
