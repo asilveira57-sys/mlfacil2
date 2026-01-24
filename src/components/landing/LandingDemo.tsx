@@ -1,14 +1,17 @@
 import { Section, SectionHeader } from "./Section";
 import { Button } from "@/components/ui/button";
 import { Play } from "lucide-react";
+import { useSiteContentContext } from "@/contexts/SiteContentContext";
 
 export function LandingDemo() {
+  const { getText } = useSiteContentContext();
+
   return (
     <Section id="demo" variant="muted">
       <div className="max-w-4xl mx-auto text-center">
         <SectionHeader
-          title="Veja a plataforma em ação"
-          subtitle="Assista uma demonstração rápida e entenda como podemos ajudar seu negócio a crescer."
+          title={getText('home.demo.title')}
+          subtitle={getText('home.demo.subtitle')}
         />
 
         {/* Video container placeholder */}
@@ -33,7 +36,7 @@ export function LandingDemo() {
         </div>
 
         <p className="mt-6 text-muted-foreground">
-          5 minutos para conhecer as principais funcionalidades e entender como aplicar no seu dia a dia.
+          {getText('home.demo.duration')}
         </p>
       </div>
     </Section>

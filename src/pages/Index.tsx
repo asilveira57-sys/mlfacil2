@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { SiteContentProvider } from "@/contexts/SiteContentContext";
 import {
   LandingHeader,
   LandingHero,
@@ -28,22 +29,24 @@ const Index = () => {
   }, [navigate]);
 
   return (
-    <div className="min-h-screen bg-background">
-      <LandingHeader />
-      <main>
-        <LandingHero />
-        <LandingBenefits />
-        <LandingModules />
-        <LandingHowItWorks />
-        <LandingIntegrations />
-        <LandingDemo />
-        <LandingPricing />
-        <LandingTestimonials />
-        <LandingFAQ />
-        <LandingCTA />
-      </main>
-      <LandingFooter />
-    </div>
+    <SiteContentProvider>
+      <div className="min-h-screen bg-background">
+        <LandingHeader />
+        <main>
+          <LandingHero />
+          <LandingBenefits />
+          <LandingModules />
+          <LandingHowItWorks />
+          <LandingIntegrations />
+          <LandingDemo />
+          <LandingPricing />
+          <LandingTestimonials />
+          <LandingFAQ />
+          <LandingCTA />
+        </main>
+        <LandingFooter />
+      </div>
+    </SiteContentProvider>
   );
 };
 

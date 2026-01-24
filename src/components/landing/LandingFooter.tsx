@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { BarChart3, Twitter, Linkedin, Instagram, Youtube } from "lucide-react";
+import { useSiteContentContext } from "@/contexts/SiteContentContext";
 
 const footerLinks = {
   produto: [
@@ -36,6 +37,8 @@ const socialLinks = [
 ];
 
 export function LandingFooter() {
+  const { getText } = useSiteContentContext();
+
   const handleLinkClick = (href: string) => {
     if (href.startsWith("#")) {
       const element = document.querySelector(href);
@@ -58,7 +61,7 @@ export function LandingFooter() {
               <span className="text-lg font-bold text-foreground">ML Analyzer</span>
             </Link>
             <p className="text-sm text-muted-foreground mb-6">
-              Plataforma completa de gestão e análise para sellers do Mercado Livre.
+              {getText('home.footer.description')}
             </p>
             <div className="flex gap-3">
               {socialLinks.map((social, index) => (
@@ -173,7 +176,7 @@ export function LandingFooter() {
             © {new Date().getFullYear()} ML Analyzer Pro. Todos os direitos reservados.
           </p>
           <p className="text-sm text-muted-foreground">
-            Contato: contato@mlanalyzerpro.com.br
+            Contato: {getText('home.footer.contact')}
           </p>
         </div>
       </div>

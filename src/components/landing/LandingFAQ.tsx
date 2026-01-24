@@ -1,5 +1,6 @@
 import { Section, SectionHeader } from "./Section";
 import { FAQList } from "./FAQItem";
+import { useSiteContentContext } from "@/contexts/SiteContentContext";
 
 const faqItems = [
   {
@@ -29,11 +30,13 @@ const faqItems = [
 ];
 
 export function LandingFAQ() {
+  const { getText } = useSiteContentContext();
+
   return (
     <Section id="faq">
       <SectionHeader
-        title="Perguntas frequentes"
-        subtitle="Tire suas dúvidas sobre a plataforma, pagamentos e suporte."
+        title={getText('home.faq.title')}
+        subtitle={getText('home.faq.subtitle')}
       />
 
       <FAQList items={faqItems} />

@@ -1,33 +1,36 @@
 import { Section, SectionHeader } from "./Section";
 import { Link2, BarChart3, Rocket } from "lucide-react";
-
-const steps = [
-  {
-    number: "01",
-    icon: Link2,
-    title: "Conecte sua conta",
-    description: "Integração rápida e segura com o Mercado Livre. Seus dados são importados automaticamente."
-  },
-  {
-    number: "02",
-    icon: BarChart3,
-    title: "Escolha e analise",
-    description: "Explore os módulos disponíveis e analise seus dados com dashboards interativos e insights."
-  },
-  {
-    number: "03",
-    icon: Rocket,
-    title: "Aplique e acompanhe",
-    description: "Implemente as melhorias sugeridas e monitore os resultados em tempo real."
-  }
-];
+import { useSiteContentContext } from "@/contexts/SiteContentContext";
 
 export function LandingHowItWorks() {
+  const { getText } = useSiteContentContext();
+
+  const steps = [
+    {
+      number: "01",
+      icon: Link2,
+      titleKey: 'home.howitworks.step1.title',
+      descriptionKey: 'home.howitworks.step1.description'
+    },
+    {
+      number: "02",
+      icon: BarChart3,
+      titleKey: 'home.howitworks.step2.title',
+      descriptionKey: 'home.howitworks.step2.description'
+    },
+    {
+      number: "03",
+      icon: Rocket,
+      titleKey: 'home.howitworks.step3.title',
+      descriptionKey: 'home.howitworks.step3.description'
+    }
+  ];
+
   return (
     <Section id="como-funciona" variant="muted">
       <SectionHeader
-        title="Como funciona?"
-        subtitle="Em apenas 3 passos você começa a otimizar suas vendas."
+        title={getText('home.howitworks.title')}
+        subtitle={getText('home.howitworks.subtitle')}
       />
 
       <div className="grid md:grid-cols-3 gap-8 md:gap-12">
@@ -49,11 +52,11 @@ export function LandingHowItWorks() {
               </div>
               
               <h3 className="text-lg font-semibold text-foreground mb-2">
-                {step.title}
+                {getText(step.titleKey)}
               </h3>
               
               <p className="text-muted-foreground text-sm max-w-xs">
-                {step.description}
+                {getText(step.descriptionKey)}
               </p>
             </div>
           </div>
