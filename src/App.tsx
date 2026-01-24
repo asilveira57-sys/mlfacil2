@@ -23,6 +23,7 @@ import Settings from "./pages/Settings";
 import Blog from "./pages/Blog";
 import BlogAdmin from "./pages/BlogAdmin";
 import NotFound from "./pages/NotFound";
+import { AdminRoute } from "./components/auth/AdminRoute";
 
 // Global watchdog provider component - handles both cost and orders sync
 function GlobalWatchdogs() {
@@ -141,7 +142,8 @@ const App = () => {
             <Route path="/blog" element={<Blog />} />
             <Route path="/blog/:slug" element={<Blog />} />
             <Route path="/blog/categoria/:slug" element={<Blog />} />
-            <Route path="/admin/blog/*" element={<BlogAdmin />} />
+            {/* Admin routes - protected by AdminRoute guard */}
+            <Route path="/admin/blog/*" element={<AdminRoute><BlogAdmin /></AdminRoute>} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

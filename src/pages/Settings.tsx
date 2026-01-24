@@ -9,6 +9,7 @@ import SettingsBilling from "@/components/settings/SettingsBilling";
 import SettingsCompanies from "@/components/settings/SettingsCompanies";
 import SettingsIntegrations from "@/components/settings/SettingsIntegrations";
 import SettingsSubscription from "@/components/settings/SettingsSubscription";
+import { AdminOnly } from "@/components/auth/AdminOnly";
 
 const Settings = () => {
   const navigate = useNavigate();
@@ -67,24 +68,26 @@ const Settings = () => {
           </TabsContent>
         </Tabs>
 
-        {/* Blog Admin Quick Access */}
-        <Card className="mt-8">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FileText className="h-5 w-5" />
-              Gerenciamento do Blog
-            </CardTitle>
-            <CardDescription>
-              Crie e gerencie posts e categorias do blog
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button onClick={() => navigate('/admin/blog')} className="gap-2">
-              Acessar Admin do Blog
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </CardContent>
-        </Card>
+        {/* Blog Admin Quick Access - Only visible to admins */}
+        <AdminOnly>
+          <Card className="mt-8">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Gerenciamento do Blog
+              </CardTitle>
+              <CardDescription>
+                Crie e gerencie posts e categorias do blog
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button onClick={() => navigate('/admin/blog')} className="gap-2">
+                Acessar Admin do Blog
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </CardContent>
+          </Card>
+        </AdminOnly>
       </div>
     </div>
   );

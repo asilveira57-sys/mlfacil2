@@ -39,6 +39,32 @@ serve(async (req) => {
       });
     }
 
+    // Verify user is admin
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: 'Invalid token' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Check admin role using the security definer function
+    const { data: userRole, error: roleError } = await supabase.rpc('get_user_role', {
+      _user_id: user.id
+    });
+
+    if (roleError || userRole !== 'admin') {
+      console.log('[blog-generate-article] Access denied for user:', user.id, 'role:', userRole);
+      return new Response(JSON.stringify({ error: 'Forbidden: Admin access required' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    console.log('[blog-generate-article] Admin access granted for user:', user.id);
+
     const input: ArticleInput = await req.json();
     
     // Validate required fields
