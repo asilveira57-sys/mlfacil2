@@ -2770,12 +2770,18 @@ export type Database = {
           created_at: string | null
           currency: string | null
           description: string | null
+          discount_cents: number | null
+          final_amount_cents: number | null
           gateway_payment_id: string | null
           id: string
+          mercadopago_payment_id: string | null
+          mercadopago_status: string | null
           paid_at: string | null
+          payment_method: string | null
           status: string
           subscription_id: string | null
           user_id: string
+          voucher_id: string | null
         }
         Insert: {
           amount_cents: number
@@ -2783,12 +2789,18 @@ export type Database = {
           created_at?: string | null
           currency?: string | null
           description?: string | null
+          discount_cents?: number | null
+          final_amount_cents?: number | null
           gateway_payment_id?: string | null
           id?: string
+          mercadopago_payment_id?: string | null
+          mercadopago_status?: string | null
           paid_at?: string | null
+          payment_method?: string | null
           status: string
           subscription_id?: string | null
           user_id: string
+          voucher_id?: string | null
         }
         Update: {
           amount_cents?: number
@@ -2796,12 +2808,18 @@ export type Database = {
           created_at?: string | null
           currency?: string | null
           description?: string | null
+          discount_cents?: number | null
+          final_amount_cents?: number | null
           gateway_payment_id?: string | null
           id?: string
+          mercadopago_payment_id?: string | null
+          mercadopago_status?: string | null
           paid_at?: string | null
+          payment_method?: string | null
           status?: string
           subscription_id?: string | null
           user_id?: string
+          voucher_id?: string | null
         }
         Relationships: [
           {
@@ -2818,7 +2836,103 @@ export type Database = {
             referencedRelation: "subscriptions"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "payments_voucher_id_fkey"
+            columns: ["voucher_id"]
+            isOneToOne: false
+            referencedRelation: "vouchers"
+            referencedColumns: ["id"]
+          },
         ]
+      }
+      plan_prices: {
+        Row: {
+          billing_cycle: string
+          created_at: string | null
+          duration_days: number
+          id: string
+          is_active: boolean | null
+          mercadopago_plan_id: string | null
+          plan_id: string
+          price_cents: number
+          updated_at: string | null
+        }
+        Insert: {
+          billing_cycle: string
+          created_at?: string | null
+          duration_days: number
+          id?: string
+          is_active?: boolean | null
+          mercadopago_plan_id?: string | null
+          plan_id: string
+          price_cents: number
+          updated_at?: string | null
+        }
+        Update: {
+          billing_cycle?: string
+          created_at?: string | null
+          duration_days?: number
+          id?: string
+          is_active?: boolean | null
+          mercadopago_plan_id?: string | null
+          plan_id?: string
+          price_cents?: number
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "plan_prices_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "plans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      plans: {
+        Row: {
+          code: string
+          created_at: string | null
+          description: string | null
+          features: Json | null
+          id: string
+          is_active: boolean | null
+          max_sales: number | null
+          min_sales: number | null
+          name: string
+          plan_type: string
+          sort_order: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          code: string
+          created_at?: string | null
+          description?: string | null
+          features?: Json | null
+          id?: string
+          is_active?: boolean | null
+          max_sales?: number | null
+          min_sales?: number | null
+          name: string
+          plan_type?: string
+          sort_order?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          code?: string
+          created_at?: string | null
+          description?: string | null
+          features?: Json | null
+          id?: string
+          is_active?: boolean | null
+          max_sales?: number | null
+          min_sales?: number | null
+          name?: string
+          plan_type?: string
+          sort_order?: number | null
+          updated_at?: string | null
+        }
+        Relationships: []
       }
       product_cost_catalog: {
         Row: {
@@ -3337,6 +3451,9 @@ export type Database = {
       }
       subscriptions: {
         Row: {
+          auto_renew: boolean | null
+          billing_cycle: string | null
+          cancelled_at: string | null
           company_id: string | null
           created_at: string | null
           current_period_end: string | null
@@ -3345,14 +3462,21 @@ export type Database = {
           gateway_customer_id: string | null
           gateway_subscription_id: string | null
           id: string
+          plan_id: string | null
           plan_name: string | null
           plan_price_cents: number | null
+          plan_price_id: string | null
           plan_type: string
           status: string
+          trial_ends_at: string | null
+          trial_started_at: string | null
           updated_at: string | null
           user_id: string
         }
         Insert: {
+          auto_renew?: boolean | null
+          billing_cycle?: string | null
+          cancelled_at?: string | null
           company_id?: string | null
           created_at?: string | null
           current_period_end?: string | null
@@ -3361,14 +3485,21 @@ export type Database = {
           gateway_customer_id?: string | null
           gateway_subscription_id?: string | null
           id?: string
+          plan_id?: string | null
           plan_name?: string | null
           plan_price_cents?: number | null
+          plan_price_id?: string | null
           plan_type?: string
           status?: string
+          trial_ends_at?: string | null
+          trial_started_at?: string | null
           updated_at?: string | null
           user_id: string
         }
         Update: {
+          auto_renew?: boolean | null
+          billing_cycle?: string | null
+          cancelled_at?: string | null
           company_id?: string | null
           created_at?: string | null
           current_period_end?: string | null
@@ -3377,10 +3508,14 @@ export type Database = {
           gateway_customer_id?: string | null
           gateway_subscription_id?: string | null
           id?: string
+          plan_id?: string | null
           plan_name?: string | null
           plan_price_cents?: number | null
+          plan_price_id?: string | null
           plan_type?: string
           status?: string
+          trial_ends_at?: string | null
+          trial_started_at?: string | null
           updated_at?: string | null
           user_id?: string
         }
@@ -3390,6 +3525,13 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "subscriptions_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "plans"
             referencedColumns: ["id"]
           },
         ]
@@ -3670,6 +3812,81 @@ export type Database = {
         }
         Relationships: []
       }
+      user_usage: {
+        Row: {
+          created_at: string | null
+          id: string
+          last_calculated_at: string | null
+          month_key: string
+          total_sales: number | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          last_calculated_at?: string | null
+          month_key: string
+          total_sales?: number | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          last_calculated_at?: string | null
+          month_key?: string
+          total_sales?: number | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      vouchers: {
+        Row: {
+          code: string
+          created_at: string | null
+          current_uses: number | null
+          description: string | null
+          discount_type: string
+          discount_value: number
+          id: string
+          is_active: boolean | null
+          max_uses: number | null
+          plan_ids: string[] | null
+          valid_from: string | null
+          valid_until: string | null
+        }
+        Insert: {
+          code: string
+          created_at?: string | null
+          current_uses?: number | null
+          description?: string | null
+          discount_type?: string
+          discount_value: number
+          id?: string
+          is_active?: boolean | null
+          max_uses?: number | null
+          plan_ids?: string[] | null
+          valid_from?: string | null
+          valid_until?: string | null
+        }
+        Update: {
+          code?: string
+          created_at?: string | null
+          current_uses?: number | null
+          description?: string | null
+          discount_type?: string
+          discount_value?: number
+          id?: string
+          is_active?: boolean | null
+          max_uses?: number | null
+          plan_ids?: string[] | null
+          valid_from?: string | null
+          valid_until?: string | null
+        }
+        Relationships: []
+      }
       zpl_conversion_history: {
         Row: {
           created_at: string | null
@@ -3798,6 +4015,20 @@ export type Database = {
       }
       get_user_full_context: { Args: { p_user_id: string }; Returns: Json }
       get_user_role: { Args: { _user_id: string }; Returns: string }
+      get_user_subscription: {
+        Args: { p_user_id: string }
+        Returns: {
+          current_period_end: string
+          days_remaining: number
+          is_trial: boolean
+          max_sales: number
+          plan_code: string
+          plan_name: string
+          plan_type: string
+          status: string
+          subscription_id: string
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -3817,9 +4048,15 @@ export type Database = {
         }
         Returns: Json
       }
+      start_user_trial: {
+        Args: { p_plan_code?: string; p_user_id: string }
+        Returns: string
+      }
     }
     Enums: {
       app_role: "admin" | "seller"
+      billing_cycle: "monthly" | "quarterly" | "semiannual" | "annual"
+      plan_type_enum: "volume" | "zpl_full"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -3948,6 +4185,8 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["admin", "seller"],
+      billing_cycle: ["monthly", "quarterly", "semiannual", "annual"],
+      plan_type_enum: ["volume", "zpl_full"],
     },
   },
 } as const
