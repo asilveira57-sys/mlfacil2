@@ -71,3 +71,6 @@ verify_jwt = false
 
 [functions.radiography-engine]
 verify_jwt = false
+
+[functions.blog-generate-article]
+verify_jwt = false
