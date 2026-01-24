@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { BarChart3, Menu } from "lucide-react";
 import { useSiteContentContext } from "@/contexts/SiteContentContext";
+import { EditableText } from "@/components/admin/EditableText";
+import { EditableImage } from "@/components/admin/EditableImage";
 
 export function LandingHeader() {
   const navigate = useNavigate();
@@ -31,18 +33,31 @@ export function LandingHeader() {
     }
   };
 
+  const logoImageUrl = getText('home.header.logo_image');
+  const hasLogoImage = logoImageUrl && !logoImageUrl.startsWith('home.');
+
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-md border-b border-border">
       <div className="container mx-auto px-4 md:px-6">
         <div className="flex items-center justify-between h-16 md:h-20">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2.5">
-            <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
-              <BarChart3 className="w-6 h-6 text-primary-foreground" />
-            </div>
-            <span className="text-xl font-bold text-foreground hidden sm:block">
-              {getText('home.header.logo_name')}
-            </span>
+            {hasLogoImage ? (
+              <EditableImage
+                contentKey="home.header.logo_image"
+                className="w-10 h-10 rounded-xl"
+                alt="Logo"
+              />
+            ) : (
+              <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
+                <BarChart3 className="w-6 h-6 text-primary-foreground" />
+              </div>
+            )}
+            <EditableText 
+              contentKey="home.header.logo_name" 
+              as="span"
+              className="text-xl font-bold text-foreground hidden sm:block"
+            />
           </Link>
 
           {/* Desktop Navigation */}

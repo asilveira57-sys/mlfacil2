@@ -199,6 +199,34 @@ export const siteDefaultTexts: Record<string, string> = {
   'home.cta.btn_secondary': 'Ver planos',
 
   // ============ HOME / FOOTER ============
+  'home.footer.logo_name': 'ML Analyzer Pro',
   'home.footer.description': 'Plataforma completa de gestão e análise para sellers do Mercado Livre.',
   'home.footer.contact': 'contato@mlanalyzerpro.com.br',
+  'home.footer.col1.title': 'Produto',
+  'home.footer.col1.link1': 'Recursos',
+  'home.footer.col1.link2': 'Planos',
+  'home.footer.col1.link3': 'Integrações',
+  'home.footer.col1.link4': 'Blog',
+  'home.footer.col2.title': 'Suporte',
+  'home.footer.col2.link1': 'FAQ',
+  'home.footer.col2.link2': 'Central de Ajuda',
+  'home.footer.col2.link3': 'Contato',
+  'home.footer.col2.link4': 'Status',
+  'home.footer.col3.title': 'Legal',
+  'home.footer.col3.link1': 'Termos de Uso',
+  'home.footer.col3.link2': 'Privacidade',
+  'home.footer.col3.link3': 'Cookies',
+  'home.footer.col3.link4': 'LGPD',
+  'home.footer.copyright': '© 2024 ML Analyzer Pro. Todos os direitos reservados.',
+  'home.footer.social_twitter': '',
+  'home.footer.social_linkedin': '',
+  'home.footer.social_instagram': '',
+  'home.footer.social_youtube': '',
+
+  // ============ HOME / DEMO VIDEO ============
+  'home.demo.youtube_url': '',
+
+  // ============ HOME / HERO IMAGE ============
+  'home.hero.dashboard_image': '',
+  'home.header.logo_image': '',
 };
