@@ -25,7 +25,7 @@ const PAGES = [
 ];
 
 const SECTIONS = {
-  home: ['hero', 'benefits', 'modules', 'howitworks', 'integrations', 'demo', 'pricing', 'testimonials', 'faq', 'cta', 'footer'],
+  home: ['header', 'hero', 'benefits', 'modules', 'howitworks', 'integrations', 'demo', 'pricing', 'testimonials', 'faq', 'cta', 'footer'],
   planos: ['header', 'cards', 'comparison', 'faq'],
   faq: ['general', 'payments', 'security', 'support'],
   legal: ['terms', 'privacy', 'cookies', 'lgpd'],

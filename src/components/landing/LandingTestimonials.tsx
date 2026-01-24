@@ -1,40 +1,43 @@
 import { Section, SectionHeader } from "./Section";
 import { Star, Quote } from "lucide-react";
-
-const testimonials = [
-  {
-    name: "Carlos Silva",
-    role: "Seller há 5 anos",
-    content: "Finalmente uma ferramenta que entende as dores de quem vende no Mercado Livre. Consegui aumentar minhas vendas em 40% nos primeiros 3 meses.",
-    avatar: "CS"
-  },
-  {
-    name: "Ana Martins",
-    role: "Loja de eletrônicos",
-    content: "O módulo de concorrência me ajudou a ajustar preços de forma inteligente. Hoje tenho uma visão muito mais clara do mercado.",
-    avatar: "AM"
-  },
-  {
-    name: "Roberto Santos",
-    role: "Full Commerce",
-    content: "A gestão multiconta era um pesadelo antes. Agora gerencio 8 contas em um só painel sem perder nenhum detalhe.",
-    avatar: "RS"
-  }
-];
-
-const stats = [
-  { value: "2.500+", label: "Sellers ativos" },
-  { value: "15M+", label: "Análises realizadas" },
-  { value: "R$ 80M", label: "GMV monitorado" },
-  { value: "98%", label: "Satisfação" }
-];
+import { useSiteContentContext } from "@/contexts/SiteContentContext";
 
 export function LandingTestimonials() {
+  const { getText } = useSiteContentContext();
+
+  const testimonials = [
+    {
+      name: getText('home.testimonials.item1.name'),
+      role: getText('home.testimonials.item1.role'),
+      content: getText('home.testimonials.item1.content'),
+      avatar: getText('home.testimonials.item1.avatar')
+    },
+    {
+      name: getText('home.testimonials.item2.name'),
+      role: getText('home.testimonials.item2.role'),
+      content: getText('home.testimonials.item2.content'),
+      avatar: getText('home.testimonials.item2.avatar')
+    },
+    {
+      name: getText('home.testimonials.item3.name'),
+      role: getText('home.testimonials.item3.role'),
+      content: getText('home.testimonials.item3.content'),
+      avatar: getText('home.testimonials.item3.avatar')
+    }
+  ];
+
+  const stats = [
+    { value: getText('home.testimonials.stat1.value'), label: getText('home.testimonials.stat1.label') },
+    { value: getText('home.testimonials.stat2.value'), label: getText('home.testimonials.stat2.label') },
+    { value: getText('home.testimonials.stat3.value'), label: getText('home.testimonials.stat3.label') },
+    { value: getText('home.testimonials.stat4.value'), label: getText('home.testimonials.stat4.label') }
+  ];
+
   return (
     <Section id="depoimentos" variant="muted">
       <SectionHeader
-        title="O que nossos clientes dizem"
-        subtitle="Histórias reais de sellers que transformaram seus negócios com nossa plataforma."
+        title={getText('home.testimonials.title')}
+        subtitle={getText('home.testimonials.subtitle')}
       />
 
       {/* Testimonials grid */}

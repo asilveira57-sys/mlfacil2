@@ -2,54 +2,44 @@ import { Section, SectionHeader } from "./Section";
 import { PricingCard } from "./PricingCard";
 import { useSiteContentContext } from "@/contexts/SiteContentContext";
 
-const plans = [
-  {
-    name: "Starter",
-    description: "Para quem está começando a vender online.",
-    price: "A definir",
-    features: [
-      { text: "1 conta Mercado Livre", included: true },
-      { text: "Dashboard básico", included: true },
-      { text: "Análise de performance", included: true },
-      { text: "Relatórios mensais", included: true },
-      { text: "Suporte por email", included: true },
-      { text: "Módulo de concorrência", included: false },
-      { text: "Alertas personalizados", included: false }
-    ]
-  },
-  {
-    name: "Pro",
-    description: "Para sellers que querem escalar suas operações.",
-    price: "A definir",
-    highlighted: true,
-    features: [
-      { text: "Até 5 contas Mercado Livre", included: true },
-      { text: "Todos os dashboards", included: true },
-      { text: "Análise completa de performance", included: true },
-      { text: "Relatórios ilimitados", included: true },
-      { text: "Suporte prioritário", included: true },
-      { text: "Módulo de concorrência", included: true },
-      { text: "Alertas personalizados", included: true }
-    ]
-  },
-  {
-    name: "Business",
-    description: "Para operações de alto volume e equipes.",
-    price: "A definir",
-    features: [
-      { text: "Contas ilimitadas", included: true },
-      { text: "Todos os módulos inclusos", included: true },
-      { text: "API de integração", included: true },
-      { text: "Relatórios personalizados", included: true },
-      { text: "Gerente de conta dedicado", included: true },
-      { text: "Treinamento da equipe", included: true },
-      { text: "SLA garantido", included: true }
-    ]
-  }
-];
-
 export function LandingPricing() {
   const { getText } = useSiteContentContext();
+
+  const plans = [
+    {
+      name: getText('home.pricing.plan1.name'),
+      description: getText('home.pricing.plan1.description'),
+      price: getText('home.pricing.plan1.price'),
+      features: [
+        { text: getText('home.pricing.plan1.feature1'), included: true },
+        { text: getText('home.pricing.plan1.feature2'), included: true },
+        { text: getText('home.pricing.plan1.feature3'), included: true }
+      ]
+    },
+    {
+      name: getText('home.pricing.plan2.name'),
+      description: getText('home.pricing.plan2.description'),
+      price: getText('home.pricing.plan2.price'),
+      highlighted: true,
+      features: [
+        { text: getText('home.pricing.plan2.feature1'), included: true },
+        { text: getText('home.pricing.plan2.feature2'), included: true },
+        { text: getText('home.pricing.plan2.feature3'), included: true },
+        { text: getText('home.pricing.plan2.feature4'), included: true }
+      ]
+    },
+    {
+      name: getText('home.pricing.plan3.name'),
+      description: getText('home.pricing.plan3.description'),
+      price: getText('home.pricing.plan3.price'),
+      features: [
+        { text: getText('home.pricing.plan3.feature1'), included: true },
+        { text: getText('home.pricing.plan3.feature2'), included: true },
+        { text: getText('home.pricing.plan3.feature3'), included: true },
+        { text: getText('home.pricing.plan3.feature4'), included: true }
+      ]
+    }
+  ];
 
   return (
     <Section id="planos">
@@ -72,7 +62,7 @@ export function LandingPricing() {
       </div>
 
       <p className="text-center text-sm text-muted-foreground mt-10">
-        {getText('home.pricing.trial')}
+        {getText('home.pricing.trial_text')}
       </p>
     </Section>
   );
