@@ -9,12 +9,15 @@ import {
   ChevronUp,
   Clock,
   RefreshCw,
-  User
+  User,
+  Star
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTrends } from '@/contexts/TrendsContext';
 import { SubcategoryNavigator } from './SubcategoryNavigator';
 import { useCategoryBreadcrumb } from '@/hooks/useSubcategories';
+import { SellerCategorySelector } from './SellerCategorySelector';
+import { useSellerCategories, useSyncCategories } from '@/hooks/useSellerCategories';
 
 // ============================================================
 // TIPOS
@@ -175,7 +178,7 @@ export function TrendsHeaderBar({
               </SelectContent>
             </Select>
 
-            {/* Category Selector with Eligibility Badge */}
+            {/* Category Selector with Dynamic Seller Categories */}
             <Collapsible open={showNavigator} onOpenChange={setShowNavigator}>
               <CollapsibleTrigger asChild>
                 <Button variant="outline" className="w-[280px] justify-between">
@@ -193,13 +196,13 @@ export function TrendsHeaderBar({
                   )}
                 </Button>
               </CollapsibleTrigger>
-              <CollapsibleContent className="absolute z-50 mt-2 w-[320px]">
-                <SubcategoryNavigator
-                  categories={categoriesForNavigator}
-                  selectedId={effectiveCategoryId}
-                  onSelect={handleCategorySelect}
-                  breadcrumb={breadcrumb}
-                  onBreadcrumbClick={handleBreadcrumbClick}
+              <CollapsibleContent className="absolute z-50 mt-2 w-[380px]">
+                {/* Use SellerCategorySelector with fallback to SubcategoryNavigator */}
+                <SellerCategorySelector
+                  onSelect={(id, name) => {
+                    handleCategorySelect(id, name);
+                  }}
+                  fallbackCategories={categoriesForNavigator}
                 />
               </CollapsibleContent>
             </Collapsible>
