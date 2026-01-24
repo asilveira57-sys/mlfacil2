@@ -8,52 +8,55 @@ import {
   Calculator,
   FileText
 } from "lucide-react";
-
-const modules = [
-  {
-    icon: ClipboardList,
-    title: "Pendências",
-    description: "Gerencie tarefas, pedidos em atraso e ações necessárias em um painel centralizado.",
-    href: "#"
-  },
-  {
-    icon: TrendingUp,
-    title: "Tendências & Insights",
-    description: "Descubra produtos em alta, palavras-chave trending e oportunidades de mercado.",
-    href: "#"
-  },
-  {
-    icon: Users,
-    title: "Concorrência",
-    description: "Monitore preços, posicionamento e estratégias dos seus principais concorrentes.",
-    href: "#"
-  },
-  {
-    icon: CheckCircle,
-    title: "Auditoria & Validações",
-    description: "Identifique problemas nos seus anúncios antes que afetem suas vendas.",
-    href: "#"
-  },
-  {
-    icon: Calculator,
-    title: "Custos & Margem",
-    description: "Controle custos, calcule margens reais e otimize a precificação dos produtos.",
-    href: "#"
-  },
-  {
-    icon: FileText,
-    title: "Relatórios",
-    description: "Exporte dados detalhados para análise e acompanhe a evolução ao longo do tempo.",
-    href: "#"
-  }
-];
+import { useSiteContentContext } from "@/contexts/SiteContentContext";
 
 export function LandingModules() {
+  const { getText } = useSiteContentContext();
+
+  const modules = [
+    {
+      icon: ClipboardList,
+      titleKey: 'home.modules.item1.title',
+      descriptionKey: 'home.modules.item1.description',
+      href: "#"
+    },
+    {
+      icon: TrendingUp,
+      titleKey: 'home.modules.item2.title',
+      descriptionKey: 'home.modules.item2.description',
+      href: "#"
+    },
+    {
+      icon: Users,
+      titleKey: 'home.modules.item3.title',
+      descriptionKey: 'home.modules.item3.description',
+      href: "#"
+    },
+    {
+      icon: CheckCircle,
+      titleKey: 'home.modules.item4.title',
+      descriptionKey: 'home.modules.item4.description',
+      href: "#"
+    },
+    {
+      icon: Calculator,
+      titleKey: 'home.modules.item5.title',
+      descriptionKey: 'home.modules.item5.description',
+      href: "#"
+    },
+    {
+      icon: FileText,
+      titleKey: 'home.modules.item6.title',
+      descriptionKey: 'home.modules.item6.description',
+      href: "#"
+    }
+  ];
+
   return (
     <Section id="recursos">
       <SectionHeader
-        title="Módulos poderosos para seu negócio"
-        subtitle="Ferramentas especializadas que cobrem todas as necessidades de um seller profissional."
+        title={getText('home.modules.title')}
+        subtitle={getText('home.modules.subtitle')}
       />
 
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
@@ -61,8 +64,8 @@ export function LandingModules() {
           <FeatureCard
             key={index}
             icon={module.icon}
-            title={module.title}
-            description={module.description}
+            title={getText(module.titleKey)}
+            description={getText(module.descriptionKey)}
             href={module.href}
           />
         ))}

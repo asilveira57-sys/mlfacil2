@@ -1,5 +1,6 @@
 import { Section, SectionHeader } from "./Section";
 import { PricingCard } from "./PricingCard";
+import { useSiteContentContext } from "@/contexts/SiteContentContext";
 
 const plans = [
   {
@@ -48,11 +49,13 @@ const plans = [
 ];
 
 export function LandingPricing() {
+  const { getText } = useSiteContentContext();
+
   return (
     <Section id="planos">
       <SectionHeader
-        title="Planos para cada fase do seu negócio"
-        subtitle="Escolha o plano ideal e comece a transformar suas operações hoje mesmo."
+        title={getText('home.pricing.title')}
+        subtitle={getText('home.pricing.subtitle')}
       />
 
       <div className="grid md:grid-cols-3 gap-6 md:gap-8 max-w-5xl mx-auto items-start">
@@ -69,7 +72,7 @@ export function LandingPricing() {
       </div>
 
       <p className="text-center text-sm text-muted-foreground mt-10">
-        Todos os planos incluem 7 dias de teste grátis. Cancele quando quiser.
+        {getText('home.pricing.trial')}
       </p>
     </Section>
   );

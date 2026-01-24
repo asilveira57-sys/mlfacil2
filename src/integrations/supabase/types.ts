@@ -3293,6 +3293,48 @@ export type Database = {
         }
         Relationships: []
       }
+      site_content: {
+        Row: {
+          chave: string
+          created_at: string
+          descricao: string | null
+          id: string
+          ordem: number | null
+          pagina: string
+          secao: string | null
+          status: string
+          texto: string
+          tipo: string
+          updated_at: string
+        }
+        Insert: {
+          chave: string
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          ordem?: number | null
+          pagina: string
+          secao?: string | null
+          status?: string
+          texto?: string
+          tipo?: string
+          updated_at?: string
+        }
+        Update: {
+          chave?: string
+          created_at?: string
+          descricao?: string | null
+          id?: string
+          ordem?: number | null
+          pagina?: string
+          secao?: string | null
+          status?: string
+          texto?: string
+          tipo?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       subscriptions: {
         Row: {
           company_id: string | null

@@ -1,9 +1,11 @@
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, Play, Shield, Users, Zap } from "lucide-react";
+import { useSiteContentContext } from "@/contexts/SiteContentContext";
 
 export function LandingHero() {
   const navigate = useNavigate();
+  const { getText } = useSiteContentContext();
 
   return (
     <section className="relative pt-24 md:pt-32 pb-16 md:pb-24 overflow-hidden">
@@ -18,22 +20,18 @@ export function LandingHero() {
           <div className="flex justify-center mb-6">
             <div className="inline-flex items-center gap-2 bg-primary/10 text-primary px-4 py-2 rounded-full text-sm font-medium">
               <Zap className="w-4 h-4" />
-              Plataforma completa para sellers do Mercado Livre
+              {getText('home.hero.badge')}
             </div>
           </div>
 
           {/* Headline */}
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-center text-foreground mb-6 leading-tight">
-            Gestão inteligente para{" "}
-            <span className="text-primary">
-              escalar suas vendas
-            </span>
+            {getText('home.hero.title')}
           </h1>
 
           {/* Subheadline */}
           <p className="text-lg md:text-xl text-muted-foreground text-center max-w-3xl mx-auto mb-10">
-            Centralize operações, monitore performance e tome decisões baseadas em dados. 
-            Tudo que você precisa para vender mais, em uma única plataforma.
+            {getText('home.hero.subtitle')}
           </p>
 
           {/* CTAs */}
@@ -43,7 +41,7 @@ export function LandingHero() {
               className="text-base px-8 py-6 gap-2"
               onClick={() => navigate("/auth")}
             >
-              Criar conta grátis
+              {getText('home.hero.cta_primary')}
               <ArrowRight className="w-5 h-5" />
             </Button>
             <Button
@@ -56,7 +54,7 @@ export function LandingHero() {
               }}
             >
               <Play className="w-5 h-5" />
-              Ver demonstração
+              {getText('home.hero.cta_secondary')}
             </Button>
           </div>
 
@@ -64,11 +62,11 @@ export function LandingHero() {
           <div className="flex flex-wrap items-center justify-center gap-6 md:gap-10">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Shield className="w-5 h-5 text-success" />
-              <span>Integração oficial com Mercado Pago</span>
+              <span>{getText('home.hero.trust_mercadopago')}</span>
             </div>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Users className="w-5 h-5 text-primary" />
-              <span>Suporte a múltiplas contas</span>
+              <span>{getText('home.hero.trust_multiconta')}</span>
             </div>
           </div>
 
