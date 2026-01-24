@@ -32,6 +32,17 @@ export function BestSellersSection({ onCollect, isCollecting, snapshotDate }: Be
   const isEmpty = ui.emptyFlags.bestSellers;
   const error = ui.errors.bestSellers;
 
+  // Auto-trigger collect if no data (moved before early returns to fix hooks order)
+  useEffect(() => {
+    if (hasCategory && isEmpty && !isLoading && !isCollecting && data.bestSellers.length === 0) {
+      const timer = setTimeout(() => {
+        console.log('[BestSellersSection] Auto-triggering collection');
+        onCollect();
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [hasCategory, isEmpty, isLoading, isCollecting, data.bestSellers.length, onCollect]);
+
   // Pre-warm cache with existing data
   useEffect(() => {
     if (data.bestSellers.length > 0) {
@@ -189,17 +200,7 @@ export function BestSellersSection({ onCollect, isCollecting, snapshotDate }: Be
     );
   }
   
-  // Empty state - auto-trigger collect if no data
-  useEffect(() => {
-    if (hasCategory && isEmpty && !isLoading && !isCollecting && enrichedItems.length === 0) {
-      // Auto-trigger collection after 1 second delay
-      const timer = setTimeout(() => {
-        console.log('[BestSellersSection] Auto-triggering collection');
-        onCollect();
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [hasCategory, isEmpty, isLoading, isCollecting, enrichedItems.length, onCollect]);
+  // Note: Auto-trigger useEffect moved before early returns
 
   // Empty state with loading indicator
   if ((isEmpty || enrichedItems.length === 0) && !isCollecting) {
