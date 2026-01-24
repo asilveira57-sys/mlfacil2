@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useCallback, useRef, memo } from 'react';
+import { RefreshCw, FolderOpen } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import { useMercado } from '@/contexts/MercadoContext';
 import { useMercadoPrefetch } from '@/hooks/useMercadoPrefetch';
 import { MercadoCategoryCard } from './MercadoCategoryCard';
@@ -124,15 +126,48 @@ export const MercadoCategoryGrid = memo(function MercadoCategoryGrid() {
     );
   }
 
-  // Empty state
-  if (displayCategories.length === 0) {
+  // Error state with retry
+  if (state.error) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
-        <p className="text-muted-foreground">
+        <p className="text-destructive mb-4">{state.error}</p>
+        <Button
+          variant="outline"
+          onClick={() => loadCategories()}
+          className="gap-2"
+        >
+          <RefreshCw className="h-4 w-4" />
+          Tentar novamente
+        </Button>
+      </div>
+    );
+  }
+
+  // Empty state - show message based on context
+  if (displayCategories.length === 0) {
+    const isSubcategory = state.currentParentId !== null;
+    
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <FolderOpen className="h-12 w-12 text-muted-foreground/50 mb-4" />
+        <p className="text-muted-foreground mb-2">
           {state.searchQuery
             ? 'Nenhuma categoria encontrada para essa busca.'
-            : 'Nenhuma categoria disponível.'}
+            : isSubcategory
+              ? 'Esta categoria não possui subcategorias.'
+              : 'Nenhuma categoria disponível.'}
         </p>
+        {!state.searchQuery && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => loadCategories()}
+            className="gap-2 text-muted-foreground"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Atualizar
+          </Button>
+        )}
       </div>
     );
   }
