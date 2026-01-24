@@ -1,0 +1,9 @@
+// Barrel export for trends-explorer components
+export { TrendsExpHeader } from './TrendsExpHeader';
+export { TrendsExpBreadcrumb } from './TrendsExpBreadcrumb';
+export { TrendsExpToolbar } from './TrendsExpToolbar';
+export { TrendsExpCategoryGrid } from './TrendsExpCategoryGrid';
+export { TrendsExpCategoryCard } from './TrendsExpCategoryCard';
+export { TrendsExpDetailsDrawer } from './TrendsExpDetailsDrawer';
+export { TrendsExpMetricsDrawer } from './TrendsExpMetricsDrawer';
+export { TrendsExpComparisonPanel } from './TrendsExpComparisonPanel';
