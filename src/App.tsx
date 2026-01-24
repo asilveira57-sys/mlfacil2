@@ -15,6 +15,7 @@ import LabelHeaderSettings from "./pages/LabelHeaderSettings";
 import ZPLConverter from "./pages/ZPLConverter";
 import AbcAnalysis from "./pages/AbcAnalysis";
 import Tendencias from "./pages/Tendencias";
+import Mercado from "./pages/Mercado";
 import Custos from "./pages/Custos";
 import Concorrencia from "./pages/Concorrencia";
 import Radiografia from "./pages/Radiografia";
@@ -129,6 +130,7 @@ const App = () => {
             <Route path="/zpl-converter" element={<ZPLConverter />} />
             <Route path="/abc-analysis" element={<AbcAnalysis />} />
             <Route path="/tendencias" element={<Tendencias />} />
+            <Route path="/mercado" element={<Mercado />} />
             <Route path="/custos" element={<Custos />} />
             <Route path="/concorrencia" element={<Concorrencia />} />
             <Route path="/radiografia" element={<Radiografia />} />
