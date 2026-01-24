@@ -1,12 +1,18 @@
 import { useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useTrendsGlobalCache, CachedItemGlobal } from './useTrendsGlobalCache';
 
-// Cache TTL: 7 days
-const ITEM_CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
+/**
+ * GLOBAL Item Cache - Shared across ALL accounts
+ * 
+ * This hook manages item metadata (title, thumbnail) with a 14-day TTL.
+ * Items are cached globally (by item_id only, NOT by account_id) because
+ * product metadata is public and doesn't vary by seller.
+ * 
+ * Uses useTrendsGlobalCache for storage and concurrency control.
+ */
 
-// Max concurrent fetches
-const MAX_CONCURRENT_FETCHES = 5;
-
+// Re-export for backward compatibility
 interface CachedItem {
   item_id: string;
   title: string | null;
@@ -14,59 +20,40 @@ interface CachedItem {
   cached_at: number;
 }
 
-// Module-level caches
-const itemMemoryCache = new Map<string, CachedItem>();
-const inflightRequests = new Map<string, Promise<CachedItem | null>>();
-let concurrentFetches = 0;
-const fetchQueue: (() => void)[] = [];
+// Legacy module-level caches (now delegating to global cache)
+// These are kept for backward compatibility but prefer using useTrendsGlobalCache directly
+const pendingItems = new Set<string>();
 
 export function useTrendsItemCache() {
   const pendingRef = useRef<Set<string>>(new Set());
+  const globalCache = useTrendsGlobalCache();
 
-  // Check if cached item is valid
-  const isValid = useCallback((item: CachedItem | undefined): boolean => {
-    if (!item) return false;
-    return Date.now() - item.cached_at < ITEM_CACHE_TTL;
-  }, []);
-
-  // Get from memory cache
+  // Get from GLOBAL memory cache (shared across all accounts)
   const getFromMemory = useCallback((itemId: string): CachedItem | null => {
-    const cached = itemMemoryCache.get(itemId);
-    if (isValid(cached)) {
-      return cached!;
-    }
-    return null;
-  }, [isValid]);
+    return globalCache.getItemFromMemory(itemId);
+  }, [globalCache]);
 
-  // Set to memory cache
+  // Set to GLOBAL memory cache
   const setToMemory = useCallback((item: CachedItem): void => {
-    itemMemoryCache.set(item.item_id, item);
-  }, []);
+    globalCache.setItemToCache(item as CachedItemGlobal);
+  }, [globalCache]);
 
-  // Process fetch queue
-  const processQueue = useCallback(() => {
-    while (concurrentFetches < MAX_CONCURRENT_FETCHES && fetchQueue.length > 0) {
-      const next = fetchQueue.shift();
-      if (next) next();
-    }
-  }, []);
-
-  // Fetch single item with rate limiting
+  // Fetch single item with rate limiting (GLOBAL cache, shared across accounts)
   const fetchItem = useCallback(async (itemId: string): Promise<CachedItem | null> => {
-    // Check memory first
+    // Check GLOBAL memory cache first
     const cached = getFromMemory(itemId);
     if (cached) return cached;
 
     // Check if already in flight
-    const existing = inflightRequests.get(itemId);
+    const existing = globalCache.getItemInflight(itemId);
     if (existing) return existing;
 
     // Create fetch promise with queue management
     const fetchPromise = new Promise<CachedItem | null>((resolve) => {
       const doFetch = async () => {
-        concurrentFetches++;
+        globalCache.startItemFetch();
         try {
-          // Try meli_listings_cache first
+          // Try meli_listings_cache first (public data, shared across accounts)
           const { data: listingData } = await supabase
             .from('meli_listings_cache')
             .select('item_id, title, thumbnail')
@@ -114,47 +101,47 @@ export function useTrendsItemCache() {
           console.error('[useTrendsItemCache] Fetch error:', error);
           resolve(null);
         } finally {
-          concurrentFetches--;
-          inflightRequests.delete(itemId);
-          processQueue();
+          globalCache.endItemFetch();
         }
       };
 
-      // Queue or execute immediately
-      if (concurrentFetches < MAX_CONCURRENT_FETCHES) {
+      // Queue or execute immediately using global concurrency control
+      if (globalCache.canStartItemFetch()) {
         doFetch();
       } else {
-        fetchQueue.push(doFetch);
+        globalCache.queueItemFetch(doFetch);
       }
     });
 
-    inflightRequests.set(itemId, fetchPromise);
+    globalCache.setItemInflight(itemId, fetchPromise);
     return fetchPromise;
-  }, [getFromMemory, setToMemory, processQueue]);
+  }, [getFromMemory, setToMemory, globalCache]);
 
-  // Batch fetch items
+  // Batch fetch items (GLOBAL cache)
   const fetchBatch = useCallback(async (itemIds: string[]): Promise<Map<string, CachedItem>> => {
     const results = new Map<string, CachedItem>();
     const toFetch: string[] = [];
 
-    // Check memory cache first
+    // Check GLOBAL memory cache first (not per-account)
     for (const id of itemIds) {
       const cached = getFromMemory(id);
       if (cached) {
         results.set(id, cached);
-      } else if (!pendingRef.current.has(id)) {
+      } else if (!pendingRef.current.has(id) && !pendingItems.has(id)) {
         toFetch.push(id);
         pendingRef.current.add(id);
+        pendingItems.add(id);
       }
     }
 
-    // Fetch missing items
+    // Fetch missing items (stored in GLOBAL cache)
     if (toFetch.length > 0) {
       const fetched = await Promise.all(toFetch.map(id => fetchItem(id)));
       
       fetched.forEach((item, index) => {
         const id = toFetch[index];
         pendingRef.current.delete(id);
+        pendingItems.delete(id);
         if (item) {
           results.set(id, item);
         }
@@ -164,22 +151,12 @@ export function useTrendsItemCache() {
     return results;
   }, [getFromMemory, fetchItem]);
 
-  // Pre-warm cache from items
+  // Pre-warm GLOBAL cache from items (shared across all accounts)
   const prewarmCache = useCallback((items: Array<{ item_id: string; title?: string | null; thumbnail?: string | null }>): void => {
-    for (const item of items) {
-      if (item.title || item.thumbnail) {
-        const cached: CachedItem = {
-          item_id: item.item_id,
-          title: item.title || null,
-          thumbnail: item.thumbnail || null,
-          cached_at: Date.now(),
-        };
-        setToMemory(cached);
-      }
-    }
-  }, [setToMemory]);
+    globalCache.prewarmItems(items);
+  }, [globalCache]);
 
-  // Get cached or placeholder
+  // Get cached or placeholder (from GLOBAL cache)
   const getOrPlaceholder = useCallback((itemId: string, fallbackTitle?: string | null, fallbackThumb?: string | null): CachedItem => {
     const cached = getFromMemory(itemId);
     if (cached) return cached;
@@ -193,12 +170,15 @@ export function useTrendsItemCache() {
     };
   }, [getFromMemory]);
 
-  // Clear cache
+  // Clear GLOBAL cache
   const clearAll = useCallback((): void => {
-    itemMemoryCache.clear();
-    inflightRequests.clear();
+    globalCache.clearAll();
     pendingRef.current.clear();
-  }, []);
+    pendingItems.clear();
+  }, [globalCache]);
+
+  // Get cache stats
+  const getStats = useCallback(() => globalCache.getStats(), [globalCache]);
 
   return {
     getFromMemory,
@@ -208,5 +188,6 @@ export function useTrendsItemCache() {
     prewarmCache,
     getOrPlaceholder,
     clearAll,
+    getStats,
   };
 }

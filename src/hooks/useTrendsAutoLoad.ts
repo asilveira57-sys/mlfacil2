@@ -1,56 +1,37 @@
-import { useEffect, useRef, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { useRef, useCallback } from 'react';
+import { useTrendsAccountCache } from './useTrendsAccountCache';
 
-// Key for persisting last category selection
-const LAST_CATEGORY_KEY = 'trends_last_category';
-
-interface LastCategorySelection {
-  accountId: string;
-  categoryId: string;
-  categoryName: string;
-  timestamp: number;
-}
+/**
+ * Auto-load hook for Tendências module
+ * 
+ * Uses ACCOUNT-SPECIFIC cache (keyed by account_id) for:
+ * - Last selected category per account
+ * - Auto-load state management
+ * 
+ * This data is isolated per seller and should NOT be shared globally.
+ */
 
 export function useTrendsAutoLoad() {
   const hasAutoLoadedRef = useRef(false);
   const accountIdRef = useRef<string | null>(null);
+  const accountCache = useTrendsAccountCache();
 
-  // Save last category selection
+  // Save last category selection (ACCOUNT-SPECIFIC cache)
   const saveLastCategory = useCallback((accountId: string, categoryId: string, categoryName: string) => {
-    try {
-      const selection: LastCategorySelection = {
-        accountId,
-        categoryId,
-        categoryName,
-        timestamp: Date.now(),
-      };
-      localStorage.setItem(`${LAST_CATEGORY_KEY}_${accountId}`, JSON.stringify(selection));
-    } catch (e) {
-      console.warn('[useTrendsAutoLoad] Failed to save last category:', e);
-    }
-  }, []);
+    accountCache.setLastSelection(accountId, categoryId, categoryName);
+  }, [accountCache]);
 
-  // Get last category selection
-  const getLastCategory = useCallback((accountId: string): LastCategorySelection | null => {
-    try {
-      const stored = localStorage.getItem(`${LAST_CATEGORY_KEY}_${accountId}`);
-      if (!stored) return null;
-      
-      const selection = JSON.parse(stored) as LastCategorySelection;
-      
-      // Check if selection is still valid (within 7 days)
-      const maxAge = 7 * 24 * 60 * 60 * 1000;
-      if (Date.now() - selection.timestamp > maxAge) {
-        localStorage.removeItem(`${LAST_CATEGORY_KEY}_${accountId}`);
-        return null;
-      }
-      
-      return selection;
-    } catch (e) {
-      console.warn('[useTrendsAutoLoad] Failed to get last category:', e);
-      return null;
+  // Get last category selection (ACCOUNT-SPECIFIC cache)
+  const getLastCategory = useCallback((accountId: string): { categoryId: string; categoryName: string } | null => {
+    const cached = accountCache.getLastSelection(accountId);
+    if (cached) {
+      return {
+        categoryId: cached.category_id,
+        categoryName: cached.category_name,
+      };
     }
-  }, []);
+    return null;
+  }, [accountCache]);
 
   // Reset auto-load flag when account changes
   const resetForAccount = useCallback((accountId: string | null) => {
