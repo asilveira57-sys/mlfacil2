@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSiteContent, SiteContent, SiteContentInsert } from '@/hooks/useSiteContent';
+import { siteDefaultTexts } from '@/content/siteDefaultTexts';
+import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -190,7 +192,7 @@ function ContentEditor({ content, onSave, onClose, isNew = false }: ContentEdito
 }
 
 export function SiteContentManager() {
-  const { allContent, loading, fetchAllContent, createContent, updateContent, deleteContent, defaultTexts } = useSiteContent();
+  const { allContent, loading, fetchAllContent, createContent, updateContent, deleteContent } = useSiteContent();
   const [search, setSearch] = useState('');
   const [filterPage, setFilterPage] = useState<string>('all');
   const [editingContent, setEditingContent] = useState<SiteContent | null>(null);
@@ -215,9 +217,41 @@ export function SiteContentManager() {
   });
 
   // Get default texts that haven't been customized yet
-  const uncustomizedDefaults = Object.entries(defaultTexts).filter(
+  const uncustomizedDefaults = Object.entries(siteDefaultTexts).filter(
     ([key]) => !allContent.some(item => item.chave === key)
   );
+
+  const handleImportAllDefaults = async () => {
+    try {
+      if (uncustomizedDefaults.length === 0) {
+        toast.info('Todos os textos padrão já foram importados.');
+        return;
+      }
+
+      const rows = uncustomizedDefaults.map(([chave, texto]) => {
+        const parts = chave.split('.');
+        return {
+          chave,
+          texto,
+          pagina: parts[0] || 'home',
+          secao: parts[1] || null,
+          tipo: 'text',
+          descricao: `Default: ${chave}`,
+          status: 'ativo',
+          ordem: 0,
+        };
+      });
+
+      const { error } = await supabase.from('site_content').insert(rows as any);
+      if (error) throw error;
+
+      toast.success(`Importados ${rows.length} textos padrão.`);
+      await fetchAllContent();
+    } catch (e) {
+      console.error('[SiteContentManager] import defaults error', e);
+      toast.error('Erro ao importar textos padrão.');
+    }
+  };
 
   const handleEdit = (content: SiteContent) => {
     setEditingContent(content);
@@ -289,6 +323,10 @@ export function SiteContentManager() {
           <Button variant="outline" size="sm" onClick={fetchAllContent}>
             <RefreshCw className="w-4 h-4 mr-2" />
             Atualizar
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleImportAllDefaults}>
+            <Save className="w-4 h-4 mr-2" />
+            Importar textos padrão
           </Button>
           <Button onClick={handleNew}>
             <Plus className="w-4 h-4 mr-2" />
