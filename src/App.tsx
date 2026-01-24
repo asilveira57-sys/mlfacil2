@@ -22,6 +22,7 @@ import Radiografia from "./pages/Radiografia";
 import Settings from "./pages/Settings";
 import Blog from "./pages/Blog";
 import BlogAdmin from "./pages/BlogAdmin";
+import Planos from "./pages/Planos";
 import NotFound from "./pages/NotFound";
 import { AdminRoute } from "./components/auth/AdminRoute";
 
@@ -126,6 +127,8 @@ const App = () => {
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Index />} />
+            <Route path="/home" element={<Index />} />
+            <Route path="/planos" element={<Planos />} />
             <Route path="/auth" element={<Auth />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/shipping-labels" element={<ShippingLabels />} />
