@@ -87,7 +87,7 @@ export interface MercadoCacheEntry<T> {
 export interface MercadoTelemetryEvent {
   event_type: string;
   category_id?: string;
-  data_type?: 'details' | 'metrics';
+  data_type?: 'details' | 'metrics' | 'grid';
   cache_source?: 'memory' | 'db' | 'network';
   duration_ms: number;
   timestamp: string;

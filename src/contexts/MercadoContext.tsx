@@ -1,8 +1,9 @@
-import { createContext, useContext, useReducer, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useReducer, useCallback, ReactNode, useRef, useMemo } from 'react';
 import { MercadoCategoryItem, MercadoCategoryDetails, MercadoCategoryMetrics, MercadoDrawerType } from '@/types/mercado';
 import { createMercadoAdapter, MercadoDataAdapter } from '@/adapters/mercado-data-adapter';
 import { useMercadoCache } from '@/hooks/useMercadoCache';
 import { useMercadoTelemetry } from '@/hooks/useMercadoTelemetry';
+import { useMercadoGridCache } from '@/hooks/useMercadoGridCache';
 
 // State
 interface MercadoState {
@@ -20,6 +21,7 @@ interface MercadoState {
   isLoadingCategories: boolean;
   isLoadingDetails: boolean;
   isLoadingMetrics: boolean;
+  isBackgroundRefresh: boolean;
   drawerType: MercadoDrawerType;
   searchQuery: string;
   sortBy: 'share' | 'name' | 'total' | 'delta';
@@ -43,6 +45,7 @@ const initialState: MercadoState = {
   isLoadingCategories: false,
   isLoadingDetails: false,
   isLoadingMetrics: false,
+  isBackgroundRefresh: false,
   drawerType: null,
   searchQuery: '',
   sortBy: 'share',
@@ -57,6 +60,7 @@ type Action =
   | { type: 'SET_LOADING_CATEGORIES'; payload: boolean }
   | { type: 'SET_LOADING_DETAILS'; payload: boolean }
   | { type: 'SET_LOADING_METRICS'; payload: boolean }
+  | { type: 'SET_BACKGROUND_REFRESH'; payload: boolean }
   | { type: 'SET_CATEGORIES'; payload: MercadoCategoryItem[] }
   | { type: 'SET_DETAILS'; payload: MercadoCategoryDetails | null }
   | { type: 'SET_METRICS'; payload: MercadoCategoryMetrics | null }
@@ -82,6 +86,8 @@ function reducer(state: MercadoState, action: Action): MercadoState {
       return { ...state, isLoadingDetails: action.payload };
     case 'SET_LOADING_METRICS':
       return { ...state, isLoadingMetrics: action.payload };
+    case 'SET_BACKGROUND_REFRESH':
+      return { ...state, isBackgroundRefresh: action.payload };
     case 'SET_CATEGORIES':
       return { ...state, categories: action.payload, error: null };
     case 'SET_DETAILS':
@@ -193,21 +199,94 @@ interface MercadoProviderProps {
 export function MercadoProvider({ children }: MercadoProviderProps) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const cache = useMercadoCache();
+  const gridCache = useMercadoGridCache();
   const telemetry = useMercadoTelemetry();
-  const adapter = createMercadoAdapter();
+  
+  // Memoize adapter to prevent recreation
+  const adapter = useMemo(() => createMercadoAdapter(), []);
+  
+  // Track inflight requests to avoid duplicates
+  const inflightCategoriesRef = useRef<Map<string, Promise<MercadoCategoryItem[]>>>(new Map());
+  
+  // Use ref for current parent to avoid recreating callbacks
+  const currentParentIdRef = useRef(state.currentParentId);
+  currentParentIdRef.current = state.currentParentId;
+  
+  // Use ref for categories to avoid recreating callbacks
+  const categoriesRef = useRef(state.categories);
+  categoriesRef.current = state.categories;
 
   const loadCategories = useCallback(async () => {
-    dispatch({ type: 'SET_LOADING_CATEGORIES', payload: true });
+    const parentId = currentParentIdRef.current;
+    const cacheKey = parentId ?? '__root__';
+    
+    // Check for valid cache first - render immediately
+    const cachedData = gridCache.getCached(parentId);
+    if (cachedData) {
+      telemetry.log({
+        event_type: 'cache_hit',
+        category_id: cacheKey,
+        data_type: 'grid',
+        duration_ms: 0,
+        timestamp: new Date().toISOString(),
+        cache_source: 'memory',
+      });
+      dispatch({ type: 'SET_CATEGORIES', payload: cachedData.categories });
+      return; // Don't fetch if cache is valid
+    }
+    
+    // Check for expired cache - show stale data while refreshing
+    const expiredCache = gridCache.hasExpiredCache(parentId);
+    if (expiredCache) {
+      dispatch({ type: 'SET_CATEGORIES', payload: expiredCache.categories });
+      dispatch({ type: 'SET_BACKGROUND_REFRESH', payload: true });
+    } else {
+      dispatch({ type: 'SET_LOADING_CATEGORIES', payload: true });
+    }
+
+    // Check if there's already a request in flight
+    const existingRequest = inflightCategoriesRef.current.get(cacheKey);
+    if (existingRequest) {
+      try {
+        const categories = await existingRequest;
+        // Update values without changing order if we had cached data
+        if (expiredCache) {
+          const orderedCategories = gridCache.updateCacheValues(parentId, categories);
+          dispatch({ type: 'SET_CATEGORIES', payload: orderedCategories });
+        } else {
+          gridCache.setCache(parentId, categories);
+          dispatch({ type: 'SET_CATEGORIES', payload: categories });
+        }
+      } finally {
+        dispatch({ type: 'SET_LOADING_CATEGORIES', payload: false });
+        dispatch({ type: 'SET_BACKGROUND_REFRESH', payload: false });
+      }
+      return;
+    }
+    
+    // Create new request
+    const fetchPromise = adapter.listCategories(parentId);
+    inflightCategoriesRef.current.set(cacheKey, fetchPromise);
     
     try {
-      const categories = await adapter.listCategories(state.currentParentId);
-      dispatch({ type: 'SET_CATEGORIES', payload: categories });
+      const categories = await fetchPromise;
+      
+      // Update values without changing order if we had cached data
+      if (expiredCache) {
+        const orderedCategories = gridCache.updateCacheValues(parentId, categories);
+        dispatch({ type: 'SET_CATEGORIES', payload: orderedCategories });
+      } else {
+        gridCache.setCache(parentId, categories);
+        dispatch({ type: 'SET_CATEGORIES', payload: categories });
+      }
     } catch (error) {
       dispatch({ type: 'SET_ERROR', payload: 'Falha ao carregar categorias' });
     } finally {
+      inflightCategoriesRef.current.delete(cacheKey);
       dispatch({ type: 'SET_LOADING_CATEGORIES', payload: false });
+      dispatch({ type: 'SET_BACKGROUND_REFRESH', payload: false });
     }
-  }, [adapter, state.currentParentId]);
+  }, [adapter, gridCache, telemetry]);
 
   const navigateTo = useCallback(async (categoryId: string, categoryName: string) => {
     dispatch({ type: 'NAVIGATE_TO', payload: { parentId: categoryId, name: categoryName } });
@@ -299,7 +378,7 @@ export function MercadoProvider({ children }: MercadoProviderProps) {
   }, []);
 
   const toggleFavorite = useCallback(async (categoryId: string) => {
-    const category = state.categories.find(c => c.id === categoryId);
+    const category = categoriesRef.current.find(c => c.id === categoryId);
     if (!category) return;
 
     const newFavorite = !category.is_favorite;
@@ -310,7 +389,7 @@ export function MercadoProvider({ children }: MercadoProviderProps) {
     } catch (error) {
       dispatch({ type: 'UPDATE_FAVORITE', payload: { id: categoryId, isFavorite: !newFavorite } });
     }
-  }, [adapter, state.categories]);
+  }, [adapter]);
 
   const toggleCompareMode = useCallback(() => {
     dispatch({ type: 'TOGGLE_COMPARE_MODE' });
@@ -352,7 +431,8 @@ export function MercadoProvider({ children }: MercadoProviderProps) {
     }
   }, [adapter, cache]);
 
-  const value: MercadoContextValue = {
+  // Memoize context value to prevent unnecessary re-renders
+  const value: MercadoContextValue = useMemo(() => ({
     state,
     adapter,
     loadCategories,
@@ -371,7 +451,26 @@ export function MercadoProvider({ children }: MercadoProviderProps) {
     prefetchDetails,
     prefetchMetrics,
     getTelemetryStats: telemetry.getStats,
-  };
+  }), [
+    state,
+    adapter,
+    loadCategories,
+    navigateTo,
+    goBack,
+    goToRoot,
+    openDetails,
+    openMetrics,
+    closeDrawer,
+    setSearch,
+    setSort,
+    toggleFavorite,
+    toggleCompareMode,
+    toggleComparison,
+    clearComparison,
+    prefetchDetails,
+    prefetchMetrics,
+    telemetry.getStats,
+  ]);
 
   return (
     <MercadoContext.Provider value={value}>
