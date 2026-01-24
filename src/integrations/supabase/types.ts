@@ -98,6 +98,126 @@ export type Database = {
         }
         Relationships: []
       }
+      account_category_activity: {
+        Row: {
+          account_id: string
+          category_id: string
+          category_name: string | null
+          category_path: string[] | null
+          computed_at: string
+          created_at: string
+          first_order_at: string | null
+          gmv_30d: number | null
+          gmv_90d: number | null
+          id: string
+          is_active: boolean | null
+          is_pinned_auto: boolean | null
+          last_order_at: string | null
+          level1_category_id: string | null
+          level1_category_name: string | null
+          orders_count_30d: number | null
+          orders_count_90d: number | null
+          pinned_rank: number | null
+          pinned_reason: string | null
+          units_sold_30d: number | null
+          units_sold_90d: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          account_id: string
+          category_id: string
+          category_name?: string | null
+          category_path?: string[] | null
+          computed_at?: string
+          created_at?: string
+          first_order_at?: string | null
+          gmv_30d?: number | null
+          gmv_90d?: number | null
+          id?: string
+          is_active?: boolean | null
+          is_pinned_auto?: boolean | null
+          last_order_at?: string | null
+          level1_category_id?: string | null
+          level1_category_name?: string | null
+          orders_count_30d?: number | null
+          orders_count_90d?: number | null
+          pinned_rank?: number | null
+          pinned_reason?: string | null
+          units_sold_30d?: number | null
+          units_sold_90d?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          account_id?: string
+          category_id?: string
+          category_name?: string | null
+          category_path?: string[] | null
+          computed_at?: string
+          created_at?: string
+          first_order_at?: string | null
+          gmv_30d?: number | null
+          gmv_90d?: number | null
+          id?: string
+          is_active?: boolean | null
+          is_pinned_auto?: boolean | null
+          last_order_at?: string | null
+          level1_category_id?: string | null
+          level1_category_name?: string | null
+          orders_count_30d?: number | null
+          orders_count_90d?: number | null
+          pinned_rank?: number | null
+          pinned_reason?: string | null
+          units_sold_30d?: number | null
+          units_sold_90d?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      account_category_sync_state: {
+        Row: {
+          account_id: string
+          categories_found: number | null
+          categories_pinned: number | null
+          created_at: string
+          error_message: string | null
+          id: string
+          last_sync_at: string | null
+          last_sync_duration_ms: number | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          account_id: string
+          categories_found?: number | null
+          categories_pinned?: number | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          last_sync_at?: string | null
+          last_sync_duration_ms?: number | null
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          account_id?: string
+          categories_found?: number | null
+          categories_pinned?: number | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          last_sync_at?: string | null
+          last_sync_duration_ms?: number | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       analyzed_items: {
         Row: {
           analyzed_at: string
@@ -3278,6 +3398,36 @@ export type Database = {
         }
         Relationships: []
       }
+      trends_category_visibility: {
+        Row: {
+          account_id: string
+          category_id: string
+          created_at: string
+          id: string
+          mode: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          account_id: string
+          category_id: string
+          created_at?: string
+          id?: string
+          mode?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          account_id?: string
+          category_id?: string
+          created_at?: string
+          id?: string
+          mode?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_context: {
         Row: {
           active_company_id: string | null
@@ -3454,6 +3604,22 @@ export type Database = {
       get_sales_metrics: {
         Args: { p_date_from?: string; p_date_to?: string; p_seller_id: string }
         Returns: Json
+      }
+      get_seller_visible_categories: {
+        Args: { p_account_id: string; p_limit?: number; p_user_id: string }
+        Returns: {
+          category_id: string
+          category_name: string
+          category_path: string[]
+          gmv_90d: number
+          is_pinned_auto: boolean
+          level1_category_id: string
+          level1_category_name: string
+          orders_count_90d: number
+          pinned_reason: string
+          source: string
+          visibility_mode: string
+        }[]
       }
       get_user_full_context: { Args: { p_user_id: string }; Returns: Json }
       initialize_new_user: {
