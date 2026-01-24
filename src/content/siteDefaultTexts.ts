@@ -110,13 +110,12 @@ export const siteDefaultTexts: Record<string, string> = {
   'home.demo.duration':
     '5 minutos para conhecer as principais funcionalidades e entender como aplicar no seu dia a dia.',
 
-  // ============ HOME / PRICING ============
+  // ============ HOME / PRICING (legacy) ============
   'home.pricing.title': 'Planos para cada fase do seu negócio',
   'home.pricing.subtitle':
     'Escolha o plano ideal e comece a transformar suas operações hoje mesmo.',
-  // compatibilidade (alguns componentes usam trial, outros trial_text)
-  'home.pricing.trial': 'Todos os planos incluem 7 dias de teste grátis. Cancele quando quiser.',
-  'home.pricing.trial_text': 'Todos os planos incluem 7 dias de teste grátis. Cancele quando quiser.',
+  'home.pricing.trial': 'Teste grátis de 14 dias. Sem cartão de crédito.',
+  'home.pricing.trial_text': 'Teste grátis de 14 dias. Sem cartão de crédito.',
 
   'home.pricing.plan1.name': 'Starter',
   'home.pricing.plan1.description': 'Para quem está começando a vender online.',
@@ -177,19 +176,19 @@ export const siteDefaultTexts: Record<string, string> = {
     'Sim! Utilizamos criptografia SSL 256-bit, servidores protegidos e estamos em total conformidade com a LGPD. Seus dados nunca são compartilhados com terceiros.',
   'home.faq.item2.question': 'Como funciona a cobrança?',
   'home.faq.item2.answer':
-    'Oferecemos planos mensais e anuais (com desconto). A cobrança é feita automaticamente via cartão de crédito ou PIX através do Mercado Pago. Você recebe 7 dias grátis para testar.',
+    'Oferecemos planos mensais, trimestrais e semestrais. A cobrança é feita via PIX, cartão ou boleto através do Mercado Pago. Você recebe 14 dias grátis para testar.',
   'home.faq.item3.question': 'Posso cancelar a qualquer momento?',
   'home.faq.item3.answer':
     'Sim, você pode cancelar sua assinatura quando quiser, sem multas ou burocracias. O acesso continua até o fim do período pago.',
   'home.faq.item4.question': 'Como funciona o suporte multiconta?',
   'home.faq.item4.answer':
-    'Você pode conectar múltiplas contas do Mercado Livre ao seu painel. Cada conta é isolada e você pode alternar entre elas facilmente, mantendo dados e análises separados.',
+    'Você pode conectar múltiplas contas do Mercado Livre ao seu painel. O volume de vendas é consolidado entre todas as contas para fins de cobrança.',
   'home.faq.item5.question': 'A integração com Mercado Livre é oficial?',
   'home.faq.item5.answer':
     'Sim, utilizamos a API oficial do Mercado Livre. A conexão é feita através do OAuth, garantindo segurança e que nunca temos acesso à sua senha.',
   'home.faq.item6.question': 'Qual o suporte disponível?',
   'home.faq.item6.answer':
-    'Oferecemos suporte por email para todos os planos. Planos Pro e Business contam com suporte prioritário e, no Business, você tem um gerente de conta dedicado.',
+    'Oferecemos suporte por email para todos os planos. Planos maiores contam com suporte prioritário.',
 
   // ============ HOME / CTA ============
   'home.cta.title': 'Pronto para escalar suas vendas?',
@@ -229,4 +228,57 @@ export const siteDefaultTexts: Record<string, string> = {
   // ============ HOME / HERO IMAGE ============
   'home.hero.dashboard_image': '',
   'home.header.logo_image': '',
+
+  // ============ PLANOS PAGE ============
+  'planos.hero.title': 'Planos e Preços',
+  'planos.hero.subtitle': 'Escolha o plano ideal para o seu negócio. Teste grátis por 14 dias, sem cartão.',
+  
+  // Escopo do sistema - TEXTO FIXO
+  'planos.scope.notice': 'Atualmente, as análises e históricos consideram exclusivamente dados do Mercado Livre. Integrações com outros marketplaces serão adicionadas futuramente.',
+  
+  // Trial
+  'planos.trial.title': 'Teste grátis de 14 dias',
+  'planos.trial.description': 'Teste o sistema por 14 dias, sem precisar informar cartão.',
+  
+  // Seção Volume
+  'planos.volume.title': 'Planos baseados no volume mensal de vendas no Mercado Livre',
+  'planos.volume.subtitle': 'A cobrança considera a média mensal de vendas dos últimos 30 dias, somando todas as contas do Mercado Livre conectadas.',
+  'planos.volume.notice': 'O limite de vendas é sempre mensal, independentemente da duração do plano. Todos os planos pagos incluem histórico retroativo de até 12 meses.',
+  
+  // Ciclos
+  'planos.cycle.monthly': 'Mensal',
+  'planos.cycle.monthly.description': '30 dias de acesso',
+  'planos.cycle.quarterly': 'Trimestral',
+  'planos.cycle.quarterly.description': 'No plano trimestral, você paga menos por mês e garante acesso contínuo por 90 dias.',
+  'planos.cycle.semiannual': 'Semestral',
+  'planos.cycle.semiannual.description': 'Ideal para quem prefere pagar menos vezes ao ano e manter o sistema ativo sem preocupação.',
+  
+  // Seção ZPL FULL
+  'planos.zpl.title': 'Plano ZPL FULL – Impressão de Etiquetas',
+  'planos.zpl.subtitle': 'Para quem precisa apenas gerar e imprimir etiquetas, sem login em marketplaces.',
+  'planos.zpl.description': 'Upload de arquivos ZPL, TXT ou CSV. Cole código ZPL diretamente. Pré-visualização. Compatível com Mercado Livre FULL e Shopee. Sem exigir login ou autorização em marketplaces. Sem limite de etiquetas. Política de uso justo.',
+  'planos.zpl.not_included': 'Não inclui: Integração com Mercado Livre, histórico de vendas, custos, auditoria ou tendências por API.',
+  
+  // Plano sob consulta
+  'planos.custom.title': 'Acima de 3.000 vendas/mês',
+  'planos.custom.description': 'Plano sob consulta para operações enterprise. Entre em contato para negociar condições especiais.',
+  'planos.custom.cta': 'Falar com vendas',
+  
+  // FAQ Planos
+  'planos.faq.title': 'Dúvidas sobre planos?',
+  'planos.faq.subtitle': 'Perguntas frequentes sobre assinatura e pagamentos.',
+  'planos.faq.item1.question': 'Posso trocar de plano depois?',
+  'planos.faq.item1.answer': 'Sim! Você pode fazer upgrade a qualquer momento. Se seu volume de vendas ultrapassar o limite do plano, o sistema avisa e orienta a troca.',
+  'planos.faq.item2.question': 'Como funciona a cobrança multiconta?',
+  'planos.faq.item2.answer': 'As vendas de todas as contas do Mercado Livre conectadas são somadas para determinar o plano adequado. O limite é sempre mensal.',
+  'planos.faq.item3.question': 'Como funciona o teste grátis?',
+  'planos.faq.item3.answer': 'Você tem 14 dias para testar todos os recursos. Não é necessário cartão de crédito para começar. Ao final, escolha um plano para continuar.',
+  'planos.faq.item4.question': 'Quais formas de pagamento são aceitas?',
+  'planos.faq.item4.answer': 'Aceitamos PIX, cartão de crédito e boleto através do Mercado Pago.',
+  
+  // CTA Planos
+  'planos.cta.title': 'Pronto para começar?',
+  'planos.cta.subtitle': 'Crie sua conta e teste grátis por 14 dias.',
+  'planos.cta.btn_primary': 'Criar conta grátis',
+  'planos.cta.btn_secondary': 'Voltar para início',
 };
