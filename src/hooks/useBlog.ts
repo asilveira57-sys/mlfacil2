@@ -106,7 +106,7 @@ export function useBlog() {
     try {
       const { data, error } = await supabase
         .from('blog_posts')
-        .insert([post])
+        .insert([post] as any)
         .select('*, categoria:blog_categories(*)')
         .single();
       
@@ -234,7 +234,7 @@ export function useBlog() {
     try {
       const { data, error } = await supabase
         .from('blog_categories')
-        .insert([category])
+        .insert([category] as any)
         .select()
         .single();
       
