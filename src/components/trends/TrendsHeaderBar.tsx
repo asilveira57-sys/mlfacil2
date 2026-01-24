@@ -35,6 +35,7 @@ interface TrendsHeaderBarProps {
   onReload: () => void;
   isReloading: boolean;
   categoriesForNavigator: { id: string; name: string }[];
+  onCategoryChange?: (categoryId: string | null, categoryName: string) => void;
 }
 
 // ============================================================
@@ -86,6 +87,7 @@ export function TrendsHeaderBar({
   onReload,
   isReloading,
   categoriesForNavigator,
+  onCategoryChange,
 }: TrendsHeaderBarProps) {
   const { 
     state, 
@@ -105,6 +107,7 @@ export function TrendsHeaderBar({
     // O SubcategoryNavigator gerencia subcategorias via expansão separadamente
     console.log('[TrendsHeaderBar] Category selected:', { id, name });
     setCategory(id || null, name);
+    onCategoryChange?.(id || null, name);
     setShowNavigator(false);
   };
   

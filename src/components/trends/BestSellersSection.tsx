@@ -1,14 +1,17 @@
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Trophy, ExternalLink, AlertCircle, Download, RefreshCw, Info } from 'lucide-react';
-import { useTrends } from '@/contexts/TrendsContext';
+import { useTrends, BestSellerItem } from '@/contexts/TrendsContext';
+import { useTrendsItemCache } from '@/hooks/useTrendsItemCache';
 
 // ============================================================
 // BEST SELLERS SECTION
 // Objetivo: Ranking público - NUNCA depende do seller
+// Com cache persistente para thumbs/títulos (7 dias)
 // ============================================================
 
 interface BestSellersSectionProps {
@@ -20,10 +23,66 @@ interface BestSellersSectionProps {
 export function BestSellersSection({ onCollect, isCollecting, snapshotDate }: BestSellersSectionProps) {
   const { state, hasCategory } = useTrends();
   const { data, ui } = state;
+  const itemCache = useTrendsItemCache();
+  
+  const [enrichedItems, setEnrichedItems] = useState<BestSellerItem[]>([]);
+  const [isEnriching, setIsEnriching] = useState(false);
   
   const isLoading = ui.loadingFlags.bestSellers;
   const isEmpty = ui.emptyFlags.bestSellers;
   const error = ui.errors.bestSellers;
+
+  // Pre-warm cache with existing data
+  useEffect(() => {
+    if (data.bestSellers.length > 0) {
+      itemCache.prewarmCache(data.bestSellers);
+    }
+  }, [data.bestSellers, itemCache]);
+
+  // Enrich items with cached data
+  useEffect(() => {
+    if (data.bestSellers.length === 0) {
+      setEnrichedItems([]);
+      return;
+    }
+
+    const enrichItems = async () => {
+      // First pass: use cache immediately
+      const immediateEnriched = data.bestSellers.map(item => {
+        const cached = itemCache.getOrPlaceholder(item.item_id, item.title, item.thumbnail);
+        return {
+          ...item,
+          title: cached.title || item.title,
+          thumbnail: cached.thumbnail || item.thumbnail,
+        };
+      });
+      setEnrichedItems(immediateEnriched);
+
+      // Second pass: fetch missing items
+      const itemsNeedingFetch = data.bestSellers.filter(
+        item => !item.title && !item.thumbnail && !itemCache.getFromMemory(item.item_id)
+      );
+
+      if (itemsNeedingFetch.length > 0) {
+        setIsEnriching(true);
+        const fetched = await itemCache.fetchBatch(itemsNeedingFetch.map(i => i.item_id));
+        
+        // Update with fetched data
+        const finalEnriched = data.bestSellers.map(item => {
+          const cached = fetched.get(item.item_id) || itemCache.getOrPlaceholder(item.item_id, item.title, item.thumbnail);
+          return {
+            ...item,
+            title: cached.title || item.title,
+            thumbnail: cached.thumbnail || item.thumbnail,
+          };
+        });
+        setEnrichedItems(finalEnriched);
+        setIsEnriching(false);
+      }
+    };
+
+    enrichItems();
+  }, [data.bestSellers, itemCache]);
   
   const formatPrice = (price: number | null) => {
     if (!price) return '—';
@@ -130,8 +189,20 @@ export function BestSellersSection({ onCollect, isCollecting, snapshotDate }: Be
     );
   }
   
-  // Empty state with collect option
-  if (isEmpty || data.bestSellers.length === 0) {
+  // Empty state - auto-trigger collect if no data
+  useEffect(() => {
+    if (hasCategory && isEmpty && !isLoading && !isCollecting && enrichedItems.length === 0) {
+      // Auto-trigger collection after 1 second delay
+      const timer = setTimeout(() => {
+        console.log('[BestSellersSection] Auto-triggering collection');
+        onCollect();
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [hasCategory, isEmpty, isLoading, isCollecting, enrichedItems.length, onCollect]);
+
+  // Empty state with loading indicator
+  if ((isEmpty || enrichedItems.length === 0) && !isCollecting) {
     return (
       <Card>
         <CardHeader>
@@ -145,24 +216,15 @@ export function BestSellersSection({ onCollect, isCollecting, snapshotDate }: Be
           <div className="text-center py-8">
             <Trophy className="h-12 w-12 mx-auto mb-3 text-amber-500 opacity-30" />
             <p className="text-muted-foreground mb-4">
-              Ranking não disponível para esta categoria.
+              Carregando ranking da categoria...
             </p>
             <Button 
               variant="outline" 
               onClick={onCollect}
               disabled={isCollecting}
             >
-              {isCollecting ? (
-                <>
-                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                  Coletando...
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Coletar Dados
-                </>
-              )}
+              <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+              Buscando dados...
             </Button>
           </div>
         </CardContent>
@@ -177,9 +239,12 @@ export function BestSellersSection({ onCollect, isCollecting, snapshotDate }: Be
           <CardTitle className="flex items-center gap-2">
             <Trophy className="h-5 w-5 text-amber-500" />
             Mais Vendidos da Categoria
+            {isEnriching && (
+              <span className="text-xs text-muted-foreground font-normal">(carregando detalhes...)</span>
+            )}
           </CardTitle>
           <CardDescription>
-            Top {data.bestSellers.length} produtos por vendas
+            Top {enrichedItems.length} produtos por vendas
             {snapshotDate && (
               <span className="ml-2 text-xs">
                 • Atualizado em {new Date(snapshotDate).toLocaleDateString('pt-BR')}
@@ -216,13 +281,7 @@ export function BestSellersSection({ onCollect, isCollecting, snapshotDate }: Be
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.bestSellers
-              .filter(item => {
-                // Filtrar itens sem dados mínimos (title ou thumbnail necessário)
-                const hasMinData = item.title || item.thumbnail;
-                return hasMinData;
-              })
-              .map((item, index) => (
+            {enrichedItems.map((item, index) => (
               <TableRow key={item.item_id}>
                 <TableCell>
                   <Badge variant={index < 3 ? 'default' : 'outline'}>
@@ -236,6 +295,10 @@ export function BestSellersSection({ onCollect, isCollecting, snapshotDate }: Be
                         src={item.thumbnail} 
                         alt="" 
                         className="h-10 w-10 rounded object-cover bg-muted"
+                        onError={(e) => {
+                          // Fallback if image fails to load
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
                       />
                     ) : (
                       <div className="h-10 w-10 rounded bg-muted flex items-center justify-center">
@@ -243,7 +306,7 @@ export function BestSellersSection({ onCollect, isCollecting, snapshotDate }: Be
                       </div>
                     )}
                     <span className="font-medium line-clamp-2 text-sm">
-                      {item.title || `MLB${item.item_id.slice(-8)}`}
+                      {item.title || `Produto #${item.item_id.slice(-6)}`}
                     </span>
                   </div>
                 </TableCell>

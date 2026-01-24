@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { TrendsProvider, useTrends } from '@/contexts/TrendsContext';
 import { useTrendsController } from '@/hooks/useTrendsController';
+import { useTrendsAutoLoad } from '@/hooks/useTrendsAutoLoad';
+import { useSellerCategories } from '@/hooks/useSellerCategories';
 
 // Components
 import { TrendsHeaderBar } from '@/components/trends/TrendsHeaderBar';
@@ -15,7 +17,7 @@ import { BestSellersSection } from '@/components/trends/BestSellersSection';
 import { SellerGoalsSection } from '@/components/trends/SellerGoalsSection';
 import { TechnicalFooterAccordion } from '@/components/trends/TechnicalFooterAccordion';
 
-// Categories list
+// Categories list (fallback for "Explorar mercado")
 const CATEGORIES = [
   { id: 'MLB5672', label: 'Acessórios para Veículos' },
   { id: 'MLB1367', label: 'Antiguidades e Coleções' },
@@ -51,9 +53,16 @@ function TendenciasContent() {
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState<MlAccount[]>([]);
   const [isReloading, setIsReloading] = useState(false);
-  const { state, setAccount, setSubcategory, hasCategory } = useTrends();
+  const [isAutoLoading, setIsAutoLoading] = useState(true);
+  const autoLoadAttemptedRef = useRef(false);
   
+  const { state, setAccount, setCategory, setSubcategory, hasCategory } = useTrends();
   const { collectPublicData, reload, snapshotDate, eligibility, isLoading } = useTrendsController();
+  const autoLoad = useTrendsAutoLoad();
+  
+  // Get seller categories for auto-selection
+  const { data: sellerCategories, isLoading: categoriesLoading } = useSellerCategories(state.selectedAccountId);
+  
   const [isCollecting, setIsCollecting] = useState(false);
 
   // Load accounts on mount
@@ -75,9 +84,68 @@ function TendenciasContent() {
         setAccounts(data);
         setAccount(data[0].ml_user_id);
       }
+      setIsAutoLoading(false);
     };
     loadAccounts();
   }, [navigate, setAccount]);
+
+  // AUTO-LOAD: When account is set, auto-select category and load data
+  useEffect(() => {
+    if (!state.selectedAccountId || categoriesLoading || autoLoadAttemptedRef.current) return;
+    
+    // Mark as attempted
+    autoLoadAttemptedRef.current = true;
+    autoLoad.resetForAccount(state.selectedAccountId);
+    
+    // Check for last category first
+    const lastCategory = autoLoad.getLastCategory(state.selectedAccountId);
+    
+    if (lastCategory) {
+      // Use last selected category
+      console.log('[Tendencias] Auto-loading last category:', lastCategory);
+      setCategory(lastCategory.categoryId, lastCategory.categoryName);
+      autoLoad.markAutoLoaded();
+      return;
+    }
+    
+    // Otherwise, try seller's best category
+    if (sellerCategories && sellerCategories.length > 0) {
+      // Pick first pinned or most active category
+      const pinnedCat = sellerCategories.find(c => c.is_pinned_auto);
+      const bestCat = pinnedCat || sellerCategories[0];
+      
+      console.log('[Tendencias] Auto-loading best seller category:', bestCat);
+      setCategory(bestCat.category_id, bestCat.category_name);
+      autoLoad.markAutoLoaded();
+      return;
+    }
+    
+    // Fallback: select first general category
+    if (CATEGORIES.length > 0) {
+      console.log('[Tendencias] Auto-loading fallback category:', CATEGORIES[0]);
+      setCategory(CATEGORIES[0].id, CATEGORIES[0].label);
+      autoLoad.markAutoLoaded();
+    }
+  }, [
+    state.selectedAccountId,
+    sellerCategories,
+    categoriesLoading,
+    setCategory,
+    autoLoad,
+  ]);
+
+  // Reset auto-load attempt when account changes
+  useEffect(() => {
+    autoLoadAttemptedRef.current = false;
+  }, [state.selectedAccountId]);
+
+  // Save category selection for persistence
+  const handleCategoryChange = useCallback((categoryId: string | null, categoryName: string) => {
+    if (categoryId && state.selectedAccountId) {
+      autoLoad.saveLastCategory(state.selectedAccountId, categoryId, categoryName);
+    }
+    // Note: setCategory is already called by the header, we just persist here
+  }, [state.selectedAccountId, autoLoad]);
 
   const handleBack = () => navigate('/dashboard');
 
@@ -99,6 +167,18 @@ function TendenciasContent() {
 
   const categoriesForNavigator = CATEGORIES.map(c => ({ id: c.id, name: c.label }));
 
+  // Show loading while auto-loading
+  if (isAutoLoading) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center">
+        <div className="animate-pulse flex flex-col items-center gap-4">
+          <div className="h-12 w-12 rounded-full bg-primary/20" />
+          <p className="text-muted-foreground">Carregando...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
@@ -108,6 +188,7 @@ function TendenciasContent() {
         onReload={handleReload}
         isReloading={isReloading}
         categoriesForNavigator={categoriesForNavigator}
+        onCategoryChange={handleCategoryChange}
       />
 
       {/* Main Content - Loading Order */}
