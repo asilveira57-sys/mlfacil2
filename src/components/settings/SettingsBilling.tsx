@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -6,8 +6,10 @@ import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, User, Building } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Loader2, User, Building, UserCheck, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 interface BillingData {
   personType: "pf" | "pj";
@@ -27,9 +29,18 @@ interface BillingData {
   pjState: string;
 }
 
+interface ProfileData {
+  cpf: string | null;
+  address_cep: string | null;
+  address_city: string | null;
+  address_state: string | null;
+}
+
 const SettingsBilling = () => {
   const [saving, setSaving] = useState(false);
   const [loadingCep, setLoadingCep] = useState(false);
+  const [loadingProfile, setLoadingProfile] = useState(false);
+  const [profileData, setProfileData] = useState<ProfileData | null>(null);
   const [billing, setBilling] = useState<BillingData>({
     personType: "pf",
     cpf: "",
@@ -45,6 +56,53 @@ const SettingsBilling = () => {
     pjCity: "",
     pjState: "",
   });
+
+  // Carrega dados do perfil para verificar se podem ser usados
+  useEffect(() => {
+    const loadProfileData = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data } = await supabase
+          .from("profiles")
+          .select("cpf, address_cep, address_city, address_state")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        setProfileData(data);
+      } catch (err) {
+        console.error("Error loading profile for autofill:", err);
+      }
+    };
+
+    loadProfileData();
+  }, []);
+
+  const hasProfileData = profileData && (profileData.cpf || profileData.address_cep);
+
+  const handleAutoFillFromProfile = () => {
+    if (!profileData) return;
+
+    if (billing.personType === "pf") {
+      setBilling((prev) => ({
+        ...prev,
+        cpf: profileData.cpf || prev.cpf,
+        pfCep: profileData.address_cep || prev.pfCep,
+        pfCity: profileData.address_city || prev.pfCity,
+        pfState: profileData.address_state || prev.pfState,
+      }));
+    } else {
+      setBilling((prev) => ({
+        ...prev,
+        pjCep: profileData.address_cep || prev.pjCep,
+        pjCity: profileData.address_city || prev.pjCity,
+        pjState: profileData.address_state || prev.pjState,
+      }));
+    }
+
+    toast.success("Dados do perfil aplicados!");
+  };
 
   const formatCPF = (value: string) => {
     const numbers = value.replace(/\D/g, "").slice(0, 11);
@@ -169,9 +227,30 @@ const SettingsBilling = () => {
       {/* PF Form */}
       {billing.personType === "pf" && (
         <Card>
-          <CardHeader>
-            <CardTitle>Dados Pessoa Física</CardTitle>
-            <CardDescription>Dados para emissão de nota fiscal como pessoa física</CardDescription>
+          <CardHeader className="flex flex-row items-start justify-between space-y-0">
+            <div className="space-y-1">
+              <CardTitle>Dados Pessoa Física</CardTitle>
+              <CardDescription>Dados para emissão de nota fiscal como pessoa física</CardDescription>
+            </div>
+            {hasProfileData ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleAutoFillFromProfile}
+                disabled={loadingProfile}
+                className="shrink-0"
+              >
+                <UserCheck className="mr-2 h-4 w-4" />
+                Preencher com Perfil
+              </Button>
+            ) : (
+              <Alert variant="default" className="w-auto border-amber-200 bg-amber-50 text-amber-800 py-2 px-3">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription className="text-xs">
+                  Preencha seus dados no <strong>Perfil</strong> primeiro
+                </AlertDescription>
+              </Alert>
+            )}
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
@@ -233,9 +312,30 @@ const SettingsBilling = () => {
       {/* PJ Form */}
       {billing.personType === "pj" && (
         <Card>
-          <CardHeader>
-            <CardTitle>Dados Pessoa Jurídica</CardTitle>
-            <CardDescription>Dados empresariais para emissão de nota fiscal</CardDescription>
+          <CardHeader className="flex flex-row items-start justify-between space-y-0">
+            <div className="space-y-1">
+              <CardTitle>Dados Pessoa Jurídica</CardTitle>
+              <CardDescription>Dados empresariais para emissão de nota fiscal</CardDescription>
+            </div>
+            {hasProfileData ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleAutoFillFromProfile}
+                disabled={loadingProfile}
+                className="shrink-0"
+              >
+                <UserCheck className="mr-2 h-4 w-4" />
+                Preencher Endereço com Perfil
+              </Button>
+            ) : (
+              <Alert variant="default" className="w-auto border-amber-200 bg-amber-50 text-amber-800 py-2 px-3">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription className="text-xs">
+                  Preencha o endereço no <strong>Perfil</strong> primeiro
+                </AlertDescription>
+              </Alert>
+            )}
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
