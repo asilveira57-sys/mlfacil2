@@ -4036,6 +4036,10 @@ export type Database = {
         }
         Returns: boolean
       }
+      increment_voucher_usage: {
+        Args: { voucher_id: string }
+        Returns: undefined
+      }
       initialize_new_user: {
         Args: { p_email: string; p_full_name?: string; p_user_id: string }
         Returns: Json
