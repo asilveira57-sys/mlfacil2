@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { SiteContentProvider } from "@/contexts/SiteContentContext";
+import { AdminEditModeIndicator } from "@/components/admin/AdminEditModeIndicator";
 import {
   LandingHeader,
   LandingHero,
@@ -45,6 +46,7 @@ const Index = () => {
           <LandingCTA />
         </main>
         <LandingFooter />
+        <AdminEditModeIndicator />
       </div>
     </SiteContentProvider>
   );

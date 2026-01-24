@@ -31,8 +31,8 @@ export function Section({
 }
 
 interface SectionHeaderProps {
-  title: string;
-  subtitle?: string;
+  title: React.ReactNode;
+  subtitle?: React.ReactNode;
   centered?: boolean;
   className?: string;
 }
