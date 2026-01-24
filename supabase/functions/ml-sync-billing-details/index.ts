@@ -1,6 +1,6 @@
 // @ts-nocheck - Deno types not available in build context
-// Force clean redeploy v3 - fix BOOT_ERROR
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7?target=deno";
+// Force clean redeploy v4 - fix Deno.core.runMicrotasks error
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4?target=deno";
 
 
 const corsHeaders = {
@@ -235,6 +235,18 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
     const MAX_RETRIES = 5;
     
     // Helper function for rate-limited API calls with exponential backoff
+    // Uses Deno-compatible delay
+    const delay = (ms: number) => new Promise<void>((resolve) => {
+      let elapsed = 0;
+      const interval = 1000;
+      const check = () => {
+        elapsed += interval;
+        if (elapsed >= ms) resolve();
+        else setTimeout(check, interval);
+      };
+      setTimeout(check, interval);
+    });
+
     async function fetchWithRateLimitRetry(url: string, token: string, retries = 0): Promise<Response> {
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
@@ -243,12 +255,11 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
       if (res.status === 429) {
         if (retries >= MAX_RETRIES) {
           console.log(`[BillingDetails] Max retries (${MAX_RETRIES}) reached for rate limit`);
-          return res; // Return the 429 response after max retries
+          return res;
         }
-        // Exponential backoff: 15s, 30s, 60s, 120s, 240s
         const waitSec = Math.min(15 * Math.pow(2, retries), 240);
         console.log(`[BillingDetails] Rate limited, waiting ${waitSec}s before retry ${retries + 1}/${MAX_RETRIES}...`);
-        await new Promise(r => setTimeout(r, waitSec * 1000));
+        await delay(waitSec * 1000);
         return fetchWithRateLimitRetry(url, token, retries + 1);
       }
       
@@ -316,7 +327,7 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
       }
       
       // Wait 12s between period fetches to stay under 5 req/min limit
-      await new Promise(r => setTimeout(r, 12000));
+      await delay(12000);
     }
 
     console.log(`[BillingDetails] Total periods found: ${allPeriods.length}`);
@@ -461,7 +472,7 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
         hasMore = results.length >= DETAILS_PAGE_SIZE;
 
         // Wait 12s between details fetches to stay under 5 req/min limit
-        await new Promise(r => setTimeout(r, 12000));
+        await delay(12000);
       }
 
       periodsProcessed = i + 1;
