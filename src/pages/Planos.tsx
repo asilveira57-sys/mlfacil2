@@ -44,143 +44,87 @@ const Planos = () => {
     <div className="min-h-screen bg-background">
       <LandingHeader />
 
-      <main className="pt-16">
-        {/* Hero - Minimal header */}
-        <div className="text-center max-w-3xl mx-auto px-4 pb-3">
-          <h1 className="text-xl md:text-2xl font-bold text-foreground mb-0.5">
-            <EditableText contentKey="planos.hero.title" as="span" />
-          </h1>
-          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            <span><EditableText contentKey="planos.hero.subtitle" as="span" /></span>
-            <div className="inline-flex items-center gap-1 bg-success/10 text-success px-2 py-0.5 rounded-full font-medium">
-              <Sparkles className="w-3 h-3" />
-              <EditableText contentKey="planos.trial.description" as="span" />
+      <main className="pt-20">
+        {/* Hero - Comfortable breathing room */}
+        <Section className="pb-4">
+          <div className="text-center max-w-3xl mx-auto">
+            <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-2">
+              <EditableText contentKey="planos.hero.title" as="span" />
+            </h1>
+            <p className="text-sm text-muted-foreground mb-3">
+              <EditableText contentKey="planos.hero.subtitle" as="span" />
+            </p>
+            
+            <div className="inline-flex items-center gap-1.5 bg-success/10 text-success px-3 py-1.5 rounded-full mb-3">
+              <Sparkles className="w-4 h-4" />
+              <span className="text-sm font-medium">
+                <EditableText contentKey="planos.trial.description" as="span" />
+              </span>
             </div>
+
+            <p className="text-[11px] text-muted-foreground/70 flex items-center justify-center gap-1.5">
+              <Info className="w-3.5 h-3.5" />
+              <EditableText contentKey="planos.scope.notice" as="span" />
+            </p>
           </div>
-          <p className="text-[10px] text-muted-foreground/70 mt-1 flex items-center justify-center gap-1">
-            <Info className="w-3 h-3" />
-            <EditableText contentKey="planos.scope.notice" as="span" />
-          </p>
-        </div>
+        </Section>
 
-        {/* ZPL FULL Section - Flows from Hero */}
-        {zplPlan && (
-          <div className="bg-gradient-to-b from-background to-muted/40 pt-1 pb-3 border-t border-border/30">
-            <div className="max-w-4xl mx-auto px-4">
-              <div className="flex items-center justify-center gap-2 mb-1.5">
-                <Badge className="bg-primary/10 text-primary border-primary/20 px-2 py-0 text-[10px]">
-                  <Star className="w-2.5 h-2.5 mr-0.5 fill-primary" />
-                  Só etiquetas?
-                </Badge>
-                <div className="flex items-center gap-1">
-                  <Printer className="w-3.5 h-3.5 text-primary" />
-                  <span className="text-sm font-semibold text-foreground">
-                    <EditableText contentKey="planos.zpl.title" as="span" />
-                  </span>
-                </div>
-              </div>
-
-              <Card className="overflow-hidden border border-primary/20 shadow-sm">
-                <div className="grid md:grid-cols-2">
-                  <div className="p-2.5 bg-gradient-to-br from-primary/5 to-primary/10">
-                    <ul className="grid grid-cols-2 gap-x-2 gap-y-0.5 mb-1.5">
-                      {zplPlan.features.slice(0, 4).map((feature, i) => (
-                        <li key={i} className="flex items-start gap-1 text-[10px]">
-                          <Check className="w-2.5 h-2.5 text-success mt-0.5 flex-shrink-0" />
-                          <span className="text-foreground line-clamp-1">{feature}</span>
-                        </li>
-                      ))}
-                    </ul>
-                    <div className="bg-warning/10 border border-warning/20 rounded p-1 text-[9px] text-muted-foreground">
-                      <EditableText contentKey="planos.zpl.not_included" as="span" />
-                    </div>
-                  </div>
-
-                  <div className="p-2.5 flex flex-col justify-center bg-card">
-                    <div className="flex gap-1.5 mb-1.5">
-                      {(['monthly', 'quarterly', 'semiannual'] as const).map(cycle => {
-                        const price = zplPlan.prices[cycle];
-                        if (!price) return null;
-                        const labels = { monthly: 'Mensal', quarterly: 'Tri -5%', semiannual: 'Sem -15%' };
-                        
-                        return (
-                          <button 
-                            key={cycle}
-                            className="flex-1 p-1.5 rounded border border-border hover:border-primary/50 hover:bg-primary/5 transition-all text-center"
-                            onClick={() => navigate("/auth")}
-                          >
-                            <div className="text-[9px] text-muted-foreground">{labels[cycle]}</div>
-                            <div className="font-bold text-foreground text-xs">{formatPrice(price.price_cents)}</div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <Button className="w-full h-6 text-[10px]" size="sm" onClick={() => navigate("/auth")}>
-                      Começar trial grátis
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            </div>
-          </div>
-        )}
-
-        {/* Volume Plans Section - Unified macro-section */}
-        <Section className="py-4">
-          <div className="text-center mb-2">
-            <h2 className="text-lg md:text-xl font-bold text-foreground mb-0.5">
+        {/* Volume Plans Section - Primary decision area */}
+        <Section variant="muted" className="py-5">
+          <div className="text-center mb-3">
+            <h2 className="text-lg md:text-xl font-bold text-foreground mb-1">
               <EditableText contentKey="planos.volume.title" as="span" />
             </h2>
-            <p className="text-muted-foreground text-[11px]">
+            <p className="text-muted-foreground text-xs">
               <EditableText contentKey="planos.volume.subtitle" as="span" />
             </p>
           </div>
 
-          {/* Payment Mode Toggle - Compact */}
-          <div className="flex flex-col items-center gap-1 mb-2">
-            <div className="inline-flex rounded-md border border-border p-0.5 bg-muted/30">
+          {/* Payment Mode Toggle */}
+          <div className="flex flex-col items-center gap-1.5 mb-3">
+            <div className="inline-flex rounded-lg border border-border p-0.5 bg-background">
               <button
                 onClick={() => setPaymentMode('prepaid')}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-all ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
                   paymentMode === 'prepaid'
-                    ? 'bg-background text-foreground shadow-sm'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
-                <CreditCard className="w-3 h-3" />
+                <CreditCard className="w-3.5 h-3.5" />
                 Pagamento Antecipado
               </button>
               <button
                 onClick={() => setPaymentMode('subscription')}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-all ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
                   paymentMode === 'subscription'
-                    ? 'bg-background text-foreground shadow-sm'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
-                <RefreshCw className="w-3 h-3" />
+                <RefreshCw className="w-3.5 h-3.5" />
                 Assinatura Recorrente
               </button>
             </div>
-            <span className="text-[10px] text-muted-foreground/70">
-              Você pode trocar de plano ou cancelar a qualquer momento.
+            <span className="text-[10px] text-muted-foreground">
+              Troque de plano ou cancele a qualquer momento
             </span>
           </div>
 
-          {/* Payment mode specific content - Inline */}
+          {/* Payment mode options */}
           {paymentMode === 'prepaid' ? (
-            <div className="flex flex-col items-center gap-1 mb-2">
+            <div className="flex flex-col items-center gap-1.5 mb-3">
               <Tabs value={billingCycle} onValueChange={(v) => setBillingCycle(v as BillingCycle)}>
-                <TabsList className="grid grid-cols-4 w-auto h-7">
-                  <TabsTrigger value="monthly" className="px-2 sm:px-3 text-[11px]">Mensal</TabsTrigger>
-                  <TabsTrigger value="quarterly" className="px-2 sm:px-3 text-[11px]">
-                    Tri <Badge variant="secondary" className="ml-0.5 text-[9px] hidden sm:inline-flex px-0.5 py-0">-5%</Badge>
+                <TabsList className="grid grid-cols-4 w-auto h-8">
+                  <TabsTrigger value="monthly" className="px-3 text-xs">Mensal</TabsTrigger>
+                  <TabsTrigger value="quarterly" className="px-3 text-xs">
+                    Trimestral <Badge variant="secondary" className="ml-1 text-[9px] hidden sm:inline-flex px-1 py-0">-5%</Badge>
                   </TabsTrigger>
-                  <TabsTrigger value="semiannual" className="px-2 sm:px-3 text-[11px]">
-                    Sem <Badge variant="secondary" className="ml-0.5 text-[9px] hidden sm:inline-flex px-0.5 py-0">-15%</Badge>
+                  <TabsTrigger value="semiannual" className="px-3 text-xs">
+                    Semestral <Badge variant="secondary" className="ml-1 text-[9px] hidden sm:inline-flex px-1 py-0">-15%</Badge>
                   </TabsTrigger>
-                  <TabsTrigger value="annual" className="px-2 sm:px-3 text-[11px]">
-                    Anual <Badge variant="secondary" className="ml-0.5 text-[9px] hidden sm:inline-flex px-0.5 py-0">-20%</Badge>
+                  <TabsTrigger value="annual" className="px-3 text-xs">
+                    Anual <Badge variant="secondary" className="ml-1 text-[9px] hidden sm:inline-flex px-1 py-0">-20%</Badge>
                   </TabsTrigger>
                 </TabsList>
               </Tabs>
@@ -189,9 +133,9 @@ const Planos = () => {
               </span>
             </div>
           ) : (
-            <div className="flex items-center justify-center gap-2 mb-2">
+            <div className="flex items-center justify-center gap-2 mb-3">
               <div className="inline-flex items-center gap-1 bg-success/10 text-success px-2 py-0.5 rounded-full text-[10px] font-medium">
-                <Sparkles className="w-2.5 h-2.5" />
+                <Sparkles className="w-3 h-3" />
                 10% de economia
               </div>
               <span className="text-[10px] text-muted-foreground">
@@ -238,19 +182,19 @@ const Planos = () => {
 
           {/* Enterprise - Direct continuation */}
           {customPlan && (
-            <div className="mt-2 max-w-2xl mx-auto">
-              <Card className="bg-muted/30 border-border">
-                <CardContent className="flex flex-col sm:flex-row items-center justify-between gap-2 py-2.5 px-4">
+            <div className="mt-3 max-w-2xl mx-auto">
+              <Card className="bg-background border-border">
+                <CardContent className="flex flex-col sm:flex-row items-center justify-between gap-2 py-3 px-4">
                   <div className="text-center sm:text-left">
-                    <span className="font-medium text-foreground text-xs">
+                    <span className="font-semibold text-foreground text-sm">
                       <EditableText contentKey="planos.custom.title" as="span" />
                     </span>
-                    <span className="text-[11px] text-muted-foreground ml-2">
+                    <span className="text-xs text-muted-foreground ml-2">
                       <EditableText contentKey="planos.custom.description" as="span" />
                     </span>
                   </div>
-                  <Button variant="outline" className="gap-1 h-7 text-xs" size="sm">
-                    <MessageSquare className="w-3 h-3" />
+                  <Button variant="outline" className="gap-1.5" size="sm">
+                    <MessageSquare className="w-3.5 h-3.5" />
                     <EditableText contentKey="planos.custom.cta" as="span" />
                   </Button>
                 </CardContent>
@@ -258,6 +202,83 @@ const Planos = () => {
             </div>
           )}
         </Section>
+
+        {/* ZPL FULL Section - Alternative plan, after main plans */}
+        {zplPlan && (
+          <Section className="py-5">
+            <div className="max-w-3xl mx-auto">
+              <div className="text-center mb-3">
+                <div className="inline-flex items-center gap-2 mb-1">
+                  <Printer className="w-4 h-4 text-muted-foreground" />
+                  <h3 className="text-base font-semibold text-foreground">
+                    <EditableText contentKey="planos.zpl.title" as="span" />
+                  </h3>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  <EditableText contentKey="planos.zpl.subtitle" as="span" />
+                </p>
+              </div>
+
+              <Card className="border-border">
+                <CardContent className="p-4">
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <h4 className="text-xs font-medium text-foreground mb-2 flex items-center gap-1.5">
+                        <Check className="w-3.5 h-3.5 text-primary" />
+                        O que inclui
+                      </h4>
+                      <ul className="space-y-1">
+                        {zplPlan.features.map((feature, i) => (
+                          <li key={i} className="flex items-start gap-1.5 text-[11px]">
+                            <Check className="w-3 h-3 text-success mt-0.5 flex-shrink-0" />
+                            <span className="text-muted-foreground">{feature}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="mt-2 bg-warning/10 border border-warning/20 rounded p-2 text-[10px] text-muted-foreground">
+                        <EditableText contentKey="planos.zpl.not_included" as="span" />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col justify-center">
+                      <div className="space-y-1.5">
+                        {(['monthly', 'quarterly', 'semiannual'] as const).map(cycle => {
+                          const price = zplPlan.prices[cycle];
+                          if (!price) return null;
+                          const labels = { monthly: 'Mensal', quarterly: 'Trimestral', semiannual: 'Semestral' };
+                          const discounts = { monthly: null, quarterly: '-5%', semiannual: '-15%' };
+                          
+                          return (
+                            <div 
+                              key={cycle}
+                              className="flex items-center justify-between p-2 rounded-lg border border-border hover:border-primary/50 hover:bg-primary/5 transition-all cursor-pointer"
+                              onClick={() => navigate("/auth")}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-foreground text-xs">{labels[cycle]}</span>
+                                {discounts[cycle] && (
+                                  <Badge variant="secondary" className="text-[9px] bg-success/10 text-success border-success/20 px-1 py-0">
+                                    {discounts[cycle]}
+                                  </Badge>
+                                )}
+                              </div>
+                              <span className="font-bold text-foreground text-sm">
+                                {formatPrice(price.price_cents)}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <Button className="mt-3 w-full" size="sm" onClick={() => navigate("/auth")}>
+                        Começar trial de 14 dias
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </Section>
+        )}
 
         {/* FAQ section - Tight */}
         <div className="bg-muted/30 py-4">
