@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LandingHeader, LandingFooter } from "@/components/landing";
 import { useSiteContent } from "@/hooks/useSiteContent";
-import { useBillingPlans, useBillingCheckout, formatPriceBRL } from "@/hooks/useBillingPlans";
+import { useBillingPlans, useBillingCheckout } from "@/hooks/useBillingPlans";
 import { EditableText } from "@/components/admin/EditableText";
 import { VolumePlanCard } from "@/components/billing/VolumePlanCard";
 import { ZplPlanSection } from "@/components/billing/ZplPlanSection";
@@ -16,9 +16,11 @@ import {
   Sparkles,
   MessageSquare,
   CreditCard,
+  RefreshCw,
 } from "lucide-react";
 
 type BillingPeriod = 'monthly' | 'quarterly' | 'semiannual';
+type PaymentMode = 'avulso' | 'assinatura';
 
 const Planos = () => {
   const navigate = useNavigate();
@@ -27,6 +29,7 @@ const Planos = () => {
   const { volumePlans, zplPlan, settings, loading, error } = useBillingPlans();
   const { checkout, loading: checkoutLoading } = useBillingCheckout();
   const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>('monthly');
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>('avulso');
 
   // Handle payment status from URL
   useEffect(() => {
@@ -45,6 +48,11 @@ const Planos = () => {
   const handleCheckout = async (priceId: string) => {
     await checkout(priceId);
   };
+
+  // Get mode description text
+  const modeDescription = paymentMode === 'avulso'
+    ? 'Plano avulso • Pagamento único • Sem renovação automática'
+    : 'Cobrança mensal recorrente • Renovação automática • Cancele quando quiser';
 
   return (
     <div className="min-h-screen bg-background">
@@ -87,27 +95,53 @@ const Planos = () => {
             </p>
           </div>
 
-          {/* Payment Mode Info */}
-          <div className="flex flex-col items-center gap-2 mb-5">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-background border border-border shadow-sm">
-              <CreditCard className="w-4 h-4 text-primary" />
-              <span className="text-xs font-medium text-foreground">Pagamento Antecipado</span>
+          {/* Payment Mode Toggle */}
+          <div className="flex justify-center mb-4">
+            <div className="inline-flex rounded-lg border border-primary/20 p-0.5 bg-background shadow-sm">
+              <button
+                onClick={() => setPaymentMode('avulso')}
+                className={`flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-medium transition-all ${
+                  paymentMode === 'avulso'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                }`}
+              >
+                <CreditCard className="w-3.5 h-3.5" />
+                Pagamento Antecipado
+              </button>
+              <button
+                onClick={() => setPaymentMode('assinatura')}
+                className={`flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-medium transition-all ${
+                  paymentMode === 'assinatura'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                }`}
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Assinatura Recorrente
+              </button>
             </div>
+          </div>
+
+          {/* Mode Description */}
+          <div className="flex flex-col items-center gap-2 mb-5">
             <span className="text-[10px] text-muted-foreground">
-              Plano avulso • Pagamento único • Sem renovação automática
+              {modeDescription}
             </span>
           </div>
 
-          {/* Period Selector */}
-          <div className="flex flex-col items-center gap-2 mb-6">
-            <Tabs value={billingPeriod} onValueChange={(v) => setBillingPeriod(v as BillingPeriod)}>
-              <TabsList className="grid grid-cols-3 w-auto h-9 bg-background">
-                <TabsTrigger value="monthly" className="px-4 text-xs">Mensal</TabsTrigger>
-                <TabsTrigger value="quarterly" className="px-4 text-xs">Trimestral</TabsTrigger>
-                <TabsTrigger value="semiannual" className="px-4 text-xs">Semestral</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
+          {/* Period Selector (only for avulso mode) */}
+          {paymentMode === 'avulso' && (
+            <div className="flex flex-col items-center gap-2 mb-6">
+              <Tabs value={billingPeriod} onValueChange={(v) => setBillingPeriod(v as BillingPeriod)}>
+                <TabsList className="grid grid-cols-3 w-auto h-9 bg-background">
+                  <TabsTrigger value="monthly" className="px-4 text-xs">Mensal</TabsTrigger>
+                  <TabsTrigger value="quarterly" className="px-4 text-xs">Trimestral</TabsTrigger>
+                  <TabsTrigger value="semiannual" className="px-4 text-xs">Semestral</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+          )}
 
           {/* Volume Plans Grid */}
           {loading ? (
@@ -124,6 +158,7 @@ const Planos = () => {
                     key={plan.id} 
                     plan={plan} 
                     selectedPeriod={billingPeriod}
+                    mode={paymentMode}
                     onCheckout={handleCheckout}
                     checkoutLoading={checkoutLoading}
                   />
@@ -137,6 +172,7 @@ const Planos = () => {
                       <VolumePlanCard 
                         plan={plan} 
                         selectedPeriod={billingPeriod}
+                        mode={paymentMode}
                         onCheckout={handleCheckout}
                         checkoutLoading={checkoutLoading}
                       />
@@ -174,6 +210,7 @@ const Planos = () => {
             plan={zplPlan} 
             onCheckout={handleCheckout}
             checkoutLoading={checkoutLoading}
+            showAnnualCampaign={settings.enable_annual_campaign}
           />
         )}
 
