@@ -23,6 +23,7 @@ import Settings from "./pages/Settings";
 import Blog from "./pages/Blog";
 import BlogAdmin from "./pages/BlogAdmin";
 import Planos from "./pages/Planos";
+import AdminPlanos from "./pages/AdminPlanos";
 import NotFound from "./pages/NotFound";
 import { AdminRoute } from "./components/auth/AdminRoute";
 
@@ -147,6 +148,7 @@ const App = () => {
             <Route path="/blog/categoria/:slug" element={<Blog />} />
             {/* Admin routes - protected by AdminRoute guard */}
             <Route path="/admin/blog/*" element={<AdminRoute><BlogAdmin /></AdminRoute>} />
+            <Route path="/admin/planos" element={<AdminRoute><AdminPlanos /></AdminRoute>} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
