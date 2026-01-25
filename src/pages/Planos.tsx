@@ -21,7 +21,7 @@ import {
   RefreshCw
 } from "lucide-react";
 
-type BillingCycle = 'monthly' | 'quarterly' | 'semiannual' | 'annual';
+type BillingCycle = 'monthly' | 'quarterly' | 'semiannual';
 type PaymentMode = 'prepaid' | 'subscription';
 
 const Planos = () => {
@@ -116,40 +116,30 @@ const Planos = () => {
           {paymentMode === 'prepaid' ? (
             <div className="flex flex-col items-center gap-2 mb-6">
               <Tabs value={billingCycle} onValueChange={(v) => setBillingCycle(v as BillingCycle)}>
-                <TabsList className="grid grid-cols-4 w-auto h-9 bg-background">
-                  <TabsTrigger value="monthly" className="px-3 text-xs">Mensal</TabsTrigger>
-                  <TabsTrigger value="quarterly" className="px-3 text-xs">
+                <TabsList className="grid grid-cols-3 w-auto h-9 bg-background">
+                  <TabsTrigger value="monthly" className="px-4 text-xs">Mensal</TabsTrigger>
+                  <TabsTrigger value="quarterly" className="px-4 text-xs">
                     Trimestral 
                     <Badge className={`ml-1 text-[9px] hidden sm:inline-flex px-1.5 py-0 ${billingCycle === 'quarterly' ? 'bg-success text-white' : 'bg-success/20 text-success border-0'}`}>
                       -5%
                     </Badge>
                   </TabsTrigger>
-                  <TabsTrigger value="semiannual" className="px-3 text-xs">
+                  <TabsTrigger value="semiannual" className="px-4 text-xs">
                     Semestral 
                     <Badge className={`ml-1 text-[9px] hidden sm:inline-flex px-1.5 py-0 ${billingCycle === 'semiannual' ? 'bg-success text-white' : 'bg-success/20 text-success border-0'}`}>
                       -15%
                     </Badge>
                   </TabsTrigger>
-                  <TabsTrigger value="annual" className="px-3 text-xs">
-                    Anual 
-                    <Badge className={`ml-1 text-[9px] hidden sm:inline-flex px-1.5 py-0 ${billingCycle === 'annual' ? 'bg-success text-white' : 'bg-success/20 text-success border-0'}`}>
-                      -20%
-                    </Badge>
-                  </TabsTrigger>
                 </TabsList>
               </Tabs>
-              <span className="text-[11px] text-muted-foreground/60">
-                Pagamento único. Sem renovação automática.
-              </span>
             </div>
           ) : (
-            <div className="flex items-center justify-center gap-2 mb-6">
-              <div className="inline-flex items-center gap-1.5 bg-success text-white px-3 py-1.5 rounded-full text-[11px] font-semibold shadow-sm">
-                <Sparkles className="w-3 h-3" />
-                2 meses grátis no plano anual
-              </div>
-              <span className="text-[11px] text-muted-foreground">
-                Pague 10 meses, use 12
+            <div className="flex flex-col items-center gap-2 mb-6">
+              <span className="text-xs text-muted-foreground">
+                Cobrança mensal recorrente • Renovação automática
+              </span>
+              <span className="text-[10px] text-muted-foreground/70">
+                Cancele quando quiser
               </span>
             </div>
           )}
@@ -164,7 +154,7 @@ const Planos = () => {
                   <VolumePlanCard 
                     key={plan.id} 
                     plan={plan} 
-                    billingCycle={paymentMode === 'subscription' ? 'annual' : billingCycle}
+                    billingCycle={billingCycle}
                     paymentMode={paymentMode}
                     getAnnualSubscriptionPrice={getAnnualSubscriptionPrice}
                     onSelect={() => navigate("/auth")}
@@ -178,7 +168,7 @@ const Planos = () => {
                     <div key={plan.id} className="w-full sm:w-[calc(50%-0.375rem)] lg:w-[calc(33.333%-0.375rem)]">
                       <VolumePlanCard 
                         plan={plan} 
-                        billingCycle={paymentMode === 'subscription' ? 'annual' : billingCycle}
+                        billingCycle={billingCycle}
                         paymentMode={paymentMode}
                         getAnnualSubscriptionPrice={getAnnualSubscriptionPrice}
                         onSelect={() => navigate("/auth")}
@@ -329,29 +319,18 @@ function VolumePlanCard({ plan, billingCycle, paymentMode, getAnnualSubscription
   const isPopular = plan.code === 'volume_300' || plan.code === 'volume_700';
   const isSubscription = paymentMode === 'subscription';
   
-  // For subscription mode, calculate monthly installment (pay 10, use 12)
+  // For subscription mode, use monthly price directly (monthly recurring billing)
   const monthlyPrice = plan.prices['monthly']?.price_cents;
   const price = plan.prices[billingCycle];
   
-  // Calculate display price based on mode
-  // Subscription: show monthly installment (total/12), Prepaid: show period total
-  const annualTotal = monthlyPrice ? getAnnualSubscriptionPrice(monthlyPrice) : 0;
-  const monthlyInstallment = Math.round(annualTotal / 12);
-  const displayPrice = isSubscription ? monthlyInstallment : price?.price_cents;
-
-  // Show "2 meses grátis" badge only for subscription mode
-  const showAnnualSavings = isSubscription;
+  // Subscription shows monthly price, Prepaid shows period total
+  const displayPrice = isSubscription ? monthlyPrice : price?.price_cents;
   
   return (
     <Card className={`relative h-full transition-all ${isPopular ? 'border-primary shadow-md ring-2 ring-primary/30' : 'hover:shadow-sm'}`}>
       {isPopular && (
         <Badge className="absolute -top-2 left-1/2 -translate-x-1/2 bg-primary text-[9px] px-1.5 py-0 shadow-sm">
           Popular
-        </Badge>
-      )}
-      {showAnnualSavings && (
-        <Badge className="absolute -top-2 right-1.5 bg-success text-white text-[9px] px-1.5 py-0 shadow-sm">
-          2 meses grátis
         </Badge>
       )}
       <CardHeader className="pb-2 pt-3 px-3">
@@ -375,9 +354,14 @@ function VolumePlanCard({ plan, billingCycle, paymentMode, getAnnualSubscription
               </div>
               <div className="text-[10px] text-muted-foreground leading-tight mt-0.5">
                 {isSubscription 
-                  ? 'Plano anual • Cobrança mensal recorrente • 2 meses grátis' 
-                  : 'Plano avulso • Sem renovação automática'}
+                  ? 'Cobrança mensal recorrente • Renovação automática' 
+                  : 'Plano avulso • Pagamento único • Sem renovação automática'}
               </div>
+              {isSubscription && (
+                <div className="text-[9px] text-muted-foreground/70 mt-0.5">
+                  Cancele quando quiser
+                </div>
+              )}
             </>
           ) : (
             <div className="text-sm text-muted-foreground">-</div>
@@ -422,14 +406,14 @@ function ZplPriceSection({ zplPlan, onSelect }: ZplPriceSectionProps) {
   
   const monthlyPrice = zplPlan.prices['monthly']?.price_cents || 2490; // R$ 24,90
   
-  // Annual subscription: pay 10 months, use 12 (2 free months)
+  // Annual subscription: pay 10 months, use 12 (2 free months) = R$ 16,58/mês
   const annualTotalPrice = monthlyPrice * 10;
-  const monthlyInstallment = Math.round(annualTotalPrice / 12);
+  const monthlyInstallment = Math.round(annualTotalPrice / 12); // ~1658 cents = R$ 16,58
   
   const prepaidCycles = [
-    { key: 'monthly' as const, label: 'Mensal' },
-    { key: 'quarterly' as const, label: 'Trimestral' },
-    { key: 'semiannual' as const, label: 'Semestral' },
+    { key: 'monthly' as const, label: 'Mensal', price: 2490 },
+    { key: 'quarterly' as const, label: 'Trimestral', price: 5990 },
+    { key: 'semiannual' as const, label: 'Semestral', price: 9990 },
   ];
   
   return (
@@ -445,7 +429,7 @@ function ZplPriceSection({ zplPlan, onSelect }: ZplPriceSectionProps) {
           }`}
         >
           <CreditCard className="w-3 h-3" />
-          Plano Avulso
+          Pagamento Avulso
         </button>
         <button
           onClick={() => setZplMode('subscription')}
@@ -463,9 +447,7 @@ function ZplPriceSection({ zplPlan, onSelect }: ZplPriceSectionProps) {
       {zplMode === 'prepaid' ? (
         /* Prepaid Mode - One-time payment per period, NO automatic renewal */
         <div className="flex flex-col gap-2">
-          {prepaidCycles.map(({ key, label }) => {
-            const price = zplPlan.prices[key];
-            if (!price) return null;
+          {prepaidCycles.map(({ key, label, price }) => {
             const isSelected = selectedCycle === key;
             
             return (
@@ -484,37 +466,31 @@ function ZplPriceSection({ zplPlan, onSelect }: ZplPriceSectionProps) {
                 }}
               >
                 <span>{label}</span>
-                <span className="font-semibold">{formatPrice(price.price_cents)}</span>
+                <span className="font-semibold">{formatPrice(price)}</span>
               </Button>
             );
           })}
-          <p className="text-[10px] text-muted-foreground text-center mt-1 leading-tight">
+          <p className="text-[10px] text-muted-foreground text-center mt-2 leading-tight font-medium">
             Plano avulso • Sem renovação automática
           </p>
-          <Button 
-            className="w-full h-9 text-xs font-medium shadow-sm mt-1"
-            size="sm"
-            variant="default"
-            onClick={onSelect}
-          >
-            Comprar plano
-          </Button>
         </div>
       ) : (
         /* Subscription Mode - Annual only with monthly billing and automatic renewal */
         <div className="flex flex-col gap-3">
-          {/* Annual Subscription - 2 free months, monthly billing */}
           <div className="relative">
             <Badge className="absolute -top-2 right-2 bg-success text-white text-[9px] px-1.5 py-0 z-10 shadow-sm">
               2 meses grátis
             </Badge>
-            <div className="border-2 border-primary rounded-lg p-4 bg-primary/5 shadow-md">
-              <div className="flex items-baseline justify-center gap-1 mb-1">
+            <div className="border-2 border-primary rounded-lg p-4 bg-primary/5 shadow-md ring-2 ring-primary/30">
+              <div className="flex items-baseline justify-center gap-1 mb-2">
                 <span className="text-2xl font-bold text-foreground">{formatPrice(monthlyInstallment)}</span>
                 <span className="text-sm text-muted-foreground">/mês</span>
               </div>
+              <p className="text-[11px] text-foreground/80 text-center leading-tight mb-1 font-medium">
+                Plano anual • Cobrança mensal recorrente
+              </p>
               <p className="text-[10px] text-muted-foreground text-center leading-tight mb-3">
-                Plano anual • Cobrança mensal recorrente • 2 meses grátis
+                Renovação automática • Cancele quando quiser
               </p>
               <Button 
                 variant="default"
@@ -526,10 +502,6 @@ function ZplPriceSection({ zplPlan, onSelect }: ZplPriceSectionProps) {
               </Button>
             </div>
           </div>
-          
-          <p className="text-[10px] text-muted-foreground text-center leading-tight">
-            Assinatura com renovação automática mensal • Cancele quando quiser
-          </p>
         </div>
       )}
     </div>
