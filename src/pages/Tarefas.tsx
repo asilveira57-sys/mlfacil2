@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,7 @@ import { TaskDrawer } from '@/components/tasks/TaskDrawer';
 import { TaskBulkActions } from '@/components/tasks/TaskBulkActions';
 import { NotificationList } from '@/components/tasks/NotificationList';
 import { EventList } from '@/components/tasks/EventList';
+import { WorkspaceOnboarding } from '@/components/tasks/WorkspaceOnboarding';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -26,7 +27,7 @@ import type { Task, TaskStatus, TaskPriority, AutomationRule, WorkspaceAccount, 
 export default function Tarefas() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { currentWorkspace, members, accounts, loading: workspaceLoading } = useWorkspace();
+  const { currentWorkspace, members, accounts, loading: workspaceLoading, createWorkspace } = useWorkspace();
   
   const {
     tasks,
@@ -107,14 +108,11 @@ export default function Tarefas() {
 
   if (!currentWorkspace) {
     return (
-      <div className="container mx-auto p-6">
-        <div className="text-center py-12">
-          <h2 className="text-xl font-semibold mb-2">Nenhum workspace encontrado</h2>
-          <p className="text-muted-foreground">
-            Você precisa estar em um workspace para gerenciar tarefas.
-          </p>
-        </div>
-      </div>
+      <WorkspaceOnboarding
+        onCreateWorkspace={async (name) => {
+          await createWorkspace(name);
+        }}
+      />
     );
   }
 
