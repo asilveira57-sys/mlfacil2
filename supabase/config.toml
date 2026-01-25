@@ -80,3 +80,12 @@ verify_jwt = false
 
 [functions.mercadopago-webhook]
 verify_jwt = false
+
+[functions.billing-public-plans]
+verify_jwt = false
+
+[functions.billing-checkout]
+verify_jwt = false
+
+[functions.billing-admin]
+verify_jwt = false
