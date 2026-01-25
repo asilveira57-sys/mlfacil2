@@ -89,3 +89,6 @@ verify_jwt = false
 
 [functions.billing-admin]
 verify_jwt = false
+
+[functions.mp-sync-price]
+verify_jwt = false

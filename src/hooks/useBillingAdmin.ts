@@ -1,61 +1,51 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import type { Json } from '@/integrations/supabase/types';
+import type { AdminPlan, AdminPlanPrice, PlanSettings, PriceMode, PricePeriod } from '@/types/billing';
 
-interface AdminPlanPrice {
-  id: string;
-  mode: string;
-  period: string;
-  amount_cents: number;
-  currency: string;
-  badge_text: string | null;
-  label_sub: string | null;
-  ui_order: number;
-  is_visible: boolean;
-  published_at: string | null;
-  version: number;
+interface UseBillingAdminReturn {
+  plans: AdminPlan[];
+  settings: PlanSettings;
+  loading: boolean;
+  refetch: () => Promise<void>;
+  // Plan operations
+  createPlan: (plan: Partial<AdminPlan>) => Promise<string | null>;
+  updatePlan: (id: string, updates: Partial<AdminPlan>) => Promise<boolean>;
+  deletePlan: (id: string) => Promise<boolean>;
+  // Price operations
+  createPrice: (price: Partial<AdminPlanPrice>) => Promise<string | null>;
+  updatePrice: (id: string, updates: Partial<AdminPlanPrice>) => Promise<boolean>;
+  deletePrice: (id: string) => Promise<boolean>;
+  // Settings operations
+  updateSettings: (updates: Partial<PlanSettings>) => Promise<boolean>;
+  // MP sync
+  syncPriceWithMP: (priceId: string) => Promise<boolean>;
 }
 
-interface AdminPlan {
-  id: string;
-  slug: string;
-  name: string;
-  description: string | null;
-  features: string[];
-  category: string;
-  is_active: boolean;
-  billing_plan_prices: AdminPlanPrice[];
-}
-
-interface AdminSettings {
-  campaigns?: { annual_enabled?: boolean };
-  ui_copy?: { one_time_note?: string; subscription_note?: string };
-}
-
-export function useBillingAdmin() {
+export function useBillingAdmin(): UseBillingAdminReturn {
   const [plans, setPlans] = useState<AdminPlan[]>([]);
-  const [settings, setSettings] = useState<AdminSettings>({});
+  const [settings, setSettings] = useState<PlanSettings>({ enable_annual_campaign: false });
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
 
-      // Query directly from Supabase tables (no edge function cold start)
       const [plansResult, pricesResult, settingsResult] = await Promise.all([
         supabase
-          .from('billing_plans')
-          .select('id, slug, name, description, features, category, is_active, created_at')
+          .from('plans')
+          .select('*')
           .order('category')
-          .order('created_at'),
+          .order('sort_order'),
         supabase
-          .from('billing_plan_prices')
-          .select('id, plan_id, mode, period, amount_cents, currency, badge_text, label_sub, ui_order, is_visible, published_at, version')
-          .order('ui_order'),
+          .from('plan_prices')
+          .select('*')
+          .order('sort_order'),
         supabase
-          .from('billing_settings')
-          .select('key, value'),
+          .from('plan_settings')
+          .select('*')
+          .eq('key', 'global')
+          .single(),
       ]);
 
       if (plansResult.error) throw plansResult.error;
@@ -66,35 +56,43 @@ export function useBillingAdmin() {
         id: plan.id,
         slug: plan.slug,
         name: plan.name,
+        category: plan.category as 'volume' | 'zpl',
         description: plan.description,
-        features: (plan.features as string[]) || [],
-        category: plan.category,
-        is_active: plan.is_active ?? true,
-        billing_plan_prices: (pricesResult.data || [])
+        features: Array.isArray(plan.features) ? plan.features as string[] : [],
+        active: plan.active,
+        sort_order: plan.sort_order,
+        created_at: plan.created_at,
+        updated_at: plan.updated_at,
+        plan_prices: (pricesResult.data || [])
           .filter((p) => p.plan_id === plan.id)
           .map((p) => ({
             id: p.id,
-            mode: p.mode,
-            period: p.period,
-            amount_cents: p.amount_cents,
+            plan_id: p.plan_id,
+            mode: p.mode as PriceMode,
+            period: p.period as PricePeriod,
+            price_cents: p.price_cents,
             currency: p.currency,
+            recurring: p.recurring,
+            auto_renew: p.auto_renew,
             badge_text: p.badge_text,
-            label_sub: p.label_sub,
-            ui_order: p.ui_order,
-            is_visible: p.is_visible ?? true,
-            published_at: p.published_at,
-            version: p.version,
+            visible: p.visible,
+            is_campaign: p.is_campaign,
+            campaign_notes: p.campaign_notes,
+            mp_preapproval_plan_id: p.mp_preapproval_plan_id,
+            mp_checkout_url: p.mp_checkout_url,
+            sort_order: p.sort_order,
+            created_at: p.created_at,
+            updated_at: p.updated_at,
           })),
       }));
 
       // Parse settings
-      const settingsMap: AdminSettings = {};
-      settingsResult.data?.forEach((s) => {
-        settingsMap[s.key as keyof AdminSettings] = s.value as AdminSettings[keyof AdminSettings];
-      });
+      const parsedSettings: PlanSettings = {
+        enable_annual_campaign: settingsResult.data?.enable_annual_campaign ?? false,
+      };
 
       setPlans(plansWithPrices);
-      setSettings(settingsMap);
+      setSettings(parsedSettings);
     } catch (err) {
       console.error('[useBillingAdmin] Error:', err);
       toast.error('Erro ao carregar dados de admin');
@@ -107,110 +105,198 @@ export function useBillingAdmin() {
     fetchData();
   }, [fetchData]);
 
-  const updatePlan = async (plan: Partial<AdminPlan> & { id: string }) => {
+  // Helper to generate slug
+  const generateSlug = (name: string): string => {
+    return name
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
+  };
+
+  // Plan operations
+  const createPlan = async (plan: Partial<AdminPlan>): Promise<string | null> => {
     try {
-      const { error } = await supabase
-        .from('billing_plans')
-        .update({
-          name: plan.name,
+      const slug = plan.slug || generateSlug(plan.name || 'novo-plano');
+      const { data, error } = await supabase
+        .from('plans')
+        .insert({
+          slug,
+          name: plan.name || 'Novo Plano',
+          category: plan.category || 'volume',
           description: plan.description,
-          features: plan.features,
-          is_active: plan.is_active,
+          features: plan.features || [],
+          active: plan.active ?? true,
+          sort_order: plan.sort_order ?? 99,
         })
-        .eq('id', plan.id);
+        .select('id')
+        .single();
 
       if (error) throw error;
+      toast.success('Plano criado com sucesso');
+      await fetchData();
+      return data.id;
+    } catch (err) {
+      console.error('[useBillingAdmin] createPlan error:', err);
+      toast.error('Erro ao criar plano');
+      return null;
+    }
+  };
 
+  const updatePlan = async (id: string, updates: Partial<AdminPlan>): Promise<boolean> => {
+    try {
+      const { error } = await supabase
+        .from('plans')
+        .update({
+          name: updates.name,
+          slug: updates.slug,
+          description: updates.description,
+          features: updates.features,
+          active: updates.active,
+          sort_order: updates.sort_order,
+        })
+        .eq('id', id);
+
+      if (error) throw error;
       toast.success('Plano atualizado');
       await fetchData();
+      return true;
     } catch (err) {
+      console.error('[useBillingAdmin] updatePlan error:', err);
       toast.error('Erro ao atualizar plano');
+      return false;
     }
   };
 
-  const updatePrice = async (price: Partial<AdminPlanPrice> & { id: string }) => {
+  const deletePlan = async (id: string): Promise<boolean> => {
     try {
-      const { error } = await supabase
-        .from('billing_plan_prices')
-        .update({
-          amount_cents: price.amount_cents,
+      const { error } = await supabase.from('plans').delete().eq('id', id);
+      if (error) throw error;
+      toast.success('Plano excluído');
+      await fetchData();
+      return true;
+    } catch (err) {
+      console.error('[useBillingAdmin] deletePlan error:', err);
+      toast.error('Erro ao excluir plano');
+      return false;
+    }
+  };
+
+  // Price operations
+  const createPrice = async (price: Partial<AdminPlanPrice>): Promise<string | null> => {
+    try {
+      const { data, error } = await supabase
+        .from('plan_prices')
+        .insert({
+          plan_id: price.plan_id,
+          mode: price.mode || 'avulso',
+          period: price.period || 'mensal',
+          price_cents: price.price_cents || 0,
+          currency: price.currency || 'BRL',
+          recurring: price.recurring ?? false,
+          auto_renew: price.auto_renew ?? false,
           badge_text: price.badge_text,
-          label_sub: price.label_sub,
-          is_visible: price.is_visible,
-          ui_order: price.ui_order,
+          visible: price.visible ?? true,
+          is_campaign: price.is_campaign ?? false,
+          campaign_notes: price.campaign_notes,
+          sort_order: price.sort_order ?? 99,
         })
-        .eq('id', price.id);
+        .select('id')
+        .single();
 
       if (error) throw error;
+      toast.success('Preço criado com sucesso');
+      await fetchData();
+      return data.id;
+    } catch (err) {
+      console.error('[useBillingAdmin] createPrice error:', err);
+      toast.error('Erro ao criar preço');
+      return null;
+    }
+  };
 
+  const updatePrice = async (id: string, updates: Partial<AdminPlanPrice>): Promise<boolean> => {
+    try {
+      const { error } = await supabase
+        .from('plan_prices')
+        .update({
+          mode: updates.mode,
+          period: updates.period,
+          price_cents: updates.price_cents,
+          recurring: updates.recurring,
+          auto_renew: updates.auto_renew,
+          badge_text: updates.badge_text,
+          visible: updates.visible,
+          is_campaign: updates.is_campaign,
+          campaign_notes: updates.campaign_notes,
+          sort_order: updates.sort_order,
+        })
+        .eq('id', id);
+
+      if (error) throw error;
       toast.success('Preço atualizado');
       await fetchData();
+      return true;
     } catch (err) {
+      console.error('[useBillingAdmin] updatePrice error:', err);
       toast.error('Erro ao atualizar preço');
+      return false;
     }
   };
 
-  const publishPrice = async (priceId: string) => {
+  const deletePrice = async (id: string): Promise<boolean> => {
+    try {
+      const { error } = await supabase.from('plan_prices').delete().eq('id', id);
+      if (error) throw error;
+      toast.success('Preço excluído');
+      await fetchData();
+      return true;
+    } catch (err) {
+      console.error('[useBillingAdmin] deletePrice error:', err);
+      toast.error('Erro ao excluir preço');
+      return false;
+    }
+  };
+
+  // Settings operations
+  const updateSettings = async (updates: Partial<PlanSettings>): Promise<boolean> => {
     try {
       const { error } = await supabase
-        .from('billing_plan_prices')
-        .update({ published_at: new Date().toISOString() })
-        .eq('id', priceId);
+        .from('plan_settings')
+        .update({
+          enable_annual_campaign: updates.enable_annual_campaign,
+        })
+        .eq('key', 'global');
 
       if (error) throw error;
-
-      toast.success('Preço publicado');
+      toast.success('Configurações atualizadas');
       await fetchData();
+      return true;
     } catch (err) {
-      toast.error('Erro ao publicar preço');
+      console.error('[useBillingAdmin] updateSettings error:', err);
+      toast.error('Erro ao atualizar configurações');
+      return false;
     }
   };
 
-  const unpublishPrice = async (priceId: string) => {
+  // MP sync
+  const syncPriceWithMP = async (priceId: string): Promise<boolean> => {
     try {
-      const { error } = await supabase
-        .from('billing_plan_prices')
-        .update({ published_at: null })
-        .eq('id', priceId);
+      const { data, error } = await supabase.functions.invoke('mp-sync-price', {
+        body: { plan_price_id: priceId },
+      });
 
       if (error) throw error;
+      if (data?.error) throw new Error(data.error);
 
-      toast.success('Preço despublicado');
+      toast.success('Sincronizado com Mercado Pago');
       await fetchData();
+      return true;
     } catch (err) {
-      toast.error('Erro ao despublicar preço');
-    }
-  };
-
-  const updateSettings = async (key: string, value: unknown) => {
-    try {
-      // Try update first, then insert if not exists
-      const { data: existing } = await supabase
-        .from('billing_settings')
-        .select('key')
-        .eq('key', key)
-        .maybeSingle();
-
-      let error;
-      if (existing) {
-        const result = await supabase
-          .from('billing_settings')
-          .update({ value: value as Json, updated_at: new Date().toISOString() })
-          .eq('key', key);
-        error = result.error;
-      } else {
-        const result = await supabase
-          .from('billing_settings')
-          .insert([{ key, value: value as Json }]);
-        error = result.error;
-      }
-
-      if (error) throw error;
-
-      toast.success('Configuração atualizada');
-      await fetchData();
-    } catch (err) {
-      toast.error('Erro ao atualizar configuração');
+      console.error('[useBillingAdmin] syncPriceWithMP error:', err);
+      toast.error('Erro ao sincronizar com Mercado Pago');
+      return false;
     }
   };
 
@@ -219,10 +305,13 @@ export function useBillingAdmin() {
     settings,
     loading,
     refetch: fetchData,
+    createPlan,
     updatePlan,
+    deletePlan,
+    createPrice,
     updatePrice,
-    publishPrice,
-    unpublishPrice,
+    deletePrice,
     updateSettings,
+    syncPriceWithMP,
   };
 }

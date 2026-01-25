@@ -3,34 +3,46 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Check, Printer, Info, CreditCard, RefreshCw } from "lucide-react";
-import type { Plan, PlanPrice } from "@/types/billing";
+import type { Plan, PricePeriod } from "@/types/billing";
 import { formatPriceBRL } from "@/hooks/useBillingPlans";
 import { EditableText } from "@/components/admin/EditableText";
 
-type ZplPaymentMode = 'prepaid' | 'subscription';
+type ZplPaymentMode = 'avulso' | 'assinatura';
+
+// Map internal period to display label
+const periodLabels: Record<PricePeriod, string> = {
+  mensal: 'Mensal',
+  trimestral: 'Trimestral',
+  semestral: 'Semestral',
+  anual: 'Anual',
+};
 
 interface ZplPlanSectionProps {
   plan: Plan;
   onCheckout: (priceId: string) => void;
   checkoutLoading: boolean;
+  showAnnualCampaign: boolean;
 }
 
-export function ZplPlanSection({ plan, onCheckout, checkoutLoading }: ZplPlanSectionProps) {
-  const [zplMode, setZplMode] = useState<ZplPaymentMode>('prepaid');
-  const [selectedPeriod, setSelectedPeriod] = useState<'monthly' | 'quarterly' | 'semiannual'>('monthly');
+export function ZplPlanSection({ plan, onCheckout, checkoutLoading, showAnnualCampaign }: ZplPlanSectionProps) {
+  const [zplMode, setZplMode] = useState<ZplPaymentMode>('avulso');
+  const [selectedPeriod, setSelectedPeriod] = useState<PricePeriod>('mensal');
 
   // Get prices by mode
-  const oneTimePrices = plan.prices.filter(p => p.mode === 'one_time');
-  const subscriptionPrices = plan.prices.filter(p => p.mode === 'subscription');
-  const annualPrice = subscriptionPrices.find(p => p.period === 'annual_campaign');
+  const avulsoPrices = plan.prices.filter(p => p.mode === 'avulso' && p.visible);
+  const assinaturaPrices = plan.prices.filter(p => p.mode === 'assinatura' && p.visible);
+  const annualCampaignPrice = assinaturaPrices.find(p => p.period === 'anual' && p.is_campaign);
 
-  // Get selected one-time price
-  const selectedOneTimePrice = oneTimePrices.find(p => p.period === selectedPeriod);
+  // Check if subscription mode is available
+  const hasSubscription = showAnnualCampaign && annualCampaignPrice;
+
+  // Get selected avulso price
+  const selectedAvulsoPrice = avulsoPrices.find(p => p.period === selectedPeriod);
 
   // Determine label based on mode
-  const currentLabelSub = zplMode === 'prepaid' 
+  const currentLabelSub = zplMode === 'avulso' 
     ? 'Pagamento único • Sem renovação automática'
-    : annualPrice?.label_sub || 'Cobrança mensal recorrente • Renovação automática • Cancele quando quiser';
+    : 'Cobrança mensal recorrente • Renovação automática • Cancele quando quiser';
 
   return (
     <div className="py-8 px-4 bg-gradient-to-b from-primary/8 to-primary/3 border-t border-primary/10">
@@ -87,9 +99,9 @@ export function ZplPlanSection({ plan, onCheckout, checkoutLoading }: ZplPlanSec
                 {/* Mode Toggle */}
                 <div className="inline-flex rounded-lg border border-primary/20 p-0.5 bg-background self-center shadow-sm">
                   <button
-                    onClick={() => setZplMode('prepaid')}
+                    onClick={() => setZplMode('avulso')}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium transition-all ${
-                      zplMode === 'prepaid'
+                      zplMode === 'avulso'
                         ? 'bg-primary text-primary-foreground shadow-sm'
                         : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                     }`}
@@ -97,11 +109,11 @@ export function ZplPlanSection({ plan, onCheckout, checkoutLoading }: ZplPlanSec
                     <CreditCard className="w-3 h-3" />
                     Pagamento Avulso
                   </button>
-                  {subscriptionPrices.length > 0 && (
+                  {hasSubscription && (
                     <button
-                      onClick={() => setZplMode('subscription')}
+                      onClick={() => setZplMode('assinatura')}
                       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium transition-all ${
-                        zplMode === 'subscription'
+                        zplMode === 'assinatura'
                           ? 'bg-primary text-primary-foreground shadow-sm'
                           : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                       }`}
@@ -112,18 +124,14 @@ export function ZplPlanSection({ plan, onCheckout, checkoutLoading }: ZplPlanSec
                   )}
                 </div>
 
-                {zplMode === 'prepaid' ? (
-                  /* Prepaid Mode */
+                {zplMode === 'avulso' ? (
+                  /* Avulso Mode */
                   <div className="flex flex-col gap-2">
-                    {oneTimePrices
-                      .sort((a, b) => a.ui_order - b.ui_order)
+                    {avulsoPrices
+                      .sort((a, b) => a.sort_order - b.sort_order)
                       .map((price) => {
                         const isSelected = price.period === selectedPeriod;
-                        const periodLabel = {
-                          monthly: 'Mensal',
-                          quarterly: 'Trimestral',
-                          semiannual: 'Semestral',
-                        }[price.period] || price.period;
+                        const label = periodLabels[price.period] || price.period;
                         
                         return (
                           <Button 
@@ -136,13 +144,13 @@ export function ZplPlanSection({ plan, onCheckout, checkoutLoading }: ZplPlanSec
                                 : 'bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground'
                             }`}
                             onClick={() => {
-                              setSelectedPeriod(price.period as 'monthly' | 'quarterly' | 'semiannual');
+                              setSelectedPeriod(price.period);
                               onCheckout(price.id);
                             }}
                             disabled={checkoutLoading}
                           >
-                            <span>{periodLabel}</span>
-                            <span className="font-semibold">{formatPriceBRL(price.amount_cents)}</span>
+                            <span>{label}</span>
+                            <span className="font-semibold">{formatPriceBRL(price.price_cents)}</span>
                           </Button>
                         );
                       })}
@@ -155,23 +163,23 @@ export function ZplPlanSection({ plan, onCheckout, checkoutLoading }: ZplPlanSec
                   </div>
                 ) : (
                   /* Subscription Mode */
-                  annualPrice && (
+                  annualCampaignPrice && (
                     <div className="flex flex-col gap-3">
                       <div className="relative">
-                        {annualPrice.badge_text && (
+                        {annualCampaignPrice.badge_text && (
                           <Badge className="absolute -top-2 right-2 bg-success text-white text-[9px] px-1.5 py-0 z-10 shadow-sm">
-                            {annualPrice.badge_text}
+                            {annualCampaignPrice.badge_text}
                           </Badge>
                         )}
                         <div className="border-2 border-primary rounded-lg p-4 bg-primary/5 shadow-md ring-2 ring-primary/30">
                           <div className="flex items-baseline justify-center gap-1 mb-2">
                             <span className="text-2xl font-bold text-foreground">
-                              {formatPriceBRL(annualPrice.amount_cents)}
+                              {formatPriceBRL(annualCampaignPrice.price_cents)}
                             </span>
                             <span className="text-sm text-muted-foreground">/mês</span>
                           </div>
                           <p className="text-[11px] text-foreground/80 text-center leading-tight mb-1 font-medium">
-                            Plano anual • 12 cobranças mensais • 2 meses grátis
+                            {annualCampaignPrice.campaign_notes || 'Plano anual • 12 cobranças mensais • 2 meses grátis'}
                           </p>
                           <p className="text-[10px] text-muted-foreground text-center leading-tight mb-3">
                             Renovação automática • Cancele quando quiser
@@ -180,7 +188,7 @@ export function ZplPlanSection({ plan, onCheckout, checkoutLoading }: ZplPlanSec
                             variant="default"
                             size="sm"
                             className="w-full h-9 text-xs font-medium shadow-sm"
-                            onClick={() => onCheckout(annualPrice.id)}
+                            onClick={() => onCheckout(annualCampaignPrice.id)}
                             disabled={checkoutLoading}
                           >
                             Assinar plano

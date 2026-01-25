@@ -2,30 +2,42 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Check, ShoppingCart } from "lucide-react";
-import type { Plan, PlanPrice } from "@/types/billing";
+import type { Plan, PricePeriod } from "@/types/billing";
 import { formatPriceBRL } from "@/hooks/useBillingPlans";
+
+// Map internal period to component period
+const periodMap: Record<string, PricePeriod> = {
+  'monthly': 'mensal',
+  'quarterly': 'trimestral',
+  'semiannual': 'semestral',
+};
 
 interface VolumePlanCardProps {
   plan: Plan;
   selectedPeriod: 'monthly' | 'quarterly' | 'semiannual';
+  mode: 'avulso' | 'assinatura';
   onCheckout: (priceId: string) => void;
   checkoutLoading: boolean;
 }
 
 export function VolumePlanCard({ 
   plan, 
-  selectedPeriod, 
+  selectedPeriod,
+  mode,
   onCheckout, 
   checkoutLoading 
 }: VolumePlanCardProps) {
-  const isPopular = plan.slug === 'volume_51_300' || plan.slug === 'volume_301_700';
+  const isPopular = plan.slug === '51-300-vendas' || plan.slug === '301-700-vendas';
   
-  // Find the price for the selected period (one_time only for volume prepaid)
+  // Convert selected period to internal format and find price
+  const internalPeriod = periodMap[selectedPeriod] || 'mensal';
   const price = plan.prices.find(
-    p => p.mode === 'one_time' && p.period === selectedPeriod
+    p => p.mode === mode && p.period === internalPeriod
   );
 
   if (!price) return null;
+
+  const ctaText = mode === 'assinatura' ? 'Assinar plano' : 'Comprar plano';
 
   return (
     <Card className={`relative h-full transition-all ${isPopular ? 'border-primary shadow-md ring-2 ring-primary/30' : 'hover:shadow-sm'}`}>
@@ -45,13 +57,18 @@ export function VolumePlanCard({
       </CardHeader>
       <CardContent className="pt-0 px-3 pb-3">
         <div className="mb-2">
-          <div className="text-lg font-bold text-foreground">
-            {formatPriceBRL(price.amount_cents)}
+          <div className="flex items-baseline gap-1">
+            <span className="text-lg font-bold text-foreground">
+              {formatPriceBRL(price.price_cents)}
+            </span>
+            {mode === 'assinatura' && (
+              <span className="text-xs text-muted-foreground">/mês</span>
+            )}
           </div>
-          {price.label_sub && (
-            <div className="text-[10px] text-muted-foreground leading-tight mt-0.5">
-              {price.label_sub}
-            </div>
+          {price.badge_text && (
+            <Badge variant="secondary" className="text-[9px] mt-1">
+              {price.badge_text}
+            </Badge>
           )}
         </div>
         
@@ -71,7 +88,7 @@ export function VolumePlanCard({
           onClick={() => onCheckout(price.id)}
           disabled={checkoutLoading}
         >
-          Comprar plano
+          {ctaText}
         </Button>
       </CardContent>
     </Card>
