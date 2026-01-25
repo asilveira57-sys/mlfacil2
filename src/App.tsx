@@ -19,6 +19,8 @@ import Mercado from "./pages/Mercado";
 import Custos from "./pages/Custos";
 import Concorrencia from "./pages/Concorrencia";
 import Radiografia from "./pages/Radiografia";
+import Tarefas from "./pages/Tarefas";
+import TarefaDetalhe from "./pages/TarefaDetalhe";
 import Settings from "./pages/Settings";
 import Blog from "./pages/Blog";
 import BlogAdmin from "./pages/BlogAdmin";
@@ -141,6 +143,11 @@ const App = () => {
             <Route path="/custos" element={<Custos />} />
             <Route path="/concorrencia" element={<Concorrencia />} />
             <Route path="/radiografia" element={<Radiografia />} />
+            <Route path="/tarefas" element={<Tarefas />} />
+            <Route path="/tarefas/quadro" element={<Tarefas />} />
+            <Route path="/tarefas/inbox" element={<Tarefas />} />
+            <Route path="/tarefas/regras" element={<Tarefas />} />
+            <Route path="/tarefas/:id" element={<TarefaDetalhe />} />
             <Route path="/settings" element={<Settings />} />
             {/* Blog routes */}
             <Route path="/blog" element={<Blog />} />
