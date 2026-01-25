@@ -1,7 +1,24 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import type { Plan, PlanPrice, BillingSettings, PublicPlansResponse, CheckoutResponse } from '@/types/billing';
+import type { Plan, PlanPrice, BillingSettings, CheckoutResponse } from '@/types/billing';
+
+interface ViewRow {
+  plan_id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  features: string[];
+  category: string;
+  price_id: string;
+  mode: string;
+  period: string;
+  amount_cents: number;
+  currency: string;
+  badge_text: string | null;
+  label_sub: string | null;
+  ui_order: number;
+}
 
 export function useBillingPlans() {
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -17,18 +34,73 @@ export function useBillingPlans() {
       setLoading(true);
       setError(null);
 
-      const { data, error: fnError } = await supabase.functions.invoke<PublicPlansResponse>(
-        'billing-public-plans'
-      );
+      // Fetch plans directly from the public view (no edge function cold start)
+      const [plansResult, settingsResult] = await Promise.all([
+        supabase
+          .from('public_plans_v1')
+          .select('*')
+          .order('category')
+          .order('ui_order'),
+        supabase
+          .from('billing_settings')
+          .select('key, value'),
+      ]);
 
-      if (fnError) {
-        throw new Error(fnError.message);
-      }
+      if (plansResult.error) throw plansResult.error;
 
-      if (data) {
-        setPlans(data.plans || []);
-        setSettings(data.settings || { annual_enabled: false, ui_copy: {} });
-      }
+      // Parse settings
+      const settingsMap: BillingSettings = { annual_enabled: false, ui_copy: {} };
+      settingsResult.data?.forEach((s: { key: string; value: unknown }) => {
+        if (s.key === 'campaigns') {
+          const campaigns = s.value as { annual_enabled?: boolean } | null;
+          settingsMap.annual_enabled = campaigns?.annual_enabled ?? false;
+        }
+        if (s.key === 'ui_copy') {
+          settingsMap.ui_copy = (s.value as Record<string, string>) ?? {};
+        }
+      });
+
+      // Group by plan
+      const plansMap = new Map<string, Plan>();
+      (plansResult.data as ViewRow[] | null)?.forEach((row) => {
+        if (!plansMap.has(row.slug)) {
+          plansMap.set(row.slug, {
+            id: row.plan_id,
+            slug: row.slug,
+            name: row.name,
+            description: row.description,
+            features: row.features || [],
+            category: row.category as 'volume' | 'zpl',
+            prices: [],
+          });
+        }
+
+        const plan = plansMap.get(row.slug)!;
+
+        // Filter out annual_campaign if not enabled
+        if (row.period === 'annual_campaign' && !settingsMap.annual_enabled) {
+          return;
+        }
+
+        plan.prices.push({
+          id: row.price_id,
+          mode: row.mode as 'one_time' | 'subscription',
+          period: row.period as 'monthly' | 'quarterly' | 'semiannual' | 'annual_campaign',
+          amount_cents: row.amount_cents,
+          currency: row.currency,
+          badge_text: row.badge_text,
+          label_sub: row.label_sub,
+          ui_order: row.ui_order,
+        });
+      });
+
+      // Convert to array and filter plans without visible prices
+      const plansList = Array.from(plansMap.values())
+        .filter(p => p.prices.length > 0)
+        .sort((a, b) => (a.category === 'volume' ? -1 : 1) - (b.category === 'volume' ? -1 : 1));
+
+      setPlans(plansList);
+      setSettings(settingsMap);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erro ao carregar planos';
       console.error('[useBillingPlans] Error:', message);
