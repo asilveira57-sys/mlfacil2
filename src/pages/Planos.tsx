@@ -35,9 +35,9 @@ const Planos = () => {
   const firstRowPlans = volumePlans.slice(0, 3);
   const secondRowPlans = volumePlans.slice(3);
 
-  // Calculate subscription discount (10% off monthly prepaid)
-  const getSubscriptionPrice = (monthlyPrice: number) => {
-    return Math.round(monthlyPrice * 0.9); // 10% discount
+  // Calculate annual subscription price: pay 10 months, use 12 (2 free months)
+  const getAnnualSubscriptionPrice = (monthlyPrice: number) => {
+    return monthlyPrice * 10; // Pay for 10 months only
   };
 
   return (
@@ -146,10 +146,10 @@ const Planos = () => {
             <div className="flex items-center justify-center gap-2 mb-6">
               <div className="inline-flex items-center gap-1.5 bg-success text-white px-3 py-1.5 rounded-full text-[11px] font-semibold shadow-sm">
                 <Sparkles className="w-3 h-3" />
-                10% de economia
+                2 meses grátis no plano anual
               </div>
               <span className="text-[11px] text-muted-foreground">
-                Cobrança mensal recorrente
+                Pague 10 meses, use 12
               </span>
             </div>
           )}
@@ -164,9 +164,9 @@ const Planos = () => {
                   <VolumePlanCard 
                     key={plan.id} 
                     plan={plan} 
-                    billingCycle={paymentMode === 'subscription' ? 'monthly' : billingCycle}
+                    billingCycle={paymentMode === 'subscription' ? 'annual' : billingCycle}
                     paymentMode={paymentMode}
-                    getSubscriptionPrice={getSubscriptionPrice}
+                    getAnnualSubscriptionPrice={getAnnualSubscriptionPrice}
                     onSelect={() => navigate("/auth")}
                   />
                 ))}
@@ -178,9 +178,9 @@ const Planos = () => {
                     <div key={plan.id} className="w-full sm:w-[calc(50%-0.375rem)] lg:w-[calc(33.333%-0.375rem)]">
                       <VolumePlanCard 
                         plan={plan} 
-                        billingCycle={paymentMode === 'subscription' ? 'monthly' : billingCycle}
+                        billingCycle={paymentMode === 'subscription' ? 'annual' : billingCycle}
                         paymentMode={paymentMode}
-                        getSubscriptionPrice={getSubscriptionPrice}
+                        getAnnualSubscriptionPrice={getAnnualSubscriptionPrice}
                         onSelect={() => navigate("/auth")}
                       />
                     </div>
@@ -214,29 +214,29 @@ const Planos = () => {
 
         </div>
 
-        {/* ZPL FULL - Distinct light blue background for visibility */}
+        {/* ZPL FULL - Distinct section, prepaid only, no subscription */}
         {zplPlan && (
-          <div className="py-8 px-4 bg-primary/5">
+          <div className="py-8 px-4 bg-gradient-to-b from-primary/8 to-primary/3 border-t border-primary/10">
             <div className="max-w-2xl mx-auto">
-              <div className="flex items-center gap-2 mb-4">
-                <div className="p-2 bg-primary/10 rounded-lg">
-                  <Printer className="w-5 h-5 text-primary" />
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2.5 bg-primary/15 rounded-xl">
+                  <Printer className="w-6 h-6 text-primary" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-foreground">
+                  <h3 className="text-xl font-bold text-foreground">
                     <EditableText contentKey="planos.zpl.title" as="span" />
                   </h3>
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-sm text-muted-foreground">
                     <EditableText contentKey="planos.zpl.subtitle" as="span" />
                   </span>
                 </div>
               </div>
 
-              <Card className="border-primary/20 bg-background shadow-sm">
-                <CardContent className="p-5">
-                  <div className="flex flex-col md:flex-row gap-5">
+              <Card className="border-primary/25 bg-background shadow-md">
+                <CardContent className="p-6">
+                  <div className="flex flex-col md:flex-row gap-6">
                     <div className="flex-1">
-                      <ul className="grid grid-cols-2 gap-x-4 gap-y-2">
+                      <ul className="grid grid-cols-2 gap-x-4 gap-y-2.5">
                         {zplPlan.features.slice(0, 4).map((feature, i) => (
                           <li key={i} className="flex items-start gap-2 text-sm">
                             <Check className="w-4 h-4 text-success mt-0.5 flex-shrink-0" />
@@ -244,30 +244,22 @@ const Planos = () => {
                           </li>
                         ))}
                       </ul>
-                      <p className="mt-3 text-xs text-muted-foreground">
-                        <EditableText contentKey="planos.zpl.not_included" as="span" />
-                      </p>
+                      <div className="mt-4 flex flex-col gap-1">
+                        <p className="text-xs text-muted-foreground">
+                          <EditableText contentKey="planos.zpl.not_included" as="span" />
+                        </p>
+                        <p className="text-xs text-muted-foreground/80 flex items-center gap-1">
+                          <Info className="w-3 h-3" />
+                          Plano avulso, sem renovação automática
+                        </p>
+                      </div>
                     </div>
 
-                    <div className="flex items-center gap-2 flex-wrap md:flex-col md:items-stretch">
-                      {(['monthly', 'quarterly', 'semiannual'] as const).map((cycle, index) => {
-                        const price = zplPlan.prices[cycle];
-                        if (!price) return null;
-                        const labels = { monthly: 'Mensal', quarterly: 'Trimestral', semiannual: 'Semestral' };
-                        const isFirst = index === 0;
-                        
-                        return (
-                          <Button 
-                            key={cycle}
-                            variant={isFirst ? "default" : "outline"}
-                            size="sm"
-                            className={`h-9 text-xs px-4 ${isFirst ? 'shadow-sm' : ''}`}
-                            onClick={() => navigate("/auth")}
-                          >
-                            {labels[cycle]} {formatPrice(price.price_cents)}
-                          </Button>
-                        );
-                      })}
+                    <div className="flex flex-col gap-2 min-w-[180px]">
+                      <span className="text-[10px] text-muted-foreground text-center mb-1">
+                        Pagamento único por período
+                      </span>
+                      <ZplPriceButtons zplPlan={zplPlan} onSelect={() => navigate("/auth")} />
                     </div>
                   </div>
                 </CardContent>
@@ -329,23 +321,25 @@ interface VolumePlanCardProps {
   plan: ReturnType<typeof usePlans>['volumePlans'][number];
   billingCycle: BillingCycle;
   paymentMode: PaymentMode;
-  getSubscriptionPrice: (price: number) => number;
+  getAnnualSubscriptionPrice: (price: number) => number;
   onSelect: () => void;
 }
 
-function VolumePlanCard({ plan, billingCycle, paymentMode, getSubscriptionPrice, onSelect }: VolumePlanCardProps) {
-  const price = plan.prices[billingCycle];
+function VolumePlanCard({ plan, billingCycle, paymentMode, getAnnualSubscriptionPrice, onSelect }: VolumePlanCardProps) {
   const isPopular = plan.code === 'volume_300' || plan.code === 'volume_700';
   const isSubscription = paymentMode === 'subscription';
   
-  const displayPrice = isSubscription && price 
-    ? getSubscriptionPrice(price.price_cents) 
+  // For subscription mode, use annual pricing (pay 10, use 12)
+  const monthlyPrice = plan.prices['monthly']?.price_cents;
+  const price = plan.prices[billingCycle];
+  
+  // Calculate display price based on mode
+  const displayPrice = isSubscription && monthlyPrice
+    ? getAnnualSubscriptionPrice(monthlyPrice) // Pay for 10 months
     : price?.price_cents;
 
-  const originalMonthlyPrice = plan.prices['monthly']?.price_cents;
-  const savingsPercent = isSubscription && originalMonthlyPrice && displayPrice
-    ? Math.round((1 - displayPrice / originalMonthlyPrice) * 100)
-    : null;
+  // Show "2 meses grátis" badge only for subscription mode
+  const showAnnualSavings = isSubscription;
   
   return (
     <Card className={`relative h-full ${isPopular ? 'border-primary shadow-sm ring-1 ring-primary/20' : ''}`}>
@@ -354,9 +348,9 @@ function VolumePlanCard({ plan, billingCycle, paymentMode, getSubscriptionPrice,
           Popular
         </Badge>
       )}
-      {isSubscription && savingsPercent && savingsPercent > 0 && (
+      {showAnnualSavings && (
         <Badge className="absolute -top-2 right-1.5 bg-success/90 text-[9px] px-1 py-0">
-          -{savingsPercent}%
+          2 meses grátis
         </Badge>
       )}
       <CardHeader className="pb-2 pt-3 px-3">
@@ -376,7 +370,9 @@ function VolumePlanCard({ plan, billingCycle, paymentMode, getSubscriptionPrice,
                 {formatPrice(displayPrice)}
               </div>
               <div className="text-[10px] text-muted-foreground">
-                {isSubscription ? 'Recorrente' : (billingCycle === 'monthly' ? '/mês' : `${formatPricePerMonth(price!.price_cents, price!.duration_days)}/mês`)}
+                {isSubscription 
+                  ? '/ano (pague 10 meses)' 
+                  : (billingCycle === 'monthly' ? '/mês' : `${formatPricePerMonth(price!.price_cents, price!.duration_days)}/mês`)}
               </div>
             </>
           ) : (
@@ -403,6 +399,50 @@ function VolumePlanCard({ plan, billingCycle, paymentMode, getSubscriptionPrice,
         </Button>
       </CardContent>
     </Card>
+  );
+}
+
+// ZPL Price Buttons - Prepaid only, no subscription
+interface ZplPriceButtonsProps {
+  zplPlan: ReturnType<typeof usePlans>['zplPlan'];
+  onSelect: () => void;
+}
+
+function ZplPriceButtons({ zplPlan, onSelect }: ZplPriceButtonsProps) {
+  const [selectedCycle, setSelectedCycle] = useState<'monthly' | 'quarterly' | 'semiannual'>('monthly');
+  
+  if (!zplPlan) return null;
+  
+  const cycles = [
+    { key: 'monthly' as const, label: 'Mensal' },
+    { key: 'quarterly' as const, label: 'Trimestral' },
+    { key: 'semiannual' as const, label: 'Semestral' },
+  ];
+  
+  return (
+    <div className="flex flex-col gap-2">
+      {cycles.map(({ key, label }) => {
+        const price = zplPlan.prices[key];
+        if (!price) return null;
+        const isSelected = selectedCycle === key;
+        
+        return (
+          <Button 
+            key={key}
+            variant={isSelected ? "default" : "outline"}
+            size="sm"
+            className={`h-9 text-xs px-4 justify-between ${isSelected ? 'shadow-sm bg-primary' : 'hover:bg-muted'}`}
+            onClick={() => {
+              setSelectedCycle(key);
+              onSelect();
+            }}
+          >
+            <span>{label}</span>
+            <span className="font-semibold">{formatPrice(price.price_cents)}</span>
+          </Button>
+        );
+      })}
+    </div>
   );
 }
 
