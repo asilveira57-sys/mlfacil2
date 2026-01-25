@@ -280,6 +280,183 @@ export type Database = {
           },
         ]
       }
+      billing_plan_prices: {
+        Row: {
+          amount_cents: number
+          badge_text: string | null
+          created_at: string | null
+          currency: string
+          id: string
+          is_visible: boolean | null
+          label_sub: string | null
+          mode: string
+          period: string
+          plan_id: string
+          published_at: string | null
+          ui_order: number
+          updated_at: string | null
+          version: number
+        }
+        Insert: {
+          amount_cents: number
+          badge_text?: string | null
+          created_at?: string | null
+          currency?: string
+          id?: string
+          is_visible?: boolean | null
+          label_sub?: string | null
+          mode: string
+          period: string
+          plan_id: string
+          published_at?: string | null
+          ui_order?: number
+          updated_at?: string | null
+          version?: number
+        }
+        Update: {
+          amount_cents?: number
+          badge_text?: string | null
+          created_at?: string | null
+          currency?: string
+          id?: string
+          is_visible?: boolean | null
+          label_sub?: string | null
+          mode?: string
+          period?: string
+          plan_id?: string
+          published_at?: string | null
+          ui_order?: number
+          updated_at?: string | null
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "billing_plan_prices_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "billing_plans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "billing_plan_prices_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "public_plans_v1"
+            referencedColumns: ["plan_id"]
+          },
+        ]
+      }
+      billing_plans: {
+        Row: {
+          category: string
+          created_at: string | null
+          description: string | null
+          features: Json | null
+          id: string
+          is_active: boolean | null
+          name: string
+          slug: string
+          updated_at: string | null
+        }
+        Insert: {
+          category?: string
+          created_at?: string | null
+          description?: string | null
+          features?: Json | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          slug: string
+          updated_at?: string | null
+        }
+        Update: {
+          category?: string
+          created_at?: string | null
+          description?: string | null
+          features?: Json | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          slug?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      billing_provider_map: {
+        Row: {
+          created_at: string | null
+          id: string
+          last_sync_at: string | null
+          meta: Json | null
+          plan_price_id: string
+          provider: string
+          provider_id: string | null
+          provider_mode: string
+          status: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          last_sync_at?: string | null
+          meta?: Json | null
+          plan_price_id: string
+          provider?: string
+          provider_id?: string | null
+          provider_mode: string
+          status?: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          last_sync_at?: string | null
+          meta?: Json | null
+          plan_price_id?: string
+          provider?: string
+          provider_id?: string | null
+          provider_mode?: string
+          status?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "billing_provider_map_plan_price_id_fkey"
+            columns: ["plan_price_id"]
+            isOneToOne: false
+            referencedRelation: "billing_plan_prices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "billing_provider_map_plan_price_id_fkey"
+            columns: ["plan_price_id"]
+            isOneToOne: false
+            referencedRelation: "public_plans_v1"
+            referencedColumns: ["price_id"]
+          },
+        ]
+      }
+      billing_settings: {
+        Row: {
+          created_at: string | null
+          key: string
+          updated_at: string | null
+          value: Json
+        }
+        Insert: {
+          created_at?: string | null
+          key: string
+          updated_at?: string | null
+          value: Json
+        }
+        Update: {
+          created_at?: string | null
+          key?: string
+          updated_at?: string | null
+          value?: Json
+        }
+        Relationships: []
+      }
       blog_categories: {
         Row: {
           created_at: string
@@ -455,6 +632,63 @@ export type Database = {
           zipcode?: string
         }
         Relationships: []
+      }
+      checkout_logs: {
+        Row: {
+          created_at: string | null
+          error_message: string | null
+          id: string
+          plan_price_id: string | null
+          provider: string
+          provider_id: string | null
+          provider_mode: string | null
+          request_payload: Json | null
+          response_payload: Json | null
+          status: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          plan_price_id?: string | null
+          provider?: string
+          provider_id?: string | null
+          provider_mode?: string | null
+          request_payload?: Json | null
+          response_payload?: Json | null
+          status?: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          plan_price_id?: string | null
+          provider?: string
+          provider_id?: string | null
+          provider_mode?: string | null
+          request_payload?: Json | null
+          response_payload?: Json | null
+          status?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "checkout_logs_plan_price_id_fkey"
+            columns: ["plan_price_id"]
+            isOneToOne: false
+            referencedRelation: "billing_plan_prices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "checkout_logs_plan_price_id_fkey"
+            columns: ["plan_price_id"]
+            isOneToOne: false
+            referencedRelation: "public_plans_v1"
+            referencedColumns: ["price_id"]
+          },
+        ]
       }
       companies: {
         Row: {
@@ -3953,6 +4187,25 @@ export type Database = {
           total_amount: number | null
           tracking_number: string | null
           user_id: string | null
+        }
+        Relationships: []
+      }
+      public_plans_v1: {
+        Row: {
+          amount_cents: number | null
+          badge_text: string | null
+          category: string | null
+          currency: string | null
+          description: string | null
+          features: Json | null
+          label_sub: string | null
+          mode: string | null
+          name: string | null
+          period: string | null
+          plan_id: string | null
+          price_id: string | null
+          slug: string | null
+          ui_order: number | null
         }
         Relationships: []
       }
