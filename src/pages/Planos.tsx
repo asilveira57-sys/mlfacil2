@@ -44,33 +44,32 @@ const Planos = () => {
     <div className="min-h-screen bg-background">
       <LandingHeader />
 
-      <main className="pt-20">
-        {/* Hero - Comfortable breathing room */}
-        <Section className="pb-4">
-          <div className="text-center max-w-3xl mx-auto">
-            <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-2">
-              <EditableText contentKey="planos.hero.title" as="span" />
-            </h1>
-            <p className="text-sm text-muted-foreground mb-3">
-              <EditableText contentKey="planos.hero.subtitle" as="span" />
-            </p>
-            
-            <div className="inline-flex items-center gap-1.5 bg-success/10 text-success px-3 py-1.5 rounded-full mb-3">
-              <Sparkles className="w-4 h-4" />
-              <span className="text-sm font-medium">
+      <main className="pt-16">
+        {/* Hero - Ultra compact, content-based height only */}
+        <div className="text-center max-w-3xl mx-auto px-4 pt-2 pb-2">
+          <h1 className="text-xl md:text-2xl font-bold text-foreground mb-1">
+            <EditableText contentKey="planos.hero.title" as="span" />
+          </h1>
+          <p className="text-xs text-muted-foreground mb-2">
+            <EditableText contentKey="planos.hero.subtitle" as="span" />
+          </p>
+          
+          <div className="flex flex-wrap items-center justify-center gap-2 mb-1">
+            <div className="inline-flex items-center gap-1 bg-success/10 text-success px-2 py-0.5 rounded-full">
+              <Sparkles className="w-3 h-3" />
+              <span className="text-xs font-medium">
                 <EditableText contentKey="planos.trial.description" as="span" />
               </span>
             </div>
-
-            <p className="text-[11px] text-muted-foreground/70 flex items-center justify-center gap-1.5">
-              <Info className="w-3.5 h-3.5" />
+            <span className="text-[10px] text-muted-foreground/70 flex items-center gap-1">
+              <Info className="w-3 h-3" />
               <EditableText contentKey="planos.scope.notice" as="span" />
-            </p>
+            </span>
           </div>
-        </Section>
+        </div>
 
-        {/* Volume Plans Section - Primary decision area */}
-        <Section variant="muted" className="py-5">
+        {/* Volume Plans Section - Immediately after Hero, no gap */}
+        <div className="bg-muted/30 pt-3 pb-4">
           <div className="text-center mb-3">
             <h2 className="text-lg md:text-xl font-bold text-foreground mb-1">
               <EditableText contentKey="planos.volume.title" as="span" />
@@ -144,11 +143,11 @@ const Planos = () => {
             </div>
           )}
 
-          {/* Volume Plans Grid - Tight spacing */}
+          {/* Volume Plans Grid - Minimal top margin */}
           {loading ? (
-            <div className="text-center py-4 text-muted-foreground text-xs">Carregando...</div>
+            <div className="text-center py-2 text-muted-foreground text-xs">Carregando...</div>
           ) : (
-            <div className="max-w-5xl mx-auto">
+            <div className="max-w-5xl mx-auto px-4">
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 mb-2">
                 {firstRowPlans.map((plan) => (
                   <VolumePlanCard 
@@ -180,122 +179,97 @@ const Planos = () => {
             </div>
           )}
 
-          {/* Enterprise - Direct continuation */}
+          {/* Enterprise - Direct continuation, no extra margin */}
           {customPlan && (
-            <div className="mt-3 max-w-2xl mx-auto">
+            <div className="mt-2 max-w-2xl mx-auto px-4">
               <Card className="bg-background border-border">
-                <CardContent className="flex flex-col sm:flex-row items-center justify-between gap-2 py-3 px-4">
+                <CardContent className="flex flex-col sm:flex-row items-center justify-between gap-2 py-2 px-3">
                   <div className="text-center sm:text-left">
-                    <span className="font-semibold text-foreground text-sm">
+                    <span className="font-semibold text-foreground text-xs">
                       <EditableText contentKey="planos.custom.title" as="span" />
                     </span>
-                    <span className="text-xs text-muted-foreground ml-2">
+                    <span className="text-[11px] text-muted-foreground ml-2">
                       <EditableText contentKey="planos.custom.description" as="span" />
                     </span>
                   </div>
-                  <Button variant="outline" className="gap-1.5" size="sm">
-                    <MessageSquare className="w-3.5 h-3.5" />
+                  <Button variant="outline" className="gap-1 h-7 text-xs" size="sm">
+                    <MessageSquare className="w-3 h-3" />
                     <EditableText contentKey="planos.custom.cta" as="span" />
                   </Button>
                 </CardContent>
               </Card>
             </div>
           )}
-        </Section>
 
-        {/* ZPL FULL Section - Alternative plan, after main plans */}
-        {zplPlan && (
-          <Section className="py-5">
-            <div className="max-w-3xl mx-auto">
-              <div className="text-center mb-3">
-                <div className="inline-flex items-center gap-2 mb-1">
-                  <Printer className="w-4 h-4 text-muted-foreground" />
-                  <h3 className="text-base font-semibold text-foreground">
-                    <EditableText contentKey="planos.zpl.title" as="span" />
-                  </h3>
-                </div>
-                <p className="text-xs text-muted-foreground">
+          {/* ZPL FULL - Same visual group, minimal separation */}
+          {zplPlan && (
+            <div className="mt-3 max-w-2xl mx-auto px-4">
+              <div className="flex items-center gap-2 mb-1.5">
+                <Printer className="w-3.5 h-3.5 text-muted-foreground" />
+                <h3 className="text-sm font-semibold text-foreground">
+                  <EditableText contentKey="planos.zpl.title" as="span" />
+                </h3>
+                <span className="text-[10px] text-muted-foreground">
                   <EditableText contentKey="planos.zpl.subtitle" as="span" />
-                </p>
+                </span>
               </div>
 
               <Card className="border-border">
-                <CardContent className="p-4">
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div>
-                      <h4 className="text-xs font-medium text-foreground mb-2 flex items-center gap-1.5">
-                        <Check className="w-3.5 h-3.5 text-primary" />
-                        O que inclui
-                      </h4>
-                      <ul className="space-y-1">
-                        {zplPlan.features.map((feature, i) => (
-                          <li key={i} className="flex items-start gap-1.5 text-[11px]">
-                            <Check className="w-3 h-3 text-success mt-0.5 flex-shrink-0" />
-                            <span className="text-muted-foreground">{feature}</span>
+                <CardContent className="p-3">
+                  <div className="flex flex-col md:flex-row gap-3">
+                    <div className="flex-1">
+                      <ul className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                        {zplPlan.features.slice(0, 4).map((feature, i) => (
+                          <li key={i} className="flex items-start gap-1 text-[10px]">
+                            <Check className="w-2.5 h-2.5 text-success mt-0.5 flex-shrink-0" />
+                            <span className="text-muted-foreground line-clamp-1">{feature}</span>
                           </li>
                         ))}
                       </ul>
-                      <div className="mt-2 bg-warning/10 border border-warning/20 rounded p-2 text-[10px] text-muted-foreground">
+                      <p className="mt-1.5 text-[9px] text-muted-foreground/70">
                         <EditableText contentKey="planos.zpl.not_included" as="span" />
-                      </div>
+                      </p>
                     </div>
 
-                    <div className="flex flex-col justify-center">
-                      <div className="space-y-1.5">
-                        {(['monthly', 'quarterly', 'semiannual'] as const).map(cycle => {
-                          const price = zplPlan.prices[cycle];
-                          if (!price) return null;
-                          const labels = { monthly: 'Mensal', quarterly: 'Trimestral', semiannual: 'Semestral' };
-                          const discounts = { monthly: null, quarterly: '-5%', semiannual: '-15%' };
-                          
-                          return (
-                            <div 
-                              key={cycle}
-                              className="flex items-center justify-between p-2 rounded-lg border border-border hover:border-primary/50 hover:bg-primary/5 transition-all cursor-pointer"
-                              onClick={() => navigate("/auth")}
-                            >
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium text-foreground text-xs">{labels[cycle]}</span>
-                                {discounts[cycle] && (
-                                  <Badge variant="secondary" className="text-[9px] bg-success/10 text-success border-success/20 px-1 py-0">
-                                    {discounts[cycle]}
-                                  </Badge>
-                                )}
-                              </div>
-                              <span className="font-bold text-foreground text-sm">
-                                {formatPrice(price.price_cents)}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <Button className="mt-3 w-full" size="sm" onClick={() => navigate("/auth")}>
-                        Começar trial de 14 dias
-                      </Button>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {(['monthly', 'quarterly', 'semiannual'] as const).map(cycle => {
+                        const price = zplPlan.prices[cycle];
+                        if (!price) return null;
+                        const labels = { monthly: 'Mensal', quarterly: 'Trim.', semiannual: 'Sem.' };
+                        
+                        return (
+                          <Button 
+                            key={cycle}
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-[10px] px-2"
+                            onClick={() => navigate("/auth")}
+                          >
+                            {labels[cycle]} {formatPrice(price.price_cents)}
+                          </Button>
+                        );
+                      })}
                     </div>
                   </div>
                 </CardContent>
               </Card>
             </div>
-          </Section>
-        )}
+          )}
+        </div>
 
-        {/* FAQ section - Tight */}
-        <div className="bg-muted/30 py-4">
-          <div className="max-w-2xl mx-auto px-4">
-            <div className="text-center mb-2">
-              <h2 className="text-base font-bold text-foreground">
-                <EditableText contentKey="planos.faq.title" as="span" />
-              </h2>
-            </div>
-
-            <div className="space-y-1.5">
+        {/* FAQ section - Compact */}
+        <div className="py-3 px-4">
+          <div className="max-w-2xl mx-auto">
+            <h2 className="text-sm font-bold text-foreground text-center mb-2">
+              <EditableText contentKey="planos.faq.title" as="span" />
+            </h2>
+            <div className="space-y-1">
               {[1, 2, 3, 4].map(i => (
-                <div key={i} className="bg-card border border-border rounded p-2">
+                <div key={i} className="bg-muted/40 border border-border rounded p-2">
                   <h4 className="font-medium text-foreground text-xs">
                     <EditableText contentKey={`planos.faq.item${i}.question`} as="span" />
                   </h4>
-                  <p className="text-muted-foreground text-[11px] mt-0.5">
+                  <p className="text-muted-foreground text-[10px] mt-0.5">
                     <EditableText contentKey={`planos.faq.item${i}.answer`} as="span" />
                   </p>
                 </div>
@@ -305,25 +279,25 @@ const Planos = () => {
         </div>
 
         {/* CTA - Minimal */}
-        <Section className="py-4">
-          <div className="text-center">
-            <h2 className="text-base font-bold text-foreground mb-1">
+        <div className="py-3 px-4 bg-muted/20">
+          <div className="text-center max-w-xl mx-auto">
+            <h2 className="text-sm font-bold text-foreground mb-0.5">
               <EditableText contentKey="planos.cta.title" as="span" />
             </h2>
-            <p className="text-muted-foreground mb-2 text-xs">
+            <p className="text-muted-foreground mb-2 text-[11px]">
               <EditableText contentKey="planos.cta.subtitle" as="span" />
             </p>
             <div className="flex items-center justify-center gap-2">
-              <Button size="sm" onClick={() => navigate("/auth")}>
+              <Button size="sm" className="h-7 text-xs" onClick={() => navigate("/auth")}>
                 <EditableText contentKey="planos.cta.btn_primary" as="span" />
               </Button>
-              <Button size="sm" variant="outline" onClick={() => navigate("/")} className="gap-1">
+              <Button size="sm" variant="outline" onClick={() => navigate("/")} className="gap-1 h-7 text-xs">
                 <ArrowLeft className="w-3 h-3" />
                 <EditableText contentKey="planos.cta.btn_secondary" as="span" />
               </Button>
             </div>
           </div>
-        </Section>
+        </div>
       </main>
 
       <LandingFooter />
