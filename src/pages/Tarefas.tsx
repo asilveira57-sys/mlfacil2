@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { Plus, List, LayoutGrid, Bell, Settings } from 'lucide-react';
-import { useWorkspace } from '@/hooks/useWorkspace';
+import { Plus, List, LayoutGrid, Bell, Settings, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { useUserPreferences } from '@/hooks/useUserPreferences';
 import { useTasks } from '@/hooks/useTasks';
 import { useNotifications, useSystemEvents } from '@/hooks/useNotifications';
+import { useAutomationRules } from '@/hooks/useAutomationRules';
 import { TaskFilters } from '@/components/tasks/TaskFilters';
 import { TaskList } from '@/components/tasks/TaskList';
 import { TaskBoard } from '@/components/tasks/TaskBoard';
@@ -13,22 +14,34 @@ import { TaskDrawer } from '@/components/tasks/TaskDrawer';
 import { TaskBulkActions } from '@/components/tasks/TaskBulkActions';
 import { NotificationList } from '@/components/tasks/NotificationList';
 import { EventList } from '@/components/tasks/EventList';
-import { WorkspaceOnboarding } from '@/components/tasks/WorkspaceOnboarding';
+import { TasksOnboarding } from '@/components/tasks/TasksOnboarding';
+import { TasksEmptyState } from '@/components/tasks/TasksEmptyState';
+import { WorkspaceSwitcher } from '@/components/tasks/WorkspaceSwitcher';
+import { AutomationRuleEditor } from '@/components/tasks/AutomationRuleEditor';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { useAutomationRules } from '@/hooks/useAutomationRules';
-import { AutomationRuleEditor } from '@/components/tasks/AutomationRuleEditor';
+import { useWorkspace } from '@/hooks/useWorkspace';
 import type { Task, TaskStatus, TaskPriority, AutomationRule, WorkspaceAccount, SystemEvent } from '@/types/tasks';
 
 export default function Tarefas() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { currentWorkspace, members, accounts, loading: workspaceLoading, createWorkspace } = useWorkspace();
   
+  const { 
+    activeWorkspace, 
+    workspaces, 
+    tasksEnabled, 
+    loading: prefsLoading, 
+    enableTasks, 
+    switchWorkspace,
+    refetch: refetchPrefs
+  } = useUserPreferences();
+
+  const { members, accounts } = useWorkspace();
+
   const {
     tasks,
     loading: tasksLoading,
@@ -40,7 +53,7 @@ export default function Tarefas() {
     bulkUpdateStatus,
     bulkUpdateAssignee,
     bulkUpdatePriority,
-  } = useTasks(currentWorkspace?.id || null);
+  } = useTasks(activeWorkspace?.id || null);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
@@ -96,7 +109,20 @@ export default function Tarefas() {
     setSelectedTaskIds([]);
   };
 
-  if (workspaceLoading) {
+  const handleSwitchWorkspace = async (workspaceId: string) => {
+    await switchWorkspace(workspaceId);
+  };
+
+  const handleEnableTasks = async (): Promise<boolean> => {
+    const success = await enableTasks();
+    if (success) {
+      await refetchPrefs();
+    }
+    return success;
+  };
+
+  // Loading state
+  if (prefsLoading) {
     return (
       <div className="container mx-auto p-6 space-y-6">
         <Skeleton className="h-10 w-64" />
@@ -106,13 +132,22 @@ export default function Tarefas() {
     );
   }
 
-  if (!currentWorkspace) {
+  // Onboarding - tasks not enabled
+  if (!tasksEnabled) {
+    return <TasksOnboarding onEnable={handleEnableTasks} />;
+  }
+
+  // No workspace (shouldn't happen after ensure_workspace, but fallback)
+  if (!activeWorkspace) {
     return (
-      <WorkspaceOnboarding
-        onCreateWorkspace={async (name) => {
-          await createWorkspace(name);
-        }}
-      />
+      <div className="container mx-auto p-6">
+        <div className="text-center py-12">
+          <h2 className="text-xl font-semibold mb-2">Erro ao carregar workspace</h2>
+          <p className="text-muted-foreground">
+            Tente recarregar a página.
+          </p>
+        </div>
+      </div>
     );
   }
 
@@ -120,9 +155,15 @@ export default function Tarefas() {
     <div className="container mx-auto p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Tarefas</h1>
-          <p className="text-muted-foreground">{currentWorkspace.name}</p>
+        <div className="flex items-center gap-4">
+          <div>
+            <h1 className="text-2xl font-bold">Tarefas</h1>
+          </div>
+          <WorkspaceSwitcher
+            currentWorkspace={activeWorkspace}
+            workspaces={workspaces}
+            onSwitch={handleSwitchWorkspace}
+          />
         </div>
         <Button onClick={() => setDrawerOpen(true)}>
           <Plus className="h-4 w-4 mr-2" />
@@ -161,14 +202,18 @@ export default function Tarefas() {
             members={members}
             accounts={accounts}
           />
-          <TaskList
-            tasks={tasks}
-            loading={tasksLoading}
-            selectedIds={selectedTaskIds}
-            onSelectChange={setSelectedTaskIds}
-            onStatusChange={handleStatusChange}
-            onDelete={deleteTask}
-          />
+          {!tasksLoading && tasks.length === 0 ? (
+            <TasksEmptyState onCreateTask={() => setDrawerOpen(true)} />
+          ) : (
+            <TaskList
+              tasks={tasks}
+              loading={tasksLoading}
+              selectedIds={selectedTaskIds}
+              onSelectChange={setSelectedTaskIds}
+              onStatusChange={handleStatusChange}
+              onDelete={deleteTask}
+            />
+          )}
           {selectedTaskIds.length > 0 && (
             <TaskBulkActions
               selectedCount={selectedTaskIds.length}
@@ -190,20 +235,24 @@ export default function Tarefas() {
             members={members}
             accounts={accounts}
           />
-          <TaskBoard
-            tasks={tasks}
-            loading={tasksLoading}
-            onStatusChange={handleStatusChange}
-          />
+          {!tasksLoading && tasks.length === 0 ? (
+            <TasksEmptyState onCreateTask={() => setDrawerOpen(true)} />
+          ) : (
+            <TaskBoard
+              tasks={tasks}
+              loading={tasksLoading}
+              onStatusChange={handleStatusChange}
+            />
+          )}
         </>
       )}
 
       {activeTab === 'inbox' && (
-        <InboxContent workspaceId={currentWorkspace.id} />
+        <InboxContent workspaceId={activeWorkspace.id} />
       )}
 
       {activeTab === 'regras' && (
-        <RulesContent workspaceId={currentWorkspace.id} accounts={accounts} />
+        <RulesContent workspaceId={activeWorkspace.id} accounts={accounts} />
       )}
 
       {/* Create/Edit Drawer */}
@@ -225,7 +274,6 @@ function InboxContent({ workspaceId }: { workspaceId: string }) {
   const { events, loading: eventsLoading } = useSystemEvents(workspaceId);
 
   const handleCreateTaskFromEvent = (event: SystemEvent) => {
-    // TODO: Open drawer with pre-filled data from event
     console.log('Create task from event:', event);
   };
 

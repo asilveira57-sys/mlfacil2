@@ -4233,6 +4233,38 @@ export type Database = {
         }
         Relationships: []
       }
+      user_preferences: {
+        Row: {
+          active_workspace_id: string | null
+          created_at: string
+          tasks_enabled: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          active_workspace_id?: string | null
+          created_at?: string
+          tasks_enabled?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          active_workspace_id?: string | null
+          created_at?: string
+          tasks_enabled?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_preferences_active_workspace_id_fkey"
+            columns: ["active_workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           created_at: string
@@ -4552,6 +4584,7 @@ export type Database = {
           total_pending: number
         }[]
       }
+      ensure_workspace: { Args: { p_user_id: string }; Returns: Json }
       generate_blog_slug: { Args: { title: string }; Returns: string }
       generate_category_slug: { Args: { name: string }; Returns: string }
       get_orders_needing_cost_sync: {
