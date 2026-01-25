@@ -44,45 +44,37 @@ const Planos = () => {
     <div className="min-h-screen bg-background">
       <LandingHeader />
 
-      <main className="pt-20">
-        {/* Hero - Ultra Compact */}
-        <Section className="pb-2">
-          <div className="text-center max-w-3xl mx-auto">
-            <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-1">
-              <EditableText contentKey="planos.hero.title" as="span" />
-            </h1>
-            <p className="text-sm text-muted-foreground mb-2">
-              <EditableText contentKey="planos.hero.subtitle" as="span" />
-            </p>
-            
-            {/* Trial Badge + Scope Notice inline */}
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-2 mb-0">
-              <div className="inline-flex items-center gap-1.5 bg-success/10 text-success px-2.5 py-1 rounded-full">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span className="text-xs font-medium">
-                  <EditableText contentKey="planos.trial.description" as="span" />
-                </span>
-              </div>
-              <div className="text-[11px] text-muted-foreground/80 flex items-center gap-1">
-                <Info className="w-3 h-3 flex-shrink-0" />
-                <EditableText contentKey="planos.scope.notice" as="span" />
-              </div>
+      <main className="pt-16">
+        {/* Hero - Minimal header */}
+        <div className="text-center max-w-3xl mx-auto px-4 pb-3">
+          <h1 className="text-xl md:text-2xl font-bold text-foreground mb-0.5">
+            <EditableText contentKey="planos.hero.title" as="span" />
+          </h1>
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span><EditableText contentKey="planos.hero.subtitle" as="span" /></span>
+            <div className="inline-flex items-center gap-1 bg-success/10 text-success px-2 py-0.5 rounded-full font-medium">
+              <Sparkles className="w-3 h-3" />
+              <EditableText contentKey="planos.trial.description" as="span" />
             </div>
           </div>
-        </Section>
+          <p className="text-[10px] text-muted-foreground/70 mt-1 flex items-center justify-center gap-1">
+            <Info className="w-3 h-3" />
+            <EditableText contentKey="planos.scope.notice" as="span" />
+          </p>
+        </div>
 
-        {/* ZPL FULL Section - Minimal spacing, visual continuity */}
+        {/* ZPL FULL Section - Flows from Hero */}
         {zplPlan && (
-          <div className="bg-muted/30 pt-3 pb-4">
+          <div className="bg-gradient-to-b from-background to-muted/40 pt-1 pb-3 border-t border-border/30">
             <div className="max-w-4xl mx-auto px-4">
-              <div className="flex items-center justify-center gap-2 mb-2">
-                <Badge className="bg-primary/10 text-primary border-primary/20 px-2 py-0.5 text-[11px]">
-                  <Star className="w-2.5 h-2.5 mr-1 fill-primary" />
-                  Só precisa imprimir etiquetas?
+              <div className="flex items-center justify-center gap-2 mb-1.5">
+                <Badge className="bg-primary/10 text-primary border-primary/20 px-2 py-0 text-[10px]">
+                  <Star className="w-2.5 h-2.5 mr-0.5 fill-primary" />
+                  Só etiquetas?
                 </Badge>
-                <div className="flex items-center gap-1.5">
-                  <Printer className="w-4 h-4 text-primary" />
-                  <span className="text-base font-semibold text-foreground">
+                <div className="flex items-center gap-1">
+                  <Printer className="w-3.5 h-3.5 text-primary" />
+                  <span className="text-sm font-semibold text-foreground">
                     <EditableText contentKey="planos.zpl.title" as="span" />
                   </span>
                 </div>
@@ -90,53 +82,41 @@ const Planos = () => {
 
               <Card className="overflow-hidden border border-primary/20 shadow-sm">
                 <div className="grid md:grid-cols-2">
-                  {/* Features */}
-                  <div className="p-3 bg-gradient-to-br from-primary/5 to-primary/10">
-                    <ul className="space-y-1 mb-2">
+                  <div className="p-2.5 bg-gradient-to-br from-primary/5 to-primary/10">
+                    <ul className="grid grid-cols-2 gap-x-2 gap-y-0.5 mb-1.5">
                       {zplPlan.features.slice(0, 4).map((feature, i) => (
-                        <li key={i} className="flex items-start gap-1.5 text-[11px]">
-                          <Check className="w-3 h-3 text-success mt-0.5 flex-shrink-0" />
-                          <span className="text-foreground">{feature}</span>
+                        <li key={i} className="flex items-start gap-1 text-[10px]">
+                          <Check className="w-2.5 h-2.5 text-success mt-0.5 flex-shrink-0" />
+                          <span className="text-foreground line-clamp-1">{feature}</span>
                         </li>
                       ))}
                     </ul>
-                    <div className="bg-warning/10 border border-warning/20 rounded p-1.5 text-[10px] text-muted-foreground">
+                    <div className="bg-warning/10 border border-warning/20 rounded p-1 text-[9px] text-muted-foreground">
                       <EditableText contentKey="planos.zpl.not_included" as="span" />
                     </div>
                   </div>
 
-                  {/* Prices */}
-                  <div className="p-3 flex flex-col justify-center bg-card">
-                    <div className="space-y-1">
+                  <div className="p-2.5 flex flex-col justify-center bg-card">
+                    <div className="flex gap-1.5 mb-1.5">
                       {(['monthly', 'quarterly', 'semiannual'] as const).map(cycle => {
                         const price = zplPlan.prices[cycle];
                         if (!price) return null;
-                        const cycleLabels = { monthly: 'Mensal', quarterly: 'Trimestral', semiannual: 'Semestral' };
-                        const discounts = { monthly: null, quarterly: '-5%', semiannual: '-15%' };
+                        const labels = { monthly: 'Mensal', quarterly: 'Tri -5%', semiannual: 'Sem -15%' };
                         
                         return (
-                          <div 
+                          <button 
                             key={cycle}
-                            className="flex items-center justify-between p-1.5 rounded border border-border hover:border-primary/50 hover:bg-primary/5 transition-all cursor-pointer group"
+                            className="flex-1 p-1.5 rounded border border-border hover:border-primary/50 hover:bg-primary/5 transition-all text-center"
                             onClick={() => navigate("/auth")}
                           >
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-medium text-foreground text-xs">{cycleLabels[cycle]}</span>
-                              {discounts[cycle] && (
-                                <Badge variant="secondary" className="text-[9px] bg-success/10 text-success border-success/20 px-1 py-0">
-                                  {discounts[cycle]}
-                                </Badge>
-                              )}
-                            </div>
-                            <span className="font-bold text-foreground group-hover:text-primary text-xs">
-                              {formatPrice(price.price_cents)}
-                            </span>
-                          </div>
+                            <div className="text-[9px] text-muted-foreground">{labels[cycle]}</div>
+                            <div className="font-bold text-foreground text-xs">{formatPrice(price.price_cents)}</div>
+                          </button>
                         );
                       })}
                     </div>
-                    <Button className="mt-2 w-full h-7 text-xs" size="sm" onClick={() => navigate("/auth")}>
-                      Começar trial de 14 dias
+                    <Button className="w-full h-6 text-[10px]" size="sm" onClick={() => navigate("/auth")}>
+                      Começar trial grátis
                     </Button>
                   </div>
                 </div>
