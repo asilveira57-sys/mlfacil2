@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LandingHeader, LandingFooter, Section } from "@/components/landing";
 import { useSiteContent } from "@/hooks/useSiteContent";
 import { usePlans, formatPrice, formatPricePerMonth } from "@/hooks/usePlans";
@@ -11,14 +11,12 @@ import { EditableText } from "@/components/admin/EditableText";
 import { 
   ArrowLeft, 
   Check, 
-  Clock, 
   Info, 
-  Package, 
   Printer, 
   ShoppingCart, 
   Sparkles,
   MessageSquare,
-  Zap
+  Star
 } from "lucide-react";
 
 type BillingCycle = 'monthly' | 'quarterly' | 'semiannual';
@@ -29,14 +27,6 @@ const Planos = () => {
   const { volumePlans, zplPlan, customPlan, loading } = usePlans();
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('monthly');
 
-  const getCycleLabel = (cycle: BillingCycle) => {
-    switch (cycle) {
-      case 'monthly': return getText('planos.cycle.monthly');
-      case 'quarterly': return getText('planos.cycle.quarterly');
-      case 'semiannual': return getText('planos.cycle.semiannual');
-    }
-  };
-
   const getCycleDescription = (cycle: BillingCycle) => {
     switch (cycle) {
       case 'monthly': return getText('planos.cycle.monthly.description');
@@ -44,6 +34,10 @@ const Planos = () => {
       case 'semiannual': return getText('planos.cycle.semiannual.description');
     }
   };
+
+  // Split volume plans into two rows: first 3, then remaining
+  const firstRowPlans = volumePlans.slice(0, 3);
+  const secondRowPlans = volumePlans.slice(3);
 
   return (
     <div className="min-h-screen bg-background">
@@ -78,8 +72,118 @@ const Planos = () => {
           </div>
         </Section>
 
+        {/* ZPL FULL Section - NOW FIRST AND HIGHLIGHTED */}
+        {zplPlan && (
+          <Section variant="muted">
+            <div className="max-w-4xl mx-auto">
+              <div className="text-center mb-6">
+                <Badge className="mb-4 bg-primary/10 text-primary border-primary/20 px-4 py-1.5">
+                  <Star className="w-3.5 h-3.5 mr-1.5 fill-primary" />
+                  Só precisa imprimir etiquetas? Este plano é pra você!
+                </Badge>
+                <div className="inline-flex items-center gap-2 mb-2">
+                  <Printer className="w-6 h-6 text-primary" />
+                  <h2 className="text-2xl md:text-3xl font-bold text-foreground">
+                    <EditableText contentKey="planos.zpl.title" as="span" />
+                  </h2>
+                </div>
+                <p className="text-muted-foreground max-w-2xl mx-auto">
+                  <EditableText contentKey="planos.zpl.subtitle" as="span" />
+                </p>
+              </div>
+
+              <Card className="overflow-hidden border-2 border-primary/30 shadow-lg">
+                <div className="grid md:grid-cols-2">
+                  {/* Features */}
+                  <div className="p-6 bg-gradient-to-br from-primary/5 to-primary/10">
+                    <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
+                      <Check className="w-4 h-4 text-primary" />
+                      O que inclui
+                    </h3>
+                    <ul className="space-y-2.5 mb-6">
+                      {zplPlan.features.map((feature, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm">
+                          <Check className="w-4 h-4 text-success mt-0.5 flex-shrink-0" />
+                          <span className="text-foreground">{feature}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    
+                    <div className="bg-warning/10 border border-warning/20 rounded-lg p-3 text-xs text-muted-foreground">
+                      <EditableText contentKey="planos.zpl.not_included" as="span" />
+                    </div>
+                  </div>
+
+                  {/* Prices */}
+                  <div className="p-6 flex flex-col justify-center bg-card">
+                    <h3 className="font-semibold text-foreground mb-4">
+                      Escolha o período
+                    </h3>
+                    <div className="space-y-3">
+                      {(['monthly', 'quarterly', 'semiannual'] as const).map(cycle => {
+                        const price = zplPlan.prices[cycle];
+                        if (!price) return null;
+                        
+                        const cycleLabels = {
+                          monthly: 'Mensal',
+                          quarterly: 'Trimestral',
+                          semiannual: 'Semestral'
+                        };
+                        
+                        const discounts = {
+                          monthly: null,
+                          quarterly: '-5%',
+                          semiannual: '-15%'
+                        };
+                        
+                        return (
+                          <div 
+                            key={cycle}
+                            className="flex items-center justify-between p-3 rounded-lg border border-border hover:border-primary/50 hover:bg-primary/5 transition-all cursor-pointer group"
+                            onClick={() => navigate("/auth")}
+                          >
+                            <div className="flex items-center gap-2">
+                              <div>
+                                <div className="font-medium text-foreground flex items-center gap-2">
+                                  {cycleLabels[cycle]}
+                                  {discounts[cycle] && (
+                                    <Badge variant="secondary" className="text-xs bg-success/10 text-success border-success/20">
+                                      {discounts[cycle]}
+                                    </Badge>
+                                  )}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  {price.duration_days} dias
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="font-bold text-foreground group-hover:text-primary transition-colors">
+                                {formatPrice(price.price_cents)}
+                              </div>
+                              {cycle !== 'monthly' && (
+                                <div className="text-xs text-muted-foreground">
+                                  {formatPricePerMonth(price.price_cents, price.duration_days)}/mês
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    
+                    <Button className="mt-6 w-full" size="lg" onClick={() => navigate("/auth")}>
+                      Começar trial de 14 dias
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            </div>
+          </Section>
+        )}
+
         {/* Volume Plans Section */}
-        <Section variant="muted">
+        <Section>
           <div className="text-center mb-8">
             <h2 className="text-2xl md:text-3xl font-bold text-foreground mb-3">
               <EditableText contentKey="planos.volume.title" as="span" />
@@ -93,19 +197,19 @@ const Planos = () => {
           </div>
 
           {/* Billing Cycle Tabs */}
-          <div className="flex justify-center mb-8">
+          <div className="flex justify-center mb-6">
             <Tabs value={billingCycle} onValueChange={(v) => setBillingCycle(v as BillingCycle)}>
               <TabsList className="grid grid-cols-3 w-auto">
-                <TabsTrigger value="monthly" className="px-6">
-                  {getText('planos.cycle.monthly')}
+                <TabsTrigger value="monthly" className="px-4 sm:px-6">
+                  Mensal
                 </TabsTrigger>
-                <TabsTrigger value="quarterly" className="px-6">
-                  {getText('planos.cycle.quarterly')}
-                  <Badge variant="secondary" className="ml-2 text-xs">-5%</Badge>
+                <TabsTrigger value="quarterly" className="px-4 sm:px-6">
+                  Trimestral
+                  <Badge variant="secondary" className="ml-1.5 text-xs hidden sm:inline-flex">-5%</Badge>
                 </TabsTrigger>
-                <TabsTrigger value="semiannual" className="px-6">
-                  {getText('planos.cycle.semiannual')}
-                  <Badge variant="secondary" className="ml-2 text-xs">-15%</Badge>
+                <TabsTrigger value="semiannual" className="px-4 sm:px-6">
+                  Semestral
+                  <Badge variant="secondary" className="ml-1.5 text-xs hidden sm:inline-flex">-15%</Badge>
                 </TabsTrigger>
               </TabsList>
             </Tabs>
@@ -116,81 +220,44 @@ const Planos = () => {
             {getCycleDescription(billingCycle)}
           </p>
 
-          {/* Volume Plans Grid */}
+          {/* Volume Plans Grid - 3 + 2 layout */}
           {loading ? (
             <div className="text-center py-12 text-muted-foreground">Carregando planos...</div>
           ) : (
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 max-w-7xl mx-auto">
-              {volumePlans.map((plan, index) => {
-                const price = plan.prices[billingCycle];
-                const isPopular = plan.code === 'volume_300' || plan.code === 'volume_700';
-                
-                return (
-                  <Card 
+            <div className="max-w-5xl mx-auto">
+              {/* First row: 3 cards */}
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+                {firstRowPlans.map((plan) => (
+                  <VolumePlanCard 
                     key={plan.id} 
-                    className={`relative ${isPopular ? 'border-primary shadow-lg ring-2 ring-primary/20' : ''}`}
-                  >
-                    {isPopular && (
-                      <Badge className="absolute -top-3 left-1/2 -translate-x-1/2 bg-primary">
-                        Popular
-                      </Badge>
-                    )}
-                    <CardHeader className="pb-2">
-                      <div className="flex items-center gap-2 mb-1">
-                        <ShoppingCart className="w-4 h-4 text-primary" />
-                        <CardTitle className="text-base">{plan.name}</CardTitle>
-                      </div>
-                      <CardDescription className="text-xs line-clamp-2">
-                        {plan.description}
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="mb-4">
-                        {price ? (
-                          <>
-                            <div className="text-2xl font-bold text-foreground">
-                              {formatPrice(price.price_cents)}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {billingCycle !== 'monthly' && (
-                                <span>{formatPricePerMonth(price.price_cents, price.duration_days)}/mês</span>
-                              )}
-                              {billingCycle === 'monthly' && <span>por mês</span>}
-                            </div>
-                          </>
-                        ) : (
-                          <div className="text-lg text-muted-foreground">-</div>
-                        )}
-                      </div>
-                      
-                      <ul className="space-y-1.5 mb-4 text-xs">
-                        {plan.features.slice(0, 4).map((feature, i) => (
-                          <li key={i} className="flex items-start gap-1.5">
-                            <Check className="w-3 h-3 text-success mt-0.5 flex-shrink-0" />
-                            <span className="text-muted-foreground">{feature}</span>
-                          </li>
-                        ))}
-                      </ul>
-                      
-                      <Button 
-                        className="w-full" 
-                        size="sm"
-                        variant={isPopular ? "default" : "outline"}
-                        onClick={() => navigate("/auth")}
-                      >
-                        Começar trial
-                      </Button>
-                    </CardContent>
-                  </Card>
-                );
-              })}
+                    plan={plan} 
+                    billingCycle={billingCycle}
+                    onSelect={() => navigate("/auth")}
+                  />
+                ))}
+              </div>
+              
+              {/* Second row: 2 cards centered */}
+              {secondRowPlans.length > 0 && (
+                <div className="flex justify-center gap-4 flex-wrap">
+                  {secondRowPlans.map((plan) => (
+                    <div key={plan.id} className="w-full sm:w-[calc(50%-0.5rem)] lg:w-[calc(33.333%-0.5rem)]">
+                      <VolumePlanCard 
+                        plan={plan} 
+                        billingCycle={billingCycle}
+                        onSelect={() => navigate("/auth")}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
           {/* Custom Plan */}
           {customPlan && (
             <div className="mt-8 max-w-2xl mx-auto">
-              <Card className="bg-gradient-to-r from-primary/5 to-primary/10 border-primary/20">
+              <Card className="bg-gradient-to-r from-muted/50 to-muted/30 border-border">
                 <CardContent className="flex flex-col md:flex-row items-center justify-between gap-4 py-6">
                   <div className="text-center md:text-left">
                     <h3 className="font-semibold text-foreground mb-1">
@@ -209,94 +276,6 @@ const Planos = () => {
             </div>
           )}
         </Section>
-
-        {/* ZPL FULL Section */}
-        {zplPlan && (
-          <Section>
-            <div className="max-w-4xl mx-auto">
-              <div className="text-center mb-8">
-                <div className="inline-flex items-center gap-2 mb-4">
-                  <Printer className="w-6 h-6 text-primary" />
-                  <h2 className="text-2xl md:text-3xl font-bold text-foreground">
-                    <EditableText contentKey="planos.zpl.title" as="span" />
-                  </h2>
-                </div>
-                <p className="text-muted-foreground max-w-2xl mx-auto">
-                  <EditableText contentKey="planos.zpl.subtitle" as="span" />
-                </p>
-              </div>
-
-              <Card className="overflow-hidden">
-                <div className="grid md:grid-cols-2">
-                  {/* Features */}
-                  <div className="p-6 bg-muted/30">
-                    <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
-                      <Package className="w-4 h-4" />
-                      O que inclui
-                    </h3>
-                    <ul className="space-y-2 mb-6">
-                      {zplPlan.features.map((feature, i) => (
-                        <li key={i} className="flex items-start gap-2 text-sm">
-                          <Check className="w-4 h-4 text-success mt-0.5 flex-shrink-0" />
-                          <span className="text-muted-foreground">{feature}</span>
-                        </li>
-                      ))}
-                    </ul>
-                    
-                    <div className="bg-warning/10 border border-warning/20 rounded-lg p-3 text-xs text-warning-foreground">
-                      <EditableText contentKey="planos.zpl.not_included" as="span" />
-                    </div>
-                  </div>
-
-                  {/* Prices */}
-                  <div className="p-6 flex flex-col justify-center">
-                    <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
-                      <Zap className="w-4 h-4" />
-                      Escolha o período
-                    </h3>
-                    <div className="space-y-3">
-                      {(['monthly', 'quarterly', 'semiannual'] as const).map(cycle => {
-                        const price = zplPlan.prices[cycle];
-                        if (!price) return null;
-                        
-                        return (
-                          <div 
-                            key={cycle}
-                            className="flex items-center justify-between p-3 rounded-lg border border-border hover:border-primary/50 transition-colors cursor-pointer"
-                            onClick={() => navigate("/auth")}
-                          >
-                            <div>
-                              <div className="font-medium text-foreground">
-                                {getCycleLabel(cycle)}
-                              </div>
-                              <div className="text-xs text-muted-foreground">
-                                {price.duration_days} dias
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <div className="font-bold text-foreground">
-                                {formatPrice(price.price_cents)}
-                              </div>
-                              {cycle !== 'monthly' && (
-                                <div className="text-xs text-muted-foreground">
-                                  {formatPricePerMonth(price.price_cents, price.duration_days)}/mês
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    
-                    <Button className="mt-6 w-full" onClick={() => navigate("/auth")}>
-                      Começar trial de 14 dias
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            </div>
-          </Section>
-        )}
 
         {/* FAQ section */}
         <Section variant="muted">
@@ -354,5 +333,73 @@ const Planos = () => {
     </div>
   );
 };
+
+// Extracted component for volume plan cards
+interface VolumePlanCardProps {
+  plan: ReturnType<typeof usePlans>['volumePlans'][number];
+  billingCycle: BillingCycle;
+  onSelect: () => void;
+}
+
+function VolumePlanCard({ plan, billingCycle, onSelect }: VolumePlanCardProps) {
+  const price = plan.prices[billingCycle];
+  const isPopular = plan.code === 'volume_300' || plan.code === 'volume_700';
+  
+  return (
+    <Card className={`relative h-full ${isPopular ? 'border-primary shadow-lg ring-2 ring-primary/20' : ''}`}>
+      {isPopular && (
+        <Badge className="absolute -top-3 left-1/2 -translate-x-1/2 bg-primary">
+          Popular
+        </Badge>
+      )}
+      <CardHeader className="pb-2">
+        <div className="flex items-center gap-2 mb-1">
+          <ShoppingCart className="w-4 h-4 text-primary" />
+          <CardTitle className="text-base">{plan.name}</CardTitle>
+        </div>
+        <CardDescription className="text-xs line-clamp-2">
+          {plan.description}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="mb-4">
+          {price ? (
+            <>
+              <div className="text-2xl font-bold text-foreground">
+                {formatPrice(price.price_cents)}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {billingCycle !== 'monthly' && (
+                  <span>{formatPricePerMonth(price.price_cents, price.duration_days)}/mês</span>
+                )}
+                {billingCycle === 'monthly' && <span>por mês</span>}
+              </div>
+            </>
+          ) : (
+            <div className="text-lg text-muted-foreground">-</div>
+          )}
+        </div>
+        
+        <ul className="space-y-1.5 mb-4 text-xs">
+          {plan.features.slice(0, 4).map((feature, i) => (
+            <li key={i} className="flex items-start gap-1.5">
+              <Check className="w-3 h-3 text-success mt-0.5 flex-shrink-0" />
+              <span className="text-muted-foreground">{feature}</span>
+            </li>
+          ))}
+        </ul>
+        
+        <Button 
+          className="w-full" 
+          size="sm"
+          variant={isPopular ? "default" : "outline"}
+          onClick={onSelect}
+        >
+          Começar trial
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default Planos;
