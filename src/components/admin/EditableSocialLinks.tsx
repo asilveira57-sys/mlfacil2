@@ -29,20 +29,25 @@ interface EditableSocialLinksProps {
 }
 
 export function EditableSocialLinks({ className }: EditableSocialLinksProps) {
-  const { getText, refresh } = useSiteContentContext();
+  const { getText, refresh, content } = useSiteContentContext();
   const { isAdmin, loading: roleLoading } = useUserRole();
   const [open, setOpen] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [initialized, setInitialized] = useState(false);
 
+  // Initialize values only once when dialog opens or content changes
   useEffect(() => {
+    if (initialized) return;
+    
     const initial: Record<string, string> = {};
     socialLinks.forEach(link => {
       const val = getText(link.key);
       initial[link.key] = val.startsWith('home.') ? '' : val;
     });
     setValues(initial);
-  }, [getText]);
+    setInitialized(true);
+  }, [content, initialized, getText]);
 
   const handleSave = async () => {
     setSaving(true);
