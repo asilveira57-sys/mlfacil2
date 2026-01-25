@@ -259,7 +259,7 @@ const Planos = () => {
                       <span className="text-[10px] text-muted-foreground text-center mb-1">
                         Pagamento único por período
                       </span>
-                      <ZplPriceButtons zplPlan={zplPlan} onSelect={() => navigate("/auth")} />
+                      <ZplPriceSection zplPlan={zplPlan} onSelect={() => navigate("/auth")} />
                     </div>
                   </div>
                 </CardContent>
@@ -402,46 +402,132 @@ function VolumePlanCard({ plan, billingCycle, paymentMode, getAnnualSubscription
   );
 }
 
-// ZPL Price Buttons - Prepaid only, no subscription
-interface ZplPriceButtonsProps {
+// ZPL Price Section - Supports both Prepaid and Subscription modes
+type ZplPaymentMode = 'prepaid' | 'subscription';
+
+interface ZplPriceSectionProps {
   zplPlan: ReturnType<typeof usePlans>['zplPlan'];
   onSelect: () => void;
 }
 
-function ZplPriceButtons({ zplPlan, onSelect }: ZplPriceButtonsProps) {
+function ZplPriceSection({ zplPlan, onSelect }: ZplPriceSectionProps) {
+  const [zplMode, setZplMode] = useState<ZplPaymentMode>('prepaid');
   const [selectedCycle, setSelectedCycle] = useState<'monthly' | 'quarterly' | 'semiannual'>('monthly');
   
   if (!zplPlan) return null;
   
-  const cycles = [
+  const monthlyPrice = zplPlan.prices['monthly']?.price_cents || 2490; // R$ 24,90
+  
+  // Annual subscription: pay 10 months, use 12 (2 free months)
+  const annualTotalPrice = monthlyPrice * 10;
+  const monthlyInstallment = Math.round(annualTotalPrice / 12);
+  
+  const prepaidCycles = [
     { key: 'monthly' as const, label: 'Mensal' },
     { key: 'quarterly' as const, label: 'Trimestral' },
     { key: 'semiannual' as const, label: 'Semestral' },
   ];
   
   return (
-    <div className="flex flex-col gap-2">
-      {cycles.map(({ key, label }) => {
-        const price = zplPlan.prices[key];
-        if (!price) return null;
-        const isSelected = selectedCycle === key;
-        
-        return (
+    <div className="flex flex-col gap-4">
+      {/* ZPL Mode Toggle */}
+      <div className="inline-flex rounded-lg border border-border p-0.5 bg-muted/30 self-center">
+        <button
+          onClick={() => setZplMode('prepaid')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium transition-all ${
+            zplMode === 'prepaid'
+              ? 'bg-primary text-primary-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+          }`}
+        >
+          <CreditCard className="w-3 h-3" />
+          Pagamento Avulso
+        </button>
+        <button
+          onClick={() => setZplMode('subscription')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium transition-all ${
+            zplMode === 'subscription'
+              ? 'bg-primary text-primary-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+          }`}
+        >
+          <RefreshCw className="w-3 h-3" />
+          Assinatura
+        </button>
+      </div>
+
+      {zplMode === 'prepaid' ? (
+        /* Prepaid Mode - One-time payment per period */
+        <div className="flex flex-col gap-2">
+          <span className="text-[10px] text-muted-foreground text-center">
+            Pagamento único por período
+          </span>
+          {prepaidCycles.map(({ key, label }) => {
+            const price = zplPlan.prices[key];
+            if (!price) return null;
+            const isSelected = selectedCycle === key;
+            
+            return (
+              <Button 
+                key={key}
+                variant={isSelected ? "default" : "outline"}
+                size="sm"
+                className={`h-9 text-xs px-4 justify-between ${isSelected ? 'shadow-sm bg-primary' : 'hover:bg-muted'}`}
+                onClick={() => {
+                  setSelectedCycle(key);
+                  onSelect();
+                }}
+              >
+                <span>{label}</span>
+                <span className="font-semibold">{formatPrice(price.price_cents)}</span>
+              </Button>
+            );
+          })}
+          <p className="text-[10px] text-muted-foreground/80 flex items-center justify-center gap-1 mt-1">
+            <Info className="w-3 h-3" />
+            Plano avulso, sem renovação automática
+          </p>
+        </div>
+      ) : (
+        /* Subscription Mode - Recurring monthly with annual discount */
+        <div className="flex flex-col gap-3">
+          {/* Monthly Subscription */}
           <Button 
-            key={key}
-            variant={isSelected ? "default" : "outline"}
+            variant="outline"
             size="sm"
-            className={`h-9 text-xs px-4 justify-between ${isSelected ? 'shadow-sm bg-primary' : 'hover:bg-muted'}`}
-            onClick={() => {
-              setSelectedCycle(key);
-              onSelect();
-            }}
+            className="h-10 text-xs px-4 justify-between hover:bg-muted"
+            onClick={onSelect}
           >
-            <span>{label}</span>
-            <span className="font-semibold">{formatPrice(price.price_cents)}</span>
+            <span>Mensal recorrente</span>
+            <span className="font-semibold">{formatPrice(monthlyPrice)}/mês</span>
           </Button>
-        );
-      })}
+          
+          {/* Annual Subscription - 2 free months */}
+          <div className="relative">
+            <Badge className="absolute -top-2 right-2 bg-success text-[9px] px-1.5 py-0 z-10">
+              2 meses grátis
+            </Badge>
+            <Button 
+              variant="default"
+              size="sm"
+              className="h-12 w-full text-xs px-4 flex flex-col items-start gap-0.5 shadow-sm"
+              onClick={onSelect}
+            >
+              <div className="flex w-full justify-between items-center">
+                <span className="font-medium">Assinatura anual</span>
+                <span className="font-bold">{formatPrice(monthlyInstallment)}/mês</span>
+              </div>
+              <span className="text-[10px] text-primary-foreground/80">
+                12x com desconto • Total: {formatPrice(annualTotalPrice)}
+              </span>
+            </Button>
+          </div>
+          
+          <p className="text-[10px] text-muted-foreground/80 text-center mt-1">
+            Cobrança mensal recorrente • Cancele quando quiser
+          </p>
+        </div>
+      )}
     </div>
   );
 }
