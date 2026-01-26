@@ -23,12 +23,15 @@ import {
   ClipboardPlus,
   Store,
   History,
+  WifiOff,
+  Link2,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { usePromotions, usePromotionItems, PromotionSnapshot, PromotionItemSnapshot } from '@/hooks/usePromotions';
 import { usePromotionTasks } from '@/hooks/usePromotionTasks';
 import { usePromotionSyncLogs } from '@/hooks/usePromotionSyncLogs';
+import { invokeEdgeFunction, getUserFriendlyError } from '@/lib/edgeFunctionClient';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -59,6 +62,8 @@ export default function Promocoes() {
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [selectedPromotion, setSelectedPromotion] = useState<PromotionSnapshot | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncErrorCode, setSyncErrorCode] = useState<string | null>(null);
   const { createTask, creating } = usePromotionTasks();
 
   // Fetch workspace on mount
@@ -103,27 +108,48 @@ export default function Promocoes() {
   // Sync logs
   const { lastSync, refetch: refetchLogs } = usePromotionSyncLogs(workspaceId, sellerId);
 
+  // Define result type for sync
+  interface SyncResultData {
+    promotions_synced?: number;
+    items_synced?: number;
+    events_created?: number;
+    log_id?: string;
+  }
+
   const handleSync = async () => {
     if (!workspaceId || !sellerId) return;
     setSyncing(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('promotions-sync', {
-        body: { workspace_id: workspaceId, account_id: sellerId },
-      });
-      if (error) throw error;
-      if (data?.error) {
-        toast.error(data.error);
+    setSyncError(null);
+    setSyncErrorCode(null);
+
+    const result = await invokeEdgeFunction<SyncResultData>('promotions-sync', {
+      body: { workspace_id: workspaceId, account_id: sellerId },
+    });
+
+    setSyncing(false);
+
+    if (!result.success) {
+      setSyncError(result.error);
+      setSyncErrorCode(result.errorCode);
+      
+      // Special handling for auth errors
+      if (result.errorCode === 'TOKEN_EXPIRED' || result.errorCode === 'ML_AUTH_REQUIRED') {
+        toast.error('Reconecte sua conta do Mercado Livre', {
+          description: result.error,
+          action: {
+            label: 'Conectar',
+            onClick: () => window.location.href = '/settings',
+          },
+        });
       } else {
-        toast.success(`Sincronizado: ${data.promotions_synced || 0} promoções`);
+        toast.error(getUserFriendlyError(result.errorCode, result.error || undefined));
       }
-      await refetch();
-      await refetchLogs();
-    } catch (err) {
-      console.error('[Promocoes] Sync error:', err);
-      toast.error('Erro ao sincronizar promoções');
-    } finally {
-      setSyncing(false);
+      return;
     }
+
+    toast.success(`Sincronizado: ${result.data?.promotions_synced || 0} promoções`);
+    await refetch();
+    await refetchLogs();
   };
 
   // Handle manual task creation
@@ -239,8 +265,30 @@ export default function Promocoes() {
           </div>
         </div>
 
-        {/* Error Alert */}
-        {error && (
+        {/* Sync Error Alert */}
+        {syncError && (
+          <Alert variant="destructive">
+            <WifiOff className="h-4 w-4" />
+            <AlertTitle>Erro na sincronização</AlertTitle>
+            <AlertDescription className="flex items-center justify-between">
+              <span>{syncError}</span>
+              {(syncErrorCode === 'TOKEN_EXPIRED' || syncErrorCode === 'ML_AUTH_REQUIRED') && (
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  className="ml-4 gap-1.5"
+                  onClick={() => window.location.href = '/settings'}
+                >
+                  <Link2 className="h-3.5 w-3.5" />
+                  Reconectar Conta
+                </Button>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Data Loading Error Alert */}
+        {error && !syncError && (
           <Alert variant="destructive">
             <AlertTriangle className="h-4 w-4" />
             <AlertTitle>Erro ao carregar promoções</AlertTitle>
