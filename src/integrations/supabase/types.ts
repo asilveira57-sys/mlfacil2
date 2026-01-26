@@ -518,6 +518,133 @@ export type Database = {
           },
         ]
       }
+      ads_connections: {
+        Row: {
+          auto_sync_enabled: boolean
+          connected_at: string | null
+          created_at: string
+          disconnected_at: string | null
+          id: string
+          last_sync_at: string | null
+          last_sync_message: string | null
+          last_sync_status: string | null
+          ml_account_email: string | null
+          ml_account_name: string | null
+          next_scheduled_sync_at: string | null
+          seller_id: string
+          status: string
+          status_message: string | null
+          sync_interval_hours: number
+          updated_at: string
+          user_id: string
+          workspace_id: string | null
+        }
+        Insert: {
+          auto_sync_enabled?: boolean
+          connected_at?: string | null
+          created_at?: string
+          disconnected_at?: string | null
+          id?: string
+          last_sync_at?: string | null
+          last_sync_message?: string | null
+          last_sync_status?: string | null
+          ml_account_email?: string | null
+          ml_account_name?: string | null
+          next_scheduled_sync_at?: string | null
+          seller_id: string
+          status?: string
+          status_message?: string | null
+          sync_interval_hours?: number
+          updated_at?: string
+          user_id: string
+          workspace_id?: string | null
+        }
+        Update: {
+          auto_sync_enabled?: boolean
+          connected_at?: string | null
+          created_at?: string
+          disconnected_at?: string | null
+          id?: string
+          last_sync_at?: string | null
+          last_sync_message?: string | null
+          last_sync_status?: string | null
+          ml_account_email?: string | null
+          ml_account_name?: string | null
+          next_scheduled_sync_at?: string | null
+          seller_id?: string
+          status?: string
+          status_message?: string | null
+          sync_interval_hours?: number
+          updated_at?: string
+          user_id?: string
+          workspace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ads_connections_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ads_credentials: {
+        Row: {
+          access_token_expires_at: string | null
+          access_token_hash: string | null
+          connection_id: string
+          created_at: string
+          id: string
+          is_valid: boolean
+          last_refresh_at: string | null
+          last_refresh_error: string | null
+          refresh_failure_count: number
+          refresh_token_expires_at: string | null
+          refresh_token_hash: string | null
+          scopes: string[] | null
+          updated_at: string
+        }
+        Insert: {
+          access_token_expires_at?: string | null
+          access_token_hash?: string | null
+          connection_id: string
+          created_at?: string
+          id?: string
+          is_valid?: boolean
+          last_refresh_at?: string | null
+          last_refresh_error?: string | null
+          refresh_failure_count?: number
+          refresh_token_expires_at?: string | null
+          refresh_token_hash?: string | null
+          scopes?: string[] | null
+          updated_at?: string
+        }
+        Update: {
+          access_token_expires_at?: string | null
+          access_token_hash?: string | null
+          connection_id?: string
+          created_at?: string
+          id?: string
+          is_valid?: boolean
+          last_refresh_at?: string | null
+          last_refresh_error?: string | null
+          refresh_failure_count?: number
+          refresh_token_expires_at?: string | null
+          refresh_token_hash?: string | null
+          scopes?: string[] | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ads_credentials_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: true
+            referencedRelation: "ads_connections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ads_daily_metrics: {
         Row: {
           acos: number | null
@@ -583,6 +710,62 @@ export type Database = {
             columns: ["campaign_id"]
             isOneToOne: false
             referencedRelation: "ads_campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ads_data_freshness: {
+        Row: {
+          cached_date_range_from: string | null
+          cached_date_range_to: string | null
+          cached_record_count: number | null
+          connection_id: string
+          consecutive_failures: number
+          data_type: string
+          id: string
+          is_stale: boolean
+          last_successful_sync_at: string | null
+          last_sync_attempt_at: string | null
+          seller_id: string
+          stale_threshold_hours: number
+          updated_at: string
+        }
+        Insert: {
+          cached_date_range_from?: string | null
+          cached_date_range_to?: string | null
+          cached_record_count?: number | null
+          connection_id: string
+          consecutive_failures?: number
+          data_type: string
+          id?: string
+          is_stale?: boolean
+          last_successful_sync_at?: string | null
+          last_sync_attempt_at?: string | null
+          seller_id: string
+          stale_threshold_hours?: number
+          updated_at?: string
+        }
+        Update: {
+          cached_date_range_from?: string | null
+          cached_date_range_to?: string | null
+          cached_record_count?: number | null
+          connection_id?: string
+          consecutive_failures?: number
+          data_type?: string
+          id?: string
+          is_stale?: boolean
+          last_successful_sync_at?: string | null
+          last_sync_attempt_at?: string | null
+          seller_id?: string
+          stale_threshold_hours?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ads_data_freshness_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "ads_connections"
             referencedColumns: ["id"]
           },
         ]
@@ -666,6 +849,531 @@ export type Database = {
             columns: ["ad_group_id"]
             isOneToOne: false
             referencedRelation: "ads_ad_groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ads_snapshots: {
+        Row: {
+          connection_id: string
+          created_at: string
+          data_json: Json
+          id: string
+          is_valid: boolean
+          job_id: string | null
+          record_count: number
+          seller_id: string
+          snapshot_date: string
+          snapshot_hour: number | null
+          snapshot_type: string
+          superseded_by: string | null
+        }
+        Insert: {
+          connection_id: string
+          created_at?: string
+          data_json: Json
+          id?: string
+          is_valid?: boolean
+          job_id?: string | null
+          record_count?: number
+          seller_id: string
+          snapshot_date: string
+          snapshot_hour?: number | null
+          snapshot_type: string
+          superseded_by?: string | null
+        }
+        Update: {
+          connection_id?: string
+          created_at?: string
+          data_json?: Json
+          id?: string
+          is_valid?: boolean
+          job_id?: string | null
+          record_count?: number
+          seller_id?: string
+          snapshot_date?: string
+          snapshot_hour?: number | null
+          snapshot_type?: string
+          superseded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ads_snapshots_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "ads_connections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ads_snapshots_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "ads_sync_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ads_snapshots_superseded_by_fkey"
+            columns: ["superseded_by"]
+            isOneToOne: false
+            referencedRelation: "ads_snapshots"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ads_staging_ad_groups: {
+        Row: {
+          connection_id: string
+          default_bid: number | null
+          fetched_at: string
+          id: string
+          is_processed: boolean
+          job_id: string
+          ml_ad_group_id: string
+          ml_campaign_id: string
+          name: string | null
+          processed_at: string | null
+          processing_error: string | null
+          raw_data: Json
+          seller_id: string
+          status: string | null
+        }
+        Insert: {
+          connection_id: string
+          default_bid?: number | null
+          fetched_at?: string
+          id?: string
+          is_processed?: boolean
+          job_id: string
+          ml_ad_group_id: string
+          ml_campaign_id: string
+          name?: string | null
+          processed_at?: string | null
+          processing_error?: string | null
+          raw_data: Json
+          seller_id: string
+          status?: string | null
+        }
+        Update: {
+          connection_id?: string
+          default_bid?: number | null
+          fetched_at?: string
+          id?: string
+          is_processed?: boolean
+          job_id?: string
+          ml_ad_group_id?: string
+          ml_campaign_id?: string
+          name?: string | null
+          processed_at?: string | null
+          processing_error?: string | null
+          raw_data?: Json
+          seller_id?: string
+          status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ads_staging_ad_groups_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "ads_connections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ads_staging_ad_groups_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "ads_sync_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ads_staging_campaigns: {
+        Row: {
+          campaign_type: string | null
+          connection_id: string
+          daily_budget: number | null
+          end_date: string | null
+          fetched_at: string
+          id: string
+          is_processed: boolean
+          job_id: string
+          ml_campaign_id: string
+          name: string | null
+          processed_at: string | null
+          processing_error: string | null
+          raw_data: Json
+          seller_id: string
+          start_date: string | null
+          status: string | null
+          total_budget: number | null
+        }
+        Insert: {
+          campaign_type?: string | null
+          connection_id: string
+          daily_budget?: number | null
+          end_date?: string | null
+          fetched_at?: string
+          id?: string
+          is_processed?: boolean
+          job_id: string
+          ml_campaign_id: string
+          name?: string | null
+          processed_at?: string | null
+          processing_error?: string | null
+          raw_data: Json
+          seller_id: string
+          start_date?: string | null
+          status?: string | null
+          total_budget?: number | null
+        }
+        Update: {
+          campaign_type?: string | null
+          connection_id?: string
+          daily_budget?: number | null
+          end_date?: string | null
+          fetched_at?: string
+          id?: string
+          is_processed?: boolean
+          job_id?: string
+          ml_campaign_id?: string
+          name?: string | null
+          processed_at?: string | null
+          processing_error?: string | null
+          raw_data?: Json
+          seller_id?: string
+          start_date?: string | null
+          status?: string | null
+          total_budget?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ads_staging_campaigns_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "ads_connections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ads_staging_campaigns_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "ads_sync_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ads_staging_items: {
+        Row: {
+          bid: number | null
+          connection_id: string
+          current_price: number | null
+          fetched_at: string
+          id: string
+          is_processed: boolean
+          item_id: string
+          job_id: string
+          ml_ad_group_id: string | null
+          processed_at: string | null
+          processing_error: string | null
+          raw_data: Json
+          seller_id: string
+          status: string | null
+          title: string | null
+        }
+        Insert: {
+          bid?: number | null
+          connection_id: string
+          current_price?: number | null
+          fetched_at?: string
+          id?: string
+          is_processed?: boolean
+          item_id: string
+          job_id: string
+          ml_ad_group_id?: string | null
+          processed_at?: string | null
+          processing_error?: string | null
+          raw_data: Json
+          seller_id: string
+          status?: string | null
+          title?: string | null
+        }
+        Update: {
+          bid?: number | null
+          connection_id?: string
+          current_price?: number | null
+          fetched_at?: string
+          id?: string
+          is_processed?: boolean
+          item_id?: string
+          job_id?: string
+          ml_ad_group_id?: string | null
+          processed_at?: string | null
+          processing_error?: string | null
+          raw_data?: Json
+          seller_id?: string
+          status?: string | null
+          title?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ads_staging_items_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "ads_connections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ads_staging_items_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "ads_sync_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ads_staging_metrics: {
+        Row: {
+          clicks: number | null
+          connection_id: string
+          conversions: number | null
+          entity_id: string
+          entity_type: string
+          fetched_at: string
+          id: string
+          impressions: number | null
+          is_processed: boolean
+          job_id: string
+          metric_date: string
+          processed_at: string | null
+          processing_error: string | null
+          raw_data: Json
+          revenue: number | null
+          seller_id: string
+          spent: number | null
+        }
+        Insert: {
+          clicks?: number | null
+          connection_id: string
+          conversions?: number | null
+          entity_id: string
+          entity_type: string
+          fetched_at?: string
+          id?: string
+          impressions?: number | null
+          is_processed?: boolean
+          job_id: string
+          metric_date: string
+          processed_at?: string | null
+          processing_error?: string | null
+          raw_data: Json
+          revenue?: number | null
+          seller_id: string
+          spent?: number | null
+        }
+        Update: {
+          clicks?: number | null
+          connection_id?: string
+          conversions?: number | null
+          entity_id?: string
+          entity_type?: string
+          fetched_at?: string
+          id?: string
+          impressions?: number | null
+          is_processed?: boolean
+          job_id?: string
+          metric_date?: string
+          processed_at?: string | null
+          processing_error?: string | null
+          raw_data?: Json
+          revenue?: number | null
+          seller_id?: string
+          spent?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ads_staging_metrics_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "ads_connections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ads_staging_metrics_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "ads_sync_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ads_sync_jobs: {
+        Row: {
+          completed_at: string | null
+          connection_id: string
+          created_at: string
+          date_from: string | null
+          date_to: string | null
+          error_details: Json | null
+          error_message: string | null
+          failed_records: number | null
+          id: string
+          job_type: string
+          max_retries: number
+          next_retry_at: string | null
+          priority: number
+          processed_records: number | null
+          result_summary: Json | null
+          retry_count: number
+          started_at: string | null
+          status: string
+          total_records: number | null
+          updated_at: string
+        }
+        Insert: {
+          completed_at?: string | null
+          connection_id: string
+          created_at?: string
+          date_from?: string | null
+          date_to?: string | null
+          error_details?: Json | null
+          error_message?: string | null
+          failed_records?: number | null
+          id?: string
+          job_type: string
+          max_retries?: number
+          next_retry_at?: string | null
+          priority?: number
+          processed_records?: number | null
+          result_summary?: Json | null
+          retry_count?: number
+          started_at?: string | null
+          status?: string
+          total_records?: number | null
+          updated_at?: string
+        }
+        Update: {
+          completed_at?: string | null
+          connection_id?: string
+          created_at?: string
+          date_from?: string | null
+          date_to?: string | null
+          error_details?: Json | null
+          error_message?: string | null
+          failed_records?: number | null
+          id?: string
+          job_type?: string
+          max_retries?: number
+          next_retry_at?: string | null
+          priority?: number
+          processed_records?: number | null
+          result_summary?: Json | null
+          retry_count?: number
+          started_at?: string | null
+          status?: string
+          total_records?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ads_sync_jobs_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "ads_connections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ads_sync_logs: {
+        Row: {
+          connection_id: string
+          created_at: string
+          details: Json | null
+          duration_ms: number | null
+          ended_at: string | null
+          error_code: string | null
+          error_message: string | null
+          error_stack: string | null
+          id: string
+          job_id: string | null
+          log_level: string
+          log_type: string
+          message: string | null
+          rate_limit_remaining: number | null
+          rate_limit_reset_at: string | null
+          records_created: number | null
+          records_failed: number | null
+          records_fetched: number | null
+          records_processed: number | null
+          records_updated: number | null
+          retry_after_seconds: number | null
+          seller_id: string
+          started_at: string
+          success: boolean | null
+        }
+        Insert: {
+          connection_id: string
+          created_at?: string
+          details?: Json | null
+          duration_ms?: number | null
+          ended_at?: string | null
+          error_code?: string | null
+          error_message?: string | null
+          error_stack?: string | null
+          id?: string
+          job_id?: string | null
+          log_level?: string
+          log_type: string
+          message?: string | null
+          rate_limit_remaining?: number | null
+          rate_limit_reset_at?: string | null
+          records_created?: number | null
+          records_failed?: number | null
+          records_fetched?: number | null
+          records_processed?: number | null
+          records_updated?: number | null
+          retry_after_seconds?: number | null
+          seller_id: string
+          started_at?: string
+          success?: boolean | null
+        }
+        Update: {
+          connection_id?: string
+          created_at?: string
+          details?: Json | null
+          duration_ms?: number | null
+          ended_at?: string | null
+          error_code?: string | null
+          error_message?: string | null
+          error_stack?: string | null
+          id?: string
+          job_id?: string | null
+          log_level?: string
+          log_type?: string
+          message?: string | null
+          rate_limit_remaining?: number | null
+          rate_limit_reset_at?: string | null
+          records_created?: number | null
+          records_failed?: number | null
+          records_fetched?: number | null
+          records_processed?: number | null
+          records_updated?: number | null
+          retry_after_seconds?: number | null
+          seller_id?: string
+          started_at?: string
+          success?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ads_sync_logs_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "ads_connections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ads_sync_logs_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "ads_sync_jobs"
             referencedColumns: ["id"]
           },
         ]

@@ -39,9 +39,11 @@ import {
   FileText,
   Calculator,
   Brain,
+  Link2,
 } from 'lucide-react';
 import { AdsBudgetSimulator } from '@/components/ads/AdsBudgetSimulator';
 import { AdsAiConsultant } from '@/components/ads/AdsAiConsultant';
+import { AdsConnectionsPanel } from '@/components/ads/AdsConnectionsPanel';
 
 export default function Publicidade() {
   const navigate = useNavigate();
@@ -178,7 +180,7 @@ export default function Publicidade() {
       <div className="p-4 lg:p-6 space-y-6">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <div className="flex items-center justify-between flex-wrap gap-4">
-            <TabsList className="grid w-full max-w-3xl grid-cols-7">
+            <TabsList className="grid w-full max-w-4xl grid-cols-8">
               <TabsTrigger value="dashboard" className="flex items-center gap-2">
                 <LayoutDashboard className="h-4 w-4" />
                 <span className="hidden sm:inline">Dashboard</span>
@@ -206,6 +208,10 @@ export default function Publicidade() {
               <TabsTrigger value="report" className="flex items-center gap-2">
                 <FileText className="h-4 w-4" />
                 <span className="hidden sm:inline">Relatório</span>
+              </TabsTrigger>
+              <TabsTrigger value="connections" className="flex items-center gap-2">
+                <Link2 className="h-4 w-4" />
+                <span className="hidden sm:inline">Conexões</span>
               </TabsTrigger>
             </TabsList>
 
@@ -390,6 +396,11 @@ export default function Publicidade() {
           {/* Executive Report Tab */}
           <TabsContent value="report" className="space-y-6 mt-6">
             <AdsExecutiveReport sellerId={sellerId} />
+          </TabsContent>
+
+          {/* Connections Tab */}
+          <TabsContent value="connections" className="space-y-6 mt-6">
+            <AdsConnectionsPanel sellerId={sellerId} />
           </TabsContent>
         </Tabs>
       </div>
