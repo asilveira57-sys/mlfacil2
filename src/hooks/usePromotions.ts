@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { validateSellerAccess } from '@/lib/accountUnification';
 
 export interface PromotionSnapshot {
   id: string;
@@ -55,13 +56,18 @@ interface UsePromotionItemsResult {
   startedItems: PromotionItemSnapshot[];
 }
 
-export function usePromotions(workspaceId: string | null, accountId?: string | null): UsePromotionsResult {
+/**
+ * Hook for promotions - uses sellerId (from unified source) as required filter
+ * to prevent data leakage between accounts.
+ */
+export function usePromotions(workspaceId: string | null, sellerId?: string | null): UsePromotionsResult {
   const [promotions, setPromotions] = useState<PromotionSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchPromotions = useCallback(async () => {
-    if (!workspaceId) {
+    // Both workspaceId and sellerId are required for security
+    if (!workspaceId || !sellerId) {
       setPromotions([]);
       setLoading(false);
       return;
@@ -71,17 +77,22 @@ export function usePromotions(workspaceId: string | null, accountId?: string | n
       setLoading(true);
       setError(null);
 
-      let query = supabase
+      // Validate seller access via unified layer
+      const hasAccess = await validateSellerAccess(sellerId);
+      if (!hasAccess) {
+        console.warn('[usePromotions] No access to seller:', sellerId);
+        setPromotions([]);
+        setLoading(false);
+        return;
+      }
+
+      // Query with both workspace and seller filter (security)
+      const { data, error: fetchError } = await supabase
         .from('promotion_snapshots')
         .select('*')
         .eq('workspace_id', workspaceId)
+        .eq('account_id', sellerId)
         .order('end_at', { ascending: true });
-
-      if (accountId) {
-        query = query.eq('account_id', accountId);
-      }
-
-      const { data, error: fetchError } = await query;
 
       if (fetchError) throw fetchError;
 
@@ -92,7 +103,7 @@ export function usePromotions(workspaceId: string | null, accountId?: string | n
     } finally {
       setLoading(false);
     }
-  }, [workspaceId, accountId]);
+  }, [workspaceId, sellerId]);
 
   useEffect(() => {
     fetchPromotions();
@@ -148,17 +159,21 @@ export function usePromotions(workspaceId: string | null, accountId?: string | n
   };
 }
 
+/**
+ * Hook for promotion items - uses sellerId (from unified source) as required filter.
+ */
 export function usePromotionItems(
   workspaceId: string | null,
   promotionId?: string | null,
-  accountId?: string | null
+  sellerId?: string | null
 ): UsePromotionItemsResult {
   const [items, setItems] = useState<PromotionItemSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchItems = useCallback(async () => {
-    if (!workspaceId) {
+    // Both workspaceId and sellerId are required for security
+    if (!workspaceId || !sellerId) {
       setItems([]);
       setLoading(false);
       return;
@@ -172,14 +187,11 @@ export function usePromotionItems(
         .from('promotion_items_snapshots')
         .select('*')
         .eq('workspace_id', workspaceId)
+        .eq('account_id', sellerId)
         .order('item_status', { ascending: true });
 
       if (promotionId) {
         query = query.eq('promotion_id', promotionId);
-      }
-
-      if (accountId) {
-        query = query.eq('account_id', accountId);
       }
 
       const { data, error: fetchError } = await query;
@@ -193,7 +205,7 @@ export function usePromotionItems(
     } finally {
       setLoading(false);
     }
-  }, [workspaceId, promotionId, accountId]);
+  }, [workspaceId, promotionId, sellerId]);
 
   useEffect(() => {
     fetchItems();

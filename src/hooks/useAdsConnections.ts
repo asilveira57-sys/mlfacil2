@@ -1,7 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-
+import { 
+  getAccountBySellerId, 
+  ensureAdsConnection, 
+  getAdsConnectionId,
+  UnifiedMarketplaceAccount 
+} from '@/lib/accountUnification';
 export interface AdsConnection {
   id: string;
   user_id: string;
@@ -23,13 +28,11 @@ export interface AdsConnection {
   updated_at: string;
 }
 
+// Derived from ml_accounts (source of truth)
 export interface MlAccount {
   id: string;
   user_id: string;
   ml_user_id: string;
-  access_token: string;
-  refresh_token: string | null;
-  expires_at: string | null;
   nickname: string | null;
   email: string | null;
   is_active: boolean;
@@ -117,7 +120,7 @@ export function useAdsConnections(sellerId?: string) {
   const [syncing, setSyncing] = useState(false);
   const [autoLinking, setAutoLinking] = useState(false);
 
-  // Check for existing ml_accounts and auto-link if needed
+  // Check for existing ml_account and auto-link to ads_connections (using unified layer)
   const checkAutoLink = useCallback(async (userId: string, targetSellerId: string): Promise<AdsConnection | null> => {
     try {
       setAutoLinking(true);
@@ -127,52 +130,53 @@ export function useAdsConnections(sellerId?: string) {
         .from('ads_connections')
         .select('*')
         .eq('seller_id', targetSellerId)
+        .eq('user_id', userId)
         .single();
 
       if (existingConnection) {
         return existingConnection as unknown as AdsConnection;
       }
 
-      // Check if ml_accounts has this seller
-      const { data: mlAccountData } = await supabase
-        .from('ml_accounts')
-        .select('*')
-        .eq('ml_user_id', targetSellerId)
-        .eq('is_active', true)
-        .single();
-
-      if (!mlAccountData) {
-        return null;
-      }
-
-      setMlAccount(mlAccountData as unknown as MlAccount);
-
-      // Auto-create ads_connection from ml_accounts
-      console.log('[useAdsConnections] Auto-linking ml_account to ads_connections:', targetSellerId);
+      // Check if ml_account exists via unified layer (source of truth)
+      const unifiedAccount = await getAccountBySellerId(targetSellerId);
       
-      const { data: newConnection, error } = await supabase
-        .from('ads_connections')
-        .insert({
-          user_id: userId,
-          seller_id: targetSellerId,
-          status: 'connected',
-          status_message: 'Vinculado automaticamente via conta Mercado Livre',
-          ml_account_name: mlAccountData.nickname,
-          ml_account_email: mlAccountData.email,
-          connected_at: new Date().toISOString(),
-          auto_sync_enabled: true,
-          sync_interval_hours: 6,
-          next_scheduled_sync_at: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
-        })
-        .select()
-        .single();
-
-      if (error) {
-        console.error('[useAdsConnections] Auto-link error:', error);
+      if (!unifiedAccount) {
         return null;
       }
 
-      console.log('[useAdsConnections] Auto-link successful:', newConnection);
+      // Set local state for display
+      setMlAccount({
+        id: unifiedAccount.id,
+        user_id: unifiedAccount.userId,
+        ml_user_id: unifiedAccount.sellerId,
+        nickname: unifiedAccount.nickname,
+        email: unifiedAccount.email,
+        is_active: unifiedAccount.isActive,
+        created_at: unifiedAccount.createdAt,
+        updated_at: unifiedAccount.updatedAt,
+      });
+
+      // Auto-link via unified layer (prevents duplicates)
+      console.log('[useAdsConnections] Auto-linking via unified layer:', targetSellerId);
+      const linkResult = await ensureAdsConnection(unifiedAccount.id, targetSellerId);
+      
+      if (!linkResult.connectionId) {
+        console.error('[useAdsConnections] Auto-link failed');
+        return null;
+      }
+
+      // Fetch the created connection
+      const { data: newConnection } = await supabase
+        .from('ads_connections')
+        .select('*')
+        .eq('id', linkResult.connectionId)
+        .single();
+
+      if (!newConnection) {
+        return null;
+      }
+
+      console.log('[useAdsConnections] Auto-link successful:', newConnection.id);
       return newConnection as unknown as AdsConnection;
     } catch (err) {
       console.error('[useAdsConnections] Auto-link exception:', err);
@@ -182,17 +186,21 @@ export function useAdsConnections(sellerId?: string) {
     }
   }, []);
 
-  // Fetch ml_account for display purposes
+  // Fetch ml_account for display purposes (via unified layer)
   const fetchMlAccount = useCallback(async (targetSellerId: string) => {
-    const { data } = await supabase
-      .from('ml_accounts')
-      .select('*')
-      .eq('ml_user_id', targetSellerId)
-      .eq('is_active', true)
-      .single();
+    const unifiedAccount = await getAccountBySellerId(targetSellerId);
 
-    if (data) {
-      setMlAccount(data as unknown as MlAccount);
+    if (unifiedAccount) {
+      setMlAccount({
+        id: unifiedAccount.id,
+        user_id: unifiedAccount.userId,
+        ml_user_id: unifiedAccount.sellerId,
+        nickname: unifiedAccount.nickname,
+        email: unifiedAccount.email,
+        is_active: unifiedAccount.isActive,
+        created_at: unifiedAccount.createdAt,
+        updated_at: unifiedAccount.updatedAt,
+      });
     }
   }, []);
 

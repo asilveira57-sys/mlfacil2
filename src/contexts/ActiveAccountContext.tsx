@@ -1,8 +1,9 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { getAllAccounts, ensureAdsConnection, UnifiedMarketplaceAccount } from '@/lib/accountUnification';
 
-// Account from ml_accounts (primary source for now)
+// Account from ml_accounts (source of truth via accountUnification)
 export interface ActiveAccount {
   id: string;
   sellerId: string;
@@ -39,30 +40,18 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
 
-  // Load accounts from ml_accounts (primary source)
+  // Load accounts from unified source (ml_accounts via accountUnification)
   const loadAccounts = useCallback(async (): Promise<ActiveAccount[]> => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return [];
-
-    const { data: mlAccounts, error } = await supabase
-      .from('ml_accounts')
-      .select('id, ml_user_id, nickname, email, is_active')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('[ActiveAccountContext] Error loading accounts:', error);
-      return [];
-    }
-
-    return (mlAccounts || []).map(acc => ({
+    const unifiedAccounts = await getAllAccounts();
+    
+    return unifiedAccounts.map((acc: UnifiedMarketplaceAccount) => ({
       id: acc.id,
-      sellerId: acc.ml_user_id,
+      sellerId: acc.sellerId,
       nickname: acc.nickname,
       email: acc.email,
-      isActive: acc.is_active,
-      provider: 'mercadolivre' as const,
-      status: acc.is_active ? 'connected' as const : 'disconnected' as const,
+      isActive: acc.isActive,
+      provider: acc.provider,
+      status: acc.status,
     }));
   }, []);
 
