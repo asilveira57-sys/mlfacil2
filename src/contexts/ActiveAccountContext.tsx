@@ -1,7 +1,7 @@
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { getAllAccounts, ensureAdsConnection, UnifiedMarketplaceAccount } from '@/lib/accountUnification';
+import { getAllAccounts, UnifiedMarketplaceAccount } from '@/lib/accountUnification';
 
 // Account from ml_accounts (source of truth via accountUnification)
 export interface ActiveAccount {
@@ -39,6 +39,15 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
   const [activeAccount, setActiveAccountState] = useState<ActiveAccount | null>(null);
   const [loading, setLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
+  
+  // Use refs to avoid dependency loops
+  const accountsRef = useRef<ActiveAccount[]>([]);
+  const initializingRef = useRef(false);
+  
+  // Keep ref in sync
+  useEffect(() => {
+    accountsRef.current = accounts;
+  }, [accounts]);
 
   // Load accounts from unified source (ml_accounts via accountUnification)
   const loadAccounts = useCallback(async (): Promise<ActiveAccount[]> => {
@@ -72,11 +81,14 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
     return localStorage.getItem('active_account_id');
   }, []);
 
-  // Persist active account
-  const persistActiveAccount = useCallback(async (userId: string, accountId: string): Promise<void> => {
+  // Persist active account - uses ref to avoid dependency on accounts state
+  const persistActiveAccount = useCallback(async (userId: string, accountId: string, accountsList?: ActiveAccount[]): Promise<void> => {
+    const currentAccounts = accountsList || accountsRef.current;
+    const account = currentAccounts.find(a => a.id === accountId);
+    
     // Save to localStorage for immediate access
     localStorage.setItem('active_account_id', accountId);
-    localStorage.setItem('active_seller_id', accounts.find(a => a.id === accountId)?.sellerId || '');
+    localStorage.setItem('active_seller_id', account?.sellerId || '');
 
     // Save to user_context in database
     try {
@@ -105,29 +117,36 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error('[ActiveAccountContext] Error persisting context:', err);
     }
-  }, [accounts]);
+  }, []);
 
-  // Initialize context
+  // Initialize context - stable function that doesn't change
   const initialize = useCallback(async () => {
+    // Prevent double initialization
+    if (initializingRef.current) return;
+    initializingRef.current = true;
+    
     setLoading(true);
     
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      setAccounts([]);
-      setActiveAccountState(null);
-      setLoading(false);
-      setInitialized(true);
-      return;
-    }
-
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setAccounts([]);
+        setActiveAccountState(null);
+        setLoading(false);
+        setInitialized(true);
+        initializingRef.current = false;
+        return;
+      }
+
       const loadedAccounts = await loadAccounts();
       setAccounts(loadedAccounts);
+      accountsRef.current = loadedAccounts;
 
       if (loadedAccounts.length === 0) {
         setActiveAccountState(null);
         setLoading(false);
         setInitialized(true);
+        initializingRef.current = false;
         return;
       }
 
@@ -149,7 +168,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
 
       if (active) {
         setActiveAccountState(active);
-        await persistActiveAccount(user.id, active.id);
+        await persistActiveAccount(user.id, active.id, loadedAccounts);
         
         // Also update localStorage for legacy code
         localStorage.setItem('cost_watchdog_seller_id', active.sellerId);
@@ -159,6 +178,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
       setInitialized(true);
+      initializingRef.current = false;
     }
   }, [loadAccounts, getPersistedActiveAccountId, persistActiveAccount]);
 
@@ -167,7 +187,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return false;
 
-    const account = accounts.find(a => a.id === accountId);
+    const account = accountsRef.current.find(a => a.id === accountId);
     if (!account) {
       toast.error('Conta não encontrada');
       return false;
@@ -192,15 +212,17 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
       toast.error('Erro ao trocar conta');
       return false;
     }
-  }, [accounts, persistActiveAccount]);
+  }, [persistActiveAccount]);
 
   // Refresh accounts
   const refreshAccounts = useCallback(async () => {
     const loadedAccounts = await loadAccounts();
     setAccounts(loadedAccounts);
+    accountsRef.current = loadedAccounts;
     
     // Check if active account still exists
-    if (activeAccount && !loadedAccounts.find(a => a.id === activeAccount.id)) {
+    const currentActiveId = activeAccount?.id;
+    if (currentActiveId && !loadedAccounts.find(a => a.id === currentActiveId)) {
       const firstConnected = loadedAccounts.find(a => a.status === 'connected');
       if (firstConnected) {
         await setActiveAccount(firstConnected.id);
@@ -208,21 +230,24 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
         setActiveAccountState(null);
       }
     }
-  }, [loadAccounts, activeAccount, setActiveAccount]);
+  }, [loadAccounts, activeAccount?.id, setActiveAccount]);
 
-  // Initialize on mount
+  // Initialize on mount - only once
   useEffect(() => {
     initialize();
-  }, [initialize]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Listen for auth changes
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_IN') {
+        initializingRef.current = false; // Reset to allow re-initialization
         initialize();
       } else if (event === 'SIGNED_OUT') {
         setAccounts([]);
         setActiveAccountState(null);
+        accountsRef.current = [];
         localStorage.removeItem('active_account_id');
         localStorage.removeItem('active_seller_id');
       }
