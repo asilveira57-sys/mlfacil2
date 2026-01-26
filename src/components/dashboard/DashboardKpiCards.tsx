@@ -2,11 +2,9 @@ import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Package,
   AlertTriangle,
   Megaphone,
   TrendingUp,
-  DollarSign,
   ShoppingCart,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -36,6 +34,18 @@ export function DashboardKpiCards({ sellerId }: { sellerId?: string }) {
       }
 
       try {
+        // Calculate date 30 days ago
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const thirtyDaysAgoISO = thirtyDaysAgo.toISOString();
+
+        // Fetch orders count from the last 30 days
+        const { count: ordersCount } = await supabase
+          .from("meli_orders_cache")
+          .select("*", { count: "exact", head: true })
+          .eq("seller_id", sellerId)
+          .gte("date_created", thirtyDaysAgoISO);
+
         // Fetch pending alerts
         const { count: alertsCount } = await supabase
           .from("ads_alerts")
@@ -50,12 +60,17 @@ export function DashboardKpiCards({ sellerId }: { sellerId?: string }) {
           .eq("seller_id", sellerId)
           .eq("status", "active");
 
-        // For orders count, we'll use a simpler approach - just show campaigns for now
-        // Orders count can be added when the ml_orders_cache table is properly typed
+        // Fetch active promotions count
+        const { count: promotionsCount } = await supabase
+          .from("promotion_snapshots")
+          .select("*", { count: "exact", head: true })
+          .eq("seller_id", sellerId)
+          .eq("status", "started");
+
         setData({
-          totalOrders: 0, // Will show as synced from ML
+          totalOrders: ordersCount || 0,
           pendingAlerts: alertsCount || 0,
-          activePromotions: 0, // Placeholder for promotions module
+          activePromotions: promotionsCount || 0,
           activeCampaigns: campaignsCount || 0,
           loading: false,
         });
