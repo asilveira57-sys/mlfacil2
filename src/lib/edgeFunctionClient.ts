@@ -49,6 +49,9 @@ function safeJsonParse<T>(value: unknown): T | null {
  */
 function normalizeError(err: unknown): { code: string; message: string } {
   if (err instanceof Error) {
+    if (err.message?.includes('Unexpected end of JSON input')) {
+      return { code: 'EMPTY_RESPONSE', message: 'Resposta vazia do servidor. Tente novamente.' };
+    }
     return { code: 'CLIENT_ERROR', message: err.message };
   }
   if (typeof err === 'object' && err !== null) {
@@ -96,11 +99,15 @@ export async function invokeEdgeFunction<T = unknown>(
     // Handle Supabase client-level error
     if (error) {
       console.error(`[EdgeFunction] ${functionName} client error:`, error);
+
+       // Common parse failure when server returns empty/invalid JSON
+      const msg = error.message || 'Erro ao chamar função';
+      const looksLikeEmptyJson = msg.includes('Unexpected end of JSON input');
       return {
         success: false,
         data: null,
-        error: error.message || 'Erro ao chamar função',
-        errorCode: 'INVOKE_ERROR',
+        error: looksLikeEmptyJson ? 'Resposta vazia do servidor. Tente novamente.' : msg,
+        errorCode: looksLikeEmptyJson ? 'EMPTY_RESPONSE' : 'INVOKE_ERROR',
         rawResponse: error,
       };
     }
@@ -193,6 +200,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   SERVER_ERROR: 'Erro no servidor. Tente novamente em alguns minutos.',
   TOKEN_EXPIRED: 'Sua sessão expirou. Reconecte sua conta do Mercado Livre.',
   ML_AUTH_REQUIRED: 'É necessário reconectar sua conta do Mercado Livre.',
+  NO_CONNECTED_ACCOUNT: 'Nenhuma conta conectada para esta seleção. Conecte uma conta para continuar.',
   ML_API_ERROR: 'Erro ao comunicar com o Mercado Livre. Tente novamente.',
   NETWORK_ERROR: 'Erro de conexão. Verifique sua internet.',
   UNKNOWN_ERROR: 'Erro inesperado. Tente novamente.',
