@@ -7,6 +7,7 @@ import {
   DollarSign,
   BarChart3,
   FileText,
+  Tag,
   Settings,
   Activity,
   Target,
@@ -53,6 +54,7 @@ const mainNavItems: NavItem[] = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Vendas", url: "/shipping-labels", icon: Package },
   { title: "Tarefas", url: "/tarefas", icon: ListChecks },
+  { title: "Promoções", url: "/promocoes", icon: Tag },
   { title: "Mercado ADS", url: "/publicidade", icon: Megaphone },
 ];
 
