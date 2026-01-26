@@ -17,6 +17,7 @@ import {
   AdsFilters,
 } from '@/components/ads';
 import { AdsRulesPanel } from '@/components/ads/AdsRulesPanel';
+import { AdsTasksPanel } from '@/components/ads/AdsTasksPanel';
 import {
   useAdsCampaigns,
   useAdsDailyMetrics,
@@ -39,6 +40,7 @@ import {
 export default function Publicidade() {
   const navigate = useNavigate();
   const [sellerId, setSellerId] = useState<string>();
+  const [workspaceId, setWorkspaceId] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState<AdsFilterState>({});
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -59,16 +61,29 @@ export default function Publicidade() {
         return;
       }
 
-      const result = await supabase
+      // Load ML account
+      const accountResult = await supabase
         .from('ml_accounts')
         .select('ml_user_id')
         .eq('user_id', user.id)
         .limit(1);
 
-      const accounts = result.data as { ml_user_id: string }[] | null;
+      const accounts = accountResult.data as { ml_user_id: string }[] | null;
       if (accounts && accounts.length > 0) {
         setSellerId(accounts[0].ml_user_id);
       }
+
+      // Load workspace for task integration
+      const prefsResult = await supabase
+        .from('user_preferences')
+        .select('active_workspace_id')
+        .eq('user_id', user.id)
+        .single();
+
+      if (prefsResult.data?.active_workspace_id) {
+        setWorkspaceId(prefsResult.data.active_workspace_id);
+      }
+
       setLoading(false);
     };
 
@@ -334,7 +349,14 @@ export default function Publicidade() {
 
           {/* Rules Tab */}
           <TabsContent value="rules" className="space-y-6 mt-6">
-            <AdsRulesPanel sellerId={sellerId} />
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2">
+                <AdsRulesPanel sellerId={sellerId} />
+              </div>
+              <div>
+                <AdsTasksPanel sellerId={sellerId} workspaceId={workspaceId} />
+              </div>
+            </div>
           </TabsContent>
         </Tabs>
       </div>
