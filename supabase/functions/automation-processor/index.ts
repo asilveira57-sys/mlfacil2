@@ -6,7 +6,7 @@ const corsHeaders = {
 };
 
 interface AutomationAction {
-  type: 'create_task' | 'assign_to' | 'set_due_in_hours' | 'set_due_at' | 'add_checklist' | 'notify' | 'add_tag';
+  type: 'create_task' | 'assign_to' | 'set_due_in_hours' | 'set_due_at' | 'add_checklist' | 'notify' | 'add_tag' | 'create_notification';
   params: Record<string, unknown>;
 }
 
@@ -99,7 +99,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    const results: { rule_id: string; task_id?: string; actions_executed: string[] }[] = [];
+    const results: { rule_id: string; task_id?: string; notification_id?: string; actions_executed: string[] }[] = [];
 
     for (const rule of (rules || []) as AutomationRule[]) {
       // Evaluate conditions
@@ -109,6 +109,7 @@ Deno.serve(async (req) => {
 
       const actionsExecuted: string[] = [];
       let taskId: string | undefined;
+      let notificationId: string | undefined;
       let taskData: Record<string, unknown> = {
         workspace_id: systemEvent.workspace_id,
         account_id: systemEvent.account_id,
@@ -116,6 +117,10 @@ Deno.serve(async (req) => {
         priority: 'medium',
         tags: [],
       };
+
+      // For promotion events, use promotion_id as deduplication key
+      const promotionId = (systemEvent.payload as Record<string, unknown>).promotion_id as string | undefined;
+      const dedupeKey = promotionId || systemEvent.id;
 
       // Process actions
       for (const action of rule.actions) {
@@ -129,22 +134,39 @@ Deno.serve(async (req) => {
               source_type?: string;
             };
 
-            // Check for duplicate task
-            const sourceType = params.source_type || systemEvent.event_type;
-            const sourceId = systemEvent.id;
-
+            const sourceType = params.source_type || 'promotion';
+            
+            // Deduplication: check for existing open task with same source
             const { data: existingTask } = await supabase
               .from('tasks')
               .select('id')
               .eq('workspace_id', systemEvent.workspace_id)
               .eq('source_type', sourceType)
-              .eq('source_id', sourceId)
+              .eq('source_id', dedupeKey)
               .neq('status', 'done')
               .limit(1);
 
             if (existingTask && existingTask.length > 0) {
-              console.log(`Skipping duplicate task for source ${sourceType}:${sourceId}`);
+              console.log(`[automation] Skipping duplicate task for ${sourceType}:${dedupeKey}`);
+              taskId = existingTask[0].id;
+              // Update existing task instead
+              actionsExecuted.push('update_existing_task');
               continue;
+            }
+
+            // Rate limit: max 3 tasks per promotion
+            if (promotionId) {
+              const { count } = await supabase
+                .from('tasks')
+                .select('id', { count: 'exact', head: true })
+                .eq('workspace_id', systemEvent.workspace_id)
+                .eq('source_type', 'promotion')
+                .ilike('source_id', `${promotionId}%`);
+
+              if (count && count >= 3) {
+                console.log(`[automation] Rate limit: skipping task for promotion ${promotionId} (${count} tasks exist)`);
+                continue;
+              }
             }
 
             taskData = {
@@ -154,11 +176,51 @@ Deno.serve(async (req) => {
               priority: params.priority || 'medium',
               tags: params.tags || [],
               source_type: sourceType,
-              source_id: sourceId,
+              source_id: dedupeKey,
               source_ref: systemEvent.payload,
-              created_by_user_id: null, // System-created
+              created_by_user_id: null,
             };
             actionsExecuted.push('create_task');
+            break;
+          }
+
+          case 'create_notification': {
+            // For events that should only create notification, not task
+            const params = action.params as {
+              title?: string;
+              body?: string;
+              link?: string;
+            };
+
+            // Get all workspace admins/gestors
+            const { data: members } = await supabase
+              .from('workspace_members')
+              .select('user_id')
+              .eq('workspace_id', systemEvent.workspace_id)
+              .in('role', ['admin', 'gestor']);
+
+            if (members && members.length > 0) {
+              const notifications = members.map(m => ({
+                workspace_id: systemEvent.workspace_id,
+                user_id: m.user_id,
+                type: 'promotion_alert',
+                title: interpolateString(params.title || 'Alerta', systemEvent.payload),
+                body: interpolateString(params.body || '', systemEvent.payload),
+                link: params.link || null,
+                is_read: false,
+              }));
+
+              const { data: notifData, error: notifError } = await supabase
+                .from('notifications')
+                .insert(notifications)
+                .select('id')
+                .limit(1);
+
+              if (!notifError && notifData?.[0]) {
+                notificationId = notifData[0].id;
+              }
+            }
+            actionsExecuted.push('create_notification');
             break;
           }
 
@@ -167,7 +229,6 @@ Deno.serve(async (req) => {
             if (params.user_id) {
               taskData.assignee_user_id = params.user_id;
             } else if (params.routing_rule === 'round_robin') {
-              // Simple round-robin: get least assigned member
               const { data: members } = await supabase
                 .from('workspace_members')
                 .select('user_id')
@@ -175,7 +236,6 @@ Deno.serve(async (req) => {
                 .in('role', ['admin', 'gestor', 'operador']);
 
               if (members && members.length > 0) {
-                // Count current open tasks per member
                 const { data: taskCounts } = await supabase
                   .from('tasks')
                   .select('assignee_user_id')
@@ -246,14 +306,14 @@ Deno.serve(async (req) => {
         } else {
           taskId = newTask?.id;
 
-          // Process post-task-creation actions
+          // Process post-task-creation actions (checklist, notify)
           for (const action of rule.actions) {
             if (action.type === 'add_checklist' && taskId) {
               const params = action.params as { items: string[] };
               if (params.items && params.items.length > 0) {
                 const checklistItems = params.items.map((title, index) => ({
                   task_id: taskId,
-                  title,
+                  title: interpolateString(title, systemEvent.payload),
                   sort_order: index,
                   is_done: false,
                 }));
@@ -264,20 +324,17 @@ Deno.serve(async (req) => {
 
             if (action.type === 'notify' && taskId) {
               const notifyUsers: string[] = [];
-
-              // Notify assignee
               if (taskData.assignee_user_id) {
                 notifyUsers.push(taskData.assignee_user_id as string);
               }
 
-              // Create notifications
               if (notifyUsers.length > 0) {
                 const notifications = notifyUsers.map(userId => ({
                   workspace_id: systemEvent.workspace_id,
                   user_id: userId,
                   type: 'automation_created',
                   title: `Nova tarefa atribuída: ${taskData.title}`,
-                  body: `Uma tarefa foi criada automaticamente pela regra "${rule.name}"`,
+                  body: `Tarefa criada pela regra "${rule.name}"`,
                   link: `/tarefas/${taskId}`,
                   is_read: false,
                 }));
@@ -287,7 +344,7 @@ Deno.serve(async (req) => {
             }
           }
 
-          // Log to audit
+          // Audit log
           await supabase.from('audit_logs').insert({
             workspace_id: systemEvent.workspace_id,
             user_id: null,
@@ -298,13 +355,19 @@ Deno.serve(async (req) => {
               rule_id: rule.id,
               rule_name: rule.name,
               event_id: systemEvent.id,
+              event_type: systemEvent.event_type,
               actions_executed: actionsExecuted,
             },
           });
         }
       }
 
-      results.push({ rule_id: rule.id, task_id: taskId, actions_executed: actionsExecuted });
+      results.push({ 
+        rule_id: rule.id, 
+        task_id: taskId, 
+        notification_id: notificationId,
+        actions_executed: actionsExecuted 
+      });
     }
 
     // Mark event as processed
@@ -329,7 +392,7 @@ Deno.serve(async (req) => {
 // Evaluate conditions against payload
 function evaluateConditions(conditions: Record<string, unknown>, payload: Record<string, unknown>): boolean {
   if (!conditions || Object.keys(conditions).length === 0) {
-    return true; // No conditions = always match
+    return true;
   }
 
   for (const [key, expected] of Object.entries(conditions)) {
@@ -366,7 +429,6 @@ function evaluateConditions(conditions: Record<string, unknown>, payload: Record
         }
       }
     } else {
-      // Simple equality check
       if (actual !== expected) return false;
     }
   }
