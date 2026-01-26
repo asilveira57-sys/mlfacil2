@@ -16,6 +16,7 @@ import {
   AdsSpendRevenueChart,
   AdsFilters,
 } from '@/components/ads';
+import { AdsRulesPanel } from '@/components/ads/AdsRulesPanel';
 import {
   useAdsCampaigns,
   useAdsDailyMetrics,
@@ -333,24 +334,7 @@ export default function Publicidade() {
 
           {/* Rules Tab */}
           <TabsContent value="rules" className="space-y-6 mt-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Regras de Automação</CardTitle>
-                <CardDescription>
-                  Configure regras para otimizar suas campanhas automaticamente
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-12 text-muted-foreground">
-                  <Settings className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p className="font-medium">Regras de automação em desenvolvimento</p>
-                  <p className="text-sm mt-2 max-w-md mx-auto">
-                    Em breve: pausar automaticamente produtos com ACOS alto,
-                    escalar produtos com bom ROAS, e integração com o módulo de Tarefas.
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
+            <AdsRulesPanel sellerId={sellerId} />
           </TabsContent>
         </Tabs>
       </div>
