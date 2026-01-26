@@ -23,6 +23,20 @@ export interface AdsConnection {
   updated_at: string;
 }
 
+export interface MlAccount {
+  id: string;
+  user_id: string;
+  ml_user_id: string;
+  access_token: string;
+  refresh_token: string | null;
+  expires_at: string | null;
+  nickname: string | null;
+  email: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AdsSyncJob {
   id: string;
   connection_id: string;
@@ -88,6 +102,7 @@ export interface ConnectionStats {
 export function useAdsConnections(sellerId?: string) {
   const [connections, setConnections] = useState<AdsConnection[]>([]);
   const [currentConnection, setCurrentConnection] = useState<AdsConnection | null>(null);
+  const [mlAccount, setMlAccount] = useState<MlAccount | null>(null);
   const [syncJobs, setSyncJobs] = useState<AdsSyncJob[]>([]);
   const [syncLogs, setSyncLogs] = useState<AdsSyncLog[]>([]);
   const [freshness, setFreshness] = useState<AdsDataFreshness[]>([]);
@@ -100,9 +115,95 @@ export function useAdsConnections(sellerId?: string) {
   });
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [autoLinking, setAutoLinking] = useState(false);
+
+  // Check for existing ml_accounts and auto-link if needed
+  const checkAutoLink = useCallback(async (userId: string, targetSellerId: string): Promise<AdsConnection | null> => {
+    try {
+      setAutoLinking(true);
+      
+      // First check if ads_connection already exists for this seller
+      const { data: existingConnection } = await supabase
+        .from('ads_connections')
+        .select('*')
+        .eq('seller_id', targetSellerId)
+        .single();
+
+      if (existingConnection) {
+        return existingConnection as unknown as AdsConnection;
+      }
+
+      // Check if ml_accounts has this seller
+      const { data: mlAccountData } = await supabase
+        .from('ml_accounts')
+        .select('*')
+        .eq('ml_user_id', targetSellerId)
+        .eq('is_active', true)
+        .single();
+
+      if (!mlAccountData) {
+        return null;
+      }
+
+      setMlAccount(mlAccountData as unknown as MlAccount);
+
+      // Auto-create ads_connection from ml_accounts
+      console.log('[useAdsConnections] Auto-linking ml_account to ads_connections:', targetSellerId);
+      
+      const { data: newConnection, error } = await supabase
+        .from('ads_connections')
+        .insert({
+          user_id: userId,
+          seller_id: targetSellerId,
+          status: 'connected',
+          status_message: 'Vinculado automaticamente via conta Mercado Livre',
+          ml_account_name: mlAccountData.nickname,
+          ml_account_email: mlAccountData.email,
+          connected_at: new Date().toISOString(),
+          auto_sync_enabled: true,
+          sync_interval_hours: 6,
+          next_scheduled_sync_at: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[useAdsConnections] Auto-link error:', error);
+        return null;
+      }
+
+      console.log('[useAdsConnections] Auto-link successful:', newConnection);
+      return newConnection as unknown as AdsConnection;
+    } catch (err) {
+      console.error('[useAdsConnections] Auto-link exception:', err);
+      return null;
+    } finally {
+      setAutoLinking(false);
+    }
+  }, []);
+
+  // Fetch ml_account for display purposes
+  const fetchMlAccount = useCallback(async (targetSellerId: string) => {
+    const { data } = await supabase
+      .from('ml_accounts')
+      .select('*')
+      .eq('ml_user_id', targetSellerId)
+      .eq('is_active', true)
+      .single();
+
+    if (data) {
+      setMlAccount(data as unknown as MlAccount);
+    }
+  }, []);
 
   // Fetch all connections for the user
   const fetchConnections = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
     const { data, error } = await supabase
       .from('ads_connections')
       .select('*')
@@ -110,16 +211,29 @@ export function useAdsConnections(sellerId?: string) {
 
     if (error) {
       console.error('[useAdsConnections] Error fetching connections:', error);
+      setLoading(false);
       return;
     }
 
-    const typedConnections = (data || []) as unknown as AdsConnection[];
+    let typedConnections = (data || []) as unknown as AdsConnection[];
+
+    // If we have a sellerId but no connection, try auto-link
+    if (sellerId && !typedConnections.find(c => c.seller_id === sellerId)) {
+      const autoLinked = await checkAutoLink(user.id, sellerId);
+      if (autoLinked) {
+        typedConnections = [autoLinked, ...typedConnections];
+      }
+    }
+
     setConnections(typedConnections);
 
     // Find connection for current seller
     if (sellerId) {
       const current = typedConnections.find(c => c.seller_id === sellerId);
       setCurrentConnection(current || null);
+      
+      // Also fetch ml_account for display
+      await fetchMlAccount(sellerId);
     }
 
     // Calculate stats
@@ -134,7 +248,9 @@ export function useAdsConnections(sellerId?: string) {
       activeConnections: active,
       lastSyncAt: lastSync?.last_sync_at || null,
     }));
-  }, [sellerId]);
+
+    setLoading(false);
+  }, [sellerId, checkAutoLink, fetchMlAccount]);
 
   // Fetch sync jobs for current connection
   const fetchSyncJobs = useCallback(async (connectionId: string) => {
@@ -352,12 +468,7 @@ export function useAdsConnections(sellerId?: string) {
 
   // Initial load
   useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      await fetchConnections();
-      setLoading(false);
-    };
-    load();
+    fetchConnections();
   }, [fetchConnections]);
 
   // Load connection details when current connection changes
@@ -373,6 +484,7 @@ export function useAdsConnections(sellerId?: string) {
     // Data
     connections,
     currentConnection,
+    mlAccount,
     syncJobs,
     syncLogs,
     freshness,
@@ -381,6 +493,7 @@ export function useAdsConnections(sellerId?: string) {
     // State
     loading,
     syncing,
+    autoLinking,
     
     // Actions
     connectAccount,

@@ -12,7 +12,6 @@ import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   Link2,
-  LinkIcon,
   Unlink,
   RefreshCw,
   Clock,
@@ -27,6 +26,8 @@ import {
   Info,
   Wifi,
   WifiOff,
+  LinkIcon,
+  Sparkles,
 } from 'lucide-react';
 import { useAdsConnections, AdsConnection, AdsSyncJob, AdsSyncLog } from '@/hooks/useAdsConnections';
 import { cn } from '@/lib/utils';
@@ -41,22 +42,22 @@ export function AdsConnectionsPanel({ sellerId }: AdsConnectionsPanelProps) {
   const {
     connections,
     currentConnection,
+    mlAccount,
     syncJobs,
     syncLogs,
     freshness,
     stats,
     loading,
     syncing,
-    connectAccount,
+    autoLinking,
     disconnectAccount,
     triggerSync,
     updateSyncSettings,
-    isDataStale,
   } = useAdsConnections(sellerId);
 
   const [activeTab, setActiveTab] = useState('status');
 
-  if (loading) {
+  if (loading || autoLinking) {
     return (
       <Card>
         <CardHeader>
@@ -64,6 +65,12 @@ export function AdsConnectionsPanel({ sellerId }: AdsConnectionsPanelProps) {
           <Skeleton className="h-4 w-72" />
         </CardHeader>
         <CardContent className="space-y-4">
+          {autoLinking && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Vinculando conta automaticamente...
+            </div>
+          )}
           <Skeleton className="h-24" />
           <Skeleton className="h-32" />
         </CardContent>
@@ -74,9 +81,21 @@ export function AdsConnectionsPanel({ sellerId }: AdsConnectionsPanelProps) {
   const hasConnection = !!currentConnection;
   const isConnected = currentConnection?.status === 'connected';
   const hasStaleData = freshness.some(f => f.is_stale);
+  const isAutoLinked = !!mlAccount && hasConnection;
 
   return (
     <div className="space-y-6">
+      {/* Auto-linked info banner */}
+      {isAutoLinked && (
+        <Alert className="border-primary/30 bg-primary/5">
+          <Sparkles className="h-4 w-4 text-primary" />
+          <AlertTitle className="text-primary">Conta vinculada automaticamente</AlertTitle>
+          <AlertDescription>
+            A conta <strong>{mlAccount.nickname || mlAccount.email}</strong> do Mercado Livre foi detectada e vinculada automaticamente ao módulo de publicidade.
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Connection Status Card */}
       <Card>
         <CardHeader className="pb-4">
@@ -95,18 +114,19 @@ export function AdsConnectionsPanel({ sellerId }: AdsConnectionsPanelProps) {
               <div>
                 <CardTitle className="text-lg">Conexões de Dados</CardTitle>
                 <CardDescription>
-                  Gerencie a integração com a API do Mercado Livre
+                  {isAutoLinked 
+                    ? `Conta: ${mlAccount.nickname || mlAccount.email || sellerId}`
+                    : 'Gerencie a integração com a API do Mercado Livre'
+                  }
                 </CardDescription>
               </div>
             </div>
-            <ConnectionStatusBadge status={currentConnection?.status} />
+            <ConnectionStatusBadge status={currentConnection?.status} isAutoLinked={isAutoLinked} />
           </div>
         </CardHeader>
         <CardContent>
           {!hasConnection ? (
-            <EmptyConnectionState 
-              onConnect={() => connectAccount(sellerId, 'Conta Principal')} 
-            />
+            <NoMlAccountState />
           ) : (
             <Tabs value={activeTab} onValueChange={setActiveTab}>
               <TabsList className="grid w-full grid-cols-4">
@@ -167,6 +187,27 @@ export function AdsConnectionsPanel({ sellerId }: AdsConnectionsPanelProps) {
                     subtext={currentConnection.last_sync_message}
                   />
                 </div>
+
+                {/* ML Account Info */}
+                {mlAccount && (
+                  <Card className="border-border/50 bg-muted/30">
+                    <CardContent className="py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                          <LinkIcon className="h-5 w-5 text-primary" />
+                        </div>
+                        <div className="flex-1">
+                          <p className="font-medium">{mlAccount.nickname || 'Conta Mercado Livre'}</p>
+                          <p className="text-sm text-muted-foreground">{mlAccount.email || `ID: ${mlAccount.ml_user_id}`}</p>
+                        </div>
+                        <Badge variant="outline" className="gap-1">
+                          <CheckCircle2 className="h-3 w-3 text-success" />
+                          Vinculada
+                        </Badge>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
 
                 {/* Data Freshness */}
                 <Card className="border-border/50">
@@ -312,6 +353,18 @@ export function AdsConnectionsPanel({ sellerId }: AdsConnectionsPanelProps) {
                             : '-'}
                         </span>
                       </div>
+                      {mlAccount && (
+                        <>
+                          <div>
+                            <span className="text-muted-foreground">Nickname:</span>
+                            <span className="ml-2">{mlAccount.nickname || '-'}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Email:</span>
+                            <span className="ml-2">{mlAccount.email || '-'}</span>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -325,6 +378,7 @@ export function AdsConnectionsPanel({ sellerId }: AdsConnectionsPanelProps) {
                       <div className="text-center py-8 text-muted-foreground">
                         <Database className="h-8 w-8 mx-auto mb-2 opacity-50" />
                         <p>Nenhum job de sincronização encontrado</p>
+                        <p className="text-xs mt-1">Execute uma sincronização para ver o histórico</p>
                       </div>
                     ) : (
                       syncJobs.map(job => (
@@ -361,11 +415,11 @@ export function AdsConnectionsPanel({ sellerId }: AdsConnectionsPanelProps) {
 }
 
 // Sub-components
-function ConnectionStatusBadge({ status }: { status?: AdsConnection['status'] }) {
+function ConnectionStatusBadge({ status, isAutoLinked }: { status?: AdsConnection['status']; isAutoLinked?: boolean }) {
   if (!status) return null;
 
   const config: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
-    connected: { label: 'Conectado', variant: 'default' },
+    connected: { label: isAutoLinked ? 'Vinculado' : 'Conectado', variant: 'default' },
     pending: { label: 'Pendente', variant: 'secondary' },
     expired: { label: 'Expirado', variant: 'destructive' },
     error: { label: 'Erro', variant: 'destructive' },
@@ -384,19 +438,22 @@ function ConnectionStatusBadge({ status }: { status?: AdsConnection['status'] })
   );
 }
 
-function EmptyConnectionState({ onConnect }: { onConnect: () => void }) {
+function NoMlAccountState() {
   return (
     <div className="text-center py-8">
       <div className="w-16 h-16 mx-auto rounded-full bg-muted flex items-center justify-center mb-4">
         <Link2 className="h-8 w-8 text-muted-foreground" />
       </div>
-      <h3 className="font-medium mb-2">Nenhuma conexão configurada</h3>
+      <h3 className="font-medium mb-2">Nenhuma conta do Mercado Livre conectada</h3>
       <p className="text-sm text-muted-foreground mb-4 max-w-md mx-auto">
-        Conecte sua conta do Mercado Livre para sincronizar dados de publicidade automaticamente via API oficial.
+        Para usar o módulo de publicidade, primeiro conecte sua conta do Mercado Livre 
+        através das <strong>Configurações → Integrações</strong>.
       </p>
-      <Button onClick={onConnect} className="gap-2">
-        <LinkIcon className="h-4 w-4" />
-        Conectar Conta
+      <Button variant="outline" asChild>
+        <a href="/settings">
+          <Settings className="h-4 w-4 mr-2" />
+          Ir para Configurações
+        </a>
       </Button>
     </div>
   );
@@ -446,23 +503,40 @@ function JobCard({ job }: { job: AdsSyncJob }) {
     )}>
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
-          <Badge variant={isRunning ? 'default' : isPending ? 'secondary' : isFailed ? 'destructive' : 'outline'}>
-            {job.status}
-          </Badge>
-          <span className="font-medium">{getJobTypeLabel(job.job_type)}</span>
+          {isRunning && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+          {isPending && <Clock className="h-4 w-4 text-muted-foreground" />}
+          {job.status === 'completed' && <CheckCircle2 className="h-4 w-4 text-success" />}
+          {isFailed && <XCircle className="h-4 w-4 text-destructive" />}
+          <span className="font-medium capitalize">{job.job_type.replace('_', ' ')}</span>
         </div>
-        <span className="text-muted-foreground text-xs">
-          {formatDistanceToNow(new Date(job.created_at), { addSuffix: true, locale: ptBR })}
-        </span>
+        <Badge variant={
+          job.status === 'completed' ? 'default' :
+          job.status === 'failed' ? 'destructive' :
+          job.status === 'running' ? 'secondary' : 'outline'
+        }>
+          {job.status}
+        </Badge>
       </div>
-      <div className="flex items-center gap-4 text-muted-foreground">
-        <span>Processados: {job.processed_records}/{job.total_records || '?'}</span>
-        {job.failed_records > 0 && (
-          <span className="text-destructive">Falhas: {job.failed_records}</span>
-        )}
+      <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+        <div>
+          <span className="block text-foreground font-medium">{job.processed_records || 0}</span>
+          Processados
+        </div>
+        <div>
+          <span className="block text-foreground font-medium">{job.failed_records || 0}</span>
+          Falhas
+        </div>
+        <div>
+          <span className="block text-foreground font-medium">
+            {job.started_at 
+              ? formatDistanceToNow(new Date(job.started_at), { locale: ptBR })
+              : '-'}
+          </span>
+          Iniciado
+        </div>
       </div>
       {job.error_message && (
-        <p className="text-destructive text-xs mt-2">{job.error_message}</p>
+        <p className="text-xs text-destructive mt-2">{job.error_message}</p>
       )}
     </div>
   );
@@ -474,59 +548,56 @@ function LogCard({ log }: { log: AdsSyncLog }) {
 
   return (
     <div className={cn(
-      "p-2 rounded border text-xs",
+      "p-3 rounded-lg border text-sm",
       isError && "border-destructive/30 bg-destructive/5",
-      isWarn && "border-warning/30 bg-warning/5",
-      !isError && !isWarn && "border-border/30"
+      isWarn && "border-warning/30 bg-warning/5"
     )}>
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="text-[10px]">
-            {log.log_type}
+          <Badge variant={isError ? 'destructive' : isWarn ? 'secondary' : 'outline'} className="text-xs">
+            {log.log_level}
           </Badge>
-          <span className={cn(
-            isError && "text-destructive",
-            isWarn && "text-warning"
-          )}>
-            {log.message}
-          </span>
+          <span className="font-medium">{log.log_type}</span>
         </div>
-        <span className="text-muted-foreground">
+        <span className="text-xs text-muted-foreground">
           {formatDistanceToNow(new Date(log.created_at), { addSuffix: true, locale: ptBR })}
         </span>
       </div>
-      {log.records_processed !== null && (
-        <div className="mt-1 text-muted-foreground">
-          Processados: {log.records_processed} | Criados: {log.records_created} | Atualizados: {log.records_updated}
-        </div>
+      {log.message && (
+        <p className="text-muted-foreground">{log.message}</p>
+      )}
+      {log.duration_ms && (
+        <span className="text-xs text-muted-foreground">
+          Duração: {log.duration_ms}ms
+        </span>
       )}
     </div>
   );
 }
 
-// Helpers
-function getStatusLabel(status?: string): string {
+// Helper functions
+function getStatusLabel(status: AdsConnection['status']): string {
   const labels: Record<string, string> = {
     connected: 'Conectado',
-    pending: 'Aguardando',
+    pending: 'Pendente',
     expired: 'Token Expirado',
-    error: 'Erro de Conexão',
+    error: 'Erro na Conexão',
     disconnected: 'Desconectado',
   };
-  return labels[status || ''] || 'Desconhecido';
+  return labels[status] || status;
 }
 
-function getStatusIcon(status?: string): React.ReactNode {
+function getStatusIcon(status: AdsConnection['status']): React.ReactNode {
   switch (status) {
     case 'connected': return <CheckCircle2 className="h-5 w-5 text-success" />;
     case 'pending': return <Loader2 className="h-5 w-5 animate-spin" />;
-    case 'error': 
-    case 'expired': return <XCircle className="h-5 w-5 text-destructive" />;
-    default: return <Info className="h-5 w-5 text-muted-foreground" />;
+    case 'expired': return <AlertTriangle className="h-5 w-5 text-warning" />;
+    case 'error': return <XCircle className="h-5 w-5 text-destructive" />;
+    default: return <WifiOff className="h-5 w-5 text-muted-foreground" />;
   }
 }
 
-function getStatusColor(status?: string): 'default' | 'success' | 'destructive' {
+function getStatusColor(status: AdsConnection['status']): 'default' | 'success' | 'destructive' {
   switch (status) {
     case 'connected': return 'success';
     case 'error':
@@ -541,20 +612,6 @@ function getDataTypeLabel(dataType: string): string {
     ad_groups: 'Grupos',
     items: 'Produtos',
     daily_metrics: 'Métricas',
-    summary_metrics: 'Resumo',
   };
   return labels[dataType] || dataType;
-}
-
-function getJobTypeLabel(jobType: string): string {
-  const labels: Record<string, string> = {
-    full: 'Sincronização Completa',
-    incremental: 'Incremental',
-    campaigns: 'Campanhas',
-    ad_groups: 'Grupos de Anúncios',
-    items: 'Produtos',
-    metrics: 'Métricas',
-    daily_metrics: 'Métricas Diárias',
-  };
-  return labels[jobType] || jobType;
 }
