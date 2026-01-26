@@ -7,6 +7,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCostSyncWatchdog } from "@/hooks/useCostSyncWatchdog";
 import { useOrdersSyncWatchdog } from "@/hooks/useOrdersSyncWatchdog";
+import { ActiveAccountProvider } from "@/contexts/ActiveAccountContext";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
@@ -126,44 +127,46 @@ const App = () => {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <GlobalWatchdogs />
-        <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<Index />} />
-            <Route path="/home" element={<Index />} />
-            <Route path="/planos" element={<Planos />} />
-            <Route path="/auth" element={<Auth />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/shipping-labels" element={<ShippingLabels />} />
-            <Route path="/shipping-labels/header-settings" element={<LabelHeaderSettings />} />
-            <Route path="/zpl-converter" element={<ZPLConverter />} />
-            <Route path="/abc-analysis" element={<AbcAnalysis />} />
-            <Route path="/tendencias" element={<Tendencias />} />
-            <Route path="/mercado" element={<Mercado />} />
-            <Route path="/custos" element={<Custos />} />
-            <Route path="/concorrencia" element={<Concorrencia />} />
-            <Route path="/radiografia" element={<Radiografia />} />
-            <Route path="/tarefas" element={<Tarefas />} />
-            <Route path="/tarefas/quadro" element={<Tarefas />} />
-            <Route path="/tarefas/inbox" element={<Tarefas />} />
-            <Route path="/tarefas/regras" element={<Tarefas />} />
-            <Route path="/tarefas/:id" element={<TarefaDetalhe />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/publicidade" element={<Publicidade />} />
-            <Route path="/promocoes" element={<Promocoes />} />
-            {/* Blog routes */}
-            <Route path="/blog" element={<Blog />} />
-            <Route path="/blog/:slug" element={<Blog />} />
-            <Route path="/blog/categoria/:slug" element={<Blog />} />
-            {/* Admin routes - protected by AdminRoute guard */}
-            <Route path="/admin/blog/*" element={<AdminRoute><BlogAdmin /></AdminRoute>} />
-            <Route path="/admin/planos" element={<AdminRoute><AdminPlanos /></AdminRoute>} />
-            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
+        <ActiveAccountProvider>
+          <Toaster />
+          <Sonner />
+          <GlobalWatchdogs />
+          <BrowserRouter>
+            <Routes>
+              <Route path="/" element={<Index />} />
+              <Route path="/home" element={<Index />} />
+              <Route path="/planos" element={<Planos />} />
+              <Route path="/auth" element={<Auth />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/shipping-labels" element={<ShippingLabels />} />
+              <Route path="/shipping-labels/header-settings" element={<LabelHeaderSettings />} />
+              <Route path="/zpl-converter" element={<ZPLConverter />} />
+              <Route path="/abc-analysis" element={<AbcAnalysis />} />
+              <Route path="/tendencias" element={<Tendencias />} />
+              <Route path="/mercado" element={<Mercado />} />
+              <Route path="/custos" element={<Custos />} />
+              <Route path="/concorrencia" element={<Concorrencia />} />
+              <Route path="/radiografia" element={<Radiografia />} />
+              <Route path="/tarefas" element={<Tarefas />} />
+              <Route path="/tarefas/quadro" element={<Tarefas />} />
+              <Route path="/tarefas/inbox" element={<Tarefas />} />
+              <Route path="/tarefas/regras" element={<Tarefas />} />
+              <Route path="/tarefas/:id" element={<TarefaDetalhe />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/publicidade" element={<Publicidade />} />
+              <Route path="/promocoes" element={<Promocoes />} />
+              {/* Blog routes */}
+              <Route path="/blog" element={<Blog />} />
+              <Route path="/blog/:slug" element={<Blog />} />
+              <Route path="/blog/categoria/:slug" element={<Blog />} />
+              {/* Admin routes - protected by AdminRoute guard */}
+              <Route path="/admin/blog/*" element={<AdminRoute><BlogAdmin /></AdminRoute>} />
+              <Route path="/admin/planos" element={<AdminRoute><AdminPlanos /></AdminRoute>} />
+              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+        </ActiveAccountProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

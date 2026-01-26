@@ -19,9 +19,9 @@ import {
   Info,
   Percent,
   CalendarClock,
-  CircleDollarSign,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { usePromotions, usePromotionItems, PromotionSnapshot, PromotionItemSnapshot } from '@/hooks/usePromotions';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -43,12 +43,12 @@ import {
 } from '@/components/ui/sheet';
 
 export default function Promocoes() {
+  const { sellerId, activeAccount, loading: accountLoading, initialized } = useActiveAccount();
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
-  const [accountId, setAccountId] = useState<string | null>(null);
   const [selectedPromotion, setSelectedPromotion] = useState<PromotionSnapshot | null>(null);
   const [syncing, setSyncing] = useState(false);
 
-  // Fetch workspace and account on mount
+  // Fetch workspace on mount
   useEffect(() => {
     const fetchContext = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -64,18 +64,6 @@ export default function Promocoes() {
       if (prefs?.active_workspace_id) {
         setWorkspaceId(prefs.active_workspace_id);
       }
-
-      // Get first active ML account
-      const { data: accounts } = await supabase
-        .from('ml_accounts')
-        .select('ml_user_id')
-        .eq('user_id', user.id)
-        .eq('is_active', true)
-        .limit(1);
-
-      if (accounts?.[0]) {
-        setAccountId(accounts[0].ml_user_id);
-      }
     };
 
     fetchContext();
@@ -89,7 +77,7 @@ export default function Promocoes() {
     activePromotions,
     endingSoonPromotions,
     finishedPromotions,
-  } = usePromotions(workspaceId, accountId);
+  } = usePromotions(workspaceId, sellerId);
 
   const {
     items: selectedItems,
@@ -97,14 +85,14 @@ export default function Promocoes() {
     pendingItems,
     ineligibleItems,
     startedItems,
-  } = usePromotionItems(workspaceId, selectedPromotion?.promotion_id, accountId);
+  } = usePromotionItems(workspaceId, selectedPromotion?.promotion_id, sellerId);
 
   const handleSync = async () => {
-    if (!workspaceId || !accountId) return;
+    if (!workspaceId || !sellerId) return;
     setSyncing(true);
     try {
       const { error } = await supabase.functions.invoke('promotions-sync', {
-        body: { workspace_id: workspaceId, account_id: accountId },
+        body: { workspace_id: workspaceId, account_id: sellerId },
       });
       if (error) throw error;
       await refetch();
@@ -115,22 +103,45 @@ export default function Promocoes() {
     }
   };
 
-  if (!workspaceId) {
+  // Show loading while context initializes
+  if (accountLoading || !initialized) {
+    return (
+      <DashboardLayout>
+        <div className="p-6">
+          <div className="space-y-4">
+            <Skeleton className="h-10 w-64" />
+            <div className="grid grid-cols-4 gap-4">
+              {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24" />)}
+            </div>
+            <Skeleton className="h-64" />
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (!sellerId) {
     return (
       <DashboardLayout>
         <div className="p-6">
           <Card>
             <CardContent className="py-12 text-center">
               <Info className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-              <h3 className="text-lg font-medium mb-2">Configuração necessária</h3>
+              <h3 className="text-lg font-medium mb-2">Conecte uma conta</h3>
               <p className="text-muted-foreground">
-                Configure seu workspace nas Configurações para acessar a Central de Promoções.
+                Conecte sua conta do Mercado Livre para acessar a Central de Promoções.
               </p>
+              <Button className="mt-4" onClick={() => window.location.href = '/settings'}>
+                Conectar Conta
+              </Button>
             </CardContent>
           </Card>
         </div>
       </DashboardLayout>
     );
+  }
+
+  if (!workspaceId) {
   }
 
   return (
