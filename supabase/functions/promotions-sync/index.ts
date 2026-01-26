@@ -20,8 +20,8 @@ interface Promotion {
   type: string;
   name?: string;
   status: string;
-  start_date: string;
-  finish_date: string;
+  start_date: string | null;
+  finish_date: string | null;
   items?: PromotionItem[];
 }
 
@@ -61,10 +61,11 @@ async function safeFetchJson<T>(
   try {
     const response = await fetch(url, options);
     const status = response.status;
+    const contentType = response.headers.get('content-type') || '';
     
     // Handle empty response
     const text = await response.text();
-    console.log(`[${context}] Status: ${status}, Body length: ${text?.length || 0}`);
+    console.log(`[${context}] Status: ${status}, Content-Type: ${contentType}, Body length: ${text?.length || 0}`);
     
     if (!text || text.trim() === '') {
       // Empty response with success status = no data (valid for promotions API)
@@ -129,7 +130,16 @@ Deno.serve(async (req) => {
     }
 
     const logPrefix = `[promotions-sync] ws=${workspaceId} acc=${accountId}`;
-    console.log(`${logPrefix} Starting sync (source: ${syncSource})`);
+    console.log(JSON.stringify({
+      tag: 'promotions-sync',
+      route: 'promotions-sync',
+      workspace_id: workspaceId,
+      seller_id: accountId,
+      ml_account_id: null,
+      status: 'starting',
+      sync_source: syncSource,
+      ts: new Date().toISOString(),
+    }));
 
     // Create sync log entry
     const { data: syncLog, error: logError } = await supabase
@@ -152,7 +162,7 @@ Deno.serve(async (req) => {
     // Fetch ML account credentials
     const { data: mlAccount, error: mlError } = await supabase
       .from('ml_accounts')
-      .select('access_token, ml_user_id')
+      .select('id, access_token, ml_user_id')
       .eq('ml_user_id', accountId)
       .eq('is_active', true)
       .maybeSingle();
@@ -166,13 +176,27 @@ Deno.serve(async (req) => {
     if (!mlAccount) {
       console.warn(`${logPrefix} ML account not found or inactive`);
       await updateSyncLog(supabase, logId, 'error', startTime, { error_message: 'ML account not found' });
-      return errorResponse('ML_AUTH_REQUIRED', 'Conta do Mercado Livre não encontrada. Reconecte sua conta.', 400);
+      return errorResponse('NO_CONNECTED_ACCOUNT', 'Nenhuma conta do Mercado Livre conectada para esta seleção. Conecte uma conta para sincronizar promoções.', 400, {
+        workspace_id: workspaceId,
+        seller_id: accountId,
+      });
     }
+
+    const mlAccountId = (mlAccount as { id: string }).id;
+    console.log(JSON.stringify({
+      tag: 'promotions-sync',
+      route: 'promotions-sync',
+      workspace_id: workspaceId,
+      seller_id: accountId,
+      ml_account_id: mlAccountId,
+      status: 'ml_account_ok',
+      ts: new Date().toISOString(),
+    }));
 
     // Fetch existing snapshots for comparison
     const { data: existingSnapshots } = await supabase
       .from('promotion_snapshots')
-      .select('promotion_id, status, items_count')
+      .select('promotion_id, status')
       .eq('workspace_id', workspaceId)
       .eq('account_id', accountId);
 
@@ -196,14 +220,17 @@ Deno.serve(async (req) => {
     }
 
     // Fetch promotions from ML API with safe JSON handling
-    const mlUrl = `https://api.mercadolibre.com/seller-promotions/promotions?seller_id=${mlAccount.ml_user_id}`;
-    const mlHeaders = {
-      'Authorization': `Bearer ${mlAccount.access_token}`,
-      'Content-Type': 'application/json',
+    // Mercado Livre Promotions API (v2)
+    // Docs: /seller-promotions/users/{user_id}?app_version=v2
+    const mlUrl = `https://api.mercadolibre.com/seller-promotions/users/${mlAccount.ml_user_id}?app_version=v2`;
+    const mlHeaders: Record<string, string> = {
+      'Authorization': `Bearer ${(mlAccount as { access_token: string }).access_token}`,
+      'Accept': 'application/json',
     };
 
     const { data: mlData, error: mlApiError, status: mlStatus, isEmpty } = await safeFetchJson<{
       results?: Record<string, unknown>[];
+      paging?: Record<string, unknown>;
     } | Record<string, unknown>[]>(mlUrl, { headers: mlHeaders }, 'ML-Promotions');
 
     // Handle ML API errors
@@ -238,22 +265,33 @@ Deno.serve(async (req) => {
 
     console.log(`${logPrefix} ML API returned ${rawPromotions.length} promotions`);
 
-    // Parse promotions
-    const promotions: Promotion[] = rawPromotions.map((p) => ({
-      id: p.id as string,
-      type: (p.type as string) || 'deal',
-      name: (p.name as string) || (p.title as string),
-      status: p.status as string,
-      start_date: p.start_date as string,
-      finish_date: p.finish_date as string,
-      items: [],
-    }));
+    // Parse promotions (be defensive with schema differences)
+    const promotions: Promotion[] = rawPromotions
+      .filter((p) => !!(p.id || p.promotion_id))
+      .map((p) => {
+        const id = (p.id as string) || (p.promotion_id as string);
+        const type = ((p.type as string) || (p.promotion_type as string) || (p.kind as string) || 'DEAL').toString();
+        const name = (p.name as string) || (p.title as string) || (p.promotion_name as string);
+        const status = ((p.status as string) || (p.state as string) || 'unknown').toString();
+        const startDate = (p.start_date as string) || (p.start_at as string) || (p.startDate as string) || null;
+        const finishDate = (p.finish_date as string) || (p.end_date as string) || (p.end_at as string) || (p.finishDate as string) || null;
+        return {
+          id,
+          type,
+          name,
+          status,
+          start_date: startDate,
+          finish_date: finishDate,
+          items: [],
+        };
+      });
 
     console.log(`${logPrefix} Fetched ${promotions.length} promotions from ML`);
 
     // Fetch items for each promotion
     for (const promo of promotions) {
-      const itemsUrl = `https://api.mercadolibre.com/seller-promotions/promotions/${promo.id}/items?seller_id=${mlAccount.ml_user_id}`;
+      // Docs: /seller-promotions/promotions/{promotion_id}/items?promotion_type=...&app_version=v2
+      const itemsUrl = `https://api.mercadolibre.com/seller-promotions/promotions/${promo.id}/items?promotion_type=${encodeURIComponent(promo.type)}&app_version=v2&seller_id=${mlAccount.ml_user_id}`;
       const { data: itemsData, error: itemsError } = await safeFetchJson<{
         results?: Record<string, unknown>[];
       }>(itemsUrl, { headers: mlHeaders }, `ML-Items-${promo.id}`);
@@ -290,7 +328,7 @@ Deno.serve(async (req) => {
     let itemsSynced = 0;
 
     for (const promo of promotions) {
-      const promoEndDate = new Date(promo.finish_date);
+      const promoEndDate = promo.finish_date ? new Date(promo.finish_date) : null;
       const existing = existingMap.get(promo.id);
       const existingItemStatuses = existingItemsMap.get(promo.id) || new Map();
 
@@ -307,13 +345,16 @@ Deno.serve(async (req) => {
           status: promo.status,
           start_at: promo.start_date,
           end_at: promo.finish_date,
-          items_count: promo.items?.length || 0,
           updated_at: new Date().toISOString(),
         }, {
           onConflict: 'workspace_id,account_id,promotion_id',
         });
 
-      if (!promoError) promotionsSynced++;
+      if (promoError) {
+        console.error(`${logPrefix} Upsert promotion snapshot failed:`, promoError);
+      } else {
+        promotionsSynced++;
+      }
 
       // Track items for events
       const pendingItems: string[] = [];
@@ -335,16 +376,17 @@ Deno.serve(async (req) => {
             item_status: item.status,
             original_price: item.original_price,
             promo_price: item.deal_price,
-            discount_percent: item.original_price && item.deal_price
-              ? ((item.original_price - item.deal_price) / item.original_price) * 100
-              : null,
             error_reason: item.error,
             updated_at: new Date().toISOString(),
           }, {
             onConflict: 'workspace_id,promotion_id,item_id',
           });
 
-        if (!itemError) itemsSynced++;
+        if (itemError) {
+          console.error(`${logPrefix} Upsert item snapshot failed:`, itemError);
+        } else {
+          itemsSynced++;
+        }
 
         // Track status for events
         if (item.status === 'candidate' || item.status === 'pending') {
@@ -389,7 +431,7 @@ Deno.serve(async (req) => {
         });
       }
 
-      if (promo.status === 'started' && promoEndDate <= hours48FromNow && promoEndDate > now) {
+      if (promo.status === 'started' && promoEndDate && promoEndDate <= hours48FromNow && promoEndDate > now) {
         const wasNotEndingSoon = existing?.status !== 'started' || !existing;
         if (wasNotEndingSoon) {
           eventsToCreate.push({
@@ -457,7 +499,20 @@ Deno.serve(async (req) => {
       events_created: eventsToCreate.length,
     });
 
-    console.log(`${logPrefix} Completed in ${elapsed}ms. Promos: ${promotionsSynced}, Items: ${itemsSynced}, Events: ${eventsToCreate.length}`);
+    console.log(JSON.stringify({
+      tag: 'promotions-sync',
+      route: 'promotions-sync',
+      workspace_id: workspaceId,
+      seller_id: accountId,
+      ml_account_id: (mlAccount as { id: string }).id,
+      status: 'success',
+      elapsed_ms: elapsed,
+      promotions_fetched: promotions.length,
+      promotions_synced: promotionsSynced,
+      items_synced: itemsSynced,
+      events_created: eventsToCreate.length,
+      ts: new Date().toISOString(),
+    }));
 
     const result: SyncResult = {
       promotions_fetched: promotions.length,
@@ -483,7 +538,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    return errorResponse('INTERNAL_ERROR', 'Erro interno do servidor', 500, {
+     return errorResponse('INTERNAL_ERROR', 'Erro interno do servidor', 500, {
       message: String(error),
     });
   }

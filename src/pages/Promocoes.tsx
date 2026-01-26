@@ -132,8 +132,8 @@ export default function Promocoes() {
       setSyncError(result.error);
       setSyncErrorCode(result.errorCode);
       
-      // Special handling for auth errors
-      if (result.errorCode === 'TOKEN_EXPIRED' || result.errorCode === 'ML_AUTH_REQUIRED') {
+      // Special handling for connection/auth errors
+      if (result.errorCode === 'TOKEN_EXPIRED' || result.errorCode === 'ML_AUTH_REQUIRED' || result.errorCode === 'NO_CONNECTED_ACCOUNT') {
         toast.error('Reconecte sua conta do Mercado Livre', {
           description: result.error,
           action: {
