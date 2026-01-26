@@ -22,6 +22,7 @@ import { DashboardKpiCards } from "@/components/dashboard/DashboardKpiCards";
 import { DashboardQuickActions } from "@/components/dashboard/DashboardQuickActions";
 import { DashboardModulesGrid } from "@/components/dashboard/DashboardModulesGrid";
 import { DashboardOnboarding } from "@/components/dashboard/DashboardOnboarding";
+import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import {
   Dialog,
   DialogContent,
@@ -38,14 +39,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
-interface MLAccount {
-  id: string;
-  nickname: string | null;
-  email: string | null;
-  is_active: boolean | null;
-  ml_user_id: string;
-}
 
 interface SyncJob {
   id: string;
@@ -66,35 +59,19 @@ const Dashboard = () => {
   const { toast } = useToast();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [mlAccount, setMlAccount] = useState<MLAccount | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Use global active account context (source of truth)
+  const { activeAccount, sellerId, loading: accountLoading, initialized, refreshAccounts } = useActiveAccount();
 
   // Sync state for settings
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncJob, setSyncJob] = useState<SyncJob | null>(null);
   const [syncDebugInfo, setSyncDebugInfo] = useState<SyncDebugInfo | null>(null);
 
-  // Fetch ML account status
-  const fetchMlAccount = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('ml_accounts')
-      .select('id, nickname, email, is_active, ml_user_id')
-      .eq('user_id', userId)
-      .eq('is_active', true)
-      .order('updated_at', { ascending: false })
-      .limit(1);
-
-    if (error) {
-      console.error('Erro ao buscar conta ML:', error);
-      return;
-    }
-
-    setMlAccount(data?.[0] ?? null);
-  };
-
   // Fetch sync debug info
   const fetchSyncDebugInfo = useCallback(async () => {
-    if (!user) return;
+    if (!user || !sellerId) return;
     
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -110,15 +87,13 @@ const Dashboard = () => {
     } catch (err) {
       console.error("Error fetching sync debug info:", err);
     }
-  }, [user]);
+  }, [user, sellerId]);
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
       if (!session) {
         navigate("/auth");
-      } else {
-        fetchMlAccount(session.user.id);
       }
     });
 
@@ -126,8 +101,6 @@ const Dashboard = () => {
       setUser(session?.user ?? null);
       if (!session) {
         navigate("/auth");
-      } else {
-        fetchMlAccount(session.user.id);
       }
       setLoading(false);
     });
@@ -137,10 +110,10 @@ const Dashboard = () => {
 
   // Fetch debug info when settings open
   useEffect(() => {
-    if (settingsOpen && mlAccount) {
+    if (settingsOpen && activeAccount) {
       fetchSyncDebugInfo();
     }
-  }, [settingsOpen, mlAccount, fetchSyncDebugInfo]);
+  }, [settingsOpen, activeAccount, fetchSyncDebugInfo]);
 
   // Handle ML OAuth callback
   useEffect(() => {
@@ -164,10 +137,11 @@ const Dashboard = () => {
         description: "Sua conta do Mercado Livre foi conectada com sucesso",
       });
       
-      fetchMlAccount(user.id);
+      // Refresh accounts from global context
+      refreshAccounts();
       window.history.replaceState({}, '', '/dashboard');
     }
-  }, [user, toast]);
+  }, [user, toast, refreshAccounts]);
 
   const handleConnectML = async () => {
     try {
@@ -235,7 +209,7 @@ const Dashboard = () => {
 
   // Sync orders from settings
   const handleSyncOrders = async () => {
-    if (!mlAccount) return;
+    if (!sellerId) return;
 
     setIsSyncing(true);
     setSyncJob(null);
@@ -248,7 +222,7 @@ const Dashboard = () => {
 
       const response = await supabase.functions.invoke("ml-sync-orders", {
         headers: { Authorization: `Bearer ${session.access_token}` },
-        body: { seller_id: mlAccount.ml_user_id }
+        body: { seller_id: sellerId }
       });
 
       if (response.error) {
@@ -316,7 +290,7 @@ const Dashboard = () => {
     ? (syncJob.processed_records / syncJob.total_records) * 100 
     : 0;
 
-  if (loading) {
+  if (loading || accountLoading || !initialized) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
@@ -327,10 +301,10 @@ const Dashboard = () => {
   const headerContent = (
     <div className="flex items-center gap-2">
       {/* ML Connection Status Badge */}
-      {mlAccount ? (
+      {activeAccount ? (
         <Badge variant="outline" className="gap-1.5 text-success border-success/30 bg-success/10">
           <CheckCircle className="h-3 w-3" />
-          <span className="hidden sm:inline">{mlAccount.nickname || "ML Conectado"}</span>
+          <span className="hidden sm:inline">{activeAccount.nickname || "ML Conectado"}</span>
         </Badge>
       ) : (
         <Badge variant="outline" className="gap-1.5 text-muted-foreground">
@@ -360,23 +334,23 @@ const Dashboard = () => {
               <h4 className="font-medium text-sm">Mercado Livre</h4>
               <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
                 <div className="flex items-center gap-3">
-                  {mlAccount ? (
+                  {activeAccount ? (
                     <CheckCircle className="w-5 h-5 text-success" />
                   ) : (
                     <XCircle className="w-5 h-5 text-muted-foreground" />
                   )}
                   <div>
                     <p className="text-sm font-medium">
-                      {mlAccount ? 'Conectado' : 'Desconectado'}
+                      {activeAccount ? 'Conectado' : 'Desconectado'}
                     </p>
-                    {mlAccount && (
+                    {activeAccount && (
                       <p className="text-xs text-muted-foreground">
-                        {mlAccount.nickname || mlAccount.email || mlAccount.ml_user_id}
+                        {activeAccount.nickname || activeAccount.email || activeAccount.sellerId}
                       </p>
                     )}
                   </div>
                 </div>
-                {!mlAccount && (
+                {!activeAccount && (
                   <Button size="sm" onClick={() => { setSettingsOpen(false); handleConnectML(); }}>
                     Conectar
                   </Button>
@@ -385,7 +359,7 @@ const Dashboard = () => {
             </div>
 
             {/* Sync Section - Only show when ML is connected */}
-            {mlAccount && (
+            {activeAccount && (
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <Database className="w-4 h-4 text-muted-foreground" />
@@ -503,10 +477,10 @@ const Dashboard = () => {
     >
       <div className="p-4 lg:p-6 space-y-6">
         {/* Connected State - Full Dashboard */}
-        {mlAccount ? (
+        {activeAccount ? (
           <>
             {/* KPI Cards */}
-            <DashboardKpiCards sellerId={mlAccount.ml_user_id} />
+            <DashboardKpiCards sellerId={sellerId || undefined} />
 
             {/* Quick Actions */}
             <DashboardQuickActions />

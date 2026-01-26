@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { format } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
+import { useActiveSellerId } from "@/contexts/ActiveAccountContext";
 import { SalesMetricsCard } from "./SalesMetricsCard";
 import { SalesChart } from "./SalesChart";
 import { AnnualSalesChart } from "./AnnualSalesChart";
@@ -148,9 +149,11 @@ export function SalesDashboard() {
   const [salesData, setSalesData] = useState<SalesData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sellerId, setSellerId] = useState<string | null>(null);
   const [dateFilter, setDateFilter] = useState<DateFilter>(getInitial30DayFilter);
   const { toast } = useToast();
+
+  // Use global active seller ID from context (source of truth)
+  const activeSellerId = useActiveSellerId();
 
   // Sync state for onboarding
   const [isSyncing, setIsSyncing] = useState(false);
@@ -181,18 +184,7 @@ export function SalesDashboard() {
         return;
       }
 
-      // Fetch seller_id from ml_accounts
-      const { data: accounts } = await supabase
-        .from('ml_accounts')
-        .select('ml_user_id')
-        .eq('user_id', session.user.id)
-        .eq('is_active', true)
-        .limit(1);
-      
-      if (accounts?.[0]) {
-        setSellerId(accounts[0].ml_user_id);
-      }
-
+      // Use the global active seller ID from context
       let response = await supabase.functions.invoke("ml-sales-data", {
         headers: { Authorization: `Bearer ${session.access_token}` },
         body: {
@@ -242,9 +234,9 @@ export function SalesDashboard() {
 
       // Check if this is a new account that needs onboarding sync
       const debug = response.data?._debug;
-      if (isFirstLoad && debug?.cachedOrdersCount === 0 && accounts?.[0]) {
+      if (isFirstLoad && debug?.cachedOrdersCount === 0 && activeSellerId) {
         setShowOnboarding(true);
-        startProgressiveSync(accounts[0].ml_user_id, session.access_token);
+        startProgressiveSync(activeSellerId, session.access_token);
       }
       setIsFirstLoad(false);
 
@@ -427,7 +419,7 @@ export function SalesDashboard() {
 
     const handleSyncComplete = (event: CustomEvent) => {
       // Refresh data when background sync completes
-      if (event.detail?.sellerId === sellerId || !sellerId) {
+      if (event.detail?.sellerId === activeSellerId || !activeSellerId) {
         fetchSalesData();
         toast({
           title: "Dados atualizados",
@@ -444,7 +436,7 @@ export function SalesDashboard() {
       window.removeEventListener("orders_sync_start", handleSyncStart as EventListener);
       window.removeEventListener("orders_sync_complete", handleSyncComplete as EventListener);
     };
-  }, [sellerId, toast]);
+  }, [activeSellerId, toast, fetchSalesData]);
 
   // Show onboarding sync screen
   if (showOnboarding) {
