@@ -74,6 +74,7 @@ export const SOURCE_TYPES = {
   COST: 'cost',
   COMPETITOR: 'competitor',
   ADS: 'ads',
+  ADS_RULE: 'ads_rule',
   ORDER: 'order',
   LISTING: 'listing',
   MANUAL: 'manual',
