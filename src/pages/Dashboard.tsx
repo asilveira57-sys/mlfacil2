@@ -5,32 +5,23 @@ import { User } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
 import { 
-  LogOut, 
-  BarChart3, 
-  Plus, 
-  ExternalLink, 
-  Settings, 
   CheckCircle, 
   XCircle, 
-  Package, 
   CloudDownload, 
   RefreshCw, 
   Database,
-  TrendingUp,
-  Activity,
-  Target,
-  DollarSign,
-  Printer,
-  FileText,
-  Megaphone,
-  Users,
-  Store,
-  ListChecks,
-  Zap,
+  Settings,
+  User as UserIcon,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { SalesDashboard } from "@/components/SalesDashboard";
+import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { DashboardKpiCards } from "@/components/dashboard/DashboardKpiCards";
+import { DashboardQuickActions } from "@/components/dashboard/DashboardQuickActions";
+import { DashboardModulesGrid } from "@/components/dashboard/DashboardModulesGrid";
+import { DashboardOnboarding } from "@/components/dashboard/DashboardOnboarding";
 import {
   Dialog,
   DialogContent,
@@ -39,6 +30,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface MLAccount {
   id: string;
@@ -169,15 +168,6 @@ const Dashboard = () => {
       window.history.replaceState({}, '', '/dashboard');
     }
   }, [user, toast]);
-
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    toast({
-      title: "Logout realizado",
-      description: "Você foi desconectado com sucesso",
-    });
-    navigate("/auth");
-  };
 
   const handleConnectML = async () => {
     try {
@@ -334,440 +324,208 @@ const Dashboard = () => {
     );
   }
 
-  return (
-    <div className="min-h-screen bg-muted/30">
-      {/* Header */}
-      <header className="bg-card border-b border-border sticky top-0 z-50 shadow-sm">
-        <div className="container mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-primary rounded-xl flex items-center justify-center">
-                <BarChart3 className="w-6 h-6 text-primary-foreground" />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold text-foreground">ML Analyzer Pro</h1>
-                <p className="text-xs text-muted-foreground">Análise Profissional de Anúncios</p>
-              </div>
-            </div>
-            
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-muted-foreground hidden sm:inline">
-                {user?.email}
-              </span>
-              
-              {/* Settings Dialog */}
-              <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" size="sm" className="gap-2">
-                    <Settings className="w-4 h-4" />
-                    <span className="hidden sm:inline">Configurações</span>
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-lg">
-                  <DialogHeader>
-                    <DialogTitle>Configurações</DialogTitle>
-                    <DialogDescription>
-                      Gerencie suas conexões e sincronização de dados
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="space-y-6 py-4">
-                    {/* ML Connection Status */}
-                    <div className="space-y-3">
-                      <h4 className="font-medium text-sm">Mercado Livre</h4>
-                      <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                        <div className="flex items-center gap-3">
-                          {mlAccount ? (
-                            <CheckCircle className="w-5 h-5 text-green-500" />
-                          ) : (
-                            <XCircle className="w-5 h-5 text-muted-foreground" />
-                          )}
-                          <div>
-                            <p className="text-sm font-medium">
-                              {mlAccount ? 'Conectado' : 'Desconectado'}
-                            </p>
-                            {mlAccount && (
-                              <p className="text-xs text-muted-foreground">
-                                {mlAccount.nickname || mlAccount.email || mlAccount.ml_user_id}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                        {!mlAccount && (
-                          <Button size="sm" onClick={() => { setSettingsOpen(false); handleConnectML(); }}>
-                            Conectar
-                          </Button>
-                        )}
-                      </div>
-                    </div>
+  const headerContent = (
+    <div className="flex items-center gap-2">
+      {/* ML Connection Status Badge */}
+      {mlAccount ? (
+        <Badge variant="outline" className="gap-1.5 text-success border-success/30 bg-success/10">
+          <CheckCircle className="h-3 w-3" />
+          <span className="hidden sm:inline">{mlAccount.nickname || "ML Conectado"}</span>
+        </Badge>
+      ) : (
+        <Badge variant="outline" className="gap-1.5 text-muted-foreground">
+          <XCircle className="h-3 w-3" />
+          <span className="hidden sm:inline">ML Desconectado</span>
+        </Badge>
+      )}
 
-                    {/* Sync Section - Only show when ML is connected */}
+      {/* Settings Dialog */}
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogTrigger asChild>
+          <Button variant="outline" size="sm" className="gap-2">
+            <Settings className="w-4 h-4" />
+            <span className="hidden sm:inline">Sync</span>
+          </Button>
+        </DialogTrigger>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Sincronização de Dados</DialogTitle>
+            <DialogDescription>
+              Gerencie suas conexões e sincronização de dados do Mercado Livre
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-6 py-4">
+            {/* ML Connection Status */}
+            <div className="space-y-3">
+              <h4 className="font-medium text-sm">Mercado Livre</h4>
+              <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  {mlAccount ? (
+                    <CheckCircle className="w-5 h-5 text-success" />
+                  ) : (
+                    <XCircle className="w-5 h-5 text-muted-foreground" />
+                  )}
+                  <div>
+                    <p className="text-sm font-medium">
+                      {mlAccount ? 'Conectado' : 'Desconectado'}
+                    </p>
                     {mlAccount && (
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-2">
-                          <Database className="w-4 h-4 text-muted-foreground" />
-                          <h4 className="font-medium text-sm">Sincronização de Dados</h4>
-                        </div>
-
-                        {/* Sync Debug Info */}
-                        {syncDebugInfo && (
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="text-center p-3 bg-muted/50 rounded-lg">
-                              <div className="text-xl font-bold text-foreground">
-                                {syncDebugInfo.cachedOrdersCount.toLocaleString("pt-BR")}
-                              </div>
-                              <div className="text-xs text-muted-foreground">Pedidos</div>
-                            </div>
-                            <div className="text-center p-3 bg-muted/50 rounded-lg">
-                              <div className="text-xl font-bold text-foreground">
-                                {syncDebugInfo.cachedItemsCount.toLocaleString("pt-BR")}
-                              </div>
-                              <div className="text-xs text-muted-foreground">Itens</div>
-                            </div>
-                            <div className="text-center p-3 bg-muted/50 rounded-lg">
-                              <div className="text-xl font-bold text-foreground">
-                                {syncDebugInfo.ordersWithItemsSynced.toLocaleString("pt-BR")}
-                              </div>
-                              <div className="text-xs text-muted-foreground">Pedidos c/ Itens</div>
-                            </div>
-                            <div className="text-center p-3 bg-muted/50 rounded-lg">
-                              <div className={`text-xl font-bold ${syncDebugInfo.itemsSyncedPercent >= 80 ? 'text-green-500' : syncDebugInfo.itemsSyncedPercent >= 50 ? 'text-amber-500' : 'text-destructive'}`}>
-                                {syncDebugInfo.itemsSyncedPercent}%
-                              </div>
-                              <div className="text-xs text-muted-foreground">% Sincronizado</div>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Sync Progress */}
-                        {isSyncing && syncJob && (
-                          <div className="space-y-2 p-3 bg-muted/50 rounded-lg">
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="flex items-center gap-2">
-                                <RefreshCw className="w-4 h-4 animate-spin" />
-                                Sincronizando...
-                              </span>
-                              <span className="text-muted-foreground">
-                                {syncJob.processed_records} / {syncJob.total_records}
-                              </span>
-                            </div>
-                            <Progress value={syncProgress} className="h-2" />
-                          </div>
-                        )}
-
-                        {/* Sync Button */}
-                        <Button
-                          onClick={handleSyncOrders}
-                          disabled={isSyncing}
-                          className="w-full"
-                          variant="outline"
-                        >
-                          {isSyncing ? (
-                            <>
-                              <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                              Sincronizando...
-                            </>
-                          ) : (
-                            <>
-                              <CloudDownload className="w-4 h-4 mr-2" />
-                              Sincronizar Pedidos
-                            </>
-                          )}
-                        </Button>
-
-                        <p className="text-xs text-muted-foreground">
-                          A sincronização carrega todos os pedidos e itens do Mercado Livre para o cache local,
-                          permitindo análises mais rápidas e completas.
-                        </p>
-                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {mlAccount.nickname || mlAccount.email || mlAccount.ml_user_id}
+                      </p>
                     )}
                   </div>
-                </DialogContent>
-              </Dialog>
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleSignOut}
-                className="gap-2"
-              >
-                <LogOut className="w-4 h-4" />
-                <span className="hidden sm:inline">Sair</span>
-              </Button>
+                </div>
+                {!mlAccount && (
+                  <Button size="sm" onClick={() => { setSettingsOpen(false); handleConnectML(); }}>
+                    Conectar
+                  </Button>
+                )}
+              </div>
             </div>
+
+            {/* Sync Section - Only show when ML is connected */}
+            {mlAccount && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-muted-foreground" />
+                  <h4 className="font-medium text-sm">Sincronização de Dados</h4>
+                </div>
+
+                {/* Sync Debug Info */}
+                {syncDebugInfo && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="text-center p-3 bg-muted/50 rounded-lg">
+                      <div className="text-xl font-bold text-foreground">
+                        {syncDebugInfo.cachedOrdersCount.toLocaleString("pt-BR")}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Pedidos</div>
+                    </div>
+                    <div className="text-center p-3 bg-muted/50 rounded-lg">
+                      <div className="text-xl font-bold text-foreground">
+                        {syncDebugInfo.cachedItemsCount.toLocaleString("pt-BR")}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Itens</div>
+                    </div>
+                    <div className="text-center p-3 bg-muted/50 rounded-lg">
+                      <div className="text-xl font-bold text-foreground">
+                        {syncDebugInfo.ordersWithItemsSynced.toLocaleString("pt-BR")}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Pedidos c/ Itens</div>
+                    </div>
+                    <div className="text-center p-3 bg-muted/50 rounded-lg">
+                      <div className={`text-xl font-bold ${syncDebugInfo.itemsSyncedPercent >= 80 ? 'text-green-500' : syncDebugInfo.itemsSyncedPercent >= 50 ? 'text-amber-500' : 'text-destructive'}`}>
+                        {syncDebugInfo.itemsSyncedPercent}%
+                      </div>
+                      <div className="text-xs text-muted-foreground">% Sincronizado</div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Sync Progress */}
+                {isSyncing && syncJob && (
+                  <div className="space-y-2 p-3 bg-muted/50 rounded-lg">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="flex items-center gap-2">
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        Sincronizando...
+                      </span>
+                      <span className="text-muted-foreground">
+                        {syncJob.processed_records} / {syncJob.total_records}
+                      </span>
+                    </div>
+                    <Progress value={syncProgress} className="h-2" />
+                  </div>
+                )}
+
+                {/* Sync Button */}
+                <Button
+                  onClick={handleSyncOrders}
+                  disabled={isSyncing}
+                  className="w-full"
+                  variant="outline"
+                >
+                  {isSyncing ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                      Sincronizando...
+                    </>
+                  ) : (
+                    <>
+                      <CloudDownload className="w-4 h-4 mr-2" />
+                      Sincronizar Pedidos
+                    </>
+                  )}
+                </Button>
+
+                <p className="text-xs text-muted-foreground">
+                  A sincronização carrega todos os pedidos e itens do Mercado Livre para o cache local,
+                  permitindo análises mais rápidas e completas.
+                </p>
+              </div>
+            )}
           </div>
-        </div>
-      </header>
+        </DialogContent>
+      </Dialog>
 
-      {/* Main Content */}
-      <main className="container mx-auto px-6 py-8">
-        <div className="mb-8">
-          <h2 className="text-3xl font-bold text-foreground mb-2">Dashboard</h2>
-          <p className="text-muted-foreground">
-            Bem-vindo ao ML Analyzer Pro - sua ferramenta completa de análise de anúncios do Mercado Livre
-          </p>
-        </div>
-
-        {/* Sales Dashboard - Only show when ML is connected */}
-        {mlAccount && (
-          <div className="mb-8">
-            <SalesDashboard />
-          </div>
-        )}
-
-        {/* Module Cards Grid */}
-        {mlAccount && (
-          <div className="mb-8">
-            <h3 className="text-xl font-semibold mb-4">Módulos</h3>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {/* Radiografia */}
-              <ModuleCard
-                title="Radiografia"
-                description="Análise profunda de anúncios com score, eventos e sugestões de otimização."
-                icon={<Activity className="w-5 h-5" />}
-                color="violet"
-                onClick={() => navigate('/radiografia')}
-              />
-
-              {/* Tendências */}
-              <ModuleCard
-                title="Tendências"
-                description="Produtos em alta, mais vendidos e oportunidades por categoria."
-                icon={<TrendingUp className="w-5 h-5" />}
-                color="orange"
-                onClick={() => navigate('/tendencias')}
-              />
-
-              {/* Mercado */}
-              <ModuleCard
-                title="Mercado"
-                description="Dashboard premium de analytics com navegação por categorias."
-                icon={<Store className="w-5 h-5" />}
-                color="emerald"
-                onClick={() => navigate('/mercado')}
-              />
-
-              {/* Concorrência */}
-              <ModuleCard
-                title="Concorrência"
-                description="Monitore preços, posições e estratégias dos concorrentes."
-                icon={<Target className="w-5 h-5" />}
-                color="red"
-                onClick={() => navigate('/concorrencia')}
-              />
-
-              {/* Curva ABC */}
-              <ModuleCard
-                title="Curva ABC"
-                description="Identifique produtos, clientes e regiões mais importantes."
-                icon={<BarChart3 className="w-5 h-5" />}
-                color="cyan"
-                onClick={() => navigate('/abc-analysis')}
-              />
-
-              {/* Custos */}
-              <ModuleCard
-                title="Custos"
-                description="Análise financeira com margens, impostos e lucro líquido."
-                icon={<DollarSign className="w-5 h-5" />}
-                color="green"
-                onClick={() => navigate('/custos')}
-              />
-
-              {/* Mercado ADS */}
-              <ModuleCard
-                title="Mercado ADS"
-                description="Analytics e automação de campanhas publicitárias."
-                icon={<Megaphone className="w-5 h-5" />}
-                color="pink"
-                onClick={() => navigate('/publicidade')}
-              />
-
-              {/* Tarefas / Central de Promoções */}
-              <ModuleCard
-                title="Tarefas"
-                description="Central de tarefas, promoções e automações."
-                icon={<ListChecks className="w-5 h-5" />}
-                color="amber"
-                onClick={() => navigate('/tarefas')}
-              />
-
-              {/* Etiquetas */}
-              <ModuleCard
-                title="Etiquetas"
-                description="Gerencie e imprima etiquetas em PDF ou ZPL."
-                icon={<Package className="w-5 h-5" />}
-                color="blue"
-                onClick={() => navigate('/shipping-labels')}
-              />
-
-              {/* ZPL Converter */}
-              <ModuleCard
-                title="ZPL Converter"
-                description="Converta etiquetas para formato ZPL de impressoras térmicas."
-                icon={<Printer className="w-5 h-5" />}
-                color="slate"
-                onClick={() => navigate('/zpl-converter')}
-              />
-
-              {/* Configurações */}
-              <ModuleCard
-                title="Configurações"
-                description="Perfil, empresas, integrações e assinatura."
-                icon={<Settings className="w-5 h-5" />}
-                color="gray"
-                onClick={() => navigate('/settings')}
-              />
+      {/* User Menu */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="sm" className="gap-2">
+            <UserIcon className="h-4 w-4" />
+            <span className="hidden sm:inline max-w-[150px] truncate">
+              {user?.email?.split("@")[0]}
+            </span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuLabel className="font-normal">
+            <div className="flex flex-col space-y-1">
+              <p className="text-sm font-medium leading-none">{user?.email?.split("@")[0]}</p>
+              <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
             </div>
-          </div>
-        )}
-
-        {/* Getting Started Cards - Only show when ML is NOT connected */}
-        {!mlAccount && (
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 mb-8">
-            <Card className="p-6 hover:shadow-lg transition-all duration-300 border-2 border-dashed border-primary/20 hover:border-primary/40">
-              <div className="flex items-start justify-between mb-4">
-                <div className="w-12 h-12 bg-accent/10 rounded-xl flex items-center justify-center">
-                  <Plus className="w-6 h-6 text-accent" />
-                </div>
-              </div>
-              <h3 className="text-lg font-semibold text-card-foreground mb-2">
-                1. Conecte sua Conta ML
-              </h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                Vincule sua conta do Mercado Livre para começar a analisar seus anúncios automaticamente.
-              </p>
-              <Button className="w-full" variant="default" onClick={handleConnectML}>
-                Conectar Mercado Livre
-              </Button>
-            </Card>
-
-            <Card className="p-6 hover:shadow-lg transition-all duration-300">
-              <div className="flex items-start justify-between mb-4">
-                <div className="w-12 h-12 bg-success/10 rounded-xl flex items-center justify-center">
-                  <ExternalLink className="w-6 h-6 text-success" />
-                </div>
-              </div>
-              <h3 className="text-lg font-semibold text-card-foreground mb-2">
-                2. Instale a Extensão
-              </h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                Baixe e instale a extensão do Chrome para análise em tempo real nas páginas do ML.
-              </p>
-              <Button className="w-full" variant="outline">
-                Baixar Extensão
-              </Button>
-            </Card>
-
-            <Card className="p-6 hover:shadow-lg transition-all duration-300">
-              <div className="flex items-start justify-between mb-4">
-                <div className="w-12 h-12 bg-warning/10 rounded-xl flex items-center justify-center">
-                  <BarChart3 className="w-6 h-6 text-warning" />
-                </div>
-              </div>
-              <h3 className="text-lg font-semibold text-card-foreground mb-2">
-                Analise Produtos
-              </h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                Navegue até qualquer anúncio no ML e veja análises detalhadas no painel lateral.
-              </p>
-              <Button className="w-full" variant="secondary" disabled>
-                Aguardando Setup
-              </Button>
-            </Card>
-          </div>
-        )}
-
-      </main>
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => navigate("/settings")}>
+            <Settings className="mr-2 h-4 w-4" />
+            Configurações
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
-};
 
-// Module Card Component
-interface ModuleCardProps {
-  title: string;
-  description: string;
-  icon: React.ReactNode;
-  color: 'violet' | 'orange' | 'emerald' | 'red' | 'cyan' | 'green' | 'pink' | 'amber' | 'blue' | 'slate' | 'gray';
-  onClick: () => void;
-}
-
-const colorMap = {
-  violet: {
-    border: "border-violet-500/20 hover:border-violet-500/40",
-    bg: "bg-violet-500/10",
-    text: "text-violet-500",
-  },
-  orange: {
-    border: "border-orange-500/20 hover:border-orange-500/40",
-    bg: "bg-orange-500/10",
-    text: "text-orange-500",
-  },
-  emerald: {
-    border: "border-emerald-500/20 hover:border-emerald-500/40",
-    bg: "bg-emerald-500/10",
-    text: "text-emerald-500",
-  },
-  red: {
-    border: "border-red-500/20 hover:border-red-500/40",
-    bg: "bg-red-500/10",
-    text: "text-red-500",
-  },
-  cyan: {
-    border: "border-cyan-500/20 hover:border-cyan-500/40",
-    bg: "bg-cyan-500/10",
-    text: "text-cyan-500",
-  },
-  green: {
-    border: "border-green-500/20 hover:border-green-500/40",
-    bg: "bg-green-500/10",
-    text: "text-green-500",
-  },
-  pink: {
-    border: "border-pink-500/20 hover:border-pink-500/40",
-    bg: "bg-pink-500/10",
-    text: "text-pink-500",
-  },
-  amber: {
-    border: "border-amber-500/20 hover:border-amber-500/40",
-    bg: "bg-amber-500/10",
-    text: "text-amber-500",
-  },
-  blue: {
-    border: "border-blue-500/20 hover:border-blue-500/40",
-    bg: "bg-blue-500/10",
-    text: "text-blue-500",
-  },
-  slate: {
-    border: "border-slate-500/20 hover:border-slate-500/40",
-    bg: "bg-slate-500/10",
-    text: "text-slate-500",
-  },
-  gray: {
-    border: "border-muted-foreground/20 hover:border-muted-foreground/40",
-    bg: "bg-muted",
-    text: "text-muted-foreground",
-  },
-};
-
-function ModuleCard({ title, description, icon, color, onClick }: ModuleCardProps) {
-  const colors = colorMap[color];
-  
   return (
-    <Card 
-      className={`p-4 hover:shadow-md transition-all duration-200 cursor-pointer border-2 ${colors.border}`}
-      onClick={onClick}
+    <DashboardLayout 
+      title="Dashboard" 
+      subtitle="Visão geral das suas operações no Mercado Livre"
+      headerContent={headerContent}
     >
-      <div className="flex items-start gap-3">
-        <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${colors.bg}`}>
-          <span className={colors.text}>{icon}</span>
-        </div>
-        <div className="flex-1 min-w-0">
-          <h4 className="font-semibold text-card-foreground text-sm mb-1">{title}</h4>
-          <p className="text-xs text-muted-foreground line-clamp-2">{description}</p>
-        </div>
+      <div className="p-4 lg:p-6 space-y-6">
+        {/* Connected State - Full Dashboard */}
+        {mlAccount ? (
+          <>
+            {/* KPI Cards */}
+            <DashboardKpiCards sellerId={mlAccount.ml_user_id} />
+
+            {/* Quick Actions */}
+            <DashboardQuickActions />
+
+            {/* Sales Dashboard */}
+            <div className="mt-6">
+              <SalesDashboard />
+            </div>
+
+            {/* Modules Grid */}
+            <DashboardModulesGrid />
+          </>
+        ) : (
+          /* Onboarding State - Not Connected */
+          <DashboardOnboarding onConnectML={handleConnectML} />
+        )}
       </div>
-    </Card>
+    </DashboardLayout>
   );
-}
+};
 
 export default Dashboard;
