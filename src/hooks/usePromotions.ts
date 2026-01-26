@@ -5,14 +5,14 @@ import { validateSellerAccess } from '@/lib/accountUnification';
 export interface PromotionSnapshot {
   id: string;
   workspace_id: string;
-  account_id: string;
+  seller_id: string;
   promotion_id: string;
   promotion_type: string;
   promotion_name: string | null;
   status: string;
   start_at: string | null;
   end_at: string | null;
-  items_count: number | null;
+  items_count?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -20,7 +20,7 @@ export interface PromotionSnapshot {
 export interface PromotionItemSnapshot {
   id: string;
   workspace_id: string;
-  account_id: string;
+  seller_id: string;
   promotion_id: string;
   item_id: string;
   item_status: string;
@@ -86,12 +86,13 @@ export function usePromotions(workspaceId: string | null, sellerId?: string | nu
         return;
       }
 
-      // Query with both workspace and seller filter (security)
+      // Query with both workspace and seller_id filter (security)
+      // Using seller_id column (TEXT) instead of account_id (UUID)
       const { data, error: fetchError } = await supabase
         .from('promotion_snapshots')
         .select('*')
         .eq('workspace_id', workspaceId)
-        .eq('account_id', sellerId)
+        .eq('seller_id', sellerId)
         .order('end_at', { ascending: true });
 
       if (fetchError) throw fetchError;
@@ -183,11 +184,12 @@ export function usePromotionItems(
       setLoading(true);
       setError(null);
 
+      // Using seller_id column (TEXT) instead of account_id (UUID)
       let query = supabase
         .from('promotion_items_snapshots')
         .select('*')
         .eq('workspace_id', workspaceId)
-        .eq('account_id', sellerId)
+        .eq('seller_id', sellerId)
         .order('item_status', { ascending: true });
 
       if (promotionId) {
