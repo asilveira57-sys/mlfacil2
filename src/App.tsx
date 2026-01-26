@@ -26,6 +26,7 @@ import Blog from "./pages/Blog";
 import BlogAdmin from "./pages/BlogAdmin";
 import Planos from "./pages/Planos";
 import AdminPlanos from "./pages/AdminPlanos";
+import Publicidade from "./pages/Publicidade";
 import NotFound from "./pages/NotFound";
 import { AdminRoute } from "./components/auth/AdminRoute";
 
@@ -149,6 +150,7 @@ const App = () => {
             <Route path="/tarefas/regras" element={<Tarefas />} />
             <Route path="/tarefas/:id" element={<TarefaDetalhe />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/publicidade" element={<Publicidade />} />
             {/* Blog routes */}
             <Route path="/blog" element={<Blog />} />
             <Route path="/blog/:slug" element={<Blog />} />

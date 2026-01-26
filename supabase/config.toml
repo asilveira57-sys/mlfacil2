@@ -92,3 +92,6 @@ verify_jwt = false
 
 [functions.mp-sync-price]
 verify_jwt = false
+
+[functions.ads-sync]
+verify_jwt = false
