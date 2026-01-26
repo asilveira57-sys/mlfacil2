@@ -37,7 +37,9 @@ import {
   TrendingUp,
   AlertCircle,
   FileText,
+  Calculator,
 } from 'lucide-react';
+import { AdsBudgetSimulator } from '@/components/ads/AdsBudgetSimulator';
 
 export default function Publicidade() {
   const navigate = useNavigate();
@@ -174,7 +176,7 @@ export default function Publicidade() {
       <div className="p-4 lg:p-6 space-y-6">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <div className="flex items-center justify-between flex-wrap gap-4">
-            <TabsList className="grid w-full max-w-lg grid-cols-5">
+            <TabsList className="grid w-full max-w-2xl grid-cols-6">
               <TabsTrigger value="dashboard" className="flex items-center gap-2">
                 <LayoutDashboard className="h-4 w-4" />
                 <span className="hidden sm:inline">Dashboard</span>
@@ -186,6 +188,10 @@ export default function Publicidade() {
               <TabsTrigger value="products" className="flex items-center gap-2">
                 <Package className="h-4 w-4" />
                 <span className="hidden sm:inline">Produtos</span>
+              </TabsTrigger>
+              <TabsTrigger value="simulator" className="flex items-center gap-2">
+                <Calculator className="h-4 w-4" />
+                <span className="hidden sm:inline">Simulador</span>
               </TabsTrigger>
               <TabsTrigger value="rules" className="flex items-center gap-2">
                 <Settings className="h-4 w-4" />
@@ -351,6 +357,11 @@ export default function Publicidade() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Simulator Tab */}
+          <TabsContent value="simulator" className="space-y-6 mt-6">
+            <AdsBudgetSimulator sellerId={sellerId} />
           </TabsContent>
 
           {/* Rules Tab */}
