@@ -18,12 +18,14 @@ import {
   ArrowRight,
   Package,
   ExternalLink,
-  RefreshCw
+  RefreshCw,
+  LineChart,
 } from "lucide-react";
 import { useRadiography, Radiography, ListingEvent } from "@/hooks/useRadiography";
 import { supabase } from "@/integrations/supabase/client";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { RadiographyEvolutionChart } from "./RadiographyEvolutionChart";
 
 interface RadiographyDetailDrawerProps {
   sellerId: string | null;
@@ -187,8 +189,12 @@ export function RadiographyDetailDrawer({
             </div>
           ) : radiography ? (
             <Tabs value={activeTab} onValueChange={setActiveTab} className="p-6">
-              <TabsList className="grid w-full grid-cols-4">
+              <TabsList className="grid w-full grid-cols-5">
                 <TabsTrigger value="score">Score</TabsTrigger>
+                <TabsTrigger value="evolution" className="gap-1">
+                  <LineChart className="h-3 w-3" />
+                  Evolução
+                </TabsTrigger>
                 <TabsTrigger value="narrative">Narrativa</TabsTrigger>
                 <TabsTrigger value="events">Eventos</TabsTrigger>
                 <TabsTrigger value="actions">Ações</TabsTrigger>
@@ -230,6 +236,16 @@ export function RadiographyDetailDrawer({
                     })}
                   </CardContent>
                 </Card>
+              </TabsContent>
+
+              {/* Evolution Tab - Visit History with Events Correlation */}
+              <TabsContent value="evolution" className="space-y-4 mt-4">
+                {sellerId && itemId && (
+                  <RadiographyEvolutionChart 
+                    sellerId={sellerId} 
+                    itemId={itemId} 
+                  />
+                )}
               </TabsContent>
 
               {/* Narrative Tab */}

@@ -99,6 +99,13 @@ Deno.serve(async (req) => {
         return await handleListItems(supabase, user.id, seller_id, body, corsHeaders);
       case "events":
         return await handleGetEvents(supabase, user.id, seller_id, item_id, corsHeaders);
+      case "visit-history":
+        if (!item_id) {
+          return new Response(JSON.stringify({ error: "item_id required for visit-history" }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        return await handleVisitHistory(supabase, user.id, seller_id, item_id, body.days || 30, corsHeaders);
       default:
         return await handleStatus(supabase, user.id, seller_id, corsHeaders);
     }
@@ -518,6 +525,134 @@ async function handleGetEvents(supabase: any, userId: string, sellerId: string, 
 
   return new Response(JSON.stringify({
     events: events || [],
+  }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+
+// ============================================================================
+// VISIT-HISTORY: Get daily visits with events overlay for correlation analysis
+// ============================================================================
+async function handleVisitHistory(
+  supabase: any,
+  userId: string,
+  sellerId: string,
+  itemId: string,
+  days: number,
+  corsHeaders: any
+) {
+  const daysToFetch = Math.min(Math.max(days, 7), 90);
+  const fromDate = new Date();
+  fromDate.setDate(fromDate.getDate() - daysToFetch);
+  const fromDateStr = fromDate.toISOString().split('T')[0];
+
+  console.log(`[Radiography] Fetching visit history for ${itemId}, last ${daysToFetch} days`);
+
+  // Fetch daily visits
+  const { data: visits, error: visitsErr } = await supabase
+    .from("seller_item_visits")
+    .select("visit_date, visits_count")
+    .eq("seller_id", sellerId)
+    .eq("item_id", itemId)
+    .gte("visit_date", fromDateStr)
+    .order("visit_date", { ascending: true });
+
+  if (visitsErr) {
+    console.error("[Radiography] Visits fetch error:", visitsErr);
+  }
+
+  // Fetch events in the same period
+  const { data: events, error: eventsErr } = await supabase
+    .from("listing_events")
+    .select("id, event_type, event_category, severity, impact_direction, observation_pt, detected_at, score_delta")
+    .eq("seller_id", sellerId)
+    .eq("item_id", itemId)
+    .gte("detected_at", fromDate.toISOString())
+    .order("detected_at", { ascending: true });
+
+  if (eventsErr) {
+    console.error("[Radiography] Events fetch error:", eventsErr);
+  }
+
+  // Fetch daily snapshots for sales/conversion overlay
+  const { data: snapshots, error: snapErr } = await supabase
+    .from("listing_snapshots")
+    .select("snapshot_date, sales_7d, conversion_rate_7d, score_total, visits_7d")
+    .eq("seller_id", sellerId)
+    .eq("item_id", itemId)
+    .gte("snapshot_date", fromDateStr)
+    .order("snapshot_date", { ascending: true });
+
+  if (snapErr) {
+    console.error("[Radiography] Snapshots fetch error:", snapErr);
+  }
+
+  // Create a map of date -> visits
+  const visitsByDate = new Map<string, number>();
+  for (const v of visits || []) {
+    visitsByDate.set(v.visit_date, v.visits_count);
+  }
+
+  // Create a map of date -> snapshot data
+  const snapshotsByDate = new Map<string, any>();
+  for (const s of snapshots || []) {
+    snapshotsByDate.set(s.snapshot_date, s);
+  }
+
+  // Build timeline with all dates
+  const timeline: any[] = [];
+  const currentDate = new Date(fromDateStr);
+  const today = new Date();
+
+  while (currentDate <= today) {
+    const dateStr = currentDate.toISOString().split('T')[0];
+    const snapshot = snapshotsByDate.get(dateStr);
+    
+    timeline.push({
+      date: dateStr,
+      visits: visitsByDate.get(dateStr) || 0,
+      sales_7d: snapshot?.sales_7d || null,
+      conversion_7d: snapshot?.conversion_rate_7d || null,
+      score_total: snapshot?.score_total || null,
+    });
+    
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+
+  // Map events to their dates
+  const eventsByDate = new Map<string, any[]>();
+  for (const event of events || []) {
+    const eventDate = new Date(event.detected_at).toISOString().split('T')[0];
+    if (!eventsByDate.has(eventDate)) {
+      eventsByDate.set(eventDate, []);
+    }
+    eventsByDate.get(eventDate)!.push(event);
+  }
+
+  // Add events to timeline
+  for (const day of timeline) {
+    day.events = eventsByDate.get(day.date) || [];
+  }
+
+  // Calculate summary stats
+  const totalVisits = timeline.reduce((sum, d) => sum + d.visits, 0);
+  const avgVisits = timeline.length > 0 ? Math.round(totalVisits / timeline.length) : 0;
+  
+  // Calculate trend (last 7 days vs previous 7 days)
+  const last7 = timeline.slice(-7);
+  const prev7 = timeline.slice(-14, -7);
+  const last7Visits = last7.reduce((sum, d) => sum + d.visits, 0);
+  const prev7Visits = prev7.reduce((sum, d) => sum + d.visits, 0);
+  const trend = prev7Visits > 0 ? Math.round(((last7Visits / prev7Visits) - 1) * 100) : 0;
+
+  return new Response(JSON.stringify({
+    timeline,
+    events: events || [],
+    summary: {
+      total_visits: totalVisits,
+      avg_daily_visits: avgVisits,
+      trend_7d: trend,
+      total_events: events?.length || 0,
+      days_analyzed: daysToFetch,
+    },
   }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
