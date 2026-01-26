@@ -10,3 +10,4 @@ export { AdsRuleCard } from './AdsRuleCard';
 export { AdsRuleEditor } from './AdsRuleEditor';
 export { AdsRuleEventsPanel } from './AdsRuleEventsPanel';
 export { AdsTasksPanel } from './AdsTasksPanel';
+export { AdsExecutiveReport } from './AdsExecutiveReport';
