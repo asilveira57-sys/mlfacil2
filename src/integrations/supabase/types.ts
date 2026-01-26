@@ -643,6 +643,13 @@ export type Database = {
             referencedRelation: "ads_connections"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "ads_credentials_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: true
+            referencedRelation: "unified_marketplace_accounts"
+            referencedColumns: ["ads_connection_id"]
+          },
         ]
       }
       ads_daily_metrics: {
@@ -767,6 +774,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "ads_connections"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ads_data_freshness_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "unified_marketplace_accounts"
+            referencedColumns: ["ads_connection_id"]
           },
         ]
       }
@@ -905,6 +919,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "ads_snapshots_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "unified_marketplace_accounts"
+            referencedColumns: ["ads_connection_id"]
+          },
+          {
             foreignKeyName: "ads_snapshots_job_id_fkey"
             columns: ["job_id"]
             isOneToOne: false
@@ -976,6 +997,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "ads_connections"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ads_staging_ad_groups_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "unified_marketplace_accounts"
+            referencedColumns: ["ads_connection_id"]
           },
           {
             foreignKeyName: "ads_staging_ad_groups_job_id_fkey"
@@ -1053,6 +1081,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "ads_staging_campaigns_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "unified_marketplace_accounts"
+            referencedColumns: ["ads_connection_id"]
+          },
+          {
             foreignKeyName: "ads_staging_campaigns_job_id_fkey"
             columns: ["job_id"]
             isOneToOne: false
@@ -1120,6 +1155,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "ads_connections"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ads_staging_items_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "unified_marketplace_accounts"
+            referencedColumns: ["ads_connection_id"]
           },
           {
             foreignKeyName: "ads_staging_items_job_id_fkey"
@@ -1195,6 +1237,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "ads_connections"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ads_staging_metrics_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "unified_marketplace_accounts"
+            referencedColumns: ["ads_connection_id"]
           },
           {
             foreignKeyName: "ads_staging_metrics_job_id_fkey"
@@ -1279,6 +1328,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "ads_connections"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ads_sync_jobs_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "unified_marketplace_accounts"
+            referencedColumns: ["ads_connection_id"]
           },
         ]
       }
@@ -1368,6 +1424,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "ads_connections"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ads_sync_logs_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "unified_marketplace_accounts"
+            referencedColumns: ["ads_connection_id"]
           },
           {
             foreignKeyName: "ads_sync_logs_job_id_fkey"
@@ -1478,6 +1541,13 @@ export type Database = {
             columns: ["ml_account_id"]
             isOneToOne: false
             referencedRelation: "ml_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "analyzed_items_ml_account_id_fkey"
+            columns: ["ml_account_id"]
+            isOneToOne: false
+            referencedRelation: "unified_marketplace_accounts"
             referencedColumns: ["id"]
           },
         ]
@@ -5870,6 +5940,24 @@ export type Database = {
         }
         Relationships: []
       }
+      unified_marketplace_accounts: {
+        Row: {
+          ads_auto_sync: boolean | null
+          ads_connection_id: string | null
+          ads_last_sync: string | null
+          created_at: string | null
+          email: string | null
+          id: string | null
+          is_active: boolean | null
+          nickname: string | null
+          provider: string | null
+          seller_id: string | null
+          status: string | null
+          updated_at: string | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       calculate_category_eligibility: {
@@ -5903,9 +5991,32 @@ export type Database = {
           total_pending: number
         }[]
       }
+      ensure_ads_connection: {
+        Args: { p_seller_id: string; p_user_id: string }
+        Returns: {
+          connection_id: string
+          is_new: boolean
+        }[]
+      }
       ensure_workspace: { Args: { p_user_id: string }; Returns: Json }
       generate_blog_slug: { Args: { title: string }; Returns: string }
       generate_category_slug: { Args: { name: string }; Returns: string }
+      get_or_create_ml_account: {
+        Args: {
+          p_access_token?: string
+          p_email?: string
+          p_expires_at?: string
+          p_nickname?: string
+          p_refresh_token?: string
+          p_seller_id: string
+          p_user_id: string
+        }
+        Returns: {
+          account_id: string
+          is_new: boolean
+          seller_id: string
+        }[]
+      }
       get_orders_needing_cost_sync: {
         Args: { p_limit?: number; p_offset?: number; p_seller_id: string }
         Returns: {
