@@ -3335,6 +3335,123 @@ export type Database = {
         }
         Relationships: []
       }
+      promotion_items_snapshots: {
+        Row: {
+          account_id: string
+          created_at: string
+          error_reason: string | null
+          id: string
+          item_id: string
+          item_status: string
+          original_price: number | null
+          promo_price: number | null
+          promotion_id: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          account_id: string
+          created_at?: string
+          error_reason?: string | null
+          id?: string
+          item_id: string
+          item_status?: string
+          original_price?: number | null
+          promo_price?: number | null
+          promotion_id: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          account_id?: string
+          created_at?: string
+          error_reason?: string | null
+          id?: string
+          item_id?: string
+          item_status?: string
+          original_price?: number | null
+          promo_price?: number | null
+          promotion_id?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "promotion_items_snapshots_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "workspace_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "promotion_items_snapshots_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      promotion_snapshots: {
+        Row: {
+          account_id: string
+          created_at: string
+          end_at: string | null
+          id: string
+          promotion_id: string
+          promotion_name: string | null
+          promotion_type: string
+          raw_data: Json | null
+          start_at: string | null
+          status: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          account_id: string
+          created_at?: string
+          end_at?: string | null
+          id?: string
+          promotion_id: string
+          promotion_name?: string | null
+          promotion_type: string
+          raw_data?: Json | null
+          start_at?: string | null
+          status?: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          account_id?: string
+          created_at?: string
+          end_at?: string | null
+          id?: string
+          promotion_id?: string
+          promotion_name?: string | null
+          promotion_type?: string
+          raw_data?: Json | null
+          start_at?: string | null
+          status?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "promotion_snapshots_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "workspace_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "promotion_snapshots_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       public_categories: {
         Row: {
           children_count: number | null
