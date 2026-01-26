@@ -218,6 +218,461 @@ export type Database = {
         }
         Relationships: []
       }
+      ads_ad_groups: {
+        Row: {
+          campaign_id: string | null
+          clicks: number | null
+          conversions: number | null
+          created_at: string
+          default_bid: number | null
+          id: string
+          impressions: number | null
+          ml_ad_group_id: string
+          name: string
+          raw_data: Json | null
+          seller_id: string
+          spent: number | null
+          status: string
+          synced_at: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          campaign_id?: string | null
+          clicks?: number | null
+          conversions?: number | null
+          created_at?: string
+          default_bid?: number | null
+          id?: string
+          impressions?: number | null
+          ml_ad_group_id: string
+          name: string
+          raw_data?: Json | null
+          seller_id: string
+          spent?: number | null
+          status?: string
+          synced_at?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          campaign_id?: string | null
+          clicks?: number | null
+          conversions?: number | null
+          created_at?: string
+          default_bid?: number | null
+          id?: string
+          impressions?: number | null
+          ml_ad_group_id?: string
+          name?: string
+          raw_data?: Json | null
+          seller_id?: string
+          spent?: number | null
+          status?: string
+          synced_at?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ads_ad_groups_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "ads_campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ads_alerts: {
+        Row: {
+          alert_type: string
+          campaign_id: string | null
+          created_at: string
+          data_json: Json | null
+          id: string
+          is_dismissed: boolean | null
+          is_read: boolean | null
+          item_id: string | null
+          message_pt: string
+          resolved_at: string | null
+          seller_id: string
+          severity: string
+          title: string
+          user_id: string
+          workspace_id: string | null
+        }
+        Insert: {
+          alert_type: string
+          campaign_id?: string | null
+          created_at?: string
+          data_json?: Json | null
+          id?: string
+          is_dismissed?: boolean | null
+          is_read?: boolean | null
+          item_id?: string | null
+          message_pt: string
+          resolved_at?: string | null
+          seller_id: string
+          severity?: string
+          title: string
+          user_id: string
+          workspace_id?: string | null
+        }
+        Update: {
+          alert_type?: string
+          campaign_id?: string | null
+          created_at?: string
+          data_json?: Json | null
+          id?: string
+          is_dismissed?: boolean | null
+          is_read?: boolean | null
+          item_id?: string | null
+          message_pt?: string
+          resolved_at?: string | null
+          seller_id?: string
+          severity?: string
+          title?: string
+          user_id?: string
+          workspace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ads_alerts_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "ads_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ads_alerts_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ads_automation_rules: {
+        Row: {
+          actions: Json
+          conditions: Json
+          created_at: string
+          description: string | null
+          id: string
+          is_enabled: boolean | null
+          last_triggered_at: string | null
+          name: string
+          rule_type: string
+          seller_id: string
+          trigger_count: number | null
+          updated_at: string
+          user_id: string
+          workspace_id: string | null
+        }
+        Insert: {
+          actions?: Json
+          conditions?: Json
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_enabled?: boolean | null
+          last_triggered_at?: string | null
+          name: string
+          rule_type: string
+          seller_id: string
+          trigger_count?: number | null
+          updated_at?: string
+          user_id: string
+          workspace_id?: string | null
+        }
+        Update: {
+          actions?: Json
+          conditions?: Json
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_enabled?: boolean | null
+          last_triggered_at?: string | null
+          name?: string
+          rule_type?: string
+          seller_id?: string
+          trigger_count?: number | null
+          updated_at?: string
+          user_id?: string
+          workspace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ads_automation_rules_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ads_campaigns: {
+        Row: {
+          campaign_type: string | null
+          created_at: string
+          daily_budget: number | null
+          end_date: string | null
+          id: string
+          ml_campaign_id: string
+          name: string
+          raw_data: Json | null
+          seller_id: string
+          spent_total: number | null
+          start_date: string | null
+          status: string
+          synced_at: string | null
+          total_budget: number | null
+          updated_at: string
+          user_id: string
+          workspace_id: string | null
+        }
+        Insert: {
+          campaign_type?: string | null
+          created_at?: string
+          daily_budget?: number | null
+          end_date?: string | null
+          id?: string
+          ml_campaign_id: string
+          name: string
+          raw_data?: Json | null
+          seller_id: string
+          spent_total?: number | null
+          start_date?: string | null
+          status?: string
+          synced_at?: string | null
+          total_budget?: number | null
+          updated_at?: string
+          user_id: string
+          workspace_id?: string | null
+        }
+        Update: {
+          campaign_type?: string | null
+          created_at?: string
+          daily_budget?: number | null
+          end_date?: string | null
+          id?: string
+          ml_campaign_id?: string
+          name?: string
+          raw_data?: Json | null
+          seller_id?: string
+          spent_total?: number | null
+          start_date?: string | null
+          status?: string
+          synced_at?: string | null
+          total_budget?: number | null
+          updated_at?: string
+          user_id?: string
+          workspace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ads_campaigns_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ads_daily_metrics: {
+        Row: {
+          acos: number | null
+          ad_group_id: string | null
+          campaign_id: string
+          clicks: number | null
+          conversions: number | null
+          created_at: string
+          id: string
+          impressions: number | null
+          item_id: string | null
+          metric_date: string
+          revenue: number | null
+          roas: number | null
+          seller_id: string
+          spent: number | null
+          user_id: string
+        }
+        Insert: {
+          acos?: number | null
+          ad_group_id?: string | null
+          campaign_id: string
+          clicks?: number | null
+          conversions?: number | null
+          created_at?: string
+          id?: string
+          impressions?: number | null
+          item_id?: string | null
+          metric_date: string
+          revenue?: number | null
+          roas?: number | null
+          seller_id: string
+          spent?: number | null
+          user_id: string
+        }
+        Update: {
+          acos?: number | null
+          ad_group_id?: string | null
+          campaign_id?: string
+          clicks?: number | null
+          conversions?: number | null
+          created_at?: string
+          id?: string
+          impressions?: number | null
+          item_id?: string | null
+          metric_date?: string
+          revenue?: number | null
+          roas?: number | null
+          seller_id?: string
+          spent?: number | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ads_daily_metrics_ad_group_id_fkey"
+            columns: ["ad_group_id"]
+            isOneToOne: false
+            referencedRelation: "ads_ad_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ads_daily_metrics_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "ads_campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ads_items: {
+        Row: {
+          acos: number | null
+          ad_group_id: string | null
+          bid: number | null
+          category_id: string | null
+          clicks: number | null
+          conversions: number | null
+          created_at: string
+          current_price: number | null
+          id: string
+          impressions: number | null
+          item_id: string
+          product_key: string | null
+          raw_data: Json | null
+          revenue_from_ads: number | null
+          roas: number | null
+          seller_id: string
+          spent: number | null
+          status: string
+          synced_at: string | null
+          title: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          acos?: number | null
+          ad_group_id?: string | null
+          bid?: number | null
+          category_id?: string | null
+          clicks?: number | null
+          conversions?: number | null
+          created_at?: string
+          current_price?: number | null
+          id?: string
+          impressions?: number | null
+          item_id: string
+          product_key?: string | null
+          raw_data?: Json | null
+          revenue_from_ads?: number | null
+          roas?: number | null
+          seller_id: string
+          spent?: number | null
+          status?: string
+          synced_at?: string | null
+          title?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          acos?: number | null
+          ad_group_id?: string | null
+          bid?: number | null
+          category_id?: string | null
+          clicks?: number | null
+          conversions?: number | null
+          created_at?: string
+          current_price?: number | null
+          id?: string
+          impressions?: number | null
+          item_id?: string
+          product_key?: string | null
+          raw_data?: Json | null
+          revenue_from_ads?: number | null
+          roas?: number | null
+          seller_id?: string
+          spent?: number | null
+          status?: string
+          synced_at?: string | null
+          title?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ads_items_ad_group_id_fkey"
+            columns: ["ad_group_id"]
+            isOneToOne: false
+            referencedRelation: "ads_ad_groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ads_sync_state: {
+        Row: {
+          campaigns_synced: number | null
+          created_at: string
+          id: string
+          items_synced: number | null
+          last_error: string | null
+          last_sync_at: string | null
+          next_sync_at: string | null
+          seller_id: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          campaigns_synced?: number | null
+          created_at?: string
+          id?: string
+          items_synced?: number | null
+          last_error?: string | null
+          last_sync_at?: string | null
+          next_sync_at?: string | null
+          seller_id: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          campaigns_synced?: number | null
+          created_at?: string
+          id?: string
+          items_synced?: number | null
+          last_error?: string | null
+          last_sync_at?: string | null
+          next_sync_at?: string | null
+          seller_id?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       analyzed_items: {
         Row: {
           analyzed_at: string
