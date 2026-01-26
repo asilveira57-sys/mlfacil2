@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
+import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -47,9 +48,8 @@ import { AdsConnectionsPanel } from '@/components/ads/AdsConnectionsPanel';
 
 export default function Publicidade() {
   const navigate = useNavigate();
-  const [sellerId, setSellerId] = useState<string>();
+  const { sellerId, activeAccount, loading: accountLoading, initialized } = useActiveAccount();
   const [workspaceId, setWorkspaceId] = useState<string>();
-  const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState<AdsFilterState>({});
   const [activeTab, setActiveTab] = useState('dashboard');
 
@@ -60,28 +60,15 @@ export default function Publicidade() {
   const dateFrom = thirtyDaysAgo.toISOString().split('T')[0];
   const dateTo = today.toISOString().split('T')[0];
 
-  // Load seller account
+  // Load workspace for task integration
   useEffect(() => {
-    const loadAccount = async () => {
+    const loadWorkspace = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         navigate('/auth');
         return;
       }
 
-      // Load ML account
-      const accountResult = await supabase
-        .from('ml_accounts')
-        .select('ml_user_id')
-        .eq('user_id', user.id)
-        .limit(1);
-
-      const accounts = accountResult.data as { ml_user_id: string }[] | null;
-      if (accounts && accounts.length > 0) {
-        setSellerId(accounts[0].ml_user_id);
-      }
-
-      // Load workspace for task integration
       const prefsResult = await supabase
         .from('user_preferences')
         .select('active_workspace_id')
@@ -91,24 +78,25 @@ export default function Publicidade() {
       if (prefsResult.data?.active_workspace_id) {
         setWorkspaceId(prefsResult.data.active_workspace_id);
       }
-
-      setLoading(false);
     };
 
-    loadAccount();
+    loadWorkspace();
   }, [navigate]);
 
-  // Hooks for data
-  const { campaigns, loading: campaignsLoading } = useAdsCampaigns(sellerId);
-  const { metrics, loading: metricsLoading } = useAdsDailyMetrics(sellerId, dateFrom, dateTo);
-  const { alerts, dismissAlert, markAsRead, unreadCount } = useAdsAlerts(sellerId);
-  const { items: enrichedItems, loading: itemsLoading } = useEnrichedAdsItems(sellerId, filters);
-  const summary = useAdsMetricsSummary(sellerId, dateFrom, dateTo);
-  const { syncState, triggerSync } = useAdsSyncState(sellerId);
+  // Hooks for data - use sellerId from context
+  const { campaigns, loading: campaignsLoading } = useAdsCampaigns(sellerId || undefined);
+  const { metrics, loading: metricsLoading } = useAdsDailyMetrics(sellerId || undefined, dateFrom, dateTo);
+  const { alerts, dismissAlert, markAsRead, unreadCount } = useAdsAlerts(sellerId || undefined);
+  const { items: enrichedItems, loading: itemsLoading } = useEnrichedAdsItems(sellerId || undefined, filters);
+  const summary = useAdsMetricsSummary(sellerId || undefined, dateFrom, dateTo);
+  const { syncState, triggerSync } = useAdsSyncState(sellerId || undefined);
 
   // Summary cards data
   const activeCampaigns = campaigns.filter(c => c.status === 'active').length;
   const pausedCampaigns = campaigns.filter(c => c.status === 'paused').length;
+
+  // Loading state from context
+  const loading = accountLoading || !initialized;
 
   const headerContent = (
     <div className="flex items-center gap-2">

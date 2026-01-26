@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
+import { AccountSwitcher } from "./AccountSwitcher";
 import { Separator } from "@/components/ui/separator";
 
 interface DashboardLayoutProps {
@@ -33,11 +34,10 @@ export function DashboardLayout({
                 )}
               </div>
             )}
-            {headerContent && (
-              <div className="flex items-center gap-2 ml-auto">
-                {headerContent}
-              </div>
-            )}
+            <div className="flex items-center gap-2 ml-auto">
+              <AccountSwitcher />
+              {headerContent}
+            </div>
           </header>
 
           {/* Main Content */}
