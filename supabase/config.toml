@@ -95,3 +95,6 @@ verify_jwt = false
 
 [functions.ads-sync]
 verify_jwt = false
+
+[functions.ads-rules-engine]
+verify_jwt = false
