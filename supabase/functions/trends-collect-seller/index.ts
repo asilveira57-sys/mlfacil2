@@ -23,7 +23,48 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Validate user authentication
+    const body = await req.json().catch(() => ({}));
+    const { seller_id, collect_type = 'all' } = body;
+
+    // CRON MODE: No seller_id provided - iterate all active accounts
+    if (!seller_id) {
+      console.log('[trends-collect-seller] CRON mode: collecting for all active accounts');
+      
+      const { data: accounts, error: accountsError } = await supabase
+        .from('ml_accounts')
+        .select('ml_user_id, user_id, access_token, refresh_token, token_expires_at')
+        .eq('status', 'active');
+
+      if (accountsError || !accounts?.length) {
+        console.log('[trends-collect-seller] No active accounts found');
+        return new Response(JSON.stringify({ 
+          status: 'completed', 
+          message: 'No active accounts to process',
+          accounts_processed: 0
+        }), {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      console.log(`[trends-collect-seller] Found ${accounts.length} active accounts`);
+
+      // Process each account in background
+      EdgeRuntime.waitUntil(
+        processAllAccounts(supabase, accounts, collect_type)
+      );
+
+      return new Response(JSON.stringify({ 
+        status: 'processing', 
+        message: `Started collection for ${accounts.length} accounts`,
+        accounts_queued: accounts.length
+      }), {
+        status: 202,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // SINGLE ACCOUNT MODE: seller_id provided - requires user auth
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
       return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
@@ -42,17 +83,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const body = await req.json();
-    const { seller_id, collect_type = 'all' } = body;
-
-    if (!seller_id) {
-      return new Response(JSON.stringify({ error: 'seller_id is required' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    console.log(`[trends-collect-seller] Starting collection for seller ${seller_id}, type: ${collect_type}`);
+    console.log(`[trends-collect-seller] Single account mode for seller ${seller_id}`);
 
     // Get account tokens
     const { data: account, error: accError } = await supabase
@@ -83,16 +114,14 @@ Deno.serve(async (req) => {
     }
 
     // Return immediately and process in background
-    const responseData = { 
-      status: 'processing', 
-      message: 'Collection started in background' 
-    };
-
     EdgeRuntime.waitUntil(
       processCollection(supabase, user.id, seller_id, accessToken, collect_type)
     );
 
-    return new Response(JSON.stringify(responseData), {
+    return new Response(JSON.stringify({ 
+      status: 'processing', 
+      message: 'Collection started in background' 
+    }), {
       status: 202,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -105,6 +134,48 @@ Deno.serve(async (req) => {
     });
   }
 });
+
+// Process all accounts sequentially with delay to avoid rate limits
+async function processAllAccounts(
+  supabase: any,
+  accounts: any[],
+  collectType: string
+) {
+  let processed = 0;
+  let errors = 0;
+
+  for (const account of accounts) {
+    try {
+      const { ml_user_id: sellerId, user_id: userId, access_token, refresh_token, token_expires_at } = account;
+
+      // Refresh token if needed
+      let accessToken = access_token;
+      if (new Date(token_expires_at) < new Date()) {
+        const refreshed = await refreshToken(supabase, sellerId, userId, refresh_token);
+        if (!refreshed) {
+          console.error(`[trends-collect-seller] Failed to refresh token for seller ${sellerId}`);
+          errors++;
+          continue;
+        }
+        accessToken = refreshed;
+      }
+
+      console.log(`[trends-collect-seller] Processing account ${sellerId} (${processed + 1}/${accounts.length})`);
+      await processCollection(supabase, userId, sellerId, accessToken, collectType);
+      processed++;
+
+      // Add delay between accounts to avoid overwhelming the API
+      if (processed < accounts.length) {
+        await sleep(2000);
+      }
+    } catch (error) {
+      console.error(`[trends-collect-seller] Error processing account:`, error);
+      errors++;
+    }
+  }
+
+  console.log(`[trends-collect-seller] CRON completed: ${processed} processed, ${errors} errors`);
+}
 
 async function refreshToken(supabase: any, sellerId: string, userId: string, refreshToken: string): Promise<string | null> {
   try {
