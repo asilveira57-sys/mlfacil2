@@ -38,8 +38,10 @@ import {
   AlertCircle,
   FileText,
   Calculator,
+  Brain,
 } from 'lucide-react';
 import { AdsBudgetSimulator } from '@/components/ads/AdsBudgetSimulator';
+import { AdsAiConsultant } from '@/components/ads/AdsAiConsultant';
 
 export default function Publicidade() {
   const navigate = useNavigate();
@@ -176,7 +178,7 @@ export default function Publicidade() {
       <div className="p-4 lg:p-6 space-y-6">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <div className="flex items-center justify-between flex-wrap gap-4">
-            <TabsList className="grid w-full max-w-2xl grid-cols-6">
+            <TabsList className="grid w-full max-w-3xl grid-cols-7">
               <TabsTrigger value="dashboard" className="flex items-center gap-2">
                 <LayoutDashboard className="h-4 w-4" />
                 <span className="hidden sm:inline">Dashboard</span>
@@ -188,6 +190,10 @@ export default function Publicidade() {
               <TabsTrigger value="products" className="flex items-center gap-2">
                 <Package className="h-4 w-4" />
                 <span className="hidden sm:inline">Produtos</span>
+              </TabsTrigger>
+              <TabsTrigger value="consultant" className="flex items-center gap-2">
+                <Brain className="h-4 w-4" />
+                <span className="hidden sm:inline">Consultor IA</span>
               </TabsTrigger>
               <TabsTrigger value="simulator" className="flex items-center gap-2">
                 <Calculator className="h-4 w-4" />
@@ -357,6 +363,11 @@ export default function Publicidade() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* AI Consultant Tab */}
+          <TabsContent value="consultant" className="space-y-6 mt-6">
+            <AdsAiConsultant sellerId={sellerId} />
           </TabsContent>
 
           {/* Simulator Tab */}
