@@ -12,3 +12,4 @@ export { AdsRuleEventsPanel } from './AdsRuleEventsPanel';
 export { AdsTasksPanel } from './AdsTasksPanel';
 export { AdsExecutiveReport } from './AdsExecutiveReport';
 export { AdsBudgetSimulator } from './AdsBudgetSimulator';
+export { AdsAiConsultant } from './AdsAiConsultant';

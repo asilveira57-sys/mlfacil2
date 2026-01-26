@@ -283,6 +283,45 @@ export type Database = {
           },
         ]
       }
+      ads_ai_analyses: {
+        Row: {
+          analysis_json: Json
+          analysis_type: string
+          created_at: string
+          focus_area: string | null
+          health_score: number | null
+          health_status: string | null
+          id: string
+          input_summary: Json | null
+          seller_id: string
+          user_id: string
+        }
+        Insert: {
+          analysis_json: Json
+          analysis_type?: string
+          created_at?: string
+          focus_area?: string | null
+          health_score?: number | null
+          health_status?: string | null
+          id?: string
+          input_summary?: Json | null
+          seller_id: string
+          user_id: string
+        }
+        Update: {
+          analysis_json?: Json
+          analysis_type?: string
+          created_at?: string
+          focus_area?: string | null
+          health_score?: number | null
+          health_status?: string | null
+          id?: string
+          input_summary?: Json | null
+          seller_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       ads_alerts: {
         Row: {
           alert_type: string
