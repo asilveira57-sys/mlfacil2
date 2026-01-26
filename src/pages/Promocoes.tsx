@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Separator } from '@/components/ui/separator';
 import {
   Tag,
   RefreshCw,
@@ -19,10 +20,15 @@ import {
   Info,
   Percent,
   CalendarClock,
+  ClipboardPlus,
+  Store,
+  History,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { usePromotions, usePromotionItems, PromotionSnapshot, PromotionItemSnapshot } from '@/hooks/usePromotions';
+import { usePromotionTasks } from '@/hooks/usePromotionTasks';
+import { usePromotionSyncLogs } from '@/hooks/usePromotionSyncLogs';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow, format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -41,12 +47,19 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { toast } from 'sonner';
 
 export default function Promocoes() {
   const { sellerId, activeAccount, loading: accountLoading, initialized } = useActiveAccount();
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [selectedPromotion, setSelectedPromotion] = useState<PromotionSnapshot | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const { createTask, creating } = usePromotionTasks();
 
   // Fetch workspace on mount
   useEffect(() => {
@@ -87,20 +100,43 @@ export default function Promocoes() {
     startedItems,
   } = usePromotionItems(workspaceId, selectedPromotion?.promotion_id, sellerId);
 
+  // Sync logs
+  const { lastSync, refetch: refetchLogs } = usePromotionSyncLogs(workspaceId, sellerId);
+
   const handleSync = async () => {
     if (!workspaceId || !sellerId) return;
     setSyncing(true);
     try {
-      const { error } = await supabase.functions.invoke('promotions-sync', {
+      const { data, error } = await supabase.functions.invoke('promotions-sync', {
         body: { workspace_id: workspaceId, account_id: sellerId },
       });
       if (error) throw error;
+      if (data?.error) {
+        toast.error(data.error);
+      } else {
+        toast.success(`Sincronizado: ${data.promotions_synced || 0} promoções`);
+      }
       await refetch();
+      await refetchLogs();
     } catch (err) {
       console.error('[Promocoes] Sync error:', err);
+      toast.error('Erro ao sincronizar promoções');
     } finally {
       setSyncing(false);
     }
+  };
+
+  // Handle manual task creation
+  const handleCreateTask = async (taskType: 'ineligible' | 'expiring' | 'review' | 'custom') => {
+    if (!workspaceId || !sellerId || !selectedPromotion) return;
+    
+    await createTask({
+      workspaceId,
+      sellerId,
+      promotionId: selectedPromotion.promotion_id,
+      promotionName: selectedPromotion.promotion_name,
+      taskType,
+    });
   };
 
   // Show loading while context initializes
@@ -148,7 +184,7 @@ export default function Promocoes() {
     <DashboardLayout>
       <div className="p-6 space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
               <Tag className="h-5 w-5 text-primary" />
@@ -160,14 +196,47 @@ export default function Promocoes() {
               </p>
             </div>
           </div>
-          <Button onClick={handleSync} disabled={syncing} className="gap-2">
-            {syncing ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
+          <div className="flex items-center gap-3">
+            {/* Active Account Indicator */}
+            {activeAccount && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted/50 border">
+                <Store className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium">
+                  {activeAccount.nickname || activeAccount.sellerId}
+                </span>
+              </div>
             )}
-            Sincronizar
-          </Button>
+            
+            {/* Last Sync Info */}
+            {lastSync && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <History className="h-3.5 w-3.5" />
+                    <span>
+                      {format(new Date(lastSync.started_at), 'HH:mm', { locale: ptBR })}
+                    </span>
+                    {lastSync.status === 'success' && <CheckCircle2 className="h-3 w-3 text-success" />}
+                    {lastSync.status === 'error' && <XCircle className="h-3 w-3 text-destructive" />}
+                    {lastSync.status === 'running' && <Loader2 className="h-3 w-3 animate-spin" />}
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Última sync: {format(new Date(lastSync.started_at), 'dd/MM HH:mm', { locale: ptBR })}</p>
+                  <p className="text-xs opacity-70">{lastSync.promotions_synced || 0} promoções sincronizadas</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+            
+            <Button onClick={handleSync} disabled={syncing} className="gap-2">
+              {syncing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              Sincronizar
+            </Button>
+          </div>
         </div>
 
         {/* Error Alert */}
@@ -322,6 +391,54 @@ export default function Promocoes() {
                   <span className="block text-xs text-muted-foreground">Inelegíveis</span>
                 </div>
               </div>
+
+              {/* Task Creation Actions */}
+              <div className="space-y-3">
+                <Separator />
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">Criar Tarefa</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {ineligibleItems.length > 0 && (
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      className="gap-1.5 text-destructive border-destructive/30"
+                      onClick={() => handleCreateTask('ineligible')}
+                      disabled={creating}
+                    >
+                      <ClipboardPlus className="h-3.5 w-3.5" />
+                      Corrigir Inelegíveis
+                    </Button>
+                  )}
+                  {selectedPromotion?.status === 'started' && (
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      className="gap-1.5"
+                      onClick={() => handleCreateTask('expiring')}
+                      disabled={creating}
+                    >
+                      <ClipboardPlus className="h-3.5 w-3.5" />
+                      Planejar Renovação
+                    </Button>
+                  )}
+                  {selectedPromotion?.status === 'finished' && (
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      className="gap-1.5"
+                      onClick={() => handleCreateTask('review')}
+                      disabled={creating}
+                    >
+                      <ClipboardPlus className="h-3.5 w-3.5" />
+                      Revisar Resultados
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              <Separator />
 
               {/* Items Table */}
               <div>

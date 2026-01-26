@@ -4618,6 +4618,7 @@ export type Database = {
           original_price: number | null
           promo_price: number | null
           promotion_id: string
+          seller_id: string | null
           updated_at: string
           workspace_id: string
         }
@@ -4631,6 +4632,7 @@ export type Database = {
           original_price?: number | null
           promo_price?: number | null
           promotion_id: string
+          seller_id?: string | null
           updated_at?: string
           workspace_id: string
         }
@@ -4644,6 +4646,7 @@ export type Database = {
           original_price?: number | null
           promo_price?: number | null
           promotion_id?: string
+          seller_id?: string | null
           updated_at?: string
           workspace_id?: string
         }
@@ -4674,6 +4677,7 @@ export type Database = {
           promotion_name: string | null
           promotion_type: string
           raw_data: Json | null
+          seller_id: string | null
           start_at: string | null
           status: string
           updated_at: string
@@ -4688,6 +4692,7 @@ export type Database = {
           promotion_name?: string | null
           promotion_type: string
           raw_data?: Json | null
+          seller_id?: string | null
           start_at?: string | null
           status?: string
           updated_at?: string
@@ -4702,6 +4707,7 @@ export type Database = {
           promotion_name?: string | null
           promotion_type?: string
           raw_data?: Json | null
+          seller_id?: string | null
           start_at?: string | null
           status?: string
           updated_at?: string
@@ -4717,6 +4723,68 @@ export type Database = {
           },
           {
             foreignKeyName: "promotion_snapshots_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      promotion_sync_logs: {
+        Row: {
+          account_id: string
+          created_at: string
+          duration_ms: number | null
+          ended_at: string | null
+          error_details: Json | null
+          error_message: string | null
+          events_created: number | null
+          id: string
+          items_synced: number | null
+          promotions_fetched: number | null
+          promotions_synced: number | null
+          started_at: string
+          status: string
+          sync_source: string | null
+          workspace_id: string
+        }
+        Insert: {
+          account_id: string
+          created_at?: string
+          duration_ms?: number | null
+          ended_at?: string | null
+          error_details?: Json | null
+          error_message?: string | null
+          events_created?: number | null
+          id?: string
+          items_synced?: number | null
+          promotions_fetched?: number | null
+          promotions_synced?: number | null
+          started_at?: string
+          status?: string
+          sync_source?: string | null
+          workspace_id: string
+        }
+        Update: {
+          account_id?: string
+          created_at?: string
+          duration_ms?: number | null
+          ended_at?: string | null
+          error_details?: Json | null
+          error_message?: string | null
+          events_created?: number | null
+          id?: string
+          items_synced?: number | null
+          promotions_fetched?: number | null
+          promotions_synced?: number | null
+          started_at?: string
+          status?: string
+          sync_source?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "promotion_sync_logs_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
