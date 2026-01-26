@@ -5,7 +5,30 @@ import { User } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { LogOut, BarChart3, Plus, ExternalLink, Settings, CheckCircle, XCircle, Package, CloudDownload, RefreshCw, Database } from "lucide-react";
+import { 
+  LogOut, 
+  BarChart3, 
+  Plus, 
+  ExternalLink, 
+  Settings, 
+  CheckCircle, 
+  XCircle, 
+  Package, 
+  CloudDownload, 
+  RefreshCw, 
+  Database,
+  TrendingUp,
+  Activity,
+  Target,
+  DollarSign,
+  Printer,
+  FileText,
+  Megaphone,
+  Users,
+  Store,
+  ListChecks,
+  Zap,
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { SalesDashboard } from "@/components/SalesDashboard";
 import {
@@ -491,26 +514,116 @@ const Dashboard = () => {
           </div>
         )}
 
-        {/* Getting Started Cards */}
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 mb-8">
-          {mlAccount ? (
-            <Card className="p-6 hover:shadow-lg transition-all duration-300 border-2 border-green-500/30 bg-green-500/5">
-              <div className="flex items-start justify-between mb-4">
-                <div className="w-12 h-12 bg-green-500/10 rounded-xl flex items-center justify-center">
-                  <CheckCircle className="w-6 h-6 text-green-500" />
-                </div>
-              </div>
-              <h3 className="text-lg font-semibold text-card-foreground mb-2">
-                ✓ Conta Conectada
-              </h3>
-              <p className="text-sm text-muted-foreground mb-2">
-                {mlAccount.nickname || mlAccount.email || `ID: ${mlAccount.ml_user_id}`}
-              </p>
-              <p className="text-xs text-green-600 font-medium">
-                Status: Ativo
-              </p>
-            </Card>
-          ) : (
+        {/* Module Cards Grid */}
+        {mlAccount && (
+          <div className="mb-8">
+            <h3 className="text-xl font-semibold mb-4">Módulos</h3>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {/* Radiografia */}
+              <ModuleCard
+                title="Radiografia"
+                description="Análise profunda de anúncios com score, eventos e sugestões de otimização."
+                icon={<Activity className="w-5 h-5" />}
+                color="violet"
+                onClick={() => navigate('/radiografia')}
+              />
+
+              {/* Tendências */}
+              <ModuleCard
+                title="Tendências"
+                description="Produtos em alta, mais vendidos e oportunidades por categoria."
+                icon={<TrendingUp className="w-5 h-5" />}
+                color="orange"
+                onClick={() => navigate('/tendencias')}
+              />
+
+              {/* Mercado */}
+              <ModuleCard
+                title="Mercado"
+                description="Dashboard premium de analytics com navegação por categorias."
+                icon={<Store className="w-5 h-5" />}
+                color="emerald"
+                onClick={() => navigate('/mercado')}
+              />
+
+              {/* Concorrência */}
+              <ModuleCard
+                title="Concorrência"
+                description="Monitore preços, posições e estratégias dos concorrentes."
+                icon={<Target className="w-5 h-5" />}
+                color="red"
+                onClick={() => navigate('/concorrencia')}
+              />
+
+              {/* Curva ABC */}
+              <ModuleCard
+                title="Curva ABC"
+                description="Identifique produtos, clientes e regiões mais importantes."
+                icon={<BarChart3 className="w-5 h-5" />}
+                color="cyan"
+                onClick={() => navigate('/abc-analysis')}
+              />
+
+              {/* Custos */}
+              <ModuleCard
+                title="Custos"
+                description="Análise financeira com margens, impostos e lucro líquido."
+                icon={<DollarSign className="w-5 h-5" />}
+                color="green"
+                onClick={() => navigate('/custos')}
+              />
+
+              {/* Mercado ADS */}
+              <ModuleCard
+                title="Mercado ADS"
+                description="Analytics e automação de campanhas publicitárias."
+                icon={<Megaphone className="w-5 h-5" />}
+                color="pink"
+                onClick={() => navigate('/publicidade')}
+              />
+
+              {/* Tarefas / Central de Promoções */}
+              <ModuleCard
+                title="Tarefas"
+                description="Central de tarefas, promoções e automações."
+                icon={<ListChecks className="w-5 h-5" />}
+                color="amber"
+                onClick={() => navigate('/tarefas')}
+              />
+
+              {/* Etiquetas */}
+              <ModuleCard
+                title="Etiquetas"
+                description="Gerencie e imprima etiquetas em PDF ou ZPL."
+                icon={<Package className="w-5 h-5" />}
+                color="blue"
+                onClick={() => navigate('/shipping-labels')}
+              />
+
+              {/* ZPL Converter */}
+              <ModuleCard
+                title="ZPL Converter"
+                description="Converta etiquetas para formato ZPL de impressoras térmicas."
+                icon={<Printer className="w-5 h-5" />}
+                color="slate"
+                onClick={() => navigate('/zpl-converter')}
+              />
+
+              {/* Configurações */}
+              <ModuleCard
+                title="Configurações"
+                description="Perfil, empresas, integrações e assinatura."
+                icon={<Settings className="w-5 h-5" />}
+                color="gray"
+                onClick={() => navigate('/settings')}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Getting Started Cards - Only show when ML is NOT connected */}
+        {!mlAccount && (
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 mb-8">
             <Card className="p-6 hover:shadow-lg transition-all duration-300 border-2 border-dashed border-primary/20 hover:border-primary/40">
               <div className="flex items-start justify-between mb-4">
                 <div className="w-12 h-12 bg-accent/10 rounded-xl flex items-center justify-center">
@@ -527,179 +640,134 @@ const Dashboard = () => {
                 Conectar Mercado Livre
               </Button>
             </Card>
-          )}
 
-          <Card className="p-6 hover:shadow-lg transition-all duration-300">
-            <div className="flex items-start justify-between mb-4">
-              <div className="w-12 h-12 bg-success/10 rounded-xl flex items-center justify-center">
-                <ExternalLink className="w-6 h-6 text-success" />
-              </div>
-            </div>
-            <h3 className="text-lg font-semibold text-card-foreground mb-2">
-              2. Instale a Extensão
-            </h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Baixe e instale a extensão do Chrome para análise em tempo real nas páginas do ML.
-            </p>
-            <Button className="w-full" variant="outline">
-              Baixar Extensão
-            </Button>
-          </Card>
-
-          {mlAccount && (
-            <Card 
-              className="p-6 hover:shadow-lg transition-all duration-300 cursor-pointer border-2 border-primary/20 hover:border-primary/40"
-              onClick={() => navigate('/shipping-labels')}
-            >
+            <Card className="p-6 hover:shadow-lg transition-all duration-300">
               <div className="flex items-start justify-between mb-4">
-                <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center">
-                  <Package className="w-6 h-6 text-primary" />
+                <div className="w-12 h-12 bg-success/10 rounded-xl flex items-center justify-center">
+                  <ExternalLink className="w-6 h-6 text-success" />
                 </div>
               </div>
               <h3 className="text-lg font-semibold text-card-foreground mb-2">
-                Etiquetas de Envio
+                2. Instale a Extensão
               </h3>
               <p className="text-sm text-muted-foreground mb-4">
-                Gerencie e imprima etiquetas dos seus envios em PDF ou ZPL.
+                Baixe e instale a extensão do Chrome para análise em tempo real nas páginas do ML.
               </p>
-              <Button className="w-full" variant="default">
-                Acessar Etiquetas
+              <Button className="w-full" variant="outline">
+                Baixar Extensão
               </Button>
             </Card>
-          )}
 
-          {mlAccount && (
-            <Card 
-              className="p-6 hover:shadow-lg transition-all duration-300 cursor-pointer border-2 border-orange-500/20 hover:border-orange-500/40"
-              onClick={() => navigate('/tendencias')}
-            >
+            <Card className="p-6 hover:shadow-lg transition-all duration-300">
               <div className="flex items-start justify-between mb-4">
-                <div className="w-12 h-12 bg-orange-500/10 rounded-xl flex items-center justify-center">
-                  <BarChart3 className="w-6 h-6 text-orange-500" />
+                <div className="w-12 h-12 bg-warning/10 rounded-xl flex items-center justify-center">
+                  <BarChart3 className="w-6 h-6 text-warning" />
                 </div>
               </div>
               <h3 className="text-lg font-semibold text-card-foreground mb-2">
-                Tendências
+                Analise Produtos
               </h3>
               <p className="text-sm text-muted-foreground mb-4">
-                Produtos em alta, mais vendidos por categoria e alertas de oportunidades.
+                Navegue até qualquer anúncio no ML e veja análises detalhadas no painel lateral.
               </p>
-              <Button className="w-full border-orange-500/50 text-orange-600 hover:bg-orange-500/10" variant="outline">
-                Ver Tendências
+              <Button className="w-full" variant="secondary" disabled>
+                Aguardando Setup
               </Button>
             </Card>
-          )}
-
-          {mlAccount && (
-            <Card 
-              className="p-6 hover:shadow-lg transition-all duration-300 cursor-pointer border-2 border-cyan-500/20 hover:border-cyan-500/40"
-              onClick={() => navigate('/abc-analysis')}
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div className="w-12 h-12 bg-cyan-500/10 rounded-xl flex items-center justify-center">
-                  <BarChart3 className="w-6 h-6 text-cyan-500" />
-                </div>
-              </div>
-              <h3 className="text-lg font-semibold text-card-foreground mb-2">
-                Análise ABC
-              </h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                Identifique produtos, clientes e regiões mais importantes.
-              </p>
-              <Button className="w-full border-cyan-500/50 text-cyan-600 hover:bg-cyan-500/10" variant="outline">
-                Ver Análise ABC
-              </Button>
-            </Card>
-          )}
-
-          <Card className="p-6 hover:shadow-lg transition-all duration-300">
-            <div className="flex items-start justify-between mb-4">
-              <div className="w-12 h-12 bg-warning/10 rounded-xl flex items-center justify-center">
-                <BarChart3 className="w-6 h-6 text-warning" />
-              </div>
-            </div>
-            <h3 className="text-lg font-semibold text-card-foreground mb-2">
-              Analise Produtos
-            </h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Navegue até qualquer anúncio no ML e veja análises detalhadas no painel lateral.
-            </p>
-            <Button className="w-full" variant="secondary" disabled>
-              Aguardando Setup
-            </Button>
-          </Card>
-        </div>
-
-        {/* Features Overview */}
-        <Card className="p-8">
-          <h3 className="text-2xl font-bold text-card-foreground mb-6">
-            Recursos Disponíveis
-          </h3>
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            <div className="space-y-2">
-              <div className="w-10 h-10 bg-accent/10 rounded-lg flex items-center justify-center mb-3">
-                <span className="text-2xl">📊</span>
-              </div>
-              <h4 className="font-semibold text-card-foreground">Métricas Completas</h4>
-              <p className="text-sm text-muted-foreground">
-                Visitas, vendas, conversão, estoque e muito mais em tempo real
-              </p>
-            </div>
-            
-            <div className="space-y-2">
-              <div className="w-10 h-10 bg-success/10 rounded-lg flex items-center justify-center mb-3">
-                <span className="text-2xl">🎯</span>
-              </div>
-              <h4 className="font-semibold text-card-foreground">Ranking de Palavras-Chave</h4>
-              <p className="text-sm text-muted-foreground">
-                Monitore suas posições e descubra oportunidades de SEO
-              </p>
-            </div>
-            
-            <div className="space-y-2">
-              <div className="w-10 h-10 bg-warning/10 rounded-lg flex items-center justify-center mb-3">
-                <span className="text-2xl">🔍</span>
-              </div>
-              <h4 className="font-semibold text-card-foreground">Análise de Concorrência</h4>
-              <p className="text-sm text-muted-foreground">
-                Compare preços, reputação e estratégias dos concorrentes
-              </p>
-            </div>
-            
-            <div className="space-y-2">
-              <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center mb-3">
-                <span className="text-2xl">📈</span>
-              </div>
-              <h4 className="font-semibold text-card-foreground">Tendências de Mercado</h4>
-              <p className="text-sm text-muted-foreground">
-                Identifique produtos em alta e oportunidades de crescimento
-              </p>
-            </div>
-            
-            <div className="space-y-2">
-              <div className="w-10 h-10 bg-destructive/10 rounded-lg flex items-center justify-center mb-3">
-                <span className="text-2xl">💰</span>
-              </div>
-              <h4 className="font-semibold text-card-foreground">Análise Financeira</h4>
-              <p className="text-sm text-muted-foreground">
-                Calcule margens, impostos e lucro líquido automaticamente
-              </p>
-            </div>
-            
-            <div className="space-y-2">
-              <div className="w-10 h-10 bg-accent/10 rounded-lg flex items-center justify-center mb-3">
-                <span className="text-2xl">✅</span>
-              </div>
-              <h4 className="font-semibold text-card-foreground">Qualidade do Anúncio</h4>
-              <p className="text-sm text-muted-foreground">
-                Checklist completo com sugestões de melhorias
-              </p>
-            </div>
           </div>
-        </Card>
+        )}
+
       </main>
     </div>
   );
 };
+
+// Module Card Component
+interface ModuleCardProps {
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  color: 'violet' | 'orange' | 'emerald' | 'red' | 'cyan' | 'green' | 'pink' | 'amber' | 'blue' | 'slate' | 'gray';
+  onClick: () => void;
+}
+
+const colorMap = {
+  violet: {
+    border: "border-violet-500/20 hover:border-violet-500/40",
+    bg: "bg-violet-500/10",
+    text: "text-violet-500",
+  },
+  orange: {
+    border: "border-orange-500/20 hover:border-orange-500/40",
+    bg: "bg-orange-500/10",
+    text: "text-orange-500",
+  },
+  emerald: {
+    border: "border-emerald-500/20 hover:border-emerald-500/40",
+    bg: "bg-emerald-500/10",
+    text: "text-emerald-500",
+  },
+  red: {
+    border: "border-red-500/20 hover:border-red-500/40",
+    bg: "bg-red-500/10",
+    text: "text-red-500",
+  },
+  cyan: {
+    border: "border-cyan-500/20 hover:border-cyan-500/40",
+    bg: "bg-cyan-500/10",
+    text: "text-cyan-500",
+  },
+  green: {
+    border: "border-green-500/20 hover:border-green-500/40",
+    bg: "bg-green-500/10",
+    text: "text-green-500",
+  },
+  pink: {
+    border: "border-pink-500/20 hover:border-pink-500/40",
+    bg: "bg-pink-500/10",
+    text: "text-pink-500",
+  },
+  amber: {
+    border: "border-amber-500/20 hover:border-amber-500/40",
+    bg: "bg-amber-500/10",
+    text: "text-amber-500",
+  },
+  blue: {
+    border: "border-blue-500/20 hover:border-blue-500/40",
+    bg: "bg-blue-500/10",
+    text: "text-blue-500",
+  },
+  slate: {
+    border: "border-slate-500/20 hover:border-slate-500/40",
+    bg: "bg-slate-500/10",
+    text: "text-slate-500",
+  },
+  gray: {
+    border: "border-muted-foreground/20 hover:border-muted-foreground/40",
+    bg: "bg-muted",
+    text: "text-muted-foreground",
+  },
+};
+
+function ModuleCard({ title, description, icon, color, onClick }: ModuleCardProps) {
+  const colors = colorMap[color];
+  
+  return (
+    <Card 
+      className={`p-4 hover:shadow-md transition-all duration-200 cursor-pointer border-2 ${colors.border}`}
+      onClick={onClick}
+    >
+      <div className="flex items-start gap-3">
+        <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${colors.bg}`}>
+          <span className={colors.text}>{icon}</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <h4 className="font-semibold text-card-foreground text-sm mb-1">{title}</h4>
+          <p className="text-xs text-muted-foreground line-clamp-2">{description}</p>
+        </div>
+      </div>
+    </Card>
+  );
+}
 
 export default Dashboard;
