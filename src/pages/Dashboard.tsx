@@ -22,7 +22,9 @@ import { DashboardKpiCards } from "@/components/dashboard/DashboardKpiCards";
 import { DashboardQuickActions } from "@/components/dashboard/DashboardQuickActions";
 import { DashboardModulesGrid } from "@/components/dashboard/DashboardModulesGrid";
 import { DashboardOnboarding } from "@/components/dashboard/DashboardOnboarding";
+import { TrialBanner } from "@/components/access/TrialBanner";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
+import { useUserAccess } from "@/contexts/UserAccessContext";
 import {
   Dialog,
   DialogContent,
@@ -476,6 +478,9 @@ const Dashboard = () => {
       headerContent={headerContent}
     >
       <div className="p-4 lg:p-6 space-y-6">
+        {/* Trial Banner */}
+        <TrialBanner />
+
         {/* Connected State - Full Dashboard */}
         {activeAccount ? (
           <>
