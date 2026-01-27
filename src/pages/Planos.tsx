@@ -3,12 +3,14 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 import { LandingHeader, LandingFooter } from "@/components/landing";
 import { useSiteContent } from "@/hooks/useSiteContent";
 import { useBillingPlans, useBillingCheckout } from "@/hooks/useBillingPlans";
 import { EditableText } from "@/components/admin/EditableText";
 import { VolumePlanCard } from "@/components/billing/VolumePlanCard";
 import { ZplPlanSection } from "@/components/billing/ZplPlanSection";
+import { useUserAccess } from "@/contexts/UserAccessContext";
 import { toast } from "sonner";
 import { 
   ArrowLeft, 
@@ -17,6 +19,8 @@ import {
   MessageSquare,
   CreditCard,
   RefreshCw,
+  AlertTriangle,
+  CheckCircle,
 } from "lucide-react";
 
 type BillingPeriod = 'monthly' | 'quarterly' | 'semiannual';
@@ -28,6 +32,7 @@ const Planos = () => {
   const { getText } = useSiteContent();
   const { volumePlans, zplPlan, settings, loading, error } = useBillingPlans();
   const { checkout, loading: checkoutLoading } = useBillingCheckout();
+  const { isAuthenticated, trialActive, trialExpired, flags, selectPlan } = useUserAccess();
   const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>('monthly');
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('avulso');
 
@@ -53,6 +58,35 @@ const Planos = () => {
   const modeDescription = paymentMode === 'avulso'
     ? 'Plano avulso • Pagamento único • Sem renovação automática'
     : 'Cobrança mensal recorrente • Renovação automática • Cancele quando quiser';
+
+  // Determine CTA based on user state
+  const getCtaConfig = () => {
+    if (!isAuthenticated) {
+      return {
+        primary: { label: 'Criar conta e iniciar teste', action: () => navigate('/auth') },
+        secondary: { label: 'Assinar agora', action: () => navigate('/auth?intent=subscribe') },
+      };
+    }
+    if (trialActive) {
+      const daysLeft = flags?.trial_days_remaining || 0;
+      return {
+        primary: { label: `Continuar no teste (${daysLeft} dias)`, action: () => navigate('/dashboard') },
+        secondary: { label: 'Escolher plano para depois', action: () => {} },
+      };
+    }
+    if (trialExpired) {
+      return {
+        primary: { label: 'Escolher plano e pagar', action: () => {} },
+        secondary: null,
+      };
+    }
+    return {
+      primary: { label: 'Ver Dashboard', action: () => navigate('/dashboard') },
+      secondary: null,
+    };
+  };
+
+  const ctaConfig = getCtaConfig();
 
   return (
     <div className="min-h-screen bg-background">
@@ -238,6 +272,20 @@ const Planos = () => {
         {/* CTA Section */}
         <div className="py-8 px-4 bg-muted/40">
           <div className="text-center max-w-xl mx-auto">
+            {/* Trial status badge */}
+            {isAuthenticated && trialActive && (
+              <Badge variant="secondary" className="mb-3 bg-success/10 text-success border-success/20">
+                <CheckCircle className="w-3 h-3 mr-1" />
+                Teste ativo • {flags?.trial_days_remaining || 0} dias restantes
+              </Badge>
+            )}
+            {isAuthenticated && trialExpired && (
+              <Badge variant="secondary" className="mb-3 bg-destructive/10 text-destructive border-destructive/20">
+                <AlertTriangle className="w-3 h-3 mr-1" />
+                Teste expirado • Escolha um plano para continuar
+              </Badge>
+            )}
+
             <h2 className="text-base font-bold text-foreground mb-1">
               <EditableText contentKey="planos.cta.title" as="span" />
             </h2>
@@ -245,13 +293,20 @@ const Planos = () => {
               <EditableText contentKey="planos.cta.subtitle" as="span" />
             </p>
             <div className="flex items-center justify-center gap-3">
-              <Button size="sm" className="h-10 text-sm px-6 shadow-sm" onClick={() => navigate("/auth")}>
-                <EditableText contentKey="planos.cta.btn_primary" as="span" />
+              <Button size="sm" className="h-10 text-sm px-6 shadow-sm" onClick={ctaConfig.primary.action}>
+                {ctaConfig.primary.label}
               </Button>
-              <Button size="sm" variant="outline" onClick={() => navigate("/")} className="gap-1.5 h-10 text-sm px-5 bg-background">
-                <ArrowLeft className="w-3.5 h-3.5" />
-                <EditableText contentKey="planos.cta.btn_secondary" as="span" />
-              </Button>
+              {ctaConfig.secondary && (
+                <Button size="sm" variant="outline" onClick={ctaConfig.secondary.action} className="gap-1.5 h-10 text-sm px-5 bg-background">
+                  {ctaConfig.secondary.label}
+                </Button>
+              )}
+              {!ctaConfig.secondary && (
+                <Button size="sm" variant="outline" onClick={() => navigate("/")} className="gap-1.5 h-10 text-sm px-5 bg-background">
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  Voltar ao início
+                </Button>
+              )}
             </div>
           </div>
         </div>
