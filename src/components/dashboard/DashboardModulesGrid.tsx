@@ -15,6 +15,7 @@ import {
   Printer,
   Settings,
   ArrowRight,
+  MessageSquareText,
 } from "lucide-react";
 
 interface Module {
@@ -100,6 +101,15 @@ const modules: Module[] = [
     color: "text-amber-500",
     bgColor: "bg-amber-500/10",
     borderColor: "border-amber-500/20 hover:border-amber-500/40",
+  },
+  {
+    title: "Pós-Venda",
+    description: "Mensagens de orientação e suporte ao comprador.",
+    icon: MessageSquareText,
+    route: "/mensagens",
+    color: "text-sky-500",
+    bgColor: "bg-sky-500/10",
+    borderColor: "border-sky-500/20 hover:border-sky-500/40",
   },
   {
     title: "Etiquetas",

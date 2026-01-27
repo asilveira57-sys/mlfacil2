@@ -98,3 +98,21 @@ verify_jwt = false
 
 [functions.ads-rules-engine]
 verify_jwt = false
+
+[functions.ads-ai-consultant]
+verify_jwt = false
+
+[functions.ads-connector-sync]
+verify_jwt = false
+
+[functions.automation-processor]
+verify_jwt = false
+
+[functions.promotions-sync]
+verify_jwt = false
+
+[functions.trends-sync-categories]
+verify_jwt = false
+
+[functions.post-sale-messages]
+verify_jwt = false
