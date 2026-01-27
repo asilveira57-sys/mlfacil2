@@ -218,6 +218,45 @@ export type Database = {
         }
         Relationships: []
       }
+      admin_action_log: {
+        Row: {
+          action_type: string
+          admin_user_id: string
+          created_at: string
+          description: string | null
+          id: string
+          ip_address: string | null
+          new_value: Json | null
+          old_value: Json | null
+          target_id: string | null
+          target_table: string | null
+        }
+        Insert: {
+          action_type: string
+          admin_user_id: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          ip_address?: string | null
+          new_value?: Json | null
+          old_value?: Json | null
+          target_id?: string | null
+          target_table?: string | null
+        }
+        Update: {
+          action_type?: string
+          admin_user_id?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          ip_address?: string | null
+          new_value?: Json | null
+          old_value?: Json | null
+          target_id?: string | null
+          target_table?: string | null
+        }
+        Relationships: []
+      }
       ads_ad_groups: {
         Row: {
           campaign_id: string | null
@@ -2509,6 +2548,45 @@ export type Database = {
         }
         Relationships: []
       }
+      integration_status: {
+        Row: {
+          config: Json
+          created_at: string
+          display_name: string
+          error_count: number
+          id: string
+          integration_name: string
+          last_error: string | null
+          last_sync_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          config?: Json
+          created_at?: string
+          display_name: string
+          error_count?: number
+          id?: string
+          integration_name: string
+          last_error?: string | null
+          last_sync_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string
+          display_name?: string
+          error_count?: number
+          id?: string
+          integration_name?: string
+          last_error?: string | null
+          last_sync_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       invoice_queue: {
         Row: {
           company_id: string
@@ -4292,6 +4370,45 @@ export type Database = {
           },
         ]
       }
+      onboarding_cards: {
+        Row: {
+          created_at: string
+          description: string | null
+          display_condition: string | null
+          icon_name: string | null
+          id: string
+          is_active: boolean
+          link_url: string | null
+          sort_order: number
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          display_condition?: string | null
+          icon_name?: string | null
+          id?: string
+          is_active?: boolean
+          link_url?: string | null
+          sort_order?: number
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          display_condition?: string | null
+          icon_name?: string | null
+          id?: string
+          is_active?: boolean
+          link_url?: string | null
+          sort_order?: number
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       order_cost_breakdown_cache: {
         Row: {
           adjustments: number | null
@@ -4746,6 +4863,42 @@ export type Database = {
           requires_ml_owner?: boolean
           slug?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      platform_settings: {
+        Row: {
+          category: string
+          created_at: string
+          description: string | null
+          id: string
+          is_public: boolean
+          key: string
+          updated_at: string
+          updated_by: string | null
+          value: Json
+        }
+        Insert: {
+          category?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_public?: boolean
+          key: string
+          updated_at?: string
+          updated_by?: string | null
+          value?: Json
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_public?: boolean
+          key?: string
+          updated_at?: string
+          updated_by?: string | null
+          value?: Json
         }
         Relationships: []
       }
@@ -6009,6 +6162,54 @@ export type Database = {
         }
         Relationships: []
       }
+      seo_page_settings: {
+        Row: {
+          canonical_url: string | null
+          created_at: string
+          id: string
+          meta_description: string | null
+          meta_title: string | null
+          og_description: string | null
+          og_image: string | null
+          og_title: string | null
+          page_path: string
+          robots_follow: boolean
+          robots_index: boolean
+          structured_data: Json | null
+          updated_at: string
+        }
+        Insert: {
+          canonical_url?: string | null
+          created_at?: string
+          id?: string
+          meta_description?: string | null
+          meta_title?: string | null
+          og_description?: string | null
+          og_image?: string | null
+          og_title?: string | null
+          page_path: string
+          robots_follow?: boolean
+          robots_index?: boolean
+          structured_data?: Json | null
+          updated_at?: string
+        }
+        Update: {
+          canonical_url?: string | null
+          created_at?: string
+          id?: string
+          meta_description?: string | null
+          meta_title?: string | null
+          og_description?: string | null
+          og_image?: string | null
+          og_title?: string | null
+          page_path?: string
+          robots_follow?: boolean
+          robots_index?: boolean
+          structured_data?: Json | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       site_content: {
         Row: {
           chave: string
@@ -7128,6 +7329,39 @@ export type Database = {
       }
     }
     Functions: {
+      add_admin_by_email: { Args: { p_email: string }; Returns: undefined }
+      admin_adjust_trial: {
+        Args: {
+          p_days_adjustment: number
+          p_reason?: string
+          p_target_user_id: string
+        }
+        Returns: Json
+      }
+      admin_reset_trial: {
+        Args: {
+          p_reason?: string
+          p_target_user_id: string
+          p_trial_days?: number
+        }
+        Returns: Json
+      }
+      admin_set_user_blocked: {
+        Args: {
+          p_blocked: boolean
+          p_reason?: string
+          p_target_user_id: string
+        }
+        Returns: Json
+      }
+      admin_set_user_role: {
+        Args: {
+          p_action: string
+          p_role: Database["public"]["Enums"]["app_role"]
+          p_target_user_id: string
+        }
+        Returns: Json
+      }
       calculate_category_eligibility: {
         Args: {
           p_category_id: string
@@ -7170,6 +7404,7 @@ export type Database = {
       ensure_workspace: { Args: { p_user_id: string }; Returns: Json }
       generate_blog_slug: { Args: { title: string }; Returns: string }
       generate_category_slug: { Args: { name: string }; Returns: string }
+      get_admin_dashboard_stats: { Args: never; Returns: Json }
       get_or_create_ml_account: {
         Args: {
           p_access_token?: string
@@ -7285,6 +7520,17 @@ export type Database = {
       is_workspace_member: {
         Args: { _user_id: string; _workspace_id: string }
         Returns: boolean
+      }
+      log_admin_action: {
+        Args: {
+          p_action_type: string
+          p_description?: string
+          p_new_value?: Json
+          p_old_value?: Json
+          p_target_id?: string
+          p_target_table?: string
+        }
+        Returns: string
       }
       resolve_notification: {
         Args: { p_notification_id: string }
