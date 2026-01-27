@@ -3,6 +3,8 @@ import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/s
 import { AppSidebar } from "./AppSidebar";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { Separator } from "@/components/ui/separator";
+import { NotificationBell } from "@/components/notifications";
+import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -17,6 +19,8 @@ export function DashboardLayout({
   subtitle,
   headerContent 
 }: DashboardLayoutProps) {
+  const { sellerId } = useActiveAccount();
+  
   return (
     <SidebarProvider defaultOpen={true}>
       <div className="min-h-screen flex w-full bg-background">
@@ -35,6 +39,7 @@ export function DashboardLayout({
               </div>
             )}
             <div className="flex items-center gap-2 ml-auto">
+              <NotificationBell sellerId={sellerId} />
               <AccountSwitcher />
               {headerContent}
             </div>

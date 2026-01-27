@@ -1564,12 +1564,18 @@ export type Database = {
           is_actioned: boolean | null
           is_dismissed: boolean | null
           is_read: boolean | null
+          is_snoozed: boolean | null
           metadata: Json | null
+          origin_module: string | null
           priority: Database["public"]["Enums"]["notification_priority"] | null
           read_at: string | null
           reference_id: string | null
           reference_type: string | null
+          resolved_at: string | null
+          resolved_by: string | null
           seller_id: string | null
+          snooze_until: string | null
+          snoozed_at: string | null
           title: string
           user_id: string
           workspace_id: string | null
@@ -1585,12 +1591,18 @@ export type Database = {
           is_actioned?: boolean | null
           is_dismissed?: boolean | null
           is_read?: boolean | null
+          is_snoozed?: boolean | null
           metadata?: Json | null
+          origin_module?: string | null
           priority?: Database["public"]["Enums"]["notification_priority"] | null
           read_at?: string | null
           reference_id?: string | null
           reference_type?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
           seller_id?: string | null
+          snooze_until?: string | null
+          snoozed_at?: string | null
           title: string
           user_id: string
           workspace_id?: string | null
@@ -1606,12 +1618,18 @@ export type Database = {
           is_actioned?: boolean | null
           is_dismissed?: boolean | null
           is_read?: boolean | null
+          is_snoozed?: boolean | null
           metadata?: Json | null
+          origin_module?: string | null
           priority?: Database["public"]["Enums"]["notification_priority"] | null
           read_at?: string | null
           reference_id?: string | null
           reference_type?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
           seller_id?: string | null
+          snooze_until?: string | null
+          snoozed_at?: string | null
           title?: string
           user_id?: string
           workspace_id?: string | null
@@ -4110,6 +4128,125 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      notification_audit_log: {
+        Row: {
+          action: string
+          action_details: Json | null
+          created_at: string
+          id: string
+          ip_address: string | null
+          notification_id: string | null
+          user_agent: string | null
+          user_id: string
+        }
+        Insert: {
+          action: string
+          action_details?: Json | null
+          created_at?: string
+          id?: string
+          ip_address?: string | null
+          notification_id?: string | null
+          user_agent?: string | null
+          user_id: string
+        }
+        Update: {
+          action?: string
+          action_details?: Json | null
+          created_at?: string
+          id?: string
+          ip_address?: string | null
+          notification_id?: string | null
+          user_agent?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notification_audit_log_notification_id_fkey"
+            columns: ["notification_id"]
+            isOneToOne: false
+            referencedRelation: "app_notifications"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notification_audit_log_notification_id_fkey"
+            columns: ["notification_id"]
+            isOneToOne: false
+            referencedRelation: "priority_notifications"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notification_preferences: {
+        Row: {
+          created_at: string
+          id: string
+          post_sale_blocked_enabled: boolean | null
+          post_sale_error_enabled: boolean | null
+          qa_blocked_enabled: boolean | null
+          qa_pending_enabled: boolean | null
+          qa_send_error_enabled: boolean | null
+          qa_sla_breached_enabled: boolean | null
+          qa_sla_warning_enabled: boolean | null
+          quiet_hours_enabled: boolean | null
+          quiet_hours_end: string | null
+          quiet_hours_start: string | null
+          show_in_bell: boolean | null
+          show_in_dashboard: boolean | null
+          system_alert_enabled: boolean | null
+          updated_at: string
+          user_id: string
+          workspace_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          post_sale_blocked_enabled?: boolean | null
+          post_sale_error_enabled?: boolean | null
+          qa_blocked_enabled?: boolean | null
+          qa_pending_enabled?: boolean | null
+          qa_send_error_enabled?: boolean | null
+          qa_sla_breached_enabled?: boolean | null
+          qa_sla_warning_enabled?: boolean | null
+          quiet_hours_enabled?: boolean | null
+          quiet_hours_end?: string | null
+          quiet_hours_start?: string | null
+          show_in_bell?: boolean | null
+          show_in_dashboard?: boolean | null
+          system_alert_enabled?: boolean | null
+          updated_at?: string
+          user_id: string
+          workspace_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          post_sale_blocked_enabled?: boolean | null
+          post_sale_error_enabled?: boolean | null
+          qa_blocked_enabled?: boolean | null
+          qa_pending_enabled?: boolean | null
+          qa_send_error_enabled?: boolean | null
+          qa_sla_breached_enabled?: boolean | null
+          qa_sla_warning_enabled?: boolean | null
+          quiet_hours_enabled?: boolean | null
+          quiet_hours_end?: string | null
+          quiet_hours_start?: string | null
+          show_in_bell?: boolean | null
+          show_in_dashboard?: boolean | null
+          system_alert_enabled?: boolean | null
+          updated_at?: string
+          user_id?: string
+          workspace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notification_preferences_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       notifications: {
         Row: {
@@ -6849,6 +6986,101 @@ export type Database = {
         }
         Relationships: []
       }
+      priority_notifications: {
+        Row: {
+          action_url: string | null
+          body: string | null
+          category: Database["public"]["Enums"]["notification_category"] | null
+          created_at: string | null
+          expires_at: string | null
+          group_key: string | null
+          id: string | null
+          is_actioned: boolean | null
+          is_dismissed: boolean | null
+          is_read: boolean | null
+          is_snoozed: boolean | null
+          metadata: Json | null
+          origin_module: string | null
+          priority: Database["public"]["Enums"]["notification_priority"] | null
+          priority_score: number | null
+          read_at: string | null
+          reference_id: string | null
+          reference_type: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          seller_id: string | null
+          snooze_until: string | null
+          snoozed_at: string | null
+          title: string | null
+          user_id: string | null
+          workspace_id: string | null
+        }
+        Insert: {
+          action_url?: string | null
+          body?: string | null
+          category?: Database["public"]["Enums"]["notification_category"] | null
+          created_at?: string | null
+          expires_at?: string | null
+          group_key?: string | null
+          id?: string | null
+          is_actioned?: boolean | null
+          is_dismissed?: boolean | null
+          is_read?: boolean | null
+          is_snoozed?: boolean | null
+          metadata?: Json | null
+          origin_module?: string | null
+          priority?: Database["public"]["Enums"]["notification_priority"] | null
+          priority_score?: never
+          read_at?: string | null
+          reference_id?: string | null
+          reference_type?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          seller_id?: string | null
+          snooze_until?: string | null
+          snoozed_at?: string | null
+          title?: string | null
+          user_id?: string | null
+          workspace_id?: string | null
+        }
+        Update: {
+          action_url?: string | null
+          body?: string | null
+          category?: Database["public"]["Enums"]["notification_category"] | null
+          created_at?: string | null
+          expires_at?: string | null
+          group_key?: string | null
+          id?: string | null
+          is_actioned?: boolean | null
+          is_dismissed?: boolean | null
+          is_read?: boolean | null
+          is_snoozed?: boolean | null
+          metadata?: Json | null
+          origin_module?: string | null
+          priority?: Database["public"]["Enums"]["notification_priority"] | null
+          priority_score?: never
+          read_at?: string | null
+          reference_id?: string | null
+          reference_type?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          seller_id?: string | null
+          snooze_until?: string | null
+          snoozed_at?: string | null
+          title?: string | null
+          user_id?: string | null
+          workspace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "app_notifications_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       public_plans_v1: {
         Row: {
           active: boolean | null
@@ -6919,6 +7151,7 @@ export type Database = {
         Args: { _user_id: string; _workspace_id: string }
         Returns: boolean
       }
+      check_snoozed_notifications: { Args: never; Returns: undefined }
       count_orders_needing_cost_sync: {
         Args: { p_seller_id: string }
         Returns: {
@@ -7053,6 +7286,10 @@ export type Database = {
         Args: { _user_id: string; _workspace_id: string }
         Returns: boolean
       }
+      resolve_notification: {
+        Args: { p_notification_id: string }
+        Returns: undefined
+      }
       select_plan: { Args: { p_plan_id: string }; Returns: Json }
       set_user_active_context: {
         Args: {
@@ -7061,6 +7298,10 @@ export type Database = {
           p_user_id: string
         }
         Returns: Json
+      }
+      snooze_notification: {
+        Args: { p_notification_id: string; p_snooze_hours?: number }
+        Returns: undefined
       }
       start_user_trial: {
         Args: { p_plan_code?: string; p_user_id: string }

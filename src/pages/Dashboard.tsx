@@ -23,6 +23,7 @@ import { DashboardQuickActions } from "@/components/dashboard/DashboardQuickActi
 import { DashboardModulesGrid } from "@/components/dashboard/DashboardModulesGrid";
 import { DashboardOnboarding } from "@/components/dashboard/DashboardOnboarding";
 import { TrialBanner } from "@/components/access/TrialBanner";
+import { PriorityInbox } from "@/components/notifications";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { useUserAccess } from "@/contexts/UserAccessContext";
 import {
@@ -484,6 +485,9 @@ const Dashboard = () => {
         {/* Connected State - Full Dashboard */}
         {activeAccount ? (
           <>
+            {/* Priority Inbox - Pending Actions */}
+            <PriorityInbox sellerId={sellerId || undefined} />
+
             {/* KPI Cards */}
             <DashboardKpiCards sellerId={sellerId || undefined} />
 
