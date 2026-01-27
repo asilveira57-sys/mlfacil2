@@ -36,22 +36,30 @@ export function RouteChangeCleanup() {
     };
   }, [pathname]);
 
-  // Periodic check for orphaned scroll locks (every 2s)
+  // Periodic check for orphaned scroll locks (every 1s - more aggressive)
   useEffect(() => {
     const interval = window.setInterval(() => {
       const hasScrollLock = document.body.hasAttribute("data-scroll-locked");
-      const hasAnyOpen = !!document.querySelector('[data-radix-portal] [data-state="open"]');
+      const hasPointerEventsNone = document.body.style.pointerEvents === "none";
       
-      if (hasScrollLock && !hasAnyOpen) {
+      // Check all possible open states
+      const hasAnyOpen = !!(
+        document.querySelector('[data-radix-portal] [data-state="open"]') ||
+        document.querySelector('[data-radix-select-content][data-state="open"]') ||
+        document.querySelector('[data-radix-dialog-content][data-state="open"]') ||
+        document.querySelector('[data-radix-popover-content][data-state="open"]')
+      );
+      
+      if ((hasScrollLock || hasPointerEventsNone) && !hasAnyOpen) {
         if (import.meta.env.DEV) {
-          console.warn("[UI-Cleanup] Orphaned scroll-lock detected, removing...");
+          console.warn("[UI-Cleanup] Orphaned scroll-lock/pointer-events detected, removing...");
         }
         document.body.removeAttribute("data-scroll-locked");
         document.body.style.overflow = "";
         document.body.style.paddingRight = "";
         document.body.style.pointerEvents = "";
       }
-    }, 2000);
+    }, 1000);
 
     return () => window.clearInterval(interval);
   }, []);
