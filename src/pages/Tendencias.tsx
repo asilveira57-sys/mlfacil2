@@ -5,6 +5,7 @@ import { TrendsProvider, useTrends } from '@/contexts/TrendsContext';
 import { useTrendsController } from '@/hooks/useTrendsController';
 import { useTrendsAutoLoad } from '@/hooks/useTrendsAutoLoad';
 import { useSellerCategories } from '@/hooks/useSellerCategories';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
 
 // Components
 import { TrendsHeaderBar } from '@/components/trends/TrendsHeaderBar';
@@ -16,6 +17,9 @@ import { TopicChips } from '@/components/trends/TopicChips';
 import { BestSellersSection } from '@/components/trends/BestSellersSection';
 import { SellerGoalsSection } from '@/components/trends/SellerGoalsSection';
 import { TechnicalFooterAccordion } from '@/components/trends/TechnicalFooterAccordion';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { RefreshCw } from 'lucide-react';
 
 // Categories list (fallback for "Explorar mercado")
 const CATEGORIES = [
@@ -147,8 +151,6 @@ function TendenciasContent() {
     // Note: setCategory is already called by the header, we just persist here
   }, [state.selectedAccountId, autoLoad]);
 
-  const handleBack = () => navigate('/dashboard');
-
   const handleReload = () => {
     setIsReloading(true);
     reload();
@@ -167,32 +169,68 @@ function TendenciasContent() {
 
   const categoriesForNavigator = CATEGORIES.map(c => ({ id: c.id, name: c.label }));
 
+  // Header content with account selector and reload button
+  const headerContent = (
+    <div className="flex items-center gap-2">
+      {accounts.length > 1 && (
+        <Select value={state.selectedAccountId || ''} onValueChange={setAccount}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="Conta" />
+          </SelectTrigger>
+          <SelectContent>
+            {accounts.map((acc) => (
+              <SelectItem key={acc.id} value={acc.ml_user_id}>
+                {acc.nickname || acc.ml_user_id}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={handleReload}
+        disabled={isReloading}
+        className="gap-2"
+      >
+        <RefreshCw className={`h-4 w-4 ${isReloading ? 'animate-spin' : ''}`} />
+        <span className="hidden sm:inline">Atualizar</span>
+      </Button>
+    </div>
+  );
+
   // Show loading while auto-loading
   if (isAutoLoading) {
     return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center">
-        <div className="animate-pulse flex flex-col items-center gap-4">
-          <div className="h-12 w-12 rounded-full bg-primary/20" />
-          <p className="text-muted-foreground">Carregando...</p>
+      <DashboardLayout title="Tendências de Mercado" subtitle="Análise baseada em dados públicos do Mercado Livre">
+        <div className="flex-1 flex items-center justify-center">
+          <div className="animate-pulse flex flex-col items-center gap-4">
+            <div className="h-12 w-12 rounded-full bg-primary/20" />
+            <p className="text-muted-foreground">Carregando...</p>
+          </div>
         </div>
-      </div>
+      </DashboardLayout>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      {/* Header */}
-      <TrendsHeaderBar
-        accounts={accounts}
-        onBack={handleBack}
-        onReload={handleReload}
-        isReloading={isReloading}
-        categoriesForNavigator={categoriesForNavigator}
-        onCategoryChange={handleCategoryChange}
-      />
-
+    <DashboardLayout
+      title="Tendências de Mercado"
+      subtitle="Análise baseada em dados públicos do Mercado Livre"
+      headerContent={headerContent}
+    >
       {/* Main Content - Loading Order */}
       <main className="flex-1 container mx-auto px-4 py-6 space-y-6">
+        {/* Inline filters bar */}
+        <TrendsHeaderBar
+          accounts={accounts}
+          onReload={handleReload}
+          isReloading={isReloading}
+          categoriesForNavigator={categoriesForNavigator}
+          onCategoryChange={handleCategoryChange}
+          hideBackAndTitle
+        />
+
         {/* 1. Status Banner */}
         <TrendsStatusBanner />
 
@@ -235,7 +273,7 @@ function TendenciasContent() {
           snapshotDate={snapshotDate}
         />
       </main>
-    </div>
+    </DashboardLayout>
   );
 }
 
