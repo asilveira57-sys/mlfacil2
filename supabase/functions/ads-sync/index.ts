@@ -50,20 +50,24 @@ Deno.serve(async (req) => {
 
     console.log(`[ads-sync] Starting sync for seller ${seller_id}`);
 
-    // Get account tokens
+    // Get account tokens and site_id (country_id)
     const { data: account, error: accError } = await supabase
       .from('ml_accounts')
-      .select('access_token, refresh_token, token_expires_at')
+      .select('access_token, refresh_token, token_expires_at, country_id')
       .eq('ml_user_id', seller_id)
       .eq('user_id', user.id)
       .single();
 
     if (accError || !account) {
+      console.error(`[ads-sync] Account not found for seller ${seller_id}:`, accError);
       return new Response(JSON.stringify({ error: 'Account not found' }), {
         status: 404,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+
+    const siteId = account.country_id || 'MLB';
+    console.log(`[ads-sync] Using site_id: ${siteId}`);
 
     // Update sync state to syncing
     await supabase
@@ -88,8 +92,17 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Fetch campaigns from ML API
-    const campaignsResult = await fetchCampaigns(accessToken, seller_id);
+    // Calculate date range (last 30 days)
+    const dateTo = new Date();
+    const dateFrom = new Date();
+    dateFrom.setDate(dateFrom.getDate() - 30);
+    const dateFromStr = dateFrom.toISOString().split('T')[0];
+    const dateToStr = dateTo.toISOString().split('T')[0];
+
+    console.log(`[ads-sync] Date range: ${dateFromStr} to ${dateToStr}`);
+
+    // Fetch campaigns from ML Product Ads API v2
+    const campaignsResult = await fetchCampaigns(accessToken, siteId, seller_id, dateFromStr, dateToStr);
     console.log(`[ads-sync] Fetched ${campaignsResult.campaigns.length} campaigns`);
 
     // Upsert campaigns
@@ -97,18 +110,20 @@ Deno.serve(async (req) => {
     let itemsSynced = 0;
 
     for (const campaign of campaignsResult.campaigns) {
+      const metrics = campaign.metrics || {};
+      
       const campaignData = {
         user_id: user.id,
         seller_id,
-        ml_campaign_id: campaign.id,
-        name: campaign.name || `Campaign ${campaign.id}`,
+        ml_campaign_id: String(campaign.id || campaign.campaign_id),
+        name: campaign.name || `Campaign ${campaign.id || campaign.campaign_id}`,
         status: mapStatus(campaign.status),
-        campaign_type: campaign.type,
-        daily_budget: campaign.daily_budget,
-        total_budget: campaign.total_budget,
-        spent_total: campaign.metrics?.cost || 0,
-        start_date: campaign.start_date,
-        end_date: campaign.end_date,
+        campaign_type: campaign.type || 'product_ads',
+        daily_budget: campaign.daily_budget || campaign.budget?.daily || null,
+        total_budget: campaign.total_budget || campaign.budget?.total || null,
+        spent_total: metrics.cost || metrics.spent || 0,
+        start_date: campaign.start_date || null,
+        end_date: campaign.end_date || null,
         raw_data: campaign,
         synced_at: new Date().toISOString(),
       };
@@ -126,52 +141,69 @@ Deno.serve(async (req) => {
 
       campaignsSynced++;
 
-      // Fetch ads/items for this campaign
-      await sleep(RATE_LIMIT_DELAY);
-      const adsResult = await fetchCampaignAds(accessToken, seller_id, campaign.id);
-
-      for (const ad of adsResult.ads) {
-        const spent = ad.metrics?.cost || 0;
-        const revenue = ad.metrics?.revenue || 0;
-        const acos = revenue > 0 ? spent / revenue : null;
-        const roas = spent > 0 ? revenue / spent : null;
-
-        const adData = {
+      // Store daily metrics for this campaign
+      if (metrics && upsertedCampaign) {
+        await supabase.from('ads_daily_metrics').upsert({
           user_id: user.id,
           seller_id,
-          ad_group_id: null, // ML doesn't have ad groups in Product Ads
-          item_id: ad.item_id,
-          product_key: ad.product_key,
-          title: ad.title,
-          category_id: ad.category_id,
-          current_price: ad.price,
-          status: mapStatus(ad.status),
-          bid: ad.bid,
-          spent,
-          clicks: ad.metrics?.clicks || 0,
-          impressions: ad.metrics?.impressions || 0,
-          conversions: ad.metrics?.conversions || 0,
-          revenue_from_ads: revenue,
-          acos,
-          roas,
-          raw_data: ad,
-          synced_at: new Date().toISOString(),
-        };
+          campaign_id: upsertedCampaign.id,
+          metric_date: dateToStr,
+          clicks: metrics.clicks || 0,
+          impressions: metrics.prints || metrics.impressions || 0,
+          spent: metrics.cost || 0,
+          revenue: metrics.total_amount || metrics.revenue || 0,
+          conversions: metrics.conversions || 0,
+          acos: metrics.acos || null,
+          roas: metrics.roas || null,
+        }, { onConflict: 'campaign_id,metric_date' });
+      }
+    }
 
-        // For ads_items, we need to handle the unique constraint differently
-        // since ad_group_id can be null
-        const { error: adError } = await supabase
-          .from('ads_items')
-          .upsert(adData, { 
-            onConflict: 'seller_id,item_id,ad_group_id',
-            ignoreDuplicates: false 
-          });
+    // Fetch items/ads
+    await sleep(RATE_LIMIT_DELAY);
+    const itemsResult = await fetchItems(accessToken, siteId, seller_id, dateFromStr, dateToStr);
+    console.log(`[ads-sync] Fetched ${itemsResult.items.length} items`);
 
-        if (adError) {
-          console.error(`[ads-sync] Ad item upsert error:`, adError);
-        } else {
-          itemsSynced++;
-        }
+    for (const item of itemsResult.items) {
+      const metrics = item.metrics || {};
+      const spent = metrics.cost || 0;
+      const revenue = metrics.total_amount || metrics.revenue || 0;
+      const acos = revenue > 0 ? spent / revenue : null;
+      const roas = spent > 0 ? revenue / spent : null;
+
+      const adData = {
+        user_id: user.id,
+        seller_id,
+        ad_group_id: null,
+        item_id: item.item_id || item.id,
+        product_key: item.product_key || null,
+        title: item.title || null,
+        category_id: item.category_id || null,
+        current_price: item.price || null,
+        status: mapStatus(item.status),
+        bid: item.bid || item.max_bid || null,
+        spent,
+        clicks: metrics.clicks || 0,
+        impressions: metrics.prints || metrics.impressions || 0,
+        conversions: metrics.conversions || 0,
+        revenue_from_ads: revenue,
+        acos,
+        roas,
+        raw_data: item,
+        synced_at: new Date().toISOString(),
+      };
+
+      const { error: adError } = await supabase
+        .from('ads_items')
+        .upsert(adData, { 
+          onConflict: 'seller_id,item_id,ad_group_id',
+          ignoreDuplicates: false 
+        });
+
+      if (adError) {
+        console.error(`[ads-sync] Ad item upsert error:`, adError);
+      } else {
+        itemsSynced++;
       }
     }
 
@@ -236,44 +268,73 @@ async function refreshToken(supabase: any, sellerId: string, userId: string, ref
   }
 }
 
-async function fetchCampaigns(accessToken: string, sellerId: string) {
-  // ML Product Ads API endpoint
+async function fetchCampaigns(accessToken: string, siteId: string, sellerId: string, dateFrom: string, dateTo: string) {
+  // Product Ads API v2 endpoint
+  const metrics = 'clicks,prints,cost,cpc,acos,roas,total_amount';
+  const url = `https://api.mercadolibre.com/marketplace/advertising/${siteId}/advertisers/${sellerId}/product_ads/campaigns/search?date_from=${dateFrom}&date_to=${dateTo}&metrics=${metrics}`;
+  
+  console.log(`[ads-sync] Fetching campaigns from: ${url}`);
+
   try {
-    const response = await fetch(
-      `https://api.mercadolibre.com/advertising/advertisers/${sellerId}/campaigns?include_metrics=true`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
+    const response = await fetch(url, { 
+      headers: { 
+        'Authorization': `Bearer ${accessToken}`,
+        'api-version': '2',
+      } 
+    });
+
+    console.log(`[ads-sync] Campaigns response status: ${response.status}`);
 
     if (!response.ok) {
-      console.warn(`[ads-sync] Campaigns fetch failed: ${response.status}`);
+      const errorText = await response.text();
+      console.warn(`[ads-sync] Campaigns fetch failed: ${response.status} - ${errorText}`);
       return { campaigns: [] };
     }
 
     const data = await response.json();
-    return { campaigns: data.results || data || [] };
+    console.log(`[ads-sync] Campaigns raw response:`, JSON.stringify(data).slice(0, 500));
+    
+    // Handle different response structures
+    const campaigns = data.results || data.campaigns || data || [];
+    return { campaigns: Array.isArray(campaigns) ? campaigns : [] };
   } catch (error) {
     console.error('[ads-sync] fetchCampaigns error:', error);
     return { campaigns: [] };
   }
 }
 
-async function fetchCampaignAds(accessToken: string, sellerId: string, campaignId: string) {
+async function fetchItems(accessToken: string, siteId: string, sellerId: string, dateFrom: string, dateTo: string) {
+  // Product Ads API v2 items endpoint
+  const metrics = 'clicks,prints,cost,cpc,acos,roas,total_amount';
+  const url = `https://api.mercadolibre.com/marketplace/advertising/${siteId}/advertisers/${sellerId}/product_ads/items/search?date_from=${dateFrom}&date_to=${dateTo}&metrics=${metrics}`;
+  
+  console.log(`[ads-sync] Fetching items from: ${url}`);
+
   try {
-    const response = await fetch(
-      `https://api.mercadolibre.com/advertising/advertisers/${sellerId}/campaigns/${campaignId}/ads?include_metrics=true`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
+    const response = await fetch(url, { 
+      headers: { 
+        'Authorization': `Bearer ${accessToken}`,
+        'api-version': '2',
+      } 
+    });
+
+    console.log(`[ads-sync] Items response status: ${response.status}`);
 
     if (!response.ok) {
-      console.warn(`[ads-sync] Campaign ads fetch failed: ${response.status}`);
-      return { ads: [] };
+      const errorText = await response.text();
+      console.warn(`[ads-sync] Items fetch failed: ${response.status} - ${errorText}`);
+      return { items: [] };
     }
 
     const data = await response.json();
-    return { ads: data.results || data || [] };
+    console.log(`[ads-sync] Items raw response:`, JSON.stringify(data).slice(0, 500));
+    
+    // Handle different response structures
+    const items = data.results || data.items || data || [];
+    return { items: Array.isArray(items) ? items : [] };
   } catch (error) {
-    console.error('[ads-sync] fetchCampaignAds error:', error);
-    return { ads: [] };
+    console.error('[ads-sync] fetchItems error:', error);
+    return { items: [] };
   }
 }
 
@@ -289,7 +350,6 @@ async function generateAlerts(supabase: any, userId: string, sellerId: string) {
       .eq('status', 'active');
 
     for (const item of highAcosItems || []) {
-      // Check if alert already exists
       const { data: existing } = await supabase
         .from('ads_alerts')
         .select('id')
@@ -370,14 +430,16 @@ async function updateSyncState(
       last_error: error,
       campaigns_synced: campaignsSynced ?? 0,
       items_synced: itemsSynced ?? 0,
-      next_sync_at: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(), // 6 hours
+      next_sync_at: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
     }, { onConflict: 'user_id,seller_id' });
 }
 
 function mapStatus(mlStatus: string): string {
   const statusMap: Record<string, string> = {
     active: 'active',
+    enabled: 'active',
     paused: 'paused',
+    disabled: 'paused',
     ended: 'ended',
     finished: 'ended',
   };
