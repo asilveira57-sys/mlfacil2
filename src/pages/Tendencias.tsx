@@ -203,7 +203,7 @@ function TendenciasContent() {
   if (isAutoLoading) {
     return (
       <DashboardLayout title="Tendências de Mercado" subtitle="Análise baseada em dados públicos do Mercado Livre">
-        <div className="flex-1 flex items-center justify-center">
+        <div className="flex items-center justify-center min-h-[400px]">
           <div className="animate-pulse flex flex-col items-center gap-4">
             <div className="h-12 w-12 rounded-full bg-primary/20" />
             <p className="text-muted-foreground">Carregando...</p>
@@ -220,7 +220,7 @@ function TendenciasContent() {
       headerContent={headerContent}
     >
       {/* Main Content - Loading Order */}
-      <main className="flex-1 container mx-auto px-4 py-6 space-y-6">
+      <div className="container mx-auto px-4 py-6 space-y-6">
         {/* Inline filters bar */}
         <TrendsHeaderBar
           accounts={accounts}
@@ -272,7 +272,7 @@ function TendenciasContent() {
           isReloading={isReloading}
           snapshotDate={snapshotDate}
         />
-      </main>
+      </div>
     </DashboardLayout>
   );
 }
