@@ -187,7 +187,7 @@ export function TrendsHeaderBar({
             </Select>
 
             {/* Category Selector with Dynamic Seller Categories */}
-            <Collapsible open={showNavigator} onOpenChange={setShowNavigator}>
+            <Collapsible open={showNavigator} onOpenChange={setShowNavigator} className="relative">
               <CollapsibleTrigger asChild>
                 <Button variant="outline" className="w-[280px] justify-between">
                   <div className="flex items-center gap-2">
@@ -204,7 +204,7 @@ export function TrendsHeaderBar({
                   )}
                 </Button>
               </CollapsibleTrigger>
-              <CollapsibleContent className="absolute z-50 mt-2 w-[380px]">
+              <CollapsibleContent className="absolute left-0 z-50 mt-2 w-[380px] data-[state=closed]:pointer-events-none data-[state=closed]:opacity-0">
                 {/* Use SellerCategorySelector with fallback to SubcategoryNavigator */}
                 <SellerCategorySelector
                   onSelect={(id, name) => {
