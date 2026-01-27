@@ -1552,6 +1552,80 @@ export type Database = {
           },
         ]
       }
+      app_notifications: {
+        Row: {
+          action_url: string | null
+          body: string | null
+          category: Database["public"]["Enums"]["notification_category"]
+          created_at: string
+          expires_at: string | null
+          group_key: string | null
+          id: string
+          is_actioned: boolean | null
+          is_dismissed: boolean | null
+          is_read: boolean | null
+          metadata: Json | null
+          priority: Database["public"]["Enums"]["notification_priority"] | null
+          read_at: string | null
+          reference_id: string | null
+          reference_type: string | null
+          seller_id: string | null
+          title: string
+          user_id: string
+          workspace_id: string | null
+        }
+        Insert: {
+          action_url?: string | null
+          body?: string | null
+          category: Database["public"]["Enums"]["notification_category"]
+          created_at?: string
+          expires_at?: string | null
+          group_key?: string | null
+          id?: string
+          is_actioned?: boolean | null
+          is_dismissed?: boolean | null
+          is_read?: boolean | null
+          metadata?: Json | null
+          priority?: Database["public"]["Enums"]["notification_priority"] | null
+          read_at?: string | null
+          reference_id?: string | null
+          reference_type?: string | null
+          seller_id?: string | null
+          title: string
+          user_id: string
+          workspace_id?: string | null
+        }
+        Update: {
+          action_url?: string | null
+          body?: string | null
+          category?: Database["public"]["Enums"]["notification_category"]
+          created_at?: string
+          expires_at?: string | null
+          group_key?: string | null
+          id?: string
+          is_actioned?: boolean | null
+          is_dismissed?: boolean | null
+          is_read?: boolean | null
+          metadata?: Json | null
+          priority?: Database["public"]["Enums"]["notification_priority"] | null
+          read_at?: string | null
+          reference_id?: string | null
+          reference_type?: string | null
+          seller_id?: string | null
+          title?: string
+          user_id?: string
+          workspace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "app_notifications_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       audit_logs: {
         Row: {
           action: string
@@ -1879,6 +1953,39 @@ export type Database = {
             referencedColumns: ["price_id"]
           },
         ]
+      }
+      communication_blocked_patterns: {
+        Row: {
+          category: string
+          channels: string[] | null
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          pattern: string
+          pattern_type: string
+        }
+        Insert: {
+          category: string
+          channels?: string[] | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          pattern: string
+          pattern_type: string
+        }
+        Update: {
+          category?: string
+          channels?: string[] | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          pattern?: string
+          pattern_type?: string
+        }
+        Relationships: []
       }
       companies: {
         Row: {
@@ -4549,36 +4656,6 @@ export type Database = {
           },
         ]
       }
-      post_sale_blocked_patterns: {
-        Row: {
-          category: string
-          created_at: string
-          description: string | null
-          id: string
-          is_active: boolean
-          pattern: string
-          pattern_type: string
-        }
-        Insert: {
-          category: string
-          created_at?: string
-          description?: string | null
-          id?: string
-          is_active?: boolean
-          pattern: string
-          pattern_type: string
-        }
-        Update: {
-          category?: string
-          created_at?: string
-          description?: string | null
-          id?: string
-          is_active?: boolean
-          pattern?: string
-          pattern_type?: string
-        }
-        Relationships: []
-      }
       post_sale_messages: {
         Row: {
           block_details: Json | null
@@ -5175,6 +5252,406 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: []
+      }
+      qa_audit_log: {
+        Row: {
+          action: string
+          actor_id: string
+          block_reasons: string[] | null
+          created_at: string
+          id: string
+          ip_address: string | null
+          metadata: Json | null
+          question_id: string | null
+          question_text: string | null
+          response_id: string | null
+          response_source:
+            | Database["public"]["Enums"]["qa_response_source"]
+            | null
+          response_text: string | null
+          seller_id: string
+          user_agent: string | null
+          user_id: string
+          validation_result: Json | null
+        }
+        Insert: {
+          action: string
+          actor_id: string
+          block_reasons?: string[] | null
+          created_at?: string
+          id?: string
+          ip_address?: string | null
+          metadata?: Json | null
+          question_id?: string | null
+          question_text?: string | null
+          response_id?: string | null
+          response_source?:
+            | Database["public"]["Enums"]["qa_response_source"]
+            | null
+          response_text?: string | null
+          seller_id: string
+          user_agent?: string | null
+          user_id: string
+          validation_result?: Json | null
+        }
+        Update: {
+          action?: string
+          actor_id?: string
+          block_reasons?: string[] | null
+          created_at?: string
+          id?: string
+          ip_address?: string | null
+          metadata?: Json | null
+          question_id?: string | null
+          question_text?: string | null
+          response_id?: string | null
+          response_source?:
+            | Database["public"]["Enums"]["qa_response_source"]
+            | null
+          response_text?: string | null
+          seller_id?: string
+          user_agent?: string | null
+          user_id?: string
+          validation_result?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "qa_audit_log_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "qa_questions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "qa_audit_log_response_id_fkey"
+            columns: ["response_id"]
+            isOneToOne: false
+            referencedRelation: "qa_responses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      qa_daily_metrics: {
+        Row: {
+          avg_response_time_minutes: number | null
+          created_at: string
+          id: string
+          metric_date: string
+          questions_answered: number | null
+          questions_blocked: number | null
+          questions_pending: number | null
+          questions_received: number | null
+          responses_from_ai: number | null
+          responses_from_library: number | null
+          responses_manual: number | null
+          seller_id: string
+          sla_breaches: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          avg_response_time_minutes?: number | null
+          created_at?: string
+          id?: string
+          metric_date: string
+          questions_answered?: number | null
+          questions_blocked?: number | null
+          questions_pending?: number | null
+          questions_received?: number | null
+          responses_from_ai?: number | null
+          responses_from_library?: number | null
+          responses_manual?: number | null
+          seller_id: string
+          sla_breaches?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          avg_response_time_minutes?: number | null
+          created_at?: string
+          id?: string
+          metric_date?: string
+          questions_answered?: number | null
+          questions_blocked?: number | null
+          questions_pending?: number | null
+          questions_received?: number | null
+          responses_from_ai?: number | null
+          responses_from_library?: number | null
+          responses_manual?: number | null
+          seller_id?: string
+          sla_breaches?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      qa_questions: {
+        Row: {
+          answered_at: string | null
+          category: string | null
+          created_at: string
+          id: string
+          is_sla_breached: boolean | null
+          is_snoozed: boolean | null
+          item_sku: string | null
+          item_thumbnail: string | null
+          item_title: string | null
+          item_variation: string | null
+          ml_buyer_id: string | null
+          ml_item_id: string
+          ml_question_id: string
+          needs_attention: boolean | null
+          question_date: string
+          question_text: string
+          risk_level: Database["public"]["Enums"]["qa_risk_level"] | null
+          risk_reasons: string[] | null
+          seller_id: string
+          sla_deadline: string | null
+          snooze_until: string | null
+          status: Database["public"]["Enums"]["qa_question_status"] | null
+          updated_at: string
+          user_id: string
+          workspace_id: string | null
+        }
+        Insert: {
+          answered_at?: string | null
+          category?: string | null
+          created_at?: string
+          id?: string
+          is_sla_breached?: boolean | null
+          is_snoozed?: boolean | null
+          item_sku?: string | null
+          item_thumbnail?: string | null
+          item_title?: string | null
+          item_variation?: string | null
+          ml_buyer_id?: string | null
+          ml_item_id: string
+          ml_question_id: string
+          needs_attention?: boolean | null
+          question_date: string
+          question_text: string
+          risk_level?: Database["public"]["Enums"]["qa_risk_level"] | null
+          risk_reasons?: string[] | null
+          seller_id: string
+          sla_deadline?: string | null
+          snooze_until?: string | null
+          status?: Database["public"]["Enums"]["qa_question_status"] | null
+          updated_at?: string
+          user_id: string
+          workspace_id?: string | null
+        }
+        Update: {
+          answered_at?: string | null
+          category?: string | null
+          created_at?: string
+          id?: string
+          is_sla_breached?: boolean | null
+          is_snoozed?: boolean | null
+          item_sku?: string | null
+          item_thumbnail?: string | null
+          item_title?: string | null
+          item_variation?: string | null
+          ml_buyer_id?: string | null
+          ml_item_id?: string
+          ml_question_id?: string
+          needs_attention?: boolean | null
+          question_date?: string
+          question_text?: string
+          risk_level?: Database["public"]["Enums"]["qa_risk_level"] | null
+          risk_reasons?: string[] | null
+          seller_id?: string
+          sla_deadline?: string | null
+          snooze_until?: string | null
+          status?: Database["public"]["Enums"]["qa_question_status"] | null
+          updated_at?: string
+          user_id?: string
+          workspace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "qa_questions_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      qa_response_categories: {
+        Row: {
+          color: string | null
+          created_at: string
+          description: string | null
+          icon: string | null
+          id: string
+          name: string
+          seller_id: string
+          sort_order: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          color?: string | null
+          created_at?: string
+          description?: string | null
+          icon?: string | null
+          id?: string
+          name: string
+          seller_id: string
+          sort_order?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          color?: string | null
+          created_at?: string
+          description?: string | null
+          icon?: string | null
+          id?: string
+          name?: string
+          seller_id?: string
+          sort_order?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      qa_response_library: {
+        Row: {
+          category_id: string | null
+          content: string
+          created_at: string
+          id: string
+          is_active: boolean | null
+          is_approved: boolean | null
+          name: string
+          seller_id: string
+          shortcut: string | null
+          tags: string[] | null
+          updated_at: string
+          usage_count: number | null
+          user_id: string
+        }
+        Insert: {
+          category_id?: string | null
+          content: string
+          created_at?: string
+          id?: string
+          is_active?: boolean | null
+          is_approved?: boolean | null
+          name: string
+          seller_id: string
+          shortcut?: string | null
+          tags?: string[] | null
+          updated_at?: string
+          usage_count?: number | null
+          user_id: string
+        }
+        Update: {
+          category_id?: string | null
+          content?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean | null
+          is_approved?: boolean | null
+          name?: string
+          seller_id?: string
+          shortcut?: string | null
+          tags?: string[] | null
+          updated_at?: string
+          usage_count?: number | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "qa_response_library_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "qa_response_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      qa_responses: {
+        Row: {
+          ai_model: string | null
+          ai_original_text: string | null
+          created_at: string
+          id: string
+          is_draft: boolean | null
+          is_sent: boolean | null
+          library_response_id: string | null
+          ml_response_id: string | null
+          question_id: string
+          response_text: string
+          retry_count: number | null
+          seller_id: string
+          send_error: string | null
+          sent_at: string | null
+          source: Database["public"]["Enums"]["qa_response_source"]
+          updated_at: string
+          user_id: string
+          validation_errors: string[] | null
+          validation_passed: boolean | null
+        }
+        Insert: {
+          ai_model?: string | null
+          ai_original_text?: string | null
+          created_at?: string
+          id?: string
+          is_draft?: boolean | null
+          is_sent?: boolean | null
+          library_response_id?: string | null
+          ml_response_id?: string | null
+          question_id: string
+          response_text: string
+          retry_count?: number | null
+          seller_id: string
+          send_error?: string | null
+          sent_at?: string | null
+          source: Database["public"]["Enums"]["qa_response_source"]
+          updated_at?: string
+          user_id: string
+          validation_errors?: string[] | null
+          validation_passed?: boolean | null
+        }
+        Update: {
+          ai_model?: string | null
+          ai_original_text?: string | null
+          created_at?: string
+          id?: string
+          is_draft?: boolean | null
+          is_sent?: boolean | null
+          library_response_id?: string | null
+          ml_response_id?: string | null
+          question_id?: string
+          response_text?: string
+          retry_count?: number | null
+          seller_id?: string
+          send_error?: string | null
+          sent_at?: string | null
+          source?: Database["public"]["Enums"]["qa_response_source"]
+          updated_at?: string
+          user_id?: string
+          validation_errors?: string[] | null
+          validation_passed?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "qa_responses_library_response_id_fkey"
+            columns: ["library_response_id"]
+            isOneToOne: false
+            referencedRelation: "qa_response_library"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "qa_responses_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "qa_questions"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       seller_category_eligibility: {
         Row: {
@@ -6628,6 +7105,18 @@ export type Database = {
       app_role: "admin" | "seller"
       billing_cycle: "monthly" | "quarterly" | "semiannual" | "annual"
       ml_account_role: "none" | "owner" | "collaborator"
+      notification_category:
+        | "qa_pending"
+        | "qa_sla_warning"
+        | "qa_sla_breached"
+        | "qa_blocked"
+        | "qa_send_error"
+        | "post_sale_blocked"
+        | "post_sale_error"
+        | "system_alert"
+        | "task_assigned"
+        | "promotion_alert"
+      notification_priority: "low" | "normal" | "high" | "urgent"
       onboarding_status: "pending" | "completed"
       payment_status: "free" | "trial" | "active" | "blocked" | "cancelled"
       plan_type_enum: "volume" | "zpl_full"
@@ -6643,6 +7132,14 @@ export type Database = {
         | "venda_confirmada"
         | "pedido_enviado"
         | "pedido_entregue"
+      qa_question_status:
+        | "pending"
+        | "answered"
+        | "draft"
+        | "archived"
+        | "blocked"
+      qa_response_source: "manual" | "library" | "ai_suggested" | "ai_edited"
+      qa_risk_level: "low" | "medium" | "high"
       task_priority: "low" | "medium" | "high" | "urgent"
       task_status: "todo" | "doing" | "blocked" | "done"
       trial_status: "none" | "active" | "expired"
@@ -6777,6 +7274,19 @@ export const Constants = {
       app_role: ["admin", "seller"],
       billing_cycle: ["monthly", "quarterly", "semiannual", "annual"],
       ml_account_role: ["none", "owner", "collaborator"],
+      notification_category: [
+        "qa_pending",
+        "qa_sla_warning",
+        "qa_sla_breached",
+        "qa_blocked",
+        "qa_send_error",
+        "post_sale_blocked",
+        "post_sale_error",
+        "system_alert",
+        "task_assigned",
+        "promotion_alert",
+      ],
+      notification_priority: ["low", "normal", "high", "urgent"],
       onboarding_status: ["pending", "completed"],
       payment_status: ["free", "trial", "active", "blocked", "cancelled"],
       plan_type_enum: ["volume", "zpl_full"],
@@ -6794,6 +7304,15 @@ export const Constants = {
         "pedido_enviado",
         "pedido_entregue",
       ],
+      qa_question_status: [
+        "pending",
+        "answered",
+        "draft",
+        "archived",
+        "blocked",
+      ],
+      qa_response_source: ["manual", "library", "ai_suggested", "ai_edited"],
+      qa_risk_level: ["low", "medium", "high"],
       task_priority: ["low", "medium", "high", "urgent"],
       task_status: ["todo", "doing", "blocked", "done"],
       trial_status: ["none", "active", "expired"],

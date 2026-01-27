@@ -62,6 +62,7 @@ const mainNavItems: NavItem[] = [
   { title: "Promoções", url: "/promocoes", icon: Tag },
   { title: "Mercado ADS", url: "/publicidade", icon: Megaphone },
   { title: "Pós-Venda", url: "/mensagens", icon: MessageSquareText },
+  { title: "Perguntas", url: "/perguntas", icon: MessageSquareText },
 ];
 
 const analyticsNavItems: NavItem[] = [
