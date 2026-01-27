@@ -3,13 +3,12 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { User } from "@supabase/supabase-js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AbcSidebar } from "@/components/abc/AbcSidebar";
 import { AbcHeader } from "@/components/abc/AbcHeader";
 import { AbcProductsTab } from "@/components/abc/AbcProductsTab";
 import { AbcCustomersTab } from "@/components/abc/AbcCustomersTab";
 import { AbcCitiesTab } from "@/components/abc/AbcCitiesTab";
 import { AbcConfigPanel } from "@/components/abc/AbcConfigPanel";
-import { SidebarProvider } from "@/components/ui/sidebar";
+import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Package, Users, MapPin } from "lucide-react";
 
 export interface AbcFilters {
@@ -140,96 +139,100 @@ const AbcAnalysis = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="animate-pulse text-muted-foreground">Carregando...</div>
-      </div>
+      <DashboardLayout title="Curva ABC">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-pulse text-muted-foreground">Carregando...</div>
+        </div>
+      </DashboardLayout>
     );
   }
 
   if (!sellerId) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <p className="text-muted-foreground">
-            Conecte sua conta do Mercado Livre para acessar a Curva ABC.
-          </p>
-          <button
-            onClick={() => navigate("/dashboard")}
-            className="text-primary underline"
-          >
-            Ir para o Dashboard
-          </button>
+      <DashboardLayout title="Curva ABC">
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center space-y-4">
+            <p className="text-muted-foreground">
+              Conecte sua conta do Mercado Livre para acessar a Curva ABC.
+            </p>
+            <button
+              onClick={() => navigate("/dashboard")}
+              className="text-primary underline"
+            >
+              Ir para o Dashboard
+            </button>
+          </div>
         </div>
-      </div>
+      </DashboardLayout>
     );
   }
 
+  const headerContent = (
+    <AbcHeader 
+      sellerNickname={sellerNickname}
+      config={config}
+      onOpenConfig={() => setConfigOpen(true)}
+      filters={filters}
+      onFiltersChange={setFilters}
+    />
+  );
+
   return (
-    <SidebarProvider>
-      <div className="min-h-screen flex w-full bg-background">
-        <AbcSidebar />
-        
-        <main className="flex-1 flex flex-col">
-          <AbcHeader 
-            sellerNickname={sellerNickname}
-            config={config}
-            onOpenConfig={() => setConfigOpen(true)}
-            filters={filters}
-            onFiltersChange={setFilters}
-          />
-          
-          <div className="flex-1 p-6">
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-              <TabsList className="grid w-full max-w-md grid-cols-3">
-                <TabsTrigger value="products" className="flex items-center gap-2">
-                  <Package className="h-4 w-4" />
-                  Produtos
-                </TabsTrigger>
-                <TabsTrigger value="customers" className="flex items-center gap-2">
-                  <Users className="h-4 w-4" />
-                  Clientes
-                </TabsTrigger>
-                <TabsTrigger value="cities" className="flex items-center gap-2">
-                  <MapPin className="h-4 w-4" />
-                  Cidades
-                </TabsTrigger>
-              </TabsList>
+    <DashboardLayout 
+      title="Curva ABC" 
+      subtitle="Análise de produtos, clientes e cidades"
+      headerContent={headerContent}
+    >
+      <div className="flex-1 p-6">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <TabsList className="grid w-full max-w-md grid-cols-3">
+            <TabsTrigger value="products" className="flex items-center gap-2">
+              <Package className="h-4 w-4" />
+              Produtos
+            </TabsTrigger>
+            <TabsTrigger value="customers" className="flex items-center gap-2">
+              <Users className="h-4 w-4" />
+              Clientes
+            </TabsTrigger>
+            <TabsTrigger value="cities" className="flex items-center gap-2">
+              <MapPin className="h-4 w-4" />
+              Cidades
+            </TabsTrigger>
+          </TabsList>
 
-              <TabsContent value="products">
-                <AbcProductsTab 
-                  sellerId={sellerId} 
-                  filters={filters} 
-                  config={config} 
-                />
-              </TabsContent>
+          <TabsContent value="products">
+            <AbcProductsTab 
+              sellerId={sellerId} 
+              filters={filters} 
+              config={config} 
+            />
+          </TabsContent>
 
-              <TabsContent value="customers">
-                <AbcCustomersTab 
-                  sellerId={sellerId} 
-                  filters={filters} 
-                  config={config} 
-                />
-              </TabsContent>
+          <TabsContent value="customers">
+            <AbcCustomersTab 
+              sellerId={sellerId} 
+              filters={filters} 
+              config={config} 
+            />
+          </TabsContent>
 
-              <TabsContent value="cities">
-                <AbcCitiesTab 
-                  sellerId={sellerId} 
-                  filters={filters} 
-                  config={config} 
-                />
-              </TabsContent>
-            </Tabs>
-          </div>
-        </main>
-
-        <AbcConfigPanel
-          open={configOpen}
-          onOpenChange={setConfigOpen}
-          config={config}
-          onSave={saveConfig}
-        />
+          <TabsContent value="cities">
+            <AbcCitiesTab 
+              sellerId={sellerId} 
+              filters={filters} 
+              config={config} 
+            />
+          </TabsContent>
+        </Tabs>
       </div>
-    </SidebarProvider>
+
+      <AbcConfigPanel
+        open={configOpen}
+        onOpenChange={setConfigOpen}
+        config={config}
+        onSave={saveConfig}
+      />
+    </DashboardLayout>
   );
 };
 

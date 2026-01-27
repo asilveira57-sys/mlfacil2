@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Package, Settings } from 'lucide-react';
+import { Package, Settings } from 'lucide-react';
 import { useShippingLabels, ShippingOrder, LabelLayout } from '@/hooks/useShippingLabels';
 import { ShippingFilters } from '@/components/shipping/ShippingFilters';
 import { ShippingTable } from '@/components/shipping/ShippingTable';
@@ -10,6 +10,7 @@ import { ShippingPagination } from '@/components/shipping/ShippingPagination';
 import { BulkActionsBar } from '@/components/shipping/BulkActionsBar';
 import { OrderDetailsDrawer } from '@/components/shipping/OrderDetailsDrawer';
 import { useToast } from '@/hooks/use-toast';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
 
 interface MLAccount {
   id: string;
@@ -121,50 +122,31 @@ export default function ShippingLabels() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
+      <DashboardLayout title="Etiquetas de Envio">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        </div>
+      </DashboardLayout>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => navigate('/dashboard')}
-              >
-                <ArrowLeft className="h-5 w-5" />
-              </Button>
-              <div className="flex items-center gap-3">
-                <Package className="h-6 w-6 text-primary" />
-                <div>
-                  <h1 className="text-xl font-semibold">Etiquetas de Envio</h1>
-                  {mlAccount && (
-                    <p className="text-sm text-muted-foreground">
-                      {mlAccount.nickname || mlAccount.email}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => navigate('/shipping-labels/header-settings')}
-              title="Configurar cabeçalho"
-            >
-              <Settings className="h-5 w-5" />
-            </Button>
-          </div>
-        </div>
-      </header>
+  const headerContent = (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={() => navigate('/shipping-labels/header-settings')}
+      title="Configurar cabeçalho"
+    >
+      <Settings className="h-5 w-5" />
+    </Button>
+  );
 
+  return (
+    <DashboardLayout 
+      title="Etiquetas de Envio" 
+      subtitle={mlAccount?.nickname || mlAccount?.email || undefined}
+      headerContent={headerContent}
+    >
       {/* Main Content */}
       <main className="container mx-auto px-4 py-6 space-y-6">
         {/* Filters */}
@@ -228,6 +210,6 @@ export default function ShippingLabels() {
         isGenerating={isGenerating}
         orderItems={selectedOrder ? orderItems.get(selectedOrder.order_id) : undefined}
       />
-    </div>
+    </DashboardLayout>
   );
 }

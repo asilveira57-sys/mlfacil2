@@ -10,6 +10,7 @@ import SettingsCompanies from "@/components/settings/SettingsCompanies";
 import SettingsIntegrations from "@/components/settings/SettingsIntegrations";
 import SettingsSubscription from "@/components/settings/SettingsSubscription";
 import { AdminOnly } from "@/components/auth/AdminOnly";
+import { DashboardLayout } from "@/components/layout/DashboardLayout";
 
 const Settings = () => {
   const navigate = useNavigate();
@@ -24,15 +25,11 @@ const Settings = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-background">
+    <DashboardLayout 
+      title="Configurações" 
+      subtitle="Gerencie seu perfil, empresas, integrações e assinatura"
+    >
       <div className="container mx-auto py-6 px-4 max-w-6xl">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground">Configurações</h1>
-          <p className="text-muted-foreground mt-1">
-            Gerencie seu perfil, empresas, integrações e assinatura
-          </p>
-        </div>
-
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList className="grid w-full grid-cols-5 h-auto p-1 bg-muted/50">
             {tabs.map((tab) => (
@@ -89,7 +86,7 @@ const Settings = () => {
           </Card>
         </AdminOnly>
       </div>
-    </div>
+    </DashboardLayout>
   );
 };
 
