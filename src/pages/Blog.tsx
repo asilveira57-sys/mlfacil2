@@ -70,7 +70,7 @@ function BlogListPage() {
 
   const loadData = async () => {
     const [postsData, categoriesData] = await Promise.all([
-      fetchPublishedPosts({ limit: 20 }),
+      fetchPublishedPosts(),
       fetchCategories()
     ]);
     setPosts(postsData);

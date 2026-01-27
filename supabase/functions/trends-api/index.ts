@@ -609,7 +609,7 @@ async function getSellerHistory(supabase: any, userId: string, params: Record<st
     query = query.gte('sale_month', `${fromMonth}-01`);
   }
 
-  const { data, error } = await query.limit(500);
+  const { data, error } = await query;
 
   if (error) throw error;
 
@@ -723,7 +723,7 @@ async function getAlerts(supabase: any, userId: string, params: Record<string, s
     query = query.eq('is_dismissed', false);
   }
 
-  const { data, error } = await query.limit(50);
+  const { data, error } = await query;
 
   if (error) throw error;
 

@@ -235,8 +235,7 @@ export function useAdsRuleEvents(sellerId?: string) {
           .eq('seller_id', sellerId)
           .in('alert_type', ['rule_violation', 'rule_opportunity'])
           .eq('is_dismissed', false)
-          .order('created_at', { ascending: false })
-          .limit(50);
+          .order('created_at', { ascending: false });
 
         if (error) throw error;
 

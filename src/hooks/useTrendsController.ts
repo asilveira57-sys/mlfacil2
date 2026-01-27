@@ -225,8 +225,7 @@ export function useTrendsController(options: ControllerOptions = {}) {
         const { data, error } = await supabase
           .from('category_tree_cache')
           .select('id, name, total_items_qty')
-          .eq('parent_id', effectiveCategoryId)
-          .limit(20);
+          .eq('parent_id', effectiveCategoryId);
         
         if (error) throw error;
         

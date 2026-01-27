@@ -24,8 +24,7 @@ export function usePrintHistory(sellerId: string | null, shipmentId?: string) {
         .from('meli_print_queue')
         .select('*')
         .eq('seller_id', sellerId)
-        .order('created_at', { ascending: false })
-        .limit(50);
+        .order('created_at', { ascending: false });
 
       const { data, error } = await query;
 

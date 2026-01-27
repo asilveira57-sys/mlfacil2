@@ -95,8 +95,7 @@ export function TrendsHistoryTab({ sellerId }: TrendsHistoryTabProps) {
         .eq('seller_id', sellerId)
         .gte('sale_month', monthStart)
         .lt('sale_month', monthEnd)
-        .order('revenue', { ascending: false })
-        .limit(50);
+        .order('revenue', { ascending: false });
 
       if (error) throw error;
       if (!data || data.length === 0) return [];
