@@ -116,3 +116,6 @@ verify_jwt = false
 
 [functions.post-sale-messages]
 verify_jwt = false
+
+[functions.qa-engine]
+verify_jwt = false

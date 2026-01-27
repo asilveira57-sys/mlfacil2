@@ -34,6 +34,7 @@ import AdminPlanos from "./pages/AdminPlanos";
 import Publicidade from "./pages/Publicidade";
 import Promocoes from "./pages/Promocoes";
 import MensagensPosVenda from "./pages/MensagensPosVenda";
+import Perguntas from "./pages/Perguntas";
 import NotFound from "./pages/NotFound";
 import { AdminRoute } from "./components/auth/AdminRoute";
 
@@ -165,6 +166,7 @@ const App = () => {
                 <Route path="/publicidade" element={<Publicidade />} />
                 <Route path="/promocoes" element={<Promocoes />} />
                 <Route path="/mensagens" element={<MensagensPosVenda />} />
+                <Route path="/perguntas" element={<Perguntas />} />
                 {/* Blog routes */}
                 <Route path="/blog" element={<Blog />} />
                 <Route path="/blog/:slug" element={<Blog />} />

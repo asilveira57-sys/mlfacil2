@@ -1,0 +1,303 @@
+import { useState, useCallback, useEffect } from "react";
+import { format, formatDistanceToNow } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import {
+  Bell,
+  MessageCircle,
+  AlertTriangle,
+  Timer,
+  XCircle,
+  Settings,
+  CheckCheck,
+  ChevronRight,
+  X,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
+import { useNavigate } from "react-router-dom";
+import { useToast } from "@/hooks/use-toast";
+import type { AppNotification, NotificationCategory } from "@/types/qa";
+import { CATEGORY_LABELS, PRIORITY_LABELS } from "@/types/qa";
+import {
+  useAppNotifications,
+  useUnreadNotificationsCount,
+  useMarkNotificationRead,
+  useMarkAllNotificationsRead,
+  useDismissNotification,
+  useNotificationsRealtime,
+  groupNotificationsByCategory,
+} from "@/hooks/useAppNotifications";
+import { supabase } from "@/integrations/supabase/client";
+
+const CATEGORY_ICONS: Record<NotificationCategory, React.ReactNode> = {
+  qa_pending: <MessageCircle className="h-4 w-4 text-blue-500" />,
+  qa_sla_warning: <Timer className="h-4 w-4 text-amber-500" />,
+  qa_sla_breached: <Timer className="h-4 w-4 text-red-500" />,
+  qa_blocked: <XCircle className="h-4 w-4 text-red-500" />,
+  qa_send_error: <AlertTriangle className="h-4 w-4 text-red-500" />,
+  post_sale_blocked: <XCircle className="h-4 w-4 text-orange-500" />,
+  post_sale_error: <AlertTriangle className="h-4 w-4 text-orange-500" />,
+  system_alert: <Settings className="h-4 w-4 text-purple-500" />,
+  task_assigned: <CheckCheck className="h-4 w-4 text-green-500" />,
+  promotion_alert: <Bell className="h-4 w-4 text-pink-500" />,
+};
+
+interface NotificationCenterProps {
+  workspaceId?: string | null;
+  sellerId?: string | null;
+}
+
+export function NotificationCenter({ workspaceId, sellerId }: NotificationCenterProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const { toast } = useToast();
+
+  const { data: notifications, isLoading, refetch } = useAppNotifications({
+    workspaceId,
+    sellerId,
+  });
+  const { data: unreadCount } = useUnreadNotificationsCount(workspaceId);
+  const markRead = useMarkNotificationRead();
+  const markAllRead = useMarkAllNotificationsRead();
+  const dismiss = useDismissNotification();
+
+  // Get user ID for realtime
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setUserId(data.user?.id || null);
+    });
+  }, []);
+
+  // Realtime notifications
+  const handleNewNotification = useCallback(
+    (notification: AppNotification) => {
+      refetch();
+      toast({
+        title: notification.title,
+        description: notification.body || undefined,
+      });
+    },
+    [refetch, toast]
+  );
+
+  useNotificationsRealtime(userId, handleNewNotification);
+
+  const handleNotificationClick = (notification: AppNotification) => {
+    markRead.mutate(notification.id);
+    if (notification.action_url) {
+      navigate(notification.action_url);
+      setIsOpen(false);
+    }
+  };
+
+  const handleMarkAllRead = () => {
+    markAllRead.mutate(workspaceId || undefined);
+  };
+
+  const handleDismiss = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    dismiss.mutate(id);
+  };
+
+  const groupedNotifications = notifications
+    ? groupNotificationsByCategory(notifications)
+    : {};
+
+  return (
+    <Popover open={isOpen} onOpenChange={setIsOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="icon" className="relative">
+          <Bell className="h-5 w-5" />
+          {unreadCount && unreadCount > 0 && (
+            <Badge
+              variant="destructive"
+              className="absolute -top-1 -right-1 h-5 w-5 p-0 flex items-center justify-center text-[10px] animate-pulse"
+            >
+              {unreadCount > 9 ? "9+" : unreadCount}
+            </Badge>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-96 p-0" align="end">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <div className="flex items-center gap-2">
+            <Bell className="h-4 w-4 text-primary" />
+            <span className="font-semibold text-sm">Notificações</span>
+            {unreadCount && unreadCount > 0 && (
+              <Badge variant="secondary" className="text-[10px]">
+                {unreadCount} nova{unreadCount !== 1 ? "s" : ""}
+              </Badge>
+            )}
+          </div>
+          {unreadCount && unreadCount > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={handleMarkAllRead}
+            >
+              <CheckCheck className="h-3 w-3 mr-1" />
+              Marcar lidas
+            </Button>
+          )}
+        </div>
+
+        {/* Content */}
+        <ScrollArea className="h-[400px]">
+          {isLoading ? (
+            <div className="p-4 space-y-3">
+              {[...Array(3)].map((_, i) => (
+                <Skeleton key={i} className="h-16 w-full" />
+              ))}
+            </div>
+          ) : !notifications || notifications.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center px-4">
+              <div className="rounded-full bg-muted p-4 mb-4">
+                <Bell className="h-8 w-8 text-muted-foreground" />
+              </div>
+              <h3 className="text-sm font-medium">Tudo em dia!</h3>
+              <p className="text-xs text-muted-foreground mt-1">
+                Nenhuma notificação pendente
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-border">
+              {Object.entries(groupedNotifications).map(([category, items]) => (
+                <div key={category}>
+                  {/* Category Header */}
+                  <div className="flex items-center gap-2 px-4 py-2 bg-muted/50">
+                    {CATEGORY_ICONS[category as NotificationCategory]}
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {CATEGORY_LABELS[category as NotificationCategory]}
+                    </span>
+                    <Badge variant="secondary" className="text-[10px] ml-auto">
+                      {items.length}
+                    </Badge>
+                  </div>
+
+                  {/* Items */}
+                  {items.slice(0, 5).map((notification) => (
+                    <NotificationItem
+                      key={notification.id}
+                      notification={notification}
+                      onClick={() => handleNotificationClick(notification)}
+                      onDismiss={(e) => handleDismiss(e, notification.id)}
+                    />
+                  ))}
+
+                  {items.length > 5 && (
+                    <button
+                      className="w-full text-center py-2 text-xs text-primary hover:underline"
+                      onClick={() => {
+                        setIsOpen(false);
+                        // Navigate to full notifications page
+                      }}
+                    >
+                      Ver mais {items.length - 5} notificações
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </ScrollArea>
+
+        {/* Footer */}
+        <div className="p-3 border-t border-border">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full h-8 text-xs"
+            onClick={() => {
+              setIsOpen(false);
+              // Navigate to settings or full notifications
+            }}
+          >
+            <Settings className="h-3 w-3 mr-1" />
+            Configurar notificações
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+interface NotificationItemProps {
+  notification: AppNotification;
+  onClick: () => void;
+  onDismiss: (e: React.MouseEvent) => void;
+}
+
+function NotificationItem({ notification, onClick, onDismiss }: NotificationItemProps) {
+  const timeAgo = formatDistanceToNow(new Date(notification.created_at), {
+    addSuffix: true,
+    locale: ptBR,
+  });
+
+  const isUrgent = notification.priority === "urgent" || notification.priority === "high";
+
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "w-full text-left p-3 hover:bg-accent/50 transition-colors group",
+        !notification.is_read && "bg-primary/5",
+        isUrgent && "bg-destructive/5 hover:bg-destructive/10"
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <div className="shrink-0 mt-0.5">
+          {CATEGORY_ICONS[notification.category]}
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-2">
+            <p
+              className={cn(
+                "text-sm line-clamp-1",
+                !notification.is_read && "font-medium"
+              )}
+            >
+              {notification.title}
+            </p>
+            <button
+              onClick={onDismiss}
+              className="p-1 rounded hover:bg-muted opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+            >
+              <X className="h-3 w-3 text-muted-foreground" />
+            </button>
+          </div>
+
+          {notification.body && (
+            <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
+              {notification.body}
+            </p>
+          )}
+
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-[10px] text-muted-foreground">{timeAgo}</span>
+            {isUrgent && (
+              <Badge variant="destructive" className="text-[10px] px-1 py-0">
+                {PRIORITY_LABELS[notification.priority]}
+              </Badge>
+            )}
+          </div>
+        </div>
+
+        {notification.action_url && (
+          <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+        )}
+      </div>
+    </button>
+  );
+}
