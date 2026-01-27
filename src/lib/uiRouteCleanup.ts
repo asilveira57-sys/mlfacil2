@@ -17,6 +17,9 @@ function clearBodyScrollLock() {
   const body = document.body;
   const html = document.documentElement;
 
+  // Remove data-scroll-locked attribute (used by Radix Select/Popover)
+  body.removeAttribute("data-scroll-locked");
+  
   // Radix / various libs may set these.
   body.style.overflow = "";
   body.style.paddingRight = "";
