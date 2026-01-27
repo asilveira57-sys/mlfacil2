@@ -13,13 +13,17 @@ interface SyncRequest {
   manual?: boolean;
 }
 
-interface RateLimitState {
-  remaining: number;
-  resetAt: Date | null;
-  retryAfter: number;
+interface SyncResult {
+  success: boolean;
+  processed?: number;
+  created?: number;
+  updated?: number;
+  failed?: number;
+  total?: number;
+  error?: string;
 }
 
-const RATE_LIMIT_DELAY_MS = 200; // 200ms between requests
+const RATE_LIMIT_DELAY_MS = 200;
 const MAX_RETRIES = 3;
 const BACKOFF_BASE_MS = 1000;
 
@@ -30,7 +34,8 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+  // deno-lint-ignore no-explicit-any
+  const supabase: any = createClient(supabaseUrl, supabaseServiceKey);
 
   try {
     const { connection_id, job_type = 'full', date_from, date_to, manual = false }: SyncRequest = await req.json();
@@ -55,6 +60,22 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({ error: 'Connection not found' }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Get ML account credentials
+    const { data: mlAccount, error: mlError } = await supabase
+      .from('ml_accounts')
+      .select('access_token, ml_user_id')
+      .eq('ml_user_id', connection.seller_id)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (mlError || !mlAccount) {
+      console.error(`[ads-connector-sync] ML account not found for seller ${connection.seller_id}`);
+      return new Response(
+        JSON.stringify({ error: 'ML account not found or inactive' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -88,33 +109,11 @@ Deno.serve(async (req) => {
       details: { manual, date_from, date_to },
     });
 
-    // Execute sync based on job type
+    // Execute sync
     let result: SyncResult;
     
     try {
-      switch (job_type) {
-        case 'full':
-          result = await executeFullSync(supabase, connection, job);
-          break;
-        case 'campaigns':
-          result = await syncCampaigns(supabase, connection, job);
-          break;
-        case 'ad_groups':
-          result = await syncAdGroups(supabase, connection, job);
-          break;
-        case 'items':
-          result = await syncItems(supabase, connection, job);
-          break;
-        case 'metrics':
-        case 'daily_metrics':
-          result = await syncMetrics(supabase, connection, job, date_from, date_to);
-          break;
-        case 'incremental':
-          result = await executeIncrementalSync(supabase, connection, job);
-          break;
-        default:
-          result = { success: false, error: 'Unknown job type' };
-      }
+      result = await executeFullSync(supabase, connection, job, mlAccount.access_token);
     } catch (syncError) {
       result = { 
         success: false, 
@@ -123,6 +122,7 @@ Deno.serve(async (req) => {
     }
 
     // Update job status
+    // deno-lint-ignore no-explicit-any
     const jobUpdate: any = {
       status: result.success ? 'completed' : 'failed',
       completed_at: new Date().toISOString(),
@@ -143,10 +143,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    await supabase
-      .from('ads_sync_jobs')
-      .update(jobUpdate)
-      .eq('id', job.id);
+    await supabase.from('ads_sync_jobs').update(jobUpdate).eq('id', job.id);
 
     // Update connection last sync info
     await supabase
@@ -154,7 +151,7 @@ Deno.serve(async (req) => {
       .update({
         last_sync_at: new Date().toISOString(),
         last_sync_status: result.success ? 'success' : 'error',
-        last_sync_message: result.success ? `Sincronizado: ${result.processed || 0} registros` : result.error,
+        last_sync_message: result.success ? `Sincronizado: ${result.processed || 0} campanhas` : result.error,
         next_scheduled_sync_at: new Date(Date.now() + connection.sync_interval_hours * 60 * 60 * 1000).toISOString(),
       })
       .eq('id', connection_id);
@@ -164,7 +161,7 @@ Deno.serve(async (req) => {
       connection_id,
       job_id: job.id,
       seller_id: connection.seller_id,
-      log_type: job_type === 'full' ? 'campaigns' : job_type,
+      log_type: 'campaigns',
       log_level: result.success ? 'info' : 'error',
       success: result.success,
       message: result.success ? 'Sync completed successfully' : `Sync failed: ${result.error}`,
@@ -174,13 +171,6 @@ Deno.serve(async (req) => {
       records_failed: result.failed,
       error_message: result.error,
     });
-
-    // Update data freshness
-    if (result.success) {
-      await updateDataFreshness(supabase, connection_id, connection.seller_id, job_type, true);
-    } else {
-      await updateDataFreshness(supabase, connection_id, connection.seller_id, job_type, false);
-    }
 
     console.log(`[ads-connector-sync] Sync ${result.success ? 'completed' : 'failed'} for connection ${connection_id}`);
 
@@ -207,369 +197,275 @@ Deno.serve(async (req) => {
   }
 });
 
-interface SyncResult {
-  success: boolean;
-  processed?: number;
-  created?: number;
-  updated?: number;
-  failed?: number;
-  total?: number;
-  error?: string;
-}
+// ========== ML API Helpers ==========
+async function fetchML<T>(
+  url: string,
+  accessToken: string,
+  apiVersion = '2'
+): Promise<{ data: T | null; error: string | null }> {
+  try {
+    console.log(`[ads-connector-sync] Fetching: ${url}`);
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'api-version': apiVersion,
+        'Content-Type': 'application/json',
+      },
+    });
 
-// Full sync: campaigns → ad groups → items → metrics
-async function executeFullSync(supabase: any, connection: any, job: any): Promise<SyncResult> {
-  const results: SyncResult[] = [];
+    const text = await response.text();
+    console.log(`[ads-connector-sync] Response status: ${response.status}, length: ${text.length}`);
 
-  // Sync in order
-  results.push(await syncCampaigns(supabase, connection, job));
-  if (!results[0].success) return results[0];
+    if (!response.ok) {
+      let errMsg = `HTTP ${response.status}`;
+      try {
+        const errJson = JSON.parse(text);
+        errMsg = errJson.message || errJson.error || errMsg;
+      } catch {
+        // Keep default error message
+      }
+      return { data: null, error: errMsg };
+    }
 
-  await delay(RATE_LIMIT_DELAY_MS);
-  results.push(await syncAdGroups(supabase, connection, job));
-  
-  await delay(RATE_LIMIT_DELAY_MS);
-  results.push(await syncItems(supabase, connection, job));
+    if (!text || text.trim() === '') {
+      return { data: null, error: null };
+    }
 
-  await delay(RATE_LIMIT_DELAY_MS);
-  results.push(await syncMetrics(supabase, connection, job));
-
-  // Aggregate results
-  const aggregated: SyncResult = {
-    success: results.every(r => r.success),
-    processed: results.reduce((sum, r) => sum + (r.processed || 0), 0),
-    created: results.reduce((sum, r) => sum + (r.created || 0), 0),
-    updated: results.reduce((sum, r) => sum + (r.updated || 0), 0),
-    failed: results.reduce((sum, r) => sum + (r.failed || 0), 0),
-    total: results.reduce((sum, r) => sum + (r.total || 0), 0),
-  };
-
-  if (!aggregated.success) {
-    aggregated.error = results.find(r => r.error)?.error;
+    const data = JSON.parse(text) as T;
+    return { data, error: null };
+  } catch (err) {
+    return { data: null, error: String(err) };
   }
-
-  // Create full snapshot
-  await createSnapshot(supabase, connection.id, connection.seller_id, job.id, 'full');
-
-  return aggregated;
 }
 
-// Incremental sync: only metrics for recent days
-async function executeIncrementalSync(supabase: any, connection: any, job: any): Promise<SyncResult> {
-  const today = new Date();
-  const sevenDaysAgo = new Date(today);
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-  return syncMetrics(supabase, connection, job, 
-    sevenDaysAgo.toISOString().split('T')[0],
-    today.toISOString().split('T')[0]
+// Discover advertiser ID for Product Ads
+async function getAdvertiserId(accessToken: string): Promise<{ advertiserId: string | null; error: string | null }> {
+  const { data, error } = await fetchML<{ results?: { id: string }[] }>(
+    'https://api.mercadolibre.com/advertising/advertisers?product_id=PADS',
+    accessToken,
+    '1'
   );
-}
-
-// Sync campaigns - stub for future ML API integration
-async function syncCampaigns(supabase: any, connection: any, job: any): Promise<SyncResult> {
-  console.log(`[ads-connector-sync] Syncing campaigns for seller ${connection.seller_id}`);
-  
-  // For now, consolidate existing ads_campaigns data into staging
-  const { data: existingCampaigns, error } = await supabase
-    .from('ads_campaigns')
-    .select('*')
-    .eq('seller_id', connection.seller_id);
 
   if (error) {
-    return { success: false, error: `Failed to fetch campaigns: ${error.message}` };
+    return { advertiserId: null, error };
   }
 
-  let created = 0;
-  let updated = 0;
-
-  for (const campaign of (existingCampaigns || [])) {
-    // Insert into staging
-    await supabase
-      .from('ads_staging_campaigns')
-      .insert({
-        job_id: job.id,
-        connection_id: connection.id,
-        seller_id: connection.seller_id,
-        ml_campaign_id: campaign.ml_campaign_id,
-        raw_data: campaign,
-        name: campaign.name,
-        status: campaign.status,
-        campaign_type: campaign.campaign_type,
-        daily_budget: campaign.daily_budget,
-        total_budget: campaign.total_budget,
-        start_date: campaign.start_date,
-        end_date: campaign.end_date,
-        is_processed: true,
-        processed_at: new Date().toISOString(),
-      });
-    created++;
+  if (!data?.results?.length) {
+    return { advertiserId: null, error: 'No Product Ads advertiser found for this account' };
   }
 
-  // Create snapshot
-  await createSnapshot(supabase, connection.id, connection.seller_id, job.id, 'campaigns', existingCampaigns);
-
-  return {
-    success: true,
-    processed: existingCampaigns?.length || 0,
-    created,
-    updated,
-    total: existingCampaigns?.length || 0,
-  };
+  return { advertiserId: data.results[0].id, error: null };
 }
 
-// Sync ad groups - stub for future ML API integration
-async function syncAdGroups(supabase: any, connection: any, job: any): Promise<SyncResult> {
-  console.log(`[ads-connector-sync] Syncing ad groups for seller ${connection.seller_id}`);
-
-  const { data: existingGroups, error } = await supabase
-    .from('ads_ad_groups')
-    .select('*')
-    .eq('seller_id', connection.seller_id);
-
-  if (error) {
-    return { success: false, error: `Failed to fetch ad groups: ${error.message}` };
-  }
-
-  let created = 0;
-
-  for (const group of (existingGroups || [])) {
-    await supabase
-      .from('ads_staging_ad_groups')
-      .insert({
-        job_id: job.id,
-        connection_id: connection.id,
-        seller_id: connection.seller_id,
-        ml_ad_group_id: group.ml_ad_group_id,
-        ml_campaign_id: group.campaign_id,
-        raw_data: group,
-        name: group.name,
-        status: group.status,
-        default_bid: group.default_bid,
-        is_processed: true,
-        processed_at: new Date().toISOString(),
-      });
-    created++;
-  }
-
-  await createSnapshot(supabase, connection.id, connection.seller_id, job.id, 'ad_groups', existingGroups);
-
-  return {
-    success: true,
-    processed: existingGroups?.length || 0,
-    created,
-    total: existingGroups?.length || 0,
-  };
-}
-
-// Sync items - stub for future ML API integration
-async function syncItems(supabase: any, connection: any, job: any): Promise<SyncResult> {
-  console.log(`[ads-connector-sync] Syncing items for seller ${connection.seller_id}`);
-
-  const { data: existingItems, error } = await supabase
-    .from('ads_items')
-    .select('*')
-    .eq('seller_id', connection.seller_id);
-
-  if (error) {
-    return { success: false, error: `Failed to fetch items: ${error.message}` };
-  }
-
-  let created = 0;
-
-  for (const item of (existingItems || [])) {
-    await supabase
-      .from('ads_staging_items')
-      .insert({
-        job_id: job.id,
-        connection_id: connection.id,
-        seller_id: connection.seller_id,
-        item_id: item.item_id,
-        ml_ad_group_id: item.ad_group_id,
-        raw_data: item,
-        title: item.title,
-        status: item.status,
-        bid: item.bid,
-        current_price: item.current_price,
-        is_processed: true,
-        processed_at: new Date().toISOString(),
-      });
-    created++;
-  }
-
-  await createSnapshot(supabase, connection.id, connection.seller_id, job.id, 'items', existingItems);
-
-  return {
-    success: true,
-    processed: existingItems?.length || 0,
-    created,
-    total: existingItems?.length || 0,
-  };
-}
-
-// Sync metrics - stub for future ML API integration
-async function syncMetrics(
-  supabase: any, 
-  connection: any, 
+// ========== Full Sync ==========
+// deno-lint-ignore no-explicit-any
+async function executeFullSync(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  // deno-lint-ignore no-explicit-any
+  connection: any,
+  // deno-lint-ignore no-explicit-any
   job: any,
-  dateFrom?: string,
-  dateTo?: string
+  accessToken: string
 ): Promise<SyncResult> {
-  console.log(`[ads-connector-sync] Syncing metrics for seller ${connection.seller_id}`);
+  const sellerId = connection.seller_id as string;
+  const userId = connection.user_id as string;
+  const connectionId = connection.id as string;
 
+  // Step 1: Get advertiser ID
+  console.log(`[ads-connector-sync] Getting advertiser ID for seller ${sellerId}`);
+  const { advertiserId, error: advError } = await getAdvertiserId(accessToken);
+
+  if (advError || !advertiserId) {
+    console.log(`[ads-connector-sync] No advertiser found: ${advError}`);
+    // Return success with 0 records - seller may not have Product Ads
+    return { success: true, processed: 0, total: 0 };
+  }
+
+  console.log(`[ads-connector-sync] Found advertiser: ${advertiserId}`);
+
+  // Step 2: Fetch campaigns with metrics
   const today = new Date().toISOString().split('T')[0];
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-  
-  const from = dateFrom || thirtyDaysAgo.toISOString().split('T')[0];
-  const to = dateTo || today;
+  const dateFrom = thirtyDaysAgo.toISOString().split('T')[0];
 
-  let query = supabase
-    .from('ads_daily_metrics')
-    .select('*')
-    .eq('seller_id', connection.seller_id)
-    .gte('metric_date', from)
-    .lte('metric_date', to);
+  const metrics = 'clicks,prints,cost,cpc,acos,roas,direct_amount,indirect_amount,total_amount,units_quantity';
+  const campaignsUrl = `https://api.mercadolibre.com/advertising/advertisers/${advertiserId}/product_ads/campaigns?limit=50&offset=0&date_from=${dateFrom}&date_to=${today}&metrics=${metrics}`;
 
-  const { data: existingMetrics, error } = await query;
+  // deno-lint-ignore no-explicit-any
+  const { data: campaignsData, error: campaignsError } = await fetchML<any>(campaignsUrl, accessToken);
 
-  if (error) {
-    return { success: false, error: `Failed to fetch metrics: ${error.message}` };
+  if (campaignsError) {
+    return { success: false, error: `Failed to fetch campaigns: ${campaignsError}` };
   }
+
+  const campaigns = campaignsData?.results || [];
+  console.log(`[ads-connector-sync] Fetched ${campaigns.length} campaigns`);
 
   let created = 0;
+  let updated = 0;
+  let totalSpent = 0;
+  let totalRevenue = 0;
 
-  for (const metric of (existingMetrics || [])) {
-    await supabase
-      .from('ads_staging_metrics')
-      .insert({
-        job_id: job.id,
-        connection_id: connection.id,
-        seller_id: connection.seller_id,
-        entity_type: metric.item_id ? 'item' : 'campaign',
-        entity_id: metric.item_id || metric.campaign_id,
-        metric_date: metric.metric_date,
-        raw_data: metric,
-        impressions: metric.impressions,
-        clicks: metric.clicks,
-        conversions: metric.conversions,
-        spent: metric.spent,
-        revenue: metric.revenue,
-        is_processed: true,
-        processed_at: new Date().toISOString(),
-      });
-    created++;
+  // deno-lint-ignore no-explicit-any
+  for (const campaign of campaigns as any[]) {
+    const mlCampaignId = String(campaign.id || campaign.campaign_id);
+    const name = String(campaign.name || campaign.title || 'Campaign');
+    const status = String(campaign.status || 'unknown').toLowerCase();
+    const campaignType = String(campaign.type || campaign.campaign_type || 'product_ads');
+    const dailyBudget = Number(campaign.daily_budget) || null;
+    const totalBudget = Number(campaign.total_budget) || null;
+    
+    // Metrics from API
+    // deno-lint-ignore no-explicit-any
+    const metricsData = (campaign.metrics as any) || campaign;
+    const spent = Number(metricsData.cost) || 0;
+    const clicks = Number(metricsData.clicks) || 0;
+    const impressions = Number(metricsData.prints) || 0;
+    const revenue = Number(metricsData.total_amount) || Number(metricsData.direct_amount) || 0;
+
+    totalSpent += spent;
+    totalRevenue += revenue;
+
+    // Upsert campaign
+    const { data: existingCampaign } = await supabase
+      .from('ads_campaigns')
+      .select('id')
+      .eq('ml_campaign_id', mlCampaignId)
+      .eq('seller_id', sellerId)
+      .maybeSingle();
+
+    if (existingCampaign) {
+      await supabase
+        .from('ads_campaigns')
+        .update({
+          name,
+          status,
+          campaign_type: campaignType,
+          daily_budget: dailyBudget,
+          total_budget: totalBudget,
+          spent_total: spent,
+          raw_data: campaign,
+          synced_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existingCampaign.id);
+      updated++;
+    } else {
+      await supabase
+        .from('ads_campaigns')
+        .insert({
+          ml_campaign_id: mlCampaignId,
+          seller_id: sellerId,
+          user_id: userId,
+          workspace_id: connection.workspace_id || null,
+          name,
+          status,
+          campaign_type: campaignType,
+          daily_budget: dailyBudget,
+          total_budget: totalBudget,
+          spent_total: spent,
+          raw_data: campaign,
+          synced_at: new Date().toISOString(),
+        });
+      created++;
+    }
+
+    // Insert daily metrics if we have data
+    if (clicks > 0 || spent > 0 || impressions > 0) {
+      // Get campaign internal ID
+      const { data: campaignRecord } = await supabase
+        .from('ads_campaigns')
+        .select('id')
+        .eq('ml_campaign_id', mlCampaignId)
+        .eq('seller_id', sellerId)
+        .maybeSingle();
+
+      if (campaignRecord) {
+        const roas = spent > 0 ? revenue / spent : 0;
+        const acos = revenue > 0 ? (spent / revenue) * 100 : 0;
+
+        await supabase
+          .from('ads_daily_metrics')
+          .upsert({
+            seller_id: sellerId,
+            user_id: userId,
+            campaign_id: campaignRecord.id,
+            metric_date: today,
+            impressions,
+            clicks,
+            spent,
+            revenue,
+            roas,
+            acos,
+          }, {
+            onConflict: 'campaign_id,metric_date',
+            ignoreDuplicates: false,
+          });
+      }
+    }
+
+    await delay(RATE_LIMIT_DELAY_MS);
   }
 
-  await createSnapshot(supabase, connection.id, connection.seller_id, job.id, 'metrics', existingMetrics);
+  // Create snapshot
+  await supabase.from('ads_snapshots').insert({
+    connection_id: connectionId,
+    seller_id: sellerId,
+    job_id: job.id,
+    snapshot_type: 'full',
+    snapshot_date: today,
+    snapshot_hour: new Date().getHours(),
+    data_json: { campaigns: campaigns.length, spent: totalSpent, revenue: totalRevenue },
+    record_count: campaigns.length,
+    is_valid: true,
+  });
+
+  // Update data freshness
+  await supabase.from('ads_data_freshness').upsert({
+    connection_id: connectionId,
+    seller_id: sellerId,
+    data_type: 'campaigns',
+    last_successful_sync_at: new Date().toISOString(),
+    last_sync_attempt_at: new Date().toISOString(),
+    cached_record_count: campaigns.length,
+    is_stale: false,
+    consecutive_failures: 0,
+  }, {
+    onConflict: 'connection_id,data_type',
+  });
 
   return {
     success: true,
-    processed: existingMetrics?.length || 0,
+    processed: campaigns.length,
     created,
-    total: existingMetrics?.length || 0,
+    updated,
+    total: campaigns.length,
   };
 }
 
-// Create a snapshot of current data state
-async function createSnapshot(
-  supabase: any,
-  connectionId: string,
-  sellerId: string,
-  jobId: string,
-  snapshotType: string,
-  data?: any[]
-): Promise<void> {
-  const now = new Date();
-  
-  await supabase
-    .from('ads_snapshots')
-    .insert({
-      connection_id: connectionId,
-      seller_id: sellerId,
-      job_id: jobId,
-      snapshot_type: snapshotType,
-      snapshot_date: now.toISOString().split('T')[0],
-      snapshot_hour: now.getHours(),
-      data_json: data || [],
-      record_count: data?.length || 0,
-      is_valid: true,
-    });
-}
-
-// Update data freshness tracking
-async function updateDataFreshness(
-  supabase: any,
-  connectionId: string,
-  sellerId: string,
-  dataType: string,
-  success: boolean
-): Promise<void> {
-  const mappedType = dataType === 'full' ? 'campaigns' : 
-                     dataType === 'incremental' ? 'daily_metrics' :
-                     dataType === 'metrics' ? 'daily_metrics' : dataType;
-
-  const { data: existing } = await supabase
-    .from('ads_data_freshness')
-    .select('id, consecutive_failures')
-    .eq('connection_id', connectionId)
-    .eq('data_type', mappedType)
-    .single();
-
-  const now = new Date().toISOString();
-  const consecutiveFailures = success ? 0 : (existing?.consecutive_failures || 0) + 1;
-  const isStale = consecutiveFailures >= 3;
-
-  const freshnessData = {
-    connection_id: connectionId,
-    seller_id: sellerId,
-    data_type: mappedType,
-    last_sync_attempt_at: now,
-    consecutive_failures: consecutiveFailures,
-    is_stale: isStale,
-    ...(success ? { last_successful_sync_at: now } : {}),
-  };
-
-  if (existing) {
-    await supabase
-      .from('ads_data_freshness')
-      .update(freshnessData)
-      .eq('id', existing.id);
-  } else {
-    await supabase
-      .from('ads_data_freshness')
-      .insert(freshnessData);
-  }
-}
-
-// Log sync activity
-async function logSync(supabase: any, logData: {
-  connection_id: string;
-  job_id?: string;
-  seller_id: string;
-  log_type: string;
-  log_level: string;
-  success?: boolean;
-  message?: string;
-  details?: any;
-  records_fetched?: number;
-  records_processed?: number;
-  records_created?: number;
-  records_updated?: number;
-  records_failed?: number;
-  error_code?: string;
-  error_message?: string;
-}): Promise<void> {
-  await supabase
-    .from('ads_sync_logs')
-    .insert({
-      ...logData,
-      started_at: new Date().toISOString(),
-      ended_at: logData.success !== undefined ? new Date().toISOString() : null,
-    });
-}
-
-// Utility delay function with async/await
+// ========== Helpers ==========
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// deno-lint-ignore no-explicit-any
+async function logSync(supabase: any, data: Record<string, unknown>): Promise<void> {
+  await supabase.from('ads_sync_logs').insert({
+    connection_id: data.connection_id,
+    job_id: data.job_id,
+    seller_id: data.seller_id,
+    log_type: data.log_type || 'general',
+    log_level: data.log_level || 'info',
+    message: data.message,
+    success: data.success ?? null,
+    records_processed: data.records_processed ?? null,
+    records_created: data.records_created ?? null,
+    records_updated: data.records_updated ?? null,
+    records_failed: data.records_failed ?? null,
+    error_message: data.error_message ?? null,
+    details: data.details ?? null,
+    started_at: new Date().toISOString(),
+  });
 }
