@@ -841,8 +841,7 @@ async function getOverview(supabase: any, userId: string, params: Record<string,
     .select('*')
     .eq('seller_id', sellerId)
     .eq('is_dismissed', false)
-    .order('created_at', { ascending: false })
-    .limit(5);
+    .order('created_at', { ascending: false });
 
   // Get settings
   const settings = await getSettings(supabase, userId, { seller_id: sellerId });

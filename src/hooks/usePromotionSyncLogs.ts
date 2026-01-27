@@ -39,8 +39,7 @@ export function usePromotionSyncLogs(workspaceId: string | null, sellerId: strin
         .select('*')
         .eq('workspace_id', workspaceId)
         .eq('account_id', sellerId)
-        .order('started_at', { ascending: false })
-        .limit(10);
+        .order('started_at', { ascending: false });
 
       if (error) throw error;
 

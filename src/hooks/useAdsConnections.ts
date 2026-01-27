@@ -266,8 +266,7 @@ export function useAdsConnections(sellerId?: string) {
       .from('ads_sync_jobs')
       .select('*')
       .eq('connection_id', connectionId)
-      .order('created_at', { ascending: false })
-      .limit(20);
+      .order('created_at', { ascending: false });
 
     if (error) {
       console.error('[useAdsConnections] Error fetching sync jobs:', error);
@@ -287,8 +286,7 @@ export function useAdsConnections(sellerId?: string) {
       .from('ads_sync_logs')
       .select('*')
       .eq('connection_id', connectionId)
-      .order('created_at', { ascending: false })
-      .limit(50);
+      .order('created_at', { ascending: false });
 
     if (error) {
       console.error('[useAdsConnections] Error fetching sync logs:', error);

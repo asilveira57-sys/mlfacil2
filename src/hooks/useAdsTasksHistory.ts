@@ -39,8 +39,7 @@ export function useAdsTasksHistory(sellerId?: string, workspaceId?: string) {
         .select('*')
         .eq('workspace_id', workspaceId)
         .eq('source_type', 'ads')
-        .order('created_at', { ascending: false })
-        .limit(100);
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
 

@@ -48,8 +48,7 @@ export function SubcategoriesSection({
           .from('category_tree_cache')
           .select('id, name, total_items_qty')
           .eq('parent_id', parentCategoryId)
-          .order('total_items_qty', { ascending: false })
-          .limit(12);
+          .order('total_items_qty', { ascending: false });
 
         if (error) throw error;
         

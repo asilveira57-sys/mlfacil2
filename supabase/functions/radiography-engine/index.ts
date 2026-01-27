@@ -296,8 +296,7 @@ async function handleDeepAnalysis(supabase: any, userId: string, sellerId: strin
     .select("*")
     .eq("seller_id", sellerId)
     .eq("item_id", itemId)
-    .order("snapshot_date", { ascending: false })
-    .limit(90);
+    .order("snapshot_date", { ascending: false });
 
   if (snapErr || !snapshots?.length) {
     return new Response(JSON.stringify({ 
@@ -423,8 +422,7 @@ async function handleStatus(supabase: any, userId: string, sellerId: string, cor
     .eq("seller_id", sellerId)
     .eq("severity", "critical")
     .gte("detected_at", sevenDaysAgo.toISOString())
-    .order("detected_at", { ascending: false })
-    .limit(10);
+    .order("detected_at", { ascending: false });
 
   return new Response(JSON.stringify({
     config: config || { auto_monitor_enabled: false },
@@ -510,8 +508,7 @@ async function handleGetEvents(supabase: any, userId: string, sellerId: string, 
     .from("listing_events")
     .select("*")
     .eq("seller_id", sellerId)
-    .order("detected_at", { ascending: false })
-    .limit(100);
+    .order("detected_at", { ascending: false });
 
   if (itemId) {
     query = query.eq("item_id", itemId);

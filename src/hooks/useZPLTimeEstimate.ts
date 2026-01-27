@@ -35,8 +35,7 @@ export const useZPLTimeEstimate = () => {
         .select('time_per_label')
         .eq('label_type', labelType)
         .gte('created_at', thirtyDaysAgo.toISOString())
-        .order('created_at', { ascending: false })
-        .limit(20);
+        .order('created_at', { ascending: false });
       
       // Se tiver subtipo, filtrar também
       if (subtype) {

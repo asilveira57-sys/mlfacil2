@@ -247,8 +247,7 @@ async function gatherAnalysisData(supabase: any, sellerId: string) {
       .select('*')
       .eq('seller_id', sellerId)
       .gte('created_at', dateStr)
-      .order('created_at', { ascending: false })
-      .limit(100),
+      .order('created_at', { ascending: false }),
     
     // Automation rules
     supabase
@@ -282,8 +281,7 @@ async function gatherAnalysisData(supabase: any, sellerId: string) {
       .select('*')
       .eq('source_type', 'ads')
       .gte('created_at', dateStr)
-      .order('created_at', { ascending: false })
-      .limit(50),
+      .order('created_at', { ascending: false }),
   ]);
 
   // Get cost catalog for margin context
