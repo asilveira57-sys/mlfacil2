@@ -19,6 +19,7 @@ import {
   ChevronDown,
   MessageSquareText,
   Shield,
+  Tags,
 } from "lucide-react";
 import {
   Collapsible,
@@ -48,31 +49,34 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useUserRole } from "@/hooks/useUserRole";
+import { useModuleTagsMap } from "@/hooks/useModuleTags";
+import { ModuleTagsDisplay } from "@/components/admin/ModuleTagBadge";
 
 interface NavItem {
   title: string;
   url: string;
   icon: React.ElementType;
   badge?: string;
+  moduleId?: string; // For tag lookup
 }
 
 const mainNavItems: NavItem[] = [
-  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-  { title: "Vendas", url: "/shipping-labels", icon: Package },
-  { title: "Tarefas", url: "/tarefas", icon: ListChecks },
-  { title: "Promoções", url: "/promocoes", icon: Tag },
-  { title: "Mercado ADS", url: "/publicidade", icon: Megaphone },
-  { title: "Pós-Venda", url: "/mensagens", icon: MessageSquareText },
-  { title: "Perguntas", url: "/perguntas", icon: MessageSquareText },
+  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, moduleId: "dashboard" },
+  { title: "Vendas", url: "/shipping-labels", icon: Package, moduleId: "etiquetas" },
+  { title: "Tarefas", url: "/tarefas", icon: ListChecks, moduleId: "tarefas" },
+  { title: "Promoções", url: "/promocoes", icon: Tag, moduleId: "promocoes" },
+  { title: "Mercado ADS", url: "/publicidade", icon: Megaphone, moduleId: "publicidade" },
+  { title: "Pós-Venda", url: "/mensagens", icon: MessageSquareText, moduleId: "pos-venda" },
+  { title: "Perguntas", url: "/perguntas", icon: MessageSquareText, moduleId: "perguntas" },
 ];
 
 const analyticsNavItems: NavItem[] = [
-  { title: "Radiografia", url: "/radiografia", icon: Activity },
-  { title: "Mercado", url: "/mercado", icon: Store },
-  { title: "Tendências", url: "/tendencias", icon: TrendingUp },
-  { title: "Concorrência", url: "/concorrencia", icon: Target },
-  { title: "Curva ABC", url: "/abc-analysis", icon: BarChart3 },
-  { title: "Custos", url: "/custos", icon: DollarSign },
+  { title: "Radiografia", url: "/radiografia", icon: Activity, moduleId: "radiografia" },
+  { title: "Mercado", url: "/mercado", icon: Store, moduleId: "mercado" },
+  { title: "Tendências", url: "/tendencias", icon: TrendingUp, moduleId: "tendencias" },
+  { title: "Concorrência", url: "/concorrencia", icon: Target, moduleId: "concorrencia" },
+  { title: "Curva ABC", url: "/abc-analysis", icon: BarChart3, moduleId: "abc" },
+  { title: "Custos", url: "/custos", icon: DollarSign, moduleId: "custos" },
 ];
 
 const toolsNavItems: NavItem[] = [
@@ -89,6 +93,7 @@ const adminNavItems: NavItem[] = [
   { title: "Usuários", url: "/admin/usuarios", icon: Settings },
   { title: "Planos", url: "/admin/planos", icon: Settings },
   { title: "Pagamentos", url: "/admin/pagamentos", icon: Settings },
+  { title: "Tags de Módulos", url: "/admin/tags", icon: Tags },
   { title: "Blog", url: "/admin/blog", icon: FileText },
   { title: "SEO", url: "/admin/seo", icon: Settings },
   { title: "Integrações", url: "/admin/integracoes", icon: Settings },
@@ -101,6 +106,7 @@ export function AppSidebar() {
   const { toast } = useToast();
   const { state } = useSidebar();
   const { isAdmin } = useUserRole();
+  const moduleTagsMap = useModuleTagsMap();
   const isCollapsed = state === "collapsed";
   
   // State for collapsible groups
@@ -136,37 +142,43 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {items.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={isActive(item.url)}
-                        className={cn(
-                          "transition-colors",
-                          isActive(item.url) && "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                        )}
-                      >
-                        <button
-                          onClick={() => navigate(item.url)}
-                          className="flex items-center gap-3 w-full"
+              {items.map((item) => {
+                const moduleTags = item.moduleId ? moduleTagsMap.get(item.moduleId) || [] : [];
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={isActive(item.url)}
+                          className={cn(
+                            "transition-colors",
+                            isActive(item.url) && "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                          )}
                         >
-                          <item.icon className="h-4 w-4 shrink-0" />
-                        </button>
-                      </SidebarMenuButton>
-                    </TooltipTrigger>
-                    <TooltipContent side="right" className="flex items-center gap-2">
-                      {item.title}
-                      {item.badge && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                          {item.badge}
-                        </span>
-                      )}
-                    </TooltipContent>
-                  </Tooltip>
-                </SidebarMenuItem>
-              ))}
+                          <button
+                            onClick={() => navigate(item.url)}
+                            className="flex items-center gap-3 w-full"
+                          >
+                            <item.icon className="h-4 w-4 shrink-0" />
+                          </button>
+                        </SidebarMenuButton>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="flex items-center gap-2">
+                        {item.title}
+                        {item.badge && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                            {item.badge}
+                          </span>
+                        )}
+                        {moduleTags.length > 0 && (
+                          <ModuleTagsDisplay tags={moduleTags} size="sm" maxDisplay={1} />
+                        )}
+                      </TooltipContent>
+                    </Tooltip>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -191,31 +203,37 @@ export function AppSidebar() {
           <CollapsibleContent>
             <SidebarGroupContent>
               <SidebarMenu>
-                {items.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={isActive(item.url)}
-                      className={cn(
-                        "transition-colors",
-                        isActive(item.url) && "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                      )}
-                    >
-                      <button
-                        onClick={() => navigate(item.url)}
-                        className="flex items-center gap-3 w-full"
-                      >
-                        <item.icon className="h-4 w-4 shrink-0" />
-                        <span className="flex-1 truncate">{item.title}</span>
-                        {item.badge && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                            {item.badge}
-                          </span>
+                {items.map((item) => {
+                  const moduleTags = item.moduleId ? moduleTagsMap.get(item.moduleId) || [] : [];
+                  return (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive(item.url)}
+                        className={cn(
+                          "transition-colors",
+                          isActive(item.url) && "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
                         )}
-                      </button>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+                      >
+                        <button
+                          onClick={() => navigate(item.url)}
+                          className="flex items-center gap-3 w-full"
+                        >
+                          <item.icon className="h-4 w-4 shrink-0" />
+                          <span className="flex-1 truncate">{item.title}</span>
+                          {item.badge && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                              {item.badge}
+                            </span>
+                          )}
+                          {moduleTags.length > 0 && (
+                            <ModuleTagsDisplay tags={moduleTags} size="sm" maxDisplay={1} />
+                          )}
+                        </button>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
               </SidebarMenu>
             </SidebarGroupContent>
           </CollapsibleContent>

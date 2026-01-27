@@ -10,7 +10,8 @@ import {
   FileText, 
   Search, 
   Plug, 
-  Settings 
+  Settings,
+  Tags 
 } from 'lucide-react';
 import { AdminDashboard } from './admin/AdminDashboard';
 import { AdminOnboarding } from './admin/AdminOnboarding';
@@ -19,6 +20,7 @@ import { AdminPayments } from './admin/AdminPayments';
 import { AdminSeo } from './admin/AdminSeo';
 import { AdminIntegrations } from './admin/AdminIntegrations';
 import { AdminSettings } from './admin/AdminSettings';
+import { AdminModuleTags } from './admin/AdminModuleTags';
 import BlogAdmin from './BlogAdmin';
 
 const adminTabs = [
@@ -27,6 +29,7 @@ const adminTabs = [
   { id: 'usuarios', label: 'Usuários', icon: Users },
   { id: 'planos', label: 'Planos', icon: CreditCard },
   { id: 'pagamentos', label: 'Pagamentos', icon: Receipt },
+  { id: 'tags', label: 'Tags', icon: Tags },
   { id: 'blog', label: 'Blog', icon: FileText },
   { id: 'seo', label: 'SEO', icon: Search },
   { id: 'integracoes', label: 'Integrações', icon: Plug },
@@ -77,6 +80,7 @@ export default function Admin() {
           <Route path="usuarios" element={<AdminUsers />} />
           <Route path="planos/*" element={<PlanosRedirect />} />
           <Route path="pagamentos" element={<AdminPayments />} />
+          <Route path="tags" element={<AdminModuleTags />} />
           <Route path="blog/*" element={<BlogAdmin />} />
           <Route path="seo" element={<AdminSeo />} />
           <Route path="integracoes" element={<AdminIntegrations />} />

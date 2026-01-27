@@ -4141,6 +4141,75 @@ export type Database = {
         }
         Relationships: []
       }
+      module_tag_assignments: {
+        Row: {
+          created_at: string
+          id: string
+          module_id: string
+          tag_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          module_id: string
+          tag_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          module_id?: string
+          tag_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "module_tag_assignments_module_id_fkey"
+            columns: ["module_id"]
+            isOneToOne: false
+            referencedRelation: "system_modules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "module_tag_assignments_tag_id_fkey"
+            columns: ["tag_id"]
+            isOneToOne: false
+            referencedRelation: "module_tags"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      module_tags: {
+        Row: {
+          color: string
+          created_at: string
+          id: string
+          is_active: boolean
+          name: string
+          priority: number
+          style: string
+          updated_at: string
+        }
+        Insert: {
+          color?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name: string
+          priority?: number
+          style?: string
+          updated_at?: string
+        }
+        Update: {
+          color?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          priority?: number
+          style?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       modules_registry: {
         Row: {
           created_at: string
@@ -6415,6 +6484,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      system_modules: {
+        Row: {
+          created_at: string
+          description: string | null
+          icon_name: string | null
+          id: string
+          is_active: boolean
+          name: string
+          route: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          icon_name?: string | null
+          id: string
+          is_active?: boolean
+          name: string
+          route?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          icon_name?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          route?: string | null
+          updated_at?: string
+        }
+        Relationships: []
       }
       task_checklists: {
         Row: {
