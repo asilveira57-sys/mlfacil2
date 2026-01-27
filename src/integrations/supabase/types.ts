@@ -4445,6 +4445,66 @@ export type Database = {
         }
         Relationships: []
       }
+      plans_v2: {
+        Row: {
+          badge_text: string | null
+          billing_period: string
+          created_at: string
+          description_long: string | null
+          description_short: string | null
+          display_order: number
+          features: Json
+          id: string
+          is_active: boolean
+          is_featured: boolean
+          limits_json: Json
+          name: string
+          plan_type: string
+          price_cents: number
+          requires_ml_owner: boolean
+          slug: string
+          updated_at: string
+        }
+        Insert: {
+          badge_text?: string | null
+          billing_period?: string
+          created_at?: string
+          description_long?: string | null
+          description_short?: string | null
+          display_order?: number
+          features?: Json
+          id?: string
+          is_active?: boolean
+          is_featured?: boolean
+          limits_json?: Json
+          name: string
+          plan_type?: string
+          price_cents?: number
+          requires_ml_owner?: boolean
+          slug: string
+          updated_at?: string
+        }
+        Update: {
+          badge_text?: string | null
+          billing_period?: string
+          created_at?: string
+          description_long?: string | null
+          description_short?: string | null
+          display_order?: number
+          features?: Json
+          id?: string
+          is_active?: boolean
+          is_featured?: boolean
+          limits_json?: Json
+          name?: string
+          plan_type?: string
+          price_cents?: number
+          requires_ml_owner?: boolean
+          slug?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       product_cost_catalog: {
         Row: {
           cost_currency: string
@@ -5613,6 +5673,105 @@ export type Database = {
         }
         Relationships: []
       }
+      user_access_state: {
+        Row: {
+          active_subscription_id: string | null
+          created_at: string
+          default_label_size: string | null
+          default_print_mode: string | null
+          id: string
+          ml_account_connected: boolean
+          ml_account_id: string | null
+          ml_account_role: Database["public"]["Enums"]["ml_account_role"]
+          onboarding_completed_at: string | null
+          onboarding_objective: string[] | null
+          onboarding_status: Database["public"]["Enums"]["onboarding_status"]
+          payment_status: Database["public"]["Enums"]["payment_status"]
+          selected_plan_id: string | null
+          trial_end_at: string | null
+          trial_start_at: string | null
+          trial_status: Database["public"]["Enums"]["trial_status"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          active_subscription_id?: string | null
+          created_at?: string
+          default_label_size?: string | null
+          default_print_mode?: string | null
+          id?: string
+          ml_account_connected?: boolean
+          ml_account_id?: string | null
+          ml_account_role?: Database["public"]["Enums"]["ml_account_role"]
+          onboarding_completed_at?: string | null
+          onboarding_objective?: string[] | null
+          onboarding_status?: Database["public"]["Enums"]["onboarding_status"]
+          payment_status?: Database["public"]["Enums"]["payment_status"]
+          selected_plan_id?: string | null
+          trial_end_at?: string | null
+          trial_start_at?: string | null
+          trial_status?: Database["public"]["Enums"]["trial_status"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          active_subscription_id?: string | null
+          created_at?: string
+          default_label_size?: string | null
+          default_print_mode?: string | null
+          id?: string
+          ml_account_connected?: boolean
+          ml_account_id?: string | null
+          ml_account_role?: Database["public"]["Enums"]["ml_account_role"]
+          onboarding_completed_at?: string | null
+          onboarding_objective?: string[] | null
+          onboarding_status?: Database["public"]["Enums"]["onboarding_status"]
+          payment_status?: Database["public"]["Enums"]["payment_status"]
+          selected_plan_id?: string | null
+          trial_end_at?: string | null
+          trial_start_at?: string | null
+          trial_status?: Database["public"]["Enums"]["trial_status"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_access_state_active_subscription_id_fkey"
+            columns: ["active_subscription_id"]
+            isOneToOne: false
+            referencedRelation: "subscriptions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_access_state_ml_account_id_fkey"
+            columns: ["ml_account_id"]
+            isOneToOne: false
+            referencedRelation: "ml_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_access_state_ml_account_id_fkey"
+            columns: ["ml_account_id"]
+            isOneToOne: false
+            referencedRelation: "unified_marketplace_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_access_state_selected_plan_id_fkey"
+            columns: ["selected_plan_id"]
+            isOneToOne: false
+            referencedRelation: "plans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_access_state_selected_plan_id_fkey"
+            columns: ["selected_plan_id"]
+            isOneToOne: false
+            referencedRelation: "public_plans_v1"
+            referencedColumns: ["plan_id"]
+          },
+        ]
+      }
       user_context: {
         Row: {
           active_company_id: string | null
@@ -6077,6 +6236,35 @@ export type Database = {
           seller_id: string
         }[]
       }
+      get_or_create_user_access_state: {
+        Args: { p_user_id: string }
+        Returns: {
+          active_subscription_id: string | null
+          created_at: string
+          default_label_size: string | null
+          default_print_mode: string | null
+          id: string
+          ml_account_connected: boolean
+          ml_account_id: string | null
+          ml_account_role: Database["public"]["Enums"]["ml_account_role"]
+          onboarding_completed_at: string | null
+          onboarding_objective: string[] | null
+          onboarding_status: Database["public"]["Enums"]["onboarding_status"]
+          payment_status: Database["public"]["Enums"]["payment_status"]
+          selected_plan_id: string | null
+          trial_end_at: string | null
+          trial_start_at: string | null
+          trial_status: Database["public"]["Enums"]["trial_status"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "user_access_state"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       get_orders_needing_cost_sync: {
         Args: { p_limit?: number; p_offset?: number; p_seller_id: string }
         Returns: {
@@ -6107,8 +6295,10 @@ export type Database = {
           visibility_mode: string
         }[]
       }
+      get_user_feature_flags: { Args: { p_user_id: string }; Returns: Json }
       get_user_full_context: { Args: { p_user_id: string }; Returns: Json }
       get_user_role: { Args: { _user_id: string }; Returns: string }
+      get_user_status: { Args: never; Returns: Json }
       get_user_subscription: {
         Args: { p_user_id: string }
         Returns: {
@@ -6146,6 +6336,7 @@ export type Database = {
         Args: { _user_id: string; _workspace_id: string }
         Returns: boolean
       }
+      select_plan: { Args: { p_plan_id: string }; Returns: Json }
       set_user_active_context: {
         Args: {
           p_company_id?: string
@@ -6158,13 +6349,51 @@ export type Database = {
         Args: { p_plan_code?: string; p_user_id: string }
         Returns: string
       }
+      update_onboarding_state: {
+        Args: {
+          p_label_size?: string
+          p_objective?: string[]
+          p_print_mode?: string
+          p_status?: Database["public"]["Enums"]["onboarding_status"]
+        }
+        Returns: {
+          active_subscription_id: string | null
+          created_at: string
+          default_label_size: string | null
+          default_print_mode: string | null
+          id: string
+          ml_account_connected: boolean
+          ml_account_id: string | null
+          ml_account_role: Database["public"]["Enums"]["ml_account_role"]
+          onboarding_completed_at: string | null
+          onboarding_objective: string[] | null
+          onboarding_status: Database["public"]["Enums"]["onboarding_status"]
+          payment_status: Database["public"]["Enums"]["payment_status"]
+          selected_plan_id: string | null
+          trial_end_at: string | null
+          trial_start_at: string | null
+          trial_status: Database["public"]["Enums"]["trial_status"]
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "user_access_state"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
     }
     Enums: {
       app_role: "admin" | "seller"
       billing_cycle: "monthly" | "quarterly" | "semiannual" | "annual"
+      ml_account_role: "none" | "owner" | "collaborator"
+      onboarding_status: "pending" | "completed"
+      payment_status: "free" | "trial" | "active" | "blocked" | "cancelled"
       plan_type_enum: "volume" | "zpl_full"
       task_priority: "low" | "medium" | "high" | "urgent"
       task_status: "todo" | "doing" | "blocked" | "done"
+      trial_status: "none" | "active" | "expired"
       workspace_role: "admin" | "gestor" | "operador" | "visualizador"
     }
     CompositeTypes: {
@@ -6295,9 +6524,13 @@ export const Constants = {
     Enums: {
       app_role: ["admin", "seller"],
       billing_cycle: ["monthly", "quarterly", "semiannual", "annual"],
+      ml_account_role: ["none", "owner", "collaborator"],
+      onboarding_status: ["pending", "completed"],
+      payment_status: ["free", "trial", "active", "blocked", "cancelled"],
       plan_type_enum: ["volume", "zpl_full"],
       task_priority: ["low", "medium", "high", "urgent"],
       task_status: ["todo", "doing", "blocked", "done"],
+      trial_status: ["none", "active", "expired"],
       workspace_role: ["admin", "gestor", "operador", "visualizador"],
     },
   },
