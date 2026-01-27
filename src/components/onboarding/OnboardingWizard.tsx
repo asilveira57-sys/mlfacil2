@@ -4,7 +4,6 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { useUserAccess } from '@/contexts/UserAccessContext';
-import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
 import { OnboardingWelcome } from './steps/OnboardingWelcome';
@@ -27,7 +26,7 @@ const TOTAL_STEPS = 7;
 
 export function OnboardingWizard() {
   const navigate = useNavigate();
-  const { status, state, flags, refetch, requiresOnboarding } = useUserAccess();
+  const { state, refetch, requiresOnboarding, updateOnboarding } = useUserAccess();
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [data, setData] = useState<OnboardingData>({
@@ -74,23 +73,18 @@ export function OnboardingWizard() {
   const handleComplete = async () => {
     setIsSubmitting(true);
     try {
-      const { data: session } = await supabase.auth.getSession();
-      if (!session?.session?.user?.id) {
-        throw new Error('Usuário não autenticado');
-      }
-
-      // Update onboarding state
-      const { error } = await supabase.rpc('update_onboarding_state', {
-        p_user_id: session.session.user.id,
-        p_status: 'completed',
-        p_objective: data.objective ? [data.objective] : null,
-        p_print_mode: data.printMode,
-        p_label_size: data.labelSize,
+      // Use the context's updateOnboarding function
+      const success = await updateOnboarding({
+        status: 'completed',
+        objective: data.objective ? [data.objective] : undefined,
+        printMode: data.printMode,
+        labelSize: data.labelSize,
       });
 
-      if (error) throw error;
+      if (!success) {
+        throw new Error('Erro ao salvar configurações');
+      }
 
-      await refetch();
       toast.success('Configuração concluída! Bem-vindo ao Mktpfacil.');
       navigate('/dashboard');
     } catch (err) {
