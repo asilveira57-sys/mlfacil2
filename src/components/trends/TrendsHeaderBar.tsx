@@ -12,12 +12,13 @@ import {
   User,
   Star
 } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useTrends } from '@/contexts/TrendsContext';
 import { SubcategoryNavigator } from './SubcategoryNavigator';
 import { useCategoryBreadcrumb } from '@/hooks/useSubcategories';
 import { SellerCategorySelector } from './SellerCategorySelector';
 import { useSellerCategories, useSyncCategories } from '@/hooks/useSellerCategories';
+import { performGlobalUiCleanup } from '@/lib/uiRouteCleanup';
 
 // ============================================================
 // TIPOS
@@ -105,6 +106,21 @@ export function TrendsHeaderBar({
   const [showNavigator, setShowNavigator] = useState(false);
   const { data: breadcrumb } = useCategoryBreadcrumb(effectiveCategoryId);
   
+  // Defensive cleanup when any Select closes to prevent orphaned scroll locks
+  const handleSelectOpenChange = useCallback((open: boolean) => {
+    if (!open) {
+      // Small delay to allow Radix to finish its cleanup, then force remove orphans
+      setTimeout(() => {
+        const hasAnyOpen = !!document.querySelector('[data-radix-select-content][data-state="open"]');
+        if (!hasAnyOpen) {
+          document.body.removeAttribute('data-scroll-locked');
+          document.body.style.pointerEvents = '';
+          document.body.style.overflow = '';
+        }
+      }, 100);
+    }
+  }, []);
+  
   const handleCategorySelect = (id: string, name: string) => {
     // SEMPRE atualizar a categoria principal ao selecionar
     // O SubcategoryNavigator gerencia subcategorias via expansão separadamente
@@ -112,6 +128,9 @@ export function TrendsHeaderBar({
     setCategory(id || null, name);
     onCategoryChange?.(id || null, name);
     setShowNavigator(false);
+    
+    // Force cleanup after category selection
+    setTimeout(() => performGlobalUiCleanup('category-select'), 150);
   };
   
   const handleBreadcrumbClick = (id: string) => {
@@ -152,6 +171,7 @@ export function TrendsHeaderBar({
             <Select 
               value={state.selectedAccountId || 'none'} 
               onValueChange={(v) => setAccount(v === 'none' ? null : v)}
+              onOpenChange={handleSelectOpenChange}
             >
               <SelectTrigger className="w-[180px]">
                 <User className="h-4 w-4 mr-2 text-muted-foreground" />
@@ -174,6 +194,7 @@ export function TrendsHeaderBar({
             <Select 
               value={String(state.selectedPeriod)} 
               onValueChange={(v) => setPeriod(Number(v))}
+              onOpenChange={handleSelectOpenChange}
             >
               <SelectTrigger className="w-[150px]">
                 <Clock className="h-4 w-4 mr-2 text-muted-foreground" />

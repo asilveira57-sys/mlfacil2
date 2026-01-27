@@ -17,6 +17,17 @@ function clearBodyScrollLock() {
   const body = document.body;
   const html = document.documentElement;
 
+  // Check if any Radix component is actually open
+  const hasAnyOpen = !!(
+    document.querySelector('[data-radix-portal] [data-state="open"]') ||
+    document.querySelector('[data-radix-select-content][data-state="open"]') ||
+    document.querySelector('[data-radix-dialog-content][data-state="open"]') ||
+    document.querySelector('[data-radix-popover-content][data-state="open"]')
+  );
+
+  // Only clear if nothing is actually open
+  if (hasAnyOpen) return;
+
   // Remove data-scroll-locked attribute (used by Radix Select/Popover)
   body.removeAttribute("data-scroll-locked");
   
