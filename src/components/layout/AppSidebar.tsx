@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
-  TrendingUp,
   Megaphone,
   DollarSign,
   BarChart3,
@@ -15,8 +14,6 @@ import {
   Package,
   Printer,
   ListChecks,
-  ChevronLeft,
-  ChevronRight,
   LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -59,7 +56,6 @@ const mainNavItems: NavItem[] = [
 ];
 
 const analyticsNavItems: NavItem[] = [
-  { title: "Tendências", url: "/tendencias", icon: TrendingUp },
   { title: "Radiografia", url: "/radiografia", icon: Activity },
   { title: "Mercado", url: "/mercado", icon: Store },
   { title: "Concorrência", url: "/concorrencia", icon: Target },
