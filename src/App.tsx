@@ -10,6 +10,8 @@ import { useOrdersSyncWatchdog } from "@/hooks/useOrdersSyncWatchdog";
 import { ActiveAccountProvider } from "@/contexts/ActiveAccountContext";
 import { UserAccessProvider } from "@/contexts/UserAccessContext";
 import { RouteChangeCleanup } from "@/components/layout/RouteChangeCleanup";
+import { OnboardingWizard } from "@/components/onboarding";
+import { TrialExpiredPaywall } from "@/components/access";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
@@ -136,6 +138,8 @@ const App = () => {
             <GlobalWatchdogs />
             <BrowserRouter>
               <RouteChangeCleanup />
+              <OnboardingWizard />
+              <TrialExpiredPaywall />
               <Routes>
                 <Route path="/" element={<Index />} />
                 <Route path="/home" element={<Index />} />
