@@ -18,6 +18,7 @@ import {
   TrendingUp,
   ChevronDown,
   MessageSquareText,
+  Shield,
 } from "lucide-react";
 import {
   Collapsible,
@@ -37,7 +38,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
 import {
@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/tooltip";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useUserRole } from "@/hooks/useUserRole";
 
 interface NavItem {
   title: string;
@@ -83,11 +84,23 @@ const configNavItems: NavItem[] = [
   { title: "Configurações", url: "/settings", icon: Settings },
 ];
 
+const adminNavItems: NavItem[] = [
+  { title: "Dashboard Admin", url: "/admin", icon: LayoutDashboard },
+  { title: "Usuários", url: "/admin/usuarios", icon: Settings },
+  { title: "Planos", url: "/admin/planos", icon: Settings },
+  { title: "Pagamentos", url: "/admin/pagamentos", icon: Settings },
+  { title: "Blog", url: "/admin/blog", icon: FileText },
+  { title: "SEO", url: "/admin/seo", icon: Settings },
+  { title: "Integrações", url: "/admin/integracoes", icon: Settings },
+  { title: "Configurações", url: "/admin/configuracoes", icon: Settings },
+];
+
 export function AppSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { toast } = useToast();
   const { state } = useSidebar();
+  const { isAdmin } = useUserRole();
   const isCollapsed = state === "collapsed";
   
   // State for collapsible groups
@@ -96,13 +109,14 @@ export function AppSidebar() {
     Analytics: true,
     Ferramentas: true,
     Sistema: true,
+    Admin: true,
   });
 
   const toggleGroup = (label: string) => {
     setOpenGroups(prev => ({ ...prev, [label]: !prev[label] }));
   };
 
-  const isActive = (url: string) => location.pathname === url;
+  const isActive = (url: string) => location.pathname === url || location.pathname.startsWith(url + '/');
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -113,7 +127,7 @@ export function AppSidebar() {
     navigate("/auth");
   };
 
-  const NavGroup = ({ label, items }: { label: string; items: NavItem[] }) => {
+  const NavGroup = ({ label, items, icon: GroupIcon }: { label: string; items: NavItem[]; icon?: React.ElementType }) => {
     const isOpen = openGroups[label] ?? true;
     
     // When collapsed, show items directly without collapsible header
@@ -164,7 +178,10 @@ export function AppSidebar() {
         <Collapsible open={isOpen} onOpenChange={() => toggleGroup(label)}>
           <CollapsibleTrigger asChild>
             <SidebarGroupLabel className="cursor-pointer hover:bg-sidebar-accent/50 rounded-md transition-colors flex items-center justify-between pr-2">
-              <span>{label}</span>
+              <span className="flex items-center gap-2">
+                {GroupIcon && <GroupIcon className="h-4 w-4" />}
+                {label}
+              </span>
               <ChevronDown className={cn(
                 "h-3.5 w-3.5 text-muted-foreground transition-transform duration-200",
                 isOpen && "rotate-180"
@@ -232,6 +249,11 @@ export function AppSidebar() {
         <NavGroup label="Analytics" items={analyticsNavItems} />
         <NavGroup label="Ferramentas" items={toolsNavItems} />
         <NavGroup label="Sistema" items={configNavItems} />
+        
+        {/* Admin Section - Only visible to admins */}
+        {isAdmin && (
+          <NavGroup label="Admin" items={adminNavItems} icon={Shield} />
+        )}
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border p-2">
