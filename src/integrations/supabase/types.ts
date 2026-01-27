@@ -4505,6 +4505,246 @@ export type Database = {
         }
         Relationships: []
       }
+      post_sale_automation_rules: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          require_approval: boolean
+          seller_id: string
+          template_id: string
+          updated_at: string
+          user_id: string
+          wait_for_buyer_response: boolean
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          require_approval?: boolean
+          seller_id: string
+          template_id: string
+          updated_at?: string
+          user_id: string
+          wait_for_buyer_response?: boolean
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          require_approval?: boolean
+          seller_id?: string
+          template_id?: string
+          updated_at?: string
+          user_id?: string
+          wait_for_buyer_response?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "post_sale_automation_rules_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "post_sale_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      post_sale_blocked_patterns: {
+        Row: {
+          category: string
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          pattern: string
+          pattern_type: string
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          pattern: string
+          pattern_type: string
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          pattern?: string
+          pattern_type?: string
+        }
+        Relationships: []
+      }
+      post_sale_messages: {
+        Row: {
+          block_details: Json | null
+          block_reason: string | null
+          buyer_id: string | null
+          buyer_name: string | null
+          content_sent: string
+          created_at: string
+          id: string
+          is_visible: boolean
+          listing_id: string | null
+          listing_title: string | null
+          message_type: Database["public"]["Enums"]["post_sale_message_type"]
+          ml_message_id: string | null
+          order_id: string
+          pack_id: string | null
+          seller_id: string
+          sent_at: string | null
+          status: Database["public"]["Enums"]["post_sale_message_status"]
+          suggested_fix: string | null
+          template_id: string | null
+          trigger_event: Database["public"]["Enums"]["post_sale_trigger_event"]
+          user_id: string
+        }
+        Insert: {
+          block_details?: Json | null
+          block_reason?: string | null
+          buyer_id?: string | null
+          buyer_name?: string | null
+          content_sent: string
+          created_at?: string
+          id?: string
+          is_visible?: boolean
+          listing_id?: string | null
+          listing_title?: string | null
+          message_type: Database["public"]["Enums"]["post_sale_message_type"]
+          ml_message_id?: string | null
+          order_id: string
+          pack_id?: string | null
+          seller_id: string
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["post_sale_message_status"]
+          suggested_fix?: string | null
+          template_id?: string | null
+          trigger_event: Database["public"]["Enums"]["post_sale_trigger_event"]
+          user_id: string
+        }
+        Update: {
+          block_details?: Json | null
+          block_reason?: string | null
+          buyer_id?: string | null
+          buyer_name?: string | null
+          content_sent?: string
+          created_at?: string
+          id?: string
+          is_visible?: boolean
+          listing_id?: string | null
+          listing_title?: string | null
+          message_type?: Database["public"]["Enums"]["post_sale_message_type"]
+          ml_message_id?: string | null
+          order_id?: string
+          pack_id?: string | null
+          seller_id?: string
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["post_sale_message_status"]
+          suggested_fix?: string | null
+          template_id?: string | null
+          trigger_event?: Database["public"]["Enums"]["post_sale_trigger_event"]
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "post_sale_messages_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "post_sale_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      post_sale_template_scopes: {
+        Row: {
+          created_at: string
+          id: string
+          is_enabled: boolean
+          scope_type: string
+          scope_value: string | null
+          template_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_enabled?: boolean
+          scope_type: string
+          scope_value?: string | null
+          template_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_enabled?: boolean
+          scope_type?: string
+          scope_value?: string | null
+          template_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "post_sale_template_scopes_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "post_sale_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      post_sale_templates: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          is_active: boolean
+          logistics_profile:
+            | Database["public"]["Enums"]["post_sale_logistics_profile"]
+            | null
+          max_characters: number | null
+          message_type: Database["public"]["Enums"]["post_sale_message_type"]
+          name: string
+          seller_id: string
+          trigger_event: Database["public"]["Enums"]["post_sale_trigger_event"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          logistics_profile?:
+            | Database["public"]["Enums"]["post_sale_logistics_profile"]
+            | null
+          max_characters?: number | null
+          message_type: Database["public"]["Enums"]["post_sale_message_type"]
+          name: string
+          seller_id: string
+          trigger_event: Database["public"]["Enums"]["post_sale_trigger_event"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          logistics_profile?:
+            | Database["public"]["Enums"]["post_sale_logistics_profile"]
+            | null
+          max_characters?: number | null
+          message_type?: Database["public"]["Enums"]["post_sale_message_type"]
+          name?: string
+          seller_id?: string
+          trigger_event?: Database["public"]["Enums"]["post_sale_trigger_event"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       product_cost_catalog: {
         Row: {
           cost_currency: string
@@ -6391,6 +6631,18 @@ export type Database = {
       onboarding_status: "pending" | "completed"
       payment_status: "free" | "trial" | "active" | "blocked" | "cancelled"
       plan_type_enum: "volume" | "zpl_full"
+      post_sale_logistics_profile: "mercado_envios" | "full" | "outros"
+      post_sale_message_status:
+        | "enviado"
+        | "bloqueado"
+        | "erro"
+        | "pendente"
+        | "rascunho"
+      post_sale_message_type: "informativa" | "preventiva" | "relacionamento"
+      post_sale_trigger_event:
+        | "venda_confirmada"
+        | "pedido_enviado"
+        | "pedido_entregue"
       task_priority: "low" | "medium" | "high" | "urgent"
       task_status: "todo" | "doing" | "blocked" | "done"
       trial_status: "none" | "active" | "expired"
@@ -6528,6 +6780,20 @@ export const Constants = {
       onboarding_status: ["pending", "completed"],
       payment_status: ["free", "trial", "active", "blocked", "cancelled"],
       plan_type_enum: ["volume", "zpl_full"],
+      post_sale_logistics_profile: ["mercado_envios", "full", "outros"],
+      post_sale_message_status: [
+        "enviado",
+        "bloqueado",
+        "erro",
+        "pendente",
+        "rascunho",
+      ],
+      post_sale_message_type: ["informativa", "preventiva", "relacionamento"],
+      post_sale_trigger_event: [
+        "venda_confirmada",
+        "pedido_enviado",
+        "pedido_entregue",
+      ],
       task_priority: ["low", "medium", "high", "urgent"],
       task_status: ["todo", "doing", "blocked", "done"],
       trial_status: ["none", "active", "expired"],

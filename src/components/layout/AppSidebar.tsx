@@ -17,6 +17,7 @@ import {
   LogOut,
   TrendingUp,
   ChevronDown,
+  MessageSquareText,
 } from "lucide-react";
 import {
   Collapsible,
@@ -60,6 +61,7 @@ const mainNavItems: NavItem[] = [
   { title: "Tarefas", url: "/tarefas", icon: ListChecks },
   { title: "Promoções", url: "/promocoes", icon: Tag },
   { title: "Mercado ADS", url: "/publicidade", icon: Megaphone },
+  { title: "Pós-Venda", url: "/mensagens", icon: MessageSquareText },
 ];
 
 const analyticsNavItems: NavItem[] = [
