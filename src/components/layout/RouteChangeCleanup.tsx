@@ -36,6 +36,26 @@ export function RouteChangeCleanup() {
     };
   }, [pathname]);
 
+  // Periodic check for orphaned scroll locks (every 2s)
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      const hasScrollLock = document.body.hasAttribute("data-scroll-locked");
+      const hasAnyOpen = !!document.querySelector('[data-radix-portal] [data-state="open"]');
+      
+      if (hasScrollLock && !hasAnyOpen) {
+        if (import.meta.env.DEV) {
+          console.warn("[UI-Cleanup] Orphaned scroll-lock detected, removing...");
+        }
+        document.body.removeAttribute("data-scroll-locked");
+        document.body.style.overflow = "";
+        document.body.style.paddingRight = "";
+        document.body.style.pointerEvents = "";
+      }
+    }, 2000);
+
+    return () => window.clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     if (!import.meta.env.DEV) return;
 
