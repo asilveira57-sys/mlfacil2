@@ -8,6 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCostSyncWatchdog } from "@/hooks/useCostSyncWatchdog";
 import { useOrdersSyncWatchdog } from "@/hooks/useOrdersSyncWatchdog";
 import { ActiveAccountProvider } from "@/contexts/ActiveAccountContext";
+import { RouteChangeCleanup } from "@/components/layout/RouteChangeCleanup";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
@@ -132,6 +133,7 @@ const App = () => {
           <Sonner />
           <GlobalWatchdogs />
           <BrowserRouter>
+             <RouteChangeCleanup />
             <Routes>
               <Route path="/" element={<Index />} />
               <Route path="/home" element={<Index />} />
