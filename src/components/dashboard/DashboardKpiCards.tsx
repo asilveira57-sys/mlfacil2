@@ -44,7 +44,7 @@ export function DashboardKpiCards({ sellerId }: { sellerId?: string }) {
           .from("meli_orders_cache")
           .select("*", { count: "exact", head: true })
           .eq("seller_id", sellerId)
-          .gte("date_created", thirtyDaysAgoISO);
+          .gte("created_at_meli", thirtyDaysAgoISO);
 
         // Fetch pending alerts
         const { count: alertsCount } = await supabase
