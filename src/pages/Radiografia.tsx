@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Activity, List, Settings } from "lucide-react";
+import { Activity, List } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { RadiographyOverview } from "@/components/radiography/RadiographyOverview";
 import { RadiographyItemList } from "@/components/radiography/RadiographyItemList";
 import { RadiographyDetailDrawer } from "@/components/radiography/RadiographyDetailDrawer";
+import { DashboardLayout } from "@/components/layout/DashboardLayout";
 
 export default function Radiografia() {
   const [sellerId, setSellerId] = useState<string | null>(null);
@@ -37,43 +38,48 @@ export default function Radiografia() {
   };
 
   return (
-    <div className="container max-w-7xl mx-auto py-6 px-4">
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="mb-6">
-          <TabsTrigger value="overview" className="gap-2">
-            <Activity className="h-4 w-4" />
-            Visão Geral
-          </TabsTrigger>
-          <TabsTrigger value="items" className="gap-2">
-            <List className="h-4 w-4" />
-            Anúncios
-          </TabsTrigger>
-        </TabsList>
+    <DashboardLayout 
+      title="Radiografia de Anúncios" 
+      subtitle="Monitoramento de saúde e performance dos seus anúncios"
+    >
+      <div className="container max-w-7xl mx-auto py-6 px-4">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="mb-6">
+            <TabsTrigger value="overview" className="gap-2">
+              <Activity className="h-4 w-4" />
+              Visão Geral
+            </TabsTrigger>
+            <TabsTrigger value="items" className="gap-2">
+              <List className="h-4 w-4" />
+              Anúncios
+            </TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="overview">
-          <RadiographyOverview 
-            sellerId={sellerId} 
-            onSelectItem={handleSelectItem}
-          />
-        </TabsContent>
+          <TabsContent value="overview">
+            <RadiographyOverview 
+              sellerId={sellerId} 
+              onSelectItem={handleSelectItem}
+            />
+          </TabsContent>
 
-        <TabsContent value="items">
-          <RadiographyItemList 
-            sellerId={sellerId}
-            onSelectItem={handleSelectItem}
-          />
-        </TabsContent>
-      </Tabs>
+          <TabsContent value="items">
+            <RadiographyItemList 
+              sellerId={sellerId}
+              onSelectItem={handleSelectItem}
+            />
+          </TabsContent>
+        </Tabs>
 
-      <RadiographyDetailDrawer
-        sellerId={sellerId}
-        itemId={selectedItemId}
-        open={drawerOpen}
-        onClose={() => {
-          setDrawerOpen(false);
-          setSelectedItemId(null);
-        }}
-      />
-    </div>
+        <RadiographyDetailDrawer
+          sellerId={sellerId}
+          itemId={selectedItemId}
+          open={drawerOpen}
+          onClose={() => {
+            setDrawerOpen(false);
+            setSelectedItemId(null);
+          }}
+        />
+      </div>
+    </DashboardLayout>
   );
 }

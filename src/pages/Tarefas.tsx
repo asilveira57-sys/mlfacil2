@@ -24,6 +24,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import type { Task, TaskStatus, TaskPriority, AutomationRule, WorkspaceAccount, SystemEvent } from '@/types/tasks';
 
 export default function Tarefas() {
@@ -124,146 +125,156 @@ export default function Tarefas() {
   // Loading state
   if (prefsLoading) {
     return (
-      <div className="container mx-auto p-6 space-y-6">
-        <Skeleton className="h-10 w-64" />
-        <Skeleton className="h-12 w-full" />
-        <Skeleton className="h-96 w-full" />
-      </div>
+      <DashboardLayout title="Tarefas">
+        <div className="container mx-auto p-6 space-y-6">
+          <Skeleton className="h-10 w-64" />
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-96 w-full" />
+        </div>
+      </DashboardLayout>
     );
   }
 
   // Onboarding - tasks not enabled
   if (!tasksEnabled) {
-    return <TasksOnboarding onEnable={handleEnableTasks} />;
+    return (
+      <DashboardLayout title="Tarefas">
+        <TasksOnboarding onEnable={handleEnableTasks} />
+      </DashboardLayout>
+    );
   }
 
   // No workspace (shouldn't happen after ensure_workspace, but fallback)
   if (!activeWorkspace) {
     return (
-      <div className="container mx-auto p-6">
-        <div className="text-center py-12">
-          <h2 className="text-xl font-semibold mb-2">Erro ao carregar workspace</h2>
-          <p className="text-muted-foreground">
-            Tente recarregar a página.
-          </p>
+      <DashboardLayout title="Tarefas">
+        <div className="container mx-auto p-6">
+          <div className="text-center py-12">
+            <h2 className="text-xl font-semibold mb-2">Erro ao carregar workspace</h2>
+            <p className="text-muted-foreground">
+              Tente recarregar a página.
+            </p>
+          </div>
         </div>
-      </div>
+      </DashboardLayout>
     );
   }
 
-  return (
-    <div className="container mx-auto p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div>
-            <h1 className="text-2xl font-bold">Tarefas</h1>
-          </div>
-          <WorkspaceSwitcher
-            currentWorkspace={activeWorkspace}
-            workspaces={workspaces}
-            onSwitch={handleSwitchWorkspace}
-          />
-        </div>
-        <Button onClick={() => setDrawerOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          Nova tarefa
-        </Button>
-      </div>
-
-      {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={handleTabChange}>
-        <TabsList>
-          <TabsTrigger value="lista" className="gap-2">
-            <List className="h-4 w-4" />
-            Lista
-          </TabsTrigger>
-          <TabsTrigger value="quadro" className="gap-2">
-            <LayoutGrid className="h-4 w-4" />
-            Quadro
-          </TabsTrigger>
-          <TabsTrigger value="inbox" className="gap-2">
-            <Bell className="h-4 w-4" />
-            Inbox
-          </TabsTrigger>
-          <TabsTrigger value="regras" className="gap-2">
-            <Settings className="h-4 w-4" />
-            Regras
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
-
-      {/* Content based on active tab */}
-      {activeTab === 'lista' && (
-        <>
-          <TaskFilters
-            filters={filters}
-            onFiltersChange={setFilters}
-            members={members}
-            accounts={accounts}
-          />
-          {!tasksLoading && tasks.length === 0 ? (
-            <TasksEmptyState onCreateTask={() => setDrawerOpen(true)} />
-          ) : (
-            <TaskList
-              tasks={tasks}
-              loading={tasksLoading}
-              selectedIds={selectedTaskIds}
-              onSelectChange={setSelectedTaskIds}
-              onStatusChange={handleStatusChange}
-              onDelete={deleteTask}
-            />
-          )}
-          {selectedTaskIds.length > 0 && (
-            <TaskBulkActions
-              selectedCount={selectedTaskIds.length}
-              members={members}
-              onClear={() => setSelectedTaskIds([])}
-              onStatusChange={handleBulkStatusChange}
-              onAssigneeChange={handleBulkAssigneeChange}
-              onPriorityChange={handleBulkPriorityChange}
-            />
-          )}
-        </>
-      )}
-
-      {activeTab === 'quadro' && (
-        <>
-          <TaskFilters
-            filters={filters}
-            onFiltersChange={setFilters}
-            members={members}
-            accounts={accounts}
-          />
-          {!tasksLoading && tasks.length === 0 ? (
-            <TasksEmptyState onCreateTask={() => setDrawerOpen(true)} />
-          ) : (
-            <TaskBoard
-              tasks={tasks}
-              loading={tasksLoading}
-              onStatusChange={handleStatusChange}
-            />
-          )}
-        </>
-      )}
-
-      {activeTab === 'inbox' && (
-        <InboxContent workspaceId={activeWorkspace.id} />
-      )}
-
-      {activeTab === 'regras' && (
-        <RulesContent workspaceId={activeWorkspace.id} accounts={accounts} />
-      )}
-
-      {/* Create/Edit Drawer */}
-      <TaskDrawer
-        open={drawerOpen}
-        onOpenChange={setDrawerOpen}
-        onSave={handleCreateTask}
-        members={members}
-        accounts={accounts}
+  const headerContent = (
+    <div className="flex items-center gap-4">
+      <WorkspaceSwitcher
+        currentWorkspace={activeWorkspace}
+        workspaces={workspaces}
+        onSwitch={handleSwitchWorkspace}
       />
+      <Button onClick={() => setDrawerOpen(true)}>
+        <Plus className="h-4 w-4 mr-2" />
+        Nova tarefa
+      </Button>
     </div>
+  );
+
+  return (
+    <DashboardLayout 
+      title="Tarefas" 
+      subtitle="Gerencie suas tarefas e automações"
+      headerContent={headerContent}
+    >
+      <div className="container mx-auto p-6 space-y-6">
+        {/* Tabs */}
+        <Tabs value={activeTab} onValueChange={handleTabChange}>
+          <TabsList>
+            <TabsTrigger value="lista" className="gap-2">
+              <List className="h-4 w-4" />
+              Lista
+            </TabsTrigger>
+            <TabsTrigger value="quadro" className="gap-2">
+              <LayoutGrid className="h-4 w-4" />
+              Quadro
+            </TabsTrigger>
+            <TabsTrigger value="inbox" className="gap-2">
+              <Bell className="h-4 w-4" />
+              Inbox
+            </TabsTrigger>
+            <TabsTrigger value="regras" className="gap-2">
+              <Settings className="h-4 w-4" />
+              Regras
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        {/* Content based on active tab */}
+        {activeTab === 'lista' && (
+          <>
+            <TaskFilters
+              filters={filters}
+              onFiltersChange={setFilters}
+              members={members}
+              accounts={accounts}
+            />
+            {!tasksLoading && tasks.length === 0 ? (
+              <TasksEmptyState onCreateTask={() => setDrawerOpen(true)} />
+            ) : (
+              <TaskList
+                tasks={tasks}
+                loading={tasksLoading}
+                selectedIds={selectedTaskIds}
+                onSelectChange={setSelectedTaskIds}
+                onStatusChange={handleStatusChange}
+                onDelete={deleteTask}
+              />
+            )}
+            {selectedTaskIds.length > 0 && (
+              <TaskBulkActions
+                selectedCount={selectedTaskIds.length}
+                members={members}
+                onClear={() => setSelectedTaskIds([])}
+                onStatusChange={handleBulkStatusChange}
+                onAssigneeChange={handleBulkAssigneeChange}
+                onPriorityChange={handleBulkPriorityChange}
+              />
+            )}
+          </>
+        )}
+
+        {activeTab === 'quadro' && (
+          <>
+            <TaskFilters
+              filters={filters}
+              onFiltersChange={setFilters}
+              members={members}
+              accounts={accounts}
+            />
+            {!tasksLoading && tasks.length === 0 ? (
+              <TasksEmptyState onCreateTask={() => setDrawerOpen(true)} />
+            ) : (
+              <TaskBoard
+                tasks={tasks}
+                loading={tasksLoading}
+                onStatusChange={handleStatusChange}
+              />
+            )}
+          </>
+        )}
+
+        {activeTab === 'inbox' && (
+          <InboxContent workspaceId={activeWorkspace.id} />
+        )}
+
+        {activeTab === 'regras' && (
+          <RulesContent workspaceId={activeWorkspace.id} accounts={accounts} />
+        )}
+
+        {/* Create/Edit Drawer */}
+        <TaskDrawer
+          open={drawerOpen}
+          onOpenChange={setDrawerOpen}
+          onSave={handleCreateTask}
+          members={members}
+          accounts={accounts}
+        />
+      </div>
+    </DashboardLayout>
   );
 }
 

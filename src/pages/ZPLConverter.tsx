@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { Home, Download, FileText, X, Upload, History, Clock, Trash2, Sparkles, Info } from "lucide-react";
+import { Download, FileText, X, Upload, History, Clock, Trash2, Sparkles, Info } from "lucide-react";
 import jsPDF from "jspdf";
 import { useDropzone } from "react-dropzone";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -18,6 +18,7 @@ import { ZPLTimer } from "@/components/ZPLTimer";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useZPLTimeEstimate } from "@/hooks/useZPLTimeEstimate";
 import { useZPLPrintHistory } from "@/hooks/useZPLPrintHistory";
+import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import type { User } from "@supabase/supabase-js";
 
 export default function ZPLConverter() {
@@ -374,45 +375,21 @@ export default function ZPLConverter() {
     multiple: false,
   });
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    navigate("/auth");
-  };
-
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-      </div>
+      <DashboardLayout title="Conversor ZPL para PDF">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+        </div>
+      </DashboardLayout>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Button variant="ghost" size="icon" onClick={() => navigate("/dashboard")}>
-                <Home className="h-5 w-5" />
-              </Button>
-              <div>
-                <h1 className="text-xl font-semibold">Conversor ZPL para PDF</h1>
-                <p className="text-sm text-muted-foreground">Converta códigos ZPL em etiquetas PDF</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <span className="text-sm text-muted-foreground">{user?.email}</span>
-              <Button variant="outline" size="sm" onClick={handleSignOut}>
-                Sair
-              </Button>
-            </div>
-          </div>
-        </div>
-      </header>
-
+    <DashboardLayout 
+      title="Conversor ZPL para PDF" 
+      subtitle="Converta códigos ZPL em etiquetas PDF"
+    >
       <main className="container mx-auto px-4 py-6">
         <div className="mb-6">
           <Card>
@@ -809,6 +786,6 @@ export default function ZPLConverter() {
           </div>
         </div>
       </main>
-    </div>
+    </DashboardLayout>
   );
 }

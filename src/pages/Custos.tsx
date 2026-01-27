@@ -1,18 +1,19 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { DollarSign, Package, TrendingUp, Calculator, RefreshCw, Settings, BarChart3, ArrowLeft, FileSearch } from 'lucide-react';
+import { DollarSign, Package, TrendingUp, Calculator, RefreshCw, Settings, BarChart3, FileSearch } from 'lucide-react';
 import { toast } from 'sonner';
 import { CostCatalog } from '@/components/custos/CostCatalog';
 import { CostSettings } from '@/components/custos/CostSettings';
 import { CostOrders } from '@/components/custos/CostOrders';
 import { CostAbcProfit } from '@/components/custos/CostAbcProfit';
 import { CostOrderDiagnostic } from '@/components/custos/CostOrderDiagnostic';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
 
 interface MlAccount {
   id: string;
@@ -114,51 +115,45 @@ export default function Custos() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background p-6">
-        <Skeleton className="h-8 w-48 mb-6" />
-        <Skeleton className="h-64 w-full" />
-      </div>
+      <DashboardLayout title="Módulo de Custos">
+        <div className="p-6">
+          <Skeleton className="h-8 w-48 mb-6" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      </DashboardLayout>
     );
   }
 
   const formatCurrency = (value: number) => 
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 
-  return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Link to="/" className="flex items-center gap-1 text-sm hover:underline">
-              <ArrowLeft className="h-4 w-4" />
-              Voltar
-            </Link>
-            <h1 className="text-xl font-bold flex items-center gap-2">
-              <Calculator className="h-5 w-5" />
-              Módulo de Custos
-            </h1>
-          </div>
-          <div className="flex items-center gap-4">
-            <Select value={selectedSellerId || ''} onValueChange={setSelectedSellerId}>
-              <SelectTrigger className="w-48">
-                <SelectValue placeholder="Selecione a conta" />
-              </SelectTrigger>
-              <SelectContent>
-                {mlAccounts.map(acc => (
-                  <SelectItem key={acc.id} value={acc.ml_user_id}>
-                    {acc.nickname || acc.ml_user_id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button onClick={handleCalculate} disabled={isCalculating}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isCalculating ? 'animate-spin' : ''}`} />
-              {isCalculating ? 'Calculando...' : 'Recalcular'}
-            </Button>
-          </div>
-        </div>
-      </header>
+  const headerContent = (
+    <div className="flex items-center gap-4">
+      <Select value={selectedSellerId || ''} onValueChange={setSelectedSellerId}>
+        <SelectTrigger className="w-48">
+          <SelectValue placeholder="Selecione a conta" />
+        </SelectTrigger>
+        <SelectContent>
+          {mlAccounts.map(acc => (
+            <SelectItem key={acc.id} value={acc.ml_user_id}>
+              {acc.nickname || acc.ml_user_id}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Button onClick={handleCalculate} disabled={isCalculating}>
+        <RefreshCw className={`h-4 w-4 mr-2 ${isCalculating ? 'animate-spin' : ''}`} />
+        {isCalculating ? 'Calculando...' : 'Recalcular'}
+      </Button>
+    </div>
+  );
 
+  return (
+    <DashboardLayout 
+      title="Módulo de Custos" 
+      subtitle="Análise de custos e lucratividade"
+      headerContent={headerContent}
+    >
       <main className="container mx-auto px-4 py-6">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="mb-6">
@@ -269,6 +264,6 @@ export default function Custos() {
           </TabsContent>
         </Tabs>
       </main>
-    </div>
+    </DashboardLayout>
   );
 }
