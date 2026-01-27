@@ -31,11 +31,13 @@ interface MlAccount {
 
 interface TrendsHeaderBarProps {
   accounts: MlAccount[];
-  onBack: () => void;
+  onBack?: () => void;
   onReload: () => void;
   isReloading: boolean;
   categoriesForNavigator: { id: string; name: string }[];
   onCategoryChange?: (categoryId: string | null, categoryName: string) => void;
+  /** Hides the back button and title row when used inside DashboardLayout */
+  hideBackAndTitle?: boolean;
 }
 
 // ============================================================
@@ -88,6 +90,7 @@ export function TrendsHeaderBar({
   isReloading,
   categoriesForNavigator,
   onCategoryChange,
+  hideBackAndTitle = false,
 }: TrendsHeaderBarProps) {
   const { 
     state, 
@@ -119,28 +122,30 @@ export function TrendsHeaderBar({
   };
   
   return (
-    <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-20">
-      {/* Title Row */}
-      <div className="container mx-auto px-4 py-4">
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" onClick={onBack}>
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
-            <TrendingUp className="h-6 w-6 text-primary" />
-            <div>
-              <h1 className="text-xl font-semibold">Tendências de Mercado</h1>
-              <p className="text-xs text-muted-foreground hidden sm:block">
-                Análise baseada em dados públicos do Mercado Livre
-              </p>
+    <div className={hideBackAndTitle ? '' : 'border-b bg-card/50 backdrop-blur-sm sticky top-0 z-20'}>
+      {/* Title Row - only shown when not using DashboardLayout */}
+      {!hideBackAndTitle && (
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center gap-3">
+              <Button variant="ghost" size="icon" onClick={onBack}>
+                <ArrowLeft className="h-5 w-5" />
+              </Button>
+              <TrendingUp className="h-6 w-6 text-primary" />
+              <div>
+                <h1 className="text-xl font-semibold">Tendências de Mercado</h1>
+                <p className="text-xs text-muted-foreground hidden sm:block">
+                  Análise baseada em dados públicos do Mercado Livre
+                </p>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Controls Row */}
-      <div className="border-t bg-muted/30">
-        <div className="container mx-auto px-4 py-3">
+      <div className={hideBackAndTitle ? '' : 'border-t bg-muted/30'}>
+        <div className={hideBackAndTitle ? '' : 'container mx-auto px-4 py-3'}>
           <div className="flex items-center gap-3 flex-wrap">
             
             {/* Account Selector */}
@@ -210,20 +215,22 @@ export function TrendsHeaderBar({
               </CollapsibleContent>
             </Collapsible>
 
-            {/* Reload Button - Single action, no loop */}
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={onReload}
-              disabled={isReloading}
-              className="ml-auto"
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${isReloading ? 'animate-spin' : ''}`} />
-              Atualizar
-            </Button>
+            {/* Reload Button - only show if not hideBackAndTitle (already in headerContent) */}
+            {!hideBackAndTitle && (
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={onReload}
+                disabled={isReloading}
+                className="ml-auto"
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${isReloading ? 'animate-spin' : ''}`} />
+                Atualizar
+              </Button>
+            )}
           </div>
         </div>
       </div>
-    </header>
+    </div>
   );
 }
