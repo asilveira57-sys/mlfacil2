@@ -1,6 +1,5 @@
 import { MercadoProvider } from '@/contexts/MercadoContext';
 import {
-  MercadoHeader,
   MercadoBreadcrumb,
   MercadoToolbar,
   MercadoCategoryGrid,
@@ -8,14 +7,15 @@ import {
   MercadoMetricsDrawer,
   MercadoComparisonPanel,
 } from '@/components/mercado';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
 
 function MercadoContent() {
   return (
-    <div className="min-h-screen bg-background">
+    <DashboardLayout
+      title="Mercado"
+      subtitle="Dashboard de analytics premium"
+    >
       <div className="container mx-auto px-4 py-6 max-w-7xl space-y-6">
-        {/* Header */}
-        <MercadoHeader />
-
         {/* Breadcrumb */}
         <MercadoBreadcrumb />
 
@@ -32,7 +32,7 @@ function MercadoContent() {
         <MercadoDetailsDrawer />
         <MercadoMetricsDrawer />
       </div>
-    </div>
+    </DashboardLayout>
   );
 }
 
