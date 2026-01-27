@@ -15,7 +15,14 @@ import {
   Printer,
   ListChecks,
   LogOut,
+  TrendingUp,
+  ChevronDown,
 } from "lucide-react";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -58,6 +65,7 @@ const mainNavItems: NavItem[] = [
 const analyticsNavItems: NavItem[] = [
   { title: "Radiografia", url: "/radiografia", icon: Activity },
   { title: "Mercado", url: "/mercado", icon: Store },
+  { title: "Tendências", url: "/tendencias", icon: TrendingUp },
   { title: "Concorrência", url: "/concorrencia", icon: Target },
   { title: "Curva ABC", url: "/abc-analysis", icon: BarChart3 },
   { title: "Custos", url: "/custos", icon: DollarSign },
@@ -78,6 +86,18 @@ export function AppSidebar() {
   const { toast } = useToast();
   const { state } = useSidebar();
   const isCollapsed = state === "collapsed";
+  
+  // State for collapsible groups
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
+    Principal: true,
+    Analytics: true,
+    Ferramentas: true,
+    Sistema: true,
+  });
+
+  const toggleGroup = (label: string) => {
+    setOpenGroups(prev => ({ ...prev, [label]: !prev[label] }));
+  };
 
   const isActive = (url: string) => location.pathname === url;
 
@@ -90,58 +110,99 @@ export function AppSidebar() {
     navigate("/auth");
   };
 
-  const NavGroup = ({ label, items }: { label: string; items: NavItem[] }) => (
-    <SidebarGroup>
-      <SidebarGroupLabel className={cn(isCollapsed && "sr-only")}>
-        {label}
-      </SidebarGroupLabel>
-      <SidebarGroupContent>
-        <SidebarMenu>
-          {items.map((item) => (
-            <SidebarMenuItem key={item.title}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={isActive(item.url)}
-                    className={cn(
-                      "transition-colors",
-                      isActive(item.url) && "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                    )}
-                  >
-                    <button
-                      onClick={() => navigate(item.url)}
-                      className="flex items-center gap-3 w-full"
-                    >
-                      <item.icon className="h-4 w-4 shrink-0" />
-                      {!isCollapsed && (
-                        <span className="flex-1 truncate">{item.title}</span>
-                      )}
-                      {!isCollapsed && item.badge && (
+  const NavGroup = ({ label, items }: { label: string; items: NavItem[] }) => {
+    const isOpen = openGroups[label] ?? true;
+    
+    // When collapsed, show items directly without collapsible header
+    if (isCollapsed) {
+      return (
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {items.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive(item.url)}
+                        className={cn(
+                          "transition-colors",
+                          isActive(item.url) && "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                        )}
+                      >
+                        <button
+                          onClick={() => navigate(item.url)}
+                          className="flex items-center gap-3 w-full"
+                        >
+                          <item.icon className="h-4 w-4 shrink-0" />
+                        </button>
+                      </SidebarMenuButton>
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="flex items-center gap-2">
+                      {item.title}
+                      {item.badge && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                           {item.badge}
                         </span>
                       )}
-                    </button>
-                  </SidebarMenuButton>
-                </TooltipTrigger>
-                {isCollapsed && (
-                  <TooltipContent side="right" className="flex items-center gap-2">
-                    {item.title}
-                    {item.badge && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                        {item.badge}
-                      </span>
-                    )}
-                  </TooltipContent>
-                )}
-              </Tooltip>
-            </SidebarMenuItem>
-          ))}
-        </SidebarMenu>
-      </SidebarGroupContent>
-    </SidebarGroup>
-  );
+                    </TooltipContent>
+                  </Tooltip>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      );
+    }
+    
+    return (
+      <SidebarGroup>
+        <Collapsible open={isOpen} onOpenChange={() => toggleGroup(label)}>
+          <CollapsibleTrigger asChild>
+            <SidebarGroupLabel className="cursor-pointer hover:bg-sidebar-accent/50 rounded-md transition-colors flex items-center justify-between pr-2">
+              <span>{label}</span>
+              <ChevronDown className={cn(
+                "h-3.5 w-3.5 text-muted-foreground transition-transform duration-200",
+                isOpen && "rotate-180"
+              )} />
+            </SidebarGroupLabel>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {items.map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={isActive(item.url)}
+                      className={cn(
+                        "transition-colors",
+                        isActive(item.url) && "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                      )}
+                    >
+                      <button
+                        onClick={() => navigate(item.url)}
+                        className="flex items-center gap-3 w-full"
+                      >
+                        <item.icon className="h-4 w-4 shrink-0" />
+                        <span className="flex-1 truncate">{item.title}</span>
+                        {item.badge && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                            {item.badge}
+                          </span>
+                        )}
+                      </button>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </CollapsibleContent>
+        </Collapsible>
+      </SidebarGroup>
+    );
+  };
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
