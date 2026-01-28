@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
 export type AppRole = 'admin' | 'seller';
@@ -20,6 +20,8 @@ export function useUserRole(): UseUserRoleResult {
   const [role, setRole] = useState<AppRole>('seller');
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
+  // Track if initial load completed - after that, refetches are silent
+  const initialLoadDoneRef = useRef(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -33,6 +35,7 @@ export function useUserRole(): UseUserRoleResult {
             setRole('seller');
             setUserId(null);
             setLoading(false);
+            initialLoadDoneRef.current = true;
           }
           return;
         }
@@ -51,6 +54,7 @@ export function useUserRole(): UseUserRoleResult {
           if (isMounted) {
             setRole('seller');
             setLoading(false);
+            initialLoadDoneRef.current = true;
           }
           return;
         }
@@ -58,12 +62,14 @@ export function useUserRole(): UseUserRoleResult {
         if (isMounted) {
           setRole((data as AppRole) || 'seller');
           setLoading(false);
+          initialLoadDoneRef.current = true;
         }
       } catch (error) {
         console.error('[useUserRole] Unexpected error:', error);
         if (isMounted) {
           setRole('seller');
           setLoading(false);
+          initialLoadDoneRef.current = true;
         }
       }
     };
@@ -79,9 +85,14 @@ export function useUserRole(): UseUserRoleResult {
           setLoading(false);
         }
       } else if (event === 'SIGNED_IN') {
-        setLoading(true);
+        // CRITICAL: Only show loading on initial load, not on background refetches
+        // This prevents the "flash" when switching browser tabs
+        if (!initialLoadDoneRef.current) {
+          setLoading(true);
+        }
         fetchRole();
       }
+      // Ignore TOKEN_REFRESHED and INITIAL_SESSION to prevent tab-switch flicker
     });
 
     return () => {
