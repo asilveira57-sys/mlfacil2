@@ -3,7 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ActiveAccountProvider } from "@/contexts/ActiveAccountContext";
 import { UserAccessProvider } from "@/contexts/UserAccessContext";
 import { RouteChangeCleanup } from "@/components/layout/RouteChangeCleanup";
@@ -63,6 +63,40 @@ const App = () => {
       },
     },
   }));
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    // eslint-disable-next-line no-console
+    console.info("[MOUNT] App");
+    return () => {
+      // eslint-disable-next-line no-console
+      console.info("[UNMOUNT] App");
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+
+    let lastLogAt = 0;
+    const unsubscribe = queryClient.getQueryCache().subscribe((event: any) => {
+      const now = Date.now();
+      if (now - lastLogAt < 250) return;
+      lastLogAt = now;
+
+      const query = event?.query;
+      const key = query?.queryKey ? JSON.stringify(query.queryKey) : undefined;
+      // eslint-disable-next-line no-console
+      console.debug(
+        "[RQ]",
+        event?.type,
+        key,
+        query?.state?.fetchStatus,
+        query?.state?.status,
+      );
+    });
+
+    return () => unsubscribe();
+  }, [queryClient]);
 
   return (
     <QueryClientProvider client={queryClient}>

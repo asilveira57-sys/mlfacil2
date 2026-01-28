@@ -17,8 +17,24 @@ export function RouteChangeCleanup() {
   const lastCleanupAtRef = useRef<number>(0);
 
   useEffect(() => {
-    if (lastPathRef.current === pathname) return;
+    if (!import.meta.env.DEV) return;
+    // eslint-disable-next-line no-console
+    console.info('[MOUNT] RouteChangeCleanup');
+    return () => {
+      // eslint-disable-next-line no-console
+      console.info('[UNMOUNT] RouteChangeCleanup');
+    };
+  }, []);
+
+  useEffect(() => {
+    const from = lastPathRef.current;
+    if (from === pathname) return;
     lastPathRef.current = pathname;
+
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info('[NAV] RouteChangeCleanup', { from, to: pathname });
+    }
 
     // Run a multi-pass cleanup to catch both immediate leftovers and
     // mid-animation leftovers.

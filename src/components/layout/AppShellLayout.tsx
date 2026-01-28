@@ -1,5 +1,5 @@
-import { ReactNode, createContext, useContext, useState, useCallback } from "react";
-import { Outlet } from "react-router-dom";
+import { ReactNode, createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
+import { Outlet, useLocation } from "react-router-dom";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
 import { AccountSwitcher } from "./AccountSwitcher";
@@ -28,14 +28,20 @@ export function usePageHeader() {
 // Hook for pages to set their header - stable reference
 export function useSetPageHeader(title: string, subtitle?: string, headerContent?: ReactNode) {
   const { setHeader } = usePageHeader();
-  
-  // Use effect-free approach - pages call this on render
-  // The setHeader is memoized so it won't cause extra renders
-  setHeader(title, subtitle, headerContent);
+
+  // Avoid setState during render (can create render loops).
+  // Also avoid depending on inline JSX references for headerContent.
+  const headerContentRef = useRef<ReactNode>(headerContent);
+  headerContentRef.current = headerContent;
+
+  useEffect(() => {
+    setHeader(title, subtitle, headerContentRef.current);
+  }, [title, subtitle, setHeader]);
 }
 
 export function AppShellLayout() {
   const { sellerId } = useActiveAccount();
+  const location = useLocation();
   const [headerState, setHeaderState] = useState({
     title: "",
     subtitle: undefined as string | undefined,
@@ -43,6 +49,10 @@ export function AppShellLayout() {
   });
 
   const setHeader = useCallback((title: string, subtitle?: string, headerContent?: ReactNode) => {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.debug("[HEADER] setHeader", { title, subtitle, hasHeaderContent: !!headerContent });
+    }
     setHeaderState(prev => {
       // Only update if something changed
       if (prev.title === title && prev.subtitle === subtitle && prev.headerContent === headerContent) {
@@ -58,6 +68,22 @@ export function AppShellLayout() {
     headerContent: headerState.headerContent,
     setHeader,
   };
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    // eslint-disable-next-line no-console
+    console.info("[MOUNT] AppShellLayout");
+    return () => {
+      // eslint-disable-next-line no-console
+      console.info("[UNMOUNT] AppShellLayout");
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    // eslint-disable-next-line no-console
+    console.info("[NAV] AppShellLayout", location.pathname);
+  }, [location.pathname]);
 
   return (
     <PageHeaderContext.Provider value={contextValue}>

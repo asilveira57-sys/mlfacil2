@@ -1,4 +1,4 @@
-import React, { createContext, useContext, ReactNode } from 'react';
+import React, { createContext, useContext, ReactNode, useEffect } from 'react';
 import { useUserAccessState } from '@/hooks/useUserAccessState';
 import type { 
   UserStatus, 
@@ -48,6 +48,16 @@ interface UserAccessProviderProps {
 
 export function UserAccessProvider({ children }: UserAccessProviderProps) {
   const accessState = useUserAccessState();
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    // eslint-disable-next-line no-console
+    console.info('[MOUNT] UserAccessProvider');
+    return () => {
+      // eslint-disable-next-line no-console
+      console.info('[UNMOUNT] UserAccessProvider');
+    };
+  }, []);
 
   return (
     <UserAccessContext.Provider value={accessState}>
