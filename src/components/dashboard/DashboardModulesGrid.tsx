@@ -16,6 +16,7 @@ import {
   Settings,
   ArrowRight,
   MessageSquareText,
+  History,
 } from "lucide-react";
 
 interface Module {
@@ -110,6 +111,15 @@ const modules: Module[] = [
     color: "text-sky-500",
     bgColor: "bg-sky-500/10",
     borderColor: "border-sky-500/20 hover:border-sky-500/40",
+  },
+  {
+    title: "Linha do Tempo",
+    description: "Radar de anúncios sem vendas e ações de republicação/clonagem.",
+    icon: History,
+    route: "/anuncios/linha-do-tempo",
+    color: "text-indigo-500",
+    bgColor: "bg-indigo-500/10",
+    borderColor: "border-indigo-500/20 hover:border-indigo-500/40",
   },
   {
     title: "Etiquetas",
