@@ -93,13 +93,18 @@ const Dashboard = () => {
   }, [user, sellerId]);
 
   useEffect(() => {
+    // Only react to actual sign-out, not token refresh
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      setUser(session?.user ?? null);
-      if (!session) {
+      if (event === 'SIGNED_OUT') {
+        setUser(null);
         navigate("/auth");
+      } else if (event === 'SIGNED_IN') {
+        setUser(session?.user ?? null);
       }
+      // Ignore TOKEN_REFRESHED and INITIAL_SESSION to prevent tab-switch flicker
     });
 
+    // Initial session check
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       if (!session) {

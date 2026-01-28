@@ -98,9 +98,13 @@ export function useCollaboratorAccess(): CollaboratorAccess {
   useEffect(() => {
     fetchAccess();
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
-      fetchAccess();
+    // Listen for auth changes - ONLY on actual session changes
+    // Ignoring TOKEN_REFRESHED prevents tab-switch flickering
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+        fetchAccess();
+      }
+      // TOKEN_REFRESHED and INITIAL_SESSION are ignored
     });
 
     return () => subscription.unsubscribe();
