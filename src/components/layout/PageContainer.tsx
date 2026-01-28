@@ -1,4 +1,4 @@
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useEffect, useRef } from "react";
 import { usePageHeader } from "@/components/layout/AppShellLayout";
 
 interface PageContainerProps {
@@ -22,9 +22,16 @@ export function PageContainer({
 }: PageContainerProps) {
   const { setHeader } = usePageHeader();
 
+  // Avoid header update loops:
+  // Many pages pass inline JSX (new reference each render). If we depend on
+  // `headerContent`, the effect runs every render, causing AppShell re-renders
+  // that look like a "refresh".
+  const headerContentRef = useRef<ReactNode>(headerContent);
+  headerContentRef.current = headerContent;
+
   useEffect(() => {
-    setHeader(title, subtitle, headerContent);
-  }, [title, subtitle, headerContent, setHeader]);
+    setHeader(title, subtitle, headerContentRef.current);
+  }, [title, subtitle, setHeader]);
 
   return (
     <div className={className}>
