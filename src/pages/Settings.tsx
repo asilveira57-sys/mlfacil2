@@ -8,7 +8,7 @@ import SettingsIntegrations from "@/components/settings/SettingsIntegrations";
 import SettingsSubscription from "@/components/settings/SettingsSubscription";
 import SettingsCustomization from "@/components/settings/SettingsCustomization";
 import { CollaboratorsCard } from "@/components/settings/collaborators";
-import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { PageContainer } from "@/components/layout/PageContainer";
 
 const Settings = () => {
   const [activeTab, setActiveTab] = useState("profile");
@@ -23,7 +23,7 @@ const Settings = () => {
   ];
 
   return (
-    <DashboardLayout 
+    <PageContainer 
       title="Configurações" 
       subtitle="Gerencie seu perfil, empresas, integrações e assinatura"
     >
@@ -69,7 +69,7 @@ const Settings = () => {
           </TabsContent>
         </Tabs>
       </div>
-    </DashboardLayout>
+    </PageContainer>
   );
 };
 

@@ -13,7 +13,7 @@ import { CostSettings } from '@/components/custos/CostSettings';
 import { CostOrders } from '@/components/custos/CostOrders';
 import { CostAbcProfit } from '@/components/custos/CostAbcProfit';
 import { CostOrderDiagnostic } from '@/components/custos/CostOrderDiagnostic';
-import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { PageContainer } from "@/components/layout/PageContainer";
 
 interface MlAccount {
   id: string;
@@ -115,12 +115,12 @@ export default function Custos() {
 
   if (isLoading) {
     return (
-      <DashboardLayout title="Módulo de Custos">
+      <PageContainer title="Módulo de Custos">
         <div className="p-6">
           <Skeleton className="h-8 w-48 mb-6" />
           <Skeleton className="h-64 w-full" />
         </div>
-      </DashboardLayout>
+      </PageContainer>
     );
   }
 
@@ -149,7 +149,7 @@ export default function Custos() {
   );
 
   return (
-    <DashboardLayout 
+    <PageContainer 
       title="Módulo de Custos" 
       subtitle="Análise de custos e lucratividade"
       headerContent={headerContent}
@@ -264,6 +264,6 @@ export default function Custos() {
           </TabsContent>
         </Tabs>
       </main>
-    </DashboardLayout>
+    </PageContainer>
   );
 }

@@ -41,7 +41,8 @@ export function useActiveNotifications(options: UseNotificationSystemOptions = {
       if (error) throw error;
       return (data || []) as AppNotification[];
     },
-    refetchInterval: 30000,
+    // DISABLED: No polling - use realtime subscription instead
+    // refetchInterval: 30000,
   });
 }
 
@@ -78,7 +79,8 @@ export function usePriorityNotifications(options: UseNotificationSystemOptions =
       }
       return (data || []) as (AppNotification & { priority_score: number })[];
     },
-    refetchInterval: 30000,
+    // DISABLED: No polling - use realtime subscription instead
+    // refetchInterval: 30000,
   });
 }
 
@@ -125,7 +127,8 @@ export function useNotificationCounts(workspaceId?: string | null) {
         pending: pendingCount || 0,
       };
     },
-    refetchInterval: 30000,
+    // DISABLED: No polling - invalidation happens on user actions
+    // refetchInterval: 30000,
   });
 }
 
