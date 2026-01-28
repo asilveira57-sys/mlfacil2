@@ -110,18 +110,16 @@ function GlobalWatchdogs() {
     // Same-tab updates (CostSettings dispatches this)
     const handleWatchdogUpdate = () => syncFromStorage();
 
-    // Also resync when tab regains focus
-    const handleFocus = () => syncFromStorage();
+    // REMOVED: handleFocus was causing unnecessary re-renders on tab switch
+    // Storage sync now only happens on explicit storage events or custom events
 
     window.addEventListener("storage", handleStorage);
     window.addEventListener("cost_watchdog_update", handleWatchdogUpdate as EventListener);
-    window.addEventListener("focus", handleFocus);
 
     return () => {
       subscription.unsubscribe();
       window.removeEventListener("storage", handleStorage);
       window.removeEventListener("cost_watchdog_update", handleWatchdogUpdate as EventListener);
-      window.removeEventListener("focus", handleFocus);
     };
   }, []);
 
@@ -133,7 +131,24 @@ function GlobalWatchdogs() {
 }
 
 const App = () => {
-  const [queryClient] = useState(() => new QueryClient());
+  const [queryClient] = useState(() => new QueryClient({
+    defaultOptions: {
+      queries: {
+        // CRITICAL: Disable automatic refetching on window focus
+        refetchOnWindowFocus: false,
+        // Disable refetch on reconnect (network recovery)
+        refetchOnReconnect: false,
+        // Keep data fresh for 5 minutes by default
+        staleTime: 5 * 60 * 1000,
+        // Keep unused data in cache for 30 minutes
+        gcTime: 30 * 60 * 1000,
+        // Don't retry failed queries automatically
+        retry: 1,
+        // Prevent refetch on mount if data exists
+        refetchOnMount: false,
+      },
+    },
+  }));
 
   return (
     <QueryClientProvider client={queryClient}>
