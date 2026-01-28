@@ -69,21 +69,6 @@ export function AppShellLayout() {
     setHeader,
   };
 
-  useEffect(() => {
-    if (!import.meta.env.DEV) return;
-    // eslint-disable-next-line no-console
-    console.info("[MOUNT] AppShellLayout");
-    return () => {
-      // eslint-disable-next-line no-console
-      console.info("[UNMOUNT] AppShellLayout");
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!import.meta.env.DEV) return;
-    // eslint-disable-next-line no-console
-    console.info("[NAV] AppShellLayout", location.pathname);
-  }, [location.pathname]);
 
   return (
     <PageHeaderContext.Provider value={contextValue}>
