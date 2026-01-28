@@ -3,13 +3,11 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
-import { useCostSyncWatchdog } from "@/hooks/useCostSyncWatchdog";
-import { useOrdersSyncWatchdog } from "@/hooks/useOrdersSyncWatchdog";
+import { useState } from "react";
 import { ActiveAccountProvider } from "@/contexts/ActiveAccountContext";
 import { UserAccessProvider } from "@/contexts/UserAccessContext";
 import { RouteChangeCleanup } from "@/components/layout/RouteChangeCleanup";
+import { AppShellLayout } from "@/components/layout/AppShellLayout";
 import { OnboardingWizard } from "@/components/onboarding";
 import { TrialExpiredPaywall, ModuleAccessGuard } from "@/components/access";
 import { SeoHead } from "@/components/seo/SeoHead";
@@ -43,92 +41,8 @@ import Send from "./pages/Send";
 import NotFound from "./pages/NotFound";
 import { AdminRoute } from "./components/auth/AdminRoute";
 
-// Global watchdog provider component - handles both cost and orders sync
-function GlobalWatchdogs() {
-  const [sellerId, setSellerId] = useState<string | null>(() => {
-    return localStorage.getItem("cost_watchdog_seller_id");
-  });
-  const [enabled, setEnabled] = useState(() => {
-    return localStorage.getItem("cost_watchdog_enabled") !== "false";
-  });
-
-  useEffect(() => {
-    const syncFromStorage = () => {
-      setSellerId(localStorage.getItem("cost_watchdog_seller_id"));
-      setEnabled(localStorage.getItem("cost_watchdog_enabled") !== "false");
-    };
-
-    // Initial sync
-    syncFromStorage();
-
-    // Check auth and get first active seller (only if none is stored)
-    const checkAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        setSellerId(null);
-        setEnabled(false);
-        return;
-      }
-
-      const storedSellerId = localStorage.getItem("cost_watchdog_seller_id");
-      if (!storedSellerId) {
-        const { data: accounts } = await supabase
-          .from("ml_accounts")
-          .select("ml_user_id")
-          .eq("user_id", session.user.id)
-          .eq("is_active", true)
-          .limit(1);
-
-        if (accounts?.[0]) {
-          localStorage.setItem("cost_watchdog_seller_id", accounts[0].ml_user_id);
-          localStorage.setItem("cost_watchdog_enabled", "true");
-          syncFromStorage();
-        }
-      }
-    };
-
-    checkAuth();
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_OUT") {
-        setSellerId(null);
-        setEnabled(false);
-        localStorage.removeItem("cost_watchdog_seller_id");
-      } else if (event === "SIGNED_IN") {
-        checkAuth();
-      }
-    });
-
-    // Cross-tab updates
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key === "cost_watchdog_enabled" || e.key === "cost_watchdog_seller_id") {
-        syncFromStorage();
-      }
-    };
-
-    // Same-tab updates (CostSettings dispatches this)
-    const handleWatchdogUpdate = () => syncFromStorage();
-
-    // REMOVED: handleFocus was causing unnecessary re-renders on tab switch
-    // Storage sync now only happens on explicit storage events or custom events
-
-    window.addEventListener("storage", handleStorage);
-    window.addEventListener("cost_watchdog_update", handleWatchdogUpdate as EventListener);
-
-    return () => {
-      subscription.unsubscribe();
-      window.removeEventListener("storage", handleStorage);
-      window.removeEventListener("cost_watchdog_update", handleWatchdogUpdate as EventListener);
-    };
-  }, []);
-
-  // Run both global watchdogs
-  useCostSyncWatchdog(sellerId, enabled);
-  useOrdersSyncWatchdog(sellerId, enabled);
-
-  return null;
-}
+// NOTE: GlobalWatchdogs removed to prevent background activity storms on tab focus.
+// Cost/orders sync is now triggered only by explicit user actions or module-specific buttons.
 
 const App = () => {
   const [queryClient] = useState(() => new QueryClient({
@@ -157,7 +71,6 @@ const App = () => {
           <UserAccessProvider>
             <Toaster />
             <Sonner />
-            <GlobalWatchdogs />
             <BrowserRouter>
               <RouteChangeCleanup />
               <SeoHead />
@@ -165,45 +78,51 @@ const App = () => {
               <TrialExpiredPaywall />
               <ModuleAccessGuard>
               <Routes>
+                {/* Public routes (no shell) */}
                 <Route path="/" element={<Index />} />
                 <Route path="/home" element={<Index />} />
                 <Route path="/planos" element={<Planos />} />
                 <Route path="/auth" element={<Auth />} />
-                <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="/shipping-labels" element={<ShippingLabels />} />
-                <Route path="/shipping-labels/header-settings" element={<LabelHeaderSettings />} />
-                <Route path="/zpl-converter" element={<ZPLConverter />} />
-                <Route path="/abc-analysis" element={<AbcAnalysis />} />
-                <Route path="/tendencias" element={<TendenciasV2 />} />
-                <Route path="/mercado" element={<Mercado />} />
-                <Route path="/custos" element={<Custos />} />
-                <Route path="/concorrencia" element={<Concorrencia />} />
-                <Route path="/radiografia" element={<Radiografia />} />
-                <Route path="/tarefas" element={<Tarefas />} />
-                <Route path="/tarefas/quadro" element={<Tarefas />} />
-                <Route path="/tarefas/inbox" element={<Tarefas />} />
-                <Route path="/tarefas/regras" element={<Tarefas />} />
-                <Route path="/tarefas/:id" element={<TarefaDetalhe />} />
-                <Route path="/settings" element={<Settings />} />
-                <Route path="/publicidade" element={<Publicidade />} />
-                <Route path="/promocoes" element={<Promocoes />} />
-                <Route path="/mensagens" element={<MensagensPosVenda />} />
-                <Route path="/perguntas" element={<Perguntas />} />
-                {/* Ad Timeline routes */}
-                <Route path="/anuncios/linha-do-tempo" element={<AdTimelineRadar />} />
-                <Route path="/anuncios/linha-do-tempo/:itemId" element={<AdTimelineDetail />} />
-                <Route path="/anuncios/acoes" element={<AdActionsCenter />} />
-                {/* Send routes */}
-                <Route path="/send" element={<Send />} />
-                <Route path="/send/:itemId" element={<Send />} />
-                <Route path="/send/sementes" element={<Send />} />
-                {/* Blog routes */}
                 <Route path="/blog" element={<Blog />} />
                 <Route path="/blog/:slug" element={<Blog />} />
                 <Route path="/blog/categoria/:slug" element={<Blog />} />
+
+                {/* Dashboard routes (with persistent shell) */}
+                <Route element={<AppShellLayout />}>
+                  <Route path="/dashboard" element={<Dashboard />} />
+                  <Route path="/shipping-labels" element={<ShippingLabels />} />
+                  <Route path="/shipping-labels/header-settings" element={<LabelHeaderSettings />} />
+                  <Route path="/zpl-converter" element={<ZPLConverter />} />
+                  <Route path="/abc-analysis" element={<AbcAnalysis />} />
+                  <Route path="/tendencias" element={<TendenciasV2 />} />
+                  <Route path="/mercado" element={<Mercado />} />
+                  <Route path="/custos" element={<Custos />} />
+                  <Route path="/concorrencia" element={<Concorrencia />} />
+                  <Route path="/radiografia" element={<Radiografia />} />
+                  <Route path="/tarefas" element={<Tarefas />} />
+                  <Route path="/tarefas/quadro" element={<Tarefas />} />
+                  <Route path="/tarefas/inbox" element={<Tarefas />} />
+                  <Route path="/tarefas/regras" element={<Tarefas />} />
+                  <Route path="/tarefas/:id" element={<TarefaDetalhe />} />
+                  <Route path="/settings" element={<Settings />} />
+                  <Route path="/publicidade" element={<Publicidade />} />
+                  <Route path="/promocoes" element={<Promocoes />} />
+                  <Route path="/mensagens" element={<MensagensPosVenda />} />
+                  <Route path="/perguntas" element={<Perguntas />} />
+                  {/* Ad Timeline routes */}
+                  <Route path="/anuncios/linha-do-tempo" element={<AdTimelineRadar />} />
+                  <Route path="/anuncios/linha-do-tempo/:itemId" element={<AdTimelineDetail />} />
+                  <Route path="/anuncios/acoes" element={<AdActionsCenter />} />
+                  {/* Send routes */}
+                  <Route path="/send" element={<Send />} />
+                  <Route path="/send/:itemId" element={<Send />} />
+                  <Route path="/send/sementes" element={<Send />} />
+                </Route>
+
                 {/* Admin routes - protected by AdminRoute guard */}
                 <Route path="/admin/*" element={<AdminRoute><Admin /></AdminRoute>} />
                 <Route path="/admin/planos" element={<AdminRoute><AdminPlanos /></AdminRoute>} />
+                
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />
               </Routes>

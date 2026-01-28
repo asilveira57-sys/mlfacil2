@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { RadiographyOverview } from "@/components/radiography/RadiographyOverview";
 import { RadiographyItemList } from "@/components/radiography/RadiographyItemList";
 import { RadiographyDetailDrawer } from "@/components/radiography/RadiographyDetailDrawer";
-import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { PageContainer } from "@/components/layout/PageContainer";
 
 export default function Radiografia() {
   const [sellerId, setSellerId] = useState<string | null>(null);
@@ -38,7 +38,7 @@ export default function Radiografia() {
   };
 
   return (
-    <DashboardLayout 
+    <PageContainer 
       title="Radiografia" 
       subtitle="Diagnóstico clínico dos seus anúncios"
     >
@@ -103,6 +103,6 @@ export default function Radiografia() {
           />
         </div>
       </div>
-    </DashboardLayout>
+    </PageContainer>
   );
 }

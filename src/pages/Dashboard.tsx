@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { SalesDashboard } from "@/components/SalesDashboard";
-import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { PageContainer } from "@/components/layout/PageContainer";
 import { DashboardKpiCards } from "@/components/dashboard/DashboardKpiCards";
 import { DashboardQuickActions } from "@/components/dashboard/DashboardQuickActions";
 import { DashboardModulesGrid } from "@/components/dashboard/DashboardModulesGrid";
@@ -478,7 +478,7 @@ const Dashboard = () => {
   );
 
   return (
-    <DashboardLayout 
+    <PageContainer 
       title="Dashboard" 
       subtitle="Visão geral das suas operações no Mercado Livre"
       headerContent={headerContent}
@@ -512,7 +512,7 @@ const Dashboard = () => {
           <DashboardOnboarding onConnectML={handleConnectML} />
         )}
       </div>
-    </DashboardLayout>
+    </PageContainer>
   );
 };
 

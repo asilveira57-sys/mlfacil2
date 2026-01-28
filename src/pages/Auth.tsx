@@ -9,14 +9,17 @@ const Auth = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    // Check session on mount (once)
+    supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
         navigate("/dashboard");
       }
     });
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
+    // Listen for auth state changes - only react to actual sign-in events
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // CRITICAL: Only navigate on explicit SIGNED_IN, not TOKEN_REFRESHED or other events
+      if (event === "SIGNED_IN" && session) {
         navigate("/dashboard");
       }
     });
