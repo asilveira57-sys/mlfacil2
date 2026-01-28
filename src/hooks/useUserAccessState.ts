@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import type { 
   UserStatus, 
@@ -46,10 +46,16 @@ export function useUserAccessState(): UseUserAccessStateReturn {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // Track if initial load completed - after that, refetches are silent (no loading state)
+  const initialLoadDoneRef = React.useRef(false);
 
   const fetchStatus = useCallback(async () => {
     try {
-      setLoading(true);
+      // Only show loading on initial fetch, not on background refetches
+      // This prevents the "flash" when switching browser tabs
+      if (!initialLoadDoneRef.current) {
+        setLoading(true);
+      }
       setError(null);
 
       // Check if user is authenticated
@@ -83,6 +89,7 @@ export function useUserAccessState(): UseUserAccessStateReturn {
       setError(message);
     } finally {
       setLoading(false);
+      initialLoadDoneRef.current = true;
     }
   }, []);
 
