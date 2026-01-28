@@ -11,7 +11,7 @@ import { ActiveAccountProvider } from "@/contexts/ActiveAccountContext";
 import { UserAccessProvider } from "@/contexts/UserAccessContext";
 import { RouteChangeCleanup } from "@/components/layout/RouteChangeCleanup";
 import { OnboardingWizard } from "@/components/onboarding";
-import { TrialExpiredPaywall } from "@/components/access";
+import { TrialExpiredPaywall, ModuleAccessGuard } from "@/components/access";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
@@ -145,6 +145,7 @@ const App = () => {
               <RouteChangeCleanup />
               <OnboardingWizard />
               <TrialExpiredPaywall />
+              <ModuleAccessGuard>
               <Routes>
                 <Route path="/" element={<Index />} />
                 <Route path="/home" element={<Index />} />
@@ -184,6 +185,7 @@ const App = () => {
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />
               </Routes>
+              </ModuleAccessGuard>
             </BrowserRouter>
           </UserAccessProvider>
         </ActiveAccountProvider>
