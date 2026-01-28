@@ -67,11 +67,16 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
   // Get persisted active account from user_context or localStorage
   const getPersistedActiveAccountId = useCallback(async (userId: string): Promise<string | null> => {
     // Try user_context first
-    const { data: context } = await supabase
+    const { data: context, error } = await supabase
       .from('user_context')
       .select('active_marketplace_account_id')
       .eq('user_id', userId)
-      .single();
+      .maybeSingle();
+
+    if (error && import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.debug('[CTX] user_context lookup error (ignored)', error.message);
+    }
 
     if (context?.active_marketplace_account_id) {
       return context.active_marketplace_account_id;
@@ -92,32 +97,65 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
 
     // Save to user_context in database
     try {
-      const { data: existingContext } = await supabase
+      // Upsert prevents 406 (no rows) and 409 (race) storms.
+      const { error } = await supabase
         .from('user_context')
-        .select('id')
-        .eq('user_id', userId)
-        .single();
-
-      if (existingContext) {
-        await supabase
-          .from('user_context')
-          .update({ 
-            active_marketplace_account_id: accountId,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('user_id', userId);
-      } else {
-        await supabase
-          .from('user_context')
-          .insert({
+        .upsert(
+          {
             user_id: userId,
             active_marketplace_account_id: accountId,
-          });
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'user_id' }
+        );
+
+      if (error) {
+        console.error('[ActiveAccountContext] Upsert user_context error:', error);
       }
     } catch (err) {
       console.error('[ActiveAccountContext] Error persisting context:', err);
     }
   }, []);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    // eslint-disable-next-line no-console
+    console.info('[MOUNT] ActiveAccountProvider');
+    return () => {
+      // eslint-disable-next-line no-console
+      console.info('[UNMOUNT] ActiveAccountProvider');
+    };
+  }, []);
+
+  const prevStateRef = useRef({
+    activeAccountId: null as string | null,
+    sellerId: null as string | null,
+    loading,
+    initialized,
+  });
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+
+    const next = {
+      activeAccountId: activeAccount?.id || null,
+      sellerId: activeAccount?.sellerId || null,
+      loading,
+      initialized,
+    };
+
+    const prev = prevStateRef.current;
+    if (
+      prev.activeAccountId !== next.activeAccountId ||
+      prev.sellerId !== next.sellerId ||
+      prev.loading !== next.loading ||
+      prev.initialized !== next.initialized
+    ) {
+      // eslint-disable-next-line no-console
+      console.info('[CTX] ActiveAccountContext changed', { prev, next });
+      prevStateRef.current = next;
+    }
+  }, [activeAccount?.id, activeAccount?.sellerId, loading, initialized]);
 
   // Initialize context - stable function that doesn't change
   const initialize = useCallback(async () => {

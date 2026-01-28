@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { PageContainer } from '@/components/layout/PageContainer';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -168,7 +168,7 @@ export default function Promocoes() {
   // Show loading while context initializes
   if (accountLoading || !initialized) {
     return (
-      <DashboardLayout>
+      <PageContainer title="Promoções" subtitle="Central de Promoções">
         <div className="p-6">
           <div className="space-y-4">
             <Skeleton className="h-10 w-64" />
@@ -178,13 +178,13 @@ export default function Promocoes() {
             <Skeleton className="h-64" />
           </div>
         </div>
-      </DashboardLayout>
+      </PageContainer>
     );
   }
 
   if (!sellerId) {
     return (
-      <DashboardLayout>
+      <PageContainer title="Promoções" subtitle="Central de Promoções">
         <div className="p-6">
           <Card>
             <CardContent className="py-12 text-center">
@@ -199,7 +199,7 @@ export default function Promocoes() {
             </CardContent>
           </Card>
         </div>
-      </DashboardLayout>
+      </PageContainer>
     );
   }
 
@@ -207,7 +207,7 @@ export default function Promocoes() {
   }
 
   return (
-    <DashboardLayout>
+    <PageContainer title="Promoções" subtitle="Central de Promoções">
       <div className="p-6 space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-4">
@@ -554,7 +554,7 @@ export default function Promocoes() {
           </SheetContent>
         </Sheet>
       </div>
-    </DashboardLayout>
+    </PageContainer>
   );
 }
 

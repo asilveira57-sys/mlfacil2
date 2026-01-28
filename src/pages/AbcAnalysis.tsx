@@ -8,7 +8,7 @@ import { AbcProductsTab } from "@/components/abc/AbcProductsTab";
 import { AbcCustomersTab } from "@/components/abc/AbcCustomersTab";
 import { AbcCitiesTab } from "@/components/abc/AbcCitiesTab";
 import { AbcConfigPanel } from "@/components/abc/AbcConfigPanel";
-import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { PageContainer } from "@/components/layout/PageContainer";
 import { Package, Users, MapPin } from "lucide-react";
 
 export interface AbcFilters {
@@ -145,17 +145,17 @@ const AbcAnalysis = () => {
 
   if (loading) {
     return (
-      <DashboardLayout title="Curva ABC">
+      <PageContainer title="Curva ABC">
         <div className="flex items-center justify-center h-64">
           <div className="animate-pulse text-muted-foreground">Carregando...</div>
         </div>
-      </DashboardLayout>
+      </PageContainer>
     );
   }
 
   if (!sellerId) {
     return (
-      <DashboardLayout title="Curva ABC">
+      <PageContainer title="Curva ABC">
         <div className="flex items-center justify-center h-64">
           <div className="text-center space-y-4">
             <p className="text-muted-foreground">
@@ -169,27 +169,25 @@ const AbcAnalysis = () => {
             </button>
           </div>
         </div>
-      </DashboardLayout>
+      </PageContainer>
     );
   }
 
-  const headerContent = (
-    <AbcHeader 
-      sellerNickname={sellerNickname}
-      config={config}
-      onOpenConfig={() => setConfigOpen(true)}
-      filters={filters}
-      onFiltersChange={setFilters}
-    />
-  );
-
   return (
-    <DashboardLayout 
+    <PageContainer 
       title="Curva ABC" 
       subtitle="Análise de produtos, clientes e cidades"
-      headerContent={headerContent}
+      className="p-6"
     >
-      <div className="flex-1 p-6">
+      <div className="space-y-6">
+        <AbcHeader 
+          sellerNickname={sellerNickname}
+          config={config}
+          onOpenConfig={() => setConfigOpen(true)}
+          filters={filters}
+          onFiltersChange={setFilters}
+        />
+
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList className="grid w-full max-w-md grid-cols-3">
             <TabsTrigger value="products" className="flex items-center gap-2">
@@ -230,15 +228,15 @@ const AbcAnalysis = () => {
             />
           </TabsContent>
         </Tabs>
-      </div>
 
-      <AbcConfigPanel
-        open={configOpen}
-        onOpenChange={setConfigOpen}
-        config={config}
-        onSave={saveConfig}
-      />
-    </DashboardLayout>
+        <AbcConfigPanel
+          open={configOpen}
+          onOpenChange={setConfigOpen}
+          config={config}
+          onSave={saveConfig}
+        />
+      </div>
+    </PageContainer>
   );
 };
 

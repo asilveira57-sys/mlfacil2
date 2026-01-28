@@ -18,7 +18,7 @@ import { ZPLTimer } from "@/components/ZPLTimer";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useZPLTimeEstimate } from "@/hooks/useZPLTimeEstimate";
 import { useZPLPrintHistory } from "@/hooks/useZPLPrintHistory";
-import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { PageContainer } from "@/components/layout/PageContainer";
 import type { User } from "@supabase/supabase-js";
 
 export default function ZPLConverter() {
@@ -379,16 +379,16 @@ export default function ZPLConverter() {
 
   if (loading) {
     return (
-      <DashboardLayout title="Conversor ZPL para PDF">
+      <PageContainer title="Conversor ZPL para PDF">
         <div className="flex items-center justify-center h-64">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
         </div>
-      </DashboardLayout>
+      </PageContainer>
     );
   }
 
   return (
-    <DashboardLayout 
+    <PageContainer 
       title="Conversor ZPL para PDF" 
       subtitle="Converta códigos ZPL em etiquetas PDF"
     >
@@ -788,6 +788,6 @@ export default function ZPLConverter() {
           </div>
         </div>
       </main>
-    </DashboardLayout>
+    </PageContainer>
   );
 }

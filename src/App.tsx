@@ -151,11 +151,11 @@ const App = () => {
                   <Route path="/send" element={<Send />} />
                   <Route path="/send/:itemId" element={<Send />} />
                   <Route path="/send/sementes" element={<Send />} />
-                </Route>
 
-                {/* Admin routes - protected by AdminRoute guard */}
-                <Route path="/admin/*" element={<AdminRoute><Admin /></AdminRoute>} />
-                <Route path="/admin/planos" element={<AdminRoute><AdminPlanos /></AdminRoute>} />
+                  {/* Admin routes (also inside persistent shell) */}
+                  <Route path="/admin/*" element={<AdminRoute><Admin /></AdminRoute>} />
+                  <Route path="/admin/planos" element={<AdminRoute><AdminPlanos /></AdminRoute>} />
+                </Route>
                 
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />

@@ -1,5 +1,6 @@
+import { useEffect } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { PageContainer } from '@/components/layout/PageContainer';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   LayoutDashboard, 
@@ -55,9 +56,10 @@ export default function Admin() {
   };
 
   return (
-    <DashboardLayout 
+    <PageContainer 
       title="Administração" 
       subtitle="Centro de controle da plataforma"
+      className="p-6"
     >
       <div className="space-y-6">
         {/* Navigation Tabs */}
@@ -95,14 +97,17 @@ export default function Admin() {
           <Route path="configuracoes" element={<AdminSettings />} />
         </Routes>
       </div>
-    </DashboardLayout>
+    </PageContainer>
   );
 }
 
 // Redirect to existing plans admin
 function PlanosRedirect() {
   const navigate = useNavigate();
-  // Use existing AdminPlanos component by redirecting
-  navigate('/admin/planos', { replace: true });
+  useEffect(() => {
+    // Use existing AdminPlanos component by redirecting
+    navigate('/admin/planos', { replace: true });
+  }, [navigate]);
+
   return null;
 }
