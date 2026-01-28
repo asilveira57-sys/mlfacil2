@@ -2605,14 +2605,22 @@ export type Database = {
         Row: {
           api_key: string | null
           api_user: string | null
+          capture_from_date: string | null
+          channel_filter: string[] | null
           company_id: string
           created_at: string | null
+          display_name: string | null
+          environment: string | null
           id: string
           last_sync_at: string | null
           last_test_at: string | null
+          last_test_message: string | null
+          last_test_status: string | null
+          order_status_filter: string[] | null
           provider: string
           status: string
           sync_costs: boolean | null
+          sync_frequency_minutes: number | null
           sync_invoicing: boolean | null
           sync_orders: boolean | null
           updated_at: string | null
@@ -2620,14 +2628,22 @@ export type Database = {
         Insert: {
           api_key?: string | null
           api_user?: string | null
+          capture_from_date?: string | null
+          channel_filter?: string[] | null
           company_id: string
           created_at?: string | null
+          display_name?: string | null
+          environment?: string | null
           id?: string
           last_sync_at?: string | null
           last_test_at?: string | null
+          last_test_message?: string | null
+          last_test_status?: string | null
+          order_status_filter?: string[] | null
           provider: string
           status?: string
           sync_costs?: boolean | null
+          sync_frequency_minutes?: number | null
           sync_invoicing?: boolean | null
           sync_orders?: boolean | null
           updated_at?: string | null
@@ -2635,14 +2651,22 @@ export type Database = {
         Update: {
           api_key?: string | null
           api_user?: string | null
+          capture_from_date?: string | null
+          channel_filter?: string[] | null
           company_id?: string
           created_at?: string | null
+          display_name?: string | null
+          environment?: string | null
           id?: string
           last_sync_at?: string | null
           last_test_at?: string | null
+          last_test_message?: string | null
+          last_test_status?: string | null
+          order_status_filter?: string[] | null
           provider?: string
           status?: string
           sync_costs?: boolean | null
+          sync_frequency_minutes?: number | null
           sync_invoicing?: boolean | null
           sync_orders?: boolean | null
           updated_at?: string | null
@@ -2808,6 +2832,59 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      integration_sync_runs: {
+        Row: {
+          company_id: string
+          error_details: Json | null
+          error_message: string | null
+          finished_at: string | null
+          id: string
+          integration_id: string
+          orders_created: number | null
+          orders_failed: number | null
+          orders_fetched: number | null
+          orders_updated: number | null
+          started_at: string
+          status: string
+        }
+        Insert: {
+          company_id: string
+          error_details?: Json | null
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          integration_id: string
+          orders_created?: number | null
+          orders_failed?: number | null
+          orders_fetched?: number | null
+          orders_updated?: number | null
+          started_at?: string
+          status?: string
+        }
+        Update: {
+          company_id?: string
+          error_details?: Json | null
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          integration_id?: string
+          orders_created?: number | null
+          orders_failed?: number | null
+          orders_fetched?: number | null
+          orders_updated?: number | null
+          started_at?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "integration_sync_runs_integration_id_fkey"
+            columns: ["integration_id"]
+            isOneToOne: false
+            referencedRelation: "erp_integrations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       invoice_queue: {
         Row: {
@@ -4495,6 +4572,78 @@ export type Database = {
           rankings?: Json
           seller_id?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      nfse_field_mappings: {
+        Row: {
+          company_id: string
+          created_at: string
+          fallback_value: string | null
+          id: string
+          provider: string
+          source_path: string
+          target_field: string
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          fallback_value?: string | null
+          id?: string
+          provider: string
+          source_path: string
+          target_field: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          fallback_value?: string | null
+          id?: string
+          provider?: string
+          source_path?: string
+          target_field?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      nfse_settings: {
+        Row: {
+          aliquota_iss: number | null
+          cnae: string | null
+          company_id: string
+          created_at: string
+          id: string
+          natureza_operacao: string | null
+          observacoes: string | null
+          service_code: string | null
+          service_description: string | null
+          updated_at: string
+        }
+        Insert: {
+          aliquota_iss?: number | null
+          cnae?: string | null
+          company_id: string
+          created_at?: string
+          id?: string
+          natureza_operacao?: string | null
+          observacoes?: string | null
+          service_code?: string | null
+          service_description?: string | null
+          updated_at?: string
+        }
+        Update: {
+          aliquota_iss?: number | null
+          cnae?: string | null
+          company_id?: string
+          created_at?: string
+          id?: string
+          natureza_operacao?: string | null
+          observacoes?: string | null
+          service_code?: string | null
+          service_description?: string | null
+          updated_at?: string
         }
         Relationships: []
       }
@@ -6500,6 +6649,266 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      service_invoice_events: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          event_data: Json | null
+          event_type: string
+          id: string
+          queue_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          event_data?: Json | null
+          event_type: string
+          id?: string
+          queue_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          event_data?: Json | null
+          event_type?: string
+          id?: string
+          queue_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_invoice_events_queue_id_fkey"
+            columns: ["queue_id"]
+            isOneToOne: false
+            referencedRelation: "service_invoice_queue"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      service_invoice_queue: {
+        Row: {
+          company_id: string
+          created_at: string
+          customer_id: string | null
+          error_message: string | null
+          id: string
+          issued_at: string | null
+          last_retry_at: string | null
+          nfse_number: string | null
+          nfse_protocol: string | null
+          nfse_url: string | null
+          retry_count: number | null
+          service_code: string | null
+          service_description: string | null
+          service_order_id: string | null
+          status: string
+          updated_at: string
+          valor_iss: number | null
+          valor_servico: number | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          customer_id?: string | null
+          error_message?: string | null
+          id?: string
+          issued_at?: string | null
+          last_retry_at?: string | null
+          nfse_number?: string | null
+          nfse_protocol?: string | null
+          nfse_url?: string | null
+          retry_count?: number | null
+          service_code?: string | null
+          service_description?: string | null
+          service_order_id?: string | null
+          status?: string
+          updated_at?: string
+          valor_iss?: number | null
+          valor_servico?: number | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          customer_id?: string | null
+          error_message?: string | null
+          id?: string
+          issued_at?: string | null
+          last_retry_at?: string | null
+          nfse_number?: string | null
+          nfse_protocol?: string | null
+          nfse_url?: string | null
+          retry_count?: number | null
+          service_code?: string | null
+          service_description?: string | null
+          service_order_id?: string | null
+          status?: string
+          updated_at?: string
+          valor_iss?: number | null
+          valor_servico?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_invoice_queue_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "service_order_customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_invoice_queue_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      service_order_customers: {
+        Row: {
+          company_id: string
+          created_at: string
+          documento: string | null
+          documento_tipo: string | null
+          email: string | null
+          endereco_bairro: string | null
+          endereco_cep: string | null
+          endereco_cidade: string | null
+          endereco_complemento: string | null
+          endereco_numero: string | null
+          endereco_rua: string | null
+          endereco_uf: string | null
+          external_customer_id: string | null
+          id: string
+          is_complete: boolean | null
+          missing_fields: string[] | null
+          nome: string | null
+          observacoes: string | null
+          provider: string | null
+          raw_data: Json | null
+          telefone: string | null
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          documento?: string | null
+          documento_tipo?: string | null
+          email?: string | null
+          endereco_bairro?: string | null
+          endereco_cep?: string | null
+          endereco_cidade?: string | null
+          endereco_complemento?: string | null
+          endereco_numero?: string | null
+          endereco_rua?: string | null
+          endereco_uf?: string | null
+          external_customer_id?: string | null
+          id?: string
+          is_complete?: boolean | null
+          missing_fields?: string[] | null
+          nome?: string | null
+          observacoes?: string | null
+          provider?: string | null
+          raw_data?: Json | null
+          telefone?: string | null
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          documento?: string | null
+          documento_tipo?: string | null
+          email?: string | null
+          endereco_bairro?: string | null
+          endereco_cep?: string | null
+          endereco_cidade?: string | null
+          endereco_complemento?: string | null
+          endereco_numero?: string | null
+          endereco_rua?: string | null
+          endereco_uf?: string | null
+          external_customer_id?: string | null
+          id?: string
+          is_complete?: boolean | null
+          missing_fields?: string[] | null
+          nome?: string | null
+          observacoes?: string | null
+          provider?: string | null
+          raw_data?: Json | null
+          telefone?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      service_orders: {
+        Row: {
+          channel: string | null
+          company_id: string
+          created_at: string
+          customer_id: string | null
+          external_order_id: string
+          external_order_number: string | null
+          id: string
+          integration_id: string | null
+          nfse_error_message: string | null
+          nfse_status: string | null
+          order_date: string | null
+          order_status: string | null
+          provider: string
+          raw_data: Json | null
+          total_value: number | null
+          updated_at: string
+        }
+        Insert: {
+          channel?: string | null
+          company_id: string
+          created_at?: string
+          customer_id?: string | null
+          external_order_id: string
+          external_order_number?: string | null
+          id?: string
+          integration_id?: string | null
+          nfse_error_message?: string | null
+          nfse_status?: string | null
+          order_date?: string | null
+          order_status?: string | null
+          provider: string
+          raw_data?: Json | null
+          total_value?: number | null
+          updated_at?: string
+        }
+        Update: {
+          channel?: string | null
+          company_id?: string
+          created_at?: string
+          customer_id?: string | null
+          external_order_id?: string
+          external_order_number?: string | null
+          id?: string
+          integration_id?: string | null
+          nfse_error_message?: string | null
+          nfse_status?: string | null
+          order_date?: string | null
+          order_status?: string | null
+          provider?: string
+          raw_data?: Json | null
+          total_value?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fk_service_orders_customer"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "service_order_customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_orders_integration_id_fkey"
+            columns: ["integration_id"]
+            isOneToOne: false
+            referencedRelation: "erp_integrations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       site_content: {
         Row: {
