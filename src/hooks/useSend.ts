@@ -144,23 +144,44 @@ export function useSend(): UseSendResult {
         .limit(50);
 
       const plantedItemIds = new Set((plantedData || []).map(p => p.item_id));
-      const eligible: EligibleItem[] = (abcData || []).map(abc => ({
-        item_id: abc.product_key,
-        item_title: abc.display_name,
-        item_thumbnail: null,
-        abc_class: 'A' as const,
-        total_revenue: abc.value_total,
-        sales_count: 0,
-        is_planted: plantedItemIds.has(abc.product_key),
-      }));
+      
+      // Get item IDs to fetch from listings cache
+      const abcItemIds = (abcData || []).map(abc => abc.product_key);
+      const aplusItemIds = (aplusData || []).map(c => c.item_id);
+      const allItemIds = [...new Set([...abcItemIds, ...aplusItemIds])];
+
+      // Fetch thumbnails and titles from meli_listings_cache
+      const { data: listingsData } = await supabase
+        .from('meli_listings_cache')
+        .select('item_id, title, thumbnail')
+        .eq('seller_id', sellerId)
+        .in('item_id', allItemIds);
+
+      const listingsMap = new Map(
+        (listingsData || []).map(l => [l.item_id, { title: l.title, thumbnail: l.thumbnail }])
+      );
+
+      const eligible: EligibleItem[] = (abcData || []).map(abc => {
+        const listing = listingsMap.get(abc.product_key);
+        return {
+          item_id: abc.product_key,
+          item_title: listing?.title || abc.display_name,
+          item_thumbnail: listing?.thumbnail || null,
+          abc_class: 'A' as const,
+          total_revenue: abc.value_total,
+          sales_count: 0,
+          is_planted: plantedItemIds.has(abc.product_key),
+        };
+      });
 
       // Add A+ candidates not already in eligible
       for (const candidate of (aplusData || [])) {
         if (!eligible.find(e => e.item_id === candidate.item_id)) {
+          const listing = listingsMap.get(candidate.item_id);
           eligible.push({
             item_id: candidate.item_id,
-            item_title: candidate.item_title,
-            item_thumbnail: null,
+            item_title: listing?.title || candidate.item_title,
+            item_thumbnail: listing?.thumbnail || null,
             abc_class: 'A+',
             total_revenue: candidate.total_revenue,
             sales_count: 0,

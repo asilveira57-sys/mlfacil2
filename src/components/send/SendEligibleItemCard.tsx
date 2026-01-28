@@ -22,12 +22,18 @@ export function SendEligibleItemCard({ item, onPlant, disabled }: SendEligibleIt
     )}>
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
-          {/* Thumbnail placeholder */}
+          {/* Thumbnail */}
           <div className={cn(
-            "w-14 h-14 rounded-lg flex items-center justify-center flex-shrink-0",
-            isAPlus ? "bg-primary/10" : "bg-muted"
+            "w-14 h-14 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden",
+            isAPlus ? "bg-primary/10 ring-2 ring-primary/30" : "bg-muted"
           )}>
-            {isAPlus ? (
+            {item.item_thumbnail ? (
+              <img 
+                src={item.item_thumbnail} 
+                alt={item.item_title || 'Produto'} 
+                className="w-full h-full object-cover"
+              />
+            ) : isAPlus ? (
               <Star className="h-6 w-6 text-primary" />
             ) : (
               <TrendingUp className="h-6 w-6 text-muted-foreground" />
