@@ -21,6 +21,7 @@ import {
   Shield,
   Tags,
   History,
+  Sprout,
 } from "lucide-react";
 import {
   Collapsible,
@@ -68,6 +69,7 @@ const mainNavItems: NavItem[] = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, moduleId: "dashboard", moduleKey: "dashboard" },
   { title: "Vendas", url: "/shipping-labels", icon: Package, moduleId: "etiquetas", moduleKey: "etiquetas" },
   { title: "Tarefas", url: "/tarefas", icon: ListChecks, moduleId: "tarefas", moduleKey: "tarefas" },
+  { title: "Send", url: "/send", icon: Sprout, moduleId: "send", moduleKey: "send" },
   { title: "Promoções", url: "/promocoes", icon: Tag, moduleId: "promocoes", moduleKey: "promocoes" },
   { title: "Mercado ADS", url: "/publicidade", icon: Megaphone, moduleId: "publicidade", moduleKey: "mercado_ads" },
   { title: "Linha do Tempo", url: "/anuncios/linha-do-tempo", icon: History, moduleId: "linha-do-tempo", moduleKey: "linha_do_tempo" },

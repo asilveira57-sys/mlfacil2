@@ -6720,6 +6720,305 @@ export type Database = {
         }
         Relationships: []
       }
+      send_aplus_candidates: {
+        Row: {
+          consecutive_periods: number | null
+          created_at: string
+          id: string
+          is_promoted_to_aplus: boolean | null
+          item_id: string
+          item_title: string | null
+          last_evaluated_at: string | null
+          periods_in_curve_a: Json | null
+          seller_id: string
+          stability_score: number | null
+          total_revenue: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          consecutive_periods?: number | null
+          created_at?: string
+          id?: string
+          is_promoted_to_aplus?: boolean | null
+          item_id: string
+          item_title?: string | null
+          last_evaluated_at?: string | null
+          periods_in_curve_a?: Json | null
+          seller_id: string
+          stability_score?: number | null
+          total_revenue?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          consecutive_periods?: number | null
+          created_at?: string
+          id?: string
+          is_promoted_to_aplus?: boolean | null
+          item_id?: string
+          item_title?: string | null
+          last_evaluated_at?: string | null
+          periods_in_curve_a?: Json | null
+          seller_id?: string
+          stability_score?: number | null
+          total_revenue?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      send_item_history: {
+        Row: {
+          event_data: Json | null
+          event_type: string
+          id: string
+          item_id: string
+          occurred_at: string
+          seller_id: string
+          user_id: string
+        }
+        Insert: {
+          event_data?: Json | null
+          event_type: string
+          id?: string
+          item_id: string
+          occurred_at?: string
+          seller_id: string
+          user_id: string
+        }
+        Update: {
+          event_data?: Json | null
+          event_type?: string
+          id?: string
+          item_id?: string
+          occurred_at?: string
+          seller_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      send_metrics_snapshots: {
+        Row: {
+          avg_sales_interval_hours: number | null
+          conversion_rate: number | null
+          conversion_trend: number | null
+          created_at: string
+          growth_velocity: number | null
+          id: string
+          item_id: string
+          maturity_score: number | null
+          planted_item_id: string
+          position_checked_at: string | null
+          position_tier:
+            | Database["public"]["Enums"]["send_position_tier"]
+            | null
+          sales_count_30d: number | null
+          sales_count_7d: number | null
+          sales_stability_score: number | null
+          search_keyword: string | null
+          seller_id: string
+          snapshot_date: string
+          user_id: string
+          visit_trend: number | null
+          visits_30d: number | null
+          visits_7d: number | null
+        }
+        Insert: {
+          avg_sales_interval_hours?: number | null
+          conversion_rate?: number | null
+          conversion_trend?: number | null
+          created_at?: string
+          growth_velocity?: number | null
+          id?: string
+          item_id: string
+          maturity_score?: number | null
+          planted_item_id: string
+          position_checked_at?: string | null
+          position_tier?:
+            | Database["public"]["Enums"]["send_position_tier"]
+            | null
+          sales_count_30d?: number | null
+          sales_count_7d?: number | null
+          sales_stability_score?: number | null
+          search_keyword?: string | null
+          seller_id: string
+          snapshot_date: string
+          user_id: string
+          visit_trend?: number | null
+          visits_30d?: number | null
+          visits_7d?: number | null
+        }
+        Update: {
+          avg_sales_interval_hours?: number | null
+          conversion_rate?: number | null
+          conversion_trend?: number | null
+          created_at?: string
+          growth_velocity?: number | null
+          id?: string
+          item_id?: string
+          maturity_score?: number | null
+          planted_item_id?: string
+          position_checked_at?: string | null
+          position_tier?:
+            | Database["public"]["Enums"]["send_position_tier"]
+            | null
+          sales_count_30d?: number | null
+          sales_count_7d?: number | null
+          sales_stability_score?: number | null
+          search_keyword?: string | null
+          seller_id?: string
+          snapshot_date?: string
+          user_id?: string
+          visit_trend?: number | null
+          visits_30d?: number | null
+          visits_7d?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "send_metrics_snapshots_planted_item_id_fkey"
+            columns: ["planted_item_id"]
+            isOneToOne: false
+            referencedRelation: "send_planted_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      send_planted_items: {
+        Row: {
+          abc_class: string | null
+          created_at: string
+          days_planted: number
+          growth_stage: Database["public"]["Enums"]["send_growth_stage"]
+          health_status: Database["public"]["Enums"]["send_health_status"]
+          id: string
+          is_a_plus: boolean | null
+          item_id: string
+          item_thumbnail: string | null
+          item_title: string | null
+          last_health_check_at: string | null
+          last_metrics_at: string | null
+          planted_at: string
+          seller_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          abc_class?: string | null
+          created_at?: string
+          days_planted?: number
+          growth_stage?: Database["public"]["Enums"]["send_growth_stage"]
+          health_status?: Database["public"]["Enums"]["send_health_status"]
+          id?: string
+          is_a_plus?: boolean | null
+          item_id: string
+          item_thumbnail?: string | null
+          item_title?: string | null
+          last_health_check_at?: string | null
+          last_metrics_at?: string | null
+          planted_at?: string
+          seller_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          abc_class?: string | null
+          created_at?: string
+          days_planted?: number
+          growth_stage?: Database["public"]["Enums"]["send_growth_stage"]
+          health_status?: Database["public"]["Enums"]["send_health_status"]
+          id?: string
+          is_a_plus?: boolean | null
+          item_id?: string
+          item_thumbnail?: string | null
+          item_title?: string | null
+          last_health_check_at?: string | null
+          last_metrics_at?: string | null
+          planted_at?: string
+          seller_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      send_seed_balance: {
+        Row: {
+          created_at: string
+          id: string
+          plan_tier: string | null
+          seeds_from_plan: number
+          seeds_purchased: number
+          seeds_used: number
+          seller_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          plan_tier?: string | null
+          seeds_from_plan?: number
+          seeds_purchased?: number
+          seeds_used?: number
+          seller_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          plan_tier?: string | null
+          seeds_from_plan?: number
+          seeds_purchased?: number
+          seeds_used?: number
+          seller_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      send_seed_purchases: {
+        Row: {
+          amount_brl: number
+          created_at: string
+          expires_at: string | null
+          id: string
+          payment_id: string | null
+          payment_method: string | null
+          payment_status: string | null
+          seeds_quantity: number
+          seller_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          amount_brl: number
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          payment_id?: string | null
+          payment_method?: string | null
+          payment_status?: string | null
+          seeds_quantity: number
+          seller_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          amount_brl?: number
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          payment_id?: string | null
+          payment_method?: string | null
+          payment_status?: string | null
+          seeds_quantity?: number
+          seller_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       seo_page_settings: {
         Row: {
           canonical_url: string | null
@@ -8388,6 +8687,10 @@ export type Database = {
           visibility_mode: string
         }[]
       }
+      get_send_available_seeds: {
+        Args: { p_seller_id: string; p_user_id: string }
+        Returns: number
+      }
       get_user_feature_flags: { Args: { p_user_id: string }; Returns: Json }
       get_user_full_context: { Args: { p_user_id: string }; Returns: Json }
       get_user_role: { Args: { _user_id: string }; Returns: string }
@@ -8535,6 +8838,14 @@ export type Database = {
         | "blocked"
       qa_response_source: "manual" | "library" | "ai_suggested" | "ai_edited"
       qa_risk_level: "low" | "medium" | "high"
+      send_growth_stage: "seed" | "sprout" | "growing" | "mature" | "fruiting"
+      send_health_status: "healthy" | "stagnant" | "weakening" | "dormant"
+      send_position_tier:
+        | "top_page_1"
+        | "page_1"
+        | "page_2"
+        | "page_3_plus"
+        | "not_found"
       task_priority: "low" | "medium" | "high" | "urgent"
       task_status: "todo" | "doing" | "blocked" | "done"
       trial_status: "none" | "active" | "expired"
@@ -8708,6 +9019,15 @@ export const Constants = {
       ],
       qa_response_source: ["manual", "library", "ai_suggested", "ai_edited"],
       qa_risk_level: ["low", "medium", "high"],
+      send_growth_stage: ["seed", "sprout", "growing", "mature", "fruiting"],
+      send_health_status: ["healthy", "stagnant", "weakening", "dormant"],
+      send_position_tier: [
+        "top_page_1",
+        "page_1",
+        "page_2",
+        "page_3_plus",
+        "not_found",
+      ],
       task_priority: ["low", "medium", "high", "urgent"],
       task_status: ["todo", "doing", "blocked", "done"],
       trial_status: ["none", "active", "expired"],

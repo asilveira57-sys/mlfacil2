@@ -5,13 +5,13 @@ import { useCompanyCustomization } from "@/hooks/useCompanyCustomization";
 import { LucideIcon } from "lucide-react";
 import {
   CloudDownload, Megaphone, TrendingUp, DollarSign, Activity, Package,
-  Tag, MessageCircle, BarChart3, CheckSquare, Clock, Eye, Box
+  Tag, MessageCircle, BarChart3, CheckSquare, Clock, Eye, Box, Sprout
 } from "lucide-react";
 
 // Map of icon names to components
 const ICON_MAP: Record<string, LucideIcon> = {
   CloudDownload, Megaphone, TrendingUp, DollarSign, Activity, Package,
-  Tag, MessageCircle, BarChart3, CheckSquare, Clock, Eye, Box
+  Tag, MessageCircle, BarChart3, CheckSquare, Clock, Eye, Box, Sprout
 };
 
 export function DashboardQuickActions() {
