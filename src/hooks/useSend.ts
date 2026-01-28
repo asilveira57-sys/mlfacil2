@@ -145,27 +145,75 @@ export function useSend(): UseSendResult {
 
       const plantedItemIds = new Set((plantedData || []).map(p => p.item_id));
       
-      // Get item IDs to fetch from listings cache
-      const abcItemIds = (abcData || []).map(abc => abc.product_key);
+      // Helper function to extract MLB ID from product_key
+      // product_key can be: "MLB123456789", "MLB123456789:0", "MLB123456789_12345", or just "SKU123"
+      const extractMlbId = (productKey: string): string | null => {
+        if (!productKey.startsWith('MLB')) return null;
+        // Remove variation suffix (:0, :123, _12345, etc.)
+        const match = productKey.match(/^(MLB\d+)/);
+        return match ? match[1] : null;
+      };
+
+      // Separate product_keys into MLB IDs and SKUs
+      const abcProductKeys = (abcData || []).map(abc => abc.product_key);
+      const mlbIds: string[] = [];
+      const skuCodes: string[] = [];
+      
+      for (const pk of abcProductKeys) {
+        const mlbId = extractMlbId(pk);
+        if (mlbId) {
+          mlbIds.push(mlbId);
+        } else {
+          skuCodes.push(pk);
+        }
+      }
+      
       const aplusItemIds = (aplusData || []).map(c => c.item_id);
-      const allItemIds = [...new Set([...abcItemIds, ...aplusItemIds])];
+      const allMlbIds = [...new Set([...mlbIds, ...aplusItemIds])];
 
-      // Fetch thumbnails and titles from meli_listings_cache
-      const { data: listingsData } = await supabase
-        .from('meli_listings_cache')
-        .select('item_id, title, thumbnail')
-        .eq('seller_id', sellerId)
-        .in('item_id', allItemIds);
+      // Create a unified map for lookups
+      const listingsMap = new Map<string, { title: string; thumbnail: string }>();
 
-      const listingsMap = new Map(
-        (listingsData || []).map(l => [l.item_id, { title: l.title, thumbnail: l.thumbnail }])
-      );
+      // Fetch by MLB IDs
+      if (allMlbIds.length > 0) {
+        const { data: listingsByMlb } = await supabase
+          .from('meli_listings_cache')
+          .select('item_id, sku, title, thumbnail')
+          .eq('seller_id', sellerId)
+          .in('item_id', allMlbIds);
+
+        for (const l of (listingsByMlb || [])) {
+          listingsMap.set(l.item_id, { title: l.title, thumbnail: l.thumbnail });
+          // Also map by SKU if available
+          if (l.sku) {
+            listingsMap.set(l.sku, { title: l.title, thumbnail: l.thumbnail });
+          }
+        }
+      }
+
+      // Fetch by SKU codes (for non-MLB product_keys)
+      if (skuCodes.length > 0) {
+        const { data: listingsBySku } = await supabase
+          .from('meli_listings_cache')
+          .select('item_id, sku, title, thumbnail')
+          .eq('seller_id', sellerId)
+          .in('sku', skuCodes);
+
+        for (const l of (listingsBySku || [])) {
+          if (l.sku) {
+            listingsMap.set(l.sku, { title: l.title, thumbnail: l.thumbnail });
+          }
+          listingsMap.set(l.item_id, { title: l.title, thumbnail: l.thumbnail });
+        }
+      }
 
       const eligible: EligibleItem[] = (abcData || []).map(abc => {
-        const listing = listingsMap.get(abc.product_key);
+        const mlbId = extractMlbId(abc.product_key);
+        // Try to get listing by MLB ID first, then by product_key (SKU)
+        const listing = (mlbId ? listingsMap.get(mlbId) : null) || listingsMap.get(abc.product_key);
         return {
           item_id: abc.product_key,
-          item_title: listing?.title || abc.display_name,
+          item_title: listing?.title || abc.display_name || abc.product_key,
           item_thumbnail: listing?.thumbnail || null,
           abc_class: 'A' as const,
           total_revenue: abc.value_total,
