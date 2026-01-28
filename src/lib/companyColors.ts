@@ -113,6 +113,13 @@ export const AVAILABLE_SHORTCUTS: DashboardShortcut[] = [
     route: '/shipping-labels',
   },
   {
+    key: 'send',
+    title: 'Send',
+    description: 'Cultive seus melhores anúncios',
+    icon: 'Sprout',
+    route: '/send',
+  },
+  {
     key: 'ads',
     title: 'Mercado ADS',
     description: 'Gerencie campanhas publicitárias',

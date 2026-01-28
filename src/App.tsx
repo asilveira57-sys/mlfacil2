@@ -39,6 +39,7 @@ import Admin from "./pages/Admin";
 import AdTimelineRadar from "./pages/AdTimelineRadar";
 import AdTimelineDetail from "./pages/AdTimelineDetail";
 import AdActionsCenter from "./pages/AdActionsCenter";
+import Send from "./pages/Send";
 import NotFound from "./pages/NotFound";
 import { AdminRoute } from "./components/auth/AdminRoute";
 
@@ -177,6 +178,10 @@ const App = () => {
                 <Route path="/anuncios/linha-do-tempo" element={<AdTimelineRadar />} />
                 <Route path="/anuncios/linha-do-tempo/:itemId" element={<AdTimelineDetail />} />
                 <Route path="/anuncios/acoes" element={<AdActionsCenter />} />
+                {/* Send routes */}
+                <Route path="/send" element={<Send />} />
+                <Route path="/send/:itemId" element={<Send />} />
+                <Route path="/send/sementes" element={<Send />} />
                 {/* Blog routes */}
                 <Route path="/blog" element={<Blog />} />
                 <Route path="/blog/:slug" element={<Blog />} />
