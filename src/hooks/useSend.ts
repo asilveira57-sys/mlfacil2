@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import type { 
@@ -9,6 +9,9 @@ import type {
   PlantedItemWithMetrics,
   EligibleItem 
 } from '@/types/send';
+
+// In-memory cache for listings data
+const listingsCache = new Map<string, { title: string; thumbnail: string; sku: string }>();
 
 interface UseSendResult {
   // Seed balance
@@ -35,6 +38,13 @@ interface UseSendResult {
   refreshData: () => Promise<void>;
 }
 
+// Helper function to extract MLB ID from product_key
+function extractMlbId(productKey: string): string | null {
+  if (!productKey.startsWith('MLB')) return null;
+  const match = productKey.match(/^(MLB\d+)/);
+  return match ? match[1] : null;
+}
+
 export function useSend(): UseSendResult {
   const { sellerId } = useActiveAccount();
   const [seedBalance, setSeedBalance] = useState<SendSeedBalance | null>(null);
@@ -43,10 +53,24 @@ export function useSend(): UseSendResult {
   const [aplusCandidates, setAplusCandidates] = useState<SendAplusCandidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Track fetched data to prevent unnecessary refetches
+  const lastFetchRef = useRef<{ sellerId: string; timestamp: number } | null>(null);
+  const CACHE_TTL = 60000; // 1 minute cache
 
   // Fetch all Send data
   const fetchData = useCallback(async () => {
     if (!sellerId) {
+      setLoading(false);
+      return;
+    }
+
+    // Check cache to prevent refetching too quickly
+    const now = Date.now();
+    if (
+      lastFetchRef.current?.sellerId === sellerId && 
+      now - lastFetchRef.current.timestamp < CACHE_TTL
+    ) {
       setLoading(false);
       return;
     }
@@ -70,7 +94,6 @@ export function useSend(): UseSendResult {
         .single();
 
       if (!balanceData) {
-        // Create default balance
         const { data: newBalance } = await supabase
           .from('send_seed_balance')
           .insert({
@@ -88,129 +111,203 @@ export function useSend(): UseSendResult {
 
       setSeedBalance(balanceData as SendSeedBalance);
 
-      // Fetch planted items
-      const { data: plantedData } = await supabase
-        .from('send_planted_items')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('seller_id', sellerId)
-        .order('planted_at', { ascending: false });
+      // Parallel fetch: planted items, A+ candidates, ABC data
+      const [plantedRes, aplusRes, abcRes] = await Promise.all([
+        supabase
+          .from('send_planted_items')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('seller_id', sellerId)
+          .order('planted_at', { ascending: false }),
+        
+        supabase
+          .from('send_aplus_candidates')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('seller_id', sellerId)
+          .order('stability_score', { ascending: false }),
+        
+        supabase
+          .from('abc_profit_cache')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('seller_id', sellerId)
+          .eq('metric', 'revenue')
+          .in('class', ['A'])
+          .order('value_total', { ascending: false })
+          .limit(50)
+      ]);
 
-      // Fetch latest metrics for each planted item
+      const plantedData = plantedRes.data || [];
+      const aplusData = aplusRes.data || [];
+      const abcData = abcRes.data || [];
+
+      setAplusCandidates(aplusData as SendAplusCandidate[]);
+
+      // Collect all item IDs we need to hydrate
+      const allProductKeys = abcData.map(abc => abc.product_key);
+      const plantedItemIds = plantedData.map(p => p.item_id);
+      const aplusItemIds = aplusData.map(c => c.item_id);
+      
+      // Separate into MLB IDs and SKUs
+      const mlbIds: string[] = [];
+      const skuCodes: string[] = [];
+      
+      for (const pk of [...allProductKeys, ...plantedItemIds, ...aplusItemIds]) {
+        const mlbId = extractMlbId(pk);
+        if (mlbId) {
+          mlbIds.push(mlbId);
+        } else if (pk) {
+          skuCodes.push(pk);
+        }
+      }
+      
+      const uniqueMlbIds = [...new Set(mlbIds)];
+      const uniqueSkuCodes = [...new Set(skuCodes)];
+
+      // Check what's missing from cache
+      const missingMlbIds = uniqueMlbIds.filter(id => !listingsCache.has(id));
+      const missingSkuCodes = uniqueSkuCodes.filter(sku => !listingsCache.has(sku));
+
+      // Fetch missing data - try meli_listings_cache first, then meli_order_items_cache as fallback
+      if (missingMlbIds.length > 0 || missingSkuCodes.length > 0) {
+        // First try: meli_listings_cache (by item_id and sku)
+        const mlbFetch = missingMlbIds.length > 0 
+          ? supabase
+              .from('meli_listings_cache')
+              .select('item_id, sku, title, thumbnail')
+              .eq('seller_id', sellerId)
+              .in('item_id', missingMlbIds)
+          : null;
+
+        const skuFetch = missingSkuCodes.length > 0
+          ? supabase
+              .from('meli_listings_cache')
+              .select('item_id, sku, title, thumbnail')
+              .eq('seller_id', sellerId)
+              .in('sku', missingSkuCodes)
+          : null;
+
+        const [mlbResult, skuResult] = await Promise.all([mlbFetch, skuFetch]);
+
+        // Process meli_listings_cache results
+        for (const l of (mlbResult?.data || [])) {
+          listingsCache.set(l.item_id, { 
+            title: l.title || '', 
+            thumbnail: l.thumbnail || '', 
+            sku: l.sku || '' 
+          });
+          if (l.sku) {
+            listingsCache.set(l.sku, { 
+              title: l.title || '', 
+              thumbnail: l.thumbnail || '', 
+              sku: l.sku 
+            });
+          }
+        }
+
+        for (const l of (skuResult?.data || [])) {
+          listingsCache.set(l.item_id, { 
+            title: l.title || '', 
+            thumbnail: l.thumbnail || '', 
+            sku: l.sku || '' 
+          });
+          if (l.sku) {
+            listingsCache.set(l.sku, { 
+              title: l.title || '', 
+              thumbnail: l.thumbnail || '', 
+              sku: l.sku 
+            });
+          }
+        }
+
+        // Second try: meli_order_items_cache by product_key for any still missing
+        const stillMissingSkus = missingSkuCodes.filter(sku => !listingsCache.has(sku));
+        
+        if (stillMissingSkus.length > 0) {
+          const { data: orderItemsData } = await supabase
+            .from('meli_order_items_cache')
+            .select('product_key, item_id, title, thumbnail, sku')
+            .eq('seller_id', sellerId)
+            .in('product_key', stillMissingSkus);
+
+          for (const oi of (orderItemsData || [])) {
+            if (oi.product_key && !listingsCache.has(oi.product_key)) {
+              listingsCache.set(oi.product_key, {
+                title: oi.title || '',
+                thumbnail: oi.thumbnail || '',
+                sku: oi.sku || oi.product_key
+              });
+            }
+            if (oi.item_id && !listingsCache.has(oi.item_id)) {
+              listingsCache.set(oi.item_id, {
+                title: oi.title || '',
+                thumbnail: oi.thumbnail || '',
+                sku: oi.sku || ''
+              });
+            }
+          }
+        }
+      }
+
+      // Helper to get cached listing
+      const getCachedListing = (productKey: string) => {
+        const mlbId = extractMlbId(productKey);
+        return (mlbId ? listingsCache.get(mlbId) : null) || listingsCache.get(productKey);
+      };
+
+      // Build planted items with metrics
       const plantedWithMetrics: PlantedItemWithMetrics[] = [];
-      for (const item of (plantedData || [])) {
-        const { data: metricsData } = await supabase
+      
+      // Parallel fetch metrics for all planted items
+      const metricsPromises = plantedData.map(item => 
+        supabase
           .from('send_metrics_snapshots')
           .select('*')
           .eq('planted_item_id', item.id)
           .order('snapshot_date', { ascending: false })
           .limit(1)
-          .single();
+          .single()
+          .then(({ data }) => ({ itemId: item.id, metrics: data }))
+      );
 
-        const { count: historyCount } = await supabase
+      const historyCountPromises = plantedData.map(item =>
+        supabase
           .from('send_item_history')
           .select('*', { count: 'exact', head: true })
           .eq('item_id', item.item_id)
-          .eq('user_id', user.id);
+          .eq('user_id', user.id)
+          .then(({ count }) => ({ itemId: item.id, count: count || 0 }))
+      );
 
+      const [metricsResults, historyResults] = await Promise.all([
+        Promise.all(metricsPromises),
+        Promise.all(historyCountPromises)
+      ]);
+
+      const metricsMap = new Map(metricsResults.map(r => [r.itemId, r.metrics]));
+      const historyMap = new Map(historyResults.map(r => [r.itemId, r.count]));
+
+      for (const item of plantedData) {
+        const listing = getCachedListing(item.item_id);
+        
         plantedWithMetrics.push({
           ...item,
-          latestMetrics: metricsData as SendMetricsSnapshot | null,
-          historyCount: historyCount || 0,
+          // Hydrate from cache if stored values are missing
+          item_title: item.item_title || listing?.title || item.item_id,
+          item_thumbnail: item.item_thumbnail || listing?.thumbnail || null,
+          latestMetrics: metricsMap.get(item.id) as SendMetricsSnapshot | null,
+          historyCount: historyMap.get(item.id) || 0,
         });
       }
 
       setPlantedItems(plantedWithMetrics);
 
-      // Fetch A+ candidates
-      const { data: aplusData } = await supabase
-        .from('send_aplus_candidates')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('seller_id', sellerId)
-        .order('stability_score', { ascending: false });
-
-      setAplusCandidates((aplusData || []) as SendAplusCandidate[]);
-
-      // Build eligible items from ABC analysis cache
-      const { data: abcData } = await supabase
-        .from('abc_profit_cache')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('seller_id', sellerId)
-        .eq('metric', 'revenue')
-        .in('class', ['A'])
-        .order('value_total', { ascending: false })
-        .limit(50);
-
-      const plantedItemIds = new Set((plantedData || []).map(p => p.item_id));
+      // Build eligible items
+      const plantedItemIdSet = new Set(plantedData.map(p => p.item_id));
       
-      // Helper function to extract MLB ID from product_key
-      // product_key can be: "MLB123456789", "MLB123456789:0", "MLB123456789_12345", or just "SKU123"
-      const extractMlbId = (productKey: string): string | null => {
-        if (!productKey.startsWith('MLB')) return null;
-        // Remove variation suffix (:0, :123, _12345, etc.)
-        const match = productKey.match(/^(MLB\d+)/);
-        return match ? match[1] : null;
-      };
-
-      // Separate product_keys into MLB IDs and SKUs
-      const abcProductKeys = (abcData || []).map(abc => abc.product_key);
-      const mlbIds: string[] = [];
-      const skuCodes: string[] = [];
-      
-      for (const pk of abcProductKeys) {
-        const mlbId = extractMlbId(pk);
-        if (mlbId) {
-          mlbIds.push(mlbId);
-        } else {
-          skuCodes.push(pk);
-        }
-      }
-      
-      const aplusItemIds = (aplusData || []).map(c => c.item_id);
-      const allMlbIds = [...new Set([...mlbIds, ...aplusItemIds])];
-
-      // Create a unified map for lookups
-      const listingsMap = new Map<string, { title: string; thumbnail: string }>();
-
-      // Fetch by MLB IDs
-      if (allMlbIds.length > 0) {
-        const { data: listingsByMlb } = await supabase
-          .from('meli_listings_cache')
-          .select('item_id, sku, title, thumbnail')
-          .eq('seller_id', sellerId)
-          .in('item_id', allMlbIds);
-
-        for (const l of (listingsByMlb || [])) {
-          listingsMap.set(l.item_id, { title: l.title, thumbnail: l.thumbnail });
-          // Also map by SKU if available
-          if (l.sku) {
-            listingsMap.set(l.sku, { title: l.title, thumbnail: l.thumbnail });
-          }
-        }
-      }
-
-      // Fetch by SKU codes (for non-MLB product_keys)
-      if (skuCodes.length > 0) {
-        const { data: listingsBySku } = await supabase
-          .from('meli_listings_cache')
-          .select('item_id, sku, title, thumbnail')
-          .eq('seller_id', sellerId)
-          .in('sku', skuCodes);
-
-        for (const l of (listingsBySku || [])) {
-          if (l.sku) {
-            listingsMap.set(l.sku, { title: l.title, thumbnail: l.thumbnail });
-          }
-          listingsMap.set(l.item_id, { title: l.title, thumbnail: l.thumbnail });
-        }
-      }
-
-      const eligible: EligibleItem[] = (abcData || []).map(abc => {
-        const mlbId = extractMlbId(abc.product_key);
-        // Try to get listing by MLB ID first, then by product_key (SKU)
-        const listing = (mlbId ? listingsMap.get(mlbId) : null) || listingsMap.get(abc.product_key);
+      const eligible: EligibleItem[] = abcData.map(abc => {
+        const listing = getCachedListing(abc.product_key);
         return {
           item_id: abc.product_key,
           item_title: listing?.title || abc.display_name || abc.product_key,
@@ -218,27 +315,30 @@ export function useSend(): UseSendResult {
           abc_class: 'A' as const,
           total_revenue: abc.value_total,
           sales_count: 0,
-          is_planted: plantedItemIds.has(abc.product_key),
+          is_planted: plantedItemIdSet.has(abc.product_key),
         };
       });
 
       // Add A+ candidates not already in eligible
-      for (const candidate of (aplusData || [])) {
+      for (const candidate of aplusData) {
         if (!eligible.find(e => e.item_id === candidate.item_id)) {
-          const listing = listingsMap.get(candidate.item_id);
+          const listing = getCachedListing(candidate.item_id);
           eligible.push({
             item_id: candidate.item_id,
-            item_title: listing?.title || candidate.item_title,
+            item_title: listing?.title || candidate.item_title || candidate.item_id,
             item_thumbnail: listing?.thumbnail || null,
             abc_class: 'A+',
             total_revenue: candidate.total_revenue,
             sales_count: 0,
-            is_planted: plantedItemIds.has(candidate.item_id),
+            is_planted: plantedItemIdSet.has(candidate.item_id),
           });
         }
       }
 
       setEligibleItems(eligible);
+
+      // Update cache timestamp
+      lastFetchRef.current = { sellerId, timestamp: now };
 
     } catch (err) {
       console.error('[useSend] Error:', err);
@@ -271,6 +371,11 @@ export function useSend(): UseSendResult {
     }
 
     try {
+      // Get hydrated data from cache if not provided
+      const listing = listingsCache.get(extractMlbId(itemId) || itemId) || listingsCache.get(itemId);
+      const finalTitle = itemTitle || listing?.title || null;
+      const finalThumbnail = thumbnail || listing?.thumbnail || null;
+
       // Insert planted item
       const { error: insertError } = await supabase
         .from('send_planted_items')
@@ -278,8 +383,8 @@ export function useSend(): UseSendResult {
           user_id: user.id,
           seller_id: sellerId,
           item_id: itemId,
-          item_title: itemTitle || null,
-          item_thumbnail: thumbnail || null,
+          item_title: finalTitle,
+          item_thumbnail: finalThumbnail,
           abc_class: abcClass,
           is_a_plus: abcClass === 'A+',
         });
@@ -305,9 +410,11 @@ export function useSend(): UseSendResult {
           seller_id: sellerId,
           item_id: itemId,
           event_type: 'planted',
-          event_data: { abc_class: abcClass, title: itemTitle },
+          event_data: { abc_class: abcClass, title: finalTitle },
         });
 
+      // Force refresh
+      lastFetchRef.current = null;
       await fetchData();
       return true;
     } catch (err) {
@@ -357,6 +464,8 @@ export function useSend(): UseSendResult {
 
       if (balanceError) throw balanceError;
 
+      // Force refresh
+      lastFetchRef.current = null;
       await fetchData();
       return true;
     } catch (err) {
@@ -383,6 +492,9 @@ export function useSend(): UseSendResult {
     error,
     plantItem,
     removeItem,
-    refreshData: fetchData,
+    refreshData: async () => {
+      lastFetchRef.current = null;
+      await fetchData();
+    },
   };
 }

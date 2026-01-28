@@ -5,7 +5,7 @@ interface SendPlantVisualizationProps {
   growthStage: SendGrowthStage;
   healthStatus: SendHealthStatus;
   daysPlanted: number;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'xs' | 'sm' | 'md' | 'lg';
   showLabel?: boolean;
 }
 
@@ -20,12 +20,14 @@ export function SendPlantVisualization({
   const healthConfig = HEALTH_STATUS_CONFIG[healthStatus];
 
   const sizeClasses = {
+    xs: 'w-10 h-12',
     sm: 'w-16 h-20',
     md: 'w-24 h-32',
     lg: 'w-32 h-40',
   };
 
   const emojiSizes = {
+    xs: 'text-lg',
     sm: 'text-2xl',
     md: 'text-4xl',
     lg: 'text-5xl',
