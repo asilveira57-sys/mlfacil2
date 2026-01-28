@@ -17,12 +17,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useSend } from "@/hooks/useSend";
+import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { 
   SendSeedBalanceCard, 
   SendPlantedItemCard, 
-  SendEligibleItemCard 
+  SendEligibleItemCard,
+  SendItemDetailDrawer
 } from "@/components/send";
-import { EligibleItem, HEALTH_STATUS_CONFIG } from "@/types/send";
+import { EligibleItem } from "@/types/send";
 import { 
   Sprout, 
   Search, 
@@ -38,6 +40,7 @@ import { useNavigate } from "react-router-dom";
 
 export default function Send() {
   const navigate = useNavigate();
+  const { sellerId } = useActiveAccount();
   const {
     seedBalance,
     availableSeeds,
@@ -58,6 +61,10 @@ export default function Send() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [itemToRemove, setItemToRemove] = useState<string | null>(null);
+  
+  // Drawer state
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
 
   // Filter planted items
   const filteredPlantedItems = plantedItems.filter(item =>
@@ -102,8 +109,9 @@ export default function Send() {
     setItemToRemove(null);
   };
 
-  const handleViewItem = (itemId: string) => {
-    navigate(`/send/${itemId}`);
+  const handleViewDetails = (itemId: string) => {
+    setSelectedItemId(itemId);
+    setDrawerOpen(true);
   };
 
   if (loading) {
@@ -280,7 +288,7 @@ export default function Send() {
                       <SendPlantedItemCard
                         key={item.id}
                         item={item}
-                        onView={handleViewItem}
+                        onView={handleViewDetails}
                         onRemove={(itemId) => setItemToRemove(itemId)}
                       />
                     ))}
@@ -306,6 +314,7 @@ export default function Send() {
                         key={item.item_id}
                         item={item}
                         onPlant={handlePlant}
+                        onViewDetails={handleViewDetails}
                         disabled={availableSeeds === 0 || item.is_planted}
                       />
                     ))}
@@ -393,6 +402,18 @@ export default function Send() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Item detail drawer */}
+      <SendItemDetailDrawer
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
+        itemId={selectedItemId}
+        sellerId={sellerId || ''}
+        onRemove={(itemId) => {
+          setDrawerOpen(false);
+          setItemToRemove(itemId);
+        }}
+      />
     </DashboardLayout>
   );
 }
