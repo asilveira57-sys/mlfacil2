@@ -1,19 +1,15 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { User, Receipt, Building2, Plug, CreditCard, FileText, ArrowRight } from "lucide-react";
+import { User, Receipt, Building2, Plug, CreditCard } from "lucide-react";
 import SettingsProfile from "@/components/settings/SettingsProfile";
 import SettingsBilling from "@/components/settings/SettingsBilling";
 import SettingsCompanies from "@/components/settings/SettingsCompanies";
 import SettingsIntegrations from "@/components/settings/SettingsIntegrations";
 import SettingsSubscription from "@/components/settings/SettingsSubscription";
-import { AdminOnly } from "@/components/auth/AdminOnly";
+import { CollaboratorsCard } from "@/components/settings/collaborators";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 
 const Settings = () => {
-  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("profile");
 
   const tabs = [
@@ -44,8 +40,10 @@ const Settings = () => {
             ))}
           </TabsList>
 
-          <TabsContent value="profile" className="mt-6">
+          <TabsContent value="profile" className="mt-6 space-y-6">
             <SettingsProfile />
+            {/* Collaborators Card - Only visible for workspace admins */}
+            <CollaboratorsCard />
           </TabsContent>
 
           <TabsContent value="billing" className="mt-6">
@@ -64,27 +62,6 @@ const Settings = () => {
             <SettingsSubscription />
           </TabsContent>
         </Tabs>
-
-        {/* Blog Admin Quick Access - Only visible to admins */}
-        <AdminOnly>
-          <Card className="mt-8">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5" />
-                Gerenciamento do Blog
-              </CardTitle>
-              <CardDescription>
-                Crie e gerencie posts e categorias do blog
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button onClick={() => navigate('/admin/blog')} className="gap-2">
-                Acessar Admin do Blog
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </CardContent>
-          </Card>
-        </AdminOnly>
       </div>
     </DashboardLayout>
   );

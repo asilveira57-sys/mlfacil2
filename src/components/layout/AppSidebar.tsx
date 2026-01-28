@@ -28,7 +28,6 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import {
   Sidebar,
   SidebarContent,
@@ -51,6 +50,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useUserRole } from "@/hooks/useUserRole";
 import { useModuleTagsMap } from "@/hooks/useModuleTags";
+import { useCollaboratorAccess } from "@/hooks/useCollaboratorAccess";
 import { ModuleTagsDisplay } from "@/components/admin/ModuleTagBadge";
 
 interface NavItem {
@@ -59,27 +59,29 @@ interface NavItem {
   icon: React.ElementType;
   badge?: string;
   moduleId?: string; // For tag lookup
+  moduleKey?: string; // For access control
 }
 
 // IDs devem coincidir com system_modules.id no banco de dados
+// moduleKey é usado para controle de acesso de colaboradores
 const mainNavItems: NavItem[] = [
-  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, moduleId: "dashboard" },
-  { title: "Vendas", url: "/shipping-labels", icon: Package, moduleId: "etiquetas" },
-  { title: "Tarefas", url: "/tarefas", icon: ListChecks, moduleId: "tarefas" },
-  { title: "Promoções", url: "/promocoes", icon: Tag, moduleId: "promocoes" },
-  { title: "Mercado ADS", url: "/publicidade", icon: Megaphone, moduleId: "publicidade" },
-  { title: "Linha do Tempo", url: "/anuncios/linha-do-tempo", icon: History, moduleId: "linha-do-tempo" },
-  { title: "Pós-Venda", url: "/mensagens", icon: MessageSquareText, moduleId: "pos-venda" },
-  { title: "Perguntas", url: "/perguntas", icon: MessageSquareText, moduleId: "perguntas" },
+  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, moduleId: "dashboard", moduleKey: "dashboard" },
+  { title: "Vendas", url: "/shipping-labels", icon: Package, moduleId: "etiquetas", moduleKey: "etiquetas" },
+  { title: "Tarefas", url: "/tarefas", icon: ListChecks, moduleId: "tarefas", moduleKey: "tarefas" },
+  { title: "Promoções", url: "/promocoes", icon: Tag, moduleId: "promocoes", moduleKey: "promocoes" },
+  { title: "Mercado ADS", url: "/publicidade", icon: Megaphone, moduleId: "publicidade", moduleKey: "mercado_ads" },
+  { title: "Linha do Tempo", url: "/anuncios/linha-do-tempo", icon: History, moduleId: "linha-do-tempo", moduleKey: "linha_do_tempo" },
+  { title: "Pós-Venda", url: "/mensagens", icon: MessageSquareText, moduleId: "pos-venda", moduleKey: "pos_venda" },
+  { title: "Perguntas", url: "/perguntas", icon: MessageSquareText, moduleId: "perguntas", moduleKey: "perguntas" },
 ];
 
 const analyticsNavItems: NavItem[] = [
-  { title: "Radiografia", url: "/radiografia", icon: Activity, moduleId: "radiografia" },
-  { title: "Mercado", url: "/mercado", icon: Store, moduleId: "mercado" },
-  { title: "Tendências", url: "/tendencias", icon: TrendingUp, moduleId: "tendencias" },
-  { title: "Concorrência", url: "/concorrencia", icon: Target, moduleId: "concorrencia" },
-  { title: "Curva ABC", url: "/abc-analysis", icon: BarChart3, moduleId: "abc" },
-  { title: "Custos", url: "/custos", icon: DollarSign, moduleId: "custos" },
+  { title: "Radiografia", url: "/radiografia", icon: Activity, moduleId: "radiografia", moduleKey: "radiografia" },
+  { title: "Mercado", url: "/mercado", icon: Store, moduleId: "mercado", moduleKey: "mercado" },
+  { title: "Tendências", url: "/tendencias", icon: TrendingUp, moduleId: "tendencias", moduleKey: "tendencias" },
+  { title: "Concorrência", url: "/concorrencia", icon: Target, moduleId: "concorrencia", moduleKey: "concorrencia" },
+  { title: "Curva ABC", url: "/abc-analysis", icon: BarChart3, moduleId: "abc", moduleKey: "abc" },
+  { title: "Custos", url: "/custos", icon: DollarSign, moduleId: "custos", moduleKey: "custos" },
 ];
 
 const toolsNavItems: NavItem[] = [
@@ -110,6 +112,7 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const { isAdmin } = useUserRole();
   const moduleTagsMap = useModuleTagsMap();
+  const { hasModuleAccess, isCollaborator } = useCollaboratorAccess();
   const isCollapsed = state === "collapsed";
   
   // State for collapsible groups
@@ -139,13 +142,21 @@ export function AppSidebar() {
   const NavGroup = ({ label, items, icon: GroupIcon }: { label: string; items: NavItem[]; icon?: React.ElementType }) => {
     const isOpen = openGroups[label] ?? true;
     
+    // Filter items based on collaborator access
+    const filteredItems = items.filter(item => {
+      if (!item.moduleKey) return true; // No access control for this item
+      return hasModuleAccess(item.moduleKey);
+    });
+    // Hide group if no items are accessible
+    if (filteredItems.length === 0) return null;
+    
     // When collapsed, show items directly without collapsible header
     if (isCollapsed) {
       return (
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {items.map((item) => {
+              {filteredItems.map((item) => {
                 const moduleTags = item.moduleId ? moduleTagsMap.get(item.moduleId) || [] : [];
                 return (
                   <SidebarMenuItem key={item.title}>
@@ -206,7 +217,7 @@ export function AppSidebar() {
           <CollapsibleContent>
             <SidebarGroupContent>
               <SidebarMenu>
-                {items.map((item) => {
+                {filteredItems.map((item) => {
                   const moduleTags = item.moduleId ? moduleTagsMap.get(item.moduleId) || [] : [];
                   return (
                     <SidebarMenuItem key={item.title}>

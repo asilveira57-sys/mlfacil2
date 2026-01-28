@@ -2233,6 +2233,97 @@ export type Database = {
           },
         ]
       }
+      collaborator_module_access: {
+        Row: {
+          collaborator_id: string
+          created_at: string
+          enabled: boolean
+          id: string
+          module_key: string
+          updated_at: string
+        }
+        Insert: {
+          collaborator_id: string
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          module_key: string
+          updated_at?: string
+        }
+        Update: {
+          collaborator_id?: string
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          module_key?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collaborator_module_access_collaborator_id_fkey"
+            columns: ["collaborator_id"]
+            isOneToOne: false
+            referencedRelation: "collaborators"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      collaborators: {
+        Row: {
+          accepted_at: string | null
+          auth_user_id: string | null
+          created_at: string
+          created_by: string
+          deleted_at: string | null
+          disabled_at: string | null
+          email: string
+          id: string
+          invited_at: string | null
+          name: string
+          status: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          auth_user_id?: string | null
+          created_at?: string
+          created_by: string
+          deleted_at?: string | null
+          disabled_at?: string | null
+          email: string
+          id?: string
+          invited_at?: string | null
+          name: string
+          status?: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          accepted_at?: string | null
+          auth_user_id?: string | null
+          created_at?: string
+          created_by?: string
+          deleted_at?: string | null
+          disabled_at?: string | null
+          email?: string
+          id?: string
+          invited_at?: string | null
+          name?: string
+          status?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collaborators_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       communication_blocked_patterns: {
         Row: {
           category: string
