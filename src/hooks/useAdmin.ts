@@ -335,14 +335,22 @@ export function useSeoSettings() {
     mutationFn: async (setting: Partial<SeoPageSetting> & { page_path: string }) => {
       const insertData = {
         page_path: setting.page_path,
+        page_type: setting.page_type || 'external_page',
         meta_title: setting.meta_title || null,
         meta_description: setting.meta_description || null,
+        meta_keywords: setting.meta_keywords || null,
         canonical_url: setting.canonical_url || null,
         og_title: setting.og_title || null,
         og_description: setting.og_description || null,
         og_image: setting.og_image || null,
         robots_index: setting.robots_index ?? true,
         robots_follow: setting.robots_follow ?? true,
+        seo_roadmap: setting.seo_roadmap || null,
+        primary_keyword: setting.primary_keyword || null,
+        secondary_keywords: setting.secondary_keywords || null,
+        seo_cluster: setting.seo_cluster || null,
+        evergreen_content: setting.evergreen_content ?? false,
+        suggested_update_date: setting.suggested_update_date || null,
       };
       const { data, error } = await supabase
         .from('seo_page_settings')
@@ -354,6 +362,7 @@ export function useSeoSettings() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'seo-settings'] });
+      queryClient.invalidateQueries({ queryKey: ['seo-meta'] });
       toast.success('Configuração SEO atualizada');
     },
     onError: (error) => {
@@ -361,7 +370,25 @@ export function useSeoSettings() {
     },
   });
 
-  return { ...query, upsertSeoSetting };
+  const deleteSeoSetting = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from('seo_page_settings')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'seo-settings'] });
+      queryClient.invalidateQueries({ queryKey: ['seo-meta'] });
+      toast.success('Configuração SEO excluída');
+    },
+    onError: (error) => {
+      toast.error(`Erro ao excluir SEO: ${error.message}`);
+    },
+  });
+
+  return { ...query, upsertSeoSetting, deleteSeoSetting };
 }
 
 // Integrations

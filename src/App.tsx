@@ -12,6 +12,7 @@ import { UserAccessProvider } from "@/contexts/UserAccessContext";
 import { RouteChangeCleanup } from "@/components/layout/RouteChangeCleanup";
 import { OnboardingWizard } from "@/components/onboarding";
 import { TrialExpiredPaywall, ModuleAccessGuard } from "@/components/access";
+import { SeoHead } from "@/components/seo/SeoHead";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
@@ -143,6 +144,7 @@ const App = () => {
             <GlobalWatchdogs />
             <BrowserRouter>
               <RouteChangeCleanup />
+              <SeoHead />
               <OnboardingWizard />
               <TrialExpiredPaywall />
               <ModuleAccessGuard>
