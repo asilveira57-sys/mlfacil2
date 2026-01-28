@@ -43,6 +43,8 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
   // Use refs to avoid dependency loops
   const accountsRef = useRef<ActiveAccount[]>([]);
   const initializingRef = useRef(false);
+  // Guard to prevent repeated persist calls with the same value
+  const lastPersistedRef = useRef<{userId: string; accountId: string} | null>(null);
   
   // Keep ref in sync
   useEffect(() => {
@@ -88,7 +90,17 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
 
   // Persist active account - uses ref to avoid dependency on accounts state
   // NOTE: Silently ignores DB errors since localStorage is the primary fast-path.
+  // GUARD: Only persists when the (userId, accountId) pair actually changes.
   const persistActiveAccount = useCallback(async (userId: string, accountId: string, accountsList?: ActiveAccount[]): Promise<void> => {
+    // Guard: skip if already persisted the same pair
+    const lastPersisted = lastPersistedRef.current;
+    if (lastPersisted?.userId === userId && lastPersisted?.accountId === accountId) {
+      return; // Already persisted, no-op
+    }
+    
+    // Mark as persisted BEFORE triggering the request to prevent re-entry
+    lastPersistedRef.current = { userId, accountId };
+    
     const currentAccounts = accountsList || accountsRef.current;
     const account = currentAccounts.find(a => a.id === accountId);
     
@@ -96,7 +108,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('active_account_id', accountId);
     localStorage.setItem('active_seller_id', account?.sellerId || '');
 
-    // Best-effort save to user_context in database (non-blocking, error-silenced)
+    // Best-effort save to user_context in database (non-blocking, fire-and-forget)
     // FK now references ml_accounts so this should succeed.
     supabase
       .from('user_context')
@@ -109,9 +121,14 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
         { onConflict: 'user_id' }
       )
       .then(({ error }) => {
-        if (error && import.meta.env.DEV) {
-          // Log in dev only, don't block or loop
-          console.warn('[ActiveAccountContext] user_context upsert failed (non-blocking):', error.message);
+        if (error) {
+          // Clear the ref to allow retry on next account switch if DB failed
+          if (lastPersistedRef.current?.accountId === accountId) {
+            lastPersistedRef.current = null;
+          }
+          if (import.meta.env.DEV) {
+            console.warn('[ActiveAccountContext] user_context upsert failed (non-blocking):', error.message);
+          }
         }
       });
   }, []);
@@ -278,20 +295,24 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
   // Listen for auth changes
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_IN') {
+      // Only re-initialize on genuine SIGNED_IN (not token refresh or initial session)
+      if (event === 'SIGNED_IN' && !initializingRef.current && !initialized) {
         initializingRef.current = false; // Reset to allow re-initialization
         initialize();
       } else if (event === 'SIGNED_OUT') {
         setAccounts([]);
         setActiveAccountState(null);
         accountsRef.current = [];
+        lastPersistedRef.current = null; // Clear persist guard on sign out
         localStorage.removeItem('active_account_id');
         localStorage.removeItem('active_seller_id');
+        setInitialized(false);
       }
+      // Ignore: TOKEN_REFRESHED, INITIAL_SESSION
     });
 
     return () => subscription.unsubscribe();
-  }, [initialize]);
+  }, [initialize, initialized]);
 
   const value: ActiveAccountContextType = {
     activeAccount,
