@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
-import { Package, Settings } from 'lucide-react';
+import { Settings } from 'lucide-react';
 import { useShippingLabels, ShippingOrder, LabelLayout } from '@/hooks/useShippingLabels';
 import { ShippingFilters } from '@/components/shipping/ShippingFilters';
 import { ShippingTable } from '@/components/shipping/ShippingTable';
@@ -10,7 +10,7 @@ import { ShippingPagination } from '@/components/shipping/ShippingPagination';
 import { BulkActionsBar } from '@/components/shipping/BulkActionsBar';
 import { OrderDetailsDrawer } from '@/components/shipping/OrderDetailsDrawer';
 import { useToast } from '@/hooks/use-toast';
-import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { PageContainer } from '@/components/layout/PageContainer';
 
 interface MLAccount {
   id: string;
@@ -120,16 +120,6 @@ export default function ShippingLabels() {
     generateLabels({ format, layout: 'meli_100x150', shipmentId });
   };
 
-  if (loading) {
-    return (
-      <DashboardLayout title="Etiquetas de Envio">
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-        </div>
-      </DashboardLayout>
-    );
-  }
-
   const headerContent = (
     <Button
       variant="ghost"
@@ -141,8 +131,18 @@ export default function ShippingLabels() {
     </Button>
   );
 
+  if (loading) {
+    return (
+      <PageContainer title="Etiquetas de Envio">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        </div>
+      </PageContainer>
+    );
+  }
+
   return (
-    <DashboardLayout 
+    <PageContainer 
       title="Etiquetas de Envio" 
       subtitle={mlAccount?.nickname || mlAccount?.email || undefined}
       headerContent={headerContent}
@@ -210,6 +210,6 @@ export default function ShippingLabels() {
         isGenerating={isGenerating}
         orderItems={selectedOrder ? orderItems.get(selectedOrder.order_id) : undefined}
       />
-    </DashboardLayout>
+    </PageContainer>
   );
 }

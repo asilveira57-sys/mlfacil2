@@ -19,7 +19,7 @@ import { CompetitorListings } from '@/components/competitor/CompetitorListings';
 import { CompetitorMarketSearch } from '@/components/competitor/CompetitorMarketSearch';
 import { CompetitorAlerts } from '@/components/competitor/CompetitorAlerts';
 import { CompetitorSettings } from '@/components/competitor/CompetitorSettings';
-import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { PageContainer } from '@/components/layout/PageContainer';
 
 interface MlAccount {
   id: string;
@@ -72,22 +72,22 @@ export default function Concorrencia() {
         ))}
       </SelectContent>
     </Select>
-  ) : null;
+  ) : undefined;
 
   if (loading) {
     return (
-      <DashboardLayout title="Concorrência" subtitle="Análise de mercado e posicionamento">
+      <PageContainer title="Concorrência" subtitle="Análise de mercado e posicionamento">
         <div className="container mx-auto p-6 space-y-6">
           <Skeleton className="h-10 w-64" />
           <Skeleton className="h-96 w-full" />
         </div>
-      </DashboardLayout>
+      </PageContainer>
     );
   }
 
   if (accounts.length === 0) {
     return (
-      <DashboardLayout title="Concorrência" subtitle="Análise de mercado e posicionamento">
+      <PageContainer title="Concorrência" subtitle="Análise de mercado e posicionamento">
         <div className="container mx-auto p-6">
           <Card className="p-8 text-center">
             <AlertTriangle className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
@@ -98,12 +98,12 @@ export default function Concorrencia() {
             <Button onClick={() => navigate('/dashboard')}>Ir para Dashboard</Button>
           </Card>
         </div>
-      </DashboardLayout>
+      </PageContainer>
     );
   }
 
   return (
-    <DashboardLayout
+    <PageContainer
       title="Concorrência"
       subtitle="Análise de mercado e posicionamento de preços"
       headerContent={headerContent}
@@ -155,6 +155,6 @@ export default function Concorrencia() {
           </TabsContent>
         </Tabs>
       </div>
-    </DashboardLayout>
+    </PageContainer>
   );
 }

@@ -4,7 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
-import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { PageContainer } from '@/components/layout/PageContainer';
 import {
   TrendsFiltersBar,
   TrendsOverviewCards,
@@ -260,7 +260,7 @@ export default function TendenciasV2() {
   // NO fullscreen overlay, NO blocking loading
   
   return (
-    <DashboardLayout
+    <PageContainer
       title="Tendências de Mercado"
       subtitle="Análise baseada em dados públicos do Mercado Livre"
     >
@@ -329,6 +329,6 @@ export default function TendenciasV2() {
           onPeriodFallback={handlePeriodChange}
         />
       </div>
-    </DashboardLayout>
+    </PageContainer>
   );
 }
