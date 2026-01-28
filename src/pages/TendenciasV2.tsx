@@ -322,7 +322,11 @@ export default function TendenciasV2() {
           isLoading={highlightsLoading}
           snapshotDate={highlights?.snapshotDate || null}
           categoryName={selectedCategoryName}
+          categoryId={selectedCategoryId}
+          selectedPeriod={selectedPeriod}
           selectedKeyword={selectedKeyword}
+          onRetry={handleRefresh}
+          onPeriodFallback={handlePeriodChange}
         />
       </div>
     </DashboardLayout>

@@ -189,30 +189,57 @@ export function useHighlightsCached(siteId: string, categoryId: string | null) {
   return useQuery({
     queryKey: ['trends-cached', 'highlights', siteId, categoryId],
     queryFn: async (): Promise<CachedHighlights> => {
+      // Validate category before making request
+      if (!categoryId) {
+        console.warn('[useTrendsDataCache] Highlights: categoryId is empty/null, skipping fetch');
+        return {
+          items: [],
+          snapshotDate: null,
+          cachedAt: Date.now(),
+        };
+      }
+
       // 1. Check memory cache first
       const cached = getFromCache<CachedHighlights>(cacheKey, TTL.HIGHLIGHTS);
       if (cached) {
-        console.log('[useTrendsDataCache] Highlights cache hit');
+        console.log('[useTrendsDataCache] Highlights cache hit', { 
+          categoryId, 
+          itemsCount: cached.items.length,
+          cachedAgo: Math.round((Date.now() - cached.cachedAt) / 1000) + 's'
+        });
+        // Trigger background refresh if older than half TTL
         if (Date.now() - cached.cachedAt > TTL.HIGHLIGHTS / 2) {
-          fetchFreshHighlights(siteId, categoryId, cacheKey);
+          fetchFreshHighlights(siteId, categoryId, cacheKey).catch(err => {
+            console.warn('[useTrendsDataCache] Background refresh failed:', err);
+          });
         }
         return cached;
       }
 
       // 2. Fetch from API
-      console.log('[useTrendsDataCache] Highlights cache miss, fetching...');
+      console.log('[useTrendsDataCache] Highlights cache miss, fetching...', { categoryId, siteId });
       return fetchFreshHighlights(siteId, categoryId, cacheKey);
     },
     staleTime: TTL.HIGHLIGHTS / 2,
     gcTime: TTL.HIGHLIGHTS,
     enabled: !!categoryId,
     placeholderData: (prev) => prev,
+    retry: 2,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
   });
 }
 
 async function fetchFreshHighlights(siteId: string, categoryId: string | null, cacheKey: string): Promise<CachedHighlights> {
+  const startTime = Date.now();
+  const endpoint = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/trends-api/mercado/highlights`;
+  
+  console.log('[useTrendsDataCache] fetchFreshHighlights starting', { siteId, categoryId });
+  
   const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error('Not authenticated');
+  if (!session) {
+    console.error('[useTrendsDataCache] fetchFreshHighlights: Not authenticated');
+    throw new Error('Not authenticated');
+  }
 
   const params = new URLSearchParams({ site_id: siteId });
   if (categoryId) {
@@ -221,23 +248,57 @@ async function fetchFreshHighlights(siteId: string, categoryId: string | null, c
     params.append('all', 'true');
   }
 
-  const response = await fetch(
-    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/trends-api/mercado/highlights?${params}`,
-    {
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-        'Content-Type': 'application/json',
-      },
-    }
-  );
+  const fullUrl = `${endpoint}?${params}`;
+  console.log('[useTrendsDataCache] Fetching highlights:', fullUrl);
+  
+  const response = await fetch(fullUrl, {
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
+    },
+  });
 
+  const elapsed = Date.now() - startTime;
+  
   if (!response.ok) {
+    console.error('[useTrendsDataCache] Highlights API error', {
+      status: response.status,
+      categoryId,
+      elapsed: `${elapsed}ms`,
+    });
     throw new Error(`API error: ${response.status}`);
   }
 
   const apiData = await response.json();
+  
+  // Robust parsing: accept any items with item_id OR catalog_id
+  const rawItems = apiData.items || [];
+  const parsedItems = rawItems
+    .filter((item: any) => item.item_id || item.catalog_id)
+    .map((item: any, index: number) => ({
+      item_id: item.item_id || item.catalog_id || `unknown-${index}`,
+      rank: item.rank || index + 1,
+      title: item.title || null,
+      thumbnail: item.thumbnail || item.image || null,
+      price: item.price ?? null,
+      sold_quantity: item.sold_quantity ?? item.sold ?? null,
+      permalink: item.permalink || item.url || null,
+      estimated_revenue: item.estimated_revenue ?? null,
+      entity_type: item.entity_type || 'ITEM',
+    }))
+    .slice(0, 20); // Keep up to 20 items
+  
+  console.log('[useTrendsDataCache] Highlights fetched', {
+    categoryId,
+    rawCount: rawItems.length,
+    parsedCount: parsedItems.length,
+    snapshotDate: apiData.snapshot_date,
+    elapsed: `${elapsed}ms`,
+    message: apiData.message || null,
+  });
+  
   const result: CachedHighlights = {
-    items: (apiData.items || []).slice(0, 10),
+    items: parsedItems,
     snapshotDate: apiData.snapshot_date || null,
     cachedAt: Date.now(),
   };
