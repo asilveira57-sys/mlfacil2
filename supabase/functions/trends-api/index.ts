@@ -890,45 +890,93 @@ async function enrichMissingItemData(
   console.log(`[trends-api] Enriching ${itemsNeedingEnrichment.length} items with missing data`);
 
   // Build a map for quick lookup
-  const enrichmentMap = new Map<string, { title?: string; thumbnail?: string; price?: number; sold_quantity?: number }>();
+  const enrichmentMap = new Map<string, { 
+    title?: string; 
+    thumbnail?: string; 
+    price?: number; 
+    sold_quantity?: number;
+    permalink?: string;
+    resolved_item_id?: string;
+  }>();
 
-  // Strategy 1: Try to get from meli_listings_cache first (fastest)
-  const itemIds = itemsNeedingEnrichment.map((i) => i.item_id);
-  const { data: cachedItems } = await supabase
-    .from('meli_listings_cache')
-    .select('item_id, title, thumbnail, price, sold_quantity')
-    .in('item_id', itemIds)
-    .order('last_sync_at', { ascending: false });
-
-  for (const cached of cachedItems || []) {
-    if (cached.title && cached.thumbnail) {
-      enrichmentMap.set(cached.item_id, {
-        title: cached.title,
-        thumbnail: cached.thumbnail,
-        price: cached.price,
-        sold_quantity: cached.sold_quantity,
-      });
+  // Separate catalog IDs (MLBU*) from regular item IDs
+  const catalogIds: string[] = [];
+  const regularItemIds: string[] = [];
+  
+  for (const item of itemsNeedingEnrichment) {
+    if (item.item_id.startsWith('MLBU')) {
+      catalogIds.push(item.item_id);
+    } else {
+      regularItemIds.push(item.item_id);
     }
   }
 
-  // Strategy 2: For catalog items (MLBU*), try meli_order_items_cache
-  const catalogIds = itemsNeedingEnrichment
-    .filter((i) => i.item_id.startsWith('MLBU') && !enrichmentMap.has(i.item_id))
-    .map((i) => i.item_id);
+  // Strategy 1: For regular items, try meli_listings_cache first (fastest)
+  if (regularItemIds.length > 0) {
+    const { data: cachedItems } = await supabase
+      .from('meli_listings_cache')
+      .select('item_id, title, thumbnail, price, sold_quantity, permalink')
+      .in('item_id', regularItemIds)
+      .order('last_sync_at', { ascending: false });
 
+    for (const cached of cachedItems || []) {
+      if (cached.title || cached.thumbnail) {
+        enrichmentMap.set(cached.item_id, {
+          title: cached.title,
+          thumbnail: cached.thumbnail,
+          price: cached.price,
+          sold_quantity: cached.sold_quantity,
+          permalink: cached.permalink,
+        });
+      }
+    }
+  }
+
+  // Strategy 2: For catalog items (MLBU*), try meli_order_items_cache with price
   if (catalogIds.length > 0) {
     const { data: orderItems } = await supabase
       .from('meli_order_items_cache')
-      .select('catalog_product_id, title, thumbnail')
+      .select('catalog_product_id, item_id, title, thumbnail, unit_price, quantity, created_at_meli')
       .in('catalog_product_id', catalogIds)
+      .not('title', 'is', null)
       .order('created_at_meli', { ascending: false });
 
+    const seenCatalogs = new Set<string>();
     for (const item of orderItems || []) {
-      if (item.catalog_product_id && item.title && !enrichmentMap.has(item.catalog_product_id)) {
+      if (item.catalog_product_id && !seenCatalogs.has(item.catalog_product_id)) {
+        seenCatalogs.add(item.catalog_product_id);
         enrichmentMap.set(item.catalog_product_id, {
           title: item.title,
           thumbnail: item.thumbnail,
+          price: item.unit_price,
+          resolved_item_id: item.item_id,
         });
+      }
+    }
+
+    // Also try meli_listings_cache with catalog_product_id
+    const stillMissingCatalogs = catalogIds.filter(id => !enrichmentMap.has(id));
+    if (stillMissingCatalogs.length > 0) {
+      const { data: catalogListings } = await supabase
+        .from('meli_listings_cache')
+        .select('catalog_product_id, item_id, title, thumbnail, price, sold_quantity, permalink')
+        .in('catalog_product_id', stillMissingCatalogs)
+        .not('title', 'is', null)
+        .order('last_sync_at', { ascending: false });
+
+      const seenListings = new Set<string>();
+      for (const listing of catalogListings || []) {
+        if (listing.catalog_product_id && !seenListings.has(listing.catalog_product_id)) {
+          seenListings.add(listing.catalog_product_id);
+          enrichmentMap.set(listing.catalog_product_id, {
+            title: listing.title,
+            thumbnail: listing.thumbnail,
+            price: listing.price,
+            sold_quantity: listing.sold_quantity,
+            permalink: listing.permalink,
+            resolved_item_id: listing.item_id,
+          });
+        }
       }
     }
   }
@@ -952,7 +1000,7 @@ async function enrichMissingItemData(
     const accessToken = mlAccount?.access_token;
     const headers: Record<string, string> = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
 
-    for (const item of stillMissing.slice(0, 8)) { // Limit to 8 to avoid rate limits
+    for (const item of stillMissing.slice(0, 10)) { // Limit to 10 to avoid rate limits
       try {
         // First try: Products API (for catalog items MLBU*)
         const productUrl = `https://api.mercadolibre.com/products/${item.item_id}`;
@@ -962,13 +1010,16 @@ async function enrichMissingItemData(
           const productData = await productRes.json();
           const thumbnail = productData.pictures?.[0]?.url || productData.main_picture?.url || null;
           const title = productData.name || productData.short_description?.content || null;
+          const buyBox = productData.buy_box_winner;
           
           if (title || thumbnail) {
             enrichmentMap.set(item.item_id, {
               title: title || `Catálogo ${item.item_id.slice(-8)}`,
               thumbnail,
-              price: productData.buy_box_winner?.price ?? undefined,
-              sold_quantity: undefined,
+              price: buyBox?.price ?? undefined,
+              sold_quantity: buyBox?.sold_quantity ?? undefined,
+              permalink: buyBox?.permalink ?? undefined,
+              resolved_item_id: buyBox?.item_id ?? undefined,
             });
             console.log(`[trends-api] Enriched ${item.item_id} via Products API: ${title?.slice(0, 40)}`);
           }
@@ -988,6 +1039,8 @@ async function enrichMissingItemData(
                 thumbnail: firstResult.thumbnail,
                 price: firstResult.price,
                 sold_quantity: firstResult.sold_quantity,
+                permalink: firstResult.permalink,
+                resolved_item_id: firstResult.id,
               });
               console.log(`[trends-api] Enriched ${item.item_id} via search fallback`);
             }
@@ -995,25 +1048,38 @@ async function enrichMissingItemData(
         }
         
         // Rate limit delay
-        await new Promise((r) => setTimeout(r, 250));
+        await new Promise((r) => setTimeout(r, 200));
       } catch (err) {
         console.warn(`[trends-api] Failed to enrich ${item.item_id}:`, err);
       }
     }
   }
 
-  // Apply enrichment to items
+  // Apply enrichment to items and add entity_type flag
   return items.map((item) => {
+    const isCatalog = item.item_id.startsWith('MLBU');
     const enriched = enrichmentMap.get(item.item_id);
+    
+    const baseItem = {
+      ...item,
+      entity_type: isCatalog ? 'PRODUCT' : 'ITEM',
+    };
+    
     if (enriched) {
       return {
-        ...item,
+        ...baseItem,
         title: enriched.title || item.title,
         thumbnail: enriched.thumbnail || item.thumbnail,
         price: enriched.price ?? item.price,
         sold_quantity: enriched.sold_quantity ?? item.sold_quantity,
+        permalink: enriched.permalink || item.permalink,
+        // Calculate estimated revenue if we have price and quantity
+        estimated_revenue: (enriched.price ?? item.price) && (enriched.sold_quantity ?? item.sold_quantity)
+          ? ((enriched.price ?? item.price) * (enriched.sold_quantity ?? item.sold_quantity))
+          : item.estimated_revenue,
       };
     }
-    return item;
+    
+    return baseItem;
   });
 }
