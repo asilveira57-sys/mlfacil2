@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { User } from "@supabase/supabase-js";
@@ -298,15 +298,9 @@ const Dashboard = () => {
     ? (syncJob.processed_records / syncJob.total_records) * 100 
     : 0;
 
-  if (loading || accountLoading || !initialized) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-      </div>
-    );
-  }
-
-  const headerContent = (
+  // Memoize headerContent to prevent render loops from unstable JSX references
+  // MUST be before early return to satisfy React hooks rules
+  const headerContent = useMemo(() => (
     <div className="flex items-center gap-2">
       {/* ML Connection Status Badge */}
       {activeAccount ? (
@@ -475,7 +469,27 @@ const Dashboard = () => {
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
-  );
+  ), [
+    activeAccount,
+    settingsOpen,
+    syncDebugInfo,
+    isSyncing,
+    syncJob,
+    syncProgress,
+    user?.email,
+    handleSyncOrders,
+    handleConnectML,
+    navigate
+  ]);
+
+  // Loading state - after all hooks
+  if (loading || accountLoading || !initialized) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
+      </div>
+    );
+  }
 
   return (
     <PageContainer 
