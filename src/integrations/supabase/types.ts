@@ -218,6 +218,228 @@ export type Database = {
         }
         Relationships: []
       }
+      ad_lifecycle_actions: {
+        Row: {
+          action_status: string
+          action_type: string
+          checklist: Json | null
+          created_at: string
+          created_by: string | null
+          id: string
+          item_id: string
+          ml_account_id: string
+          reason: string | null
+          result: Json | null
+          source_snapshot: Json | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          action_status?: string
+          action_type: string
+          checklist?: Json | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          item_id: string
+          ml_account_id: string
+          reason?: string | null
+          result?: Json | null
+          source_snapshot?: Json | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          action_status?: string
+          action_type?: string
+          checklist?: Json | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          item_id?: string
+          ml_account_id?: string
+          reason?: string | null
+          result?: Json | null
+          source_snapshot?: Json | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: []
+      }
+      ad_lifecycle_experiments: {
+        Row: {
+          after_14d: Json | null
+          after_30d: Json | null
+          after_7d: Json | null
+          baseline: Json | null
+          created_at: string
+          id: string
+          method: string
+          ml_account_id: string
+          new_item_id: string | null
+          source_item_id: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          after_14d?: Json | null
+          after_30d?: Json | null
+          after_7d?: Json | null
+          baseline?: Json | null
+          created_at?: string
+          id?: string
+          method: string
+          ml_account_id: string
+          new_item_id?: string | null
+          source_item_id: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          after_14d?: Json | null
+          after_30d?: Json | null
+          after_7d?: Json | null
+          baseline?: Json | null
+          created_at?: string
+          id?: string
+          method?: string
+          ml_account_id?: string
+          new_item_id?: string | null
+          source_item_id?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: []
+      }
+      ad_timeline_events: {
+        Row: {
+          created_at: string
+          event_type: string
+          id: string
+          item_id: string
+          ml_account_id: string
+          occurred_at: string
+          payload: Json | null
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          event_type: string
+          id?: string
+          item_id: string
+          ml_account_id: string
+          occurred_at: string
+          payload?: Json | null
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          event_type?: string
+          id?: string
+          item_id?: string
+          ml_account_id?: string
+          occurred_at?: string
+          payload?: Json | null
+          workspace_id?: string
+        }
+        Relationships: []
+      }
+      ad_timeline_settings: {
+        Row: {
+          action_safety: Json | null
+          created_at: string
+          id: string
+          ml_account_id: string | null
+          no_sales_policy: string | null
+          recalc_frequency_hours: number | null
+          thresholds_days: Json | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          action_safety?: Json | null
+          created_at?: string
+          id?: string
+          ml_account_id?: string | null
+          no_sales_policy?: string | null
+          recalc_frequency_hours?: number | null
+          thresholds_days?: Json | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          action_safety?: Json | null
+          created_at?: string
+          id?: string
+          ml_account_id?: string | null
+          no_sales_policy?: string | null
+          recalc_frequency_hours?: number | null
+          thresholds_days?: Json | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: []
+      }
+      ad_timeline_stats: {
+        Row: {
+          avg_gap_hours: number | null
+          created_at: string
+          days_since_last_sale: number | null
+          first_sale_at: string | null
+          id: string
+          item_id: string
+          last_sale_at: string | null
+          max_gap_hours: number | null
+          median_gap_hours: number | null
+          ml_account_id: string
+          sales_count_120d: number | null
+          sales_count_30d: number | null
+          sales_count_60d: number | null
+          sales_count_90d: number | null
+          status_bucket: string | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          avg_gap_hours?: number | null
+          created_at?: string
+          days_since_last_sale?: number | null
+          first_sale_at?: string | null
+          id?: string
+          item_id: string
+          last_sale_at?: string | null
+          max_gap_hours?: number | null
+          median_gap_hours?: number | null
+          ml_account_id: string
+          sales_count_120d?: number | null
+          sales_count_30d?: number | null
+          sales_count_60d?: number | null
+          sales_count_90d?: number | null
+          status_bucket?: string | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          avg_gap_hours?: number | null
+          created_at?: string
+          days_since_last_sale?: number | null
+          first_sale_at?: string | null
+          id?: string
+          item_id?: string
+          last_sale_at?: string | null
+          max_gap_hours?: number | null
+          median_gap_hours?: number | null
+          ml_account_id?: string
+          sales_count_120d?: number | null
+          sales_count_30d?: number | null
+          sales_count_60d?: number | null
+          sales_count_90d?: number | null
+          status_bucket?: string | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: []
+      }
       admin_action_log: {
         Row: {
           action_type: string

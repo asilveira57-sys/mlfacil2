@@ -35,6 +35,9 @@ import Promocoes from "./pages/Promocoes";
 import MensagensPosVenda from "./pages/MensagensPosVenda";
 import Perguntas from "./pages/Perguntas";
 import Admin from "./pages/Admin";
+import AdTimelineRadar from "./pages/AdTimelineRadar";
+import AdTimelineDetail from "./pages/AdTimelineDetail";
+import AdActionsCenter from "./pages/AdActionsCenter";
 import NotFound from "./pages/NotFound";
 import { AdminRoute } from "./components/auth/AdminRoute";
 
@@ -167,6 +170,10 @@ const App = () => {
                 <Route path="/promocoes" element={<Promocoes />} />
                 <Route path="/mensagens" element={<MensagensPosVenda />} />
                 <Route path="/perguntas" element={<Perguntas />} />
+                {/* Ad Timeline routes */}
+                <Route path="/anuncios/linha-do-tempo" element={<AdTimelineRadar />} />
+                <Route path="/anuncios/linha-do-tempo/:itemId" element={<AdTimelineDetail />} />
+                <Route path="/anuncios/acoes" element={<AdActionsCenter />} />
                 {/* Blog routes */}
                 <Route path="/blog" element={<Blog />} />
                 <Route path="/blog/:slug" element={<Blog />} />

@@ -20,6 +20,7 @@ import {
   MessageSquareText,
   Shield,
   Tags,
+  History,
 } from "lucide-react";
 import {
   Collapsible,
@@ -66,6 +67,7 @@ const mainNavItems: NavItem[] = [
   { title: "Tarefas", url: "/tarefas", icon: ListChecks, moduleId: "tarefas" },
   { title: "Promoções", url: "/promocoes", icon: Tag, moduleId: "promocoes" },
   { title: "Mercado ADS", url: "/publicidade", icon: Megaphone, moduleId: "publicidade" },
+  { title: "Linha do Tempo", url: "/anuncios/linha-do-tempo", icon: History, moduleId: "linha-do-tempo" },
   { title: "Pós-Venda", url: "/mensagens", icon: MessageSquareText, moduleId: "pos-venda" },
   { title: "Perguntas", url: "/perguntas", icon: MessageSquareText, moduleId: "perguntas" },
 ];
