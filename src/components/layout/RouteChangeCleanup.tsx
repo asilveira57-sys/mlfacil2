@@ -36,11 +36,15 @@ export function RouteChangeCleanup() {
     };
   }, [pathname]);
 
-  // Periodic check for orphaned scroll locks (every 1s - more aggressive)
+  // Periodic check for orphaned scroll locks (every 3s - reduced frequency for performance)
+  // Only runs the check, doesn't cause React re-renders
   useEffect(() => {
     const interval = window.setInterval(() => {
       const hasScrollLock = document.body.hasAttribute("data-scroll-locked");
       const hasPointerEventsNone = document.body.style.pointerEvents === "none";
+      
+      // Skip check if no issues detected
+      if (!hasScrollLock && !hasPointerEventsNone) return;
       
       // Check all possible open states
       const hasAnyOpen = !!(
@@ -50,7 +54,7 @@ export function RouteChangeCleanup() {
         document.querySelector('[data-radix-popover-content][data-state="open"]')
       );
       
-      if ((hasScrollLock || hasPointerEventsNone) && !hasAnyOpen) {
+      if (!hasAnyOpen) {
         if (import.meta.env.DEV) {
           console.warn("[UI-Cleanup] Orphaned scroll-lock/pointer-events detected, removing...");
         }
@@ -59,7 +63,7 @@ export function RouteChangeCleanup() {
         document.body.style.paddingRight = "";
         document.body.style.pointerEvents = "";
       }
-    }, 1000);
+    }, 3000);
 
     return () => window.clearInterval(interval);
   }, []);

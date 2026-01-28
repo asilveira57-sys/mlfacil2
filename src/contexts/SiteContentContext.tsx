@@ -48,16 +48,8 @@ export function SiteContentProvider({ children }: SiteContentProviderProps) {
     fetchContent();
   }, []);
 
-  // Recarrega quando o usuário volta para a aba (útil após editar no admin em outra rota/aba)
-  useEffect(() => {
-    const onFocus = () => fetchContent();
-    document.addEventListener('visibilitychange', onFocus);
-    window.addEventListener('focus', onFocus);
-    return () => {
-      document.removeEventListener('visibilitychange', onFocus);
-      window.removeEventListener('focus', onFocus);
-    };
-  }, []);
+  // REMOVED: Auto-refetch on visibility/focus was causing app-wide flickering
+  // Content refresh now happens only on explicit user action (via refresh() method)
 
   const getText = (key: string, fallback?: string): string => {
     return content[key] || defaultTexts[key] || fallback || key;
