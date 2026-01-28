@@ -61,6 +61,7 @@ interface NavItem {
   moduleId?: string; // For tag lookup
 }
 
+// IDs devem coincidir com system_modules.id no banco de dados
 const mainNavItems: NavItem[] = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, moduleId: "dashboard" },
   { title: "Vendas", url: "/shipping-labels", icon: Package, moduleId: "etiquetas" },
