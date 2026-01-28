@@ -8038,7 +8038,14 @@ export type Database = {
             foreignKeyName: "user_context_active_marketplace_account_id_fkey"
             columns: ["active_marketplace_account_id"]
             isOneToOne: false
-            referencedRelation: "marketplace_accounts"
+            referencedRelation: "ml_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_context_active_marketplace_account_id_fkey"
+            columns: ["active_marketplace_account_id"]
+            isOneToOne: false
+            referencedRelation: "unified_marketplace_accounts"
             referencedColumns: ["id"]
           },
         ]

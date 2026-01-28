@@ -87,34 +87,33 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Persist active account - uses ref to avoid dependency on accounts state
+  // NOTE: Silently ignores DB errors since localStorage is the primary fast-path.
   const persistActiveAccount = useCallback(async (userId: string, accountId: string, accountsList?: ActiveAccount[]): Promise<void> => {
     const currentAccounts = accountsList || accountsRef.current;
     const account = currentAccounts.find(a => a.id === accountId);
     
-    // Save to localStorage for immediate access
+    // Save to localStorage for immediate access (primary fast-path)
     localStorage.setItem('active_account_id', accountId);
     localStorage.setItem('active_seller_id', account?.sellerId || '');
 
-    // Save to user_context in database
-    try {
-      // Upsert prevents 406 (no rows) and 409 (race) storms.
-      const { error } = await supabase
-        .from('user_context')
-        .upsert(
-          {
-            user_id: userId,
-            active_marketplace_account_id: accountId,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'user_id' }
-        );
-
-      if (error) {
-        console.error('[ActiveAccountContext] Upsert user_context error:', error);
-      }
-    } catch (err) {
-      console.error('[ActiveAccountContext] Error persisting context:', err);
-    }
+    // Best-effort save to user_context in database (non-blocking, error-silenced)
+    // FK now references ml_accounts so this should succeed.
+    supabase
+      .from('user_context')
+      .upsert(
+        {
+          user_id: userId,
+          active_marketplace_account_id: accountId,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id' }
+      )
+      .then(({ error }) => {
+        if (error && import.meta.env.DEV) {
+          // Log in dev only, don't block or loop
+          console.warn('[ActiveAccountContext] user_context upsert failed (non-blocking):', error.message);
+        }
+      });
   }, []);
 
   useEffect(() => {

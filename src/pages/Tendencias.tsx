@@ -1,11 +1,11 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { TrendsProvider, useTrends } from '@/contexts/TrendsContext';
 import { useTrendsController } from '@/hooks/useTrendsController';
 import { useTrendsAutoLoad } from '@/hooks/useTrendsAutoLoad';
 import { useSellerCategories } from '@/hooks/useSellerCategories';
-import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { PageContainer } from '@/components/layout/PageContainer';
 import { performGlobalUiCleanup } from '@/lib/uiRouteCleanup';
 
 // Components
@@ -20,7 +20,7 @@ import { SellerGoalsSection } from '@/components/trends/SellerGoalsSection';
 import { TechnicalFooterAccordion } from '@/components/trends/TechnicalFooterAccordion';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Loader2 } from 'lucide-react';
 
 // Categories list (fallback for "Explorar mercado")
 const CATEGORIES = [
@@ -177,8 +177,8 @@ function TendenciasContent() {
 
   const categoriesForNavigator = CATEGORIES.map(c => ({ id: c.id, name: c.label }));
 
-  // Header content with account selector and reload button
-  const headerContent = (
+  // Memoize header content to avoid render loops
+  const headerContent = useMemo(() => (
     <div className="flex items-center gap-2">
       {accounts.length > 1 && (
         <Select value={state.selectedAccountId || ''} onValueChange={setAccount}>
@@ -205,24 +205,27 @@ function TendenciasContent() {
         <span className="hidden sm:inline">Atualizar</span>
       </Button>
     </div>
-  );
+  ), [accounts, state.selectedAccountId, setAccount, isReloading, handleReload]);
 
   // Show loading while auto-loading
   if (isAutoLoading) {
     return (
-      <DashboardLayout title="Tendências de Mercado" subtitle="Análise baseada em dados públicos do Mercado Livre">
+      <PageContainer 
+        title="Tendências de Mercado" 
+        subtitle="Análise baseada em dados públicos do Mercado Livre"
+      >
         <div className="flex items-center justify-center min-h-[400px]">
-          <div className="animate-pulse flex flex-col items-center gap-4">
-            <div className="h-12 w-12 rounded-full bg-primary/20" />
+          <div className="flex flex-col items-center gap-4">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             <p className="text-muted-foreground">Carregando...</p>
           </div>
         </div>
-      </DashboardLayout>
+      </PageContainer>
     );
   }
 
   return (
-    <DashboardLayout
+    <PageContainer
       title="Tendências de Mercado"
       subtitle="Análise baseada em dados públicos do Mercado Livre"
       headerContent={headerContent}
@@ -281,7 +284,7 @@ function TendenciasContent() {
           snapshotDate={snapshotDate}
         />
       </div>
-    </DashboardLayout>
+    </PageContainer>
   );
 }
 

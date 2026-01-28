@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { TrendsExplorerProvider, useTrendsExplorer } from '@/contexts/TrendsExplorerContext';
 import {
   TrendsExpBreadcrumb,
@@ -7,7 +8,7 @@ import {
   TrendsExpMetricsDrawer,
   TrendsExpComparisonPanel,
 } from '@/components/trends-explorer';
-import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { PageContainer } from '@/components/layout/PageContainer';
 import { BarChart2 } from 'lucide-react';
 
 function TelemetryBadge() {
@@ -27,11 +28,14 @@ function TelemetryBadge() {
 }
 
 function TendenciasExplorerContent() {
+  // Memoize headerContent to prevent render loops
+  const headerContent = useMemo(() => <TelemetryBadge />, []);
+
   return (
-    <DashboardLayout
+    <PageContainer
       title="Tendências"
       subtitle="Análise de mercado e oportunidades"
-      headerContent={<TelemetryBadge />}
+      headerContent={headerContent}
     >
       <div className="container mx-auto px-4 py-6 space-y-4">
         {/* Breadcrumb + Toolbar */}
@@ -48,7 +52,7 @@ function TendenciasExplorerContent() {
       <TrendsExpDetailsDrawer />
       <TrendsExpMetricsDrawer />
       <TrendsExpComparisonPanel />
-    </DashboardLayout>
+    </PageContainer>
   );
 }
 
