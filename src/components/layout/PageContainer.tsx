@@ -31,16 +31,6 @@ export function PageContainer({
   const headerContentRef = useRef<ReactNode>(headerContent);
   headerContentRef.current = headerContent;
 
-  useEffect(() => {
-    if (!import.meta.env.DEV) return;
-    // eslint-disable-next-line no-console
-    console.info("[MOUNT] PageContainer", { title, pathname });
-    return () => {
-      // eslint-disable-next-line no-console
-      console.info("[UNMOUNT] PageContainer", { title, pathname });
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   useEffect(() => {
     setHeader(title, subtitle, headerContentRef.current);

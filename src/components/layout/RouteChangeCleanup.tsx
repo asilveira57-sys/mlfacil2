@@ -1,15 +1,9 @@
 import { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 
-import {
-  describeElement,
-  isSuspiciousClickBlocker,
-  performGlobalUiCleanup,
-} from "@/lib/uiRouteCleanup";
-
 /**
- * Global, defensive cleanup to prevent invisible overlays / orphan portals
- * from blocking interactions after route transitions.
+ * Passive cleanup component - only fixes genuinely stuck UI states.
+ * Does NOT run cleanup on every route change to avoid "flash" effects.
  */
 export function RouteChangeCleanup() {
   const { pathname } = useLocation();
@@ -17,52 +11,27 @@ export function RouteChangeCleanup() {
   const lastCleanupAtRef = useRef<number>(0);
 
   useEffect(() => {
-    if (!import.meta.env.DEV) return;
-    // eslint-disable-next-line no-console
-    console.info('[MOUNT] RouteChangeCleanup');
-    return () => {
-      // eslint-disable-next-line no-console
-      console.info('[UNMOUNT] RouteChangeCleanup');
-    };
-  }, []);
-
-  useEffect(() => {
     const from = lastPathRef.current;
     if (from === pathname) return;
     lastPathRef.current = pathname;
+    lastCleanupAtRef.current = Date.now();
 
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.info('[NAV] RouteChangeCleanup', { from, to: pathname });
-    }
-
-    // Run a multi-pass cleanup to catch both immediate leftovers and
-    // mid-animation leftovers.
-    const now = Date.now();
-    lastCleanupAtRef.current = now;
-
-    performGlobalUiCleanup(`route-change:${pathname}`);
-
-    const t1 = window.setTimeout(() => performGlobalUiCleanup(`route-change:post-150ms:${pathname}`), 150);
-    const t2 = window.setTimeout(() => performGlobalUiCleanup(`route-change:post-600ms:${pathname}`), 600);
-
-    return () => {
-      window.clearTimeout(t1);
-      window.clearTimeout(t2);
-    };
+    // REMOVED: Aggressive cleanup on every route change was causing "flash" effects.
+    // The periodic orphan detection below handles genuine stuck states without
+    // disrupting normal navigation.
   }, [pathname]);
 
-  // Periodic check for orphaned scroll locks (every 3s - reduced frequency for performance)
-  // Only runs the check, doesn't cause React re-renders
+  // Periodic check for orphaned scroll locks (every 5s - only fixes genuine stuck states)
+  // Does NOT run on route change, only as a background safety net
   useEffect(() => {
     const interval = window.setInterval(() => {
       const hasScrollLock = document.body.hasAttribute("data-scroll-locked");
       const hasPointerEventsNone = document.body.style.pointerEvents === "none";
       
-      // Skip check if no issues detected
+      // Skip if no issues detected
       if (!hasScrollLock && !hasPointerEventsNone) return;
       
-      // Check all possible open states
+      // Only clean if nothing is actually open
       const hasAnyOpen = !!(
         document.querySelector('[data-radix-portal] [data-state="open"]') ||
         document.querySelector('[data-radix-select-content][data-state="open"]') ||
@@ -71,47 +40,14 @@ export function RouteChangeCleanup() {
       );
       
       if (!hasAnyOpen) {
-        if (import.meta.env.DEV) {
-          console.warn("[UI-Cleanup] Orphaned scroll-lock/pointer-events detected, removing...");
-        }
         document.body.removeAttribute("data-scroll-locked");
         document.body.style.overflow = "";
         document.body.style.paddingRight = "";
         document.body.style.pointerEvents = "";
       }
-    }, 3000);
+    }, 5000);
 
     return () => window.clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    if (!import.meta.env.DEV) return;
-
-    const onPointerDownCapture = (e: PointerEvent) => {
-      // If a modal is legitimately open, we don't want noisy logs.
-      const hasAnyOpen = !!document.querySelector('[data-radix-portal] [data-state="open"]');
-      if (hasAnyOpen) return;
-
-      const topEl = document.elementFromPoint(e.clientX, e.clientY);
-      if (!isSuspiciousClickBlocker(topEl)) return;
-
-      // Avoid spamming: log at most once per second, and prefer logs soon after a route change.
-      const now = Date.now();
-      const recentRouteChange = now - lastCleanupAtRef.current < 10_000;
-      if (!recentRouteChange) return;
-      if ((window as any).__lastUiBlockerLogAt && now - (window as any).__lastUiBlockerLogAt < 1000) return;
-      (window as any).__lastUiBlockerLogAt = now;
-
-      // eslint-disable-next-line no-console
-      console.warn(
-        "[UI-Cleanup][DEV] Clique está caindo em um possível overlay invisível:",
-        describeElement(topEl),
-        { x: e.clientX, y: e.clientY },
-      );
-    };
-
-    window.addEventListener("pointerdown", onPointerDownCapture, true);
-    return () => window.removeEventListener("pointerdown", onPointerDownCapture, true);
   }, []);
 
   return null;
