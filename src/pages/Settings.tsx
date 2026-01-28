@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { User, Receipt, Building2, Plug, CreditCard } from "lucide-react";
+import { User, Receipt, Building2, Plug, CreditCard, Palette } from "lucide-react";
 import SettingsProfile from "@/components/settings/SettingsProfile";
 import SettingsBilling from "@/components/settings/SettingsBilling";
 import SettingsCompanies from "@/components/settings/SettingsCompanies";
 import SettingsIntegrations from "@/components/settings/SettingsIntegrations";
 import SettingsSubscription from "@/components/settings/SettingsSubscription";
+import SettingsCustomization from "@/components/settings/SettingsCustomization";
 import { CollaboratorsCard } from "@/components/settings/collaborators";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 
@@ -14,6 +15,7 @@ const Settings = () => {
 
   const tabs = [
     { id: "profile", label: "Perfil", icon: User },
+    { id: "customization", label: "Personalização", icon: Palette },
     { id: "billing", label: "Faturamento", icon: Receipt },
     { id: "companies", label: "Empresas e Contas", icon: Building2 },
     { id: "integrations", label: "Integrações", icon: Plug },
@@ -27,7 +29,7 @@ const Settings = () => {
     >
       <div className="container mx-auto py-6 px-4 max-w-6xl">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 h-auto p-1 bg-muted/50">
+          <TabsList className="grid w-full grid-cols-6 h-auto p-1 bg-muted/50">
             {tabs.map((tab) => (
               <TabsTrigger
                 key={tab.id}
@@ -44,6 +46,10 @@ const Settings = () => {
             <SettingsProfile />
             {/* Collaborators Card - Only visible for workspace admins */}
             <CollaboratorsCard />
+          </TabsContent>
+
+          <TabsContent value="customization" className="mt-6">
+            <SettingsCustomization />
           </TabsContent>
 
           <TabsContent value="billing" className="mt-6">

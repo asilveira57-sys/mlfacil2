@@ -1,77 +1,46 @@
 import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useCompanyCustomization } from "@/hooks/useCompanyCustomization";
+import { LucideIcon } from "lucide-react";
 import {
-  CloudDownload,
-  Megaphone,
-  TrendingUp,
-  DollarSign,
-  Package,
-  Activity,
+  CloudDownload, Megaphone, TrendingUp, DollarSign, Activity, Package,
+  Tag, MessageCircle, BarChart3, CheckSquare, Clock, Eye, Box
 } from "lucide-react";
 
-interface QuickAction {
-  title: string;
-  description: string;
-  icon: React.ElementType;
-  color: string;
-  bgColor: string;
-  route: string;
-}
-
-const quickActions: QuickAction[] = [
-  {
-    title: "Importar Vendas",
-    description: "Sincronize pedidos do Mercado Livre",
-    icon: CloudDownload,
-    color: "text-blue-600",
-    bgColor: "bg-blue-500/10 hover:bg-blue-500/20",
-    route: "/shipping-labels",
-  },
-  {
-    title: "Mercado ADS",
-    description: "Gerencie campanhas publicitárias",
-    icon: Megaphone,
-    color: "text-pink-600",
-    bgColor: "bg-pink-500/10 hover:bg-pink-500/20",
-    route: "/publicidade",
-  },
-  {
-    title: "Ver Tendências",
-    description: "Produtos em alta por categoria",
-    icon: TrendingUp,
-    color: "text-orange-600",
-    bgColor: "bg-orange-500/10 hover:bg-orange-500/20",
-    route: "/tendencias",
-  },
-  {
-    title: "Validar Custos",
-    description: "Análise de margens e lucro",
-    icon: DollarSign,
-    color: "text-emerald-600",
-    bgColor: "bg-emerald-500/10 hover:bg-emerald-500/20",
-    route: "/custos",
-  },
-  {
-    title: "Radiografia",
-    description: "Análise profunda de anúncios",
-    icon: Activity,
-    color: "text-violet-600",
-    bgColor: "bg-violet-500/10 hover:bg-violet-500/20",
-    route: "/radiografia",
-  },
-  {
-    title: "Gerar Etiquetas",
-    description: "Imprima etiquetas PDF/ZPL",
-    icon: Package,
-    color: "text-cyan-600",
-    bgColor: "bg-cyan-500/10 hover:bg-cyan-500/20",
-    route: "/shipping-labels",
-  },
-];
+// Map of icon names to components
+const ICON_MAP: Record<string, LucideIcon> = {
+  CloudDownload, Megaphone, TrendingUp, DollarSign, Activity, Package,
+  Tag, MessageCircle, BarChart3, CheckSquare, Clock, Eye, Box
+};
 
 export function DashboardQuickActions() {
   const navigate = useNavigate();
+  const { enabledShortcuts, activeColor, loading } = useCompanyCustomization();
+
+  const getIconComponent = (iconName: string): LucideIcon => {
+    return ICON_MAP[iconName] || Box;
+  };
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <Skeleton className="h-6 w-32 mb-1" />
+          <Skeleton className="h-4 w-40" />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-28" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (enabledShortcuts.length === 0) {
+    return null;
+  }
 
   return (
     <div className="space-y-4">
@@ -83,25 +52,43 @@ export function DashboardQuickActions() {
       </div>
       
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {quickActions.map((action) => (
-          <Card
-            key={action.title}
-            className={`p-4 cursor-pointer transition-all duration-200 hover:shadow-md border-2 border-transparent hover:border-primary/20 ${action.bgColor}`}
-            onClick={() => navigate(action.route)}
-          >
-            <div className="flex flex-col items-center text-center gap-3">
-              <div className={`w-12 h-12 rounded-xl flex items-center justify-center bg-background/80`}>
-                <action.icon className={`h-6 w-6 ${action.color}`} />
+        {enabledShortcuts.map((shortcut) => {
+          const IconComp = getIconComponent(shortcut.icon);
+          
+          return (
+            <Card
+              key={shortcut.key}
+              className="p-4 cursor-pointer transition-all duration-200 hover:shadow-md border-2 border-transparent hover:border-primary/20"
+              style={{ 
+                backgroundColor: `${activeColor.hex}10`,
+              }}
+              onClick={() => navigate(shortcut.route)}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = `${activeColor.hex}20`;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = `${activeColor.hex}10`;
+              }}
+            >
+              <div className="flex flex-col items-center text-center gap-3">
+                <div 
+                  className="w-12 h-12 rounded-xl flex items-center justify-center bg-background/80"
+                >
+                  <IconComp 
+                    className="h-6 w-6"
+                    style={{ color: activeColor.hex }}
+                  />
+                </div>
+                <div>
+                  <h4 className="font-medium text-sm text-foreground">{shortcut.title}</h4>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">
+                    {shortcut.description}
+                  </p>
+                </div>
               </div>
-              <div>
-                <h4 className="font-medium text-sm text-foreground">{action.title}</h4>
-                <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">
-                  {action.description}
-                </p>
-              </div>
-            </div>
-          </Card>
-        ))}
+            </Card>
+          );
+        })}
       </div>
     </div>
   );
