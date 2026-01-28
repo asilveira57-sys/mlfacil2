@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -116,6 +116,22 @@ export function AppSidebar() {
   const moduleTagsMap = useModuleTagsMap();
   const { hasModuleAccess, isCollaborator } = useCollaboratorAccess();
   const isCollapsed = state === "collapsed";
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    // eslint-disable-next-line no-console
+    console.info('[MOUNT] AppSidebar');
+    return () => {
+      // eslint-disable-next-line no-console
+      console.info('[UNMOUNT] AppSidebar');
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    // eslint-disable-next-line no-console
+    console.info('[NAV] AppSidebar', location.pathname);
+  }, [location.pathname]);
   
   // State for collapsible groups
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
