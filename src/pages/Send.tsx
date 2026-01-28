@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -18,6 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useSend } from "@/hooks/useSend";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
+import { PageContainer } from "@/components/layout/PageContainer";
 import { 
   SendSeedBalanceCard, 
   SendPlantedItemCard, 
@@ -114,9 +114,21 @@ export default function Send() {
     setDrawerOpen(true);
   };
 
+  const headerContent = (
+    <Button 
+      variant="outline" 
+      size="sm" 
+      onClick={handleRefresh}
+      disabled={isRefreshing}
+    >
+      <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+      Atualizar
+    </Button>
+  );
+
   if (loading) {
     return (
-      <DashboardLayout title="Send" subtitle="Cultive seus melhores anúncios">
+      <PageContainer title="Send" subtitle="Cultive seus melhores anúncios">
         <div className="container mx-auto py-6 px-4 max-w-7xl space-y-6">
           <Skeleton className="h-40 w-full" />
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -125,25 +137,15 @@ export default function Send() {
             ))}
           </div>
         </div>
-      </DashboardLayout>
+      </PageContainer>
     );
   }
 
   return (
-    <DashboardLayout 
+    <PageContainer 
       title="Send" 
       subtitle="Cultive seus melhores anúncios"
-      headerContent={
-        <Button 
-          variant="outline" 
-          size="sm" 
-          onClick={handleRefresh}
-          disabled={isRefreshing}
-        >
-          <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-          Atualizar
-        </Button>
-      }
+      headerContent={headerContent}
     >
       <div className="container mx-auto py-6 px-4 max-w-7xl space-y-6">
         {/* Hero section */}
@@ -414,6 +416,6 @@ export default function Send() {
           setItemToRemove(itemId);
         }}
       />
-    </DashboardLayout>
+    </PageContainer>
   );
 }

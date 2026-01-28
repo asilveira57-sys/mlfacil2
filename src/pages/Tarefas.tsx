@@ -24,7 +24,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useWorkspace } from '@/hooks/useWorkspace';
-import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { PageContainer } from '@/components/layout/PageContainer';
 import type { Task, TaskStatus, TaskPriority, AutomationRule, WorkspaceAccount, SystemEvent } from '@/types/tasks';
 
 export default function Tarefas() {
@@ -122,45 +122,8 @@ export default function Tarefas() {
     return success;
   };
 
-  // Loading state
-  if (prefsLoading) {
-    return (
-      <DashboardLayout title="Tarefas">
-        <div className="container mx-auto p-6 space-y-6">
-          <Skeleton className="h-10 w-64" />
-          <Skeleton className="h-12 w-full" />
-          <Skeleton className="h-96 w-full" />
-        </div>
-      </DashboardLayout>
-    );
-  }
-
-  // Onboarding - tasks not enabled
-  if (!tasksEnabled) {
-    return (
-      <DashboardLayout title="Tarefas">
-        <TasksOnboarding onEnable={handleEnableTasks} />
-      </DashboardLayout>
-    );
-  }
-
-  // No workspace (shouldn't happen after ensure_workspace, but fallback)
-  if (!activeWorkspace) {
-    return (
-      <DashboardLayout title="Tarefas">
-        <div className="container mx-auto p-6">
-          <div className="text-center py-12">
-            <h2 className="text-xl font-semibold mb-2">Erro ao carregar workspace</h2>
-            <p className="text-muted-foreground">
-              Tente recarregar a página.
-            </p>
-          </div>
-        </div>
-      </DashboardLayout>
-    );
-  }
-
-  const headerContent = (
+  // Build header content
+  const headerContent = activeWorkspace ? (
     <div className="flex items-center gap-4">
       <WorkspaceSwitcher
         currentWorkspace={activeWorkspace}
@@ -172,10 +135,48 @@ export default function Tarefas() {
         Nova tarefa
       </Button>
     </div>
-  );
+  ) : undefined;
+
+  // Loading state
+  if (prefsLoading) {
+    return (
+      <PageContainer title="Tarefas" subtitle="Gerencie suas tarefas e automações">
+        <div className="container mx-auto p-6 space-y-6">
+          <Skeleton className="h-10 w-64" />
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-96 w-full" />
+        </div>
+      </PageContainer>
+    );
+  }
+
+  // Onboarding - tasks not enabled
+  if (!tasksEnabled) {
+    return (
+      <PageContainer title="Tarefas" subtitle="Gerencie suas tarefas e automações">
+        <TasksOnboarding onEnable={handleEnableTasks} />
+      </PageContainer>
+    );
+  }
+
+  // No workspace (shouldn't happen after ensure_workspace, but fallback)
+  if (!activeWorkspace) {
+    return (
+      <PageContainer title="Tarefas" subtitle="Gerencie suas tarefas e automações">
+        <div className="container mx-auto p-6">
+          <div className="text-center py-12">
+            <h2 className="text-xl font-semibold mb-2">Erro ao carregar workspace</h2>
+            <p className="text-muted-foreground">
+              Tente recarregar a página.
+            </p>
+          </div>
+        </div>
+      </PageContainer>
+    );
+  }
 
   return (
-    <DashboardLayout 
+    <PageContainer 
       title="Tarefas" 
       subtitle="Gerencie suas tarefas e automações"
       headerContent={headerContent}
@@ -274,7 +275,7 @@ export default function Tarefas() {
           accounts={accounts}
         />
       </div>
-    </DashboardLayout>
+    </PageContainer>
   );
 }
 

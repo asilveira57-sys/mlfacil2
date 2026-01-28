@@ -4,7 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
-import { DashboardLayout } from "@/components/layout";
+import { PageContainer } from "@/components/layout/PageContainer";
 import {
   QaHeader,
   QaInbox,
@@ -60,7 +60,7 @@ export default function Perguntas() {
 
   if (!sellerId) {
     return (
-      <DashboardLayout>
+      <PageContainer title="Perguntas" subtitle="Responda perguntas dos clientes">
         <div className="p-6">
           <div className="text-center py-12">
             <p className="text-muted-foreground">
@@ -68,12 +68,12 @@ export default function Perguntas() {
             </p>
           </div>
         </div>
-      </DashboardLayout>
+      </PageContainer>
     );
   }
 
   return (
-    <DashboardLayout>
+    <PageContainer title="Perguntas" subtitle="Responda perguntas dos clientes">
       <div className="p-6 space-y-6 min-h-screen bg-background">
         <QaHeader />
 
@@ -160,7 +160,7 @@ export default function Perguntas() {
           </TabsContent>
         </Tabs>
       </div>
-    </DashboardLayout>
+    </PageContainer>
   );
 }
 

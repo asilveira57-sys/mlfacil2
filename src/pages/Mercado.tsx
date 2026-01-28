@@ -7,11 +7,11 @@ import {
   MercadoMetricsDrawer,
   MercadoComparisonPanel,
 } from '@/components/mercado';
-import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { PageContainer } from '@/components/layout/PageContainer';
 
 function MercadoContent() {
   return (
-    <DashboardLayout
+    <PageContainer
       title="Mercado"
       subtitle="Dashboard de analytics premium"
     >
@@ -32,7 +32,7 @@ function MercadoContent() {
         <MercadoDetailsDrawer />
         <MercadoMetricsDrawer />
       </div>
-    </DashboardLayout>
+    </PageContainer>
   );
 }
 

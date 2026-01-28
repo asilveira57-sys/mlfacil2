@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
-import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageContainer } from "@/components/layout/PageContainer";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -65,12 +65,10 @@ const bucketLabels: Record<StatusBucket | 'ALL', string> = {
 
 export default function AdTimelineRadar() {
   const navigate = useNavigate();
-  const { activeAccount, sellerId } = useActiveAccount();
-  // For workspace_id we need the actual user_id from auth
+  const { sellerId } = useActiveAccount();
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const mlAccountId = sellerId || undefined;
 
-  // Get actual workspace/user id
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
       if (data.user) setWorkspaceId(data.user.id);
@@ -139,11 +137,11 @@ export default function AdTimelineRadar() {
   };
 
   return (
-    <DashboardLayout
+    <PageContainer
       title="Linha do Tempo"
       subtitle="Radar de anúncios por intervalo de vendas"
     >
-      <div className="space-y-6">
+      <div className="p-6 space-y-6">
         {/* Summary Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
           {countsLoading ? (
@@ -158,38 +156,38 @@ export default function AdTimelineRadar() {
           ) : (
             <>
               <Card 
-                className={`cursor-pointer transition-colors ${statusFilter === '30D' ? 'ring-2 ring-yellow-500' : 'hover:bg-muted/50'}`}
+                className={`cursor-pointer transition-colors ${statusFilter === '30D' ? 'ring-2 ring-warning' : 'hover:bg-muted/50'}`}
                 onClick={() => setStatusFilter(statusFilter === '30D' ? 'ALL' : '30D')}
               >
                 <CardContent className="p-4">
-                  <div className="text-2xl font-bold text-yellow-600">{bucketCounts?.['30D'] || 0}</div>
+                  <div className="text-2xl font-bold text-warning">{bucketCounts?.['30D'] || 0}</div>
                   <div className="text-xs text-muted-foreground">30 dias sem venda</div>
                 </CardContent>
               </Card>
               <Card 
-                className={`cursor-pointer transition-colors ${statusFilter === '60D' ? 'ring-2 ring-orange-500' : 'hover:bg-muted/50'}`}
+                className={`cursor-pointer transition-colors ${statusFilter === '60D' ? 'ring-2 ring-destructive/70' : 'hover:bg-muted/50'}`}
                 onClick={() => setStatusFilter(statusFilter === '60D' ? 'ALL' : '60D')}
               >
                 <CardContent className="p-4">
-                  <div className="text-2xl font-bold text-orange-600">{bucketCounts?.['60D'] || 0}</div>
+                  <div className="text-2xl font-bold text-destructive/80">{bucketCounts?.['60D'] || 0}</div>
                   <div className="text-xs text-muted-foreground">60 dias sem venda</div>
                 </CardContent>
               </Card>
               <Card 
-                className={`cursor-pointer transition-colors ${statusFilter === '90D' ? 'ring-2 ring-red-500' : 'hover:bg-muted/50'}`}
+                className={`cursor-pointer transition-colors ${statusFilter === '90D' ? 'ring-2 ring-destructive' : 'hover:bg-muted/50'}`}
                 onClick={() => setStatusFilter(statusFilter === '90D' ? 'ALL' : '90D')}
               >
                 <CardContent className="p-4">
-                  <div className="text-2xl font-bold text-red-600">{bucketCounts?.['90D'] || 0}</div>
+                  <div className="text-2xl font-bold text-destructive">{bucketCounts?.['90D'] || 0}</div>
                   <div className="text-xs text-muted-foreground">90 dias sem venda</div>
                 </CardContent>
               </Card>
               <Card 
-                className={`cursor-pointer transition-colors ${statusFilter === '120D' ? 'ring-2 ring-red-700' : 'hover:bg-muted/50'}`}
+                className={`cursor-pointer transition-colors ${statusFilter === '120D' ? 'ring-2 ring-destructive' : 'hover:bg-muted/50'}`}
                 onClick={() => setStatusFilter(statusFilter === '120D' ? 'ALL' : '120D')}
               >
                 <CardContent className="p-4">
-                  <div className="text-2xl font-bold text-red-700">{bucketCounts?.['120D'] || 0}</div>
+                  <div className="text-2xl font-bold text-destructive">{bucketCounts?.['120D'] || 0}</div>
                   <div className="text-xs text-muted-foreground">120 dias sem venda</div>
                 </CardContent>
               </Card>
@@ -203,11 +201,11 @@ export default function AdTimelineRadar() {
                 </CardContent>
               </Card>
               <Card 
-                className={`cursor-pointer transition-colors ${statusFilter === 'OK' ? 'ring-2 ring-green-500' : 'hover:bg-muted/50'}`}
+                className={`cursor-pointer transition-colors ${statusFilter === 'OK' ? 'ring-2 ring-success' : 'hover:bg-muted/50'}`}
                 onClick={() => setStatusFilter(statusFilter === 'OK' ? 'ALL' : 'OK')}
               >
                 <CardContent className="p-4">
-                  <div className="text-2xl font-bold text-green-600">{bucketCounts?.OK || 0}</div>
+                  <div className="text-2xl font-bold text-success">{bucketCounts?.OK || 0}</div>
                   <div className="text-xs text-muted-foreground">OK (vendendo)</div>
                 </CardContent>
               </Card>
@@ -295,7 +293,6 @@ export default function AdTimelineRadar() {
                       <div className="flex flex-col items-center gap-2 text-muted-foreground">
                         <AlertTriangle className="h-8 w-8" />
                         <p>Nenhum anúncio encontrado</p>
-                        <p className="text-sm">Conecte uma conta ou sincronize os dados</p>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -304,11 +301,7 @@ export default function AdTimelineRadar() {
                     <TableRow key={item.id} className="cursor-pointer hover:bg-muted/50">
                       <TableCell>
                         {item.thumbnail ? (
-                          <img
-                            src={item.thumbnail}
-                            alt=""
-                            className="h-12 w-12 object-cover rounded"
-                          />
+                          <img src={item.thumbnail} alt="" className="h-12 w-12 object-cover rounded" />
                         ) : (
                           <div className="h-12 w-12 bg-muted rounded flex items-center justify-center">
                             <Clock className="h-4 w-4 text-muted-foreground" />
@@ -316,10 +309,8 @@ export default function AdTimelineRadar() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <div 
-                          className="font-medium text-sm truncate max-w-[200px] hover:underline"
-                          onClick={() => navigate(`/anuncios/linha-do-tempo/${item.item_id}`)}
-                        >
+                        <div className="font-medium text-sm truncate max-w-[200px] hover:underline"
+                          onClick={() => navigate(`/anuncios/linha-do-tempo/${item.item_id}`)}>
                           {item.title || item.item_id}
                         </div>
                         <div className="text-xs text-muted-foreground">{item.item_id}</div>
@@ -328,49 +319,34 @@ export default function AdTimelineRadar() {
                         <StatusBucketBadge bucket={item.status_bucket as StatusBucket} />
                       </TableCell>
                       <TableCell className="text-center text-sm">
-                        {item.last_sale_at 
-                          ? format(new Date(item.last_sale_at), "dd/MM/yy", { locale: ptBR })
-                          : "—"
-                        }
+                        {item.last_sale_at ? format(new Date(item.last_sale_at), "dd/MM/yy", { locale: ptBR }) : "—"}
                       </TableCell>
                       <TableCell className="text-center">
-                        <span className={`font-medium ${
-                          (item.days_since_last_sale || 0) > 60 ? 'text-red-600' :
-                          (item.days_since_last_sale || 0) > 30 ? 'text-orange-600' :
-                          'text-foreground'
-                        }`}>
+                        <span className={`font-medium ${(item.days_since_last_sale || 0) > 60 ? 'text-destructive' : (item.days_since_last_sale || 0) > 30 ? 'text-warning' : 'text-foreground'}`}>
                           {item.days_since_last_sale ?? "—"}
                         </span>
                       </TableCell>
-                      <TableCell className="text-center text-sm">
-                        {formatGap(item.avg_gap_hours)}
-                      </TableCell>
+                      <TableCell className="text-center text-sm">{formatGap(item.avg_gap_hours)}</TableCell>
                       <TableCell className="text-center text-sm">{item.sales_count_30d}</TableCell>
                       <TableCell className="text-center text-sm">{item.sales_count_60d}</TableCell>
                       <TableCell className="text-center text-sm">{item.sales_count_90d}</TableCell>
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
+                            <Button variant="ghost" size="icon"><MoreHorizontal className="h-4 w-4" /></Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => navigate(`/anuncios/linha-do-tempo/${item.item_id}`)}>
-                              <Eye className="h-4 w-4 mr-2" />
-                              Ver detalhes
+                              <Eye className="h-4 w-4 mr-2" />Ver detalhes
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleCreateAction(item, 'END')}>
-                              <XCircle className="h-4 w-4 mr-2" />
-                              Encerrar
+                              <XCircle className="h-4 w-4 mr-2" />Encerrar
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleCreateAction(item, 'RELIST')}>
-                              <RefreshCcw className="h-4 w-4 mr-2" />
-                              Republicar
+                              <RefreshCcw className="h-4 w-4 mr-2" />Republicar
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleCreateAction(item, 'CLONE')}>
-                              <Copy className="h-4 w-4 mr-2" />
-                              Clonar
+                              <Copy className="h-4 w-4 mr-2" />Clonar
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -384,7 +360,6 @@ export default function AdTimelineRadar() {
         </Card>
       </div>
 
-      {/* Action Drawer */}
       {selectedItem && (
         <ActionDrawer
           open={actionDrawerOpen}
@@ -397,6 +372,6 @@ export default function AdTimelineRadar() {
           isLoading={createActionMutation.isPending}
         />
       )}
-    </DashboardLayout>
+    </PageContainer>
   );
 }

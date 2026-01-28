@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { PageContainer } from '@/components/layout/PageContainer';
 import {
   AdsHeader,
   AdsKpiCards,
@@ -120,7 +120,7 @@ export default function Publicidade() {
 
   if (loading) {
     return (
-      <DashboardLayout title="Mercado ADS" subtitle="Carregando...">
+      <PageContainer title="Mercado ADS" subtitle="Carregando...">
         <div className="p-6 space-y-6">
           <Skeleton className="h-16 w-full" />
           <div className="grid grid-cols-6 gap-4">
@@ -130,13 +130,13 @@ export default function Publicidade() {
           </div>
           <Skeleton className="h-[400px]" />
         </div>
-      </DashboardLayout>
+      </PageContainer>
     );
   }
 
   if (!sellerId) {
     return (
-      <DashboardLayout title="Mercado ADS" subtitle="Analytics de publicidade">
+      <PageContainer title="Mercado ADS" subtitle="Analytics de publicidade">
         <div className="p-6">
           <Card className="max-w-md mx-auto">
             <CardHeader className="text-center">
@@ -155,12 +155,12 @@ export default function Publicidade() {
             </CardContent>
           </Card>
         </div>
-      </DashboardLayout>
+      </PageContainer>
     );
   }
 
   return (
-    <DashboardLayout 
+    <PageContainer 
       title="Mercado ADS" 
       subtitle="Analytics e inteligência de campanhas publicitárias"
       headerContent={headerContent}
@@ -392,6 +392,6 @@ export default function Publicidade() {
           </TabsContent>
         </Tabs>
       </div>
-    </DashboardLayout>
+    </PageContainer>
   );
 }

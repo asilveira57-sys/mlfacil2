@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { PageContainer } from "@/components/layout/PageContainer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -166,11 +166,11 @@ export default function AdActionsCenter() {
   };
 
   return (
-    <DashboardLayout
+    <PageContainer
       title="Central de Ações"
       subtitle="Gerencie ações de encerramento, republicação e clonagem"
     >
-      <div className="space-y-6">
+      <div className="p-6 space-y-6">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList>
             <TabsTrigger value="drafts" className="flex items-center gap-2">
@@ -256,6 +256,6 @@ export default function AdActionsCenter() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </DashboardLayout>
+    </PageContainer>
   );
 }

@@ -1,6 +1,6 @@
-import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FileText, History, Bot } from "lucide-react";
+import { PageContainer } from "@/components/layout/PageContainer";
 import {
   PostSaleHeader,
   PostSaleTemplatesList,
@@ -10,8 +10,8 @@ import {
 
 export default function MensagensPosVenda() {
   return (
-    <DashboardLayout>
-      <div className="space-y-6">
+    <PageContainer title="Mensagens Pós-Venda" subtitle="Automatize suas mensagens após a venda">
+      <div className="p-6 space-y-6">
         <PostSaleHeader />
 
         <Tabs defaultValue="templates" className="w-full">
@@ -43,6 +43,6 @@ export default function MensagensPosVenda() {
           </TabsContent>
         </Tabs>
       </div>
-    </DashboardLayout>
+    </PageContainer>
   );
 }

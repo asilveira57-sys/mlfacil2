@@ -7,6 +7,7 @@ import { useTaskDetails, useTasks } from '@/hooks/useTasks';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { Skeleton } from '@/components/ui/skeleton';
 import { supabase } from '@/integrations/supabase/client';
+import { PageContainer } from '@/components/layout/PageContainer';
 import type { Task } from '@/types/tasks';
 
 export default function TarefaDetalhe() {
@@ -62,52 +63,58 @@ export default function TarefaDetalhe() {
 
   if (loading) {
     return (
-      <div className="container mx-auto p-6 space-y-6">
-        <Skeleton className="h-8 w-32" />
-        <Skeleton className="h-96 w-full" />
-      </div>
+      <PageContainer title="Carregando..." subtitle="Detalhes da tarefa">
+        <div className="container mx-auto p-6 space-y-6">
+          <Skeleton className="h-8 w-32" />
+          <Skeleton className="h-96 w-full" />
+        </div>
+      </PageContainer>
     );
   }
 
   if (!task) {
     return (
-      <div className="container mx-auto p-6">
-        <Button variant="ghost" onClick={() => navigate('/tarefas')} className="mb-6">
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Voltar
-        </Button>
-        <div className="text-center py-12">
-          <h2 className="text-xl font-semibold mb-2">Tarefa não encontrada</h2>
-          <p className="text-muted-foreground">
-            Esta tarefa pode ter sido excluída ou você não tem permissão para visualizá-la.
-          </p>
+      <PageContainer title="Tarefa não encontrada" subtitle="Detalhes da tarefa">
+        <div className="container mx-auto p-6">
+          <Button variant="ghost" onClick={() => navigate('/tarefas')} className="mb-6">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Voltar
+          </Button>
+          <div className="text-center py-12">
+            <h2 className="text-xl font-semibold mb-2">Tarefa não encontrada</h2>
+            <p className="text-muted-foreground">
+              Esta tarefa pode ter sido excluída ou você não tem permissão para visualizá-la.
+            </p>
+          </div>
         </div>
-      </div>
+      </PageContainer>
     );
   }
 
   return (
-    <div className="container mx-auto p-6">
-      <Button variant="ghost" onClick={() => navigate('/tarefas')} className="mb-6">
-        <ArrowLeft className="h-4 w-4 mr-2" />
-        Voltar para tarefas
-      </Button>
+    <PageContainer title={task.title} subtitle="Detalhes da tarefa">
+      <div className="container mx-auto p-6">
+        <Button variant="ghost" onClick={() => navigate('/tarefas')} className="mb-6">
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Voltar para tarefas
+        </Button>
 
-      <TaskDetail
-        task={task}
-        checklists={checklists}
-        comments={comments}
-        watchers={watchers}
-        loading={false}
-        members={members}
-        currentUserId={currentUserId}
-        onUpdate={handleUpdate}
-        onAddChecklist={handleAddChecklist}
-        onToggleChecklist={toggleChecklist}
-        onDeleteChecklist={deleteChecklist}
-        onAddComment={handleAddComment}
-        onToggleWatch={toggleWatch}
-      />
-    </div>
+        <TaskDetail
+          task={task}
+          checklists={checklists}
+          comments={comments}
+          watchers={watchers}
+          loading={false}
+          members={members}
+          currentUserId={currentUserId}
+          onUpdate={handleUpdate}
+          onAddChecklist={handleAddChecklist}
+          onToggleChecklist={toggleChecklist}
+          onDeleteChecklist={deleteChecklist}
+          onAddComment={handleAddComment}
+          onToggleWatch={toggleWatch}
+        />
+      </div>
+    </PageContainer>
   );
 }
