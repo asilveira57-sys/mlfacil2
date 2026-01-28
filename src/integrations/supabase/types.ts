@@ -6697,46 +6697,70 @@ export type Database = {
         Row: {
           canonical_url: string | null
           created_at: string
+          evergreen_content: boolean | null
           id: string
           meta_description: string | null
+          meta_keywords: string | null
           meta_title: string | null
           og_description: string | null
           og_image: string | null
           og_title: string | null
           page_path: string
+          page_type: string
+          primary_keyword: string | null
           robots_follow: boolean
           robots_index: boolean
+          secondary_keywords: string | null
+          seo_cluster: string | null
+          seo_roadmap: string | null
           structured_data: Json | null
+          suggested_update_date: string | null
           updated_at: string
         }
         Insert: {
           canonical_url?: string | null
           created_at?: string
+          evergreen_content?: boolean | null
           id?: string
           meta_description?: string | null
+          meta_keywords?: string | null
           meta_title?: string | null
           og_description?: string | null
           og_image?: string | null
           og_title?: string | null
           page_path: string
+          page_type?: string
+          primary_keyword?: string | null
           robots_follow?: boolean
           robots_index?: boolean
+          secondary_keywords?: string | null
+          seo_cluster?: string | null
+          seo_roadmap?: string | null
           structured_data?: Json | null
+          suggested_update_date?: string | null
           updated_at?: string
         }
         Update: {
           canonical_url?: string | null
           created_at?: string
+          evergreen_content?: boolean | null
           id?: string
           meta_description?: string | null
+          meta_keywords?: string | null
           meta_title?: string | null
           og_description?: string | null
           og_image?: string | null
           og_title?: string | null
           page_path?: string
+          page_type?: string
+          primary_keyword?: string | null
           robots_follow?: boolean
           robots_index?: boolean
+          secondary_keywords?: string | null
+          seo_cluster?: string | null
+          seo_roadmap?: string | null
           structured_data?: Json | null
+          suggested_update_date?: string | null
           updated_at?: string
         }
         Relationships: []

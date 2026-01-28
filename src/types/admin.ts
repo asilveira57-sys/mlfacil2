@@ -58,11 +58,15 @@ export interface PlatformSetting {
   updated_at: string;
 }
 
+export type SeoPageType = 'external_page' | 'nlog_post';
+
 export interface SeoPageSetting {
   id: string;
   page_path: string;
+  page_type: SeoPageType;
   meta_title: string | null;
   meta_description: string | null;
+  meta_keywords: string | null;
   canonical_url: string | null;
   og_title: string | null;
   og_description: string | null;
@@ -70,8 +74,51 @@ export interface SeoPageSetting {
   robots_index: boolean;
   robots_follow: boolean;
   structured_data: unknown;
+  seo_roadmap: string | null;
+  // Nlog-specific fields
+  primary_keyword: string | null;
+  secondary_keywords: string | null;
+  seo_cluster: string | null;
+  evergreen_content: boolean;
+  suggested_update_date: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface SeoValidationIssue {
+  type: 'error' | 'warning';
+  field: string;
+  message: string;
+}
+
+export function validateSeoPage(page: Partial<SeoPageSetting>): SeoValidationIssue[] {
+  const issues: SeoValidationIssue[] = [];
+  
+  // Meta title validation
+  if (!page.meta_title || page.meta_title.length === 0) {
+    issues.push({ type: 'error', field: 'meta_title', message: 'Meta Title vazio' });
+  } else if (page.meta_title.length > 60) {
+    issues.push({ type: 'warning', field: 'meta_title', message: 'Meta Title excede 60 caracteres' });
+  }
+  
+  // Meta description validation
+  if (!page.meta_description || page.meta_description.length === 0) {
+    issues.push({ type: 'error', field: 'meta_description', message: 'Meta Description vazia' });
+  } else if (page.meta_description.length > 160) {
+    issues.push({ type: 'warning', field: 'meta_description', message: 'Meta Description excede 160 caracteres' });
+  }
+  
+  // Indexable page without roadmap
+  if (page.robots_index && (!page.seo_roadmap || page.seo_roadmap.length === 0)) {
+    issues.push({ type: 'warning', field: 'seo_roadmap', message: 'Página indexável sem roadmap' });
+  }
+  
+  // Nlog without primary keyword
+  if (page.page_type === 'nlog_post' && (!page.primary_keyword || page.primary_keyword.length === 0)) {
+    issues.push({ type: 'error', field: 'primary_keyword', message: 'Conteúdo Nlog sem palavra-chave principal' });
+  }
+  
+  return issues;
 }
 
 export interface IntegrationStatus {
