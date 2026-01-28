@@ -63,12 +63,14 @@ export default function ZPLConverter() {
     
     checkAuth();
 
+    // Only react to actual sign-in/out events
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!session) {
+      if (event === 'SIGNED_OUT') {
         navigate("/auth");
-      } else {
-        setUser(session.user);
+      } else if (event === 'SIGNED_IN') {
+        setUser(session?.user ?? null);
       }
+      // Ignore TOKEN_REFRESHED to prevent tab-switch flicker
     });
 
     return () => subscription.unsubscribe();

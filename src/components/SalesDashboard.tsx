@@ -401,15 +401,9 @@ export function SalesDashboard() {
     fetchSalesData(filter);
   };
 
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
-        setTimeout(() => fetchSalesData(), 100);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
+  // REMOVED: Auth state listener that was causing refetch on TOKEN_REFRESHED
+  // Data fetching is now handled by the initial useEffect and explicit refresh actions
+  // This prevents the "flicker" on tab switch when token is silently refreshed
 
   // Listen for background sync events
   useEffect(() => {

@@ -113,17 +113,23 @@ const AbcAnalysis = () => {
   };
 
   useEffect(() => {
+    // Only react to actual sign-in/out events
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
-        setUser(session?.user ?? null);
-        if (!session) {
+        if (event === 'SIGNED_OUT') {
+          setUser(null);
           navigate("/auth");
-        } else {
-          fetchMlAccount(session.user.id);
+        } else if (event === 'SIGNED_IN') {
+          setUser(session?.user ?? null);
+          if (session?.user) {
+            fetchMlAccount(session.user.id);
+          }
         }
+        // Ignore TOKEN_REFRESHED to prevent tab-switch flicker
       }
     );
 
+    // Initial session check
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       if (!session) {
