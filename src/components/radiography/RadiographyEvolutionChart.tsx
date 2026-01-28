@@ -24,6 +24,8 @@ import {
   AlertTriangle,
   Package,
   RefreshCw,
+  Activity,
+  Scan,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
@@ -101,12 +103,12 @@ export function RadiographyEvolutionChart({ sellerId, itemId }: RadiographyEvolu
 
   if (loading) {
     return (
-      <Card>
+      <Card className="bg-slate-800/50 border-slate-700">
         <CardHeader>
-          <Skeleton className="h-6 w-48" />
+          <Skeleton className="h-6 w-48 bg-slate-700" />
         </CardHeader>
         <CardContent>
-          <Skeleton className="h-[300px] w-full" />
+          <Skeleton className="h-[300px] w-full bg-slate-700" />
         </CardContent>
       </Card>
     );
@@ -114,11 +116,13 @@ export function RadiographyEvolutionChart({ sellerId, itemId }: RadiographyEvolu
 
   if (error || !data) {
     return (
-      <Card>
+      <Card className="bg-slate-800/50 border-slate-700">
         <CardContent className="py-12 text-center">
-          <AlertTriangle className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-          <p className="text-muted-foreground mb-4">{error || "Dados não disponíveis"}</p>
-          <Button variant="outline" onClick={fetchData}>
+          <div className="h-12 w-12 mx-auto mb-4 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center">
+            <AlertTriangle className="h-6 w-6 text-slate-500" />
+          </div>
+          <p className="text-slate-400 mb-4">{error || "Dados não disponíveis"}</p>
+          <Button variant="outline" onClick={fetchData} className="border-slate-600 text-slate-300">
             <RefreshCw className="h-4 w-4 mr-2" />
             Tentar novamente
           </Button>
@@ -154,15 +158,15 @@ export function RadiographyEvolutionChart({ sellerId, itemId }: RadiographyEvolu
     switch (severity) {
       case "critical": return "#ef4444";
       case "warning": return "#f59e0b";
-      default: return "#3b82f6";
+      default: return "#22d3ee";
     }
   };
 
   const getImpactIcon = (direction: string) => {
     switch (direction) {
-      case "positive": return <TrendingUp className="h-3 w-3 text-green-500" />;
-      case "negative": return <TrendingDown className="h-3 w-3 text-red-500" />;
-      default: return <Minus className="h-3 w-3 text-muted-foreground" />;
+      case "positive": return <TrendingUp className="h-3 w-3 text-emerald-400" />;
+      case "negative": return <TrendingDown className="h-3 w-3 text-red-400" />;
+      default: return <Minus className="h-3 w-3 text-slate-400" />;
     }
   };
 
@@ -184,32 +188,32 @@ export function RadiographyEvolutionChart({ sellerId, itemId }: RadiographyEvolu
     if (!dayData) return null;
 
     return (
-      <div className="bg-card border rounded-lg p-3 shadow-lg max-w-xs">
-        <p className="font-medium mb-2">{format(new Date(dayData.date + "T00:00:00"), "dd 'de' MMMM", { locale: ptBR })}</p>
+      <div className="bg-slate-800 border border-slate-600 rounded-lg p-3 shadow-lg max-w-xs">
+        <p className="font-medium mb-2 text-slate-200">{format(new Date(dayData.date + "T00:00:00"), "dd 'de' MMMM", { locale: ptBR })}</p>
         
         <div className="space-y-1 text-sm">
-          <div className="flex items-center gap-2">
-            <Eye className="h-3 w-3 text-blue-500" />
+          <div className="flex items-center gap-2 text-slate-300">
+            <Eye className="h-3 w-3 text-cyan-400" />
             <span>{dayData.visits.toLocaleString("pt-BR")} visitas</span>
           </div>
           
           {dayData.sales_7d !== null && (
-            <div className="flex items-center gap-2">
-              <Package className="h-3 w-3 text-green-500" />
+            <div className="flex items-center gap-2 text-slate-300">
+              <Package className="h-3 w-3 text-emerald-400" />
               <span>{dayData.sales_7d} vendas (7d)</span>
             </div>
           )}
           
           {dayData.score_total !== null && (
-            <div className="flex items-center gap-2 text-muted-foreground">
+            <div className="flex items-center gap-2 text-slate-400">
               <span>Score: {dayData.score_total}</span>
             </div>
           )}
         </div>
 
         {dayData.events.length > 0 && (
-          <div className="mt-3 pt-3 border-t space-y-2">
-            <p className="text-xs font-medium text-muted-foreground">Eventos do dia:</p>
+          <div className="mt-3 pt-3 border-t border-slate-600 space-y-2">
+            <p className="text-xs font-medium text-slate-400">Eventos do dia:</p>
             {dayData.events.map((event, i) => (
               <div key={i} className="flex items-start gap-2 text-xs">
                 <div 
@@ -217,11 +221,11 @@ export function RadiographyEvolutionChart({ sellerId, itemId }: RadiographyEvolu
                   style={{ backgroundColor: getSeverityColor(event.severity) }}
                 />
                 <div className="flex-1">
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 text-slate-300">
                     <span className="font-medium">{formatEventType(event.event_type)}</span>
                     {getImpactIcon(event.impact_direction)}
                   </div>
-                  <p className="text-muted-foreground line-clamp-2">{event.observation_pt}</p>
+                  <p className="text-slate-500 line-clamp-2">{event.observation_pt}</p>
                 </div>
               </div>
             ))}
@@ -233,65 +237,65 @@ export function RadiographyEvolutionChart({ sellerId, itemId }: RadiographyEvolu
 
   return (
     <div className="space-y-4">
-      {/* Summary Cards */}
+      {/* Summary Cards - Clinical Style */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card className="bg-muted/50">
+        <Card className="bg-slate-800/50 border-slate-700">
           <CardContent className="p-3">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
-              <Eye className="h-3 w-3" />
+            <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
+              <Eye className="h-3 w-3 text-cyan-400" />
               Total Visitas
             </div>
-            <div className="text-lg font-bold">{data.summary.total_visits.toLocaleString("pt-BR")}</div>
+            <div className="text-lg font-bold text-cyan-400 font-mono">{data.summary.total_visits.toLocaleString("pt-BR")}</div>
           </CardContent>
         </Card>
         
-        <Card className="bg-muted/50">
+        <Card className="bg-slate-800/50 border-slate-700">
           <CardContent className="p-3">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
-              <Eye className="h-3 w-3" />
+            <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
+              <Activity className="h-3 w-3 text-violet-400" />
               Média Diária
             </div>
-            <div className="text-lg font-bold">{data.summary.avg_daily_visits.toLocaleString("pt-BR")}</div>
+            <div className="text-lg font-bold text-violet-400 font-mono">{data.summary.avg_daily_visits.toLocaleString("pt-BR")}</div>
           </CardContent>
         </Card>
         
-        <Card className="bg-muted/50">
+        <Card className="bg-slate-800/50 border-slate-700">
           <CardContent className="p-3">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+            <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
               {data.summary.trend_7d >= 0 ? (
-                <TrendingUp className="h-3 w-3 text-green-500" />
+                <TrendingUp className="h-3 w-3 text-emerald-400" />
               ) : (
-                <TrendingDown className="h-3 w-3 text-red-500" />
+                <TrendingDown className="h-3 w-3 text-red-400" />
               )}
               Tendência 7d
             </div>
-            <div className={`text-lg font-bold ${data.summary.trend_7d >= 0 ? "text-green-500" : "text-red-500"}`}>
+            <div className={`text-lg font-bold font-mono ${data.summary.trend_7d >= 0 ? "text-emerald-400" : "text-red-400"}`}>
               {data.summary.trend_7d >= 0 ? "+" : ""}{data.summary.trend_7d}%
             </div>
           </CardContent>
         </Card>
         
-        <Card className="bg-muted/50">
+        <Card className="bg-slate-800/50 border-slate-700">
           <CardContent className="p-3">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
-              <AlertTriangle className="h-3 w-3" />
+            <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
+              <AlertTriangle className="h-3 w-3 text-amber-400" />
               Eventos
             </div>
-            <div className="text-lg font-bold">{data.summary.total_events}</div>
+            <div className="text-lg font-bold text-amber-400 font-mono">{data.summary.total_events}</div>
           </CardContent>
         </Card>
       </div>
 
       {/* Period Selector */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-slate-400">
           Correlação entre visitas diárias e eventos de otimização
         </p>
         <Select value={period} onValueChange={setPeriod}>
-          <SelectTrigger className="w-[140px]">
+          <SelectTrigger className="w-[140px] bg-slate-800/50 border-slate-700 text-slate-200">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className="bg-slate-800 border-slate-700">
             <SelectItem value="7">7 dias</SelectItem>
             <SelectItem value="14">14 dias</SelectItem>
             <SelectItem value="30">30 dias</SelectItem>
@@ -301,44 +305,46 @@ export function RadiographyEvolutionChart({ sellerId, itemId }: RadiographyEvolu
         </Select>
       </div>
 
-      {/* Main Chart */}
-      <Card>
+      {/* Main Chart - X-Ray Style */}
+      <Card className="bg-slate-800/50 border-slate-700">
         <CardContent className="pt-6">
           <ResponsiveContainer width="100%" height={300}>
             <ComposedChart data={chartData} margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
-              <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
               <XAxis 
                 dataKey="formattedDate" 
-                tick={{ fontSize: 11 }}
+                tick={{ fontSize: 11, fill: '#64748b' }}
                 interval="preserveStartEnd"
-                className="text-muted-foreground"
+                stroke="#475569"
               />
               <YAxis 
                 yAxisId="visits"
-                tick={{ fontSize: 11 }}
-                className="text-muted-foreground"
+                tick={{ fontSize: 11, fill: '#64748b' }}
+                stroke="#475569"
                 tickFormatter={(value) => value.toLocaleString("pt-BR")}
               />
               <YAxis 
                 yAxisId="sales"
                 orientation="right"
-                tick={{ fontSize: 11 }}
-                className="text-muted-foreground"
+                tick={{ fontSize: 11, fill: '#64748b' }}
+                stroke="#475569"
                 domain={[0, "auto"]}
               />
               <Tooltip content={<CustomTooltip />} />
-              <Legend />
+              <Legend 
+                wrapperStyle={{ color: '#94a3b8' }}
+              />
               
-              {/* Visits Line */}
+              {/* Visits Line - Cyan for clinical look */}
               <Line
                 yAxisId="visits"
                 type="monotone"
                 dataKey="visits"
                 name="Visitas"
-                stroke="hsl(var(--primary))"
+                stroke="#22d3ee"
                 strokeWidth={2}
                 dot={false}
-                activeDot={{ r: 6, strokeWidth: 2 }}
+                activeDot={{ r: 6, strokeWidth: 2, fill: '#22d3ee' }}
               />
               
               {/* Sales Bars */}
@@ -346,7 +352,7 @@ export function RadiographyEvolutionChart({ sellerId, itemId }: RadiographyEvolu
                 yAxisId="sales"
                 dataKey="sales_7d"
                 name="Vendas 7d"
-                fill="hsl(var(--primary) / 0.3)"
+                fill="rgba(34, 211, 238, 0.3)"
                 radius={[2, 2, 0, 0]}
               />
 
@@ -359,7 +365,7 @@ export function RadiographyEvolutionChart({ sellerId, itemId }: RadiographyEvolu
                   y={day.visits}
                   r={8}
                   fill={getSeverityColor(day.events[0]?.severity || "info")}
-                  stroke="white"
+                  stroke="#1e293b"
                   strokeWidth={2}
                 />
               ))}
@@ -370,9 +376,12 @@ export function RadiographyEvolutionChart({ sellerId, itemId }: RadiographyEvolu
 
       {/* Events Legend */}
       {data.events.length > 0 && (
-        <Card>
+        <Card className="bg-slate-800/50 border-slate-700">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Eventos no Período</CardTitle>
+            <div className="flex items-center gap-2">
+              <Scan className="h-4 w-4 text-cyan-400" />
+              <CardTitle className="text-sm text-slate-200">Eventos no Período</CardTitle>
+            </div>
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-2">
@@ -380,7 +389,7 @@ export function RadiographyEvolutionChart({ sellerId, itemId }: RadiographyEvolu
                 <Badge 
                   key={i}
                   variant="outline"
-                  className="flex items-center gap-1"
+                  className="flex items-center gap-1 border-slate-600 text-slate-300 bg-slate-800/50"
                   style={{ borderColor: getSeverityColor(event.severity) }}
                 >
                   <div 
@@ -388,13 +397,13 @@ export function RadiographyEvolutionChart({ sellerId, itemId }: RadiographyEvolu
                     style={{ backgroundColor: getSeverityColor(event.severity) }}
                   />
                   {formatEventType(event.event_type)}
-                  <span className="text-muted-foreground text-xs">
+                  <span className="text-slate-500 text-xs">
                     {format(new Date(event.detected_at), "dd/MM")}
                   </span>
                 </Badge>
               ))}
               {data.events.length > 10 && (
-                <Badge variant="secondary">+{data.events.length - 10} mais</Badge>
+                <Badge className="bg-slate-700 text-slate-300 border-slate-600">+{data.events.length - 10} mais</Badge>
               )}
             </div>
           </CardContent>

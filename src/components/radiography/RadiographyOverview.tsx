@@ -11,11 +11,18 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
-  Clock
+  Clock,
+  HeartPulse,
+  Stethoscope,
+  Siren,
+  Scan,
+  Zap,
+  ShieldAlert,
 } from "lucide-react";
 import { useRadiography, MonitorStatus, ListingEvent } from "@/hooks/useRadiography";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { HEALTH_STATUS_CONFIG, RadiographyHealthStatus } from "@/types/radiography";
 
 interface RadiographyOverviewProps {
   sellerId: string | null;
@@ -38,17 +45,17 @@ export function RadiographyOverview({ sellerId, onSelectItem }: RadiographyOverv
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
-      case "critical": return "bg-red-500/10 text-red-500 border-red-500/20";
-      case "warning": return "bg-yellow-500/10 text-yellow-500 border-yellow-500/20";
-      default: return "bg-blue-500/10 text-blue-500 border-blue-500/20";
+      case "critical": return "bg-red-500/20 text-red-400 border-red-500/30";
+      case "warning": return "bg-amber-500/20 text-amber-400 border-amber-500/30";
+      default: return "bg-cyan-500/20 text-cyan-400 border-cyan-500/30";
     }
   };
 
   const getEventIcon = (impactDirection: string) => {
     switch (impactDirection) {
-      case "positive": return <TrendingUp className="h-4 w-4 text-green-500" />;
-      case "negative": return <TrendingDown className="h-4 w-4 text-red-500" />;
-      default: return <Minus className="h-4 w-4 text-muted-foreground" />;
+      case "positive": return <TrendingUp className="h-4 w-4 text-emerald-400" />;
+      case "negative": return <TrendingDown className="h-4 w-4 text-red-400" />;
+      default: return <Minus className="h-4 w-4 text-slate-400" />;
     }
   };
 
@@ -72,8 +79,8 @@ export function RadiographyOverview({ sellerId, onSelectItem }: RadiographyOverv
 
   if (!sellerId) {
     return (
-      <Card>
-        <CardContent className="py-8 text-center text-muted-foreground">
+      <Card className="bg-slate-900/50 border-slate-700/50">
+        <CardContent className="py-8 text-center text-slate-400">
           Conecte uma conta do Mercado Livre para usar a Radiografia.
         </CardContent>
       </Card>
@@ -82,123 +89,110 @@ export function RadiographyOverview({ sellerId, onSelectItem }: RadiographyOverv
 
   return (
     <div className="space-y-6">
-      {/* Header com Status */}
+      {/* Clinical Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold">Radiografia de Anúncios</h2>
-          <p className="text-muted-foreground">
-            Monitoramento automático e análise profunda dos seus anúncios
-          </p>
+        <div className="flex items-center gap-4">
+          <div className="relative">
+            <div className="h-14 w-14 rounded-full bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center">
+              <Scan className="h-7 w-7 text-cyan-400" />
+            </div>
+            <div className="absolute -bottom-1 -right-1 h-5 w-5 rounded-full bg-slate-900 border border-cyan-500/30 flex items-center justify-center">
+              <HeartPulse className="h-3 w-3 text-cyan-400" />
+            </div>
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-slate-100">Diagnóstico Clínico</h2>
+            <p className="text-slate-400">
+              Exame interno da saúde dos seus anúncios
+            </p>
+          </div>
         </div>
         <Button 
           onClick={runSnapshot} 
           disabled={loading}
-          className="gap-2"
+          className="gap-2 bg-cyan-600 hover:bg-cyan-500 text-white border-0"
         >
           {loading ? (
             <RefreshCw className="h-4 w-4 animate-spin" />
           ) : (
-            <Camera className="h-4 w-4" />
+            <Zap className="h-4 w-4" />
           )}
-          Coletar Snapshots
+          Realizar Exame
         </Button>
       </div>
 
-      {/* Cards de Status */}
+      {/* Vitals Cards - Clinical Style */}
       <div className="grid gap-4 md:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Anúncios Monitorados
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {loading && !status ? (
-              <Skeleton className="h-8 w-20" />
-            ) : (
-              <div className="text-2xl font-bold">
-                {status?.config?.total_items_monitored || 0}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Snapshots Totais
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {loading && !status ? (
-              <Skeleton className="h-8 w-20" />
-            ) : (
-              <div className="text-2xl font-bold">
-                {status?.stats?.total_snapshots || 0}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Eventos Detectados
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {loading && !status ? (
-              <Skeleton className="h-8 w-20" />
-            ) : (
-              <div className="text-2xl font-bold">
-                {status?.stats?.total_events || 0}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Última Coleta
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {loading && !status ? (
-              <Skeleton className="h-8 w-32" />
-            ) : (
-              <div className="text-lg font-medium flex items-center gap-2">
-                <Clock className="h-4 w-4 text-muted-foreground" />
-                {status?.config?.last_snapshot_at ? (
-                  formatDistanceToNow(new Date(status.config.last_snapshot_at), {
-                    addSuffix: true,
-                    locale: ptBR,
-                  })
-                ) : (
-                  "Nunca"
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <VitalCard
+          icon={<Activity className="h-5 w-5" />}
+          label="Pacientes Monitorados"
+          value={status?.config?.total_items_monitored || 0}
+          loading={loading && !status}
+          colorClass="text-cyan-400"
+          bgClass="bg-cyan-500/10"
+          borderClass="border-cyan-500/20"
+        />
+        <VitalCard
+          icon={<Camera className="h-5 w-5" />}
+          label="Exames Realizados"
+          value={status?.stats?.total_snapshots || 0}
+          loading={loading && !status}
+          colorClass="text-violet-400"
+          bgClass="bg-violet-500/10"
+          borderClass="border-violet-500/20"
+        />
+        <VitalCard
+          icon={<ShieldAlert className="h-5 w-5" />}
+          label="Anomalias Detectadas"
+          value={status?.stats?.total_events || 0}
+          loading={loading && !status}
+          colorClass="text-amber-400"
+          bgClass="bg-amber-500/10"
+          borderClass="border-amber-500/20"
+        />
+        <VitalCard
+          icon={<Clock className="h-5 w-5" />}
+          label="Última Varredura"
+          value={
+            status?.config?.last_snapshot_at
+              ? formatDistanceToNow(new Date(status.config.last_snapshot_at), {
+                  addSuffix: true,
+                  locale: ptBR,
+                })
+              : "Nunca"
+          }
+          loading={loading && !status}
+          colorClass="text-emerald-400"
+          bgClass="bg-emerald-500/10"
+          borderClass="border-emerald-500/20"
+          isText
+        />
       </div>
 
-      {/* Eventos Críticos */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <AlertTriangle className="h-5 w-5 text-yellow-500" />
-            Eventos Críticos (últimos 7 dias)
+      {/* Critical Events Panel - X-Ray Style */}
+      <Card className="bg-slate-900/60 border-slate-700/50 overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-br from-red-500/5 via-transparent to-transparent pointer-events-none" />
+        <CardHeader className="relative">
+          <CardTitle className="flex items-center gap-3 text-slate-100">
+            <div className="h-10 w-10 rounded-lg bg-red-500/10 border border-red-500/30 flex items-center justify-center">
+              <Siren className="h-5 w-5 text-red-400" />
+            </div>
+            <div>
+              <span>Alertas Críticos</span>
+              <Badge className="ml-3 bg-red-500/20 text-red-400 border-red-500/30">
+                Últimos 7 dias
+              </Badge>
+            </div>
           </CardTitle>
-          <CardDescription>
-            Eventos que requerem atenção imediata
+          <CardDescription className="text-slate-400">
+            Condições que requerem intervenção imediata
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="relative">
           {loading && !status ? (
             <div className="space-y-3">
               {[1, 2, 3].map(i => (
-                <Skeleton key={i} className="h-16 w-full" />
+                <Skeleton key={i} className="h-16 w-full bg-slate-800/50" />
               ))}
             </div>
           ) : status?.critical_events?.length ? (
@@ -206,25 +200,29 @@ export function RadiographyOverview({ sellerId, onSelectItem }: RadiographyOverv
               {status.critical_events.map((event) => (
                 <div 
                   key={event.id}
-                  className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-accent/50 cursor-pointer transition-colors"
+                  className="flex items-center justify-between p-4 rounded-lg border border-slate-700/50 bg-slate-800/30 hover:bg-slate-800/50 cursor-pointer transition-all hover:border-red-500/30 group"
                   onClick={() => onSelectItem?.(event.item_id)}
                 >
-                  <div className="flex items-center gap-3">
-                    {getEventIcon(event.impact_direction)}
+                  <div className="flex items-center gap-4">
+                    <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${
+                      event.severity === 'critical' ? 'bg-red-500/20 border border-red-500/30' : 'bg-amber-500/20 border border-amber-500/30'
+                    }`}>
+                      {getEventIcon(event.impact_direction)}
+                    </div>
                     <div>
-                      <div className="font-medium">
+                      <div className="font-medium text-slate-200 group-hover:text-white transition-colors">
                         {formatEventType(event.event_type)}
                       </div>
-                      <div className="text-sm text-muted-foreground">
+                      <div className="text-sm text-slate-400">
                         {event.observation_pt}
                       </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
                     <Badge className={getSeverityColor(event.severity)}>
-                      {event.severity}
+                      {event.severity === 'critical' ? 'Crítico' : event.severity === 'warning' ? 'Alerta' : 'Info'}
                     </Badge>
-                    <span className="text-xs text-muted-foreground">
+                    <span className="text-xs text-slate-500">
                       {formatDistanceToNow(new Date(event.detected_at), {
                         addSuffix: true,
                         locale: ptBR,
@@ -235,14 +233,52 @@ export function RadiographyOverview({ sellerId, onSelectItem }: RadiographyOverv
               ))}
             </div>
           ) : (
-            <div className="text-center py-8 text-muted-foreground">
-              <Activity className="h-12 w-12 mx-auto mb-3 opacity-50" />
-              <p>Nenhum evento crítico nos últimos 7 dias</p>
-              <p className="text-sm">Seus anúncios estão operando normalmente.</p>
+            <div className="text-center py-12 text-slate-400">
+              <div className="h-16 w-16 mx-auto mb-4 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+                <HeartPulse className="h-8 w-8 text-emerald-400" />
+              </div>
+              <p className="text-lg font-medium text-slate-300">Nenhuma anomalia crítica</p>
+              <p className="text-sm text-slate-500 mt-1">Seus anúncios estão operando dentro dos parâmetros normais.</p>
             </div>
           )}
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+interface VitalCardProps {
+  icon: React.ReactNode;
+  label: string;
+  value: number | string;
+  loading: boolean;
+  colorClass: string;
+  bgClass: string;
+  borderClass: string;
+  isText?: boolean;
+}
+
+function VitalCard({ icon, label, value, loading, colorClass, bgClass, borderClass, isText }: VitalCardProps) {
+  return (
+    <Card className={`relative overflow-hidden bg-slate-900/60 border-slate-700/50 ${borderClass}`}>
+      <div className={`absolute inset-0 ${bgClass} opacity-30`} />
+      <CardContent className="relative pt-4 pb-4">
+        <div className="flex items-center gap-3 mb-2">
+          <div className={`h-8 w-8 rounded-lg ${bgClass} border ${borderClass} flex items-center justify-center ${colorClass}`}>
+            {icon}
+          </div>
+          <span className="text-xs font-medium text-slate-400 uppercase tracking-wide">
+            {label}
+          </span>
+        </div>
+        {loading ? (
+          <Skeleton className="h-8 w-20 bg-slate-800/50" />
+        ) : (
+          <div className={`text-2xl font-bold ${colorClass}`}>
+            {isText ? value : typeof value === 'number' ? value.toLocaleString('pt-BR') : value}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

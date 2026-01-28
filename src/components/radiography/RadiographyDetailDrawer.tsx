@@ -20,12 +20,29 @@ import {
   ExternalLink,
   RefreshCw,
   LineChart,
+  HeartPulse,
+  Activity,
+  Stethoscope,
+  Siren,
+  Scan,
+  Sprout,
+  ArrowDownRight,
+  AlertOctagon,
 } from "lucide-react";
 import { useRadiography, Radiography, ListingEvent } from "@/hooks/useRadiography";
 import { supabase } from "@/integrations/supabase/client";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { RadiographyEvolutionChart } from "./RadiographyEvolutionChart";
+import {
+  HEALTH_STATUS_CONFIG,
+  CURVE_CONFIG,
+  RadiographyHealthStatus,
+  AbcCurve,
+  calculateHealthStatus,
+  getSuggestedAction,
+  SUGGESTED_ACTIONS,
+} from "@/types/radiography";
 
 interface RadiographyDetailDrawerProps {
   sellerId: string | null;
@@ -50,7 +67,7 @@ export function RadiographyDetailDrawer({
   } = useRadiography(sellerId);
   
   const [listing, setListing] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState("score");
+  const [activeTab, setActiveTab] = useState("diagnosis");
 
   useEffect(() => {
     if (open && itemId && sellerId) {
@@ -59,11 +76,8 @@ export function RadiographyDetailDrawer({
       
       analyzeItem(itemId).then(async (data) => {
         if (data?.listing?.title && data?.listing?.thumbnail) {
-          // Backend returned complete listing data
           setListing(data.listing);
         } else {
-          // Fallback: fetch directly from cache to get thumbnail + title
-          console.log("[RadiographyDrawer] Fallback: fetching listing from cache");
           const { data: fallbackListing } = await supabase
             .from('meli_listings_cache')
             .select('title, thumbnail, permalink, price, status')
@@ -75,7 +89,6 @@ export function RadiographyDetailDrawer({
           if (fallbackListing) {
             setListing(fallbackListing);
           } else {
-            // Still no data, keep itemId as fallback
             setListing({ title: itemId, thumbnail: null, permalink: null });
           }
         }
@@ -84,45 +97,74 @@ export function RadiographyDetailDrawer({
     }
   }, [open, itemId, sellerId]);
 
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return "text-green-500";
-    if (score >= 60) return "text-yellow-500";
-    if (score >= 40) return "text-orange-500";
-    return "text-red-500";
+  // Calculate health status from radiography data
+  const healthStatus: RadiographyHealthStatus = radiography 
+    ? calculateHealthStatus({
+        score_total: radiography.score_breakdown?.total || 0,
+        conversion_rate_7d: 0,
+        visits_trend: 0,
+        stock_level: 100,
+      })
+    : 'stable';
+  
+  const healthConfig = HEALTH_STATUS_CONFIG[healthStatus];
+  
+  // Mock curve - would come from real data
+  const curve: AbcCurve = radiography?.score_breakdown?.total >= 70 ? 'A' : 'B';
+  const curveConfig = curve ? CURVE_CONFIG[curve] : null;
+  
+  const suggestedAction = getSuggestedAction(healthStatus, curve);
+  const actionConfig = SUGGESTED_ACTIONS[suggestedAction];
+
+  const HealthIcon = ({ status }: { status: RadiographyHealthStatus }) => {
+    const iconMap = {
+      healthy: HeartPulse,
+      stable: Activity,
+      observation: Stethoscope,
+      alert: AlertTriangle,
+      critical: Siren,
+    };
+    const Icon = iconMap[status];
+    return <Icon className="h-5 w-5" />;
   };
 
-  const getProgressColor = (score: number) => {
-    if (score >= 80) return "bg-green-500";
-    if (score >= 60) return "bg-yellow-500";
-    if (score >= 40) return "bg-orange-500";
-    return "bg-red-500";
+  const ActionIcon = ({ type }: { type: string }) => {
+    const iconMap: Record<string, any> = {
+      send_candidate: Sprout,
+      stagnation_risk: TrendingDown,
+      healthy: CheckCircle,
+      declining: ArrowDownRight,
+      critical_intervention: AlertOctagon,
+    };
+    const Icon = iconMap[type] || Activity;
+    return <Icon className="h-5 w-5" />;
   };
 
   const getSeverityIcon = (severity: string) => {
     switch (severity) {
-      case "critical": return <AlertTriangle className="h-4 w-4 text-red-500" />;
-      case "warning": return <AlertTriangle className="h-4 w-4 text-yellow-500" />;
-      default: return <CheckCircle className="h-4 w-4 text-blue-500" />;
+      case "critical": return <Siren className="h-4 w-4 text-red-400" />;
+      case "warning": return <AlertTriangle className="h-4 w-4 text-amber-400" />;
+      default: return <Activity className="h-4 w-4 text-cyan-400" />;
     }
   };
 
   const getImpactIcon = (direction: string) => {
     switch (direction) {
-      case "positive": return <TrendingUp className="h-4 w-4 text-green-500" />;
-      case "negative": return <TrendingDown className="h-4 w-4 text-red-500" />;
-      default: return <Minus className="h-4 w-4 text-muted-foreground" />;
+      case "positive": return <TrendingUp className="h-4 w-4 text-emerald-400" />;
+      case "negative": return <TrendingDown className="h-4 w-4 text-red-400" />;
+      default: return <Minus className="h-4 w-4 text-slate-400" />;
     }
   };
 
   const getPeriodBadge = (summary: string) => {
     const colors: Record<string, string> = {
-      crescimento: "bg-green-500/10 text-green-500",
-      queda: "bg-red-500/10 text-red-500",
-      recuperação: "bg-blue-500/10 text-blue-500",
-      "declínio recente": "bg-orange-500/10 text-orange-500",
-      estagnação: "bg-gray-500/10 text-gray-500",
+      crescimento: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
+      queda: "bg-red-500/20 text-red-400 border-red-500/30",
+      recuperação: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30",
+      "declínio recente": "bg-orange-500/20 text-orange-400 border-orange-500/30",
+      estagnação: "bg-slate-500/20 text-slate-400 border-slate-500/30",
     };
-    return colors[summary] || "bg-gray-500/10 text-gray-500";
+    return colors[summary] || "bg-slate-500/20 text-slate-400 border-slate-500/30";
   };
 
   const formatEventType = (type: string) => {
@@ -145,80 +187,146 @@ export function RadiographyDetailDrawer({
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full sm:max-w-2xl p-0">
-        <SheetHeader className="p-6 pb-4 border-b">
+      <SheetContent className="w-full sm:max-w-2xl p-0 bg-slate-900 border-slate-700">
+        {/* Clinical Header */}
+        <SheetHeader className="p-6 pb-4 border-b border-slate-700 bg-gradient-to-r from-slate-900 to-slate-800">
           <div className="flex items-start gap-4">
-            {listing?.thumbnail ? (
-              <img 
-                src={listing.thumbnail} 
-                alt={listing.title}
-                className="h-16 w-16 object-cover rounded-md"
-              />
-            ) : (
-              <div className="h-16 w-16 bg-muted rounded-md flex items-center justify-center">
-                <Package className="h-8 w-8 text-muted-foreground" />
+            <div className="relative">
+              {listing?.thumbnail ? (
+                <div className="relative">
+                  <img 
+                    src={listing.thumbnail} 
+                    alt={listing.title}
+                    className="h-16 w-16 object-cover rounded-md grayscale-[20%]"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 to-transparent rounded-md" />
+                </div>
+              ) : (
+                <div className="h-16 w-16 bg-slate-800 rounded-md flex items-center justify-center border border-slate-700">
+                  <Package className="h-8 w-8 text-slate-600" />
+                </div>
+              )}
+              {/* Health Badge */}
+              <div className={`absolute -bottom-2 -right-2 h-8 w-8 rounded-full ${healthConfig.bgClass} border-2 border-slate-900 flex items-center justify-center ${healthConfig.colorClass}`}>
+                <HealthIcon status={healthStatus} />
               </div>
-            )}
+            </div>
             <div className="flex-1 min-w-0">
-              <SheetTitle className="text-lg leading-tight mb-1">
+              <SheetTitle className="text-lg leading-tight mb-1 text-slate-100">
                 {listing?.title || itemId}
               </SheetTitle>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span>{itemId}</span>
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <span className="font-mono">{itemId}</span>
                 {listing?.permalink && (
                   <a 
                     href={listing.permalink} 
                     target="_blank" 
                     rel="noopener noreferrer"
-                    className="text-primary hover:underline flex items-center gap-1"
+                    className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1 transition-colors"
                   >
                     Ver anúncio <ExternalLink className="h-3 w-3" />
                   </a>
+                )}
+              </div>
+              {/* Health & Curve Status */}
+              <div className="flex items-center gap-2 mt-2">
+                <Badge className={`${healthConfig.bgClass} ${healthConfig.colorClass} ${healthConfig.borderClass}`}>
+                  {healthConfig.label}
+                </Badge>
+                {curveConfig && (
+                  <Badge className={`${curveConfig.bgClass} ${curveConfig.colorClass} ${curveConfig.borderClass}`}>
+                    Curva {curve}
+                  </Badge>
                 )}
               </div>
             </div>
           </div>
         </SheetHeader>
 
-        <ScrollArea className="h-[calc(100vh-140px)]">
+        <ScrollArea className="h-[calc(100vh-180px)]">
           {loading && !radiography ? (
             <div className="p-6 space-y-4">
-              <Skeleton className="h-32 w-full" />
-              <Skeleton className="h-48 w-full" />
-              <Skeleton className="h-48 w-full" />
+              <Skeleton className="h-32 w-full bg-slate-800" />
+              <Skeleton className="h-48 w-full bg-slate-800" />
+              <Skeleton className="h-48 w-full bg-slate-800" />
             </div>
           ) : radiography ? (
             <Tabs value={activeTab} onValueChange={setActiveTab} className="p-6">
-              <TabsList className="grid w-full grid-cols-5">
-                <TabsTrigger value="score">Score</TabsTrigger>
-                <TabsTrigger value="evolution" className="gap-1">
+              <TabsList className="grid w-full grid-cols-5 bg-slate-800/50 border border-slate-700">
+                <TabsTrigger value="diagnosis" className="data-[state=active]:bg-cyan-600 data-[state=active]:text-white">
+                  Diagnóstico
+                </TabsTrigger>
+                <TabsTrigger value="evolution" className="gap-1 data-[state=active]:bg-cyan-600 data-[state=active]:text-white">
                   <LineChart className="h-3 w-3" />
                   Evolução
                 </TabsTrigger>
-                <TabsTrigger value="narrative">Narrativa</TabsTrigger>
-                <TabsTrigger value="events">Eventos</TabsTrigger>
-                <TabsTrigger value="actions">Ações</TabsTrigger>
+                <TabsTrigger value="narrative" className="data-[state=active]:bg-cyan-600 data-[state=active]:text-white">
+                  Laudo
+                </TabsTrigger>
+                <TabsTrigger value="events" className="data-[state=active]:bg-cyan-600 data-[state=active]:text-white">
+                  Histórico
+                </TabsTrigger>
+                <TabsTrigger value="actions" className="data-[state=active]:bg-cyan-600 data-[state=active]:text-white">
+                  Orientações
+                </TabsTrigger>
               </TabsList>
 
-              {/* Score Tab */}
-              <TabsContent value="score" className="space-y-4 mt-4">
+              {/* Diagnosis Tab */}
+              <TabsContent value="diagnosis" className="space-y-4 mt-4">
+                {/* Suggested Action Card */}
+                <Card className={`bg-slate-800/50 border ${
+                  actionConfig.priority === 'critical' ? 'border-red-500/30 bg-red-500/5' :
+                  actionConfig.priority === 'high' ? 'border-orange-500/30 bg-orange-500/5' :
+                  actionConfig.priority === 'medium' ? 'border-amber-500/30 bg-amber-500/5' :
+                  'border-emerald-500/30 bg-emerald-500/5'
+                }`}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-3">
+                      <div className={`h-12 w-12 rounded-lg flex items-center justify-center ${
+                        actionConfig.priority === 'critical' ? 'bg-red-500/20 text-red-400' :
+                        actionConfig.priority === 'high' ? 'bg-orange-500/20 text-orange-400' :
+                        actionConfig.priority === 'medium' ? 'bg-amber-500/20 text-amber-400' :
+                        'bg-emerald-500/20 text-emerald-400'
+                      }`}>
+                        <ActionIcon type={suggestedAction} />
+                      </div>
+                      <div>
+                        <div className={`font-semibold ${
+                          actionConfig.priority === 'critical' ? 'text-red-400' :
+                          actionConfig.priority === 'high' ? 'text-orange-400' :
+                          actionConfig.priority === 'medium' ? 'text-amber-400' :
+                          'text-emerald-400'
+                        }`}>
+                          {actionConfig.title}
+                        </div>
+                        <div className="text-sm text-slate-400">{actionConfig.description}</div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
                 {/* Period Summary */}
-                <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50">
+                <div className="flex items-center justify-between p-4 rounded-lg bg-slate-800/50 border border-slate-700">
                   <div>
-                    <div className="text-sm text-muted-foreground">Período analisado</div>
-                    <div className="font-medium">{radiography.period_analyzed_days} dias</div>
+                    <div className="text-sm text-slate-400">Período analisado</div>
+                    <div className="font-medium text-slate-200">{radiography.period_analyzed_days} dias</div>
                   </div>
                   <Badge className={getPeriodBadge(radiography.period_summary)}>
                     {radiography.period_summary}
                   </Badge>
                 </div>
 
-                {/* Score Breakdown */}
-                <Card>
+                {/* Score Breakdown - Clinical Style */}
+                <Card className="bg-slate-800/50 border-slate-700">
                   <CardHeader className="pb-2">
                     <div className="flex items-center justify-between">
-                      <CardTitle className="text-lg">Score por Bloco</CardTitle>
-                      <div className={`text-3xl font-bold ${getScoreColor(radiography.score_breakdown?.total || 0)}`}>
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center">
+                          <Scan className="h-5 w-5 text-cyan-400" />
+                        </div>
+                        <CardTitle className="text-lg text-slate-100">Exame por Área</CardTitle>
+                      </div>
+                      <div className={`text-4xl font-bold font-mono ${healthConfig.colorClass}`}>
                         {radiography.score_breakdown?.total || 0}
                       </div>
                     </div>
@@ -238,7 +346,7 @@ export function RadiographyDetailDrawer({
                 </Card>
               </TabsContent>
 
-              {/* Evolution Tab - Visit History with Events Correlation */}
+              {/* Evolution Tab */}
               <TabsContent value="evolution" className="space-y-4 mt-4">
                 {sellerId && itemId && (
                   <RadiographyEvolutionChart 
@@ -248,34 +356,44 @@ export function RadiographyDetailDrawer({
                 )}
               </TabsContent>
 
-              {/* Narrative Tab */}
+              {/* Narrative Tab - Clinical Report */}
               <TabsContent value="narrative" className="space-y-4 mt-4">
-                <Card>
+                <Card className="bg-slate-800/50 border-slate-700">
                   <CardHeader>
-                    <CardTitle className="text-lg">Radiografia Interpretativa</CardTitle>
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-lg bg-violet-500/10 border border-violet-500/30 flex items-center justify-center">
+                        <Stethoscope className="h-5 w-5 text-violet-400" />
+                      </div>
+                      <CardTitle className="text-lg text-slate-100">Laudo Radiográfico</CardTitle>
+                    </div>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-muted-foreground leading-relaxed">
-                      {radiography.narrative_pt || "Narrativa não disponível."}
+                    <p className="text-slate-300 leading-relaxed">
+                      {radiography.narrative_pt || "Laudo não disponível."}
                     </p>
                   </CardContent>
                 </Card>
 
-                {/* Cause & Effect */}
+                {/* Cause & Effect - X-Ray Insights */}
                 {radiography.cause_effect_insights?.length > 0 && (
-                  <Card>
+                  <Card className="bg-slate-800/50 border-slate-700">
                     <CardHeader>
-                      <CardTitle className="text-lg">Causa e Efeito</CardTitle>
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center">
+                          <Activity className="h-5 w-5 text-amber-400" />
+                        </div>
+                        <CardTitle className="text-lg text-slate-100">Relação Causa-Efeito</CardTitle>
+                      </div>
                     </CardHeader>
                     <CardContent className="space-y-3">
                       {radiography.cause_effect_insights.map((insight: any, i: number) => (
-                        <div key={i} className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
+                        <div key={i} className="flex items-center gap-3 p-3 rounded-lg bg-slate-900/50 border border-slate-700">
                           <div className="flex-1">
-                            <div className="font-medium text-red-500">{insight.cause}</div>
+                            <div className="font-medium text-red-400">{insight.cause}</div>
                           </div>
-                          <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                          <ArrowRight className="h-4 w-4 text-slate-500" />
                           <div className="flex-1">
-                            <div className="font-medium text-blue-500">{insight.effect}</div>
+                            <div className="font-medium text-cyan-400">{insight.effect}</div>
                           </div>
                         </div>
                       ))}
@@ -284,16 +402,23 @@ export function RadiographyDetailDrawer({
                 )}
               </TabsContent>
 
-              {/* Events Tab */}
+              {/* Events Tab - Clinical Timeline */}
               <TabsContent value="events" className="space-y-4 mt-4">
-                <Card>
+                <Card className="bg-slate-800/50 border-slate-700">
                   <CardHeader>
-                    <CardTitle className="text-lg">Linha do Tempo</CardTitle>
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center">
+                        <Clock className="h-5 w-5 text-cyan-400" />
+                      </div>
+                      <CardTitle className="text-lg text-slate-100">Histórico Clínico</CardTitle>
+                    </div>
                   </CardHeader>
                   <CardContent>
                     {events.length === 0 ? (
-                      <div className="text-center py-8 text-muted-foreground">
-                        <Clock className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                      <div className="text-center py-8 text-slate-400">
+                        <div className="h-12 w-12 mx-auto mb-3 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center">
+                          <Clock className="h-6 w-6 text-slate-500" />
+                        </div>
                         <p>Nenhum evento registrado ainda.</p>
                       </div>
                     ) : (
@@ -301,23 +426,23 @@ export function RadiographyDetailDrawer({
                         {events.slice(0, 20).map((event) => (
                           <div 
                             key={event.id}
-                            className="flex items-start gap-3 p-3 rounded-lg border"
+                            className="flex items-start gap-3 p-3 rounded-lg border border-slate-700 bg-slate-900/30"
                           >
                             {getSeverityIcon(event.severity)}
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-1">
-                                <span className="font-medium">
+                                <span className="font-medium text-slate-200">
                                   {formatEventType(event.event_type)}
                                 </span>
                                 {getImpactIcon(event.impact_direction)}
                               </div>
-                              <p className="text-sm text-muted-foreground">
+                              <p className="text-sm text-slate-400">
                                 {event.observation_pt}
                               </p>
-                              <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+                              <div className="flex items-center gap-2 mt-2 text-xs text-slate-500">
                                 <Clock className="h-3 w-3" />
                                 {format(new Date(event.detected_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
-                                <Badge variant="outline" className="text-[10px]">
+                                <Badge variant="outline" className="text-[10px] border-slate-600">
                                   {event.blocks_affected?.join(", ")}
                                 </Badge>
                               </div>
@@ -330,42 +455,53 @@ export function RadiographyDetailDrawer({
                 </Card>
               </TabsContent>
 
-              {/* Actions Tab */}
+              {/* Actions Tab - Clinical Recommendations */}
               <TabsContent value="actions" className="space-y-4 mt-4">
-                <Card>
+                <Card className="bg-slate-800/50 border-slate-700">
                   <CardHeader>
-                    <CardTitle className="text-lg">Ações Sugeridas</CardTitle>
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+                        <Stethoscope className="h-5 w-5 text-emerald-400" />
+                      </div>
+                      <CardTitle className="text-lg text-slate-100">Orientações Clínicas</CardTitle>
+                    </div>
                   </CardHeader>
                   <CardContent>
                     {!radiography.suggested_actions?.length ? (
-                      <div className="text-center py-8 text-muted-foreground">
-                        <CheckCircle className="h-12 w-12 mx-auto mb-3 opacity-50 text-green-500" />
-                        <p>Nenhuma ação prioritária identificada.</p>
-                        <p className="text-sm">O anúncio está bem otimizado.</p>
+                      <div className="text-center py-8 text-slate-400">
+                        <div className="h-12 w-12 mx-auto mb-3 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+                          <CheckCircle className="h-6 w-6 text-emerald-400" />
+                        </div>
+                        <p className="text-slate-300 font-medium">Nenhuma intervenção prioritária</p>
+                        <p className="text-sm text-slate-500 mt-1">O anúncio está bem otimizado.</p>
                       </div>
                     ) : (
                       <div className="space-y-3">
                         {radiography.suggested_actions.map((action: any, i: number) => (
                           <div 
                             key={i}
-                            className="flex items-start gap-3 p-4 rounded-lg border"
+                            className={`flex items-start gap-3 p-4 rounded-lg border ${
+                              action.impact === "crítico" ? "border-red-500/30 bg-red-500/5" :
+                              action.impact === "alto" ? "border-orange-500/30 bg-orange-500/5" :
+                              "border-slate-700 bg-slate-900/30"
+                            }`}
                           >
                             <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
-                              action.impact === "crítico" ? "bg-red-500/10 text-red-500" :
-                              action.impact === "alto" ? "bg-orange-500/10 text-orange-500" :
-                              "bg-blue-500/10 text-blue-500"
+                              action.impact === "crítico" ? "bg-red-500/20 text-red-400" :
+                              action.impact === "alto" ? "bg-orange-500/20 text-orange-400" :
+                              "bg-cyan-500/20 text-cyan-400"
                             }`}>
                               {action.priority}
                             </div>
                             <div className="flex-1">
-                              <div className="font-medium mb-1">{action.action}</div>
-                              <p className="text-sm text-muted-foreground">{action.reason}</p>
+                              <div className="font-medium mb-1 text-slate-200">{action.action}</div>
+                              <p className="text-sm text-slate-400">{action.reason}</p>
                               <div className="flex items-center gap-2 mt-2">
-                                <Badge variant="outline">{action.block}</Badge>
+                                <Badge variant="outline" className="border-slate-600 text-slate-400">{action.block}</Badge>
                                 <Badge className={
-                                  action.impact === "crítico" ? "bg-red-500/10 text-red-500" :
-                                  action.impact === "alto" ? "bg-orange-500/10 text-orange-500" :
-                                  "bg-blue-500/10 text-blue-500"
+                                  action.impact === "crítico" ? "bg-red-500/20 text-red-400 border-red-500/30" :
+                                  action.impact === "alto" ? "bg-orange-500/20 text-orange-400 border-orange-500/30" :
+                                  "bg-cyan-500/20 text-cyan-400 border-cyan-500/30"
                                 }>
                                   Impacto {action.impact}
                                 </Badge>
@@ -380,12 +516,14 @@ export function RadiographyDetailDrawer({
               </TabsContent>
             </Tabs>
           ) : (
-            <div className="p-6 text-center text-muted-foreground">
-              <AlertTriangle className="h-12 w-12 mx-auto mb-3 opacity-50" />
-              <p>Não foi possível carregar a radiografia.</p>
+            <div className="p-6 text-center text-slate-400">
+              <div className="h-16 w-16 mx-auto mb-4 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center">
+                <AlertTriangle className="h-8 w-8 text-slate-500" />
+              </div>
+              <p className="text-slate-300">Não foi possível carregar a radiografia.</p>
               <Button 
                 variant="outline" 
-                className="mt-4"
+                className="mt-4 border-slate-600 text-slate-300 hover:bg-slate-800"
                 onClick={() => itemId && analyzeItem(itemId)}
               >
                 <RefreshCw className="h-4 w-4 mr-2" />
@@ -401,19 +539,31 @@ export function RadiographyDetailDrawer({
 
 function ScoreRow({ label, score }: { label: string; score: number }) {
   const getColor = (s: number) => {
-    if (s >= 80) return "bg-green-500";
-    if (s >= 60) return "bg-yellow-500";
+    if (s >= 80) return "bg-emerald-500";
+    if (s >= 60) return "bg-amber-500";
     if (s >= 40) return "bg-orange-500";
     return "bg-red-500";
+  };
+
+  const getTextColor = (s: number) => {
+    if (s >= 80) return "text-emerald-400";
+    if (s >= 60) return "text-amber-400";
+    if (s >= 40) return "text-orange-400";
+    return "text-red-400";
   };
 
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-sm">
-        <span>{label}</span>
-        <span className="font-medium">{score}</span>
+        <span className="text-slate-300">{label}</span>
+        <span className={`font-semibold font-mono ${getTextColor(score)}`}>{score}</span>
       </div>
-      <Progress value={score} className={`h-2 ${getColor(score)}`} />
+      <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+        <div 
+          className={`h-full ${getColor(score)} transition-all`} 
+          style={{ width: `${score}%` }}
+        />
+      </div>
     </div>
   );
 }
