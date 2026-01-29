@@ -181,7 +181,7 @@ export default function AdActionsCenter() {
         </Button>
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <Tabs defaultValue="drafts" value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList>
             <TabsTrigger value="drafts" className="flex items-center gap-2">
               <FileText className="h-4 w-4" />
