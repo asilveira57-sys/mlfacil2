@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { PageContainer } from "@/components/layout/PageContainer";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -34,11 +34,13 @@ import {
   FileText,
   ListChecks,
   History,
+  Link,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useAdLifecycleActions, useExecuteAction, useCancelAction } from "@/hooks/useAdTimeline";
 import type { AdLifecycleAction, ActionStatus } from "@/types/ad-timeline";
+import { CloneByLinkDialog } from "@/components/ad-timeline/CloneByLinkDialog";
 
 const statusConfig: Record<ActionStatus, { label: string; icon: React.ReactNode; className: string }> = {
   DRAFT: { label: 'Rascunho', icon: <FileText className="h-4 w-4" />, className: 'bg-muted text-muted-foreground' },
@@ -66,6 +68,7 @@ export default function AdActionsCenter() {
 
   const [activeTab, setActiveTab] = useState("drafts");
   const [confirmAction, setConfirmAction] = useState<AdLifecycleAction | null>(null);
+  const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
 
   const statusFilters: Record<string, string> = {
     drafts: 'DRAFT',
@@ -156,7 +159,7 @@ export default function AdActionsCenter() {
             </a>
           )}
           {action.action_status === 'FAILED' && (
-            <span className="text-xs text-red-600 truncate max-w-[150px] block">
+            <span className="text-xs text-destructive truncate max-w-[150px] block">
               {action.result?.error || 'Erro desconhecido'}
             </span>
           )}
@@ -171,21 +174,29 @@ export default function AdActionsCenter() {
       subtitle="Gerencie ações de encerramento, republicação e clonagem"
     >
       <div className="p-6 space-y-6">
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList>
-            <TabsTrigger value="drafts" className="flex items-center gap-2">
-              <FileText className="h-4 w-4" />
-              Rascunhos
-            </TabsTrigger>
-            <TabsTrigger value="queue" className="flex items-center gap-2">
-              <ListChecks className="h-4 w-4" />
-              Fila
-            </TabsTrigger>
-            <TabsTrigger value="completed" className="flex items-center gap-2">
-              <History className="h-4 w-4" />
-              Concluídas
-            </TabsTrigger>
-          </TabsList>
+        <div className="flex items-center justify-between">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1">
+            <TabsList>
+              <TabsTrigger value="drafts" className="flex items-center gap-2">
+                <FileText className="h-4 w-4" />
+                Rascunhos
+              </TabsTrigger>
+              <TabsTrigger value="queue" className="flex items-center gap-2">
+                <ListChecks className="h-4 w-4" />
+                Fila
+              </TabsTrigger>
+              <TabsTrigger value="completed" className="flex items-center gap-2">
+                <History className="h-4 w-4" />
+                Concluídas
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+          
+          <Button onClick={() => setCloneDialogOpen(true)} className="gap-2">
+            <Link className="h-4 w-4" />
+            Clonar por Link
+          </Button>
+        </div>
 
           <TabsContent value={activeTab} className="mt-4">
             <Card>
@@ -228,7 +239,6 @@ export default function AdActionsCenter() {
               </CardContent>
             </Card>
           </TabsContent>
-        </Tabs>
       </div>
 
       {/* Confirm Dialog */}
@@ -236,7 +246,7 @@ export default function AdActionsCenter() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-yellow-500" />
+              <AlertTriangle className="h-5 w-5 text-warning" />
               Confirmar execução
             </AlertDialogTitle>
             <AlertDialogDescription>
@@ -256,6 +266,9 @@ export default function AdActionsCenter() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Clone by Link Dialog */}
+      <CloneByLinkDialog open={cloneDialogOpen} onOpenChange={setCloneDialogOpen} />
     </PageContainer>
   );
 }
