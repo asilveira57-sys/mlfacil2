@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -10,14 +10,12 @@ import {
   EyeOff, 
   Trash2, 
   ExternalLink,
-  TrendingUp,
-  TrendingDown,
-  Minus,
   AlertTriangle,
   Settings,
-  History
+  History,
+  AlertCircle
 } from 'lucide-react';
-import { useCompetitorTracking, TrackedListing } from '@/hooks/useCompetitorTracking';
+import { useCompetitorTracking, CompetitorTracker } from '@/hooks/useCompetitorTracking';
 import { AddTrackedListingDialog } from './AddTrackedListingDialog';
 import { TrackedListingDetailDrawer } from './TrackedListingDetailDrawer';
 import { 
@@ -37,44 +35,44 @@ interface TrackedCompetitorsTabProps {
 
 export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) {
   const {
-    listings,
+    trackers,
     overview,
     loading,
     refreshing,
-    fetchListings,
+    fetchTrackers,
     fetchOverview,
-    updateListing,
-    deleteListing,
-    checkListing,
+    updateTracker,
+    deleteTracker,
+    checkTracker,
   } = useCompetitorTracking(sellerId);
 
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
-  const [selectedListing, setSelectedListing] = useState<TrackedListing | null>(null);
+  const [selectedTracker, setSelectedTracker] = useState<CompetitorTracker | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [listingToDelete, setListingToDelete] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<'active' | 'paused' | 'all'>('active');
+  const [trackerToDelete, setTrackerToDelete] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<'ativo' | 'pausado' | 'all'>('ativo');
 
   useEffect(() => {
-    fetchListings(statusFilter);
+    fetchTrackers(statusFilter);
     fetchOverview();
-  }, [fetchListings, fetchOverview, statusFilter]);
+  }, [fetchTrackers, fetchOverview, statusFilter]);
 
-  const handleOpenDetail = (listing: TrackedListing) => {
-    setSelectedListing(listing);
+  const handleOpenDetail = (tracker: CompetitorTracker) => {
+    setSelectedTracker(tracker);
     setDetailDrawerOpen(true);
   };
 
-  const handleToggleStatus = async (listing: TrackedListing) => {
-    await updateListing(listing.id, {
-      status: listing.status === 'active' ? 'paused' : 'active'
+  const handleToggleStatus = async (tracker: CompetitorTracker) => {
+    await updateTracker(tracker.id, {
+      status: tracker.status === 'ativo' ? 'pausado' : 'ativo'
     });
   };
 
   const handleDeleteConfirm = async () => {
-    if (listingToDelete) {
-      await deleteListing(listingToDelete);
-      setListingToDelete(null);
+    if (trackerToDelete) {
+      await deleteTracker(trackerToDelete);
+      setTrackerToDelete(null);
       setDeleteDialogOpen(false);
     }
   };
@@ -94,31 +92,40 @@ export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) 
     });
   };
 
-  const getReactionBadge = (type: string) => {
-    switch (type) {
-      case 'monitor':
+  const getReactionBadge = (mode: string) => {
+    switch (mode) {
+      case 'monitorar':
         return <Badge variant="secondary">Monitorar</Badge>;
-      case 'suggest':
+      case 'sugerir':
         return <Badge variant="outline" className="border-blue-500 text-blue-600">Sugerir</Badge>;
-      case 'auto':
+      case 'auto_aplicar':
         return <Badge className="bg-green-600">Automático</Badge>;
       default:
         return null;
     }
   };
 
-  const getPriceTrend = (listing: TrackedListing) => {
-    if (!listing.last_price_change_at) return null;
-    
-    // Check if price changed in last 7 days
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    if (new Date(listing.last_price_change_at) < sevenDaysAgo) return null;
-
-    // We'd need more context for trend, for now just show changed
-    return <Badge variant="outline" className="text-amber-600 border-amber-500">Alterado</Badge>;
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'ativo':
+        return null;
+      case 'pausado':
+        return <Badge variant="secondary">Pausado</Badge>;
+      case 'erro':
+        return <Badge variant="destructive">Erro</Badge>;
+      default:
+        return null;
+    }
   };
 
-  if (loading && listings.length === 0) {
+  const getStateBadge = (state: string) => {
+    if (state === 'indisponivel') {
+      return <Badge variant="destructive">Indisponível</Badge>;
+    }
+    return null;
+  };
+
+  if (loading && trackers.length === 0) {
     return (
       <div className="space-y-4">
         {[...Array(3)].map((_, i) => (
@@ -148,25 +155,25 @@ export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) 
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{overview.alerts_count}</div>
-              <p className="text-xs text-muted-foreground">Ações recomendadas</p>
+              <p className="text-xs text-muted-foreground">Não lidos</p>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Alterações Recentes</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">Ações Sugeridas</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{overview.recent_price_changes}</div>
-              <p className="text-xs text-muted-foreground">Últimos 7 dias</p>
+              <div className="text-2xl font-bold">{overview.pending_actions}</div>
+              <p className="text-xs text-muted-foreground">Aguardando resposta</p>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Pausados</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">Com Erro</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{overview.paused_count}</div>
-              <p className="text-xs text-muted-foreground">Sem monitoramento</p>
+              <div className="text-2xl font-bold">{overview.error_count}</div>
+              <p className="text-xs text-muted-foreground">Falhas consecutivas</p>
             </CardContent>
           </Card>
         </div>
@@ -176,16 +183,16 @@ export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) 
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Button
-            variant={statusFilter === 'active' ? 'default' : 'outline'}
+            variant={statusFilter === 'ativo' ? 'default' : 'outline'}
             size="sm"
-            onClick={() => setStatusFilter('active')}
+            onClick={() => setStatusFilter('ativo')}
           >
             Ativos
           </Button>
           <Button
-            variant={statusFilter === 'paused' ? 'default' : 'outline'}
+            variant={statusFilter === 'pausado' ? 'default' : 'outline'}
             size="sm"
-            onClick={() => setStatusFilter('paused')}
+            onClick={() => setStatusFilter('pausado')}
           >
             Pausados
           </Button>
@@ -203,8 +210,8 @@ export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) 
         </Button>
       </div>
 
-      {/* Listings */}
-      {listings.length === 0 ? (
+      {/* Trackers List */}
+      {trackers.length === 0 ? (
         <Card className="p-8 text-center">
           <Eye className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
           <h3 className="text-lg font-semibold mb-2">Nenhum concorrente monitorado</h3>
@@ -218,19 +225,19 @@ export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) 
         </Card>
       ) : (
         <div className="space-y-3">
-          {listings.map((listing) => (
+          {trackers.map((tracker) => (
             <Card 
-              key={listing.id} 
+              key={tracker.id} 
               className={`overflow-hidden transition-all ${
-                listing.status === 'paused' ? 'opacity-60' : ''
-              } ${!listing.is_available ? 'border-destructive/50' : ''}`}
+                tracker.status === 'pausado' ? 'opacity-60' : ''
+              } ${tracker.last_known_state === 'indisponivel' ? 'border-destructive/50' : ''}`}
             >
               <CardContent className="p-4">
                 <div className="flex items-start gap-4">
                   {/* Thumbnail */}
-                  {listing.thumbnail ? (
+                  {tracker.competitor_thumbnail ? (
                     <img 
-                      src={listing.thumbnail} 
+                      src={tracker.competitor_thumbnail} 
                       alt="" 
                       className="w-16 h-16 object-cover rounded-lg flex-shrink-0"
                     />
@@ -244,43 +251,37 @@ export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-medium">{listing.competitor_name}</span>
-                          {getReactionBadge(listing.reaction_type)}
-                          {getPriceTrend(listing)}
-                          {!listing.is_available && (
-                            <Badge variant="destructive">Indisponível</Badge>
-                          )}
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span className="font-medium">{tracker.competitor_label}</span>
+                          {getReactionBadge(tracker.reaction_mode)}
+                          {getStatusBadge(tracker.status)}
+                          {getStateBadge(tracker.last_known_state)}
                         </div>
                         <p className="text-sm text-muted-foreground truncate">
-                          {listing.title || listing.competitor_item_id}
+                          {tracker.competitor_title || tracker.competitor_external_id || 'Sem título'}
                         </p>
                       </div>
                       <div className="text-right">
                         <div className="text-xl font-bold">
-                          {formatCurrency(listing.current_price)}
+                          {formatCurrency(tracker.last_known_price)}
                         </div>
-                        {listing.original_price && listing.original_price > (listing.current_price || 0) && (
-                          <div className="text-sm text-muted-foreground line-through">
-                            {formatCurrency(listing.original_price)}
-                          </div>
-                        )}
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
-                      <span>Verificado: {formatDate(listing.last_check_at)}</span>
-                      {listing.price_change_count > 0 && (
-                        <span className="flex items-center gap-1">
-                          <History className="h-3 w-3" />
-                          {listing.price_change_count} alterações
+                    <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground flex-wrap">
+                      <span>Verificado: {formatDate(tracker.last_checked_at)}</span>
+                      <span>Próxima: {formatDate(tracker.next_check_at)}</span>
+                      {tracker.min_price && (
+                        <span>Mín: {formatCurrency(tracker.min_price)}</span>
+                      )}
+                      {tracker.max_price && (
+                        <span>Máx: {formatCurrency(tracker.max_price)}</span>
+                      )}
+                      {tracker.consecutive_failures > 0 && (
+                        <span className="text-destructive flex items-center gap-1">
+                          <AlertCircle className="h-3 w-3" />
+                          {tracker.consecutive_failures} falhas
                         </span>
-                      )}
-                      {listing.min_price && (
-                        <span>Mín: {formatCurrency(listing.min_price)}</span>
-                      )}
-                      {listing.max_price && (
-                        <span>Máx: {formatCurrency(listing.max_price)}</span>
                       )}
                     </div>
                   </div>
@@ -290,16 +291,16 @@ export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) 
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => checkListing(listing.id)}
-                      disabled={refreshing === listing.id}
+                      onClick={() => checkTracker(tracker.id)}
+                      disabled={refreshing === tracker.id}
                       title="Verificar agora"
                     >
-                      <RefreshCw className={`h-4 w-4 ${refreshing === listing.id ? 'animate-spin' : ''}`} />
+                      <RefreshCw className={`h-4 w-4 ${refreshing === tracker.id ? 'animate-spin' : ''}`} />
                     </Button>
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => handleOpenDetail(listing)}
+                      onClick={() => handleOpenDetail(tracker)}
                       title="Ver detalhes"
                     >
                       <Settings className="h-4 w-4" />
@@ -307,10 +308,10 @@ export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) 
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => handleToggleStatus(listing)}
-                      title={listing.status === 'active' ? 'Pausar' : 'Ativar'}
+                      onClick={() => handleToggleStatus(tracker)}
+                      title={tracker.status === 'ativo' ? 'Pausar' : 'Ativar'}
                     >
-                      {listing.status === 'active' ? (
+                      {tracker.status === 'ativo' ? (
                         <EyeOff className="h-4 w-4" />
                       ) : (
                         <Eye className="h-4 w-4" />
@@ -322,7 +323,7 @@ export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) 
                       asChild
                       title="Abrir anúncio"
                     >
-                      <a href={listing.competitor_link} target="_blank" rel="noopener noreferrer">
+                      <a href={tracker.competitor_url} target="_blank" rel="noopener noreferrer">
                         <ExternalLink className="h-4 w-4" />
                       </a>
                     </Button>
@@ -330,7 +331,7 @@ export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) 
                       variant="ghost"
                       size="icon"
                       onClick={() => {
-                        setListingToDelete(listing.id);
+                        setTrackerToDelete(tracker.id);
                         setDeleteDialogOpen(true);
                       }}
                       title="Remover"
@@ -356,7 +357,7 @@ export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) 
       {/* Detail Drawer */}
       <TrackedListingDetailDrawer
         sellerId={sellerId}
-        listing={selectedListing}
+        tracker={selectedTracker}
         open={detailDrawerOpen}
         onOpenChange={setDetailDrawerOpen}
       />

@@ -7,79 +7,90 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   ExternalLink, 
   RefreshCw, 
   Save,
   TrendingUp,
   TrendingDown,
-  Minus,
   History,
-  AlertTriangle
+  AlertTriangle,
+  Clock,
+  Activity
 } from 'lucide-react';
-import { useCompetitorTracking, TrackedListing, PriceHistory } from '@/hooks/useCompetitorTracking';
+import { useCompetitorTracking, CompetitorTracker, CompetitorSnapshot, CompetitorEvent } from '@/hooks/useCompetitorTracking';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface TrackedListingDetailDrawerProps {
   sellerId: string;
-  listing: TrackedListing | null;
+  tracker: CompetitorTracker | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
 export function TrackedListingDetailDrawer({ 
   sellerId, 
-  listing, 
+  tracker, 
   open, 
   onOpenChange 
 }: TrackedListingDetailDrawerProps) {
-  const { updateListing, checkListing, fetchPriceHistory, refreshing } = useCompetitorTracking(sellerId);
+  const { updateTracker, checkTracker, fetchSnapshots, fetchEvents, refreshing } = useCompetitorTracking(sellerId);
   
-  const [history, setHistory] = useState<PriceHistory[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [snapshots, setSnapshots] = useState<CompetitorSnapshot[]>([]);
+  const [events, setEvents] = useState<CompetitorEvent[]>([]);
+  const [loadingData, setLoadingData] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
   const [formData, setFormData] = useState({
-    competitor_name: '',
+    competitor_label: '',
     min_price: '',
     max_price: '',
-    reaction_type: 'monitor',
-    adjustment_value: '0.10',
+    reaction_mode: 'monitorar',
+    undercut_amount: '0.10',
+    check_interval_minutes: '120',
   });
 
   useEffect(() => {
-    if (listing) {
+    if (tracker) {
       setFormData({
-        competitor_name: listing.competitor_name,
-        min_price: listing.min_price?.toString() || '',
-        max_price: listing.max_price?.toString() || '',
-        reaction_type: listing.reaction_type,
-        adjustment_value: listing.adjustment_value?.toString() || '0.10',
+        competitor_label: tracker.competitor_label,
+        min_price: tracker.min_price?.toString() || '',
+        max_price: tracker.max_price?.toString() || '',
+        reaction_mode: tracker.reaction_mode,
+        undercut_amount: tracker.undercut_amount?.toString() || '0.10',
+        check_interval_minutes: tracker.check_interval_minutes?.toString() || '120',
       });
-      loadHistory();
+      loadData();
     }
-  }, [listing?.id]);
+  }, [tracker?.id]);
 
-  const loadHistory = async () => {
-    if (!listing) return;
-    setLoadingHistory(true);
+  const loadData = async () => {
+    if (!tracker) return;
+    setLoadingData(true);
     try {
-      const data = await fetchPriceHistory(listing.id);
-      setHistory(data);
+      const [snapshotsData, eventsData] = await Promise.all([
+        fetchSnapshots(tracker.id),
+        fetchEvents(tracker.id),
+      ]);
+      setSnapshots(snapshotsData);
+      setEvents(eventsData);
     } finally {
-      setLoadingHistory(false);
+      setLoadingData(false);
     }
   };
 
   const handleSave = async () => {
-    if (!listing) return;
+    if (!tracker) return;
     setSaving(true);
     try {
-      await updateListing(listing.id, {
-        competitor_name: formData.competitor_name,
+      await updateTracker(tracker.id, {
+        competitor_label: formData.competitor_label,
         min_price: formData.min_price ? parseFloat(formData.min_price) : null,
         max_price: formData.max_price ? parseFloat(formData.max_price) : null,
-        reaction_type: formData.reaction_type as any,
-        adjustment_value: parseFloat(formData.adjustment_value) || 0.10,
+        reaction_mode: formData.reaction_mode as any,
+        undercut_amount: parseFloat(formData.undercut_amount) || 0.10,
+        check_interval_minutes: parseInt(formData.check_interval_minutes) || 120,
       });
     } finally {
       setSaving(false);
@@ -108,252 +119,345 @@ export function TrackedListingDetailDrawer({
   };
 
   // Prepare chart data
-  const chartData = history.map(h => ({
-    date: formatChartDate(h.recorded_at),
-    price: h.price,
-    fullDate: h.recorded_at,
-  }));
+  const chartData = snapshots
+    .filter(s => s.price !== null)
+    .map(s => ({
+      date: formatChartDate(s.captured_at),
+      price: s.price,
+      fullDate: s.captured_at,
+    }));
 
   // Calculate stats
+  const prices = snapshots.filter(s => s.price !== null).map(s => s.price!);
   const stats = {
-    minPrice: history.length > 0 ? Math.min(...history.map(h => h.price)) : null,
-    maxPrice: history.length > 0 ? Math.max(...history.map(h => h.price)) : null,
-    avgPrice: history.length > 0 ? history.reduce((sum, h) => sum + h.price, 0) / history.length : null,
-    priceChanges: history.filter(h => h.price_delta !== null && h.price_delta !== 0).length,
+    minPrice: prices.length > 0 ? Math.min(...prices) : null,
+    maxPrice: prices.length > 0 ? Math.max(...prices) : null,
+    avgPrice: prices.length > 0 ? prices.reduce((sum, p) => sum + p, 0) / prices.length : null,
+    totalSnapshots: snapshots.length,
   };
 
-  if (!listing) return null;
+  const getEventIcon = (type: string) => {
+    switch (type) {
+      case 'price_down':
+        return <TrendingDown className="h-4 w-4 text-green-500" />;
+      case 'price_up':
+        return <TrendingUp className="h-4 w-4 text-amber-500" />;
+      case 'became_unavailable':
+        return <AlertTriangle className="h-4 w-4 text-destructive" />;
+      case 'became_available':
+        return <Activity className="h-4 w-4 text-green-500" />;
+      default:
+        return <Clock className="h-4 w-4 text-muted-foreground" />;
+    }
+  };
+
+  if (!tracker) return null;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full sm:max-w-[600px] overflow-y-auto">
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
-            {listing.thumbnail && (
+            {tracker.competitor_thumbnail && (
               <img 
-                src={listing.thumbnail} 
+                src={tracker.competitor_thumbnail} 
                 alt="" 
                 className="w-10 h-10 object-cover rounded"
               />
             )}
             <div>
-              <div>{listing.competitor_name}</div>
+              <div>{tracker.competitor_label}</div>
               <div className="text-sm font-normal text-muted-foreground">
-                {listing.competitor_item_id}
+                {tracker.competitor_external_id || 'ID não disponível'}
               </div>
             </div>
           </SheetTitle>
           <SheetDescription>
-            Configuração e histórico de preços do concorrente
+            Configuração e histórico do concorrente
           </SheetDescription>
         </SheetHeader>
 
-        <div className="space-y-6 mt-6">
-          {/* Current Price Card */}
-          <Card>
-            <CardContent className="pt-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Preço Atual</p>
-                  <p className="text-3xl font-bold">{formatCurrency(listing.current_price)}</p>
-                  {listing.original_price && listing.original_price > (listing.current_price || 0) && (
-                    <p className="text-sm text-muted-foreground line-through">
-                      {formatCurrency(listing.original_price)}
-                    </p>
-                  )}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-6">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="overview">Visão Geral</TabsTrigger>
+            <TabsTrigger value="history">Histórico</TabsTrigger>
+            <TabsTrigger value="config">Configurar</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="overview" className="space-y-6 mt-4">
+            {/* Current Price Card */}
+            <Card>
+              <CardContent className="pt-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Preço Atual</p>
+                    <p className="text-3xl font-bold">{formatCurrency(tracker.last_known_price)}</p>
+                    <Badge variant={tracker.last_known_state === 'ativo' ? 'default' : 'destructive'} className="mt-1">
+                      {tracker.last_known_state === 'ativo' ? 'Disponível' : 'Indisponível'}
+                    </Badge>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => checkTracker(tracker.id)}
+                      disabled={refreshing === tracker.id}
+                    >
+                      <RefreshCw className={`h-4 w-4 mr-2 ${refreshing === tracker.id ? 'animate-spin' : ''}`} />
+                      Verificar
+                    </Button>
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={tracker.competitor_url} target="_blank" rel="noopener noreferrer">
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => checkListing(listing.id)}
-                    disabled={refreshing === listing.id}
-                  >
-                    <RefreshCw className={`h-4 w-4 mr-2 ${refreshing === listing.id ? 'animate-spin' : ''}`} />
-                    Verificar
-                  </Button>
-                  <Button variant="outline" size="sm" asChild>
-                    <a href={listing.competitor_link} target="_blank" rel="noopener noreferrer">
-                      <ExternalLink className="h-4 w-4" />
-                    </a>
-                  </Button>
+
+                <div className="text-xs text-muted-foreground mt-4 space-y-1">
+                  <p>Última verificação: {formatDate(tracker.last_checked_at || '')}</p>
+                  <p>Próxima verificação: {formatDate(tracker.next_check_at || '')}</p>
+                  <p>Intervalo: {tracker.check_interval_minutes} minutos</p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Quick Stats */}
+            {snapshots.length > 0 && (
+              <div className="grid grid-cols-4 gap-4 text-sm">
+                <div className="text-center">
+                  <p className="text-muted-foreground">Mínimo</p>
+                  <p className="font-medium">{formatCurrency(stats.minPrice)}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-muted-foreground">Máximo</p>
+                  <p className="font-medium">{formatCurrency(stats.maxPrice)}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-muted-foreground">Média</p>
+                  <p className="font-medium">{formatCurrency(stats.avgPrice)}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-muted-foreground">Capturas</p>
+                  <p className="font-medium">{stats.totalSnapshots}</p>
                 </div>
               </div>
+            )}
 
-              <div className="flex flex-wrap gap-2 mt-4">
-                {listing.shipping_full && <Badge className="bg-green-600">Full</Badge>}
-                {listing.shipping_free && !listing.shipping_full && <Badge variant="secondary">Frete Grátis</Badge>}
-                {listing.listing_type && <Badge variant="outline">{listing.listing_type}</Badge>}
-                {!listing.is_available && <Badge variant="destructive">Indisponível</Badge>}
-              </div>
-
-              <div className="text-xs text-muted-foreground mt-4">
-                Última verificação: {formatDate(listing.last_check_at || '')}
-                {listing.price_change_count > 0 && (
-                  <span className="ml-4">
-                    <History className="h-3 w-3 inline mr-1" />
-                    {listing.price_change_count} alterações detectadas
-                  </span>
+            {/* Recent Events */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-lg">Eventos Recentes</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loadingData ? (
+                  <Skeleton className="h-24" />
+                ) : events.length === 0 ? (
+                  <p className="text-muted-foreground text-center py-4">Nenhum evento registrado</p>
+                ) : (
+                  <div className="space-y-3">
+                    {events.slice(0, 5).map((event) => (
+                      <div key={event.id} className="flex items-start gap-3">
+                        {getEventIcon(event.event_type)}
+                        <div className="flex-1">
+                          <p className="text-sm">{event.message}</p>
+                          <p className="text-xs text-muted-foreground">{formatDate(event.created_at)}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )}
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-          {/* Price History Chart */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Histórico de Preços</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {loadingHistory ? (
-                <Skeleton className="h-48 w-full" />
-              ) : chartData.length > 1 ? (
-                <div className="h-48">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis 
-                        dataKey="date" 
-                        fontSize={12}
-                        tickLine={false}
-                      />
-                      <YAxis 
-                        fontSize={12}
-                        tickLine={false}
-                        tickFormatter={(value) => `R$ ${value}`}
-                      />
-                      <Tooltip 
-                        formatter={(value: number) => [formatCurrency(value), 'Preço']}
-                        labelFormatter={(label, payload) => {
-                          if (payload?.[0]?.payload?.fullDate) {
-                            return formatDate(payload[0].payload.fullDate);
-                          }
-                          return label;
-                        }}
-                      />
-                      <Line 
-                        type="stepAfter" 
-                        dataKey="price" 
-                        stroke="hsl(var(--primary))" 
-                        strokeWidth={2}
-                        dot={false}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <p className="text-muted-foreground text-center py-8">
-                  Histórico insuficiente para exibir gráfico
-                </p>
-              )}
+          <TabsContent value="history" className="space-y-6 mt-4">
+            {/* Price History Chart */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-lg">Histórico de Preços</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loadingData ? (
+                  <Skeleton className="h-48 w-full" />
+                ) : chartData.length > 1 ? (
+                  <div className="h-48">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={chartData}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <XAxis 
+                          dataKey="date" 
+                          fontSize={12}
+                          tickLine={false}
+                        />
+                        <YAxis 
+                          fontSize={12}
+                          tickLine={false}
+                          tickFormatter={(value) => `R$ ${value}`}
+                        />
+                        <Tooltip 
+                          formatter={(value: number) => [formatCurrency(value), 'Preço']}
+                          labelFormatter={(label, payload) => {
+                            if (payload?.[0]?.payload?.fullDate) {
+                              return formatDate(payload[0].payload.fullDate);
+                            }
+                            return label;
+                          }}
+                        />
+                        <Line 
+                          type="stepAfter" 
+                          dataKey="price" 
+                          stroke="hsl(var(--primary))" 
+                          strokeWidth={2}
+                          dot={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground text-center py-8">
+                    Histórico insuficiente para exibir gráfico
+                  </p>
+                )}
+              </CardContent>
+            </Card>
 
-              {/* Stats */}
-              {history.length > 0 && (
-                <div className="grid grid-cols-4 gap-4 mt-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">Mínimo</p>
-                    <p className="font-medium">{formatCurrency(stats.minPrice)}</p>
+            {/* All Events Timeline */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-lg">Linha do Tempo</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loadingData ? (
+                  <Skeleton className="h-48" />
+                ) : events.length === 0 ? (
+                  <p className="text-muted-foreground text-center py-4">Nenhum evento registrado</p>
+                ) : (
+                  <div className="space-y-3 max-h-64 overflow-y-auto">
+                    {events.map((event) => (
+                      <div key={event.id} className="flex items-start gap-3 border-l-2 pl-4 border-muted">
+                        {getEventIcon(event.event_type)}
+                        <div className="flex-1">
+                          <p className="text-sm">{event.message}</p>
+                          {event.prev_price && event.new_price && (
+                            <p className="text-xs">
+                              {formatCurrency(event.prev_price)} → {formatCurrency(event.new_price)}
+                            </p>
+                          )}
+                          <p className="text-xs text-muted-foreground">{formatDate(event.created_at)}</p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <div>
-                    <p className="text-muted-foreground">Máximo</p>
-                    <p className="font-medium">{formatCurrency(stats.maxPrice)}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Média</p>
-                    <p className="font-medium">{formatCurrency(stats.avgPrice)}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Alterações</p>
-                    <p className="font-medium">{stats.priceChanges}</p>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-          {/* Configuration */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Configurações</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label>Nome do Concorrente</Label>
-                <Input
-                  value={formData.competitor_name}
-                  onChange={(e) => setFormData(prev => ({ ...prev, competitor_name: e.target.value }))}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
+          <TabsContent value="config" className="space-y-4 mt-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-lg">Configurações</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label>Preço Mínimo</Label>
+                  <Label>Nome do Concorrente</Label>
                   <Input
-                    type="number"
-                    step="0.01"
-                    placeholder="R$ 0,00"
-                    value={formData.min_price}
-                    onChange={(e) => setFormData(prev => ({ ...prev, min_price: e.target.value }))}
+                    value={formData.competitor_label}
+                    onChange={(e) => setFormData(prev => ({ ...prev, competitor_label: e.target.value }))}
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label>Preço Máximo</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    placeholder="R$ 0,00"
-                    value={formData.max_price}
-                    onChange={(e) => setFormData(prev => ({ ...prev, max_price: e.target.value }))}
-                  />
-                </div>
-              </div>
 
-              <div className="space-y-2">
-                <Label>Tipo de Reação</Label>
-                <Select
-                  value={formData.reaction_type}
-                  onValueChange={(value) => setFormData(prev => ({ ...prev, reaction_type: value }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="monitor">Apenas Monitorar</SelectItem>
-                    <SelectItem value="suggest">Sugerir Novo Preço</SelectItem>
-                    <SelectItem value="auto">Ajustar Automaticamente</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {formData.reaction_type !== 'monitor' && (
                 <div className="space-y-2">
-                  <Label>Valor de Ajuste</Label>
+                  <Label>Intervalo de Verificação</Label>
                   <Select
-                    value={formData.adjustment_value}
-                    onValueChange={(value) => setFormData(prev => ({ ...prev, adjustment_value: value }))}
+                    value={formData.check_interval_minutes}
+                    onValueChange={(value) => setFormData(prev => ({ ...prev, check_interval_minutes: value }))}
                   >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="0.01">R$ 0,01</SelectItem>
-                      <SelectItem value="0.10">R$ 0,10</SelectItem>
-                      <SelectItem value="0.50">R$ 0,50</SelectItem>
-                      <SelectItem value="1.00">R$ 1,00</SelectItem>
-                      <SelectItem value="2.00">R$ 2,00</SelectItem>
-                      <SelectItem value="5.00">R$ 5,00</SelectItem>
+                      <SelectItem value="60">A cada 1 hora</SelectItem>
+                      <SelectItem value="120">A cada 2 horas</SelectItem>
+                      <SelectItem value="240">A cada 4 horas</SelectItem>
+                      <SelectItem value="360">A cada 6 horas</SelectItem>
+                      <SelectItem value="720">A cada 12 horas</SelectItem>
+                      <SelectItem value="1440">A cada 24 horas</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-              )}
 
-              <Button onClick={handleSave} disabled={saving} className="w-full">
-                <Save className="h-4 w-4 mr-2" />
-                {saving ? 'Salvando...' : 'Salvar Configurações'}
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Preço Mínimo</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      placeholder="R$ 0,00"
+                      value={formData.min_price}
+                      onChange={(e) => setFormData(prev => ({ ...prev, min_price: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Preço Máximo</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      placeholder="R$ 0,00"
+                      value={formData.max_price}
+                      onChange={(e) => setFormData(prev => ({ ...prev, max_price: e.target.value }))}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Tipo de Reação</Label>
+                  <Select
+                    value={formData.reaction_mode}
+                    onValueChange={(value) => setFormData(prev => ({ ...prev, reaction_mode: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="monitorar">Apenas Monitorar</SelectItem>
+                      <SelectItem value="sugerir">Sugerir Novo Preço</SelectItem>
+                      <SelectItem value="auto_aplicar" disabled>Ajustar Automaticamente (em breve)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {formData.reaction_mode !== 'monitorar' && (
+                  <div className="space-y-2">
+                    <Label>Valor de Ajuste</Label>
+                    <Select
+                      value={formData.undercut_amount}
+                      onValueChange={(value) => setFormData(prev => ({ ...prev, undercut_amount: value }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="0.01">R$ 0,01</SelectItem>
+                        <SelectItem value="0.10">R$ 0,10</SelectItem>
+                        <SelectItem value="0.50">R$ 0,50</SelectItem>
+                        <SelectItem value="1.00">R$ 1,00</SelectItem>
+                        <SelectItem value="2.00">R$ 2,00</SelectItem>
+                        <SelectItem value="5.00">R$ 5,00</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                <Button onClick={handleSave} disabled={saving} className="w-full">
+                  <Save className="h-4 w-4 mr-2" />
+                  {saving ? 'Salvando...' : 'Salvar Configurações'}
+                </Button>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
       </SheetContent>
     </Sheet>
   );

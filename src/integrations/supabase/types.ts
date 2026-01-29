@@ -2488,6 +2488,287 @@ export type Database = {
         }
         Relationships: []
       }
+      competitor_alerts: {
+        Row: {
+          body: string
+          created_at: string
+          id: string
+          is_read: boolean | null
+          seller_id: string
+          severity: string
+          title: string
+          tracker_id: string | null
+          user_id: string
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          id?: string
+          is_read?: boolean | null
+          seller_id: string
+          severity?: string
+          title: string
+          tracker_id?: string | null
+          user_id: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          id?: string
+          is_read?: boolean | null
+          seller_id?: string
+          severity?: string
+          title?: string
+          tracker_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitor_alerts_tracker_id_fkey"
+            columns: ["tracker_id"]
+            isOneToOne: false
+            referencedRelation: "competitor_trackers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      competitor_events: {
+        Row: {
+          created_at: string
+          event_type: string
+          id: string
+          message: string | null
+          new_price: number | null
+          prev_price: number | null
+          tracker_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          event_type: string
+          id?: string
+          message?: string | null
+          new_price?: number | null
+          prev_price?: number | null
+          tracker_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          event_type?: string
+          id?: string
+          message?: string | null
+          new_price?: number | null
+          prev_price?: number | null
+          tracker_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitor_events_tracker_id_fkey"
+            columns: ["tracker_id"]
+            isOneToOne: false
+            referencedRelation: "competitor_trackers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      competitor_price_actions: {
+        Row: {
+          action_type: string
+          applied_price: number | null
+          competitor_price: number | null
+          created_at: string
+          id: string
+          proposed_price: number | null
+          reason: string | null
+          seller_listing_id: string | null
+          tracker_id: string
+          user_id: string
+        }
+        Insert: {
+          action_type: string
+          applied_price?: number | null
+          competitor_price?: number | null
+          created_at?: string
+          id?: string
+          proposed_price?: number | null
+          reason?: string | null
+          seller_listing_id?: string | null
+          tracker_id: string
+          user_id: string
+        }
+        Update: {
+          action_type?: string
+          applied_price?: number | null
+          competitor_price?: number | null
+          created_at?: string
+          id?: string
+          proposed_price?: number | null
+          reason?: string | null
+          seller_listing_id?: string | null
+          tracker_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitor_price_actions_tracker_id_fkey"
+            columns: ["tracker_id"]
+            isOneToOne: false
+            referencedRelation: "competitor_trackers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      competitor_rate_limits: {
+        Row: {
+          created_at: string
+          daily_limit: number | null
+          id: string
+          last_request_at: string | null
+          requests_today: number | null
+          updated_at: string
+          user_id: string
+          window_start: string | null
+        }
+        Insert: {
+          created_at?: string
+          daily_limit?: number | null
+          id?: string
+          last_request_at?: string | null
+          requests_today?: number | null
+          updated_at?: string
+          user_id: string
+          window_start?: string | null
+        }
+        Update: {
+          created_at?: string
+          daily_limit?: number | null
+          id?: string
+          last_request_at?: string | null
+          requests_today?: number | null
+          updated_at?: string
+          user_id?: string
+          window_start?: string | null
+        }
+        Relationships: []
+      }
+      competitor_snapshots: {
+        Row: {
+          captured_at: string
+          id: string
+          price: number | null
+          raw_meta: Json | null
+          source: string | null
+          state: string | null
+          tracker_id: string
+        }
+        Insert: {
+          captured_at?: string
+          id?: string
+          price?: number | null
+          raw_meta?: Json | null
+          source?: string | null
+          state?: string | null
+          tracker_id: string
+        }
+        Update: {
+          captured_at?: string
+          id?: string
+          price?: number | null
+          raw_meta?: Json | null
+          source?: string | null
+          state?: string | null
+          tracker_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitor_snapshots_tracker_id_fkey"
+            columns: ["tracker_id"]
+            isOneToOne: false
+            referencedRelation: "competitor_trackers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      competitor_trackers: {
+        Row: {
+          check_interval_minutes: number
+          competitor_external_id: string | null
+          competitor_label: string
+          competitor_thumbnail: string | null
+          competitor_title: string | null
+          competitor_url: string
+          consecutive_failures: number | null
+          created_at: string
+          id: string
+          last_checked_at: string | null
+          last_known_price: number | null
+          last_known_state: string | null
+          marketplace: string
+          max_price: number | null
+          min_price: number | null
+          next_check_at: string | null
+          reaction_mode: string
+          seller_id: string
+          seller_listing_id: string | null
+          status: string
+          undercut_amount: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          check_interval_minutes?: number
+          competitor_external_id?: string | null
+          competitor_label: string
+          competitor_thumbnail?: string | null
+          competitor_title?: string | null
+          competitor_url: string
+          consecutive_failures?: number | null
+          created_at?: string
+          id?: string
+          last_checked_at?: string | null
+          last_known_price?: number | null
+          last_known_state?: string | null
+          marketplace?: string
+          max_price?: number | null
+          min_price?: number | null
+          next_check_at?: string | null
+          reaction_mode?: string
+          seller_id: string
+          seller_listing_id?: string | null
+          status?: string
+          undercut_amount?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          check_interval_minutes?: number
+          competitor_external_id?: string | null
+          competitor_label?: string
+          competitor_thumbnail?: string | null
+          competitor_title?: string | null
+          competitor_url?: string
+          consecutive_failures?: number | null
+          created_at?: string
+          id?: string
+          last_checked_at?: string | null
+          last_known_price?: number | null
+          last_known_state?: string | null
+          marketplace?: string
+          max_price?: number | null
+          min_price?: number | null
+          next_check_at?: string | null
+          reaction_mode?: string
+          seller_id?: string
+          seller_listing_id?: string | null
+          status?: string
+          undercut_amount?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       erp_integrations: {
         Row: {
           api_key: string | null
