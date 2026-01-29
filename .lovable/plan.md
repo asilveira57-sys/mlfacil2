@@ -1,184 +1,180 @@
 
-# Plano: Corrigir Refresh Infinito + Menu Duplicado
+# Plano: Adicionar Clonagem de Anúncios no Modulo de Concorrencia
 
-## Diagnóstico Confirmado
+## Resumo
 
-Com base nos logs fornecidos pelo usuário:
-
-```
-[MOUNT] AppShellLayout
-[NAV] AppShellLayout /dashboard
-Failed to load resource: 409 (user_context upsert)
-[CTX] ActiveAccountContext changed
-[MOUNT] PageContainer
-[UNMOUNT] PageContainer ← Desmonta logo após montar!
-[NAV] RouteChangeCleanup
-```
-
-### Causas Identificadas:
-
-1. **Erro 409 no upsert de `user_context`**: O `onConflict: 'user_id'` não funciona porque o Supabase JS client requer que o `onConflict` use o nome de uma constraint real, e `user_context_user_id_key` é um índice, não uma named constraint declarada com `UNIQUE (user_id)`.
-
-2. **Loop no ActiveAccountContext**: O erro 409 dispara `console.warn` mas não impede re-execuções. O `persistActiveAccount` é chamado durante `initialize`, que pode ser reinvocado pelo `onAuthStateChange`.
-
-3. **HeaderContent instável no Dashboard**: A constante `headerContent` (linhas 309-477) é um JSX gigante criado em cada render. Apesar do `PageContainer` usar ref, o próprio Dashboard remonta quando o contexto muda (devido ao erro 409 → change → re-render).
-
-4. **Menu duplicado não existe mais**: A busca confirmou que nenhuma página usa `DashboardLayout` ou `SidebarProvider` internamente. O problema visual anterior foi corrigido.
+O objetivo e permitir clonar qualquer anuncio diretamente do modulo de Concorrencia (aba "Meus Anuncios"), reaproveitando a infraestrutura existente de clonagem do modulo Linha do Tempo.
 
 ---
 
-## Correções Propostas
+## Contexto
 
-### 1. Corrigir Constraint do `user_context` (Database)
+Atualmente a funcao de clonar anuncios esta disponivel apenas no modulo **Linha do Tempo** (`/anuncios/linha-do-tempo`), que depende de dados pre-calculados na tabela `ad_timeline_stats`. Como essa tabela nao esta sendo populada (o recalculo falha), os anuncios nao aparecem e consequentemente a opcao de clonar nao fica acessivel.
 
-Adicionar constraint UNIQUE nomeada na coluna `user_id` para que o `upsert` funcione:
+A solucao e adicionar a mesma funcionalidade de clonagem diretamente na aba **"Meus Anuncios"** do modulo de Concorrencia, que ja carrega os anuncios do seller via cache (`meli_listings_cache`) e funciona independentemente da Linha do Tempo.
 
-```sql
--- Remover o índice existente e criar constraint UNIQUE
-DROP INDEX IF EXISTS user_context_user_id_key;
+---
 
-ALTER TABLE user_context 
-  ADD CONSTRAINT user_context_user_id_unique UNIQUE (user_id);
+## Arquitetura Existente
+
+```text
++---------------------------+
+|  CompetitorListings.tsx   |  <-- Lista anuncios do seller
++---------------------------+
+            |
+            v
++---------------------------+
+| CompetitorProductDetail   |  <-- Drawer com detalhes do produto
++---------------------------+
+            |
+            v (ADICIONAR AQUI)
++---------------------------+
+|     ActionDrawer.tsx      |  <-- Ja existe, reutilizar
++---------------------------+
+            |
+            v
++---------------------------+
+|    useCreateAction()      |  <-- Cria registro DRAFT em ad_lifecycle_actions
++---------------------------+
+            |
+            v
++---------------------------+
+|  ad-action-execute (Edge) |  <-- Executa clonagem via API do ML
++---------------------------+
 ```
 
-O Supabase JS reconhece constraints nomeadas no `onConflict`.
+---
 
-### 2. Corrigir persistência non-blocking com guard de valor (ActiveAccountContext)
+## Implementacao
 
-Adicionar ref para "último valor persistido" e só persistir quando realmente mudar:
+### 1. Atualizar CompetitorProductDetail.tsx
 
-```typescript
-// Em ActiveAccountContext.tsx
+Adicionar um botao "Clonar Anuncio" que abre o `ActionDrawer` com tipo `CLONE`:
 
-// Ref para evitar persistência repetida do mesmo valor
-const lastPersistedRef = useRef<{userId: string; accountId: string} | null>(null);
+- Importar o `ActionDrawer` de `@/components/ad-timeline`
+- Importar `useCreateAction` de `@/hooks/useAdTimeline`
+- Adicionar estado para controlar abertura do drawer
+- Obter `workspaceId` (user.id) e `mlAccountId` (sellerId)
+- Ao confirmar, chamar `createActionMutation.mutateAsync()` com os dados
 
-const persistActiveAccount = useCallback(async (userId: string, accountId: string, ...) => {
-  // Guard: só persiste se o par (userId, accountId) mudou
-  const lastPersisted = lastPersistedRef.current;
-  if (lastPersisted?.userId === userId && lastPersisted?.accountId === accountId) {
-    return; // Já persistido, não fazer nada
-  }
+### 2. Exibir botao de clonar tambem na tabela (CompetitorListings.tsx)
 
-  // Marcar como persistido ANTES de disparar a request
-  lastPersistedRef.current = { userId, accountId };
-  
-  // Save to localStorage (fast-path)
-  localStorage.setItem('active_account_id', accountId);
-  localStorage.setItem('active_seller_id', account?.sellerId || '');
+Adicionar um menu de acoes (three-dot menu) em cada linha da tabela com opcao "Clonar":
 
-  // Best-effort DB save (fire-and-forget, não bloqueia)
-  supabase
-    .from('user_context')
-    .upsert({...}, { onConflict: 'user_id' })
-    .then(({ error }) => {
-      if (error) {
-        // Se falhar, limpar ref para permitir retry manual
-        if (lastPersistedRef.current?.accountId === accountId) {
-          lastPersistedRef.current = null;
-        }
-        if (import.meta.env.DEV) console.warn('[CTX] persist failed:', error.message);
-      }
-    });
-}, []);
-```
+- Similar ao que existe em `AdTimelineRadar.tsx`
+- Ao clicar, abre o `ActionDrawer` direto para o item selecionado
 
-### 3. Memoizar headerContent no Dashboard
+### 3. Criar hook/utilitario para obter workspaceId
 
-Mover o `headerContent` para um componente ou usar `useMemo`:
+Para evitar duplicacao de logica (buscar `user.id` como workspaceId), considerar:
 
-```typescript
-// Em Dashboard.tsx
+- Usar diretamente `supabase.auth.getUser()` inline (padrao atual)
+- Ou criar um pequeno hook `useWorkspaceId()` que retorna o user.id
 
-// Antes da linha 309, criar um componente separado ou useMemo:
-const headerContent = useMemo(() => (
-  <div className="flex items-center gap-2">
-    {/* ... todo o JSX atual ... */}
-  </div>
-), [
-  activeAccount,
-  settingsOpen,
-  // ... outras dependências reais
-]);
-```
+### 4. Verificar se ad_lifecycle_actions suporta items sem ad_timeline_stats
 
-Isso garante que `headerContent` tenha referência estável e só mude quando necessário.
+A tabela `ad_lifecycle_actions` nao tem FK para `ad_timeline_stats`, entao podemos criar acoes para qualquer `item_id` sem problemas. O edge function `ad-action-execute` busca os dados do item diretamente da API do ML se nao houver snapshot.
 
-### 4. Evitar re-initialize por TOKEN_REFRESHED
+---
 
-No `onAuthStateChange`, já está ignorando `TOKEN_REFRESHED`, mas garantir que `INITIAL_SESSION` não reinicialize:
+## Fluxo do Usuario
 
-```typescript
-// Em ActiveAccountContext.tsx, linha 280-293
-const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-  // Só reinicializar em SIGNED_IN real (não em refresh de token)
-  if (event === 'SIGNED_IN' && !initializingRef.current && !initialized) {
-    initializingRef.current = false;
-    initialize();
-  } else if (event === 'SIGNED_OUT') {
-    setAccounts([]);
-    setActiveAccountState(null);
-    accountsRef.current = [];
-    localStorage.removeItem('active_account_id');
-    localStorage.removeItem('active_seller_id');
-    setInitialized(false);
-  }
-  // Ignorar: TOKEN_REFRESHED, INITIAL_SESSION
-});
-```
-
-### 5. Remover logs temporários após confirmação
-
-Após validar que o loop parou:
-- Remover `console.info("[MOUNT]...")` de todos os arquivos
-- Manter apenas logs de erro (`console.error`, `console.warn`) em prod
+1. Usuario acessa **Concorrencia > Meus Anuncios**
+2. Clica em um anuncio para ver detalhes OU clica no menu de acoes na linha
+3. Clica em **"Clonar Anuncio"**
+4. Abre o drawer para selecionar o que copiar (titulo, fotos, preco, etc)
+5. Confirma e um rascunho e criado em `ad_lifecycle_actions`
+6. Usuario pode ir em **Linha do Tempo > Central de Acoes** para executar a clonagem
 
 ---
 
 ## Arquivos a Modificar
 
-| Arquivo | Alteração |
+| Arquivo | Alteracao |
 |---------|-----------|
-| `supabase/migrations/...` | Criar constraint UNIQUE nomeada em user_context |
-| `src/contexts/ActiveAccountContext.tsx` | Adicionar guard de persistência com ref |
-| `src/pages/Dashboard.tsx` | Memoizar headerContent com useMemo |
+| `src/components/competitor/CompetitorProductDetail.tsx` | Adicionar botao "Clonar" e integrar ActionDrawer |
+| `src/components/competitor/CompetitorListings.tsx` | Adicionar menu de acoes com opcao "Clonar" |
 
 ---
 
-## Critérios de Aceite
+## Detalhes Tecnicos
 
-1. Console não mostra mais erro 409 no `user_context`
-2. `[CTX] ActiveAccountContext changed` aparece no máximo 2 vezes por carregamento inicial (não em loop)
-3. Navegar entre rotas não causa `[MOUNT] PageContainer` seguido imediatamente de `[UNMOUNT]`
-4. Trocar de aba/janela não dispara re-renders visíveis
-5. Menu aparece exatamente 1 vez em todas as páginas
+### CompetitorProductDetail.tsx - Mudancas
 
----
+```tsx
+// Novos imports
+import { ActionDrawer } from "@/components/ad-timeline";
+import { useCreateAction } from "@/hooks/useAdTimeline";
+import type { ActionType, CloneChecklist } from "@/types/ad-timeline";
 
-## Seção Técnica
+// Novos estados
+const [cloneDrawerOpen, setCloneDrawerOpen] = useState(false);
+const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+const createActionMutation = useCreateAction();
 
-### Por que o upsert falha com 409?
+// Effect para obter workspaceId
+useEffect(() => {
+  supabase.auth.getUser().then(({ data }) => {
+    if (data.user) setWorkspaceId(data.user.id);
+  });
+}, []);
 
-O Supabase JS client, quando usa `upsert` com `onConflict`, requer que o nome do conflito corresponda a uma constraint real (PRIMARY KEY ou UNIQUE CONSTRAINT). O código atual usa:
+// Handler para confirmar clonagem
+const handleConfirmClone = async (reason: string, checklist: CloneChecklist) => {
+  if (!workspaceId) return;
+  await createActionMutation.mutateAsync({
+    workspaceId,
+    mlAccountId: sellerId,
+    itemId: listing.item_id,
+    actionType: 'CLONE' as ActionType,
+    reason,
+    checklist,
+  });
+  setCloneDrawerOpen(false);
+  toast.success('Rascunho de clonagem criado! Vá à Central de Ações para executar.');
+};
 
-```typescript
-.upsert({...}, { onConflict: 'user_id' })
+// Botao no JSX
+<Button onClick={() => setCloneDrawerOpen(true)}>
+  <Copy className="h-4 w-4 mr-2" />
+  Clonar Anúncio
+</Button>
+
+// ActionDrawer no final
+<ActionDrawer
+  open={cloneDrawerOpen}
+  onOpenChange={setCloneDrawerOpen}
+  actionType="CLONE"
+  itemId={listing.item_id}
+  itemTitle={listing.title}
+  onConfirm={handleConfirmClone}
+  isLoading={createActionMutation.isPending}
+/>
 ```
 
-Mas a tabela `user_context` tem:
-- `user_context_pkey` → PRIMARY KEY em `id` (não em `user_id`)
-- `user_context_user_id_key` → UNIQUE INDEX (não constraint)
+### CompetitorListings.tsx - Mudancas
 
-O Supabase não consegue mapear `user_id` para uma constraint, então trata como INSERT normal, que falha com 409 quando a linha já existe.
+- Adicionar imports similares
+- Adicionar estado para item selecionado e drawer
+- Adicionar coluna de acoes com DropdownMenu
+- Incluir ActionDrawer no render
 
-### Por que o headerContent causa loop?
+---
 
-O fluxo é:
-1. Dashboard renderiza → cria novo `headerContent` (JSX)
-2. PageContainer chama `setHeader(title, subtitle, headerContentRef.current)` via useEffect
-3. AppShellLayout atualiza `headerState` com novo objeto
-4. AppShellLayout re-renderiza
-5. Dashboard (filho via Outlet) re-renderiza
-6. Volta ao passo 1
+## Consideracoes
 
-O `headerContentRef` no PageContainer não previne o loop porque o problema está no pai (Dashboard) recriando o JSX e causando re-renders em cascata.
+1. **Execucao diferida**: O clone nao e executado imediatamente, apenas um rascunho e criado. O usuario deve ir na Central de Acoes para executar.
+
+2. **Alternativa**: Podemos adicionar execucao direta (com confirmacao) sem passar pela Central de Acoes, mas isso requer modificar o fluxo atual.
+
+3. **RLS**: A tabela `ad_lifecycle_actions` ja tem RLS baseada em `workspace_id`, entao os registros criados estarao protegidos.
+
+---
+
+## Resultado Esperado
+
+Apos a implementacao, o usuario podera:
+
+- Ver qualquer anuncio na aba "Meus Anuncios" do modulo Concorrencia
+- Clonar o anuncio diretamente de la
+- Gerenciar a execucao na Central de Acoes
