@@ -5,35 +5,33 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-interface TrackedListing {
+interface Tracker {
   id: string;
   user_id: string;
   seller_id: string;
-  competitor_item_id: string;
   marketplace: string;
-  competitor_name: string;
-  competitor_link: string;
+  competitor_label: string;
+  competitor_url: string;
+  competitor_external_id: string | null;
   status: string;
   min_price: number | null;
   max_price: number | null;
-  reaction_type: string;
-  adjustment_value: number;
-  my_item_id: string | null;
-  current_price: number | null;
+  reaction_mode: string;
+  undercut_amount: number;
+  check_interval_minutes: number;
+  last_known_price: number | null;
+  last_known_state: string;
+  seller_listing_id: string | null;
+  consecutive_failures: number;
 }
 
 // Parse item ID from ML link
 function parseMLItemId(link: string): string | null {
-  // Handle various ML link formats:
-  // https://www.mercadolivre.com.br/produto-xyz/p/MLB12345678
-  // https://produto.mercadolivre.com.br/MLB-12345678-...
-  // MLB12345678
   const patterns = [
     /\/p\/(MLB\d+)/i,
     /\/(MLB-?\d+)/i,
     /^(MLB-?\d+)$/i,
   ];
-
   for (const pattern of patterns) {
     const match = link.match(pattern);
     if (match) {
@@ -48,20 +46,18 @@ async function fetchMLListingData(itemId: string): Promise<any> {
   const response = await fetch(`https://api.mercadolibre.com/items/${itemId}`);
   if (!response.ok) {
     if (response.status === 404) {
-      return { is_available: false };
+      return { status: 'not_found', is_available: false };
     }
     throw new Error(`ML API error: ${response.status}`);
   }
   return await response.json();
 }
 
-// Determine listing type from ML data
-function getListingType(data: any): string {
-  const type = data.listing_type_id || '';
-  if (type.includes('gold_pro')) return 'premium';
-  if (type.includes('gold')) return 'classico';
-  if (type.includes('free')) return 'gratuito';
-  return type;
+// Determine state from ML data
+function getState(data: any): string {
+  if (!data || data.status === 'not_found') return 'indisponivel';
+  if (data.status === 'active') return 'ativo';
+  return 'indisponivel';
 }
 
 Deno.serve(async (req) => {
@@ -100,67 +96,88 @@ Deno.serve(async (req) => {
         });
       }
 
-      // Add tracked listing
+      // Add tracker
       if (action === 'add' || action === 'competitor-tracking') {
-        const { competitor_link, competitor_name, min_price, max_price, reaction_type, adjustment_value, my_item_id } = body;
+        const { 
+          competitor_url, 
+          competitor_label, 
+          marketplace = 'mercadolivre',
+          min_price, 
+          max_price, 
+          reaction_mode = 'monitorar', 
+          undercut_amount = 0.10,
+          check_interval_minutes = 120,
+          seller_listing_id 
+        } = body;
 
-        if (!competitor_link || !competitor_name) {
-          return new Response(JSON.stringify({ error: 'competitor_link and competitor_name required' }), {
+        if (!competitor_url || !competitor_label) {
+          return new Response(JSON.stringify({ error: 'competitor_url e competitor_label são obrigatórios' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        // Validate check_interval_minutes
+        if (check_interval_minutes < 60) {
+          return new Response(JSON.stringify({ error: 'Intervalo mínimo de verificação é 60 minutos' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        // Validate min/max price
+        if (min_price && max_price && min_price > max_price) {
+          return new Response(JSON.stringify({ error: 'Preço mínimo não pode ser maior que o máximo' }), {
             status: 400,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
 
         // Parse item ID from link
-        const competitorItemId = parseMLItemId(competitor_link);
-        if (!competitorItemId) {
-          return new Response(JSON.stringify({ error: 'Invalid ML link format' }), {
-            status: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          });
-        }
-
+        const competitorExternalId = parseMLItemId(competitor_url);
+        
         // Fetch initial data from ML
         let listingData: any = null;
-        try {
-          listingData = await fetchMLListingData(competitorItemId);
-        } catch (e) {
-          console.error('Error fetching ML data:', e);
+        if (competitorExternalId) {
+          try {
+            listingData = await fetchMLListingData(competitorExternalId);
+          } catch (e) {
+            console.error('Error fetching ML data:', e);
+          }
         }
 
-        // Insert tracked listing
+        const now = new Date();
+        const nextCheck = new Date(now.getTime() + check_interval_minutes * 60 * 1000);
+
+        // Insert tracker
         const insertData: any = {
           user_id: user.id,
           seller_id: sellerId,
-          competitor_item_id: competitorItemId,
-          marketplace: 'mercadolivre',
-          competitor_name,
-          competitor_link,
-          status: 'active',
+          marketplace,
+          competitor_label,
+          competitor_url,
+          competitor_external_id: competitorExternalId,
+          status: 'ativo',
           min_price: min_price || null,
           max_price: max_price || null,
-          reaction_type: reaction_type || 'monitor',
-          adjustment_value: adjustment_value || 0.10,
-          my_item_id: my_item_id || null,
+          reaction_mode,
+          undercut_amount: undercut_amount || 0.10,
+          check_interval_minutes,
+          seller_listing_id: seller_listing_id || null,
+          next_check_at: nextCheck.toISOString(),
         };
 
         if (listingData && listingData.id) {
-          insertData.title = listingData.title;
-          insertData.thumbnail = listingData.thumbnail || listingData.pictures?.[0]?.url;
-          insertData.current_price = listingData.price;
-          insertData.original_price = listingData.original_price;
-          insertData.listing_type = getListingType(listingData);
-          insertData.condition = listingData.condition;
-          insertData.shipping_free = listingData.shipping?.free_shipping || false;
-          insertData.shipping_full = listingData.shipping?.logistic_type === 'fulfillment';
-          insertData.is_available = listingData.status === 'active';
-          insertData.last_check_at = new Date().toISOString();
-          insertData.check_count = 1;
+          insertData.competitor_title = listingData.title;
+          insertData.competitor_thumbnail = listingData.thumbnail || listingData.pictures?.[0]?.url;
+          insertData.last_known_price = listingData.price;
+          insertData.last_known_state = getState(listingData);
+          insertData.last_checked_at = now.toISOString();
         }
 
         const { data: inserted, error: insertError } = await supabaseClient
-          .from('competitor_tracked_listings')
-          .upsert(insertData, { onConflict: 'user_id,seller_id,competitor_item_id' })
+          .from('competitor_trackers')
+          .insert(insertData)
           .select()
           .single();
 
@@ -172,48 +189,87 @@ Deno.serve(async (req) => {
           });
         }
 
-        // Insert initial price history
+        // Insert initial snapshot
         if (listingData?.price) {
-          await supabaseClient
-            .from('competitor_price_history')
-            .insert({
-              tracked_listing_id: inserted.id,
-              user_id: user.id,
-              price: listingData.price,
-              original_price: listingData.original_price,
-              is_available: listingData.status === 'active',
-              listing_type: getListingType(listingData),
-            });
+          await supabaseClient.from('competitor_snapshots').insert({
+            tracker_id: inserted.id,
+            price: listingData.price,
+            state: getState(listingData),
+            source: 'api_publica',
+          });
         }
+
+        // Insert tracker_created event
+        await supabaseClient.from('competitor_events').insert({
+          tracker_id: inserted.id,
+          user_id: user.id,
+          event_type: 'tracker_created',
+          message: `Monitoramento iniciado para ${competitor_label}`,
+        });
 
         return new Response(JSON.stringify(inserted), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      // Check/refresh single listing
+      // Force check single tracker
       if (action === 'check') {
-        const { listing_id } = body;
+        const { tracker_id } = body;
 
-        const { data: listing, error: fetchError } = await supabaseClient
-          .from('competitor_tracked_listings')
+        const { data: tracker, error: fetchError } = await supabaseClient
+          .from('competitor_trackers')
           .select('*')
-          .eq('id', listing_id)
+          .eq('id', tracker_id)
           .eq('user_id', user.id)
           .single();
 
-        if (fetchError || !listing) {
-          return new Response(JSON.stringify({ error: 'Listing not found' }), {
+        if (fetchError || !tracker) {
+          return new Response(JSON.stringify({ error: 'Tracker não encontrado' }), {
             status: 404,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
 
+        if (!tracker.competitor_external_id) {
+          return new Response(JSON.stringify({ error: 'ID externo não disponível' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
         // Fetch current data from ML
-        const currentData = await fetchMLListingData(listing.competitor_item_id);
-        const previousPrice = listing.current_price;
+        let currentData: any;
+        try {
+          currentData = await fetchMLListingData(tracker.competitor_external_id);
+        } catch (e) {
+          // Register failure event
+          await supabaseClient.from('competitor_events').insert({
+            tracker_id: tracker.id,
+            user_id: user.id,
+            event_type: 'check_failed',
+            message: `Falha ao verificar: ${e instanceof Error ? e.message : 'Erro desconhecido'}`,
+          });
+
+          const failures = (tracker.consecutive_failures || 0) + 1;
+          await supabaseClient
+            .from('competitor_trackers')
+            .update({ 
+              consecutive_failures: failures,
+              status: failures >= 3 ? 'erro' : tracker.status,
+              last_checked_at: new Date().toISOString(),
+            })
+            .eq('id', tracker.id);
+
+          return new Response(JSON.stringify({ error: 'Falha ao verificar anúncio' }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        const previousPrice = tracker.last_known_price;
+        const previousState = tracker.last_known_state;
         const currentPrice = currentData.price || null;
-        const isAvailable = currentData.status === 'active';
+        const currentState = getState(currentData);
 
         // Calculate price delta
         let priceDelta = null;
@@ -226,102 +282,151 @@ Deno.serve(async (req) => {
           priceDeltaPercent = ((currentPrice - previousPrice) / previousPrice) * 100;
         }
 
-        // Update listing
+        const now = new Date();
+        const nextCheck = new Date(now.getTime() + tracker.check_interval_minutes * 60 * 1000);
+
+        // Update tracker
         const updateData: any = {
-          current_price: currentPrice,
-          original_price: currentData.original_price || null,
-          is_available: isAvailable,
-          listing_type: getListingType(currentData),
-          shipping_free: currentData.shipping?.free_shipping || false,
-          shipping_full: currentData.shipping?.logistic_type === 'fulfillment',
-          last_check_at: new Date().toISOString(),
-          check_count: (listing.check_count || 0) + 1,
-          error_message: null,
+          last_known_price: currentPrice,
+          last_known_state: currentState,
+          last_checked_at: now.toISOString(),
+          next_check_at: nextCheck.toISOString(),
+          consecutive_failures: 0,
         };
 
-        if (priceChanged) {
-          updateData.last_price_change_at = new Date().toISOString();
-          updateData.price_change_count = (listing.price_change_count || 0) + 1;
-        }
-
-        if (!isAvailable && listing.is_available) {
-          updateData.error_message = 'Anúncio indisponível';
-        }
+        if (currentData.title) updateData.competitor_title = currentData.title;
+        if (currentData.thumbnail) updateData.competitor_thumbnail = currentData.thumbnail;
 
         await supabaseClient
-          .from('competitor_tracked_listings')
+          .from('competitor_trackers')
           .update(updateData)
-          .eq('id', listing.id);
+          .eq('id', tracker.id);
 
-        // Insert price history
-        if (currentPrice) {
-          await supabaseClient
-            .from('competitor_price_history')
-            .insert({
-              tracked_listing_id: listing.id,
-              user_id: user.id,
-              price: currentPrice,
-              original_price: currentData.original_price,
-              price_delta: priceDelta,
-              price_delta_percent: priceDeltaPercent,
-              is_available: isAvailable,
-              listing_type: getListingType(currentData),
-            });
-        }
+        // Insert snapshot
+        await supabaseClient.from('competitor_snapshots').insert({
+          tracker_id: tracker.id,
+          price: currentPrice,
+          state: currentState,
+          source: 'api_publica',
+        });
 
-        // Generate alerts if price changed
+        // Generate events and alerts
+        const events: any[] = [];
+        const alerts: any[] = [];
+
         if (priceChanged && currentPrice) {
-          let alertType = priceDelta! > 0 ? 'price_rise' : 'price_drop';
-          let severity = 'info';
-          let title = priceDelta! > 0 ? 'Concorrente subiu preço' : 'Concorrente baixou preço';
-          let message = `${listing.competitor_name}: R$ ${previousPrice?.toFixed(2)} → R$ ${currentPrice.toFixed(2)} (${priceDelta! > 0 ? '+' : ''}${priceDeltaPercent?.toFixed(1)}%)`;
+          const eventType = priceDelta! > 0 ? 'price_up' : 'price_down';
+          events.push({
+            tracker_id: tracker.id,
+            user_id: user.id,
+            event_type: eventType,
+            prev_price: previousPrice,
+            new_price: currentPrice,
+            message: `Preço ${eventType === 'price_up' ? 'subiu' : 'baixou'}: R$ ${previousPrice?.toFixed(2)} → R$ ${currentPrice.toFixed(2)}`,
+          });
+
+          alerts.push({
+            user_id: user.id,
+            seller_id: sellerId,
+            tracker_id: tracker.id,
+            severity: eventType === 'price_down' && tracker.reaction_mode !== 'monitorar' ? 'warning' : 'info',
+            title: eventType === 'price_up' ? 'Concorrente subiu preço' : 'Concorrente baixou preço',
+            body: `${tracker.competitor_label}: R$ ${previousPrice?.toFixed(2)} → R$ ${currentPrice.toFixed(2)} (${priceDelta! > 0 ? '+' : ''}${priceDeltaPercent?.toFixed(1)}%)`,
+          });
 
           // Check min/max limits
-          if (listing.min_price && currentPrice < listing.min_price) {
-            alertType = 'min_reached';
-            severity = 'warning';
-            title = 'Preço abaixo do mínimo';
-            message = `${listing.competitor_name} está com preço R$ ${currentPrice.toFixed(2)}, abaixo do seu mínimo (R$ ${listing.min_price.toFixed(2)})`;
-          }
+          if (tracker.min_price && currentPrice < tracker.min_price) {
+            events.push({
+              tracker_id: tracker.id,
+              user_id: user.id,
+              event_type: 'hit_min_limit',
+              new_price: currentPrice,
+              message: `Preço atingiu limite mínimo configurado (R$ ${tracker.min_price.toFixed(2)})`,
+            });
 
-          if (priceDelta! < 0 && listing.reaction_type !== 'monitor') {
-            severity = 'warning';
-          }
-
-          await supabaseClient
-            .from('competitor_tracking_alerts')
-            .insert({
+            alerts.push({
               user_id: user.id,
               seller_id: sellerId,
-              tracked_listing_id: listing.id,
-              alert_type: alertType,
-              severity,
-              title,
-              message_pt: message,
-              data_json: {
-                previous_price: previousPrice,
-                current_price: currentPrice,
-                delta: priceDelta,
-                delta_percent: priceDeltaPercent,
-                competitor_name: listing.competitor_name,
-              },
+              tracker_id: tracker.id,
+              severity: 'critical',
+              title: 'Preço abaixo do mínimo',
+              body: `${tracker.competitor_label} está com R$ ${currentPrice.toFixed(2)}, abaixo do mínimo (R$ ${tracker.min_price.toFixed(2)})`,
             });
+          }
+
+          if (tracker.max_price && currentPrice > tracker.max_price) {
+            events.push({
+              tracker_id: tracker.id,
+              user_id: user.id,
+              event_type: 'hit_max_limit',
+              new_price: currentPrice,
+              message: `Preço atingiu limite máximo configurado (R$ ${tracker.max_price.toFixed(2)})`,
+            });
+          }
+
+          // Create price action if reaction_mode is sugerir or auto_aplicar
+          if (tracker.reaction_mode !== 'monitorar' && priceDelta! < 0) {
+            let proposedPrice = currentPrice - (tracker.undercut_amount || 0.10);
+            
+            if (tracker.min_price && proposedPrice < tracker.min_price) {
+              proposedPrice = tracker.min_price;
+            }
+
+            await supabaseClient.from('competitor_price_actions').insert({
+              tracker_id: tracker.id,
+              user_id: user.id,
+              seller_listing_id: tracker.seller_listing_id,
+              action_type: tracker.reaction_mode === 'auto_aplicar' ? 'suggested' : 'suggested', // auto_aplicar needs integration
+              reason: 'Concorrente baixou preço',
+              competitor_price: currentPrice,
+              proposed_price: proposedPrice,
+            });
+          }
         }
 
-        // Generate alert if became unavailable
-        if (!isAvailable && listing.is_available) {
-          await supabaseClient
-            .from('competitor_tracking_alerts')
-            .insert({
+        // State change events
+        if (previousState !== currentState) {
+          if (currentState === 'indisponivel' && previousState === 'ativo') {
+            events.push({
+              tracker_id: tracker.id,
+              user_id: user.id,
+              event_type: 'became_unavailable',
+              message: 'Anúncio ficou indisponível',
+            });
+
+            alerts.push({
               user_id: user.id,
               seller_id: sellerId,
-              tracked_listing_id: listing.id,
-              alert_type: 'unavailable',
-              severity: 'warning',
+              tracker_id: tracker.id,
+              severity: 'info',
               title: 'Concorrente indisponível',
-              message_pt: `O anúncio "${listing.competitor_name}" ficou indisponível`,
-              data_json: { competitor_name: listing.competitor_name },
+              body: `O anúncio "${tracker.competitor_label}" ficou indisponível`,
             });
+          } else if (currentState === 'ativo' && previousState === 'indisponivel') {
+            events.push({
+              tracker_id: tracker.id,
+              user_id: user.id,
+              event_type: 'became_available',
+              message: 'Anúncio voltou a ficar disponível',
+            });
+
+            alerts.push({
+              user_id: user.id,
+              seller_id: sellerId,
+              tracker_id: tracker.id,
+              severity: 'info',
+              title: 'Concorrente voltou',
+              body: `O anúncio "${tracker.competitor_label}" voltou a ficar disponível`,
+            });
+          }
+        }
+
+        // Batch insert events and alerts
+        if (events.length > 0) {
+          await supabaseClient.from('competitor_events').insert(events);
+        }
+        if (alerts.length > 0) {
+          await supabaseClient.from('competitor_alerts').insert(alerts);
         }
 
         return new Response(JSON.stringify({ 
@@ -329,19 +434,20 @@ Deno.serve(async (req) => {
           price_changed: priceChanged,
           current_price: currentPrice,
           previous_price: previousPrice,
+          state: currentState,
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      // Delete listing
+      // Delete tracker
       if (action === 'delete') {
-        const { listing_id } = body;
+        const { tracker_id } = body;
         
         await supabaseClient
-          .from('competitor_tracked_listings')
+          .from('competitor_trackers')
           .delete()
-          .eq('id', listing_id)
+          .eq('id', tracker_id)
           .eq('user_id', user.id);
 
         return new Response(JSON.stringify({ success: true }), {
@@ -349,11 +455,15 @@ Deno.serve(async (req) => {
         });
       }
 
-      // Update listing config
+      // Update tracker config
       if (action === 'update') {
-        const { listing_id, ...updates } = body;
+        const { tracker_id, ...updates } = body;
         
-        const allowedFields = ['status', 'min_price', 'max_price', 'reaction_type', 'adjustment_value', 'my_item_id', 'competitor_name'];
+        const allowedFields = [
+          'status', 'competitor_label', 'min_price', 'max_price', 
+          'reaction_mode', 'undercut_amount', 'check_interval_minutes', 
+          'seller_listing_id'
+        ];
         const filteredUpdates: any = {};
         for (const key of allowedFields) {
           if (updates[key] !== undefined) {
@@ -361,10 +471,18 @@ Deno.serve(async (req) => {
           }
         }
 
+        // Validate check_interval_minutes
+        if (filteredUpdates.check_interval_minutes && filteredUpdates.check_interval_minutes < 60) {
+          return new Response(JSON.stringify({ error: 'Intervalo mínimo é 60 minutos' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
         const { data: updated, error: updateError } = await supabaseClient
-          .from('competitor_tracked_listings')
+          .from('competitor_trackers')
           .update(filteredUpdates)
-          .eq('id', listing_id)
+          .eq('id', tracker_id)
           .eq('user_id', user.id)
           .select()
           .single();
@@ -376,6 +494,14 @@ Deno.serve(async (req) => {
           });
         }
 
+        // Record update event
+        await supabaseClient.from('competitor_events').insert({
+          tracker_id: tracker_id,
+          user_id: user.id,
+          event_type: 'tracker_updated',
+          message: 'Configurações atualizadas',
+        });
+
         return new Response(JSON.stringify(updated), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
@@ -383,17 +509,36 @@ Deno.serve(async (req) => {
 
       // Dismiss alert
       if (action === 'dismiss-alert') {
-        const { alert_id, resolve } = body;
+        const { alert_id } = body;
         
-        const updateData: any = { is_dismissed: true };
-        if (resolve) {
-          updateData.resolved_at = new Date().toISOString();
+        await supabaseClient
+          .from('competitor_alerts')
+          .update({ is_read: true })
+          .eq('id', alert_id)
+          .eq('user_id', user.id);
+
+        return new Response(JSON.stringify({ success: true }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Accept/reject price action
+      if (action === 'action-response') {
+        const { action_id, response_type } = body;
+        
+        const updateData: any = {
+          action_type: response_type === 'accept' ? 'applied' : 'rejected',
+        };
+
+        if (response_type === 'accept') {
+          // For now, just mark as applied - real integration pending
+          updateData.applied_price = null;
         }
 
         await supabaseClient
-          .from('competitor_tracking_alerts')
+          .from('competitor_price_actions')
           .update(updateData)
-          .eq('id', alert_id)
+          .eq('id', action_id)
           .eq('user_id', user.id);
 
         return new Response(JSON.stringify({ success: true }), {
@@ -413,14 +558,14 @@ Deno.serve(async (req) => {
         });
       }
 
-      // List tracked listings
+      // List trackers
       if (action === 'list' || action === 'competitor-tracking') {
-        const status = url.searchParams.get('status') || 'active';
+        const status = url.searchParams.get('status') || 'ativo';
         const page = parseInt(url.searchParams.get('page') || '1');
         const pageSize = parseInt(url.searchParams.get('page_size') || '50');
 
         let query = supabaseClient
-          .from('competitor_tracked_listings')
+          .from('competitor_trackers')
           .select('*', { count: 'exact' })
           .eq('user_id', user.id)
           .eq('seller_id', sellerId)
@@ -432,7 +577,7 @@ Deno.serve(async (req) => {
 
         query = query.range((page - 1) * pageSize, page * pageSize - 1);
 
-        const { data: listings, count, error } = await query;
+        const { data: trackers, count, error } = await query;
 
         if (error) {
           return new Response(JSON.stringify({ error: error.message }), {
@@ -442,7 +587,7 @@ Deno.serve(async (req) => {
         }
 
         return new Response(JSON.stringify({
-          listings,
+          trackers,
           total: count,
           page,
           page_size: pageSize,
@@ -452,17 +597,16 @@ Deno.serve(async (req) => {
         });
       }
 
-      // Get price history
+      // Get snapshots (history)
       if (action === 'history') {
-        const listingId = url.searchParams.get('listing_id');
+        const trackerId = url.searchParams.get('tracker_id');
         const limit = parseInt(url.searchParams.get('limit') || '100');
 
-        const { data: history, error } = await supabaseClient
-          .from('competitor_price_history')
+        const { data: snapshots, error } = await supabaseClient
+          .from('competitor_snapshots')
           .select('*')
-          .eq('tracked_listing_id', listingId)
-          .eq('user_id', user.id)
-          .order('recorded_at', { ascending: true })
+          .eq('tracker_id', trackerId)
+          .order('captured_at', { ascending: true })
           .limit(limit);
 
         if (error) {
@@ -472,7 +616,64 @@ Deno.serve(async (req) => {
           });
         }
 
-        return new Response(JSON.stringify({ history }), {
+        return new Response(JSON.stringify({ snapshots }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Get events
+      if (action === 'events') {
+        const trackerId = url.searchParams.get('tracker_id');
+        const limit = parseInt(url.searchParams.get('limit') || '50');
+
+        const { data: events, error } = await supabaseClient
+          .from('competitor_events')
+          .select('*')
+          .eq('tracker_id', trackerId)
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(limit);
+
+        if (error) {
+          return new Response(JSON.stringify({ error: error.message }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        return new Response(JSON.stringify({ events }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Get price actions
+      if (action === 'price-actions') {
+        const trackerId = url.searchParams.get('tracker_id');
+        const pendingOnly = url.searchParams.get('pending_only') === 'true';
+
+        let query = supabaseClient
+          .from('competitor_price_actions')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false });
+
+        if (trackerId) {
+          query = query.eq('tracker_id', trackerId);
+        }
+        if (pendingOnly) {
+          query = query.eq('action_type', 'suggested');
+        }
+
+        const { data: actions, error } = await query.limit(50);
+
+        if (error) {
+          return new Response(JSON.stringify({ error: error.message }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        return new Response(JSON.stringify({ actions }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
@@ -481,15 +682,22 @@ Deno.serve(async (req) => {
       if (action === 'alerts') {
         const page = parseInt(url.searchParams.get('page') || '1');
         const pageSize = parseInt(url.searchParams.get('page_size') || '20');
+        const unreadOnly = url.searchParams.get('unread_only') !== 'false';
 
-        const { data: alerts, count, error } = await supabaseClient
-          .from('competitor_tracking_alerts')
+        let query = supabaseClient
+          .from('competitor_alerts')
           .select('*', { count: 'exact' })
           .eq('user_id', user.id)
           .eq('seller_id', sellerId)
-          .eq('is_dismissed', false)
-          .order('created_at', { ascending: false })
-          .range((page - 1) * pageSize, page * pageSize - 1);
+          .order('created_at', { ascending: false });
+
+        if (unreadOnly) {
+          query = query.eq('is_read', false);
+        }
+
+        query = query.range((page - 1) * pageSize, page * pageSize - 1);
+
+        const { data: alerts, count, error } = await query;
 
         if (error) {
           return new Response(JSON.stringify({ error: error.message }), {
@@ -511,34 +719,36 @@ Deno.serve(async (req) => {
 
       // Get overview stats
       if (action === 'overview') {
-        const { data: listings } = await supabaseClient
-          .from('competitor_tracked_listings')
-          .select('id, status, current_price, last_price_change_at')
+        const { data: trackers } = await supabaseClient
+          .from('competitor_trackers')
+          .select('id, status, last_known_price, last_known_state')
           .eq('user_id', user.id)
           .eq('seller_id', sellerId);
 
         const { count: alertsCount } = await supabaseClient
-          .from('competitor_tracking_alerts')
+          .from('competitor_alerts')
           .select('*', { count: 'exact', head: true })
           .eq('user_id', user.id)
           .eq('seller_id', sellerId)
-          .eq('is_dismissed', false);
+          .eq('is_read', false);
 
-        const activeCount = listings?.filter(l => l.status === 'active').length || 0;
-        const pausedCount = listings?.filter(l => l.status === 'paused').length || 0;
-        
-        // Count recent price changes (last 7 days)
-        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-        const recentChanges = listings?.filter(l => 
-          l.last_price_change_at && l.last_price_change_at > sevenDaysAgo
-        ).length || 0;
+        const { count: pendingActionsCount } = await supabaseClient
+          .from('competitor_price_actions')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .eq('action_type', 'suggested');
+
+        const activeCount = trackers?.filter(t => t.status === 'ativo').length || 0;
+        const pausedCount = trackers?.filter(t => t.status === 'pausado').length || 0;
+        const errorCount = trackers?.filter(t => t.status === 'erro').length || 0;
 
         return new Response(JSON.stringify({
-          total_tracked: listings?.length || 0,
+          total_tracked: trackers?.length || 0,
           active_count: activeCount,
           paused_count: pausedCount,
+          error_count: errorCount,
           alerts_count: alertsCount || 0,
-          recent_price_changes: recentChanges,
+          pending_actions: pendingActionsCount || 0,
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });

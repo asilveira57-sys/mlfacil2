@@ -14,41 +14,44 @@ interface AddTrackedListingDialogProps {
 }
 
 export function AddTrackedListingDialog({ sellerId, open, onOpenChange }: AddTrackedListingDialogProps) {
-  const { addTrackedListing } = useCompetitorTracking(sellerId);
+  const { addTracker } = useCompetitorTracking(sellerId);
   
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
-    competitor_link: '',
-    competitor_name: '',
+    competitor_url: '',
+    competitor_label: '',
     min_price: '',
     max_price: '',
-    reaction_type: 'monitor',
-    adjustment_value: '0.10',
+    reaction_mode: 'monitorar',
+    undercut_amount: '0.10',
+    check_interval_minutes: '120',
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.competitor_link || !formData.competitor_name) return;
+    if (!formData.competitor_url || !formData.competitor_label) return;
 
     setLoading(true);
     try {
-      const result = await addTrackedListing({
-        competitor_link: formData.competitor_link,
-        competitor_name: formData.competitor_name,
+      const result = await addTracker({
+        competitor_url: formData.competitor_url,
+        competitor_label: formData.competitor_label,
         min_price: formData.min_price ? parseFloat(formData.min_price) : undefined,
         max_price: formData.max_price ? parseFloat(formData.max_price) : undefined,
-        reaction_type: formData.reaction_type,
-        adjustment_value: parseFloat(formData.adjustment_value) || 0.10,
+        reaction_mode: formData.reaction_mode,
+        undercut_amount: parseFloat(formData.undercut_amount) || 0.10,
+        check_interval_minutes: parseInt(formData.check_interval_minutes) || 120,
       });
 
       if (result) {
         setFormData({
-          competitor_link: '',
-          competitor_name: '',
+          competitor_url: '',
+          competitor_label: '',
           min_price: '',
           max_price: '',
-          reaction_type: 'monitor',
-          adjustment_value: '0.10',
+          reaction_mode: 'monitorar',
+          undercut_amount: '0.10',
+          check_interval_minutes: '120',
         });
         onOpenChange(false);
       }
@@ -72,14 +75,14 @@ export function AddTrackedListingDialog({ sellerId, open, onOpenChange }: AddTra
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="competitor_link">Link do Anúncio *</Label>
+            <Label htmlFor="competitor_url">Link do Anúncio *</Label>
             <div className="relative">
               <Link className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                id="competitor_link"
+                id="competitor_url"
                 placeholder="https://www.mercadolivre.com.br/..."
-                value={formData.competitor_link}
-                onChange={(e) => setFormData(prev => ({ ...prev, competitor_link: e.target.value }))}
+                value={formData.competitor_url}
+                onChange={(e) => setFormData(prev => ({ ...prev, competitor_url: e.target.value }))}
                 className="pl-10"
                 required
               />
@@ -90,17 +93,37 @@ export function AddTrackedListingDialog({ sellerId, open, onOpenChange }: AddTra
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="competitor_name">Nome do Concorrente *</Label>
+            <Label htmlFor="competitor_label">Nome do Concorrente *</Label>
             <Input
-              id="competitor_name"
+              id="competitor_label"
               placeholder="Ex: Concorrente A, Loja XYZ"
-              value={formData.competitor_name}
-              onChange={(e) => setFormData(prev => ({ ...prev, competitor_name: e.target.value }))}
+              value={formData.competitor_label}
+              onChange={(e) => setFormData(prev => ({ ...prev, competitor_label: e.target.value }))}
               required
             />
             <p className="text-xs text-muted-foreground">
               Nome interno para identificação
             </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Intervalo de Verificação</Label>
+            <Select
+              value={formData.check_interval_minutes}
+              onValueChange={(value) => setFormData(prev => ({ ...prev, check_interval_minutes: value }))}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="60">A cada 1 hora</SelectItem>
+                <SelectItem value="120">A cada 2 horas</SelectItem>
+                <SelectItem value="240">A cada 4 horas</SelectItem>
+                <SelectItem value="360">A cada 6 horas</SelectItem>
+                <SelectItem value="720">A cada 12 horas</SelectItem>
+                <SelectItem value="1440">A cada 24 horas</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -139,41 +162,41 @@ export function AddTrackedListingDialog({ sellerId, open, onOpenChange }: AddTra
           <div className="space-y-2">
             <Label>Tipo de Reação</Label>
             <Select
-              value={formData.reaction_type}
-              onValueChange={(value) => setFormData(prev => ({ ...prev, reaction_type: value }))}
+              value={formData.reaction_mode}
+              onValueChange={(value) => setFormData(prev => ({ ...prev, reaction_mode: value }))}
             >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="monitor">
+                <SelectItem value="monitorar">
                   <div>
                     <div className="font-medium">Apenas Monitorar</div>
                     <div className="text-xs text-muted-foreground">Receber alertas de mudança</div>
                   </div>
                 </SelectItem>
-                <SelectItem value="suggest">
+                <SelectItem value="sugerir">
                   <div>
                     <div className="font-medium">Sugerir Novo Preço</div>
                     <div className="text-xs text-muted-foreground">Recomendar ajuste quando concorrente mudar</div>
                   </div>
                 </SelectItem>
-                <SelectItem value="auto">
+                <SelectItem value="auto_aplicar" disabled>
                   <div>
                     <div className="font-medium">Ajustar Automaticamente</div>
-                    <div className="text-xs text-muted-foreground">Atualizar preço dentro dos limites</div>
+                    <div className="text-xs text-muted-foreground">Integração pendente</div>
                   </div>
                 </SelectItem>
               </SelectContent>
             </Select>
           </div>
 
-          {formData.reaction_type !== 'monitor' && (
+          {formData.reaction_mode !== 'monitorar' && (
             <div className="space-y-2">
-              <Label htmlFor="adjustment_value">Valor de Ajuste</Label>
+              <Label htmlFor="undercut_amount">Valor de Ajuste</Label>
               <Select
-                value={formData.adjustment_value}
-                onValueChange={(value) => setFormData(prev => ({ ...prev, adjustment_value: value }))}
+                value={formData.undercut_amount}
+                onValueChange={(value) => setFormData(prev => ({ ...prev, undercut_amount: value }))}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -197,7 +220,7 @@ export function AddTrackedListingDialog({ sellerId, open, onOpenChange }: AddTra
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={loading || !formData.competitor_link || !formData.competitor_name}>
+            <Button type="submit" disabled={loading || !formData.competitor_url || !formData.competitor_label}>
               {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Adicionar
             </Button>

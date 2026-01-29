@@ -2,58 +2,74 @@ import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
-export interface TrackedListing {
+export interface CompetitorTracker {
   id: string;
-  competitor_item_id: string;
+  user_id: string;
+  seller_id: string;
   marketplace: string;
-  competitor_name: string;
-  competitor_link: string;
-  title: string | null;
-  thumbnail: string | null;
-  current_price: number | null;
-  original_price: number | null;
-  listing_type: string | null;
-  condition: string | null;
-  shipping_free: boolean;
-  shipping_full: boolean;
-  is_available: boolean;
-  status: 'active' | 'paused';
+  competitor_label: string;
+  competitor_url: string;
+  competitor_external_id: string | null;
+  competitor_thumbnail: string | null;
+  competitor_title: string | null;
+  status: 'ativo' | 'pausado' | 'erro';
   min_price: number | null;
   max_price: number | null;
-  reaction_type: 'monitor' | 'suggest' | 'auto';
-  adjustment_value: number;
-  my_item_id: string | null;
-  last_check_at: string | null;
-  last_price_change_at: string | null;
-  check_count: number;
-  price_change_count: number;
-  error_message: string | null;
+  reaction_mode: 'monitorar' | 'sugerir' | 'auto_aplicar';
+  undercut_amount: number;
+  check_interval_minutes: number;
+  last_checked_at: string | null;
+  next_check_at: string | null;
+  last_known_price: number | null;
+  last_known_state: 'ativo' | 'indisponivel' | 'desconhecido';
+  seller_listing_id: string | null;
+  consecutive_failures: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CompetitorSnapshot {
+  id: string;
+  tracker_id: string;
+  captured_at: string;
+  price: number | null;
+  state: string | null;
+  source: string;
+}
+
+export interface CompetitorEvent {
+  id: string;
+  tracker_id: string;
+  user_id: string;
+  event_type: string;
+  created_at: string;
+  prev_price: number | null;
+  new_price: number | null;
+  message: string | null;
+}
+
+export interface CompetitorPriceAction {
+  id: string;
+  tracker_id: string;
+  user_id: string;
+  seller_listing_id: string | null;
+  action_type: 'suggested' | 'applied' | 'skipped' | 'rejected';
+  reason: string | null;
+  competitor_price: number | null;
+  proposed_price: number | null;
+  applied_price: number | null;
   created_at: string;
 }
 
-export interface PriceHistory {
+export interface CompetitorAlert {
   id: string;
-  price: number;
-  original_price: number | null;
-  price_delta: number | null;
-  price_delta_percent: number | null;
-  is_available: boolean;
-  listing_type: string | null;
-  recorded_at: string;
-}
-
-export interface TrackingAlert {
-  id: string;
-  tracked_listing_id: string | null;
-  alert_type: string;
-  severity: 'info' | 'warning' | 'danger';
+  user_id: string;
+  seller_id: string;
+  tracker_id: string | null;
+  severity: 'info' | 'warning' | 'critical';
   title: string;
-  message_pt: string;
-  data_json: any;
+  body: string;
   is_read: boolean;
-  is_dismissed: boolean;
-  suggested_action: string | null;
-  suggested_price: number | null;
   created_at: string;
 }
 
@@ -61,13 +77,14 @@ export interface TrackingOverview {
   total_tracked: number;
   active_count: number;
   paused_count: number;
+  error_count: number;
   alerts_count: number;
-  recent_price_changes: number;
+  pending_actions: number;
 }
 
 export function useCompetitorTracking(sellerId: string) {
-  const [listings, setListings] = useState<TrackedListing[]>([]);
-  const [alerts, setAlerts] = useState<TrackingAlert[]>([]);
+  const [trackers, setTrackers] = useState<CompetitorTracker[]>([]);
+  const [alerts, setAlerts] = useState<CompetitorAlert[]>([]);
   const [overview, setOverview] = useState<TrackingOverview | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState<string | null>(null);
@@ -77,7 +94,7 @@ export function useCompetitorTracking(sellerId: string) {
     return session;
   };
 
-  const fetchListings = useCallback(async (status: string = 'active') => {
+  const fetchTrackers = useCallback(async (status: string = 'ativo') => {
     if (!sellerId) return;
     setLoading(true);
     try {
@@ -91,23 +108,23 @@ export function useCompetitorTracking(sellerId: string) {
 
       const data = await response.json();
       if (data.error) throw new Error(data.error);
-      setListings(data.listings || []);
+      setTrackers(data.trackers || []);
     } catch (error: any) {
-      console.error('Error fetching listings:', error);
+      console.error('Error fetching trackers:', error);
       toast.error('Erro ao carregar concorrentes monitorados');
     } finally {
       setLoading(false);
     }
   }, [sellerId]);
 
-  const fetchAlerts = useCallback(async () => {
+  const fetchAlerts = useCallback(async (unreadOnly: boolean = true) => {
     if (!sellerId) return;
     try {
       const session = await getSession();
       if (!session) return;
 
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/competitor-tracking/alerts?seller_id=${sellerId}`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/competitor-tracking/alerts?seller_id=${sellerId}&unread_only=${unreadOnly}`,
         { headers: { Authorization: `Bearer ${session.access_token}` } }
       );
 
@@ -138,14 +155,16 @@ export function useCompetitorTracking(sellerId: string) {
     }
   }, [sellerId]);
 
-  const addTrackedListing = useCallback(async (data: {
-    competitor_link: string;
-    competitor_name: string;
+  const addTracker = useCallback(async (data: {
+    competitor_url: string;
+    competitor_label: string;
+    marketplace?: string;
     min_price?: number;
     max_price?: number;
-    reaction_type?: string;
-    adjustment_value?: number;
-    my_item_id?: string;
+    reaction_mode?: string;
+    undercut_amount?: number;
+    check_interval_minutes?: number;
+    seller_listing_id?: string;
   }) => {
     const session = await getSession();
     if (!session) return null;
@@ -169,12 +188,12 @@ export function useCompetitorTracking(sellerId: string) {
     }
 
     toast.success('Concorrente adicionado com sucesso');
-    await fetchListings();
+    await fetchTrackers();
     await fetchOverview();
     return result;
-  }, [sellerId, fetchListings, fetchOverview]);
+  }, [sellerId, fetchTrackers, fetchOverview]);
 
-  const updateListing = useCallback(async (listingId: string, updates: Partial<TrackedListing>) => {
+  const updateTracker = useCallback(async (trackerId: string, updates: Partial<CompetitorTracker>) => {
     const session = await getSession();
     if (!session) return;
 
@@ -186,7 +205,7 @@ export function useCompetitorTracking(sellerId: string) {
           Authorization: `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ seller_id: sellerId, listing_id: listingId, ...updates }),
+        body: JSON.stringify({ seller_id: sellerId, tracker_id: trackerId, ...updates }),
       }
     );
 
@@ -197,10 +216,10 @@ export function useCompetitorTracking(sellerId: string) {
     }
 
     toast.success('Configuração atualizada');
-    await fetchListings();
-  }, [sellerId, fetchListings]);
+    await fetchTrackers();
+  }, [sellerId, fetchTrackers]);
 
-  const deleteListing = useCallback(async (listingId: string) => {
+  const deleteTracker = useCallback(async (trackerId: string) => {
     const session = await getSession();
     if (!session) return;
 
@@ -212,7 +231,7 @@ export function useCompetitorTracking(sellerId: string) {
           Authorization: `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ seller_id: sellerId, listing_id: listingId }),
+        body: JSON.stringify({ seller_id: sellerId, tracker_id: trackerId }),
       }
     );
 
@@ -223,12 +242,12 @@ export function useCompetitorTracking(sellerId: string) {
     }
 
     toast.success('Monitoramento removido');
-    await fetchListings();
+    await fetchTrackers();
     await fetchOverview();
-  }, [sellerId, fetchListings, fetchOverview]);
+  }, [sellerId, fetchTrackers, fetchOverview]);
 
-  const checkListing = useCallback(async (listingId: string) => {
-    setRefreshing(listingId);
+  const checkTracker = useCallback(async (trackerId: string) => {
+    setRefreshing(trackerId);
     try {
       const session = await getSession();
       if (!session) return;
@@ -241,7 +260,7 @@ export function useCompetitorTracking(sellerId: string) {
             Authorization: `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ seller_id: sellerId, listing_id: listingId }),
+          body: JSON.stringify({ seller_id: sellerId, tracker_id: trackerId }),
         }
       );
 
@@ -257,27 +276,52 @@ export function useCompetitorTracking(sellerId: string) {
         toast.info('Preço sem alteração');
       }
 
-      await fetchListings();
+      await fetchTrackers();
       await fetchAlerts();
     } finally {
       setRefreshing(null);
     }
-  }, [sellerId, fetchListings, fetchAlerts]);
+  }, [sellerId, fetchTrackers, fetchAlerts]);
 
-  const fetchPriceHistory = useCallback(async (listingId: string): Promise<PriceHistory[]> => {
+  const fetchSnapshots = useCallback(async (trackerId: string): Promise<CompetitorSnapshot[]> => {
     const session = await getSession();
     if (!session) return [];
 
     const response = await fetch(
-      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/competitor-tracking/history?seller_id=${sellerId}&listing_id=${listingId}`,
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/competitor-tracking/history?seller_id=${sellerId}&tracker_id=${trackerId}`,
       { headers: { Authorization: `Bearer ${session.access_token}` } }
     );
 
     const data = await response.json();
-    return data.history || [];
+    return data.snapshots || [];
   }, [sellerId]);
 
-  const dismissAlert = useCallback(async (alertId: string, resolve: boolean = false) => {
+  const fetchEvents = useCallback(async (trackerId: string): Promise<CompetitorEvent[]> => {
+    const session = await getSession();
+    if (!session) return [];
+
+    const response = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/competitor-tracking/events?seller_id=${sellerId}&tracker_id=${trackerId}`,
+      { headers: { Authorization: `Bearer ${session.access_token}` } }
+    );
+
+    const data = await response.json();
+    return data.events || [];
+  }, [sellerId]);
+
+  const fetchPriceActions = useCallback(async (trackerId?: string): Promise<CompetitorPriceAction[]> => {
+    const session = await getSession();
+    if (!session) return [];
+
+    let url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/competitor-tracking/price-actions?seller_id=${sellerId}`;
+    if (trackerId) url += `&tracker_id=${trackerId}`;
+
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${session.access_token}` } });
+    const data = await response.json();
+    return data.actions || [];
+  }, [sellerId]);
+
+  const dismissAlert = useCallback(async (alertId: string) => {
     const session = await getSession();
     if (!session) return;
 
@@ -289,7 +333,7 @@ export function useCompetitorTracking(sellerId: string) {
           Authorization: `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ seller_id: sellerId, alert_id: alertId, resolve }),
+        body: JSON.stringify({ seller_id: sellerId, alert_id: alertId }),
       }
     );
 
@@ -297,20 +341,43 @@ export function useCompetitorTracking(sellerId: string) {
     await fetchOverview();
   }, [sellerId, fetchOverview]);
 
+  const respondToAction = useCallback(async (actionId: string, responseType: 'accept' | 'reject') => {
+    const session = await getSession();
+    if (!session) return;
+
+    await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/competitor-tracking/action-response`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ seller_id: sellerId, action_id: actionId, response_type: responseType }),
+      }
+    );
+
+    toast.success(responseType === 'accept' ? 'Ação aplicada' : 'Ação rejeitada');
+    await fetchOverview();
+  }, [sellerId, fetchOverview]);
+
   return {
-    listings,
+    trackers,
     alerts,
     overview,
     loading,
     refreshing,
-    fetchListings,
+    fetchTrackers,
     fetchAlerts,
     fetchOverview,
-    addTrackedListing,
-    updateListing,
-    deleteListing,
-    checkListing,
-    fetchPriceHistory,
+    addTracker,
+    updateTracker,
+    deleteTracker,
+    checkTracker,
+    fetchSnapshots,
+    fetchEvents,
+    fetchPriceActions,
     dismissAlert,
+    respondToAction,
   };
 }
