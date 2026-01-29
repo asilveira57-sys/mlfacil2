@@ -155,7 +155,7 @@ export default function AdActionsCenter() {
           )}
           {action.action_status === 'FAILED' && (
             <span className="text-xs text-destructive truncate max-w-[150px] block">
-              {action.result?.error || 'Erro desconhecido'}
+              {action.result?.error || action.result?.message || 'Erro desconhecido'}
             </span>
           )}
         </TableCell>
