@@ -45,18 +45,26 @@ export function CloneByLinkDialog({ open, onOpenChange }: CloneByLinkDialogProps
 
   // Extract item ID from Mercado Livre link
   const extractItemId = (url: string): string | null => {
-    // Pattern: MLB-1234567890 or MLB1234567890
+    // Patterns for various ML ID formats:
+    // - MLB1234567890 (item regular)
+    // - MLB-1234567890 (with hyphen)
+    // - MLBU1234567890 (catalog/universal product)
+    // - MLA, MLC, MLM, etc. (other countries)
+    // - /up/MLBU... (universal product URL format)
     const patterns = [
-      /MLB[-]?\d+/i,
-      /\/p\/MLB[-]?\d+/i,
-      /item_id=MLB[-]?\d+/i,
+      /\/up\/(MLB[A-Z]?\d+)/i,           // Universal product: /up/MLBU1234567890
+      /\/p\/(MLB[A-Z]?[-]?\d+)/i,        // Product page: /p/MLB1234567890
+      /item_id=(MLB[A-Z]?[-]?\d+)/i,     // Query param: item_id=MLB...
+      /(MLB[A-Z]?[-]?\d{8,})/i,          // Any MLB ID in URL (8+ digits)
+      /(ML[A-Z]{1,2}[-]?\d{8,})/i,       // Other countries: MLA, MLC, MLM, etc.
     ];
     
     for (const pattern of patterns) {
       const match = url.match(pattern);
       if (match) {
-        // Normalize to MLB1234567890 format
-        return match[0].replace('/p/', '').replace('item_id=', '').replace('-', '').toUpperCase();
+        // Normalize: remove hyphens and uppercase
+        const id = (match[1] || match[0]).replace(/-/g, '').toUpperCase();
+        return id;
       }
     }
     return null;
