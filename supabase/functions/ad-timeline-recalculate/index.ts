@@ -3,13 +3,20 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 interface RecalculateRequest {
   workspace_id: string;
   ml_account_id?: string;
   item_id?: string; // Optional: recalculate only specific item
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
 }
 
 serve(async (req) => {
@@ -42,6 +49,63 @@ serve(async (req) => {
 
     console.log(`[ad-timeline-recalculate] Starting for workspace=${workspace_id}, account=${ml_account_id || 'all'}, item=${item_id || 'all'}`);
 
+    // Resolve marketplace account mapping.
+    // meli_* cache tables store seller_id (text), while ad_timeline_* tables use ml_account_id (uuid).
+    const { data: accounts, error: accountsError } = await supabase
+      .from("unified_marketplace_accounts")
+      .select("id, seller_id")
+      .eq("user_id", workspace_id);
+
+    if (accountsError) {
+      console.error(`[ad-timeline-recalculate] Error fetching accounts:`, accountsError);
+      return new Response(
+        JSON.stringify({ error: "Failed to fetch marketplace accounts", details: accountsError }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    const sellerToAccountId = new Map<string, string>();
+    const accountIdToSeller = new Map<string, string>();
+    for (const a of accounts || []) {
+      if (a?.seller_id && a?.id) {
+        sellerToAccountId.set(String(a.seller_id), String(a.id));
+        accountIdToSeller.set(String(a.id), String(a.seller_id));
+      }
+    }
+
+    let sellerIdFilter: string | null = null;
+    let accountIdFilter: string | null = null;
+
+    if (ml_account_id) {
+      if (isUuid(ml_account_id)) {
+        accountIdFilter = ml_account_id;
+        sellerIdFilter = accountIdToSeller.get(ml_account_id) || null;
+      } else {
+        // Backwards-compat: allow seller_id to be passed as ml_account_id
+        sellerIdFilter = ml_account_id;
+        accountIdFilter = sellerToAccountId.get(ml_account_id) || null;
+      }
+
+      if (!sellerIdFilter || !accountIdFilter) {
+        return new Response(
+          JSON.stringify({
+            error: "Unknown account",
+            details: {
+              provided: ml_account_id,
+              hint: "Envie o UUID da conta (ml_account_id) ou um seller_id válido conectado a este workspace.",
+            },
+          }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+    }
+
     // Get settings for thresholds
     const { data: settings } = await supabase
       .from("ad_timeline_settings")
@@ -60,8 +124,8 @@ serve(async (req) => {
       .not("created_at_meli", "is", null)
       .order("created_at_meli", { ascending: true });
 
-    if (ml_account_id) {
-      salesQuery = salesQuery.eq("seller_id", ml_account_id);
+    if (sellerIdFilter) {
+      salesQuery = salesQuery.eq("seller_id", sellerIdFilter);
     }
     if (item_id) {
       salesQuery = salesQuery.eq("item_id", item_id);
@@ -77,21 +141,13 @@ serve(async (req) => {
       });
     }
 
-    if (!salesData || salesData.length === 0) {
-      console.log(`[ad-timeline-recalculate] No sales data found`);
-      return new Response(JSON.stringify({ 
-        success: true, 
-        message: "No sales data found",
-        processed: 0 
-      }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    // Note: even if there are no sales, we still want to upsert NO_SALES items from listings.
+    const safeSalesData = salesData || [];
 
     // Group sales by item_id and seller_id
     const itemSales: Record<string, { seller_id: string; dates: Date[] }> = {};
     
-    for (const sale of salesData) {
+    for (const sale of safeSalesData) {
       const key = `${sale.seller_id}:${sale.item_id}`;
       if (!itemSales[key]) {
         itemSales[key] = { seller_id: sale.seller_id, dates: [] };
@@ -105,6 +161,11 @@ serve(async (req) => {
 
     for (const [key, data] of Object.entries(itemSales)) {
       const [seller_id, item_id] = key.split(":");
+      const accountId = sellerToAccountId.get(seller_id);
+      if (!accountId) {
+        console.warn(`[ad-timeline-recalculate] Skipping seller_id without account mapping: ${seller_id}`);
+        continue;
+      }
       const dates = data.dates.sort((a, b) => a.getTime() - b.getTime());
 
       const firstSale = dates[0];
@@ -148,7 +209,7 @@ serve(async (req) => {
 
       statsToUpsert.push({
         workspace_id,
-        ml_account_id: seller_id,
+        ml_account_id: accountId,
         item_id,
         first_sale_at: firstSale.toISOString(),
         last_sale_at: lastSale.toISOString(),
@@ -170,7 +231,7 @@ serve(async (req) => {
         if (gapHours > 168) { // > 7 days
           eventsToInsert.push({
             workspace_id,
-            ml_account_id: seller_id,
+            ml_account_id: accountId,
             item_id,
             event_type: "GAP",
             occurred_at: dates[i - 1].toISOString(),
@@ -192,8 +253,8 @@ serve(async (req) => {
         .select("item_id, seller_id")
         .eq("user_id", workspace_id);
 
-      if (ml_account_id) {
-        listingsQuery = listingsQuery.eq("seller_id", ml_account_id);
+      if (sellerIdFilter) {
+        listingsQuery = listingsQuery.eq("seller_id", sellerIdFilter);
       }
 
       const { data: listings } = await listingsQuery;
@@ -203,9 +264,16 @@ serve(async (req) => {
         for (const listing of listings) {
           const key = `${listing.seller_id}:${listing.item_id}`;
           if (!existingItems.has(key)) {
+            const accountId = sellerToAccountId.get(String(listing.seller_id));
+            if (!accountId) {
+              console.warn(
+                `[ad-timeline-recalculate] Skipping listing seller_id without account mapping: ${listing.seller_id}`,
+              );
+              continue;
+            }
             statsToUpsert.push({
               workspace_id,
-              ml_account_id: listing.seller_id,
+              ml_account_id: accountId,
               item_id: listing.item_id,
               first_sale_at: null,
               last_sale_at: null,
