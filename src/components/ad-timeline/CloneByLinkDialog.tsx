@@ -16,6 +16,7 @@ import { Copy, Link, Loader2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface CloneByLinkDialogProps {
   open: boolean;
@@ -32,6 +33,7 @@ interface CloneChecklist {
 
 export function CloneByLinkDialog({ open, onOpenChange }: CloneByLinkDialogProps) {
   const { activeAccount } = useActiveAccount();
+  const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
   const [link, setLink] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -180,6 +182,9 @@ export function CloneByLinkDialog({ open, onOpenChange }: CloneByLinkDialogProps
       toast.success('Rascunho de clonagem criado', {
         description: `Anúncio ${itemId} adicionado à fila de rascunhos`,
       });
+
+      // Invalidate cache so the list updates immediately
+      queryClient.invalidateQueries({ queryKey: ['ad-lifecycle-actions'] });
 
       // Reset and close
       setLink('');

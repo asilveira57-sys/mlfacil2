@@ -40,7 +40,7 @@ import { ptBR } from "date-fns/locale";
 import { useAdLifecycleActions, useExecuteAction, useCancelAction } from "@/hooks/useAdTimeline";
 import type { AdLifecycleAction, ActionStatus } from "@/types/ad-timeline";
 import { CloneByLinkDialog } from "@/components/ad-timeline/CloneByLinkDialog";
-import { useCurrentUserId } from "@/hooks/useCurrentUserId";
+import { useCurrentWorkspaceId } from "@/hooks/useCurrentWorkspaceId";
 
 const statusConfig: Record<ActionStatus, { label: string; icon: React.ReactNode; className: string }> = {
   DRAFT: { label: 'Rascunho', icon: <FileText className="h-4 w-4" />, className: 'bg-muted text-muted-foreground' },
@@ -58,8 +58,8 @@ const actionTypeLabels: Record<string, string> = {
 };
 
 export default function AdActionsCenter() {
-  // Use centralized hook instead of direct Supabase call
-  const workspaceId = useCurrentUserId();
+  // Use workspace ID for RLS-compliant queries
+  const { data: workspaceId } = useCurrentWorkspaceId();
 
   const [activeTab, setActiveTab] = useState("drafts");
   const [confirmAction, setConfirmAction] = useState<AdLifecycleAction | null>(null);
