@@ -1,5 +1,4 @@
-import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useState } from "react";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -41,6 +40,7 @@ import { ptBR } from "date-fns/locale";
 import { useAdLifecycleActions, useExecuteAction, useCancelAction } from "@/hooks/useAdTimeline";
 import type { AdLifecycleAction, ActionStatus } from "@/types/ad-timeline";
 import { CloneByLinkDialog } from "@/components/ad-timeline/CloneByLinkDialog";
+import { useCurrentUserId } from "@/hooks/useCurrentUserId";
 
 const statusConfig: Record<ActionStatus, { label: string; icon: React.ReactNode; className: string }> = {
   DRAFT: { label: 'Rascunho', icon: <FileText className="h-4 w-4" />, className: 'bg-muted text-muted-foreground' },
@@ -58,13 +58,8 @@ const actionTypeLabels: Record<string, string> = {
 };
 
 export default function AdActionsCenter() {
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) setWorkspaceId(data.user.id);
-    });
-  }, []);
+  // Use centralized hook instead of direct Supabase call
+  const workspaceId = useCurrentUserId();
 
   const [activeTab, setActiveTab] = useState("drafts");
   const [confirmAction, setConfirmAction] = useState<AdLifecycleAction | null>(null);

@@ -94,20 +94,19 @@ export function useUserAccessState(): UseUserAccessStateReturn {
   }, []);
 
   // Listen for auth state changes
-  // CRITICAL: Only refetch on actual session changes, NOT on TOKEN_REFRESHED
-  // TOKEN_REFRESHED fires when tab regains focus if token is near expiry
+  // CRITICAL: Only react to sign-out, NOT to SIGNED_IN
+  // The initial fetchStatus() already handles the login case
+  // Reacting to SIGNED_IN can cause cascade of re-fetches on tab switch
   useEffect(() => {
     fetchStatus();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      // Only react to actual sign-in/out events, not token refresh
-      if (event === 'SIGNED_IN') {
-        fetchStatus();
-      } else if (event === 'SIGNED_OUT') {
+      // Only react to sign-out, not sign-in
+      if (event === 'SIGNED_OUT') {
         setStatus(null);
         setIsAuthenticated(false);
       }
-      // TOKEN_REFRESHED is intentionally ignored to prevent tab-switch flickering
+      // SIGNED_IN and TOKEN_REFRESHED are intentionally ignored
     });
 
     return () => subscription.unsubscribe();

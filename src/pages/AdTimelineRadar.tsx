@@ -1,5 +1,4 @@
-import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { Card, CardContent } from "@/components/ui/card";
@@ -51,6 +50,7 @@ import {
   useCreateAction,
 } from "@/hooks/useAdTimeline";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
+import { useCurrentUserId } from "@/hooks/useCurrentUserId";
 import type { StatusBucket, ActionType, CloneChecklist, AdTimelineStats } from "@/types/ad-timeline";
 
 const bucketLabels: Record<StatusBucket | 'ALL', string> = {
@@ -66,14 +66,9 @@ const bucketLabels: Record<StatusBucket | 'ALL', string> = {
 export default function AdTimelineRadar() {
   const navigate = useNavigate();
   const { sellerId } = useActiveAccount();
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  // Use centralized hook instead of direct Supabase call
+  const workspaceId = useCurrentUserId();
   const mlAccountId = sellerId || undefined;
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) setWorkspaceId(data.user.id);
-    });
-  }, []);
 
   const [statusFilter, setStatusFilter] = useState<StatusBucket | 'ALL'>('ALL');
   const [searchTerm, setSearchTerm] = useState("");
