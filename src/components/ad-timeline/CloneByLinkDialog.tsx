@@ -114,6 +114,40 @@ export function CloneByLinkDialog({ open, onOpenChange }: CloneByLinkDialogProps
         throw new Error('Conta do Mercado Livre não encontrada');
       }
 
+      // Resolve workspace_id (RLS requires a workspace the user is member of)
+      let workspaceId: string | null = null;
+
+      const { data: prefs, error: prefsError } = await supabase
+        .from('user_preferences')
+        .select('active_workspace_id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (prefsError) {
+        console.error('[CloneByLinkDialog] Preferences lookup error:', prefsError);
+      }
+
+      workspaceId = (prefs as any)?.active_workspace_id ?? null;
+
+      if (!workspaceId) {
+        const { data: member, error: memberError } = await supabase
+          .from('workspace_members')
+          .select('workspace_id')
+          .eq('user_id', user.id)
+          .limit(1)
+          .maybeSingle();
+
+        if (memberError) {
+          console.error('[CloneByLinkDialog] Workspace membership lookup error:', memberError);
+        }
+
+        workspaceId = (member as any)?.workspace_id ?? null;
+      }
+
+      if (!workspaceId) {
+        throw new Error('Workspace não encontrado. Verifique seu acesso ao workspace.');
+      }
+
       // Build checklist
       const actionChecklist: Record<string, unknown> = {
         title: checklist.keep_title,
@@ -128,7 +162,7 @@ export function CloneByLinkDialog({ open, onOpenChange }: CloneByLinkDialogProps
       const { error: insertError } = await supabase
         .from('ad_lifecycle_actions')
         .insert({
-          workspace_id: user.id,
+          workspace_id: workspaceId,
           ml_account_id: mlAccount.id,
           item_id: itemId,
           action_type: 'CLONE',
