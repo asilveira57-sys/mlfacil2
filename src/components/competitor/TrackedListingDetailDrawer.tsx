@@ -18,11 +18,14 @@ import {
   AlertTriangle,
   Clock,
   Activity,
-  Link2
+  Link2,
+  Copy,
+  Sparkles
 } from 'lucide-react';
 import { useCompetitorTracking, CompetitorTracker, CompetitorSnapshot, CompetitorEvent } from '@/hooks/useCompetitorTracking';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { SellerListingBindingSection } from './SellerListingBindingSection';
+import { CloneListingDialog } from './CloneListingDialog';
 
 interface TrackedListingDetailDrawerProps {
   sellerId: string;
@@ -53,6 +56,7 @@ export function TrackedListingDetailDrawer({
   const [loadingData, setLoadingData] = useState(false);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
+  const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
   const [formData, setFormData] = useState({
     competitor_label: '',
     min_price: '',
@@ -247,6 +251,17 @@ export function TrackedListingDetailDrawer({
                         <ExternalLink className="h-4 w-4" />
                       </a>
                     </Button>
+                    {sellerListing && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCloneDialogOpen(true)}
+                        className="gap-1"
+                      >
+                        <Copy className="h-4 w-4" />
+                        Clonar
+                      </Button>
+                     )}
                   </div>
                 </div>
 
@@ -504,6 +519,21 @@ export function TrackedListingDetailDrawer({
             </Card>
           </TabsContent>
         </Tabs>
+
+        {/* Clone Listing Dialog */}
+        {sellerListing && (
+          <CloneListingDialog
+            open={cloneDialogOpen}
+            onOpenChange={setCloneDialogOpen}
+            sellerId={sellerId}
+            sellerListingId={sellerListing.listingId}
+            sellerListingTitle={sellerListing.title}
+            sellerListingPrice={sellerListing.price}
+            competitorPrice={tracker.last_known_price}
+            competitorLabel={tracker.competitor_label}
+            trackerId={tracker.id}
+          />
+        )}
       </SheetContent>
     </Sheet>
   );
