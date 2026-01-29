@@ -125,11 +125,28 @@ serve(async (req) => {
     console.log(`[ad-action-execute] Executing ${action.action_type} for item ${action.item_id}`);
 
     // Get ML account credentials
-    const { data: mlAccount } = await supabase
-      .from("ml_accounts")
-      .select("access_token, ml_user_id")
-      .eq("ml_user_id", action.ml_account_id)
-      .single();
+    // NOTE: ad_lifecycle_actions.ml_account_id stores ml_accounts.id (UUID)
+    // (not ml_user_id). Keep a fallback for legacy rows that might store ml_user_id.
+    const isUuid = (value: string) =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
+    let mlAccount: { access_token: string | null; ml_user_id: string } | null = null;
+
+    if (isUuid(action.ml_account_id)) {
+      const { data } = await supabase
+        .from("ml_accounts")
+        .select("access_token, ml_user_id")
+        .eq("id", action.ml_account_id)
+        .maybeSingle();
+      mlAccount = (data as any) ?? null;
+    } else {
+      const { data } = await supabase
+        .from("ml_accounts")
+        .select("access_token, ml_user_id")
+        .eq("ml_user_id", action.ml_account_id)
+        .maybeSingle();
+      mlAccount = (data as any) ?? null;
+    }
 
     let result: any = { success: false, message: "No integration available" };
 

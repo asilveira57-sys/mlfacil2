@@ -324,7 +324,7 @@ export function useExecuteAction() {
       } else {
         toast({
           title: 'Ação falhou',
-          description: data.result?.error || 'Ocorreu um erro',
+          description: data.result?.error || data.result?.message || 'Ocorreu um erro',
           variant: 'destructive',
         });
       }
