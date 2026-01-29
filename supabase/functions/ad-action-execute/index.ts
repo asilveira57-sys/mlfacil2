@@ -315,13 +315,15 @@ async function fetchCatalogItemData(accessToken: string, rawProductId: string): 
   const productId = normalizeProductId(rawProductId);
   console.log(`[ad-action-execute] Normalized product ID: ${rawProductId} -> ${productId}`);
 
-  // Fetch product details
+  // Try 1: Fetch as product
   const productRes = await fetch(`https://api.mercadolibre.com/products/${productId}`, {
     headers: { "Authorization": `Bearer ${accessToken}` },
   });
+  console.log(`[ad-action-execute] /products/${productId} status: ${productRes.status}`);
 
   if (productRes.ok) {
     const product = await productRes.json();
+    console.log(`[ad-action-execute] Product found: ${product.name}`);
     // If product has buy_box_winner with an item_id, fetch that item
     if (product.buy_box_winner?.item_id) {
       const itemRes = await fetch(`https://api.mercadolibre.com/items/${product.buy_box_winner.item_id}`, {
@@ -336,17 +338,71 @@ async function fetchCatalogItemData(accessToken: string, rawProductId: string): 
       ok: true,
       data: {
         title: product.name,
-        category_id: product.main_features?.[0]?.category_id,
+        category_id: product.main_features?.[0]?.category_id || product.category_id,
         pictures: product.pictures?.map((p: any) => ({ url: p.url })) || [],
         attributes: product.attributes || [],
       },
     };
   }
 
-  // Fallback: try /products/{id}/items endpoint to get competing items
+  // Try 2: Maybe it's actually an item ID, try fetching directly
+  const itemDirectRes = await fetch(`https://api.mercadolibre.com/items/${productId}`, {
+    headers: { "Authorization": `Bearer ${accessToken}` },
+  });
+  console.log(`[ad-action-execute] /items/${productId} status: ${itemDirectRes.status}`);
+  
+  if (itemDirectRes.ok) {
+    return { ok: true, data: await itemDirectRes.json() };
+  }
+
+  // Try 3: Search products by ID pattern
+  const searchRes = await fetch(
+    `https://api.mercadolibre.com/products/search?site_id=MLB&q=${rawProductId}`,
+    { headers: { "Authorization": `Bearer ${accessToken}` } }
+  );
+  console.log(`[ad-action-execute] /products/search?q=${rawProductId} status: ${searchRes.status}`);
+  
+  if (searchRes.ok) {
+    const searchData = await searchRes.json();
+    if (searchData.results?.length > 0) {
+      const firstProduct = searchData.results[0];
+      console.log(`[ad-action-execute] Found product via search: ${firstProduct.id} - ${firstProduct.name}`);
+      // Now fetch that product's items
+      const prodItemsRes = await fetch(
+        `https://api.mercadolibre.com/products/${firstProduct.id}/items?status=active&limit=1`,
+        { headers: { "Authorization": `Bearer ${accessToken}` } }
+      );
+      if (prodItemsRes.ok) {
+        const prodItemsData = await prodItemsRes.json();
+        const firstItemId = prodItemsData.results?.[0]?.item_id;
+        if (firstItemId) {
+          const itemRes = await fetch(`https://api.mercadolibre.com/items/${firstItemId}`, {
+            headers: { "Authorization": `Bearer ${accessToken}` },
+          });
+          if (itemRes.ok) {
+            return { ok: true, data: await itemRes.json() };
+          }
+        }
+      }
+      // Return product data directly
+      return {
+        ok: true,
+        data: {
+          title: firstProduct.name,
+          category_id: firstProduct.domain_id,
+          pictures: firstProduct.pictures?.map((p: any) => ({ url: p.url })) || [],
+          attributes: firstProduct.attributes || [],
+        },
+      };
+    }
+  }
+
+  // Try 4: Original fallback - products/{id}/items
   const compRes = await fetch(`https://api.mercadolibre.com/products/${productId}/items?status=active&limit=1`, {
     headers: { "Authorization": `Bearer ${accessToken}` },
   });
+  console.log(`[ad-action-execute] /products/${productId}/items status: ${compRes.status}`);
+  
   if (compRes.ok) {
     const compData = await compRes.json();
     const firstItemId = compData.results?.[0]?.item_id;
