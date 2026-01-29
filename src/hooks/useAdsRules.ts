@@ -262,18 +262,19 @@ export function useAdsRuleEvents(sellerId?: string) {
 
     fetchEvents();
 
-    // Realtime subscription
-    const channel = supabase
-      .channel(`ads-rule-events-${sellerId}`)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'ads_alerts',
-        filter: `seller_id=eq.${sellerId}`,
-      }, () => fetchEvents())
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
+    // DISABLED: Realtime subscription disabled in static mode
+    // Data only updates on manual refresh or page reload
+    // const channel = supabase
+    //   .channel(`ads-rule-events-${sellerId}`)
+    //   .on('postgres_changes', {
+    //     event: 'INSERT',
+    //     schema: 'public',
+    //     table: 'ads_alerts',
+    //     filter: `seller_id=eq.${sellerId}`,
+    //   }, () => fetchEvents())
+    //   .subscribe();
+    //
+    // return () => { supabase.removeChannel(channel); };
   }, [sellerId]);
 
   return { events, loading };

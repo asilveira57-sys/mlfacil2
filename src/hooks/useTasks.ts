@@ -112,30 +112,31 @@ export function useTasks(workspaceId: string | null): UseTasksResult {
     fetchTasks();
   }, [fetchTasks]);
 
-  // Realtime subscription
-  useEffect(() => {
-    if (!workspaceId) return;
-
-    const channel = supabase
-      .channel(`tasks-${workspaceId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'tasks',
-          filter: `workspace_id=eq.${workspaceId}`,
-        },
-        () => {
-          fetchTasks();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [workspaceId, fetchTasks]);
+  // DISABLED: Realtime subscription disabled in static mode
+  // Data only updates on manual refresh or page reload
+  // useEffect(() => {
+  //   if (!workspaceId) return;
+  //
+  //   const channel = supabase
+  //     .channel(`tasks-${workspaceId}`)
+  //     .on(
+  //       'postgres_changes',
+  //       {
+  //         event: '*',
+  //         schema: 'public',
+  //         table: 'tasks',
+  //         filter: `workspace_id=eq.${workspaceId}`,
+  //       },
+  //       () => {
+  //         fetchTasks();
+  //       }
+  //     )
+  //     .subscribe();
+  //
+  //   return () => {
+  //     supabase.removeChannel(channel);
+  //   };
+  // }, [workspaceId, fetchTasks]);
 
   const createTask = useCallback(async (task: Partial<Task>): Promise<Task | null> => {
     if (!workspaceId) return null;

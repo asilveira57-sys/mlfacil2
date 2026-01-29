@@ -73,7 +73,8 @@ export function useUnreadNotificationsCount(workspaceId?: string | null) {
       if (error) throw error;
       return count || 0;
     },
-    refetchInterval: 30000, // Check every 30 seconds
+    // DISABLED: Static mode - no polling. Use manual refresh button instead.
+    // refetchInterval: 30000,
   });
 }
 
@@ -144,33 +145,36 @@ export function useDismissNotification() {
   });
 }
 
+// DISABLED: Realtime subscription disabled in static mode
+// Data only updates on manual refresh or page reload
 export function useNotificationsRealtime(
   userId: string | null,
   onNewNotification: (n: AppNotification) => void
 ) {
-  useEffect(() => {
-    if (!userId) return;
-
-    const channel = supabase
-      .channel(`notifications-${userId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'app_notifications',
-          filter: `user_id=eq.${userId}`,
-        },
-        (payload) => {
-          onNewNotification(payload.new as AppNotification);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [userId, onNewNotification]);
+  // Realtime disabled in static mode
+  // useEffect(() => {
+  //   if (!userId) return;
+  //
+  //   const channel = supabase
+  //     .channel(`notifications-${userId}`)
+  //     .on(
+  //       'postgres_changes',
+  //       {
+  //         event: 'INSERT',
+  //         schema: 'public',
+  //         table: 'app_notifications',
+  //         filter: `user_id=eq.${userId}`,
+  //       },
+  //       (payload) => {
+  //         onNewNotification(payload.new as AppNotification);
+  //       }
+  //     )
+  //     .subscribe();
+  //
+  //   return () => {
+  //     supabase.removeChannel(channel);
+  //   };
+  // }, [userId, onNewNotification]);
 }
 
 // Group notifications by category for the bell dropdown

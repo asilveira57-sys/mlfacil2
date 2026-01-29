@@ -6,6 +6,10 @@ import { AccountSwitcher } from "./AccountSwitcher";
 import { Separator } from "@/components/ui/separator";
 import { NotificationBell } from "@/components/notifications";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
+import { useRefreshPolicy } from "@/contexts/RefreshPolicyContext";
+import { Button } from "@/components/ui/button";
+import { RefreshCw } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 // Context for page-level header customization
 interface PageHeaderContextType {
@@ -41,6 +45,7 @@ export function useSetPageHeader(title: string, subtitle?: string, headerContent
 
 export function AppShellLayout() {
   const { sellerId } = useActiveAccount();
+  const { manualRefresh, isRefreshing } = useRefreshPolicy();
   const location = useLocation();
   const [headerState, setHeaderState] = useState({
     title: "",
@@ -89,6 +94,23 @@ export function AppShellLayout() {
                 </div>
               )}
               <div className="flex items-center gap-2 ml-auto">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={manualRefresh}
+                      disabled={isRefreshing}
+                      className="h-8 w-8"
+                      aria-label="Atualizar dados"
+                    >
+                      <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Atualizar dados</p>
+                  </TooltipContent>
+                </Tooltip>
                 <NotificationBell sellerId={sellerId} />
                 <AccountSwitcher />
                 {headerState.headerContent}

@@ -22,7 +22,8 @@ export function useAdminDashboardStats() {
       if (error) throw error;
       return data as unknown as AdminDashboardStats;
     },
-    refetchInterval: 60000, // Refresh every minute
+    // DISABLED: Static mode - no polling. Use manual refresh button instead.
+    // refetchInterval: 60000,
   });
 }
 

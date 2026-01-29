@@ -110,30 +110,31 @@ export function usePromotions(workspaceId: string | null, sellerId?: string | nu
     fetchPromotions();
   }, [fetchPromotions]);
 
-  // Realtime subscription
-  useEffect(() => {
-    if (!workspaceId) return;
-
-    const channel = supabase
-      .channel(`promotions-${workspaceId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'promotion_snapshots',
-          filter: `workspace_id=eq.${workspaceId}`,
-        },
-        () => {
-          fetchPromotions();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [workspaceId, fetchPromotions]);
+  // DISABLED: Realtime subscription disabled in static mode
+  // Data only updates on manual refresh or page reload
+  // useEffect(() => {
+  //   if (!workspaceId) return;
+  //
+  //   const channel = supabase
+  //     .channel(`promotions-${workspaceId}`)
+  //     .on(
+  //       'postgres_changes',
+  //       {
+  //         event: '*',
+  //         schema: 'public',
+  //         table: 'promotion_snapshots',
+  //         filter: `workspace_id=eq.${workspaceId}`,
+  //       },
+  //       () => {
+  //         fetchPromotions();
+  //       }
+  //     )
+  //     .subscribe();
+  //
+  //   return () => {
+  //     supabase.removeChannel(channel);
+  //   };
+  // }, [workspaceId, fetchPromotions]);
 
   // Computed views
   const now = new Date();

@@ -48,37 +48,38 @@ export function useNotifications(workspaceId: string | null): UseNotificationsRe
     fetchNotifications();
   }, [fetchNotifications]);
 
-  // Realtime subscription
-  useEffect(() => {
-    if (!workspaceId) return;
-
-    const setupRealtime = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const channel = supabase
-        .channel(`notifications-${user.id}`)
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'notifications',
-            filter: `user_id=eq.${user.id}`,
-          },
-          (payload) => {
-            setNotifications(prev => [payload.new as Notification, ...prev]);
-          }
-        )
-        .subscribe();
-
-      return () => {
-        supabase.removeChannel(channel);
-      };
-    };
-
-    setupRealtime();
-  }, [workspaceId]);
+  // DISABLED: Realtime subscription disabled in static mode
+  // Data only updates on manual refresh or page reload
+  // useEffect(() => {
+  //   if (!workspaceId) return;
+  //
+  //   const setupRealtime = async () => {
+  //     const { data: { user } } = await supabase.auth.getUser();
+  //     if (!user) return;
+  //
+  //     const channel = supabase
+  //       .channel(`notifications-${user.id}`)
+  //       .on(
+  //         'postgres_changes',
+  //         {
+  //           event: 'INSERT',
+  //           schema: 'public',
+  //           table: 'notifications',
+  //           filter: `user_id=eq.${user.id}`,
+  //         },
+  //         (payload) => {
+  //           setNotifications(prev => [payload.new as Notification, ...prev]);
+  //         }
+  //       )
+  //       .subscribe();
+  //
+  //     return () => {
+  //       supabase.removeChannel(channel);
+  //     };
+  //   };
+  //
+  //   setupRealtime();
+  // }, [workspaceId]);
 
   const markAsRead = async (id: string) => {
     const { error } = await supabase

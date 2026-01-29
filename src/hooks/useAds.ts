@@ -42,21 +42,22 @@ export function useAdsCampaigns(sellerId?: string) {
     fetchCampaigns();
   }, [fetchCampaigns]);
 
-  // Realtime subscription
-  useEffect(() => {
-    if (!sellerId) return;
-    const channel = supabase
-      .channel(`ads-campaigns-${sellerId}`)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'ads_campaigns',
-        filter: `seller_id=eq.${sellerId}`,
-      }, () => fetchCampaigns())
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, [sellerId, fetchCampaigns]);
+  // DISABLED: Realtime subscription disabled in static mode
+  // Data only updates on manual refresh or page reload
+  // useEffect(() => {
+  //   if (!sellerId) return;
+  //   const channel = supabase
+  //     .channel(`ads-campaigns-${sellerId}`)
+  //     .on('postgres_changes', {
+  //       event: '*',
+  //       schema: 'public',
+  //       table: 'ads_campaigns',
+  //       filter: `seller_id=eq.${sellerId}`,
+  //     }, () => fetchCampaigns())
+  //     .subscribe();
+  //
+  //   return () => { supabase.removeChannel(channel); };
+  // }, [sellerId, fetchCampaigns]);
 
   return { campaigns, loading, refetch: fetchCampaigns };
 }
@@ -194,21 +195,22 @@ export function useAdsAlerts(sellerId?: string) {
     fetchAlerts();
   }, [fetchAlerts]);
 
-  // Realtime
-  useEffect(() => {
-    if (!sellerId) return;
-    const channel = supabase
-      .channel(`ads-alerts-${sellerId}`)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'ads_alerts',
-        filter: `seller_id=eq.${sellerId}`,
-      }, () => fetchAlerts())
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, [sellerId, fetchAlerts]);
+  // DISABLED: Realtime subscription disabled in static mode
+  // Data only updates on manual refresh or page reload
+  // useEffect(() => {
+  //   if (!sellerId) return;
+  //   const channel = supabase
+  //     .channel(`ads-alerts-${sellerId}`)
+  //     .on('postgres_changes', {
+  //       event: 'INSERT',
+  //       schema: 'public',
+  //       table: 'ads_alerts',
+  //       filter: `seller_id=eq.${sellerId}`,
+  //     }, () => fetchAlerts())
+  //     .subscribe();
+  //
+  //   return () => { supabase.removeChannel(channel); };
+  // }, [sellerId, fetchAlerts]);
 
   const unreadCount = useMemo(() => alerts.filter(a => !a.is_read).length, [alerts]);
 
