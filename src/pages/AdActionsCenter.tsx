@@ -175,28 +175,27 @@ export default function AdActionsCenter() {
     >
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1">
-            <TabsList>
-              <TabsTrigger value="drafts" className="flex items-center gap-2">
-                <FileText className="h-4 w-4" />
-                Rascunhos
-              </TabsTrigger>
-              <TabsTrigger value="queue" className="flex items-center gap-2">
-                <ListChecks className="h-4 w-4" />
-                Fila
-              </TabsTrigger>
-              <TabsTrigger value="completed" className="flex items-center gap-2">
-                <History className="h-4 w-4" />
-                Concluídas
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-          
-          <Button onClick={() => setCloneDialogOpen(true)} className="gap-2">
-            <Link className="h-4 w-4" />
-            Clonar por Link
-          </Button>
+        <Button onClick={() => setCloneDialogOpen(true)} className="gap-2">
+          <Link className="h-4 w-4" />
+          Clonar por Link
+        </Button>
         </div>
+
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList>
+            <TabsTrigger value="drafts" className="flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              Rascunhos
+            </TabsTrigger>
+            <TabsTrigger value="queue" className="flex items-center gap-2">
+              <ListChecks className="h-4 w-4" />
+              Fila
+            </TabsTrigger>
+            <TabsTrigger value="completed" className="flex items-center gap-2">
+              <History className="h-4 w-4" />
+              Concluídas
+            </TabsTrigger>
+          </TabsList>
 
           <TabsContent value={activeTab} className="mt-4">
             <Card>
@@ -239,6 +238,7 @@ export default function AdActionsCenter() {
               </CardContent>
             </Card>
           </TabsContent>
+        </Tabs>
       </div>
 
       {/* Confirm Dialog */}
