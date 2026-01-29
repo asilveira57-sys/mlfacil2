@@ -1,180 +1,134 @@
 
-# Plano: Adicionar Clonagem de Anúncios no Modulo de Concorrencia
+Objetivo: impedir qualquer “refresh”/recarregamento perceptível (UI voltando para skeleton, listas mudando, contadores atualizando, etc.) quando o usuário alterna de aba/janela ou volta para o sistema. A aplicação só deve atualizar dados quando:
+1) o usuário apertar F5 (reload do navegador), ou  
+2) o usuário clicar em um botão explícito de “Atualizar/Recarregar” dentro do sistema.  
 
-## Resumo
-
-O objetivo e permitir clonar qualquer anuncio diretamente do modulo de Concorrencia (aba "Meus Anuncios"), reaproveitando a infraestrutura existente de clonagem do modulo Linha do Tempo.
-
----
-
-## Contexto
-
-Atualmente a funcao de clonar anuncios esta disponivel apenas no modulo **Linha do Tempo** (`/anuncios/linha-do-tempo`), que depende de dados pre-calculados na tabela `ad_timeline_stats`. Como essa tabela nao esta sendo populada (o recalculo falha), os anuncios nao aparecem e consequentemente a opcao de clonar nao fica acessivel.
-
-A solucao e adicionar a mesma funcionalidade de clonagem diretamente na aba **"Meus Anuncios"** do modulo de Concorrencia, que ja carrega os anuncios do seller via cache (`meli_listings_cache`) e funciona independentemente da Linha do Tempo.
+Também vamos reduzir ao máximo “auto-updates” que hoje acontecem por polling (refetchInterval) e por Realtime subscriptions.
 
 ---
 
-## Arquitetura Existente
-
-```text
-+---------------------------+
-|  CompetitorListings.tsx   |  <-- Lista anuncios do seller
-+---------------------------+
-            |
-            v
-+---------------------------+
-| CompetitorProductDetail   |  <-- Drawer com detalhes do produto
-+---------------------------+
-            |
-            v (ADICIONAR AQUI)
-+---------------------------+
-|     ActionDrawer.tsx      |  <-- Ja existe, reutilizar
-+---------------------------+
-            |
-            v
-+---------------------------+
-|    useCreateAction()      |  <-- Cria registro DRAFT em ad_lifecycle_actions
-+---------------------------+
-            |
-            v
-+---------------------------+
-|  ad-action-execute (Edge) |  <-- Executa clonagem via API do ML
-+---------------------------+
-```
+Diagnóstico do que está acontecendo hoje (com base no código):
+- O React Query global já está configurado para NÃO refazer fetch ao voltar o foco (refetchOnWindowFocus=false, refetchOnReconnect=false, refetchOnMount=false). Isso ajuda.
+- Porém existem vários pontos com atualização automática independente do foco:
+  - Hooks com polling/refetchInterval (ex.: notificações a cada 30s, QA a cada 30s, trends status a cada 5 min, admin a cada 1 min).
+  - Hooks com Realtime subscription (tasks, promotions, ads campaigns/alerts, rules events, notifications etc.) que podem trazer alterações “ao vivo”.
+- Quando o usuário volta para a aba, timers “atrasados” podem disparar e alguns hooks setam loading=true novamente, causando “cara de refresh”.
+- Existe também a possibilidade de o Chrome descartar a aba por memória e recarregar a página (isso é do navegador). Isso não dá para impedir por código, mas dá para mitigar restaurando estado e evitando flashes.
 
 ---
 
-## Implementacao
-
-### 1. Atualizar CompetitorProductDetail.tsx
-
-Adicionar um botao "Clonar Anuncio" que abre o `ActionDrawer` com tipo `CLONE`:
-
-- Importar o `ActionDrawer` de `@/components/ad-timeline`
-- Importar `useCreateAction` de `@/hooks/useAdTimeline`
-- Adicionar estado para controlar abertura do drawer
-- Obter `workspaceId` (user.id) e `mlAccountId` (sellerId)
-- Ao confirmar, chamar `createActionMutation.mutateAsync()` com os dados
-
-### 2. Exibir botao de clonar tambem na tabela (CompetitorListings.tsx)
-
-Adicionar um menu de acoes (three-dot menu) em cada linha da tabela com opcao "Clonar":
-
-- Similar ao que existe em `AdTimelineRadar.tsx`
-- Ao clicar, abre o `ActionDrawer` direto para o item selecionado
-
-### 3. Criar hook/utilitario para obter workspaceId
-
-Para evitar duplicacao de logica (buscar `user.id` como workspaceId), considerar:
-
-- Usar diretamente `supabase.auth.getUser()` inline (padrao atual)
-- Ou criar um pequeno hook `useWorkspaceId()` que retorna o user.id
-
-### 4. Verificar se ad_lifecycle_actions suporta items sem ad_timeline_stats
-
-A tabela `ad_lifecycle_actions` nao tem FK para `ad_timeline_stats`, entao podemos criar acoes para qualquer `item_id` sem problemas. O edge function `ad-action-execute` busca os dados do item diretamente da API do ML se nao houver snapshot.
+Solução proposta (alto nível):
+1) Criar um “modo estático” global (default ligado) que DESLIGA:
+   - Todo polling (refetchInterval).
+   - Toda subscription realtime.
+   - Qualquer “auto refresh” que não seja disparado por botão.
+2) Adicionar um botão global “Atualizar dados” no header do sistema (AppShellLayout) para o usuário disparar atualização manual.
+3) Onde houver “polling de progresso” (ex.: acompanhar job em execução iniciado pelo usuário), permitir SOMENTE após um clique do usuário e somente por tempo limitado enquanto ele estiver na tela (opcional, mas recomendado para UX).
+4) Minimizar “flash” de loading: quando o usuário atualizar manualmente, manter os dados antigos na tela enquanto o novo fetch acontece (sem resetar para skeleton).
 
 ---
 
-## Fluxo do Usuario
+Mudanças planejadas (arquivos e ações)
 
-1. Usuario acessa **Concorrencia > Meus Anuncios**
-2. Clica em um anuncio para ver detalhes OU clica no menu de acoes na linha
-3. Clica em **"Clonar Anuncio"**
-4. Abre o drawer para selecionar o que copiar (titulo, fotos, preco, etc)
-5. Confirma e um rascunho e criado em `ad_lifecycle_actions`
-6. Usuario pode ir em **Linha do Tempo > Central de Acoes** para executar a clonagem
+A) Camada global de política de atualização (novo contexto)
+1. Criar um contexto/hook global, por exemplo:
+   - src/contexts/RefreshPolicyContext.tsx (novo)
+   - API:
+     - autoRefreshEnabled (boolean) -> default: false (modo estático)
+     - setAutoRefreshEnabled(boolean) -> opcional (se você quiser permitir ligar “ao vivo” depois)
+     - manualRefresh() -> dispara refresh manual
+   - Persistência em localStorage (ex.: “app_auto_refresh_enabled”).
+2. Expor um hook simples:
+   - useRefreshPolicy()
 
----
+B) Tornar o React Query “não-stale” por padrão (para não revalidar automaticamente)
+1. Ajustar src/App.tsx:
+   - defaultOptions.queries.staleTime: Infinity (ou um valor muito alto)
+   - manter refetchOnWindowFocus=false, refetchOnReconnect=false, refetchOnMount=false
+   - manter retry baixo (ou 0) para evitar comportamento “automático” em cascata
+   Observação: isso garante que o React Query não fique marcando as queries como “stale” e não tente “ajudar” com refetch em momentos inesperados.
 
-## Arquivos a Modificar
+C) Desligar polling (refetchInterval) quando modo estático estiver ativo
+Alterar os hooks que hoje fazem polling para só fazer quando autoRefreshEnabled=true OU quando houver uma operação explícita iniciada pelo usuário.
 
-| Arquivo | Alteracao |
-|---------|-----------|
-| `src/components/competitor/CompetitorProductDetail.tsx` | Adicionar botao "Clonar" e integrar ActionDrawer |
-| `src/components/competitor/CompetitorListings.tsx` | Adicionar menu de acoes com opcao "Clonar" |
+Arquivos identificados:
+- src/hooks/useAppNotifications.ts
+  - useUnreadNotificationsCount: remover refetchInterval: 30000 quando static mode estiver ativo
+- src/hooks/useQA.ts
+  - usePendingQuestionsCount: remover refetchInterval: 30000 quando static mode estiver ativo
+- src/hooks/useTrendsStatus.ts
+  - refetchInterval: 5*60*1000 -> desligar em static mode
+- src/hooks/useAdmin.ts
+  - refetchInterval: 60000 -> desligar em static mode
+- src/hooks/useSellerCategories.ts
+  - useCategorySyncState: hoje faz polling enquanto status=running
+    - Ajuste recomendado: polling só se o usuário acabou de clicar “Sincronizar” (janela de polling temporária) OU se autoRefreshEnabled=true
 
----
+D) Desligar Realtime subscriptions quando modo estático estiver ativo
+Em todos os hooks que abrem channel() e refetcham automaticamente, condicionar a inscrição a autoRefreshEnabled.
 
-## Detalhes Tecnicos
+Arquivos com subscription identificados:
+- src/hooks/useNotificationSystem.ts (notifications realtime)
+- src/hooks/useNotifications.ts
+- src/hooks/useTasks.ts
+- src/hooks/usePromotions.ts
+- src/hooks/useAds.ts (ads campaigns e alerts)
+- src/hooks/useAdsRules.ts (ads rule events)
+- src/hooks/useAdsTasksHistory.ts
+- src/hooks/useQA.ts (qa realtime aparece no arquivo em linhas posteriores)
+Ação: em cada useEffect do channel, adicionar:
+- if (!autoRefreshEnabled) return;  (ou não criar channel)
+Assim, nada “se mexe” sozinho quando o usuário troca de aba.
 
-### CompetitorProductDetail.tsx - Mudancas
+E) Botão global “Atualizar dados” (manual refresh)
+1. Alterar src/components/layout/AppShellLayout.tsx para incluir um botão no header (ex.: ícone RefreshCw “Atualizar”).
+2. Ao clicar, executar uma estratégia de refresh manual:
+   Opção 1 (mais simples, focada em React Query):
+   - queryClient.invalidateQueries({ type: 'active' })
+   - queryClient.refetchQueries({ type: 'active' })
+   Isso atualiza apenas o que estiver “em uso” na tela.
+   Opção 2 (mais abrangente):
+   - disparar um evento global window.dispatchEvent(new CustomEvent('manual_refresh'))
+   - cada módulo que não usa React Query pode ouvir e rodar seu refetch.
+   Como o projeto tem hooks fora do React Query (useState + fetch + loading), essa opção dá cobertura total sem refatorar tudo.
 
-```tsx
-// Novos imports
-import { ActionDrawer } from "@/components/ad-timeline";
-import { useCreateAction } from "@/hooks/useAdTimeline";
-import type { ActionType, CloneChecklist } from "@/types/ad-timeline";
+Recomendação: implementar as duas:
+- refetchQueries(active) para React Query
+- evento “manual_refresh” para os hooks que usam fetch manual
 
-// Novos estados
-const [cloneDrawerOpen, setCloneDrawerOpen] = useState(false);
-const [workspaceId, setWorkspaceId] = useState<string | null>(null);
-const createActionMutation = useCreateAction();
-
-// Effect para obter workspaceId
-useEffect(() => {
-  supabase.auth.getUser().then(({ data }) => {
-    if (data.user) setWorkspaceId(data.user.id);
-  });
-}, []);
-
-// Handler para confirmar clonagem
-const handleConfirmClone = async (reason: string, checklist: CloneChecklist) => {
-  if (!workspaceId) return;
-  await createActionMutation.mutateAsync({
-    workspaceId,
-    mlAccountId: sellerId,
-    itemId: listing.item_id,
-    actionType: 'CLONE' as ActionType,
-    reason,
-    checklist,
-  });
-  setCloneDrawerOpen(false);
-  toast.success('Rascunho de clonagem criado! Vá à Central de Ações para executar.');
-};
-
-// Botao no JSX
-<Button onClick={() => setCloneDrawerOpen(true)}>
-  <Copy className="h-4 w-4 mr-2" />
-  Clonar Anúncio
-</Button>
-
-// ActionDrawer no final
-<ActionDrawer
-  open={cloneDrawerOpen}
-  onOpenChange={setCloneDrawerOpen}
-  actionType="CLONE"
-  itemId={listing.item_id}
-  itemTitle={listing.title}
-  onConfirm={handleConfirmClone}
-  isLoading={createActionMutation.isPending}
-/>
-```
-
-### CompetitorListings.tsx - Mudancas
-
-- Adicionar imports similares
-- Adicionar estado para item selecionado e drawer
-- Adicionar coluna de acoes com DropdownMenu
-- Incluir ActionDrawer no render
+F) Evitar “flash” de loading em refresh manual
+Onde ainda existir loading “agressivo” (setLoading(true) sempre que refaz fetch), ajustar para:
+- só mostrar loading no primeiro carregamento
+- em refetch manual, manter dados antigos e mostrar um indicador pequeno (spinner no botão, por exemplo)
+Isso é especialmente importante nos hooks fora do React Query (ex.: useAdsCampaigns/useAdsAlerts/usePromotions/useTasks).
 
 ---
 
-## Consideracoes
-
-1. **Execucao diferida**: O clone nao e executado imediatamente, apenas um rascunho e criado. O usuario deve ir na Central de Acoes para executar.
-
-2. **Alternativa**: Podemos adicionar execucao direta (com confirmacao) sem passar pela Central de Acoes, mas isso requer modificar o fluxo atual.
-
-3. **RLS**: A tabela `ad_lifecycle_actions` ja tem RLS baseada em `workspace_id`, entao os registros criados estarao protegidos.
+Como vamos validar (checklist prático)
+1) Abrir /anuncios/linha-do-tempo e outra tela qualquer.
+2) Abrir DevTools > Network.
+3) Trocar de aba/janela por 10–20s e voltar:
+   - esperado: nenhum “boom” de requests, nenhuma troca de skeleton/flash.
+4) Clicar no botão global “Atualizar dados”:
+   - esperado: requests acontecem e a UI atualiza, sem reset de layout.
+5) Verificar módulos com polling antigo (QA, notificações, tendências):
+   - esperado: contadores não mudam sozinhos ao voltar para a aba.
+6) (Extra) Se o Chrome estiver realmente descartando a aba (tab discard):
+   - esperado: mesmo que a página recarregue, vamos tentar restaurar o estado/rota e reduzir flashes.
+   - Observação: não é possível impedir o discard via código, só mitigar.
 
 ---
 
-## Resultado Esperado
+Riscos e impactos (para alinhar expectativa)
+- Desligar realtime + polling significa que notificações/contadores não vão “andar sozinhos” (por design). O usuário precisará clicar “Atualizar”.
+- Processos em background (jobs) continuarão rodando normalmente no backend; apenas a tela não refletirá mudanças automaticamente.
 
-Apos a implementacao, o usuario podera:
+---
 
-- Ver qualquer anuncio na aba "Meus Anuncios" do modulo Concorrencia
-- Clonar o anuncio diretamente de la
-- Gerenciar a execucao na Central de Acoes
+Entrega (ordem de implementação)
+1) Criar RefreshPolicyContext e persistência.
+2) Ajustar QueryClient (staleTime alto/infinito).
+3) Desligar polling (refetchInterval) condicionado ao modo estático.
+4) Desligar realtime subscriptions condicionado ao modo estático.
+5) Botão global “Atualizar dados” + evento manual_refresh.
+6) Ajustar loaders para não “piscar” em refresh manual (primeiro nos módulos mais usados).
