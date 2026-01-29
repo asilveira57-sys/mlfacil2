@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useCollaboratorAccess, getModuleKeyFromRoute } from '@/hooks/useCollaboratorAccess';
@@ -18,6 +18,14 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
   const location = useLocation();
   const { isCollaborator, isLoading, hasModuleAccess } = useCollaboratorAccess();
   const [timedOut, setTimedOut] = useState(false);
+  // Prevent full-screen "blank" on background refetches.
+  // Once access has been resolved at least once, keep rendering children
+  // even if the underlying hook briefly flips to loading.
+  const hasResolvedOnceRef = useRef(false);
+
+  useEffect(() => {
+    if (!isLoading) hasResolvedOnceRef.current = true;
+  }, [isLoading]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -70,6 +78,11 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
   }, [isLoading, isCollaborator, location.pathname, hasModuleAccess, navigate]);
 
   if (isLoading) {
+    // If we already resolved once, never block the entire app frame.
+    if (hasResolvedOnceRef.current) {
+      return <>{children}</>;
+    }
+
     if (timedOut) {
       return (
         <div className="min-h-screen bg-background flex items-center justify-center p-6">

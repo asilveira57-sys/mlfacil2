@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -58,6 +59,7 @@ import {
 import { toast } from 'sonner';
 
 export default function Promocoes() {
+  const navigate = useNavigate();
   const { sellerId, activeAccount, loading: accountLoading, initialized } = useActiveAccount();
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [selectedPromotion, setSelectedPromotion] = useState<PromotionSnapshot | null>(null);
@@ -138,7 +140,7 @@ export default function Promocoes() {
           description: result.error,
           action: {
             label: 'Conectar',
-            onClick: () => window.location.href = '/settings',
+              onClick: () => navigate('/settings'),
           },
         });
       } else {
@@ -193,7 +195,7 @@ export default function Promocoes() {
               <p className="text-muted-foreground">
                 Conecte sua conta do Mercado Livre para acessar a Central de Promoções.
               </p>
-              <Button className="mt-4" onClick={() => window.location.href = '/settings'}>
+              <Button className="mt-4" onClick={() => navigate('/settings')}>
                 Conectar Conta
               </Button>
             </CardContent>
@@ -277,7 +279,7 @@ export default function Promocoes() {
                   size="sm" 
                   variant="outline" 
                   className="ml-4 gap-1.5"
-                  onClick={() => window.location.href = '/settings'}
+                   onClick={() => navigate('/settings')}
                 >
                   <Link2 className="h-3.5 w-3.5" />
                   Reconectar Conta
