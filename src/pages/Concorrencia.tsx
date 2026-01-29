@@ -12,13 +12,16 @@ import {
   Search as SearchIcon,
   Bell,
   Settings,
-  AlertTriangle
+  AlertTriangle,
+  Eye
 } from 'lucide-react';
 import { CompetitorOverview } from '@/components/competitor/CompetitorOverview';
 import { CompetitorListings } from '@/components/competitor/CompetitorListings';
 import { CompetitorMarketSearch } from '@/components/competitor/CompetitorMarketSearch';
 import { CompetitorAlerts } from '@/components/competitor/CompetitorAlerts';
 import { CompetitorSettings } from '@/components/competitor/CompetitorSettings';
+import { TrackedCompetitorsTab } from '@/components/competitor/TrackedCompetitorsTab';
+import { TrackingAlertsTab } from '@/components/competitor/TrackingAlertsTab';
 import { PageContainer } from '@/components/layout/PageContainer';
 
 interface MlAccount {
@@ -31,7 +34,7 @@ export default function Concorrencia() {
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState<MlAccount[]>([]);
   const [selectedSellerId, setSelectedSellerId] = useState<string>('');
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('tracked');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -105,13 +108,21 @@ export default function Concorrencia() {
   return (
     <PageContainer
       title="Concorrência"
-      subtitle="Análise de mercado e posicionamento de preços"
+      subtitle="Monitore preços e estratégias dos concorrentes"
       headerContent={headerContent}
     >
       <div className="container mx-auto p-6 space-y-6">
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid">
+          <TabsList className="grid w-full grid-cols-7 lg:w-auto lg:inline-grid">
+            <TabsTrigger value="tracked" className="gap-2">
+              <Eye className="h-4 w-4" />
+              <span className="hidden sm:inline">Monitorados</span>
+            </TabsTrigger>
+            <TabsTrigger value="tracking-alerts" className="gap-2">
+              <Bell className="h-4 w-4" />
+              <span className="hidden sm:inline">Alertas</span>
+            </TabsTrigger>
             <TabsTrigger value="overview" className="gap-2">
               <TrendingUp className="h-4 w-4" />
               <span className="hidden sm:inline">Visão Geral</span>
@@ -125,14 +136,22 @@ export default function Concorrencia() {
               <span className="hidden sm:inline">Pesquisar</span>
             </TabsTrigger>
             <TabsTrigger value="alerts" className="gap-2">
-              <Bell className="h-4 w-4" />
-              <span className="hidden sm:inline">Alertas</span>
+              <AlertTriangle className="h-4 w-4" />
+              <span className="hidden sm:inline">Margem</span>
             </TabsTrigger>
             <TabsTrigger value="settings" className="gap-2">
               <Settings className="h-4 w-4" />
-              <span className="hidden sm:inline">Configurações</span>
+              <span className="hidden sm:inline">Config</span>
             </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="tracked" className="mt-6">
+            <TrackedCompetitorsTab sellerId={selectedSellerId} />
+          </TabsContent>
+
+          <TabsContent value="tracking-alerts" className="mt-6">
+            <TrackingAlertsTab sellerId={selectedSellerId} />
+          </TabsContent>
 
           <TabsContent value="overview" className="mt-6">
             <CompetitorOverview sellerId={selectedSellerId} />
