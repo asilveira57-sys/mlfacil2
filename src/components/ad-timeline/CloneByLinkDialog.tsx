@@ -95,13 +95,11 @@ export function CloneByLinkDialog({ open, onOpenChange }: CloneByLinkDialogProps
       const user = authData?.user;
       if (!user) throw new Error('Não autenticado');
 
-      // Get ml_account_id - using dynamic query to avoid type issues
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sb = supabase as any;
-      const { data: mlAccount } = await sb
+      // Get ml_account_id using ml_user_id (which maps to sellerId)
+      const { data: mlAccount } = await supabase
         .from('ml_accounts')
         .select('id')
-        .eq('seller_id', activeAccount.sellerId)
+        .eq('ml_user_id', activeAccount.sellerId)
         .eq('user_id', user.id)
         .limit(1)
         .single();
