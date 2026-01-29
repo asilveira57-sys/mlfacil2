@@ -52,12 +52,13 @@ serve(async (req) => {
     const thresholds = settings?.thresholds_days || [30, 60, 90, 120];
 
     // Build query for sales data from meli_order_items_cache
+    // Using created_at_meli as the sale date (when the order was created on ML)
     let salesQuery = supabase
       .from("meli_order_items_cache")
-      .select("item_id, sale_datetime, seller_id")
-      .eq("user_id", workspace_id) // assuming workspace_id maps to user_id context
-      .not("sale_datetime", "is", null)
-      .order("sale_datetime", { ascending: true });
+      .select("item_id, created_at_meli, seller_id")
+      .eq("user_id", workspace_id)
+      .not("created_at_meli", "is", null)
+      .order("created_at_meli", { ascending: true });
 
     if (ml_account_id) {
       salesQuery = salesQuery.eq("seller_id", ml_account_id);
@@ -95,7 +96,7 @@ serve(async (req) => {
       if (!itemSales[key]) {
         itemSales[key] = { seller_id: sale.seller_id, dates: [] };
       }
-      itemSales[key].dates.push(new Date(sale.sale_datetime));
+      itemSales[key].dates.push(new Date(sale.created_at_meli));
     }
 
     const now = new Date();
