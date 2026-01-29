@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -450,10 +451,10 @@ function NoMlAccountState() {
         através das <strong>Configurações → Integrações</strong>.
       </p>
       <Button variant="outline" asChild>
-        <a href="/settings">
+        <Link to="/settings">
           <Settings className="h-4 w-4 mr-2" />
           Ir para Configurações
-        </a>
+        </Link>
       </Button>
     </div>
   );

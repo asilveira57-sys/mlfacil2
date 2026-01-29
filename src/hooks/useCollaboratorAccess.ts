@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { MODULE_CATALOG } from '@/types/collaborator';
 
@@ -19,16 +19,24 @@ export function useCollaboratorAccess(): CollaboratorAccess {
   const [isCollaborator, setIsCollaborator] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [enabledModules, setEnabledModules] = useState<Set<string>>(new Set());
+  // Only block UI on the very first load; subsequent refetches must be silent.
+  const initialLoadDoneRef = useRef(false);
 
   const fetchAccess = useCallback(async () => {
     try {
-      setIsLoading(true);
+      if (!initialLoadDoneRef.current) {
+        setIsLoading(true);
+      }
 
-      const { data: { user } } = await supabase.auth.getUser();
+      // IMPORTANT: getSession() is local-cache and avoids a network call.
+      // getUser() can block on network and can be triggered again on tab focus.
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) {
         setIsCollaborator(false);
         setEnabledModules(new Set());
         setIsLoading(false);
+        initialLoadDoneRef.current = true;
         return;
       }
 
@@ -45,6 +53,7 @@ export function useCollaboratorAccess(): CollaboratorAccess {
         const allModules = new Set(MODULE_CATALOG.map(m => m.key));
         setEnabledModules(allModules);
         setIsLoading(false);
+        initialLoadDoneRef.current = true;
         return;
       }
 
@@ -62,6 +71,7 @@ export function useCollaboratorAccess(): CollaboratorAccess {
         const allModules = new Set(MODULE_CATALOG.map(m => m.key));
         setEnabledModules(allModules);
         setIsLoading(false);
+        initialLoadDoneRef.current = true;
         return;
       }
 
@@ -92,6 +102,7 @@ export function useCollaboratorAccess(): CollaboratorAccess {
       setEnabledModules(new Set(['dashboard']));
     } finally {
       setIsLoading(false);
+      initialLoadDoneRef.current = true;
     }
   }, []);
 
@@ -101,9 +112,10 @@ export function useCollaboratorAccess(): CollaboratorAccess {
     // Listen for auth changes - ONLY on actual session changes
     // Ignoring TOKEN_REFRESHED prevents tab-switch flickering
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
-        fetchAccess();
-      }
+      // Only react to SIGNED_OUT.
+      // SIGNED_IN can be emitted unexpectedly in some edge cases and would
+      // cause a full-screen guard spinner that looks like a page reload.
+      if (event === 'SIGNED_OUT') fetchAccess();
       // TOKEN_REFRESHED and INITIAL_SESSION are ignored
     });
 
