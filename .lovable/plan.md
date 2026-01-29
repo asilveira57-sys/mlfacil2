@@ -1,134 +1,157 @@
 
-Objetivo: impedir qualquer “refresh”/recarregamento perceptível (UI voltando para skeleton, listas mudando, contadores atualizando, etc.) quando o usuário alterna de aba/janela ou volta para o sistema. A aplicação só deve atualizar dados quando:
-1) o usuário apertar F5 (reload do navegador), ou  
-2) o usuário clicar em um botão explícito de “Atualizar/Recarregar” dentro do sistema.  
+# Plano: Eliminação de Refresh Automático no Frame Principal
 
-Também vamos reduzir ao máximo “auto-updates” que hoje acontecem por polling (refetchInterval) e por Realtime subscriptions.
+## Contexto do Problema
 
----
+O usuário reportou que a aplicação inteira recarrega (como um F5) em duas situações:
+1. **Trocar de aba do navegador** (foco) 
+2. **Navegar entre páginas no menu** (mudança de rota)
 
-Diagnóstico do que está acontecendo hoje (com base no código):
-- O React Query global já está configurado para NÃO refazer fetch ao voltar o foco (refetchOnWindowFocus=false, refetchOnReconnect=false, refetchOnMount=false). Isso ajuda.
-- Porém existem vários pontos com atualização automática independente do foco:
-  - Hooks com polling/refetchInterval (ex.: notificações a cada 30s, QA a cada 30s, trends status a cada 5 min, admin a cada 1 min).
-  - Hooks com Realtime subscription (tasks, promotions, ads campaigns/alerts, rules events, notifications etc.) que podem trazer alterações “ao vivo”.
-- Quando o usuário volta para a aba, timers “atrasados” podem disparar e alguns hooks setam loading=true novamente, causando “cara de refresh”.
-- Existe também a possibilidade de o Chrome descartar a aba por memória e recarregar a página (isso é do navegador). Isso não dá para impedir por código, mas dá para mitigar restaurando estado e evitando flashes.
+Após análise extensiva do código, identifiquei várias fontes potenciais de instabilidade que podem causar remontagem completa do componente raiz ou cascatas de re-renderização.
 
 ---
 
-Solução proposta (alto nível):
-1) Criar um “modo estático” global (default ligado) que DESLIGA:
-   - Todo polling (refetchInterval).
-   - Toda subscription realtime.
-   - Qualquer “auto refresh” que não seja disparado por botão.
-2) Adicionar um botão global “Atualizar dados” no header do sistema (AppShellLayout) para o usuário disparar atualização manual.
-3) Onde houver “polling de progresso” (ex.: acompanhar job em execução iniciado pelo usuário), permitir SOMENTE após um clique do usuário e somente por tempo limitado enquanto ele estiver na tela (opcional, mas recomendado para UX).
-4) Minimizar “flash” de loading: quando o usuário atualizar manualmente, manter os dados antigos na tela enquanto o novo fetch acontece (sem resetar para skeleton).
+## Causa Raiz Identificada
+
+### 1. Múltiplas chamadas `supabase.auth.getSession()` dispersas em useEffects
+
+Encontrei **40+ arquivos** com chamadas diretas a `supabase.auth.getSession()` dentro de `useEffect` nas montagens de componentes. Quando essas chamadas disparam simultaneamente ao trocar de aba ou ao navegar, elas podem:
+- Causar corridas (race conditions) com o auto-refresh do token do Supabase
+- Disparar múltiplas re-renderizações em cascata
+- Resultar em estados inconsistentes entre contextos
+
+### 2. Hooks que reagem a `SIGNED_IN` durante Token Refresh
+
+Embora os hooks ignorem `TOKEN_REFRESHED`, alguns hooks como `useUserRole` e `useUserAccessState` ainda chamam `fetchRole()` ou `fetchStatus()` no evento `SIGNED_IN`. Se o token expirar e for renovado entre abas, pode gerar um evento `SIGNED_IN` que dispara toda a cadeia de inicialização.
+
+### 3. Chamadas de `getSession()` no `Dashboard.tsx` durante inicialização
+
+O Dashboard.tsx faz chamadas diretas ao `supabase.auth.getSession()` em múltiplos `useEffect`, incluindo durante verificações de OAuth callback e sync debug, o que pode conflitar com os contextos globais.
+
+### 4. Páginas com padrão inconsistente de verificação de auth
+
+Páginas como `AdTimelineRadar.tsx`, `AdTimelineDetail.tsx` e `AdActionsCenter.tsx` usam o padrão `supabase.auth.getUser().then()` dentro de `useEffect` para obter o `workspaceId`, criando chamadas redundantes que podem causar re-renderizações.
 
 ---
 
-Mudanças planejadas (arquivos e ações)
+## Plano de Correção
 
-A) Camada global de política de atualização (novo contexto)
-1. Criar um contexto/hook global, por exemplo:
-   - src/contexts/RefreshPolicyContext.tsx (novo)
-   - API:
-     - autoRefreshEnabled (boolean) -> default: false (modo estático)
-     - setAutoRefreshEnabled(boolean) -> opcional (se você quiser permitir ligar “ao vivo” depois)
-     - manualRefresh() -> dispara refresh manual
-   - Persistência em localStorage (ex.: “app_auto_refresh_enabled”).
-2. Expor um hook simples:
-   - useRefreshPolicy()
+### Fase 1: Centralizar verificação de sessão no ActiveAccountContext
 
-B) Tornar o React Query “não-stale” por padrão (para não revalidar automaticamente)
-1. Ajustar src/App.tsx:
-   - defaultOptions.queries.staleTime: Infinity (ou um valor muito alto)
-   - manter refetchOnWindowFocus=false, refetchOnReconnect=false, refetchOnMount=false
-   - manter retry baixo (ou 0) para evitar comportamento “automático” em cascata
-   Observação: isso garante que o React Query não fique marcando as queries como “stale” e não tente “ajudar” com refetch em momentos inesperados.
+Todas as páginas e componentes devem usar o contexto global em vez de chamar `supabase.auth.getUser()` diretamente.
 
-C) Desligar polling (refetchInterval) quando modo estático estiver ativo
-Alterar os hooks que hoje fazem polling para só fazer quando autoRefreshEnabled=true OU quando houver uma operação explícita iniciada pelo usuário.
+**Arquivos a modificar:**
+- `src/pages/AdActionsCenter.tsx` - Remover `useEffect` com `getUser()`, usar `useActiveAccount()` para obter user.id
+- `src/pages/AdTimelineRadar.tsx` - Mesmo padrão
+- `src/pages/AdTimelineDetail.tsx` - Mesmo padrão  
+- `src/pages/TarefaDetalhe.tsx` - Mesmo padrão
 
-Arquivos identificados:
-- src/hooks/useAppNotifications.ts
-  - useUnreadNotificationsCount: remover refetchInterval: 30000 quando static mode estiver ativo
-- src/hooks/useQA.ts
-  - usePendingQuestionsCount: remover refetchInterval: 30000 quando static mode estiver ativo
-- src/hooks/useTrendsStatus.ts
-  - refetchInterval: 5*60*1000 -> desligar em static mode
-- src/hooks/useAdmin.ts
-  - refetchInterval: 60000 -> desligar em static mode
-- src/hooks/useSellerCategories.ts
-  - useCategorySyncState: hoje faz polling enquanto status=running
-    - Ajuste recomendado: polling só se o usuário acabou de clicar “Sincronizar” (janela de polling temporária) OU se autoRefreshEnabled=true
+**Mudança padrão:**
+```typescript
+// ANTES (dispara getUser() na montagem)
+const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+useEffect(() => {
+  supabase.auth.getUser().then(({ data }) => {
+    if (data.user) setWorkspaceId(data.user.id);
+  });
+}, []);
 
-D) Desligar Realtime subscriptions quando modo estático estiver ativo
-Em todos os hooks que abrem channel() e refetcham automaticamente, condicionar a inscrição a autoRefreshEnabled.
+// DEPOIS (usa contexto centralizado)
+const { activeAccountId } = useActiveAccount();
+const workspaceId = activeAccountId; // Ou criar um hook dedicado useCurrentUserId()
+```
 
-Arquivos com subscription identificados:
-- src/hooks/useNotificationSystem.ts (notifications realtime)
-- src/hooks/useNotifications.ts
-- src/hooks/useTasks.ts
-- src/hooks/usePromotions.ts
-- src/hooks/useAds.ts (ads campaigns e alerts)
-- src/hooks/useAdsRules.ts (ads rule events)
-- src/hooks/useAdsTasksHistory.ts
-- src/hooks/useQA.ts (qa realtime aparece no arquivo em linhas posteriores)
-Ação: em cada useEffect do channel, adicionar:
-- if (!autoRefreshEnabled) return;  (ou não criar channel)
-Assim, nada “se mexe” sozinho quando o usuário troca de aba.
+### Fase 2: Criar hook utilitário `useCurrentUserId`
 
-E) Botão global “Atualizar dados” (manual refresh)
-1. Alterar src/components/layout/AppShellLayout.tsx para incluir um botão no header (ex.: ícone RefreshCw “Atualizar”).
-2. Ao clicar, executar uma estratégia de refresh manual:
-   Opção 1 (mais simples, focada em React Query):
-   - queryClient.invalidateQueries({ type: 'active' })
-   - queryClient.refetchQueries({ type: 'active' })
-   Isso atualiza apenas o que estiver “em uso” na tela.
-   Opção 2 (mais abrangente):
-   - disparar um evento global window.dispatchEvent(new CustomEvent('manual_refresh'))
-   - cada módulo que não usa React Query pode ouvir e rodar seu refetch.
-   Como o projeto tem hooks fora do React Query (useState + fetch + loading), essa opção dá cobertura total sem refatorar tudo.
+Criar um hook simples que expõe o `userId` de forma reativa a partir do contexto de autenticação global, evitando chamadas diretas ao Supabase.
 
-Recomendação: implementar as duas:
-- refetchQueries(active) para React Query
-- evento “manual_refresh” para os hooks que usam fetch manual
+**Novo arquivo:** `src/hooks/useCurrentUserId.ts`
+```typescript
+import { useState, useEffect } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 
-F) Evitar “flash” de loading em refresh manual
-Onde ainda existir loading “agressivo” (setLoading(true) sempre que refaz fetch), ajustar para:
-- só mostrar loading no primeiro carregamento
-- em refetch manual, manter dados antigos e mostrar um indicador pequeno (spinner no botão, por exemplo)
-Isso é especialmente importante nos hooks fora do React Query (ex.: useAdsCampaigns/useAdsAlerts/usePromotions/useTasks).
+let cachedUserId: string | null = null;
+let fetchPromise: Promise<string | null> | null = null;
+
+export function useCurrentUserId(): string | null {
+  const [userId, setUserId] = useState<string | null>(cachedUserId);
+
+  useEffect(() => {
+    if (cachedUserId) {
+      setUserId(cachedUserId);
+      return;
+    }
+
+    if (!fetchPromise) {
+      fetchPromise = supabase.auth.getUser().then(({ data }) => {
+        cachedUserId = data.user?.id || null;
+        return cachedUserId;
+      });
+    }
+
+    fetchPromise.then(setUserId);
+  }, []);
+
+  // Limpar cache no logout
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        cachedUserId = null;
+        fetchPromise = null;
+        setUserId(null);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  return userId;
+}
+```
+
+### Fase 3: Aplicar Static Mode a hooks restantes
+
+Alguns hooks críticos que ainda podem estar disparando refetch:
+
+**Arquivos a verificar/corrigir:**
+- `src/hooks/useNotificationSystem.ts` - As queries `useActiveNotifications`, `usePriorityNotifications` e `useNotificationCounts` precisam de Static Mode
+- `src/hooks/useSellerCategories.ts` - Verificar configuração
+- `src/hooks/useTrendsApi.ts` - Verificar configuração
+
+**Configuração padrão a aplicar:**
+```typescript
+{
+  staleTime: Infinity,
+  refetchOnWindowFocus: false,
+  refetchOnReconnect: false,
+  refetchOnMount: false,
+}
+```
+
+### Fase 4: Remover listeners `SIGNED_IN` redundantes em hooks
+
+O evento `SIGNED_IN` pode ser disparado em situações inesperadas. Para hooks que já fazem fetch na montagem, o listener de `SIGNED_IN` é redundante e pode causar double-fetch.
+
+**Arquivos a modificar:**
+- `src/hooks/useUserRole.ts` - Remover refetch em `SIGNED_IN` (já faz fetch na montagem)
+- `src/hooks/useUserAccessState.ts` - Mesmo padrão
+- `src/hooks/useCollaboratorAccess.ts` - Mesmo padrão
 
 ---
 
-Como vamos validar (checklist prático)
-1) Abrir /anuncios/linha-do-tempo e outra tela qualquer.
-2) Abrir DevTools > Network.
-3) Trocar de aba/janela por 10–20s e voltar:
-   - esperado: nenhum “boom” de requests, nenhuma troca de skeleton/flash.
-4) Clicar no botão global “Atualizar dados”:
-   - esperado: requests acontecem e a UI atualiza, sem reset de layout.
-5) Verificar módulos com polling antigo (QA, notificações, tendências):
-   - esperado: contadores não mudam sozinhos ao voltar para a aba.
-6) (Extra) Se o Chrome estiver realmente descartando a aba (tab discard):
-   - esperado: mesmo que a página recarregue, vamos tentar restaurar o estado/rota e reduzir flashes.
-   - Observação: não é possível impedir o discard via código, só mitigar.
+## Ordem de Implementação
+
+1. Criar `useCurrentUserId.ts` com cache global
+2. Atualizar páginas de Ad Timeline para usar hook centralizado
+3. Aplicar Static Mode nos hooks de notificação
+4. Simplificar listeners de auth nos hooks de role/access
+5. Testar navegação entre páginas e troca de abas
 
 ---
 
-Riscos e impactos (para alinhar expectativa)
-- Desligar realtime + polling significa que notificações/contadores não vão “andar sozinhos” (por design). O usuário precisará clicar “Atualizar”.
-- Processos em background (jobs) continuarão rodando normalmente no backend; apenas a tela não refletirá mudanças automaticamente.
+## Resultado Esperado
 
----
-
-Entrega (ordem de implementação)
-1) Criar RefreshPolicyContext e persistência.
-2) Ajustar QueryClient (staleTime alto/infinito).
-3) Desligar polling (refetchInterval) condicionado ao modo estático.
-4) Desligar realtime subscriptions condicionado ao modo estático.
-5) Botão global “Atualizar dados” + evento manual_refresh.
-6) Ajustar loaders para não “piscar” em refresh manual (primeiro nos módulos mais usados).
+Após as correções:
+- Trocar de aba NÃO deve causar reload da página
+- Navegar no menu deve manter o shell (sidebar/header) estável
+- Dados só atualizam com o botão "Atualizar dados" no header
+- Sem chamadas redundantes ao `supabase.auth.getUser()`
