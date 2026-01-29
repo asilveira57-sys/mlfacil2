@@ -15,6 +15,11 @@ export function useModuleTags() {
       if (error) throw error;
       return data as ModuleTag[];
     },
+    // Static Mode: No auto-refresh on window focus
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
   });
 }
 
@@ -30,6 +35,11 @@ export function useSystemModules() {
       if (modulesError) throw modulesError;
       return modules as SystemModule[];
     },
+    // Static Mode: No auto-refresh on window focus
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
   });
 }
 
@@ -44,6 +54,11 @@ export function useModuleTagAssignments() {
       if (error) throw error;
       return data as ModuleTagAssignment[];
     },
+    // Static Mode: No auto-refresh on window focus
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
   });
 }
 
