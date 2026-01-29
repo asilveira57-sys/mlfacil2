@@ -82,7 +82,7 @@ export default function Concorrencia() {
         </Select>
       )}
       <Button asChild>
-        <Link to="/anuncios/clonar">
+        <Link to="/anuncios/acoes">
           <Copy className="h-4 w-4 mr-2" />
           Clonar
         </Link>
