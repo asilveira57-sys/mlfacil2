@@ -8,9 +8,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Search, RefreshCw, ExternalLink, Tag, Package } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Search, RefreshCw, ExternalLink, Tag, Package, MoreHorizontal, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { CompetitorProductDetail } from './CompetitorProductDetail';
+import { ActionDrawer } from '@/components/ad-timeline';
+import { useCreateAction } from '@/hooks/useAdTimeline';
+import type { CloneChecklist } from '@/types/ad-timeline';
 
 interface CompetitorListingsProps {
   sellerId: string;
@@ -46,6 +50,39 @@ export function CompetitorListings({ sellerId }: CompetitorListingsProps) {
   const [syncing, setSyncing] = useState(false);
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [cloneDrawerOpen, setCloneDrawerOpen] = useState(false);
+  const [cloneTarget, setCloneTarget] = useState<Listing | null>(null);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const createActionMutation = useCreateAction();
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) setWorkspaceId(data.user.id);
+    });
+  }, []);
+
+  const handleOpenClone = (listing: Listing, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCloneTarget(listing);
+    setCloneDrawerOpen(true);
+  };
+
+  const handleConfirmClone = async (reason: string, checklist: CloneChecklist) => {
+    if (!workspaceId || !cloneTarget) {
+      toast.error('Dados insuficientes para clonar');
+      return;
+    }
+    await createActionMutation.mutateAsync({
+      workspaceId,
+      mlAccountId: sellerId,
+      itemId: cloneTarget.item_id,
+      actionType: 'CLONE',
+      reason,
+      checklist,
+    });
+    setCloneDrawerOpen(false);
+    setCloneTarget(null);
+  };
 
   const loadListings = async () => {
     setLoading(true);
@@ -201,6 +238,7 @@ export function CompetitorListings({ sellerId }: CompetitorListingsProps) {
                       <TableHead className="text-center">Vendidos</TableHead>
                       <TableHead className="text-center">Estoque</TableHead>
                       <TableHead>Tipo</TableHead>
+                      <TableHead className="w-12"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -251,6 +289,34 @@ export function CompetitorListings({ sellerId }: CompetitorListingsProps) {
                             )}
                           </div>
                         </TableCell>
+                        <TableCell>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="h-8 w-8"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={(e) => handleOpenClone(listing, e as unknown as React.MouseEvent)}>
+                                <Copy className="h-4 w-4 mr-2" />
+                                Clonar Anúncio
+                              </DropdownMenuItem>
+                              {listing.permalink && (
+                                <DropdownMenuItem asChild>
+                                  <a href={listing.permalink} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                                    <ExternalLink className="h-4 w-4 mr-2" />
+                                    Ver no ML
+                                  </a>
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -286,6 +352,17 @@ export function CompetitorListings({ sellerId }: CompetitorListingsProps) {
           )}
         </DialogContent>
       </Dialog>
+
+      <ActionDrawer
+        open={cloneDrawerOpen}
+        onOpenChange={setCloneDrawerOpen}
+        actionType="CLONE"
+        itemId={cloneTarget?.item_id || ''}
+        itemTitle={cloneTarget?.title}
+        itemStatus={cloneTarget?.status || undefined}
+        onConfirm={handleConfirmClone}
+        isLoading={createActionMutation.isPending}
+      />
     </>
   );
 }
