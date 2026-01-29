@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,8 @@ import {
   Settings,
   AlertTriangle,
   Eye,
-  DollarSign
+  DollarSign,
+  Copy
 } from 'lucide-react';
 import { CompetitorOverview } from '@/components/competitor/CompetitorOverview';
 import { CompetitorListings } from '@/components/competitor/CompetitorListings';
@@ -64,20 +65,30 @@ export default function Concorrencia() {
     checkAuth();
   }, [navigate]);
 
-  const headerContent = accounts.length > 1 ? (
-    <Select value={selectedSellerId} onValueChange={setSelectedSellerId}>
-      <SelectTrigger className="w-48">
-        <SelectValue placeholder="Selecione a conta" />
-      </SelectTrigger>
-      <SelectContent>
-        {accounts.map((acc) => (
-          <SelectItem key={acc.id} value={acc.ml_user_id}>
-            {acc.nickname || acc.ml_user_id}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  ) : undefined;
+  const headerContent = (
+    <div className="flex items-center gap-3">
+      {accounts.length > 1 && (
+        <Select value={selectedSellerId} onValueChange={setSelectedSellerId}>
+          <SelectTrigger className="w-48">
+            <SelectValue placeholder="Selecione a conta" />
+          </SelectTrigger>
+          <SelectContent>
+            {accounts.map((acc) => (
+              <SelectItem key={acc.id} value={acc.ml_user_id}>
+                {acc.nickname || acc.ml_user_id}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+      <Button asChild>
+        <Link to="/anuncios/clonar">
+          <Copy className="h-4 w-4 mr-2" />
+          Clonar
+        </Link>
+      </Button>
+    </div>
+  );
 
   if (loading) {
     return (
