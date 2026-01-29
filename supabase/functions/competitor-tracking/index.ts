@@ -107,7 +107,13 @@ Deno.serve(async (req) => {
           reaction_mode = 'monitorar', 
           undercut_amount = 0.10,
           check_interval_minutes = 120,
-          seller_listing_id 
+          seller_listing_id,
+          seller_listing_ref_type,
+          seller_listing_ref_id,
+          seller_listing_title,
+          seller_listing_sku,
+          seller_listing_price,
+          follow_price_up = false,
         } = body;
 
         if (!competitor_url || !competitor_label) {
@@ -164,6 +170,12 @@ Deno.serve(async (req) => {
           undercut_amount: undercut_amount || 0.10,
           check_interval_minutes,
           seller_listing_id: seller_listing_id || null,
+          seller_listing_ref_type: seller_listing_ref_type || null,
+          seller_listing_ref_id: seller_listing_ref_id || null,
+          seller_listing_title: seller_listing_title || null,
+          seller_listing_sku: seller_listing_sku || null,
+          seller_listing_price: seller_listing_price || null,
+          follow_price_up: follow_price_up || false,
           next_check_at: nextCheck.toISOString(),
         };
 
@@ -365,19 +377,30 @@ Deno.serve(async (req) => {
           }
 
           // Create price action if reaction_mode is sugerir or auto_aplicar
-          if (tracker.reaction_mode !== 'monitorar' && priceDelta! < 0) {
-            let proposedPrice = currentPrice - (tracker.undercut_amount || 0.10);
+          if (tracker.reaction_mode !== 'monitorar' && (priceDelta! < 0 || (priceDelta! > 0 && tracker.follow_price_up))) {
+            let proposedPrice: number;
             
-            if (tracker.min_price && proposedPrice < tracker.min_price) {
-              proposedPrice = tracker.min_price;
+            if (priceDelta! < 0) {
+              // Competitor lowered price - undercut them
+              proposedPrice = currentPrice - (tracker.undercut_amount || 0.10);
+              if (tracker.min_price && proposedPrice < tracker.min_price) {
+                proposedPrice = tracker.min_price;
+              }
+            } else {
+              // Competitor raised price - follow up to max
+              proposedPrice = currentPrice - (tracker.undercut_amount || 0.10);
+              if (tracker.max_price && proposedPrice > tracker.max_price) {
+                proposedPrice = tracker.max_price;
+              }
             }
 
             await supabaseClient.from('competitor_price_actions').insert({
               tracker_id: tracker.id,
               user_id: user.id,
               seller_listing_id: tracker.seller_listing_id,
-              action_type: tracker.reaction_mode === 'auto_aplicar' ? 'suggested' : 'suggested', // auto_aplicar needs integration
-              reason: 'Concorrente baixou preço',
+              action_type: 'suggested',
+              status: 'pending',
+              reason: priceDelta! < 0 ? 'Concorrente baixou preço' : 'Concorrente subiu preço',
               competitor_price: currentPrice,
               proposed_price: proposedPrice,
             });
@@ -462,7 +485,9 @@ Deno.serve(async (req) => {
         const allowedFields = [
           'status', 'competitor_label', 'min_price', 'max_price', 
           'reaction_mode', 'undercut_amount', 'check_interval_minutes', 
-          'seller_listing_id'
+          'seller_listing_id', 'seller_listing_ref_type', 'seller_listing_ref_id',
+          'seller_listing_title', 'seller_listing_sku', 'seller_listing_price',
+          'follow_price_up'
         ];
         const filteredUpdates: any = {};
         for (const key of allowedFields) {
