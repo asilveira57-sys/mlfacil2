@@ -299,9 +299,22 @@ function isCatalogProductId(itemId: string): boolean {
 }
 
 /**
+ * Convert catalog product ID (MLBU...) to API-compatible format (MLB...)
+ * MLBU1436905343 -> MLB1436905343
+ */
+function normalizeProductId(productId: string): string {
+  // Remove the 'U' or 'P' suffix to get standard product ID
+  return productId.replace(/^MLB[UP]/i, 'MLB');
+}
+
+/**
  * For catalog product IDs (MLBU/MLBP), fetch the product details and find an item to clone
  */
-async function fetchCatalogItemData(accessToken: string, productId: string): Promise<{ ok: boolean; data?: any; error?: string }> {
+async function fetchCatalogItemData(accessToken: string, rawProductId: string): Promise<{ ok: boolean; data?: any; error?: string }> {
+  // Normalize MLBU -> MLB
+  const productId = normalizeProductId(rawProductId);
+  console.log(`[ad-action-execute] Normalized product ID: ${rawProductId} -> ${productId}`);
+
   // Fetch product details
   const productRes = await fetch(`https://api.mercadolibre.com/products/${productId}`, {
     headers: { "Authorization": `Bearer ${accessToken}` },
