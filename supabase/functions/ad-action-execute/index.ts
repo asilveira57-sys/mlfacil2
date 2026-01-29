@@ -290,26 +290,101 @@ async function executeRelistAction(accessToken: string, itemId: string) {
   return { success: true, message: "Item relisted successfully", new_item_id: data.id };
 }
 
+/**
+ * Check if itemId is a catalog/product ID (MLBU, MLBP, etc.) rather than regular item (MLB)
+ */
+function isCatalogProductId(itemId: string): boolean {
+  // MLBU = universal product, MLBP = product, any suffix that isn't pure item
+  return /^MLB[UP]/i.test(itemId);
+}
+
+/**
+ * For catalog product IDs (MLBU/MLBP), fetch the product details and find an item to clone
+ */
+async function fetchCatalogItemData(accessToken: string, productId: string): Promise<{ ok: boolean; data?: any; error?: string }> {
+  // Fetch product details
+  const productRes = await fetch(`https://api.mercadolibre.com/products/${productId}`, {
+    headers: { "Authorization": `Bearer ${accessToken}` },
+  });
+
+  if (productRes.ok) {
+    const product = await productRes.json();
+    // If product has buy_box_winner with an item_id, fetch that item
+    if (product.buy_box_winner?.item_id) {
+      const itemRes = await fetch(`https://api.mercadolibre.com/items/${product.buy_box_winner.item_id}`, {
+        headers: { "Authorization": `Bearer ${accessToken}` },
+      });
+      if (itemRes.ok) {
+        return { ok: true, data: await itemRes.json() };
+      }
+    }
+    // Build minimal data from product itself
+    return {
+      ok: true,
+      data: {
+        title: product.name,
+        category_id: product.main_features?.[0]?.category_id,
+        pictures: product.pictures?.map((p: any) => ({ url: p.url })) || [],
+        attributes: product.attributes || [],
+      },
+    };
+  }
+
+  // Fallback: try /products/{id}/items endpoint to get competing items
+  const compRes = await fetch(`https://api.mercadolibre.com/products/${productId}/items?status=active&limit=1`, {
+    headers: { "Authorization": `Bearer ${accessToken}` },
+  });
+  if (compRes.ok) {
+    const compData = await compRes.json();
+    const firstItemId = compData.results?.[0]?.item_id;
+    if (firstItemId) {
+      const itemRes = await fetch(`https://api.mercadolibre.com/items/${firstItemId}`, {
+        headers: { "Authorization": `Bearer ${accessToken}` },
+      });
+      if (itemRes.ok) {
+        return { ok: true, data: await itemRes.json() };
+      }
+    }
+  }
+
+  return { ok: false, error: `Não foi possível obter dados do produto ${productId}. Verifique se o link é válido.` };
+}
+
 async function executeCloneAction(accessToken: string, itemId: string, snapshot: any, checklist: any) {
   // First, get item details if no snapshot
   let itemData = snapshot;
   if (!itemData || Object.keys(itemData).length === 0) {
-    const getResponse = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
-      headers: { "Authorization": `Bearer ${accessToken}` },
-    });
-    if (!getResponse.ok) {
-      return { success: false, error: "Failed to fetch item details for cloning" };
+    // Check if this is a catalog product ID
+    if (isCatalogProductId(itemId)) {
+      console.log(`[ad-action-execute] Detected catalog product ID: ${itemId}`);
+      const catalogResult = await fetchCatalogItemData(accessToken, itemId);
+      if (!catalogResult.ok) {
+        return { success: false, error: catalogResult.error || "Failed to fetch catalog product details" };
+      }
+      itemData = catalogResult.data;
+    } else {
+      // Regular item fetch
+      const getResponse = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
+        headers: { "Authorization": `Bearer ${accessToken}` },
+      });
+      if (!getResponse.ok) {
+        const errBody = await getResponse.text();
+        console.error(`[ad-action-execute] Failed to fetch item ${itemId}:`, errBody);
+        return { success: false, error: `Falha ao buscar detalhes do anúncio ${itemId}`, api_error: errBody };
+      }
+      itemData = await getResponse.json();
     }
-    itemData = await getResponse.json();
   }
+
+  console.log(`[ad-action-execute] Building clone payload from data:`, JSON.stringify({ title: itemData.title, category_id: itemData.category_id }));
 
   // Build new item payload based on checklist
   const newItem: any = {
     title: checklist?.title !== false ? itemData.title : undefined,
     category_id: itemData.category_id,
-    currency_id: itemData.currency_id,
-    listing_type_id: itemData.listing_type_id,
-    condition: itemData.condition,
+    currency_id: itemData.currency_id || "BRL",
+    listing_type_id: itemData.listing_type_id || "gold_special",
+    condition: itemData.condition || "new",
     pictures: checklist?.pictures !== false && itemData.pictures 
       ? itemData.pictures.map((p: any) => ({ source: p.url || p.secure_url }))
       : undefined,
@@ -317,8 +392,8 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     available_quantity: checklist?.quantity !== false ? itemData.available_quantity : 1,
   };
 
-  // Add description if included
-  if (checklist?.description !== false) {
+  // Add description if included (only for regular items)
+  if (checklist?.description !== false && !isCatalogProductId(itemId)) {
     const descResponse = await fetch(`https://api.mercadolibre.com/items/${itemId}/description`, {
       headers: { "Authorization": `Bearer ${accessToken}` },
     });
@@ -331,6 +406,15 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   // Add attributes if included
   if (checklist?.attributes !== false && itemData.attributes) {
     newItem.attributes = itemData.attributes;
+  }
+
+  // Validate minimum required fields
+  if (!newItem.title || !newItem.category_id) {
+    return {
+      success: false,
+      error: "Dados insuficientes para clonagem. Título ou categoria não encontrados.",
+      missing: { title: !newItem.title, category_id: !newItem.category_id },
+    };
   }
 
   // Create new item
