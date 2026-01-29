@@ -176,6 +176,11 @@ export function useAdLifecycleActions(workspaceId: string | null, statusFilter?:
       return (data || []) as AdLifecycleAction[];
     },
     enabled: !!workspaceId,
+    // Static Mode: No auto-refresh on window focus
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
   });
 }
 
