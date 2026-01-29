@@ -13,7 +13,8 @@ import {
   Bell,
   Settings,
   AlertTriangle,
-  Eye
+  Eye,
+  DollarSign
 } from 'lucide-react';
 import { CompetitorOverview } from '@/components/competitor/CompetitorOverview';
 import { CompetitorListings } from '@/components/competitor/CompetitorListings';
@@ -22,6 +23,7 @@ import { CompetitorAlerts } from '@/components/competitor/CompetitorAlerts';
 import { CompetitorSettings } from '@/components/competitor/CompetitorSettings';
 import { TrackedCompetitorsTab } from '@/components/competitor/TrackedCompetitorsTab';
 import { TrackingAlertsTab } from '@/components/competitor/TrackingAlertsTab';
+import { PriceSuggestionsTab } from '@/components/competitor/PriceSuggestionsTab';
 import { PageContainer } from '@/components/layout/PageContainer';
 
 interface MlAccount {
@@ -114,10 +116,14 @@ export default function Concorrencia() {
       <div className="container mx-auto p-6 space-y-6">
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-7 lg:w-auto lg:inline-grid">
+          <TabsList className="grid w-full grid-cols-8 lg:w-auto lg:inline-grid">
             <TabsTrigger value="tracked" className="gap-2">
               <Eye className="h-4 w-4" />
               <span className="hidden sm:inline">Monitorados</span>
+            </TabsTrigger>
+            <TabsTrigger value="suggestions" className="gap-2">
+              <DollarSign className="h-4 w-4" />
+              <span className="hidden sm:inline">Sugestões</span>
             </TabsTrigger>
             <TabsTrigger value="tracking-alerts" className="gap-2">
               <Bell className="h-4 w-4" />
@@ -147,6 +153,10 @@ export default function Concorrencia() {
 
           <TabsContent value="tracked" className="mt-6">
             <TrackedCompetitorsTab sellerId={selectedSellerId} />
+          </TabsContent>
+
+          <TabsContent value="suggestions" className="mt-6">
+            <PriceSuggestionsTab sellerId={selectedSellerId} />
           </TabsContent>
 
           <TabsContent value="tracking-alerts" className="mt-6">

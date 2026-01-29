@@ -6,11 +6,21 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Plus, Link } from 'lucide-react';
 import { useCompetitorTracking } from '@/hooks/useCompetitorTracking';
+import { SellerListingBindingSection } from './SellerListingBindingSection';
 
 interface AddTrackedListingDialogProps {
   sellerId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+}
+
+interface SellerListingValue {
+  refType: string;
+  refId: string;
+  listingId: string;
+  title: string;
+  sku: string | null;
+  price: number;
 }
 
 export function AddTrackedListingDialog({ sellerId, open, onOpenChange }: AddTrackedListingDialogProps) {
@@ -26,6 +36,8 @@ export function AddTrackedListingDialog({ sellerId, open, onOpenChange }: AddTra
     undercut_amount: '0.10',
     check_interval_minutes: '120',
   });
+  const [sellerListing, setSellerListing] = useState<SellerListingValue | null>(null);
+  const [followPriceUp, setFollowPriceUp] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,6 +53,13 @@ export function AddTrackedListingDialog({ sellerId, open, onOpenChange }: AddTra
         reaction_mode: formData.reaction_mode,
         undercut_amount: parseFloat(formData.undercut_amount) || 0.10,
         check_interval_minutes: parseInt(formData.check_interval_minutes) || 120,
+        seller_listing_id: sellerListing?.listingId,
+        seller_listing_ref_type: sellerListing?.refType,
+        seller_listing_ref_id: sellerListing?.refId,
+        seller_listing_title: sellerListing?.title,
+        seller_listing_sku: sellerListing?.sku,
+        seller_listing_price: sellerListing?.price,
+        follow_price_up: followPriceUp,
       });
 
       if (result) {
@@ -53,6 +72,8 @@ export function AddTrackedListingDialog({ sellerId, open, onOpenChange }: AddTra
           undercut_amount: '0.10',
           check_interval_minutes: '120',
         });
+        setSellerListing(null);
+        setFollowPriceUp(false);
         onOpenChange(false);
       }
     } finally {
@@ -215,6 +236,16 @@ export function AddTrackedListingDialog({ sellerId, open, onOpenChange }: AddTra
               </p>
             </div>
           )}
+
+          {/* Seller Listing Binding */}
+          <SellerListingBindingSection
+            sellerId={sellerId}
+            value={sellerListing}
+            followPriceUp={followPriceUp}
+            onChange={setSellerListing}
+            onFollowPriceUpChange={setFollowPriceUp}
+            disabled={loading}
+          />
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

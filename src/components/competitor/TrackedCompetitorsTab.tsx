@@ -277,6 +277,12 @@ export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) 
                       {tracker.max_price && (
                         <span>Máx: {formatCurrency(tracker.max_price)}</span>
                       )}
+                      {tracker.seller_listing_title && (
+                        <span className="flex items-center gap-1 text-primary">
+                          <span>Vinculado:</span>
+                          <span className="font-medium">{tracker.seller_listing_title}</span>
+                        </span>
+                      )}
                       {tracker.consecutive_failures > 0 && (
                         <span className="text-destructive flex items-center gap-1">
                           <AlertCircle className="h-3 w-3" />

@@ -23,6 +23,12 @@ export interface CompetitorTracker {
   last_known_price: number | null;
   last_known_state: 'ativo' | 'indisponivel' | 'desconhecido';
   seller_listing_id: string | null;
+  seller_listing_ref_type: string | null;
+  seller_listing_ref_id: string | null;
+  seller_listing_title: string | null;
+  seller_listing_sku: string | null;
+  seller_listing_price: number | null;
+  follow_price_up: boolean;
   consecutive_failures: number;
   created_at: string;
   updated_at: string;
@@ -165,6 +171,12 @@ export function useCompetitorTracking(sellerId: string) {
     undercut_amount?: number;
     check_interval_minutes?: number;
     seller_listing_id?: string;
+    seller_listing_ref_type?: string;
+    seller_listing_ref_id?: string;
+    seller_listing_title?: string;
+    seller_listing_sku?: string | null;
+    seller_listing_price?: number;
+    follow_price_up?: boolean;
   }) => {
     const session = await getSession();
     if (!session) return null;

@@ -17,16 +17,27 @@ import {
   History,
   AlertTriangle,
   Clock,
-  Activity
+  Activity,
+  Link2
 } from 'lucide-react';
 import { useCompetitorTracking, CompetitorTracker, CompetitorSnapshot, CompetitorEvent } from '@/hooks/useCompetitorTracking';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { SellerListingBindingSection } from './SellerListingBindingSection';
 
 interface TrackedListingDetailDrawerProps {
   sellerId: string;
   tracker: CompetitorTracker | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+}
+
+interface SellerListingValue {
+  refType: string;
+  refId: string;
+  listingId: string;
+  title: string;
+  sku: string | null;
+  price: number;
 }
 
 export function TrackedListingDetailDrawer({ 
@@ -50,6 +61,8 @@ export function TrackedListingDetailDrawer({
     undercut_amount: '0.10',
     check_interval_minutes: '120',
   });
+  const [sellerListing, setSellerListing] = useState<SellerListingValue | null>(null);
+  const [followPriceUp, setFollowPriceUp] = useState(false);
 
   useEffect(() => {
     if (tracker) {
@@ -61,6 +74,22 @@ export function TrackedListingDetailDrawer({
         undercut_amount: tracker.undercut_amount?.toString() || '0.10',
         check_interval_minutes: tracker.check_interval_minutes?.toString() || '120',
       });
+      
+      // Set seller listing from tracker data
+      if (tracker.seller_listing_ref_id) {
+        setSellerListing({
+          refType: tracker.seller_listing_ref_type || 'meli_listings_cache',
+          refId: tracker.seller_listing_ref_id,
+          listingId: tracker.seller_listing_id || '',
+          title: tracker.seller_listing_title || '',
+          sku: tracker.seller_listing_sku || null,
+          price: tracker.seller_listing_price || 0,
+        });
+      } else {
+        setSellerListing(null);
+      }
+      setFollowPriceUp(tracker.follow_price_up || false);
+      
       loadData();
     }
   }, [tracker?.id]);
@@ -91,6 +120,13 @@ export function TrackedListingDetailDrawer({
         reaction_mode: formData.reaction_mode as any,
         undercut_amount: parseFloat(formData.undercut_amount) || 0.10,
         check_interval_minutes: parseInt(formData.check_interval_minutes) || 120,
+        seller_listing_id: sellerListing?.listingId || null,
+        seller_listing_ref_type: sellerListing?.refType || null,
+        seller_listing_ref_id: sellerListing?.refId || null,
+        seller_listing_title: sellerListing?.title || null,
+        seller_listing_sku: sellerListing?.sku || null,
+        seller_listing_price: sellerListing?.price || null,
+        follow_price_up: followPriceUp,
       });
     } finally {
       setSaving(false);
@@ -449,6 +485,16 @@ export function TrackedListingDetailDrawer({
                     </Select>
                   </div>
                 )}
+
+                {/* Seller Listing Binding */}
+                <SellerListingBindingSection
+                  sellerId={sellerId}
+                  value={sellerListing}
+                  followPriceUp={followPriceUp}
+                  onChange={setSellerListing}
+                  onFollowPriceUpChange={setFollowPriceUp}
+                  disabled={saving}
+                />
 
                 <Button onClick={handleSave} disabled={saving} className="w-full">
                   <Save className="h-4 w-4 mr-2" />

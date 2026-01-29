@@ -2583,6 +2583,7 @@ export type Database = {
           proposed_price: number | null
           reason: string | null
           seller_listing_id: string | null
+          status: string | null
           tracker_id: string
           user_id: string
         }
@@ -2595,6 +2596,7 @@ export type Database = {
           proposed_price?: number | null
           reason?: string | null
           seller_listing_id?: string | null
+          status?: string | null
           tracker_id: string
           user_id: string
         }
@@ -2607,6 +2609,7 @@ export type Database = {
           proposed_price?: number | null
           reason?: string | null
           seller_listing_id?: string | null
+          status?: string | null
           tracker_id?: string
           user_id?: string
         }
@@ -2701,6 +2704,7 @@ export type Database = {
           competitor_url: string
           consecutive_failures: number | null
           created_at: string
+          follow_price_up: boolean | null
           id: string
           last_checked_at: string | null
           last_known_price: number | null
@@ -2712,6 +2716,11 @@ export type Database = {
           reaction_mode: string
           seller_id: string
           seller_listing_id: string | null
+          seller_listing_price: number | null
+          seller_listing_ref_id: string | null
+          seller_listing_ref_type: string | null
+          seller_listing_sku: string | null
+          seller_listing_title: string | null
           status: string
           undercut_amount: number
           updated_at: string
@@ -2726,6 +2735,7 @@ export type Database = {
           competitor_url: string
           consecutive_failures?: number | null
           created_at?: string
+          follow_price_up?: boolean | null
           id?: string
           last_checked_at?: string | null
           last_known_price?: number | null
@@ -2737,6 +2747,11 @@ export type Database = {
           reaction_mode?: string
           seller_id: string
           seller_listing_id?: string | null
+          seller_listing_price?: number | null
+          seller_listing_ref_id?: string | null
+          seller_listing_ref_type?: string | null
+          seller_listing_sku?: string | null
+          seller_listing_title?: string | null
           status?: string
           undercut_amount?: number
           updated_at?: string
@@ -2751,6 +2766,7 @@ export type Database = {
           competitor_url?: string
           consecutive_failures?: number | null
           created_at?: string
+          follow_price_up?: boolean | null
           id?: string
           last_checked_at?: string | null
           last_known_price?: number | null
@@ -2762,6 +2778,11 @@ export type Database = {
           reaction_mode?: string
           seller_id?: string
           seller_listing_id?: string | null
+          seller_listing_price?: number | null
+          seller_listing_ref_id?: string | null
+          seller_listing_ref_type?: string | null
+          seller_listing_sku?: string | null
+          seller_listing_title?: string | null
           status?: string
           undercut_amount?: number
           updated_at?: string
