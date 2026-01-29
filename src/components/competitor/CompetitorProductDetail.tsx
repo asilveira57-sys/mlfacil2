@@ -12,9 +12,13 @@ import {
   AlertTriangle,
   CheckCircle2,
   Target,
-  DollarSign
+  DollarSign,
+  Copy
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { ActionDrawer } from '@/components/ad-timeline';
+import { useCreateAction } from '@/hooks/useAdTimeline';
+import type { CloneChecklist } from '@/types/ad-timeline';
 
 interface CompetitorProductDetailProps {
   sellerId: string;
@@ -51,6 +55,31 @@ export function CompetitorProductDetail({ sellerId, listing }: CompetitorProduct
   const [data, setData] = useState<ProductDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshingCatalog, setRefreshingCatalog] = useState(false);
+  const [cloneDrawerOpen, setCloneDrawerOpen] = useState(false);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const createActionMutation = useCreateAction();
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) setWorkspaceId(data.user.id);
+    });
+  }, []);
+
+  const handleConfirmClone = async (reason: string, checklist: CloneChecklist) => {
+    if (!workspaceId) {
+      toast.error('Usuário não autenticado');
+      return;
+    }
+    await createActionMutation.mutateAsync({
+      workspaceId,
+      mlAccountId: sellerId,
+      itemId: listing.item_id,
+      actionType: 'CLONE',
+      reason,
+      checklist,
+    });
+    setCloneDrawerOpen(false);
+  };
 
   const loadDetail = async () => {
     setLoading(true);
@@ -166,9 +195,29 @@ export function CompetitorProductDetail({ sellerId, listing }: CompetitorProduct
                 </a>
               </Button>
             )}
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setCloneDrawerOpen(true)}
+              disabled={!workspaceId}
+            >
+              <Copy className="h-4 w-4 mr-2" />
+              Clonar
+            </Button>
           </div>
         </div>
       </div>
+
+      <ActionDrawer
+        open={cloneDrawerOpen}
+        onOpenChange={setCloneDrawerOpen}
+        actionType="CLONE"
+        itemId={listing.item_id}
+        itemTitle={listing.title}
+        itemStatus={data?.listing?.status}
+        onConfirm={handleConfirmClone}
+        isLoading={createActionMutation.isPending}
+      />
 
       {/* Margin Info */}
       {marginInfo ? (
