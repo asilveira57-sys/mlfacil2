@@ -96,15 +96,21 @@ export function CloneByLinkDialog({ open, onOpenChange }: CloneByLinkDialogProps
       if (!user) throw new Error('Não autenticado');
 
       // Get ml_account_id using ml_user_id (which maps to sellerId)
-      const { data: mlAccount } = await supabase
+      // sellerId might be string, ml_user_id might be numeric - handle both
+      const { data: mlAccount, error: accountError } = await supabase
         .from('ml_accounts')
         .select('id')
-        .eq('ml_user_id', activeAccount.sellerId)
+        .eq('ml_user_id', String(activeAccount.sellerId))
         .eq('user_id', user.id)
-        .limit(1)
-        .single();
+        .maybeSingle();
+
+      if (accountError) {
+        console.error('[CloneByLinkDialog] Account lookup error:', accountError);
+        throw new Error(`Erro ao buscar conta: ${accountError.message}`);
+      }
 
       if (!mlAccount?.id) {
+        console.error('[CloneByLinkDialog] Account not found for sellerId:', activeAccount.sellerId);
         throw new Error('Conta do Mercado Livre não encontrada');
       }
 
@@ -132,7 +138,10 @@ export function CloneByLinkDialog({ open, onOpenChange }: CloneByLinkDialogProps
           created_by: user.id,
         });
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        console.error('[CloneByLinkDialog] Insert error:', insertError);
+        throw new Error(`Erro ao criar rascunho: ${insertError.message}`);
+      }
 
       toast.success('Rascunho de clonagem criado', {
         description: `Anúncio ${itemId} adicionado à fila de rascunhos`,
