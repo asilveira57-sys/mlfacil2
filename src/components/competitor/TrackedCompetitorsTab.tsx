@@ -13,11 +13,13 @@ import {
   AlertTriangle,
   Settings,
   History,
-  AlertCircle
+  AlertCircle,
+  Copy
 } from 'lucide-react';
 import { useCompetitorTracking, CompetitorTracker } from '@/hooks/useCompetitorTracking';
 import { AddTrackedListingDialog } from './AddTrackedListingDialog';
 import { TrackedListingDetailDrawer } from './TrackedListingDetailDrawer';
+import { CloneCompetitorDialog } from './CloneCompetitorDialog';
 import { 
   AlertDialog, 
   AlertDialogAction, 
@@ -52,6 +54,8 @@ export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [trackerToDelete, setTrackerToDelete] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<'ativo' | 'pausado' | 'all'>('ativo');
+  const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
+  const [trackerToClone, setTrackerToClone] = useState<CompetitorTracker | null>(null);
 
   useEffect(() => {
     fetchTrackers(statusFilter);
@@ -337,6 +341,18 @@ export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) 
                       variant="ghost"
                       size="icon"
                       onClick={() => {
+                        setTrackerToClone(tracker);
+                        setCloneDialogOpen(true);
+                      }}
+                      title="Clonar anúncio"
+                      disabled={!tracker.competitor_external_id}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => {
                         setTrackerToDelete(tracker.id);
                         setDeleteDialogOpen(true);
                       }}
@@ -383,6 +399,22 @@ export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) 
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Clone Competitor Dialog */}
+      {trackerToClone && (
+        <CloneCompetitorDialog
+          open={cloneDialogOpen}
+          onOpenChange={(open) => {
+            setCloneDialogOpen(open);
+            if (!open) setTrackerToClone(null);
+          }}
+          sellerId={sellerId}
+          competitorItemId={trackerToClone.competitor_external_id || ''}
+          competitorLabel={trackerToClone.competitor_label}
+          competitorTitle={trackerToClone.competitor_title}
+          competitorPrice={trackerToClone.last_known_price}
+        />
+      )}
     </div>
   );
 }
