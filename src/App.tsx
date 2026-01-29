@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { ActiveAccountProvider } from "@/contexts/ActiveAccountContext";
 import { UserAccessProvider } from "@/contexts/UserAccessContext";
+import { RefreshPolicyProvider } from "@/contexts/RefreshPolicyContext";
 import { RouteChangeCleanup } from "@/components/layout/RouteChangeCleanup";
 import { AppShellLayout } from "@/components/layout/AppShellLayout";
 import { OnboardingWizard } from "@/components/onboarding";
@@ -52,18 +53,17 @@ const App = () => {
         refetchOnWindowFocus: false,
         // Disable refetch on reconnect (network recovery)
         refetchOnReconnect: false,
-        // Keep data fresh for 5 minutes by default
-        staleTime: 5 * 60 * 1000,
-        // Keep unused data in cache for 30 minutes
-        gcTime: 30 * 60 * 1000,
+        // STATIC MODE: Data never becomes stale automatically
+        staleTime: Infinity,
+        // Keep unused data in cache for 24 hours
+        gcTime: 24 * 60 * 60 * 1000,
         // Don't retry failed queries automatically
-        retry: 1,
+        retry: 0,
         // Prevent refetch on mount if data exists
         refetchOnMount: false,
       },
     },
   }));
-
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     // eslint-disable-next-line no-console
@@ -100,12 +100,13 @@ const App = () => {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <ActiveAccountProvider>
-          <UserAccessProvider>
-            <Toaster />
-            <Sonner />
-            <BrowserRouter>
+      <RefreshPolicyProvider>
+        <TooltipProvider>
+          <ActiveAccountProvider>
+            <UserAccessProvider>
+              <Toaster />
+              <Sonner />
+              <BrowserRouter>
               <RouteChangeCleanup />
               <SeoHead />
               <OnboardingWizard />
@@ -161,10 +162,11 @@ const App = () => {
                 <Route path="*" element={<NotFound />} />
               </Routes>
               </ModuleAccessGuard>
-            </BrowserRouter>
-          </UserAccessProvider>
-        </ActiveAccountProvider>
-      </TooltipProvider>
+              </BrowserRouter>
+            </UserAccessProvider>
+          </ActiveAccountProvider>
+        </TooltipProvider>
+      </RefreshPolicyProvider>
     </QueryClientProvider>
   );
 };

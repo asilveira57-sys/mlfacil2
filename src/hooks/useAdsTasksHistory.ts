@@ -71,28 +71,29 @@ export function useAdsTasksHistory(sellerId?: string, workspaceId?: string) {
     fetchTasks();
   }, [fetchTasks]);
 
-  // Realtime subscription
-  useEffect(() => {
-    if (!workspaceId) return;
-
-    const channel = supabase
-      .channel(`ads-tasks-${workspaceId}`)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'tasks',
-        filter: `workspace_id=eq.${workspaceId}`,
-      }, (payload) => {
-        // Only refetch if it's an ADS task
-        const task = payload.new as Task;
-        if (task?.source_type === 'ads') {
-          fetchTasks();
-        }
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, [workspaceId, fetchTasks]);
+  // DISABLED: Realtime subscription disabled in static mode
+  // Data only updates on manual refresh or page reload
+  // useEffect(() => {
+  //   if (!workspaceId) return;
+  //
+  //   const channel = supabase
+  //     .channel(`ads-tasks-${workspaceId}`)
+  //     .on('postgres_changes', {
+  //       event: '*',
+  //       schema: 'public',
+  //       table: 'tasks',
+  //       filter: `workspace_id=eq.${workspaceId}`,
+  //     }, (payload) => {
+  //       // Only refetch if it's an ADS task
+  //       const task = payload.new as Task;
+  //       if (task?.source_type === 'ads') {
+  //         fetchTasks();
+  //       }
+  //     })
+  //     .subscribe();
+  //
+  //   return () => { supabase.removeChannel(channel); };
+  // }, [workspaceId, fetchTasks]);
 
   return { tasks, stats, loading, refetch: fetchTasks };
 }

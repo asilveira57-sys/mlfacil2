@@ -110,7 +110,8 @@ export function usePendingQuestionsCount(sellerId: string | null) {
       return count || 0;
     },
     enabled: !!sellerId,
-    refetchInterval: 30000, // Refresh every 30 seconds
+    // DISABLED: Static mode - no polling. Use manual refresh button instead.
+    // refetchInterval: 30000,
   });
 }
 

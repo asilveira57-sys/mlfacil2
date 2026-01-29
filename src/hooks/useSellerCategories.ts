@@ -90,6 +90,7 @@ export function useSellerCategories(accountId: string | null) {
 
 /**
  * Hook to get sync state for a seller's categories
+ * NOTE: Polling disabled in static mode. Manual refresh or user-initiated sync only.
  */
 export function useCategorySyncState(accountId: string | null) {
   return useQuery({
@@ -123,14 +124,14 @@ export function useCategorySyncState(accountId: string | null) {
     },
     enabled: !!accountId,
     staleTime: 30 * 1000, // 30 seconds
-    refetchInterval: (query) => {
-      // Poll while running
-      const data = query.state.data;
-      if (data?.status === 'running') {
-        return 3000;
-      }
-      return false;
-    },
+    // DISABLED: Static mode - no polling. User must click refresh or wait for sync to complete.
+    // refetchInterval: (query) => {
+    //   const data = query.state.data;
+    //   if (data?.status === 'running') {
+    //     return 3000;
+    //   }
+    //   return false;
+    // },
   });
 }
 

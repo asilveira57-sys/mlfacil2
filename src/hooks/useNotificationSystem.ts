@@ -258,34 +258,37 @@ export function useDismissNotification() {
   });
 }
 
-// Realtime subscription for new notifications
+// DISABLED: Realtime subscription disabled in static mode
+// Data only updates on manual refresh or page reload
+// If you need realtime notifications, enable autoRefreshEnabled in RefreshPolicyContext
 export function useNotificationsRealtime(
   userId: string | null,
   onNewNotification: (notification: AppNotification) => void
 ) {
-  useEffect(() => {
-    if (!userId) return;
-
-    const channel = supabase
-      .channel(`notifications-${userId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'app_notifications',
-          filter: `user_id=eq.${userId}`,
-        },
-        (payload) => {
-          onNewNotification(payload.new as AppNotification);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [userId, onNewNotification]);
+  // Realtime disabled in static mode
+  // useEffect(() => {
+  //   if (!userId) return;
+  //
+  //   const channel = supabase
+  //     .channel(`notifications-${userId}`)
+  //     .on(
+  //       'postgres_changes',
+  //       {
+  //         event: 'INSERT',
+  //         schema: 'public',
+  //         table: 'app_notifications',
+  //         filter: `user_id=eq.${userId}`,
+  //       },
+  //       (payload) => {
+  //         onNewNotification(payload.new as AppNotification);
+  //       }
+  //     )
+  //     .subscribe();
+  //
+  //   return () => {
+  //     supabase.removeChannel(channel);
+  //   };
+  // }, [userId, onNewNotification]);
 }
 
 // Get user ID hook

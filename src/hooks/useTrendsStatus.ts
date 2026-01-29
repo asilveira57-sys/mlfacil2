@@ -32,7 +32,8 @@ export function useTrendsStatus() {
       return data as TrendsStatus | null;
     },
     staleTime: 60 * 1000, // 1 minute
-    refetchInterval: 5 * 60 * 1000, // refetch every 5 minutes
+    // DISABLED: Static mode - no polling. Use manual refresh button instead.
+    // refetchInterval: 5 * 60 * 1000,
   });
 }
 
