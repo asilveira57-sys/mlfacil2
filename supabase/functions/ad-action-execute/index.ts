@@ -148,9 +148,32 @@ serve(async (req) => {
       mlAccount = (data as any) ?? null;
     }
 
-    let result: any = { success: false, message: "No integration available" };
+    console.log(
+      `[ad-action-execute] mlAccount lookup`,
+      JSON.stringify({
+        action_id,
+        ml_account_id: action.ml_account_id,
+        is_uuid: isUuid(action.ml_account_id),
+        found: !!mlAccount,
+        has_access_token: !!mlAccount?.access_token,
+      })
+    );
 
-    if (mlAccount?.access_token) {
+    let result: any;
+
+    if (!mlAccount) {
+      result = {
+        success: false,
+        error: "ML_ACCOUNT_NOT_FOUND",
+        message: "Conta do Mercado Livre não encontrada para esta ação",
+      };
+    } else if (!mlAccount.access_token) {
+      result = {
+        success: false,
+        error: "ML_ACCOUNT_MISSING_TOKEN",
+        message: "Conta do Mercado Livre desconectada (sem token). Reconecte e tente novamente.",
+      };
+    } else {
       try {
         switch (action.action_type) {
           case "END":
@@ -160,10 +183,15 @@ serve(async (req) => {
             result = await executeRelistAction(mlAccount.access_token, action.item_id);
             break;
           case "CLONE":
-            result = await executeCloneAction(mlAccount.access_token, action.item_id, action.source_snapshot, action.checklist);
+            result = await executeCloneAction(
+              mlAccount.access_token,
+              action.item_id,
+              action.source_snapshot,
+              action.checklist
+            );
             break;
           default:
-            result = { success: false, message: `Unknown action type: ${action.action_type}` };
+            result = { success: false, error: "UNKNOWN_ACTION", message: `Unknown action type: ${action.action_type}` };
         }
       } catch (e: any) {
         result = { success: false, error: e?.message || String(e) };
