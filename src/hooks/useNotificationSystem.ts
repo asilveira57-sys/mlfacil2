@@ -41,8 +41,11 @@ export function useActiveNotifications(options: UseNotificationSystemOptions = {
       if (error) throw error;
       return (data || []) as AppNotification[];
     },
-    // DISABLED: No polling - use realtime subscription instead
-    // refetchInterval: 30000,
+    // STATIC MODE: No polling or refetch on focus
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
   });
 }
 
@@ -79,8 +82,11 @@ export function usePriorityNotifications(options: UseNotificationSystemOptions =
       }
       return (data || []) as (AppNotification & { priority_score: number })[];
     },
-    // DISABLED: No polling - use realtime subscription instead
-    // refetchInterval: 30000,
+    // STATIC MODE: No polling or refetch on focus
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
   });
 }
 
@@ -127,8 +133,11 @@ export function useNotificationCounts(workspaceId?: string | null) {
         pending: pendingCount || 0,
       };
     },
-    // DISABLED: No polling - invalidation happens on user actions
-    // refetchInterval: 30000,
+    // STATIC MODE: No polling or refetch on focus
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
   });
 }
 
@@ -291,18 +300,9 @@ export function useNotificationsRealtime(
   // }, [userId, onNewNotification]);
 }
 
-// Get user ID hook
-export function useCurrentUserId() {
-  const [userId, setUserId] = useState<string | null>(null);
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setUserId(data.user?.id || null);
-    });
-  }, []);
-
-  return userId;
-}
+// REMOVED: useCurrentUserId was duplicated here.
+// Use the centralized version from src/hooks/useCurrentUserId.ts instead.
+// import { useCurrentUserId } from '@/hooks/useCurrentUserId';
 
 // Group notifications by category
 export function groupNotificationsByCategory(notifications: AppNotification[]) {

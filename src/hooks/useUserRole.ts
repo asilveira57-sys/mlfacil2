@@ -76,7 +76,9 @@ export function useUserRole(): UseUserRoleResult {
 
     fetchRole();
 
-    // Listen for auth changes
+    // Listen for auth changes - ONLY on actual sign-out
+    // SIGNED_IN is ignored because fetchRole() already runs on mount
+    // TOKEN_REFRESHED is ignored to prevent tab-switch flickering
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
         if (isMounted) {
@@ -84,15 +86,8 @@ export function useUserRole(): UseUserRoleResult {
           setUserId(null);
           setLoading(false);
         }
-      } else if (event === 'SIGNED_IN') {
-        // CRITICAL: Only show loading on initial load, not on background refetches
-        // This prevents the "flash" when switching browser tabs
-        if (!initialLoadDoneRef.current) {
-          setLoading(true);
-        }
-        fetchRole();
       }
-      // Ignore TOKEN_REFRESHED and INITIAL_SESSION to prevent tab-switch flicker
+      // SIGNED_IN and TOKEN_REFRESHED are intentionally ignored
     });
 
     return () => {

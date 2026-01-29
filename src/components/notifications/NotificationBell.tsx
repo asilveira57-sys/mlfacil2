@@ -45,9 +45,9 @@ import {
   useResolveNotification,
   useDismissNotification,
   useNotificationsRealtime,
-  useCurrentUserId,
   groupNotificationsByCategory,
 } from "@/hooks/useNotificationSystem";
+import { useCurrentUserId } from "@/hooks/useCurrentUserId";
 
 const CATEGORY_ICONS: Record<NotificationCategory, React.ReactNode> = {
   qa_pending: <MessageCircle className="h-4 w-4 text-blue-500" />,

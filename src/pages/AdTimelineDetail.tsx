@@ -1,6 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -26,20 +25,16 @@ import {
   useCreateAction,
 } from "@/hooks/useAdTimeline";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
+import { useCurrentUserId } from "@/hooks/useCurrentUserId";
 import type { StatusBucket, ActionType, CloneChecklist } from "@/types/ad-timeline";
 
 export default function AdTimelineDetail() {
   const { itemId } = useParams<{ itemId: string }>();
   const navigate = useNavigate();
   const { sellerId } = useActiveAccount();
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  // Use centralized hook instead of direct Supabase call
+  const workspaceId = useCurrentUserId();
   const mlAccountId = sellerId || undefined;
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) setWorkspaceId(data.user.id);
-    });
-  }, []);
 
   const [actionDrawerOpen, setActionDrawerOpen] = useState(false);
   const [actionType, setActionType] = useState<ActionType>('END');

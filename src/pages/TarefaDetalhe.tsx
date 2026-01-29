@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
@@ -6,15 +6,16 @@ import { TaskDetail } from '@/components/tasks/TaskDetail';
 import { useTaskDetails, useTasks } from '@/hooks/useTasks';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { Skeleton } from '@/components/ui/skeleton';
-import { supabase } from '@/integrations/supabase/client';
 import { PageContainer } from '@/components/layout/PageContainer';
+import { useCurrentUserId } from '@/hooks/useCurrentUserId';
 import type { Task } from '@/types/tasks';
 
 export default function TarefaDetalhe() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { currentWorkspace, members } = useWorkspace();
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  // Use centralized hook instead of direct Supabase call
+  const currentUserId = useCurrentUserId();
   
   const {
     task,
@@ -31,12 +32,6 @@ export default function TarefaDetalhe() {
   } = useTaskDetails(id || null);
 
   const { updateTask, deleteTask } = useTasks(currentWorkspace?.id || null);
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setCurrentUserId(data.user?.id || null);
-    });
-  }, []);
 
   const handleUpdate = async (updates: Partial<Task>): Promise<boolean> => {
     if (!id) return false;
