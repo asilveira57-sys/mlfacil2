@@ -2674,6 +2674,53 @@ export type Database = {
         }
         Relationships: []
       }
+      competitor_price_history: {
+        Row: {
+          id: string
+          is_available: boolean | null
+          listing_type: string | null
+          original_price: number | null
+          price: number
+          price_delta: number | null
+          price_delta_percent: number | null
+          recorded_at: string
+          tracked_listing_id: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          is_available?: boolean | null
+          listing_type?: string | null
+          original_price?: number | null
+          price: number
+          price_delta?: number | null
+          price_delta_percent?: number | null
+          recorded_at?: string
+          tracked_listing_id: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          is_available?: boolean | null
+          listing_type?: string | null
+          original_price?: number | null
+          price?: number
+          price_delta?: number | null
+          price_delta_percent?: number | null
+          recorded_at?: string
+          tracked_listing_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitor_price_history_tracked_listing_id_fkey"
+            columns: ["tracked_listing_id"]
+            isOneToOne: false
+            referencedRelation: "competitor_tracked_listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       competitor_settings: {
         Row: {
           auto_monitor_abc_a: boolean
@@ -2718,6 +2765,158 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      competitor_tracked_listings: {
+        Row: {
+          adjustment_value: number | null
+          check_count: number | null
+          competitor_item_id: string
+          competitor_link: string
+          competitor_name: string
+          condition: string | null
+          created_at: string
+          current_price: number | null
+          error_message: string | null
+          id: string
+          is_available: boolean | null
+          last_check_at: string | null
+          last_price_change_at: string | null
+          listing_type: string | null
+          marketplace: string
+          max_price: number | null
+          min_price: number | null
+          my_item_id: string | null
+          original_price: number | null
+          price_change_count: number | null
+          reaction_type: string
+          seller_id: string
+          shipping_free: boolean | null
+          shipping_full: boolean | null
+          status: string
+          thumbnail: string | null
+          title: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          adjustment_value?: number | null
+          check_count?: number | null
+          competitor_item_id: string
+          competitor_link: string
+          competitor_name: string
+          condition?: string | null
+          created_at?: string
+          current_price?: number | null
+          error_message?: string | null
+          id?: string
+          is_available?: boolean | null
+          last_check_at?: string | null
+          last_price_change_at?: string | null
+          listing_type?: string | null
+          marketplace?: string
+          max_price?: number | null
+          min_price?: number | null
+          my_item_id?: string | null
+          original_price?: number | null
+          price_change_count?: number | null
+          reaction_type?: string
+          seller_id: string
+          shipping_free?: boolean | null
+          shipping_full?: boolean | null
+          status?: string
+          thumbnail?: string | null
+          title?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          adjustment_value?: number | null
+          check_count?: number | null
+          competitor_item_id?: string
+          competitor_link?: string
+          competitor_name?: string
+          condition?: string | null
+          created_at?: string
+          current_price?: number | null
+          error_message?: string | null
+          id?: string
+          is_available?: boolean | null
+          last_check_at?: string | null
+          last_price_change_at?: string | null
+          listing_type?: string | null
+          marketplace?: string
+          max_price?: number | null
+          min_price?: number | null
+          my_item_id?: string | null
+          original_price?: number | null
+          price_change_count?: number | null
+          reaction_type?: string
+          seller_id?: string
+          shipping_free?: boolean | null
+          shipping_full?: boolean | null
+          status?: string
+          thumbnail?: string | null
+          title?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      competitor_tracking_alerts: {
+        Row: {
+          alert_type: string
+          created_at: string
+          data_json: Json | null
+          id: string
+          is_dismissed: boolean | null
+          is_read: boolean | null
+          message_pt: string
+          resolved_at: string | null
+          seller_id: string
+          severity: string
+          title: string
+          tracked_listing_id: string | null
+          user_id: string
+        }
+        Insert: {
+          alert_type: string
+          created_at?: string
+          data_json?: Json | null
+          id?: string
+          is_dismissed?: boolean | null
+          is_read?: boolean | null
+          message_pt: string
+          resolved_at?: string | null
+          seller_id: string
+          severity?: string
+          title: string
+          tracked_listing_id?: string | null
+          user_id: string
+        }
+        Update: {
+          alert_type?: string
+          created_at?: string
+          data_json?: Json | null
+          id?: string
+          is_dismissed?: boolean | null
+          is_read?: boolean | null
+          message_pt?: string
+          resolved_at?: string | null
+          seller_id?: string
+          severity?: string
+          title?: string
+          tracked_listing_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitor_tracking_alerts_tracked_listing_id_fkey"
+            columns: ["tracked_listing_id"]
+            isOneToOne: false
+            referencedRelation: "competitor_tracked_listings"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       erp_integrations: {
         Row: {
