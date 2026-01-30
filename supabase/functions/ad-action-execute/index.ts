@@ -506,6 +506,105 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     resolved_from_catalog: !!catalogInfo,
   }));
 
+  // Fetch required attributes for the category
+  let requiredAttributes: Array<{ id: string; name: string; value_type: string; values?: any[] }> = [];
+  
+  if (itemData.category_id) {
+    console.log(`[ad-action-execute] Fetching required attributes for category: ${itemData.category_id}`);
+    
+    const catAttrsResponse = await fetch(
+      `https://api.mercadolibre.com/categories/${itemData.category_id}/attributes`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    
+    if (catAttrsResponse.ok) {
+      const allAttributes = await catAttrsResponse.json();
+      requiredAttributes = allAttributes.filter((attr: any) => 
+        attr.tags?.required === true || attr.tags?.catalog_required === true
+      );
+      
+      console.log(`[ad-action-execute] Found ${requiredAttributes.length} required attributes for category`);
+      console.log(`[ad-action-execute] Required attribute IDs:`, requiredAttributes.map((a: any) => a.id));
+    } else {
+      console.warn(`[ad-action-execute] Failed to fetch category attributes: ${catAttrsResponse.status}`);
+    }
+  }
+
+  // Build source attributes map for easy lookup
+  const sourceAttributesMap = new Map<string, any>();
+  if (itemData.attributes && Array.isArray(itemData.attributes)) {
+    for (const attr of itemData.attributes) {
+      if (attr.id) {
+        sourceAttributesMap.set(attr.id, attr);
+      }
+    }
+  }
+
+  // Build attributes array ensuring all required fields are included
+  const finalAttributes: any[] = [];
+  const includedAttrIds = new Set<string>();
+
+  // First, add all required attributes (from category)
+  for (const reqAttr of requiredAttributes) {
+    const sourceAttr = sourceAttributesMap.get(reqAttr.id);
+    
+    if (sourceAttr && (sourceAttr.value_id || sourceAttr.value_name)) {
+      // Copy from source item
+      finalAttributes.push({
+        id: reqAttr.id,
+        value_id: sourceAttr.value_id,
+        value_name: sourceAttr.value_name,
+      });
+      includedAttrIds.add(reqAttr.id);
+      console.log(`[ad-action-execute] Required attr ${reqAttr.id}: copied from source`);
+    } else if (reqAttr.values && reqAttr.values.length > 0) {
+      // Use first allowed value as default
+      const defaultValue = reqAttr.values[0];
+      finalAttributes.push({
+        id: reqAttr.id,
+        value_id: defaultValue.id,
+        value_name: defaultValue.name,
+      });
+      includedAttrIds.add(reqAttr.id);
+      console.log(`[ad-action-execute] Required attr ${reqAttr.id}: using default value ${defaultValue.name}`);
+    } else {
+      // Try to use a generic fallback for known attribute types
+      let fallbackValue: any = null;
+      
+      if (reqAttr.id === "FAMILY_NAME" || reqAttr.id === "family_name") {
+        // For family_name, try to derive from title or use generic
+        fallbackValue = { value_name: itemData.title?.split(" ").slice(0, 3).join(" ") || "Produto" };
+      } else if (reqAttr.value_type === "string") {
+        fallbackValue = { value_name: "-" };
+      } else if (reqAttr.value_type === "boolean") {
+        fallbackValue = { value_name: "Não" };
+      }
+      
+      if (fallbackValue) {
+        finalAttributes.push({
+          id: reqAttr.id,
+          ...fallbackValue,
+        });
+        includedAttrIds.add(reqAttr.id);
+        console.log(`[ad-action-execute] Required attr ${reqAttr.id}: using fallback value`);
+      } else {
+        console.warn(`[ad-action-execute] Required attr ${reqAttr.id}: NO VALUE AVAILABLE`);
+      }
+    }
+  }
+
+  // Then, add remaining attributes from source (if checklist allows)
+  if (checklist?.attributes !== false && itemData.attributes) {
+    for (const attr of itemData.attributes) {
+      if (attr.id && !includedAttrIds.has(attr.id)) {
+        finalAttributes.push(attr);
+        includedAttrIds.add(attr.id);
+      }
+    }
+  }
+
+  console.log(`[ad-action-execute] Final attributes count: ${finalAttributes.length}`);
+
   // Build new item payload based on checklist
   const newItem: any = {
     title: checklist?.title !== false ? itemData.title : undefined,
@@ -518,6 +617,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       : undefined,
     price: checklist?.price !== false ? itemData.price : undefined,
     available_quantity: checklist?.quantity !== false ? itemData.available_quantity : 1,
+    attributes: finalAttributes.length > 0 ? finalAttributes : undefined,
   };
 
   // Add description if included (fetch separately - only for regular items, not catalog)
@@ -529,11 +629,6 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       const descData = await descResponse.json();
       newItem.description = { plain_text: descData.plain_text || descData.text };
     }
-  }
-
-  // Add attributes if included
-  if (checklist?.attributes !== false && itemData.attributes) {
-    newItem.attributes = itemData.attributes;
   }
 
   // Validate minimum required fields
