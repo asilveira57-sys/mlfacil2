@@ -1173,10 +1173,20 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   console.log(`[ad-action-execute] Payload keys: ${Object.keys(newItem).join(", ")}`);
 
   // =========================================================================
-  // CREATE ITEM (1ª tentativa)
+  // CLONE SEMPRE USA: POST /items (criar novo anúncio)
+  // NUNCA usar PUT /items/{id} para clone - isso é para update
   // =========================================================================
-  let createResponse = await fetch(`https://api.mercadolibre.com/items`, {
-    method: "POST",
+  const CREATE_ENDPOINT = "https://api.mercadolibre.com/items";
+  const CREATE_METHOD = "POST";
+  
+  // Log obrigatório: request_kind, method, endpoint
+  console.log(`[ad-action-execute] === API REQUEST (Pass 1) ===`);
+  console.log(`[ad-action-execute] request_kind=create`);
+  console.log(`[ad-action-execute] method=${CREATE_METHOD}`);
+  console.log(`[ad-action-execute] endpoint=${CREATE_ENDPOINT}`);
+  
+  let createResponse = await fetch(CREATE_ENDPOINT, {
+    method: CREATE_METHOD,
     headers: {
       "Authorization": `Bearer ${accessToken}`,
       "Content-Type": "application/json",
@@ -1268,10 +1278,15 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       console.log(`[ad-action-execute] [RETRY] Body-level fields: ${JSON.stringify(fillResult.bodyLevelFields)}`);
 
       // =========================================================================
-      // CREATE ITEM (2ª tentativa)
+      // CREATE ITEM (2ª tentativa) - SEMPRE POST /items
       // =========================================================================
-      createResponse = await fetch(`https://api.mercadolibre.com/items`, {
-        method: "POST",
+      console.log(`[ad-action-execute] === API REQUEST (Pass 2 - RETRY) ===`);
+      console.log(`[ad-action-execute] request_kind=create`);
+      console.log(`[ad-action-execute] method=${CREATE_METHOD}`);
+      console.log(`[ad-action-execute] endpoint=${CREATE_ENDPOINT}`);
+      
+      createResponse = await fetch(CREATE_ENDPOINT, {
+        method: CREATE_METHOD,
         headers: {
           "Authorization": `Bearer ${accessToken}`,
           "Content-Type": "application/json",
@@ -1284,7 +1299,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   }
   
   if (!createResponse.ok) {
-    console.error(`[ad-action-execute] Clone POST failed:`, JSON.stringify({
+    console.error(`[ad-action-execute] Clone ${CREATE_METHOD} ${CREATE_ENDPOINT} FAILED:`, JSON.stringify({
       status: createResponse.status,
       error: createData,
       payload_attributes_count: finalAttributes.length,
@@ -1314,10 +1329,18 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       attributes_sent: (newItem.attributes || []).map((a: any) => ({ id: a.id, value: a.value_name || a.value_id })),
       required_check: requiredCheck,
       catalog_info: catalogInfo,
+      // Log detalhado da chamada
+      api_request: {
+        request_kind: "create",
+        http_method: CREATE_METHOD,
+        endpoint_url: CREATE_ENDPOINT,
+      },
     };
   }
 
   console.log(`[ad-action-execute] Clone SUCCESS: ${createData.id}`);
+  console.log(`[ad-action-execute] === FINAL API CALL SUMMARY ===`);
+  console.log(`[ad-action-execute] request_kind=create | method=${CREATE_METHOD} | endpoint=${CREATE_ENDPOINT} | result=SUCCESS`);
 
   return { 
     success: true, 
@@ -1330,5 +1353,11 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     body_level_fields: fillResult.bodyLevelFields,
     required_check: requiredCheck,
     catalog_info: catalogInfo,
+    // Log detalhado da chamada
+    api_request: {
+      request_kind: "create",
+      http_method: CREATE_METHOD,
+      endpoint_url: CREATE_ENDPOINT,
+    },
   };
 }
