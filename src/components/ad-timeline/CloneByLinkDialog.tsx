@@ -17,7 +17,7 @@ import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { useQueryClient } from '@tanstack/react-query';
-import { extractMeliId } from '@/lib/meli/extractMeliId';
+import { extractMeliId, isCatalogMeliId } from '@/lib/meli/extractMeliId';
 
 interface CloneByLinkDialogProps {
   open: boolean;
@@ -234,9 +234,20 @@ export function CloneByLinkDialog({ open, onOpenChange }: CloneByLinkDialogProps
               </div>
             )}
             {link && detectedId && (
-              <p className="text-xs text-muted-foreground">
-                ID detectado: <span className="font-mono">{detectedId}</span>
-              </p>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">
+                  ID detectado: <span className="font-mono">{detectedId}</span>
+                </p>
+                {isCatalogMeliId(detectedId) && (
+                  <div className="flex items-start gap-2 p-2 rounded-md bg-amber-500/10 border border-amber-500/30">
+                    <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      Este é um produto de catálogo. O clone será feito com base no 
+                      vendedor que está vencendo a buy box neste momento.
+                    </p>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 

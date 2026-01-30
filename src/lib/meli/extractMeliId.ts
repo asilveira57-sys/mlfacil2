@@ -39,3 +39,13 @@ export function isValidMeliId(id: string): boolean {
   if (!id) return false;
   return /^ML[A-Z]{0,2}\d{8,}$/i.test(id.trim());
 }
+
+/**
+ * Checks if the ID is a catalog/universal product ID (MLBU).
+ * MLBU IDs represent catalog products where multiple sellers compete,
+ * not individual listings that can be cloned directly.
+ */
+export function isCatalogMeliId(id: string): boolean {
+  if (!id) return false;
+  return /^MLBU/i.test(id.trim());
+}
