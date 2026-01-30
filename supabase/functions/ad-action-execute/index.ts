@@ -447,13 +447,52 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       headers: { Authorization: `Bearer ${accessToken}` },
     });
 
+    const responseStatus = getResponse.status;
+    console.log(`[ad-action-execute] /items/${resolvedItemId} response status: ${responseStatus}`);
+
     if (!getResponse.ok) {
       const errBody = await getResponse.text().catch(() => "");
-      console.error(`[ad-action-execute] Failed to fetch item ${resolvedItemId}:`, errBody);
+      
+      // Log detailed error for debugging
+      console.error(`[ad-action-execute] /items/${resolvedItemId} FAILED`, JSON.stringify({
+        status: responseStatus,
+        body_preview: errBody?.slice(0, 500),
+        item_id: resolvedItemId,
+        original_id: itemId,
+      }));
+
+      // Parse error type for better user feedback
+      let errorType = "UNKNOWN";
+      let userMessage = `Falha ao buscar detalhes do anúncio ${resolvedItemId}`;
+      
+      if (responseStatus === 403) {
+        errorType = "ACCESS_DENIED";
+        userMessage = `Sem permissão para acessar o anúncio ${resolvedItemId}. Este anúncio pode pertencer a outro vendedor.`;
+      } else if (responseStatus === 404) {
+        errorType = "NOT_FOUND";
+        userMessage = `Anúncio ${resolvedItemId} não encontrado. Pode ter sido excluído ou o ID está incorreto.`;
+      } else if (responseStatus === 401) {
+        errorType = "UNAUTHORIZED";
+        userMessage = `Token expirado ou inválido. Reconecte sua conta do Mercado Livre.`;
+      } else if (responseStatus >= 500) {
+        errorType = "ML_SERVER_ERROR";
+        userMessage = `Erro temporário no Mercado Livre (${responseStatus}). Tente novamente em alguns minutos.`;
+      }
+
+      // Try to parse JSON error for more details
+      let parsedError: any = null;
+      try {
+        parsedError = JSON.parse(errBody);
+      } catch {
+        // Not JSON, keep as string
+      }
+
       return {
         success: false,
-        error: `Falha ao buscar detalhes do anúncio ${resolvedItemId}`,
-        api_error: errBody,
+        error: errorType,
+        message: userMessage,
+        api_status: responseStatus,
+        api_error: parsedError || errBody,
         catalog_info: catalogInfo,
       };
     }
