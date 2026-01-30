@@ -81,9 +81,22 @@ const ALLOWED_BODY_FIELDS = new Set([
   "title", "category_id", "currency_id", "listing_type_id", "condition",
   "pictures", "price", "available_quantity", "attributes", "description",
   "buying_mode", "sale_terms", "shipping", "variations",
+  // Para catálogo
+  "catalog_product_id",
   // Body-level fields (adicionados dinamicamente)
   "family_name",
 ]);
+
+// listing_type_id que exigem pictures - não usar em catálogo com pictures bloqueadas
+const LISTING_TYPES_REQUIRING_PICTURES = new Set([
+  "gold_special",
+  "gold_pro",
+  "gold",
+  "silver",
+]);
+
+// listing_type_id seguros para catálogo (não exigem pictures)
+const CATALOG_SAFE_LISTING_TYPES = ["free", "bronze"];
 
 // ============================================================================
 // REGRA OFICIAL DE RESOLUÇÃO:
@@ -236,19 +249,34 @@ interface NormalizedAttribute {
 
 function normalizeAndCleanAttributes(
   sourceAttributes: any[],
-  categoryAttributes: CategoryAttribute[]
-): { attrsById: Map<string, NormalizedAttribute>; cleanedAttrs: NormalizedAttribute[] } {
+  categoryAttributes: CategoryAttribute[],
+  removeNotModifiable: boolean = true
+): { attrsById: Map<string, NormalizedAttribute>; cleanedAttrs: NormalizedAttribute[]; removedNotModifiable: string[] } {
   const attrsById = new Map<string, NormalizedAttribute>();
   const cleanedAttrs: NormalizedAttribute[] = [];
+  const removedNotModifiable: string[] = [];
 
   // Criar mapa de tipos esperados
   const typeById = new Map<string, string>();
+  const tagsById = new Map<string, any>();
   for (const catAttr of categoryAttributes) {
     typeById.set(catAttr.id, catAttr.value_type);
+    tagsById.set(catAttr.id, catAttr.tags || {});
   }
 
   for (const attr of sourceAttributes || []) {
     if (!attr?.id) continue;
+
+    // Verificar se o atributo é "not modifiable" (read-only) - remover para reduzir warnings
+    if (removeNotModifiable) {
+      const attrTags = tagsById.get(attr.id) || {};
+      // Atributos com read_only ou variation_attribute não devem ser copiados
+      if (attrTags.read_only === true || attrTags.hidden === true) {
+        console.log(`[ad-action-execute] Attr ${attr.id}: skipped (not modifiable/hidden)`);
+        removedNotModifiable.push(attr.id);
+        continue;
+      }
+    }
 
     // 3.1 Limpar atributos inválidos
     const hasValidValue = 
@@ -284,8 +312,8 @@ function normalizeAndCleanAttributes(
     }
   }
 
-  console.log(`[ad-action-execute] Normalized ${cleanedAttrs.length} valid attributes from source`);
-  return { attrsById, cleanedAttrs };
+  console.log(`[ad-action-execute] Normalized ${cleanedAttrs.length} valid attributes from source (removed ${removedNotModifiable.length} not-modifiable)`);
+  return { attrsById, cleanedAttrs, removedNotModifiable };
 }
 
 // ============================================================================
@@ -1065,11 +1093,12 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   }
 
   // =========================================================================
-  // ETAPA 3: Normalizar atributos do item fonte
+  // ETAPA 3: Normalizar atributos do item fonte (removendo not-modifiable)
   // =========================================================================
-  const { attrsById: sourceAttrsById, cleanedAttrs } = normalizeAndCleanAttributes(
+  const { attrsById: sourceAttrsById, cleanedAttrs, removedNotModifiable } = normalizeAndCleanAttributes(
     itemData.attributes || [],
-    categoryAttributes
+    categoryAttributes,
+    true // removeNotModifiable = true
   );
 
   // =========================================================================
@@ -1153,30 +1182,59 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   // =========================================================================
   // BUILD NEW ITEM PAYLOAD (incluindo campos no body raiz)
   // IMPORTANTE: Se is_catalog_source=true, NÃO enviar title, pictures, description
+  // IMPORTANTE: Se pictures está bloqueado, NÃO usar listing_type que exige pictures
   // =========================================================================
   const isCatalogSource = catalogDiagnostic.is_catalog_source;
   const blockedFields = catalogDiagnostic.blocked_fields;
+  const picturesBlocked = blockedFields.includes("pictures");
 
   // Determinar se cada campo pode ser incluído
   const canIncludeTitle = !isCatalogSource && checklist?.title !== false;
   const canIncludePictures = !isCatalogSource && checklist?.pictures !== false && itemData.pictures;
   const canIncludeDescription = !isCatalogSource && checklist?.description !== false;
 
+  // =========================================================================
+  // ESTRATÉGIA DE listing_type_id PARA CATÁLOGO:
+  // Se pictures está bloqueado e listing_type exige pictures (gold_special, etc.):
+  // 1ª tentativa: NÃO enviar listing_type_id (deixar ML decidir)
+  // 2ª tentativa: usar listing_type seguro (free/bronze)
+  // =========================================================================
+  let listingTypeStrategy: "omit" | "safe" | "original" = "original";
+  let listingTypeToUse: string | undefined = itemData.listing_type_id || "gold_special";
+
+  if (isCatalogSource && picturesBlocked) {
+    const originalType = itemData.listing_type_id || "gold_special";
+    if (LISTING_TYPES_REQUIRING_PICTURES.has(originalType)) {
+      console.log(`[ad-action-execute] CATALOG STRATEGY: listing_type_id "${originalType}" requires pictures but pictures are blocked`);
+      console.log(`[ad-action-execute] CATALOG STRATEGY: Will omit listing_type_id to let ML decide`);
+      listingTypeStrategy = "omit";
+      listingTypeToUse = undefined; // Não enviar - deixar ML decidir
+    }
+  }
+
   console.log(`[ad-action-execute] === PAYLOAD FIELD DECISIONS ===`);
   console.log(`[ad-action-execute] is_catalog_source: ${isCatalogSource}`);
+  console.log(`[ad-action-execute] pictures_blocked: ${picturesBlocked}`);
+  console.log(`[ad-action-execute] listing_type_strategy: ${listingTypeStrategy}`);
+  console.log(`[ad-action-execute] listing_type_to_use: ${listingTypeToUse ?? "(omitted)"}`);
   console.log(`[ad-action-execute] canIncludeTitle: ${canIncludeTitle} (blocked: ${blockedFields.includes("title")})`);
-  console.log(`[ad-action-execute] canIncludePictures: ${canIncludePictures} (blocked: ${blockedFields.includes("pictures")})`);
+  console.log(`[ad-action-execute] canIncludePictures: ${canIncludePictures} (blocked: ${picturesBlocked})`);
   console.log(`[ad-action-execute] canIncludeDescription: ${canIncludeDescription} (blocked: ${blockedFields.includes("description")})`);
+  console.log(`[ad-action-execute] removedNotModifiable: ${removedNotModifiable.join(", ") || "(none)"}`);
 
   let newItem: any = {
     category_id: itemData.category_id,
     currency_id: itemData.currency_id || "BRL",
-    listing_type_id: itemData.listing_type_id || "gold_special",
     condition: itemData.condition || "new",
     price: checklist?.price !== false ? itemData.price : undefined,
     available_quantity: checklist?.quantity !== false ? itemData.available_quantity : 1,
     attributes: finalAttributes.length > 0 ? finalAttributes : undefined,
   };
+
+  // Incluir listing_type_id apenas se não for estratégia "omit"
+  if (listingTypeToUse) {
+    newItem.listing_type_id = listingTypeToUse;
+  }
 
   // CONDICIONAL: Apenas incluir title se NÃO for catálogo
   if (canIncludeTitle) {
@@ -1314,15 +1372,20 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       );
 
       // Reconstruir payload com novos campos - RESPEITANDO REGRAS DE CATÁLOGO
+      // IMPORTANTE: Usar a mesma estratégia de listing_type determinada anteriormente
       newItem = {
         category_id: itemData.category_id,
         currency_id: itemData.currency_id || "BRL",
-        listing_type_id: itemData.listing_type_id || "gold_special",
         condition: itemData.condition || "new",
         price: checklist?.price !== false ? itemData.price : undefined,
         available_quantity: checklist?.quantity !== false ? itemData.available_quantity : 1,
         attributes: finalAttributes2.length > 0 ? finalAttributes2 : undefined,
       };
+
+      // Incluir listing_type_id apenas se não for estratégia "omit"
+      if (listingTypeToUse) {
+        newItem.listing_type_id = listingTypeToUse;
+      }
 
       // CONDICIONAL: Apenas incluir title se NÃO for catálogo
       if (canIncludeTitle) {
@@ -1406,6 +1469,37 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       (requiredCheck as any).finalExtractedMissing = finalExtracted;
     }
 
+    // Verificar se é erro de requiresPictures (listing_type exige fotos mas não enviamos)
+    const requiresPicturesError = createData?.cause?.some((c: any) => 
+      c.code === "item.pictures.required" ||
+      c.code === "pictures.required" ||
+      c.message?.includes("pictures") ||
+      c.message?.includes("requiresPictures")
+    ) || createData?.message?.toLowerCase().includes("picture");
+
+    if (requiresPicturesError && isCatalogSource && picturesBlocked) {
+      console.warn(`[ad-action-execute] CATALOG PICTURES CONFLICT: ML requires pictures but they are blocked for catalog items`);
+      return {
+        success: false,
+        error: "CATALOG_PICTURES_BLOCKED",
+        message: "Este produto de catálogo exige fotos para o tipo de anúncio, mas fotos são gerenciadas pelo catálogo. Não é possível clonar este item diretamente.",
+        user_guidance: "Itens de catálogo têm fotos gerenciadas pelo Mercado Livre. O tipo de anúncio selecionado exige fotos próprias. Tente usar a opção de cadastrar no catálogo diretamente pelo painel do Mercado Livre.",
+        api_error: createData,
+        catalog_diagnostic: { 
+          ...catalogDiagnostic, 
+          listing_type_strategy: listingTypeStrategy,
+          listing_type_attempted: listingTypeToUse,
+          pictures_blocked: picturesBlocked,
+        },
+        catalog_info: catalogInfo,
+        api_request: {
+          request_kind: "create",
+          http_method: CREATE_METHOD,
+          endpoint_url: CREATE_ENDPOINT,
+        },
+      };
+    }
+
     // Se for erro de invalid_fields com title e for catálogo, dar mensagem amigável
     const hasInvalidTitle = createData?.cause?.some((c: any) => 
       c.code === "item.invalid_title" || 
@@ -1419,7 +1513,11 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
         message: "Este anúncio pertence ao catálogo do Mercado Livre. O campo 'título' é controlado pelo catálogo e não pode ser modificado.",
         user_guidance: "Itens de catálogo têm título, fotos e descrição gerenciados pelo Mercado Livre. Esta é uma limitação da plataforma, não uma falha do sistema.",
         api_error: createData,
-        catalog_diagnostic: catalogDiagnostic,
+        catalog_diagnostic: {
+          ...catalogDiagnostic,
+          listing_type_strategy: listingTypeStrategy,
+          listing_type_attempted: listingTypeToUse,
+        },
         catalog_info: catalogInfo,
         api_request: {
           request_kind: "create",
@@ -1437,7 +1535,12 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       attributes_sent: (newItem.attributes || []).map((a: any) => ({ id: a.id, value: a.value_name || a.value_id })),
       required_check: requiredCheck,
       catalog_info: catalogInfo,
-      catalog_diagnostic: catalogDiagnostic,
+      catalog_diagnostic: {
+        ...catalogDiagnostic,
+        listing_type_strategy: listingTypeStrategy,
+        listing_type_attempted: listingTypeToUse,
+        removed_not_modifiable: removedNotModifiable,
+      },
       // Log detalhado da chamada
       api_request: {
         request_kind: "create",
@@ -1462,7 +1565,12 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     body_level_fields: fillResult.bodyLevelFields,
     required_check: requiredCheck,
     catalog_info: catalogInfo,
-    catalog_diagnostic: catalogDiagnostic,
+    catalog_diagnostic: {
+      ...catalogDiagnostic,
+      listing_type_strategy: listingTypeStrategy,
+      listing_type_used: listingTypeToUse,
+      removed_not_modifiable: removedNotModifiable,
+    },
     // Log detalhado da chamada
     api_request: {
       request_kind: "create",
