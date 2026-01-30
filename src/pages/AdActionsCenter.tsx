@@ -33,7 +33,7 @@ import {
   FileText,
   ListChecks,
   History,
-  Link,
+  Copy,
   Eye,
   Pencil,
 } from "lucide-react";
@@ -41,7 +41,7 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useAdLifecycleActions, useExecuteAction, useCancelAction } from "@/hooks/useAdTimeline";
 import type { AdLifecycleAction, ActionStatus } from "@/types/ad-timeline";
-import { CloneByLinkDialog } from "@/components/ad-timeline/CloneByLinkDialog";
+import { UnifiedCloneModal } from "@/components/clone/UnifiedCloneModal";
 import { ActionDetailsDialog } from "@/components/ad-actions/ActionDetailsDialog";
 import { useCurrentWorkspaceId } from "@/hooks/useCurrentWorkspaceId";
 
@@ -229,8 +229,8 @@ export default function AdActionsCenter() {
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between">
         <Button onClick={() => setCloneDialogOpen(true)} className="gap-2">
-          <Link className="h-4 w-4" />
-          Clonar por Link
+          <Copy className="h-4 w-4" />
+          Clonar anúncio (automático)
         </Button>
         </div>
 
@@ -320,8 +320,8 @@ export default function AdActionsCenter() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Clone by Link Dialog */}
-      <CloneByLinkDialog open={cloneDialogOpen} onOpenChange={setCloneDialogOpen} />
+      {/* Unified Clone Modal */}
+      <UnifiedCloneModal open={cloneDialogOpen} onOpenChange={setCloneDialogOpen} />
 
       {/* Action Details Dialog */}
       <ActionDetailsDialog
