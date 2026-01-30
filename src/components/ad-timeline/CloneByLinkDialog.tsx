@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -12,12 +12,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
-import { Copy, Link, Loader2, AlertCircle } from 'lucide-react';
+import { Copy, Link, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { useQueryClient } from '@tanstack/react-query';
-import { extractMeliId, isCatalogMeliId } from '@/lib/meli/extractMeliId';
+import { extractMeliIdWithType, isCatalogMeliId } from '@/lib/meli/extractMeliId';
 
 interface CloneByLinkDialogProps {
   open: boolean;
@@ -46,7 +46,9 @@ export function CloneByLinkDialog({ open, onOpenChange }: CloneByLinkDialogProps
     keep_price: true,
   });
 
-  const detectedId = extractMeliId(link);
+  // Use enhanced extraction with type info
+  const extractionResult = useMemo(() => extractMeliIdWithType(link), [link]);
+  const detectedId = extractionResult?.id ?? null;
 
   const handleCreateCloneAction = async () => {
     setError(null);
@@ -237,14 +239,35 @@ export function CloneByLinkDialog({ open, onOpenChange }: CloneByLinkDialogProps
               <div className="space-y-1">
                 <p className="text-xs text-muted-foreground">
                   ID detectado: <span className="font-mono">{detectedId}</span>
+                  {extractionResult?.type === 'MLB' && (
+                    <span className="ml-1 text-green-600 dark:text-green-400">(anúncio base)</span>
+                  )}
                 </p>
+                
+                {/* MLB extracted from catalog link - success case */}
+                {extractionResult?.resolvedFromCatalogLink && extractionResult.type === 'MLB' && (
+                  <div className="flex items-start gap-2 p-2 rounded-md bg-green-500/10 border border-green-500/30">
+                    <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0 mt-0.5" />
+                    <p className="text-xs text-green-700 dark:text-green-400">
+                      Anúncio base identificado automaticamente a partir do link de catálogo.
+                    </p>
+                  </div>
+                )}
+                
+                {/* MLBU without MLB - residual fallback warning */}
                 {isCatalogMeliId(detectedId) && (
                   <div className="flex items-start gap-2 p-2 rounded-md bg-amber-500/10 border border-amber-500/30">
                     <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                    <p className="text-xs text-amber-700 dark:text-amber-400">
-                      Este é um produto de catálogo. O clone será feito com base no 
-                      vendedor que está vencendo a buy box neste momento.
-                    </p>
+                    <div className="text-xs text-amber-700 dark:text-amber-400 space-y-1">
+                      <p className="font-medium">Link de catálogo detectado (MLBU)</p>
+                      <p>
+                        A clonagem funciona a partir do anúncio base (MLB). 
+                        Links públicos de catálogo podem exigir o link do anúncio do vendedor.
+                      </p>
+                      <p className="text-amber-600 dark:text-amber-500">
+                        O sistema tentará resolver via buy box, mas pode falhar se não houver vendedor ativo.
+                      </p>
+                    </div>
                   </div>
                 )}
               </div>
