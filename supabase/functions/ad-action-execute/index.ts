@@ -15,54 +15,122 @@ interface ExecuteActionRequest {
  * Check if itemId is a catalog/universal product ID (MLBU)
  * MLBU = Universal product catalog, not a sellable item
  */
-function isCatalogId(itemId: string): boolean {
-  return /^MLBU/i.test(itemId);
+function isCatalogId(id: string): boolean {
+  return /^MLBU/i.test((id || "").trim());
 }
+
+/**
+ * Fallback: convert MLBU to MLB for /products endpoint only
+ */
+function toProductIdFallback(catalogId: string): string {
+  return catalogId.replace(/^MLBU/i, "MLB");
+}
+
+type ResolveCatalogResult = {
+  ok: true;
+  itemId: string;
+  productData?: any;
+  resolvedBy: "products:MLBU" | "products:MLB";
+} | {
+  ok: false;
+  error: string;
+  productData?: any;
+  tried: Array<{ productId: string; status?: number; body?: string }>;
+};
 
 /**
  * Resolve a catalog ID (MLBU) to a real item ID (MLB) via the official API
  * Uses /products/{MLBU} and extracts buy_box_winner.item_id
+ * Fallback A/B: tries MLBU first, then MLB on /products endpoint only
  */
 async function resolveCatalogItem(
   accessToken: string,
-  catalogId: string
-): Promise<{ ok: boolean; itemId?: string; productData?: any; error?: string }> {
+  catalogIdRaw: string
+): Promise<ResolveCatalogResult> {
+  const catalogId = (catalogIdRaw || "").trim();
+  const tried: Array<{ productId: string; status?: number; body?: string }> = [];
+
   console.log(`[ad-action-execute] Resolving catalog ID: ${catalogId}`);
 
-  // GET /products/{MLBU} (official catalog API)
-  const productRes = await fetch(
-    `https://api.mercadolibre.com/products/${catalogId}`,
-    { headers: { "Authorization": `Bearer ${accessToken}` } }
-  );
+  // A) Try as MLBU first
+  const productIdA = catalogId;
+  const resA = await fetch(`https://api.mercadolibre.com/products/${productIdA}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
 
-  console.log(`[ad-action-execute] /products/${catalogId} status: ${productRes.status}`);
+  console.log(`[ad-action-execute] /products/${productIdA} status: ${resA.status}`);
 
-  if (!productRes.ok) {
-    const errorBody = await productRes.text();
-    console.error(`[ad-action-execute] Catalog not found: ${catalogId}`, errorBody);
+  if (resA.ok) {
+    const product = await resA.json();
+    console.log(`[ad-action-execute] Product found (A): ${product?.name ?? "(no name)"}`);
+
+    if (!product?.buy_box_winner?.item_id) {
+      console.log(`[ad-action-execute] No buy_box_winner for catalog (A) ${productIdA}`);
+      return {
+        ok: false,
+        error: "Este produto está em catálogo, mas não possui um vendedor ativo no momento. Cole o link de um anúncio específico (MLB) para continuar.",
+        productData: product,
+        tried: [{ productId: productIdA, status: resA.status }],
+      };
+    }
+
+    const realItemId = product.buy_box_winner.item_id;
+    console.log(`[ad-action-execute] buy_box_winner.item_id resolved (A): ${realItemId}`);
     return {
-      ok: false,
-      error: `Produto de catálogo não encontrado (${catalogId}). Verifique se o link está correto.`,
-    };
-  }
-
-  const product = await productRes.json();
-  console.log(`[ad-action-execute] Catalog product found: ${product.name || product.id}`);
-
-  // Check for buy_box_winner
-  if (!product.buy_box_winner?.item_id) {
-    console.log(`[ad-action-execute] No buy_box_winner for catalog ${catalogId}`);
-    return {
-      ok: false,
-      error: "Este produto está em catálogo, mas não possui um vendedor ativo no momento. Cole o link de um anúncio específico (MLB) para continuar.",
+      ok: true,
+      itemId: realItemId,
       productData: product,
+      resolvedBy: "products:MLBU",
     };
+  } else {
+    const bodyA = await resA.text().catch(() => "");
+    tried.push({ productId: productIdA, status: resA.status, body: bodyA });
+    console.log(`[ad-action-execute] /products/${productIdA} failed: ${bodyA?.slice(0, 300)}`);
   }
 
-  const realItemId = product.buy_box_winner.item_id;
-  console.log(`[ad-action-execute] buy_box_winner.item_id resolved: ${realItemId}`);
+  // B) Fallback: try as MLB on /products (without normalizing to /items)
+  const productIdB = toProductIdFallback(catalogId);
+  if (productIdB !== productIdA) {
+    const resB = await fetch(`https://api.mercadolibre.com/products/${productIdB}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
 
-  return { ok: true, itemId: realItemId, productData: product };
+    console.log(`[ad-action-execute] /products/${productIdB} status: ${resB.status}`);
+
+    if (resB.ok) {
+      const product = await resB.json();
+      console.log(`[ad-action-execute] Product found (B): ${product?.name ?? "(no name)"}`);
+
+      if (!product?.buy_box_winner?.item_id) {
+        console.log(`[ad-action-execute] No buy_box_winner for catalog (B) ${productIdB}`);
+        return {
+          ok: false,
+          error: "Este produto está em catálogo, mas não possui um vendedor ativo no momento. Cole o link de um anúncio específico (MLB) para continuar.",
+          productData: product,
+          tried: [...tried, { productId: productIdB, status: resB.status }],
+        };
+      }
+
+      const realItemId = product.buy_box_winner.item_id;
+      console.log(`[ad-action-execute] buy_box_winner.item_id resolved (B): ${realItemId}`);
+      return {
+        ok: true,
+        itemId: realItemId,
+        productData: product,
+        resolvedBy: "products:MLB",
+      };
+    } else {
+      const bodyB = await resB.text().catch(() => "");
+      tried.push({ productId: productIdB, status: resB.status, body: bodyB });
+      console.log(`[ad-action-execute] /products/${productIdB} failed: ${bodyB?.slice(0, 300)}`);
+    }
+  }
+
+  return {
+    ok: false,
+    error: `Produto de catálogo não encontrado (${catalogId}). Verifique se o link está correto.`,
+    tried,
+  };
 }
 
 serve(async (req) => {
@@ -349,27 +417,35 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   let resolvedItemId = itemId;
   let catalogInfo: any = null;
 
+  console.log(`[ad-action-execute] Clone requested for ID: ${itemId}`);
+
   // If no snapshot, we need to fetch item data
   if (!itemData || Object.keys(itemData).length === 0) {
     // DETECTION: Is this a catalog ID (MLBU) or regular item (MLB)?
     if (isCatalogId(itemId)) {
       console.log(`[ad-action-execute] Detected CATALOG ID: ${itemId}`);
 
-      // Resolve catalog via official API
+      // Resolve catalog via official API with A/B fallback
       const catalogResult = await resolveCatalogItem(accessToken, itemId);
       if (!catalogResult.ok) {
+        console.error(
+          `[ad-action-execute] Catalog resolve failed for ${itemId}`,
+          catalogResult.tried
+        );
         return {
           success: false,
           error: catalogResult.error,
           is_catalog: true,
           catalog_id: itemId,
+          tried: catalogResult.tried,
         };
       }
 
-      resolvedItemId = catalogResult.itemId!;
+      resolvedItemId = catalogResult.itemId;
       catalogInfo = {
         original_catalog_id: itemId,
         buy_box_winner_id: resolvedItemId,
+        resolved_by: catalogResult.resolvedBy,
         product_name: catalogResult.productData?.name,
       };
 
@@ -379,11 +455,11 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     // Fetch real item (MLB)
     console.log(`[ad-action-execute] Fetching item data: ${resolvedItemId}`);
     const getResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}`, {
-      headers: { "Authorization": `Bearer ${accessToken}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
 
     if (!getResponse.ok) {
-      const errBody = await getResponse.text();
+      const errBody = await getResponse.text().catch(() => "");
       console.error(`[ad-action-execute] Failed to fetch item ${resolvedItemId}:`, errBody);
       return {
         success: false,
