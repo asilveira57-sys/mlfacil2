@@ -1,270 +1,81 @@
 
 
-## Objetivo
+## Problema Identificado
 
-Implementar um fluxo oficial, estável e sem scraping para resolver IDs de catálogo (MLBU) em um `item_id` real (MLB) e permitir clonagem correta, seguindo as regras da API oficial do Mercado Livre.
+A Edge Function `ad-action-execute` **não está registrada no `supabase/config.toml`**.
 
----
+### Diagnóstico
 
-## Problema Atual
+| Componente | Status |
+|------------|--------|
+| Código da função (`supabase/functions/ad-action-execute/index.ts`) | ✅ Correto - contém toda a lógica de MLBU que implementamos |
+| Registro no config.toml | ❌ **FALTANDO** - a função não está listada |
+| Outras funções relacionadas | ❌ `ad-item-snapshot` e `ad-timeline-recalculate` também faltam |
 
-O código atual tenta tratar MLBU como MLB através da função `normalizeProductId()`, que simplesmente remove o "U" do ID:
-- `MLBU1436905343` → `MLB1436905343`
-
-Isso gera 404 em todos os endpoints porque `MLB1436905343` não existe como produto/item — é um ID de catálogo universal.
-
----
-
-## Solução Proposta
-
-### Regras Obrigatórias (conforme prompt)
-
-1. **MLBU nunca deve ser normalizado para MLB** - são coisas diferentes
-2. **Usar API oficial de catálogo** - `/products/{MLBU}` com `buy_box_winner.item_id`
-3. **Sem scraping** - nenhum fetch de HTML
-4. **Logs claros** - cada etapa logada para debug
-5. **Mensagem final clara** quando não há vendedor ativo
-
----
-
-## Arquitetura do Novo Fluxo
+### Fluxo atual do "Clonar por Link"
 
 ```text
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         DETECÇÃO DE ORIGEM                              │
-├─────────────────────────────────────────────────────────────────────────┤
-│ Input: MLB1234567890  → Tratar como ITEM NORMAL                         │
-│ Input: MLBU1234567890 → Tratar como CATÁLOGO (buy_box_winner)           │
-│ Input: /p/MLBU...     → Extrair MLBU e tratar como CATÁLOGO             │
-└─────────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│              FLUXO CATÁLOGO (quando ID começa com MLBU)                 │
-├─────────────────────────────────────────────────────────────────────────┤
-│ 1. GET /products/{MLBU}                                                 │
-│    → Extrair buy_box_winner.item_id (ex: MLB5678901234)                 │
-│                                                                         │
-│ 2. Se não existe buy_box_winner:                                        │
-│    → Retornar erro claro com orientação                                 │
-│                                                                         │
-│ 3. Com o item_id real:                                                  │
-│    → GET /items/{item_id}                                               │
-│    → Seguir fluxo normal de clonagem                                    │
-└─────────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│              FLUXO ITEM NORMAL (quando ID começa com MLB)               │
-├─────────────────────────────────────────────────────────────────────────┤
-│ 1. GET /items/{MLB}                                                     │
-│    → Seguir fluxo normal de clonagem                                    │
-└─────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 1. Usuário cola link e clica "Criar Rascunho"                                │
+│    └─> CloneByLinkDialog.tsx                                                 │
+│        └─> Insere registro DRAFT em ad_lifecycle_actions                     │
+│            (funciona corretamente ✓)                                         │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ 2. Usuário vai em "Rascunhos" e clica "Executar"                             │
+│    └─> AdActionsCenter.tsx > handleConfirmExecute()                          │
+│        └─> useExecuteAction() mutation (src/hooks/useAdTimeline.ts:303)      │
+│            └─> supabase.functions.invoke('ad-action-execute', {...})         │
+│                └─> Edge Function (pode estar desatualizada!)                 │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
+
+O código no frontend chama a função corretamente, e o código da Edge Function está correto. 
+**O problema é que a função pode não estar deployada com as últimas alterações** porque não está no `config.toml`.
 
 ---
 
-## Mudanças Técnicas
+## Solução
 
-### 1. Backend: `supabase/functions/ad-action-execute/index.ts`
+Adicionar as 3 funções de ad-lifecycle ao `supabase/config.toml`:
 
-**Remover lógica problemática:**
-- Função `normalizeProductId()` que converte MLBU → MLB
-- Função `fetchCatalogItemData()` com múltiplos tiers de fallback
+```toml
+[functions.ad-action-execute]
+verify_jwt = false
 
-**Adicionar nova lógica:**
+[functions.ad-item-snapshot]
+verify_jwt = false
 
-```typescript
-// Nova função de detecção
-function isCatalogId(itemId: string): boolean {
-  return /^MLBU/i.test(itemId); // Apenas MLBU é catálogo
-}
-
-// Nova função de resolução de catálogo (única fonte de verdade)
-async function resolveCatalogItem(
-  accessToken: string, 
-  catalogId: string
-): Promise<{ ok: boolean; itemId?: string; productData?: any; error?: string }> {
-  console.log(`[ad-action-execute] Resolving catalog ID: ${catalogId}`);
-  
-  // GET /products/{MLBU} (API oficial de catálogo)
-  const productRes = await fetch(
-    `https://api.mercadolibre.com/products/${catalogId}`,
-    { headers: { "Authorization": `Bearer ${accessToken}` } }
-  );
-  
-  console.log(`[ad-action-execute] /products/${catalogId} status: ${productRes.status}`);
-  
-  if (!productRes.ok) {
-    return { 
-      ok: false, 
-      error: `Produto de catálogo não encontrado (${catalogId}). Verifique se o link está correto.` 
-    };
-  }
-  
-  const product = await productRes.json();
-  console.log(`[ad-action-execute] Product found: ${product.name}`);
-  
-  // Verificar buy_box_winner
-  if (!product.buy_box_winner?.item_id) {
-    console.log(`[ad-action-execute] No buy_box_winner for catalog ${catalogId}`);
-    return { 
-      ok: false, 
-      error: "Este produto está em catálogo, mas não possui um vendedor ativo no momento. Cole o link de um anúncio específico (MLB) para continuar.",
-      productData: product,
-    };
-  }
-  
-  const realItemId = product.buy_box_winner.item_id;
-  console.log(`[ad-action-execute] buy_box_winner.item_id resolved: ${realItemId}`);
-  
-  return { ok: true, itemId: realItemId, productData: product };
-}
+[functions.ad-timeline-recalculate]
+verify_jwt = false
 ```
 
-**Ajustar `executeCloneAction()`:**
+### Por que `verify_jwt = false`?
 
-```typescript
-async function executeCloneAction(accessToken, itemId, snapshot, checklist) {
-  let itemData = snapshot;
-  let resolvedItemId = itemId;
-  let catalogInfo = null;
-  
-  if (!itemData || Object.keys(itemData).length === 0) {
-    // DETECÇÃO: É catálogo (MLBU) ou item normal (MLB)?
-    if (isCatalogId(itemId)) {
-      console.log(`[ad-action-execute] Detected CATALOG ID: ${itemId}`);
-      
-      // Resolver catálogo via API oficial
-      const catalogResult = await resolveCatalogItem(accessToken, itemId);
-      if (!catalogResult.ok) {
-        return { 
-          success: false, 
-          error: catalogResult.error,
-          is_catalog: true,
-          catalog_id: itemId,
-        };
-      }
-      
-      resolvedItemId = catalogResult.itemId;
-      catalogInfo = {
-        original_catalog_id: itemId,
-        buy_box_winner_id: resolvedItemId,
-        product_name: catalogResult.productData?.name,
-      };
-      
-      console.log(`[ad-action-execute] Catalog resolved to item: ${resolvedItemId}`);
-    }
-    
-    // Buscar item real (MLB)
-    console.log(`[ad-action-execute] Fetching item data: ${resolvedItemId}`);
-    const getResponse = await fetch(
-      `https://api.mercadolibre.com/items/${resolvedItemId}`,
-      { headers: { "Authorization": `Bearer ${accessToken}` } }
-    );
-    
-    if (!getResponse.ok) {
-      const errBody = await getResponse.text();
-      console.error(`[ad-action-execute] Failed to fetch item ${resolvedItemId}:`, errBody);
-      return { 
-        success: false, 
-        error: `Falha ao buscar detalhes do anúncio ${resolvedItemId}`, 
-        api_error: errBody,
-        catalog_info: catalogInfo,
-      };
-    }
-    
-    itemData = await getResponse.json();
-  }
-  
-  // Continuar fluxo normal de clonagem...
-}
-```
+A autenticação JWT já é validada **dentro** da própria função (linha 146-162 do `index.ts`), que:
+1. Lê o header `Authorization`
+2. Chama `supabase.auth.getUser(token)` para validar
+3. Rejeita com 401 se inválido
 
-### 2. Frontend: UX para Catálogo
-
-**Arquivo:** `src/components/ad-timeline/CloneByLinkDialog.tsx`
-
-Adicionar feedback visual quando o ID detectado for MLBU:
-
-```tsx
-{link && detectedId && (
-  <div className="space-y-1">
-    <p className="text-xs text-muted-foreground">
-      ID detectado: <span className="font-mono">{detectedId}</span>
-    </p>
-    {detectedId.startsWith('MLBU') && (
-      <div className="flex items-start gap-2 p-2 rounded-md bg-amber-500/10 border border-amber-500/30">
-        <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-        <p className="text-xs text-amber-700">
-          Este é um produto de catálogo. O clone será feito com base no 
-          vendedor que está vencendo a buy box neste momento.
-        </p>
-      </div>
-    )}
-  </div>
-)}
-```
-
-**Arquivo:** `src/components/ad-actions/ActionDetailsDialog.tsx`
-
-Mostrar informações de catálogo no resultado quando disponível.
-
-### 3. Frontend: `src/lib/meli/extractMeliId.ts`
-
-Manter a extração robusta que já existe, mas garantir que MLBU seja preservado:
-
-```typescript
-// Já funciona corretamente - MLBU é detectado e preservado
-// Apenas adicionar função auxiliar para identificar catálogo
-export function isCatalogMeliId(id: string): boolean {
-  return /^MLBU/i.test(id);
-}
-```
+Essa abordagem é consistente com as outras Edge Functions do projeto e permite maior flexibilidade no tratamento de erros.
 
 ---
 
-## Logging Obrigatório
+## Verificação de Segurança
 
-Cada etapa terá log claro:
+O código atual já implementa:
 
-| Etapa | Log |
-|-------|-----|
-| Detecção | `[ad-action-execute] Detected CATALOG ID: MLBU...` |
-| Resolução | `[ad-action-execute] /products/MLBU... status: 200` |
-| buy_box_winner | `[ad-action-execute] buy_box_winner.item_id resolved: MLB...` |
-| Sem vendedor | `[ad-action-execute] No buy_box_winner for catalog MLBU...` |
-| Item final | `[ad-action-execute] Fetching item data: MLB...` |
-| Erro | `[ad-action-execute] Failed to fetch item MLB...: {error}` |
+1. **Autenticação**: Valida token JWT manualmente (linhas 146-162)
+2. **Autorização**: Busca ação pelo ID e verifica status (linhas 174-196)
+3. **Limite diário**: Conta ações executadas hoje e bloqueia se exceder limite (linhas 221-238)
+4. **Confirmação dupla**: Requer `confirm: true` antes de executar (linhas 207-218)
 
 ---
 
-## O que NÃO será implementado
+## Ações a Executar
 
-- ❌ Scraping de HTML
-- ❌ Regex em página pública
-- ❌ Dependência de `/products/{id}/items` como fallback
-- ❌ Tentativas em loop com ID normalizado (MLBU→MLB)
-- ❌ Múltiplos tiers de fallback confusos
-
----
-
-## Mensagens de Erro Finais
-
-| Cenário | Mensagem |
-|---------|----------|
-| Catálogo sem vendedor | "Este produto está em catálogo, mas não possui um vendedor ativo no momento. Cole o link de um anúncio específico (MLB) para continuar." |
-| Catálogo não encontrado | "Produto de catálogo não encontrado (MLBU...). Verifique se o link está correto." |
-| Item não encontrado | "Falha ao buscar detalhes do anúncio MLB..." |
-
----
-
-## Critérios de Aceite
-
-1. ✅ MLBU nunca gera chamada para `/items/{MLBU}` diretamente
-2. ✅ Clonagem funciona com: ID MLBU, Link `/p/MLBU`, Link MLB direto
-3. ✅ Consumo de crédito reduzido (máximo 2 chamadas: `/products` + `/items`)
-4. ✅ Nenhum scraping ativo
-5. ✅ Logs permitem identificar exatamente onde falhou
-6. ✅ UX informa usuário sobre produto de catálogo
+1. **Editar `supabase/config.toml`** - Adicionar as 3 entradas de função
+2. **Redeploy** - O sistema fará o deploy automaticamente após a edição
+3. **Testar** - Executar novamente o fluxo de clonagem MLBU para validar
 
 ---
 
@@ -272,18 +83,17 @@ Cada etapa terá log claro:
 
 | Arquivo | Ação |
 |---------|------|
-| `supabase/functions/ad-action-execute/index.ts` | Reescrever lógica de resolução MLBU |
-| `src/components/ad-timeline/CloneByLinkDialog.tsx` | Adicionar aviso visual para catálogo |
-| `src/components/ad-actions/ActionDetailsDialog.tsx` | Mostrar info de catálogo no resultado |
-| `src/lib/meli/extractMeliId.ts` | Adicionar `isCatalogMeliId()` |
+| `supabase/config.toml` | Adicionar entradas para `ad-action-execute`, `ad-item-snapshot`, `ad-timeline-recalculate` |
 
 ---
 
-## Plano de Testes
+## Teste Recomendado
 
-1. Criar rascunho com link MLBU (ex: `MLBU1435399930`)
-2. Verificar logs no backend: deve aparecer resolução via `/products/{MLBU}`
-3. Se tiver buy_box_winner → clonagem deve funcionar
-4. Se não tiver buy_box_winner → erro claro deve aparecer
-5. Testar também com link MLB direto → fluxo deve ser direto
+Após o deploy:
+1. Criar um novo rascunho com link MLBU
+2. Ir em Rascunhos > Executar
+3. Verificar nos logs da Edge Function se aparecem os logs:
+   - `[ad-action-execute] Detected CATALOG ID: MLBU...`
+   - `[ad-action-execute] /products/MLBU... status: ...`
+   - `[ad-action-execute] buy_box_winner.item_id resolved: MLB...`
 
