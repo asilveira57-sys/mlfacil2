@@ -54,9 +54,36 @@ const CATEGORY_ATTRIBUTE_DEFAULTS: Record<string, Record<string, { value_name?: 
 };
 
 // ============================================================================
-// BODY-LEVEL FIELDS: Campos que vão no body raiz, NÃO em attributes[]
+// BODY-LEVEL REQUIRED FIELDS: Campos obrigatórios no body raiz, NÃO em attributes[]
+// A API exige que esses campos estejam no root do JSON payload
 // ============================================================================
-const BODY_LEVEL_FIELDS = new Set(["family_name", "FAMILY_NAME"]);
+const BODY_LEVEL_REQUIRED_FIELDS: Record<string, { 
+  fallbackFromTitle?: boolean;
+  defaultValue?: string;
+  maxLength?: number;
+}> = {
+  family_name: { fallbackFromTitle: true, maxLength: 60 },
+  // Adicionar outros campos body-level conforme descobertos
+};
+
+// Lista de alias (case-insensitive) para cada campo body-level
+const BODY_LEVEL_FIELD_ALIASES: Record<string, string[]> = {
+  family_name: ["family_name", "FAMILY_NAME"],
+};
+
+// Set para lookup rápido (incluindo aliases)
+const BODY_LEVEL_FIELDS = new Set<string>(
+  Object.values(BODY_LEVEL_FIELD_ALIASES).flat()
+);
+
+// Whitelist de campos permitidos no body raiz (sanitizer)
+const ALLOWED_BODY_FIELDS = new Set([
+  "title", "category_id", "currency_id", "listing_type_id", "condition",
+  "pictures", "price", "available_quantity", "attributes", "description",
+  "buying_mode", "sale_terms", "shipping", "variations",
+  // Body-level fields (adicionados dinamicamente)
+  "family_name",
+]);
 
 // ============================================================================
 // REGRA OFICIAL DE RESOLUÇÃO:
@@ -262,26 +289,42 @@ function normalizeAndCleanAttributes(
 }
 
 // ============================================================================
-// ETAPA 4: Garantir obrigatórios (motor genérico)
+// ETAPA 4: Motor único de preenchimento de campos obrigatórios
+// Fluxo: validate → fill → validate (incluindo body-level fields)
 // ============================================================================
 interface AttributeFillResult {
   filled: NormalizedAttribute[];
   missing: string[];
   bodyLevelFields: Record<string, string>; // Campos que vão no body raiz
   log: Array<{ attrId: string; source: string; value?: string; target: "attributes" | "body" }>;
+  requiredBodyFieldKeys: string[]; // Lista de campos body-level que são required
+  filledBodyByFallback: string[]; // Campos body preenchidos por fallback
+  filledBodyByDefaults: string[]; // Campos body preenchidos por defaults
 }
 
-function validateAndFillRequiredAttributes(
-  requiredIds: string[],
-  categoryAttributes: CategoryAttribute[],
-  sourceAttrsById: Map<string, NormalizedAttribute>,
-  itemData: any,
-  categoryId: string
-): AttributeFillResult {
+interface FillEngineInput {
+  requiredIds: string[]; // IDs de atributos obrigatórios da categoria
+  extraBodyFields?: string[]; // Campos body-level adicionais (ex: extraídos do erro da API)
+  categoryAttributes: CategoryAttribute[];
+  sourceAttrsById: Map<string, NormalizedAttribute>;
+  itemData: any;
+  categoryId: string;
+}
+
+/**
+ * Motor único de preenchimento - pode ser chamado múltiplas vezes
+ * (preflight validation → fill → second validation)
+ */
+function validateAndFillRequiredAttributes(input: FillEngineInput): AttributeFillResult {
+  const { requiredIds, extraBodyFields = [], categoryAttributes, sourceAttrsById, itemData, categoryId } = input;
+  
   const filled: NormalizedAttribute[] = [];
   const missing: string[] = [];
   const bodyLevelFields: Record<string, string> = {};
   const log: Array<{ attrId: string; source: string; value?: string; target: "attributes" | "body" }> = [];
+  const requiredBodyFieldKeys: string[] = [];
+  const filledBodyByFallback: string[] = [];
+  const filledBodyByDefaults: string[] = [];
 
   // Mapa de atributos da categoria para acesso rápido
   const catAttrById = new Map<string, CategoryAttribute>();
@@ -289,14 +332,110 @@ function validateAndFillRequiredAttributes(
     catAttrById.set(attr.id, attr);
   }
 
+  // =========================================================================
+  // FASE 1: Garantir campos body-level (family_name, etc.)
+  // São tratados PRIMEIRO porque a API os exige no root
+  // =========================================================================
+  const allBodyFieldKeys = new Set<string>([
+    ...Object.keys(BODY_LEVEL_REQUIRED_FIELDS),
+    ...extraBodyFields.map(f => f.toLowerCase()),
+  ]);
+
+  for (const fieldKey of allBodyFieldKeys) {
+    requiredBodyFieldKeys.push(fieldKey);
+    
+    const config = BODY_LEVEL_REQUIRED_FIELDS[fieldKey] || {};
+    let resolvedValue: string | undefined;
+    let source = "";
+
+    // Tentar buscar do item fonte (body-level pode estar nos attributes também)
+    const aliases = BODY_LEVEL_FIELD_ALIASES[fieldKey] || [fieldKey, fieldKey.toUpperCase()];
+    for (const alias of aliases) {
+      const sourceAttr = sourceAttrsById.get(alias);
+      if (sourceAttr?.value_name) {
+        resolvedValue = sourceAttr.value_name;
+        source = "item_fonte";
+        break;
+      }
+      // Tentar buscar diretamente dos atributos raw do item
+      const rawAttr = itemData.attributes?.find((a: any) => a.id === alias);
+      if (rawAttr?.value_name) {
+        resolvedValue = rawAttr.value_name;
+        source = "item_fonte:raw";
+        break;
+      }
+    }
+
+    // Tentar defaults do sistema
+    if (!resolvedValue) {
+      const categoryDefaults = CATEGORY_ATTRIBUTE_DEFAULTS[categoryId] || {};
+      const globalDefaults = CATEGORY_ATTRIBUTE_DEFAULTS["*"] || {};
+      for (const alias of aliases) {
+        const specificDefault = categoryDefaults[alias];
+        const globalDefault = globalDefaults[alias];
+        const defaultValue = specificDefault || globalDefault;
+        if (defaultValue?.value_name) {
+          resolvedValue = defaultValue.value_name;
+          source = specificDefault ? "default:categoria" : "default:global";
+          filledBodyByDefaults.push(fieldKey);
+          break;
+        }
+      }
+    }
+
+    // Fallback dinâmico (baseado em título para family_name)
+    if (!resolvedValue && config.fallbackFromTitle && itemData.title) {
+      const cleanTitle = itemData.title
+        .replace(/\s*[-–]\s*\d+\s*(unidades?|pcs?|un)?\s*$/i, "")
+        .replace(/\s*\d{4,}\s*/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      
+      const maxLen = config.maxLength || 60;
+      let fallbackValue = cleanTitle.split(" ").slice(0, 5).join(" ");
+      if (fallbackValue.length > maxLen) {
+        fallbackValue = fallbackValue.substring(0, maxLen).replace(/\s+\S*$/, "");
+      }
+      
+      resolvedValue = fallbackValue || itemData.title.split(" ").slice(0, 4).join(" ");
+      source = "fallback:titulo_limpo";
+      filledBodyByFallback.push(fieldKey);
+    }
+
+    // Fallback genérico
+    if (!resolvedValue && config.defaultValue) {
+      resolvedValue = config.defaultValue;
+      source = "fallback:generico";
+      filledBodyByFallback.push(fieldKey);
+    }
+
+    if (!resolvedValue) {
+      resolvedValue = "Produto";
+      source = "fallback:ultimo_recurso";
+      filledBodyByFallback.push(fieldKey);
+    }
+
+    // Aplicar no body
+    bodyLevelFields[fieldKey] = resolvedValue;
+    log.push({ attrId: fieldKey, source, value: resolvedValue, target: "body" });
+    console.log(`[ad-action-execute] Body field ${fieldKey}: ✓ ${source} = "${resolvedValue}"`);
+  }
+
+  // =========================================================================
+  // FASE 2: Garantir atributos obrigatórios da categoria (attributes[])
+  // =========================================================================
   for (const reqId of requiredIds) {
+    // Ignorar se já tratado como body-level
+    if (BODY_LEVEL_FIELDS.has(reqId) || BODY_LEVEL_FIELDS.has(reqId.toLowerCase())) {
+      continue;
+    }
+
     const catAttr = catAttrById.get(reqId);
     let resolvedValue: string | undefined;
     let resolvedValueId: string | undefined;
     let source = "";
-    const isBodyLevel = BODY_LEVEL_FIELDS.has(reqId);
 
-    // 4.1 Se já existe e tem valor válido
+    // 1. Se já existe no source e tem valor válido
     const sourceAttr = sourceAttrsById.get(reqId);
     if (sourceAttr && (sourceAttr.value_id || sourceAttr.value_name || sourceAttr.value_struct)) {
       resolvedValue = sourceAttr.value_name;
@@ -304,7 +443,7 @@ function validateAndFillRequiredAttributes(
       source = "item_fonte";
     }
 
-    // 4.2(A) Copiar do item fonte (atributos não processados acima)
+    // 2. Copiar do item fonte (atributos raw não processados)
     if (!resolvedValue && !resolvedValueId && itemData.attributes) {
       const itemAttr = itemData.attributes.find((a: any) => a.id === reqId);
       if (itemAttr && (itemAttr.value_name || itemAttr.value_id)) {
@@ -314,7 +453,7 @@ function validateAndFillRequiredAttributes(
       }
     }
 
-    // 4.2(B) Resolver via defaults do sistema (tabela interna)
+    // 3. Resolver via defaults do sistema
     if (!resolvedValue && !resolvedValueId) {
       const categoryDefaults = CATEGORY_ATTRIBUTE_DEFAULTS[categoryId] || {};
       const globalDefaults = CATEGORY_ATTRIBUTE_DEFAULTS["*"] || {};
@@ -329,7 +468,7 @@ function validateAndFillRequiredAttributes(
       }
     }
 
-    // 4.2 Adicional: Valores permitidos da categoria (primeiro valor)
+    // 4. Valores permitidos da categoria (primeiro valor)
     if (!resolvedValue && !resolvedValueId && catAttr?.values && catAttr.values.length > 0) {
       const defaultVal = catAttr.values[0];
       resolvedValueId = defaultVal.id;
@@ -337,43 +476,15 @@ function validateAndFillRequiredAttributes(
       source = "categoria:primeiro_valor";
     }
 
-    // Inferências específicas
+    // 5. Inferências específicas
     if (!resolvedValue && !resolvedValueId && catAttr) {
-      // ITEM_CONDITION → condition do item
       if (reqId === "ITEM_CONDITION" && itemData.condition) {
         resolvedValue = itemData.condition === "new" ? "Novo" : "Usado";
         source = "inferencia:condition";
       }
     }
 
-    // =========================================================================
-    // ETAPA 5: Regra específica para family_name
-    // =========================================================================
-    if (!resolvedValue && !resolvedValueId && (reqId === "FAMILY_NAME" || reqId.toLowerCase() === "family_name")) {
-      // 5.2 Gerar fallback seguro: versão "limpa" do título
-      if (itemData.title) {
-        // Limpar: remover SKU, números grandes, variação - objetivo é "nome de família"
-        const cleanTitle = itemData.title
-          .replace(/\s*[-–]\s*\d+\s*(unidades?|pcs?|un)?\s*$/i, "") // Remove "- 100 unidades"
-          .replace(/\s*\d{4,}\s*/g, " ") // Remove números grandes (códigos/SKUs)
-          .replace(/\s+/g, " ")
-          .trim();
-        
-        // Limitar a 60 chars e pegar palavras completas
-        let familyName = cleanTitle.split(" ").slice(0, 5).join(" ");
-        if (familyName.length > 60) {
-          familyName = familyName.substring(0, 60).replace(/\s+\S*$/, "");
-        }
-        
-        resolvedValue = familyName || itemData.title.split(" ").slice(0, 4).join(" ");
-        source = "fallback:titulo_limpo";
-      } else {
-        resolvedValue = "Produto";
-        source = "fallback:generico";
-      }
-    }
-
-    // Fallback genérico para tipos conhecidos
+    // 6. Fallback genérico para tipos conhecidos
     if (!resolvedValue && !resolvedValueId && catAttr) {
       if (catAttr.value_type === "string") {
         resolvedValue = "-";
@@ -388,28 +499,103 @@ function validateAndFillRequiredAttributes(
     if (resolvedValue || resolvedValueId) {
       const displayValue = resolvedValue || resolvedValueId || "(struct)";
       
-      // 5.3 Onde colocar: body raiz ou attributes[]
-      if (isBodyLevel) {
-        bodyLevelFields[reqId.toLowerCase()] = resolvedValue || resolvedValueId || "";
-        log.push({ attrId: reqId, source, value: displayValue, target: "body" });
-        console.log(`[ad-action-execute] Required ${reqId}: ✓ ${source} → BODY.${reqId.toLowerCase()} = "${displayValue}"`);
-      } else {
-        const filledAttr: NormalizedAttribute = { id: reqId };
-        if (resolvedValueId) filledAttr.value_id = resolvedValueId;
-        if (resolvedValue) filledAttr.value_name = resolvedValue;
-        
-        filled.push(filledAttr);
-        log.push({ attrId: reqId, source, value: displayValue, target: "attributes" });
-        console.log(`[ad-action-execute] Required ${reqId}: ✓ ${source} → attributes = "${displayValue}"`);
-      }
+      const filledAttr: NormalizedAttribute = { id: reqId };
+      if (resolvedValueId) filledAttr.value_id = resolvedValueId;
+      if (resolvedValue) filledAttr.value_name = resolvedValue;
+      
+      filled.push(filledAttr);
+      log.push({ attrId: reqId, source, value: displayValue, target: "attributes" });
+      console.log(`[ad-action-execute] Required ${reqId}: ✓ ${source} = "${displayValue}"`);
     } else {
       missing.push(reqId);
-      log.push({ attrId: reqId, source: "MISSING", target: isBodyLevel ? "body" : "attributes" });
+      log.push({ attrId: reqId, source: "MISSING", target: "attributes" });
       console.warn(`[ad-action-execute] Required ${reqId}: ✗ NO VALUE AVAILABLE`);
     }
   }
 
-  return { filled, missing, bodyLevelFields, log };
+  return { filled, missing, bodyLevelFields, log, requiredBodyFieldKeys, filledBodyByFallback, filledBodyByDefaults };
+}
+
+// ============================================================================
+// Extrator de campos faltantes do erro da API do Mercado Livre
+// ============================================================================
+interface ExtractedMissingFields {
+  bodyFields: string[];
+  attributeFields: string[];
+  raw: any;
+}
+
+function extractMissingFieldsFromApiError(apiError: any): ExtractedMissingFields {
+  const bodyFields: string[] = [];
+  const attributeFields: string[] = [];
+
+  if (!apiError) return { bodyFields, attributeFields, raw: apiError };
+
+  // Padrão 1: cause[].code === "item.attributes.missing_required"
+  if (apiError.cause && Array.isArray(apiError.cause)) {
+    for (const cause of apiError.cause) {
+      if (cause.code === "item.attributes.missing_required" || cause.code === "body.required_fields") {
+        // Tentar extrair field names do message
+        const match = cause.message?.match(/properties \[([^\]]+)\]/i);
+        if (match) {
+          const fields = match[1].split(",").map((f: string) => f.trim().toLowerCase());
+          for (const field of fields) {
+            if (BODY_LEVEL_REQUIRED_FIELDS[field] || BODY_LEVEL_FIELD_ALIASES[field]) {
+              bodyFields.push(field);
+            } else {
+              attributeFields.push(field);
+            }
+          }
+        }
+        // Tentar extrair do references
+        if (cause.references && Array.isArray(cause.references)) {
+          for (const ref of cause.references) {
+            const field = (ref as string).toLowerCase();
+            if (BODY_LEVEL_REQUIRED_FIELDS[field] || BODY_LEVEL_FIELD_ALIASES[field]) {
+              bodyFields.push(field);
+            } else {
+              attributeFields.push(field);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Padrão 2: message contém "body.required_fields" ou "properties [...]"
+  if (apiError.message) {
+    const match = apiError.message.match(/properties \[([^\]]+)\]/i);
+    if (match) {
+      const fields = match[1].split(",").map((f: string) => f.trim().toLowerCase());
+      for (const field of fields) {
+        if (BODY_LEVEL_REQUIRED_FIELDS[field] || BODY_LEVEL_FIELD_ALIASES[field]) {
+          if (!bodyFields.includes(field)) bodyFields.push(field);
+        } else {
+          if (!attributeFields.includes(field)) attributeFields.push(field);
+        }
+      }
+    }
+  }
+
+  return { bodyFields, attributeFields, raw: apiError };
+}
+
+// ============================================================================
+// Sanitizer: garante que apenas campos permitidos vão no body final
+// ============================================================================
+function sanitizePayload(payload: any): any {
+  const sanitized: any = {};
+  
+  for (const [key, value] of Object.entries(payload)) {
+    // Permitir apenas campos na whitelist ou body-level fields
+    if (ALLOWED_BODY_FIELDS.has(key) || BODY_LEVEL_REQUIRED_FIELDS[key]) {
+      sanitized[key] = value;
+    } else {
+      console.warn(`[ad-action-execute] Sanitizer: removed unexpected field "${key}"`);
+    }
+  }
+  
+  return sanitized;
 }
 
 // ============================================================================
@@ -855,44 +1041,50 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   );
 
   // =========================================================================
-  // ETAPA 4: Validar e completar obrigatórios
+  // ETAPA 4: PREFLIGHT - Validar e completar obrigatórios (1ª passagem)
+  // Fluxo: validate → fill → validate → create
   // =========================================================================
-  const fillResult = validateAndFillRequiredAttributes(
+  console.log(`[ad-action-execute] === PREFLIGHT VALIDATION (Pass 1) ===`);
+  
+  let fillResult = validateAndFillRequiredAttributes({
     requiredIds,
+    extraBodyFields: [], // Primeira passagem sem campos extras
     categoryAttributes,
     sourceAttrsById,
     itemData,
-    itemData.category_id || ""
-  );
+    categoryId: itemData.category_id || "",
+  });
 
   // =========================================================================
-  // ETAPA 6: Log obrigatório (para debug detalhado)
+  // ETAPA 5: Log obrigatório expandido (para debug detalhado)
   // =========================================================================
-  const requiredCheck = {
+  let requiredCheck = {
     categoryId: itemData.category_id,
     requiredAttributeIds: requiredIds,
+    requiredBodyFieldKeys: fillResult.requiredBodyFieldKeys,
     missingRequiredBeforeFill: requiredIds.filter(id => !sourceAttrsById.has(id)),
     filledByItemSource: fillResult.log.filter(l => l.source.startsWith("item_fonte")).map(l => l.attrId),
     filledByDefaults: fillResult.log.filter(l => l.source.startsWith("default:")).map(l => l.attrId),
     filledByFallback: fillResult.log.filter(l => l.source.startsWith("fallback:")).map(l => l.attrId),
     filledByCategoria: fillResult.log.filter(l => l.source.startsWith("categoria:")).map(l => l.attrId),
     filledByInferencia: fillResult.log.filter(l => l.source.startsWith("inferencia:")).map(l => l.attrId),
+    filledBodyByFallback: fillResult.filledBodyByFallback,
+    filledBodyByDefaults: fillResult.filledBodyByDefaults,
     missingAfterFill: fillResult.missing,
     bodyLevelFields: fillResult.bodyLevelFields,
   };
 
-  console.log(`[ad-action-execute] === REQUIRED CHECK SUMMARY ===`);
+  console.log(`[ad-action-execute] === REQUIRED CHECK SUMMARY (Pass 1) ===`);
   console.log(`[ad-action-execute] ${JSON.stringify(requiredCheck, null, 2)}`);
   
   for (const entry of fillResult.log) {
     console.log(`[ad-action-execute]   - ${entry.attrId}: ${entry.source} → ${entry.target}${entry.value ? ` = "${entry.value}"` : ""}`);
   }
 
-  // 4.2(C) Se não conseguiu preencher obrigatórios → erro controlado
+  // Se faltar obrigatório após primeira passagem → erro controlado
   if (fillResult.missing.length > 0) {
     console.error(`[ad-action-execute] CLONE BLOCKED: Missing required attributes: ${fillResult.missing.join(", ")}`);
     
-    // UX final (quando faltar obrigatório impossível)
     return {
       success: false,
       error: "MISSING_REQUIRED_ATTRIBUTES",
@@ -929,7 +1121,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   // =========================================================================
   // BUILD NEW ITEM PAYLOAD (incluindo campos no body raiz)
   // =========================================================================
-  const newItem: any = {
+  let newItem: any = {
     title: checklist?.title !== false ? itemData.title : undefined,
     category_id: itemData.category_id,
     currency_id: itemData.currency_id || "BRL",
@@ -943,7 +1135,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     attributes: finalAttributes.length > 0 ? finalAttributes : undefined,
   };
 
-  // 5.3 Adicionar body-level fields (family_name, etc.)
+  // Adicionar body-level fields (family_name, etc.) - GARANTIDO no payload
   for (const [fieldName, fieldValue] of Object.entries(fillResult.bodyLevelFields)) {
     newItem[fieldName] = fieldValue;
     console.log(`[ad-action-execute] Added body-level field: ${fieldName} = "${fieldValue}"`);
@@ -971,11 +1163,19 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     };
   }
 
-  console.log(`[ad-action-execute] Sending clone request with ${finalAttributes.length} attributes`);
-  console.log(`[ad-action-execute] Body-level fields: ${JSON.stringify(fillResult.bodyLevelFields)}`);
+  // =========================================================================
+  // SANITIZE: Garantir que apenas campos permitidos vão no body
+  // =========================================================================
+  newItem = sanitizePayload(newItem);
 
-  // Create new item
-  const createResponse = await fetch(`https://api.mercadolibre.com/items`, {
+  console.log(`[ad-action-execute] Sending clone request with ${finalAttributes.length} attributes`);
+  console.log(`[ad-action-execute] Body-level fields in payload: ${JSON.stringify(fillResult.bodyLevelFields)}`);
+  console.log(`[ad-action-execute] Payload keys: ${Object.keys(newItem).join(", ")}`);
+
+  // =========================================================================
+  // CREATE ITEM (1ª tentativa)
+  // =========================================================================
+  let createResponse = await fetch(`https://api.mercadolibre.com/items`, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${accessToken}`,
@@ -984,7 +1184,104 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     body: JSON.stringify(newItem),
   });
 
-  const createData = await createResponse.json();
+  let createData = await createResponse.json();
+  
+  // =========================================================================
+  // RETRY LOOP: Se falhar com required_fields, extrair e preencher
+  // =========================================================================
+  if (!createResponse.ok) {
+    const extractedMissing = extractMissingFieldsFromApiError(createData);
+    
+    if (extractedMissing.bodyFields.length > 0 || extractedMissing.attributeFields.length > 0) {
+      console.warn(`[ad-action-execute] API returned missing fields - attempting recovery`);
+      console.warn(`[ad-action-execute] Extracted body fields: ${extractedMissing.bodyFields.join(", ") || "(none)"}`);
+      console.warn(`[ad-action-execute] Extracted attribute fields: ${extractedMissing.attributeFields.join(", ") || "(none)"}`);
+
+      // =========================================================================
+      // PREFLIGHT (Pass 2): Reexecutar motor de preenchimento com campos extras
+      // =========================================================================
+      console.log(`[ad-action-execute] === PREFLIGHT VALIDATION (Pass 2 - Recovery) ===`);
+      
+      fillResult = validateAndFillRequiredAttributes({
+        requiredIds: [...requiredIds, ...extractedMissing.attributeFields.map(f => f.toUpperCase())],
+        extraBodyFields: extractedMissing.bodyFields,
+        categoryAttributes,
+        sourceAttrsById,
+        itemData,
+        categoryId: itemData.category_id || "",
+      });
+
+      // Atualizar requiredCheck com informações da segunda passagem
+      requiredCheck = {
+        ...requiredCheck,
+        requiredBodyFieldKeys: fillResult.requiredBodyFieldKeys,
+        filledBodyByFallback: fillResult.filledBodyByFallback,
+        filledBodyByDefaults: fillResult.filledBodyByDefaults,
+        bodyLevelFields: fillResult.bodyLevelFields,
+        missingAfterFill: fillResult.missing,
+        recoveryAttempt: true,
+        recoveryExtractedFields: extractedMissing,
+      } as any;
+
+      // Reconstruir payload com novos campos
+      const finalAttributes2 = buildFinalAttributesPayload(
+        fillResult.filled,
+        cleanedAttrs,
+        includeNonRequired
+      );
+
+      newItem = {
+        title: checklist?.title !== false ? itemData.title : undefined,
+        category_id: itemData.category_id,
+        currency_id: itemData.currency_id || "BRL",
+        listing_type_id: itemData.listing_type_id || "gold_special",
+        condition: itemData.condition || "new",
+        pictures: checklist?.pictures !== false && itemData.pictures 
+          ? itemData.pictures.map((p: any) => ({ source: p.url || p.secure_url }))
+          : undefined,
+        price: checklist?.price !== false ? itemData.price : undefined,
+        available_quantity: checklist?.quantity !== false ? itemData.available_quantity : 1,
+        attributes: finalAttributes2.length > 0 ? finalAttributes2 : undefined,
+      };
+
+      // Adicionar body-level fields (novos após retry)
+      for (const [fieldName, fieldValue] of Object.entries(fillResult.bodyLevelFields)) {
+        newItem[fieldName] = fieldValue;
+        console.log(`[ad-action-execute] [RETRY] Added body-level field: ${fieldName} = "${fieldValue}"`);
+      }
+
+      // Re-adicionar description se necessário
+      if (checklist?.description !== false && !isCatalogId(itemId)) {
+        const descResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}/description`, {
+          headers: { "Authorization": `Bearer ${accessToken}` },
+        });
+        if (descResponse.ok) {
+          const descData = await descResponse.json();
+          newItem.description = { plain_text: descData.plain_text || descData.text };
+        }
+      }
+
+      // Sanitize novamente
+      newItem = sanitizePayload(newItem);
+
+      console.log(`[ad-action-execute] [RETRY] Sending clone request with ${finalAttributes2.length} attributes`);
+      console.log(`[ad-action-execute] [RETRY] Body-level fields: ${JSON.stringify(fillResult.bodyLevelFields)}`);
+
+      // =========================================================================
+      // CREATE ITEM (2ª tentativa)
+      // =========================================================================
+      createResponse = await fetch(`https://api.mercadolibre.com/items`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(newItem),
+      });
+
+      createData = await createResponse.json();
+    }
+  }
   
   if (!createResponse.ok) {
     console.error(`[ad-action-execute] Clone POST failed:`, JSON.stringify({
@@ -1003,6 +1300,10 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     if (isRequiredFieldError) {
       console.error(`[ad-action-execute] ML still reports missing required fields despite validation!`);
       console.error(`[ad-action-execute] This may indicate the category has additional unlisted requirements`);
+      
+      // Última tentativa de extração para diagnóstico
+      const finalExtracted = extractMissingFieldsFromApiError(createData);
+      (requiredCheck as any).finalExtractedMissing = finalExtracted;
     }
 
     return { 
@@ -1010,7 +1311,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       error: createData.message || "Failed to create cloned item", 
       api_error: createData,
       payload_sent: newItem,
-      attributes_sent: finalAttributes.map(a => ({ id: a.id, value: a.value_name || a.value_id })),
+      attributes_sent: (newItem.attributes || []).map((a: any) => ({ id: a.id, value: a.value_name || a.value_id })),
       required_check: requiredCheck,
       catalog_info: catalogInfo,
     };
