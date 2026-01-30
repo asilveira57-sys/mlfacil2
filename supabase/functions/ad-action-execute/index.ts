@@ -99,6 +99,91 @@ const LISTING_TYPES_REQUIRING_PICTURES = new Set([
 const CATALOG_SAFE_LISTING_TYPES = ["free", "bronze"];
 
 // ============================================================================
+// DEFAULT LISTING TYPE + FALLBACK STRATEGY
+// Quando listing_type_id falha, tenta fallbacks sequencialmente
+// ============================================================================
+const DEFAULT_LISTING_TYPE_ID = "gold_special";
+const LISTING_TYPE_FALLBACKS = ["silver", "bronze"];
+
+interface ListingTypeResolution {
+  listing_type_id: string;
+  source: "source_item" | "default" | "fallback";
+  fallback_index?: number;
+}
+
+/**
+ * resolveListingTypeId - Resolve o listing_type_id com estratégia de fallback
+ * @param sourceListingType - listing_type_id do item fonte (pode ser undefined)
+ * @param defaultType - tipo padrão do sistema (gold_special)
+ * @param fallbackIndex - índice do fallback a usar (0 = primeiro fallback)
+ */
+function resolveListingTypeId(
+  sourceListingType: string | undefined,
+  defaultType: string = DEFAULT_LISTING_TYPE_ID,
+  fallbackIndex: number = -1
+): ListingTypeResolution {
+  // Se fallback foi solicitado
+  if (fallbackIndex >= 0 && fallbackIndex < LISTING_TYPE_FALLBACKS.length) {
+    return {
+      listing_type_id: LISTING_TYPE_FALLBACKS[fallbackIndex],
+      source: "fallback",
+      fallback_index: fallbackIndex,
+    };
+  }
+
+  // 1. Usar do item fonte se disponível
+  if (sourceListingType && sourceListingType.trim()) {
+    return {
+      listing_type_id: sourceListingType.trim(),
+      source: "source_item",
+    };
+  }
+
+  // 2. Usar default do sistema
+  return {
+    listing_type_id: defaultType,
+    source: "default",
+  };
+}
+
+/**
+ * isListingTypeError - Verifica se o erro da API é relacionado a listing_type_id
+ */
+function isListingTypeError(apiError: any): boolean {
+  if (!apiError) return false;
+
+  // Verificar no cause[]
+  if (apiError.cause && Array.isArray(apiError.cause)) {
+    for (const cause of apiError.cause) {
+      if (
+        cause.code === "body.required_fields" ||
+        cause.code === "item.invalid_listing_type" ||
+        cause.code?.includes("listing_type") ||
+        (cause.message && cause.message.toLowerCase().includes("listing_type"))
+      ) {
+        // Verificar se menciona listing_type_id especificamente
+        if (
+          cause.message?.includes("listing_type_id") ||
+          cause.references?.includes("listing_type_id")
+        ) {
+          return true;
+        }
+      }
+    }
+  }
+
+  // Verificar na message principal
+  if (apiError.message) {
+    const msg = apiError.message.toLowerCase();
+    if (msg.includes("listing_type_id") && (msg.includes("required") || msg.includes("invalid"))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// ============================================================================
 // REGRA OFICIAL DE RESOLUÇÃO:
 // 1. PRIORIDADE MÁXIMA: item_id já é MLB → usar direto
 // 2. MLBU é apenas camada de apresentação - fallback residual
@@ -1180,61 +1265,75 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   }
 
   // =========================================================================
-  // BUILD NEW ITEM PAYLOAD (incluindo campos no body raiz)
-  // IMPORTANTE: Se is_catalog_source=true, NÃO enviar title, pictures, description
-  // IMPORTANTE: Se pictures está bloqueado, NÃO usar listing_type que exige pictures
+  // ESTRATÉGIA DE listing_type_id - OBRIGATÓRIO EM TODA CHAMADA POST /items
+  // Usar resolveListingTypeId() com fallback automático se necessário
   // =========================================================================
   const isCatalogSource = catalogDiagnostic.is_catalog_source;
   const blockedFields = catalogDiagnostic.blocked_fields;
   const picturesBlocked = blockedFields.includes("pictures");
+
+  // Resolver listing_type_id inicial
+  let listingTypeResolution = resolveListingTypeId(itemData.listing_type_id);
+  let listingTypeToUse = listingTypeResolution.listing_type_id;
+  let listingTypeStrategy: "source" | "default" | "fallback" | "catalog_safe" = 
+    listingTypeResolution.source === "source_item" ? "source" : "default";
+
+  // Se for catálogo com pictures bloqueadas e listing_type exige pictures, usar tipo seguro
+  if (isCatalogSource && picturesBlocked) {
+    if (LISTING_TYPES_REQUIRING_PICTURES.has(listingTypeToUse)) {
+      console.log(`[ad-action-execute] CATALOG STRATEGY: listing_type_id "${listingTypeToUse}" requires pictures but pictures are blocked`);
+      // Usar o primeiro tipo seguro para catálogo
+      listingTypeToUse = CATALOG_SAFE_LISTING_TYPES[0] || "bronze";
+      listingTypeStrategy = "catalog_safe";
+      console.log(`[ad-action-execute] CATALOG STRATEGY: Switched to catalog-safe listing_type_id: ${listingTypeToUse}`);
+    }
+  }
+
+  console.log(`[ad-action-execute] === LISTING_TYPE_ID RESOLUTION ===`);
+  console.log(`[ad-action-execute] source_listing_type: ${itemData.listing_type_id || "(none)"}`);
+  console.log(`[ad-action-execute] resolved_listing_type: ${listingTypeToUse}`);
+  console.log(`[ad-action-execute] resolution_source: ${listingTypeResolution.source}`);
+  console.log(`[ad-action-execute] final_strategy: ${listingTypeStrategy}`);
 
   // Determinar se cada campo pode ser incluído
   const canIncludeTitle = !isCatalogSource && checklist?.title !== false;
   const canIncludePictures = !isCatalogSource && checklist?.pictures !== false && itemData.pictures;
   const canIncludeDescription = !isCatalogSource && checklist?.description !== false;
 
-  // =========================================================================
-  // ESTRATÉGIA DE listing_type_id PARA CATÁLOGO:
-  // Se pictures está bloqueado e listing_type exige pictures (gold_special, etc.):
-  // 1ª tentativa: NÃO enviar listing_type_id (deixar ML decidir)
-  // 2ª tentativa: usar listing_type seguro (free/bronze)
-  // =========================================================================
-  let listingTypeStrategy: "omit" | "safe" | "original" = "original";
-  let listingTypeToUse: string | undefined = itemData.listing_type_id || "gold_special";
-
-  if (isCatalogSource && picturesBlocked) {
-    const originalType = itemData.listing_type_id || "gold_special";
-    if (LISTING_TYPES_REQUIRING_PICTURES.has(originalType)) {
-      console.log(`[ad-action-execute] CATALOG STRATEGY: listing_type_id "${originalType}" requires pictures but pictures are blocked`);
-      console.log(`[ad-action-execute] CATALOG STRATEGY: Will omit listing_type_id to let ML decide`);
-      listingTypeStrategy = "omit";
-      listingTypeToUse = undefined; // Não enviar - deixar ML decidir
-    }
-  }
-
   console.log(`[ad-action-execute] === PAYLOAD FIELD DECISIONS ===`);
   console.log(`[ad-action-execute] is_catalog_source: ${isCatalogSource}`);
   console.log(`[ad-action-execute] pictures_blocked: ${picturesBlocked}`);
-  console.log(`[ad-action-execute] listing_type_strategy: ${listingTypeStrategy}`);
-  console.log(`[ad-action-execute] listing_type_to_use: ${listingTypeToUse ?? "(omitted)"}`);
+  console.log(`[ad-action-execute] listing_type_to_use: ${listingTypeToUse}`);
   console.log(`[ad-action-execute] canIncludeTitle: ${canIncludeTitle} (blocked: ${blockedFields.includes("title")})`);
   console.log(`[ad-action-execute] canIncludePictures: ${canIncludePictures} (blocked: ${picturesBlocked})`);
   console.log(`[ad-action-execute] canIncludeDescription: ${canIncludeDescription} (blocked: ${blockedFields.includes("description")})`);
   console.log(`[ad-action-execute] removedNotModifiable: ${removedNotModifiable.join(", ") || "(none)"}`);
 
-  let newItem: any = {
-    category_id: itemData.category_id,
+  // =========================================================================
+  // PRE-VALIDATION: Garantir campos obrigatórios antes do POST
+  // =========================================================================
+  const preValidation = {
+    listing_type_id: listingTypeToUse, // SEMPRE presente
     currency_id: itemData.currency_id || "BRL",
-    condition: itemData.condition || "new",
-    price: checklist?.price !== false ? itemData.price : undefined,
-    available_quantity: checklist?.quantity !== false ? itemData.available_quantity : 1,
-    attributes: finalAttributes.length > 0 ? finalAttributes : undefined,
+    has_category: !!itemData.category_id,
+    has_price: !!(checklist?.override_price ?? itemData.price),
   };
 
-  // Incluir listing_type_id apenas se não for estratégia "omit"
-  if (listingTypeToUse) {
-    newItem.listing_type_id = listingTypeToUse;
-  }
+  console.log(`[ad-action-execute] === PRE-VALIDATION ===`);
+  console.log(`[ad-action-execute] ${JSON.stringify(preValidation)}`);
+
+  // =========================================================================
+  // BUILD NEW ITEM PAYLOAD - listing_type_id SEMPRE OBRIGATÓRIO
+  // =========================================================================
+  let newItem: any = {
+    category_id: itemData.category_id,
+    currency_id: preValidation.currency_id,
+    listing_type_id: preValidation.listing_type_id, // OBRIGATÓRIO - SEMPRE PRESENTE
+    condition: itemData.condition || "new",
+    price: checklist?.override_price ?? (checklist?.price !== false ? itemData.price : undefined),
+    available_quantity: checklist?.override_quantity ?? (checklist?.quantity !== false ? itemData.available_quantity : 1),
+    attributes: finalAttributes.length > 0 ? finalAttributes : undefined,
+  };
 
   // CONDICIONAL: Apenas incluir title se NÃO for catálogo
   if (canIncludeTitle) {
@@ -1328,11 +1427,49 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   let createData = await createResponse.json();
   
   // =========================================================================
-  // RETRY LOOP: Se falhar com required_fields, extrair e preencher
+  // RETRY LOOP: Se falhar, tentar recovery de campos e fallback de listing_type
+  // Máximo de 2 fallbacks: silver, bronze
   // =========================================================================
-  if (!createResponse.ok) {
+  let currentFallbackIndex = -1; // -1 = sem fallback ainda
+  let listingTypeFallbackUsed = false;
+  let lastListingTypeAttempted = listingTypeToUse;
+
+  while (!createResponse.ok && currentFallbackIndex < LISTING_TYPE_FALLBACKS.length) {
+    // Verificar se é erro de listing_type_id
+    const isListingTypeIssue = isListingTypeError(createData);
     const extractedMissing = extractMissingFieldsFromApiError(createData);
     
+    // Se for erro de listing_type_id, tentar fallback
+    if (isListingTypeIssue && currentFallbackIndex < LISTING_TYPE_FALLBACKS.length - 1) {
+      currentFallbackIndex++;
+      const fallbackResolution = resolveListingTypeId(undefined, DEFAULT_LISTING_TYPE_ID, currentFallbackIndex);
+      listingTypeToUse = fallbackResolution.listing_type_id;
+      listingTypeStrategy = "fallback";
+      listingTypeFallbackUsed = true;
+      lastListingTypeAttempted = listingTypeToUse;
+
+      console.warn(`[ad-action-execute] LISTING_TYPE FALLBACK: Trying fallback ${currentFallbackIndex + 1}: ${listingTypeToUse}`);
+
+      // Reconstruir payload com novo listing_type_id
+      newItem.listing_type_id = listingTypeToUse;
+
+      console.log(`[ad-action-execute] === API REQUEST (Fallback ${currentFallbackIndex + 1}) ===`);
+      console.log(`[ad-action-execute] listing_type_id=${listingTypeToUse}`);
+      
+      createResponse = await fetch(CREATE_ENDPOINT, {
+        method: CREATE_METHOD,
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(newItem),
+      });
+
+      createData = await createResponse.json();
+      continue;
+    }
+
+    // Se há campos faltantes (não listing_type), tentar preencher
     if (extractedMissing.bodyFields.length > 0 || extractedMissing.attributeFields.length > 0) {
       console.warn(`[ad-action-execute] API returned missing fields - attempting recovery`);
       console.warn(`[ad-action-execute] Extracted body fields: ${extractedMissing.bodyFields.join(", ") || "(none)"}`);
@@ -1372,20 +1509,16 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       );
 
       // Reconstruir payload com novos campos - RESPEITANDO REGRAS DE CATÁLOGO
-      // IMPORTANTE: Usar a mesma estratégia de listing_type determinada anteriormente
+      // IMPORTANTE: listing_type_id SEMPRE presente
       newItem = {
         category_id: itemData.category_id,
         currency_id: itemData.currency_id || "BRL",
+        listing_type_id: listingTypeToUse, // OBRIGATÓRIO - SEMPRE PRESENTE
         condition: itemData.condition || "new",
-        price: checklist?.price !== false ? itemData.price : undefined,
-        available_quantity: checklist?.quantity !== false ? itemData.available_quantity : 1,
+        price: checklist?.override_price ?? (checklist?.price !== false ? itemData.price : undefined),
+        available_quantity: checklist?.override_quantity ?? (checklist?.quantity !== false ? itemData.available_quantity : 1),
         attributes: finalAttributes2.length > 0 ? finalAttributes2 : undefined,
       };
-
-      // Incluir listing_type_id apenas se não for estratégia "omit"
-      if (listingTypeToUse) {
-        newItem.listing_type_id = listingTypeToUse;
-      }
 
       // CONDICIONAL: Apenas incluir title se NÃO for catálogo
       if (canIncludeTitle) {
@@ -1424,6 +1557,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
 
       console.log(`[ad-action-execute] [RETRY] Sending clone request with ${finalAttributes2.length} attributes`);
       console.log(`[ad-action-execute] [RETRY] Body-level fields: ${JSON.stringify(fillResult.bodyLevelFields)}`);
+      console.log(`[ad-action-execute] [RETRY] listing_type_id: ${listingTypeToUse}`);
 
       // =========================================================================
       // CREATE ITEM (2ª tentativa) - SEMPRE POST /items
@@ -1444,6 +1578,9 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
 
       createData = await createResponse.json();
     }
+
+    // Se chegamos aqui e ainda falhou, sair do loop para evitar loop infinito
+    break;
   }
   
   if (!createResponse.ok) {
@@ -1452,6 +1589,8 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       error: createData,
       payload_attributes_count: finalAttributes.length,
       body_level_fields: fillResult.bodyLevelFields,
+      listing_type_used: listingTypeToUse,
+      listing_type_fallback_used: listingTypeFallbackUsed,
     }));
 
     // Verificar se é erro de campos obrigatórios (para logging detalhado)
@@ -1459,6 +1598,33 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       createData?.cause?.some((c: any) => c.code === "item.attributes.missing_required") ||
       createData?.message?.includes("required_fields") ||
       createData?.message?.includes("body.required_fields");
+
+    // Verificar se é erro específico de listing_type_id
+    const isListingTypeRequiredError = isListingTypeError(createData);
+
+    if (isListingTypeRequiredError) {
+      console.error(`[ad-action-execute] LISTING_TYPE_ID ERROR: All fallbacks exhausted`);
+      return {
+        success: false,
+        error: "LISTING_TYPE_VALIDATION_FAILED",
+        message: `Falha ao clonar: campo obrigatório ausente (listing_type_id). Tentamos ${listingTypeFallbackUsed ? "com fallbacks" : "o tipo original"}, mas o erro persiste.`,
+        user_guidance: "O tipo de anúncio não é compatível com esta categoria. Tente novamente ou entre em contato com o suporte.",
+        api_error: createData,
+        listing_type_resolution: {
+          original_source: listingTypeResolution.source,
+          last_attempted: lastListingTypeAttempted,
+          fallback_used: listingTypeFallbackUsed,
+          fallback_index: currentFallbackIndex,
+        },
+        payload_sent: newItem,
+        catalog_info: catalogInfo,
+        api_request: {
+          request_kind: "create",
+          http_method: CREATE_METHOD,
+          endpoint_url: CREATE_ENDPOINT,
+        },
+      };
+    }
 
     if (isRequiredFieldError) {
       console.error(`[ad-action-execute] ML still reports missing required fields despite validation!`);
@@ -1489,6 +1655,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
           ...catalogDiagnostic, 
           listing_type_strategy: listingTypeStrategy,
           listing_type_attempted: listingTypeToUse,
+          listing_type_fallback_used: listingTypeFallbackUsed,
           pictures_blocked: picturesBlocked,
         },
         catalog_info: catalogInfo,
@@ -1539,6 +1706,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
         ...catalogDiagnostic,
         listing_type_strategy: listingTypeStrategy,
         listing_type_attempted: listingTypeToUse,
+        listing_type_fallback_used: listingTypeFallbackUsed,
         removed_not_modifiable: removedNotModifiable,
       },
       // Log detalhado da chamada
@@ -1553,6 +1721,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   console.log(`[ad-action-execute] Clone SUCCESS: ${createData.id}`);
   console.log(`[ad-action-execute] === FINAL API CALL SUMMARY ===`);
   console.log(`[ad-action-execute] request_kind=create | method=${CREATE_METHOD} | endpoint=${CREATE_ENDPOINT} | result=SUCCESS`);
+  console.log(`[ad-action-execute] listing_type_id=${listingTypeToUse} | fallback_used=${listingTypeFallbackUsed}`);
 
   return { 
     success: true, 
@@ -1564,6 +1733,13 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     attributes_filled: fillResult.log.filter(l => l.source !== "item_fonte").map(l => l.attrId),
     body_level_fields: fillResult.bodyLevelFields,
     required_check: requiredCheck,
+    listing_type_resolution: {
+      listing_type_used: listingTypeToUse,
+      source: listingTypeResolution.source,
+      strategy: listingTypeStrategy,
+      fallback_used: listingTypeFallbackUsed,
+      fallback_index: listingTypeFallbackUsed ? currentFallbackIndex : undefined,
+    },
     catalog_info: catalogInfo,
     catalog_diagnostic: {
       ...catalogDiagnostic,
