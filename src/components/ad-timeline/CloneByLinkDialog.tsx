@@ -17,6 +17,7 @@ import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { useQueryClient } from '@tanstack/react-query';
+import { extractMeliId } from '@/lib/meli/extractMeliId';
 
 interface CloneByLinkDialogProps {
   open: boolean;
@@ -45,32 +46,7 @@ export function CloneByLinkDialog({ open, onOpenChange }: CloneByLinkDialogProps
     keep_price: true,
   });
 
-  // Extract item ID from Mercado Livre link
-  const extractItemId = (url: string): string | null => {
-    // Patterns for various ML ID formats:
-    // - MLB1234567890 (item regular)
-    // - MLB-1234567890 (with hyphen)
-    // - MLBU1234567890 (catalog/universal product)
-    // - MLA, MLC, MLM, etc. (other countries)
-    // - /up/MLBU... (universal product URL format)
-    const patterns = [
-      /\/up\/(MLB[A-Z]?\d+)/i,           // Universal product: /up/MLBU1234567890
-      /\/p\/(MLB[A-Z]?[-]?\d+)/i,        // Product page: /p/MLB1234567890
-      /item_id=(MLB[A-Z]?[-]?\d+)/i,     // Query param: item_id=MLB...
-      /(MLB[A-Z]?[-]?\d{8,})/i,          // Any MLB ID in URL (8+ digits)
-      /(ML[A-Z]{1,2}[-]?\d{8,})/i,       // Other countries: MLA, MLC, MLM, etc.
-    ];
-    
-    for (const pattern of patterns) {
-      const match = url.match(pattern);
-      if (match) {
-        // Normalize: remove hyphens and uppercase
-        const id = (match[1] || match[0]).replace(/-/g, '').toUpperCase();
-        return id;
-      }
-    }
-    return null;
-  };
+  const detectedId = extractMeliId(link);
 
   const handleCreateCloneAction = async () => {
     setError(null);
@@ -80,7 +56,7 @@ export function CloneByLinkDialog({ open, onOpenChange }: CloneByLinkDialogProps
       return;
     }
 
-    const itemId = extractItemId(link);
+    const itemId = detectedId;
     if (!itemId) {
       setError('Link inválido. Cole um link de anúncio do Mercado Livre (ex: https://www.mercadolivre.com.br/...)');
       return;
@@ -150,7 +126,7 @@ export function CloneByLinkDialog({ open, onOpenChange }: CloneByLinkDialogProps
         throw new Error('Workspace não encontrado. Verifique seu acesso ao workspace.');
       }
 
-      // Build checklist
+      // Build checklist with source_url preserved
       const actionChecklist: Record<string, unknown> = {
         title: checklist.keep_title,
         description: checklist.keep_description,
@@ -158,6 +134,7 @@ export function CloneByLinkDialog({ open, onOpenChange }: CloneByLinkDialogProps
         attributes: checklist.keep_attributes,
         price: checklist.keep_price,
         source: 'manual_link',
+        source_url: link.trim(), // Save original link for retry/edit
       };
 
       // Create clone action
@@ -256,9 +233,9 @@ export function CloneByLinkDialog({ open, onOpenChange }: CloneByLinkDialogProps
                 {error}
               </div>
             )}
-            {link && extractItemId(link) && (
+            {link && detectedId && (
               <p className="text-xs text-muted-foreground">
-                ID detectado: <span className="font-mono">{extractItemId(link)}</span>
+                ID detectado: <span className="font-mono">{detectedId}</span>
               </p>
             )}
           </div>
