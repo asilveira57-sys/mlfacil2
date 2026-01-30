@@ -101,49 +101,189 @@ const CATALOG_SAFE_LISTING_TYPES = ["free", "bronze"];
 // ============================================================================
 // DEFAULT LISTING TYPE + FALLBACK STRATEGY
 // Quando listing_type_id falha, tenta fallbacks sequencialmente
+// REGRA: Nunca usar "free" como default - sempre "gold_special"
 // ============================================================================
 const DEFAULT_LISTING_TYPE_ID = "gold_special";
-const LISTING_TYPE_FALLBACKS = ["silver", "bronze"];
+const DEFAULT_LISTING_TYPE_FALLBACKS = ["gold_pro", "silver", "bronze"];
+
+// Cache de listing_type_id por categoria (chave: category_id → último tipo que funcionou)
+const listingTypeCacheByCategory = new Map<string, string>();
 
 interface ListingTypeResolution {
   listing_type_id: string;
-  source: "source_item" | "default" | "fallback";
+  source: "source_item" | "default" | "fallback" | "cache" | "api_suggested";
   fallback_index?: number;
+  suggested_types?: string[];
+}
+
+/**
+ * extractSuggestedListingTypes - Extrai tipos sugeridos da mensagem de erro da API
+ * Exemplo de erro: "Listing type free is not available... You can still post with [gold_pro, gold_special]"
+ */
+function extractSuggestedListingTypes(apiError: any): string[] {
+  const suggestedTypes: string[] = [];
+  
+  if (!apiError) return suggestedTypes;
+  
+  // Verificar no cause[]
+  if (apiError.cause && Array.isArray(apiError.cause)) {
+    for (const cause of apiError.cause) {
+      // Verificar código específico
+      if (cause.code === "item.listing_type_id.unavailable" || 
+          cause.code?.includes("listing_type")) {
+        // Extrair da message: "[gold_pro, gold_special]"
+        const match = cause.message?.match(/\[([^\]]+)\]/);
+        if (match) {
+          const types = match[1].split(",").map((t: string) => t.trim().toLowerCase());
+          suggestedTypes.push(...types);
+        }
+      }
+    }
+  }
+  
+  // Verificar na message principal
+  if (apiError.message) {
+    const match = apiError.message.match(/\[([^\]]+)\]/);
+    if (match) {
+      const types = match[1].split(",").map((t: string) => t.trim().toLowerCase());
+      // Evitar duplicatas
+      for (const t of types) {
+        if (!suggestedTypes.includes(t)) {
+          suggestedTypes.push(t);
+        }
+      }
+    }
+  }
+  
+  console.log(`[ad-action-execute] Extracted suggested listing types: ${suggestedTypes.join(", ") || "(none)"}`);
+  return suggestedTypes;
+}
+
+/**
+ * isListingTypeUnavailableError - Verifica se é erro de listing_type_id.unavailable
+ */
+function isListingTypeUnavailableError(apiError: any): boolean {
+  if (!apiError) return false;
+
+  // Verificar no cause[]
+  if (apiError.cause && Array.isArray(apiError.cause)) {
+    for (const cause of apiError.cause) {
+      if (cause.code === "item.listing_type_id.unavailable") {
+        return true;
+      }
+    }
+  }
+
+  // Verificar na message principal
+  if (apiError.message) {
+    const msg = apiError.message.toLowerCase();
+    if (msg.includes("listing type") && msg.includes("not available")) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**
  * resolveListingTypeId - Resolve o listing_type_id com estratégia de fallback
+ * PRIORIDADE:
+ *   1. Cache da categoria (último tipo que funcionou)
+ *   2. Item fonte (se disponível e não é "free")
+ *   3. Default do sistema (gold_special)
+ *   4. Fallback guiado pela API (se erro ocorreu)
+ * 
  * @param sourceListingType - listing_type_id do item fonte (pode ser undefined)
+ * @param categoryId - ID da categoria (para cache)
  * @param defaultType - tipo padrão do sistema (gold_special)
- * @param fallbackIndex - índice do fallback a usar (0 = primeiro fallback)
+ * @param suggestedTypes - tipos sugeridos pela API após erro (ex: [gold_pro, gold_special])
+ * @param fallbackIndex - índice do fallback a usar
  */
 function resolveListingTypeId(
   sourceListingType: string | undefined,
+  categoryId?: string,
   defaultType: string = DEFAULT_LISTING_TYPE_ID,
+  suggestedTypes: string[] = [],
   fallbackIndex: number = -1
 ): ListingTypeResolution {
-  // Se fallback foi solicitado
-  if (fallbackIndex >= 0 && fallbackIndex < LISTING_TYPE_FALLBACKS.length) {
+  // =========================================================================
+  // FALLBACK GUIADO PELA API: Usar tipos sugeridos após erro
+  // =========================================================================
+  if (fallbackIndex >= 0 && suggestedTypes.length > 0) {
+    // Priorizar gold_special > gold_pro > resto
+    const prioritizedSuggested = [
+      ...suggestedTypes.filter(t => t === "gold_special"),
+      ...suggestedTypes.filter(t => t === "gold_pro"),
+      ...suggestedTypes.filter(t => t !== "gold_special" && t !== "gold_pro"),
+    ];
+    
+    if (fallbackIndex < prioritizedSuggested.length) {
+      const selectedType = prioritizedSuggested[fallbackIndex];
+      console.log(`[ad-action-execute] FALLBACK: Using API-suggested type [${fallbackIndex}]: ${selectedType}`);
+      return {
+        listing_type_id: selectedType,
+        source: "api_suggested",
+        fallback_index: fallbackIndex,
+        suggested_types: prioritizedSuggested,
+      };
+    }
+  }
+
+  // Fallback usando lista padrão (se não houver tipos sugeridos)
+  if (fallbackIndex >= 0 && fallbackIndex < DEFAULT_LISTING_TYPE_FALLBACKS.length) {
     return {
-      listing_type_id: LISTING_TYPE_FALLBACKS[fallbackIndex],
+      listing_type_id: DEFAULT_LISTING_TYPE_FALLBACKS[fallbackIndex],
       source: "fallback",
       fallback_index: fallbackIndex,
     };
   }
 
-  // 1. Usar do item fonte se disponível
-  if (sourceListingType && sourceListingType.trim()) {
+  // =========================================================================
+  // CACHE DA CATEGORIA: Usar último tipo que funcionou
+  // =========================================================================
+  if (categoryId) {
+    const cachedType = listingTypeCacheByCategory.get(categoryId);
+    if (cachedType) {
+      console.log(`[ad-action-execute] CACHE HIT: Using cached listing_type_id for category ${categoryId}: ${cachedType}`);
+      return {
+        listing_type_id: cachedType,
+        source: "cache",
+      };
+    }
+  }
+
+  // =========================================================================
+  // ITEM FONTE: Usar se disponível e não for "free"
+  // REGRA: Nunca usar "free" como default - evitar erro "unavailable"
+  // =========================================================================
+  if (sourceListingType && sourceListingType.trim() && sourceListingType.trim().toLowerCase() !== "free") {
     return {
       listing_type_id: sourceListingType.trim(),
       source: "source_item",
     };
   }
 
-  // 2. Usar default do sistema
+  // Se fonte é "free", usar default do sistema (gold_special)
+  if (sourceListingType && sourceListingType.trim().toLowerCase() === "free") {
+    console.log(`[ad-action-execute] Source listing_type is "free" - using default ${defaultType} instead`);
+  }
+
+  // =========================================================================
+  // DEFAULT DO SISTEMA: gold_special (configurável via Admin futuro)
+  // =========================================================================
   return {
     listing_type_id: defaultType,
     source: "default",
   };
+}
+
+/**
+ * saveListingTypeCacheForCategory - Salva o listing_type_id que funcionou para a categoria
+ */
+function saveListingTypeCacheForCategory(categoryId: string, listingTypeId: string): void {
+  if (!categoryId || !listingTypeId) return;
+  listingTypeCacheByCategory.set(categoryId, listingTypeId);
+  console.log(`[ad-action-execute] CACHE SAVE: category ${categoryId} → ${listingTypeId}`);
 }
 
 /**
@@ -1272,11 +1412,22 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   const blockedFields = catalogDiagnostic.blocked_fields;
   const picturesBlocked = blockedFields.includes("pictures");
 
-  // Resolver listing_type_id inicial
-  let listingTypeResolution = resolveListingTypeId(itemData.listing_type_id);
+  // Resolver listing_type_id inicial - com cache por categoria
+  const categoryIdForCache = itemData.category_id || "";
+  let listingTypeResolution = resolveListingTypeId(
+    itemData.listing_type_id,
+    categoryIdForCache,
+    DEFAULT_LISTING_TYPE_ID,
+    [], // sem sugestões da API ainda
+    -1  // sem fallback ainda
+  );
   let listingTypeToUse = listingTypeResolution.listing_type_id;
-  let listingTypeStrategy: "source" | "default" | "fallback" | "catalog_safe" = 
-    listingTypeResolution.source === "source_item" ? "source" : "default";
+  let listingTypeStrategy: "source" | "default" | "fallback" | "catalog_safe" | "cache" | "api_suggested" = 
+    listingTypeResolution.source === "source_item" ? "source" : 
+    listingTypeResolution.source === "cache" ? "cache" : "default";
+  
+  // Tipos sugeridos pela API (preenchidos após erro)
+  let apiSuggestedTypes: string[] = [];
 
   // Se for catálogo com pictures bloqueadas e listing_type exige pictures, usar tipo seguro
   if (isCatalogSource && picturesBlocked) {
@@ -1428,27 +1579,49 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   
   // =========================================================================
   // RETRY LOOP: Se falhar, tentar recovery de campos e fallback de listing_type
-  // Máximo de 2 fallbacks: silver, bronze
+  // ESTRATÉGIA GUIADA PELA API: Extrair tipos sugeridos da mensagem de erro
+  // Máximo de 2 fallbacks
   // =========================================================================
   let currentFallbackIndex = -1; // -1 = sem fallback ainda
   let listingTypeFallbackUsed = false;
   let lastListingTypeAttempted = listingTypeToUse;
+  let listingTypeFallbackChain: string[] = [];
+  const MAX_LISTING_TYPE_FALLBACKS = 2;
 
-  while (!createResponse.ok && currentFallbackIndex < LISTING_TYPE_FALLBACKS.length) {
-    // Verificar se é erro de listing_type_id
-    const isListingTypeIssue = isListingTypeError(createData);
+  while (!createResponse.ok && currentFallbackIndex < MAX_LISTING_TYPE_FALLBACKS) {
+    // Verificar se é erro de listing_type_id.unavailable (ex: "free is not available")
+    const isListingTypeUnavailable = isListingTypeUnavailableError(createData);
+    const isListingTypeIssue = isListingTypeError(createData) || isListingTypeUnavailable;
     const extractedMissing = extractMissingFieldsFromApiError(createData);
     
-    // Se for erro de listing_type_id, tentar fallback
-    if (isListingTypeIssue && currentFallbackIndex < LISTING_TYPE_FALLBACKS.length - 1) {
+    // Se for erro de listing_type_id, tentar fallback GUIADO PELA API
+    if (isListingTypeIssue && currentFallbackIndex < MAX_LISTING_TYPE_FALLBACKS - 1) {
       currentFallbackIndex++;
-      const fallbackResolution = resolveListingTypeId(undefined, DEFAULT_LISTING_TYPE_ID, currentFallbackIndex);
+      
+      // Extrair tipos sugeridos da resposta da API (ex: [gold_pro, gold_special])
+      if (apiSuggestedTypes.length === 0) {
+        apiSuggestedTypes = extractSuggestedListingTypes(createData);
+      }
+      
+      // Resolver com base nos tipos sugeridos ou fallback padrão
+      const fallbackResolution = resolveListingTypeId(
+        undefined,
+        categoryIdForCache,
+        DEFAULT_LISTING_TYPE_ID,
+        apiSuggestedTypes,
+        currentFallbackIndex
+      );
+      
       listingTypeToUse = fallbackResolution.listing_type_id;
-      listingTypeStrategy = "fallback";
+      listingTypeStrategy = fallbackResolution.source === "api_suggested" ? "api_suggested" : "fallback";
       listingTypeFallbackUsed = true;
       lastListingTypeAttempted = listingTypeToUse;
+      listingTypeFallbackChain.push(listingTypeToUse);
 
-      console.warn(`[ad-action-execute] LISTING_TYPE FALLBACK: Trying fallback ${currentFallbackIndex + 1}: ${listingTypeToUse}`);
+      console.warn(`[ad-action-execute] LISTING_TYPE FALLBACK [${currentFallbackIndex + 1}/${MAX_LISTING_TYPE_FALLBACKS}]:`);
+      console.warn(`[ad-action-execute]   → Trying: ${listingTypeToUse}`);
+      console.warn(`[ad-action-execute]   → Source: ${fallbackResolution.source}`);
+      console.warn(`[ad-action-execute]   → API suggested: ${apiSuggestedTypes.join(", ") || "(none)"}`);
 
       // Reconstruir payload com novo listing_type_id
       newItem.listing_type_id = listingTypeToUse;
@@ -1591,6 +1764,8 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       body_level_fields: fillResult.bodyLevelFields,
       listing_type_used: listingTypeToUse,
       listing_type_fallback_used: listingTypeFallbackUsed,
+      listing_type_fallback_chain: listingTypeFallbackChain,
+      api_suggested_types: apiSuggestedTypes,
     }));
 
     // Verificar se é erro de campos obrigatórios (para logging detalhado)
@@ -1599,21 +1774,29 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       createData?.message?.includes("required_fields") ||
       createData?.message?.includes("body.required_fields");
 
-    // Verificar se é erro específico de listing_type_id
+    // Verificar se é erro específico de listing_type_id (required ou unavailable)
     const isListingTypeRequiredError = isListingTypeError(createData);
+    const isListingTypeUnavailable = isListingTypeUnavailableError(createData);
 
-    if (isListingTypeRequiredError) {
+    if (isListingTypeRequiredError || isListingTypeUnavailable) {
       console.error(`[ad-action-execute] LISTING_TYPE_ID ERROR: All fallbacks exhausted`);
+      console.error(`[ad-action-execute]   → Fallback chain: ${listingTypeFallbackChain.join(" → ") || "(none)"}`);
+      console.error(`[ad-action-execute]   → API suggested types: ${apiSuggestedTypes.join(", ") || "(none)"}`);
+      
       return {
         success: false,
-        error: "LISTING_TYPE_VALIDATION_FAILED",
-        message: `Falha ao clonar: campo obrigatório ausente (listing_type_id). Tentamos ${listingTypeFallbackUsed ? "com fallbacks" : "o tipo original"}, mas o erro persiste.`,
-        user_guidance: "O tipo de anúncio não é compatível com esta categoria. Tente novamente ou entre em contato com o suporte.",
+        error: isListingTypeUnavailable ? "LISTING_TYPE_UNAVAILABLE" : "LISTING_TYPE_VALIDATION_FAILED",
+        message: `Não foi possível publicar com os tipos de anúncio disponíveis para essa categoria. Verifique o tipo de anúncio permitido e preferências de envio da conta.`,
+        user_guidance: isListingTypeUnavailable 
+          ? `O tipo de anúncio selecionado não está disponível para sua conta. Tipos sugeridos: ${apiSuggestedTypes.join(", ") || "não identificados"}.`
+          : "O tipo de anúncio não é compatível com esta categoria. Tente novamente ou entre em contato com o suporte.",
         api_error: createData,
         listing_type_resolution: {
           original_source: listingTypeResolution.source,
           last_attempted: lastListingTypeAttempted,
           fallback_used: listingTypeFallbackUsed,
+          fallback_chain: listingTypeFallbackChain,
+          api_suggested_types: apiSuggestedTypes,
           fallback_index: currentFallbackIndex,
         },
         payload_sent: newItem,
@@ -1723,6 +1906,27 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   console.log(`[ad-action-execute] request_kind=create | method=${CREATE_METHOD} | endpoint=${CREATE_ENDPOINT} | result=SUCCESS`);
   console.log(`[ad-action-execute] listing_type_id=${listingTypeToUse} | fallback_used=${listingTypeFallbackUsed}`);
 
+  // =========================================================================
+  // CACHE: Salvar listing_type_id que funcionou para a categoria
+  // Próximas clonagens da mesma categoria usarão este tipo primeiro
+  // =========================================================================
+  if (categoryIdForCache && listingTypeToUse) {
+    saveListingTypeCacheForCategory(categoryIdForCache, listingTypeToUse);
+  }
+
+  // =========================================================================
+  // WARNINGS: Processar warnings não críticos (ex: shipping.lost_me1_by_user)
+  // Estes warnings NÃO devem bloquear a operação, apenas registrar em log
+  // =========================================================================
+  const warnings: string[] = [];
+  if (createData.warnings && Array.isArray(createData.warnings)) {
+    for (const warning of createData.warnings) {
+      const warningCode = typeof warning === "string" ? warning : warning.code || warning.message || JSON.stringify(warning);
+      console.warn(`[ad-action-execute] WARNING (non-blocking): ${warningCode}`);
+      warnings.push(warningCode);
+    }
+  }
+
   return { 
     success: true, 
     message: catalogInfo 
@@ -1738,8 +1942,11 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       source: listingTypeResolution.source,
       strategy: listingTypeStrategy,
       fallback_used: listingTypeFallbackUsed,
+      fallback_chain: listingTypeFallbackChain,
+      api_suggested_types: apiSuggestedTypes.length > 0 ? apiSuggestedTypes : undefined,
       fallback_index: listingTypeFallbackUsed ? currentFallbackIndex : undefined,
     },
+    warnings: warnings.length > 0 ? warnings : undefined,
     catalog_info: catalogInfo,
     catalog_diagnostic: {
       ...catalogDiagnostic,
