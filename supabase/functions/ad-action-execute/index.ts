@@ -1014,10 +1014,42 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     itemData = await getResponse.json();
   }
 
+  // =========================================================================
+  // ETAPA 1.5: DIAGNÓSTICO DE CATÁLOGO - Detectar se o item fonte é de catálogo
+  // Isso afeta quais campos podem ser enviados no POST /items
+  // =========================================================================
+  const catalogDiagnostic = {
+    catalog_product_id: itemData.catalog_product_id || null,
+    catalog_listing: itemData.catalog_listing ?? null,
+    parent_item_id: itemData.parent_item_id || null,
+    is_catalog_source: false,
+    blocked_fields: [] as string[],
+  };
+
+  // Determinar se é item de catálogo
+  catalogDiagnostic.is_catalog_source = !!(
+    catalogDiagnostic.catalog_product_id ||
+    catalogDiagnostic.catalog_listing === true ||
+    catalogDiagnostic.parent_item_id
+  );
+
+  // Se for catálogo, estes campos são bloqueados pela API
+  if (catalogDiagnostic.is_catalog_source) {
+    catalogDiagnostic.blocked_fields = ["title", "pictures", "description"];
+  }
+
+  console.log(`[ad-action-execute] === CATALOG DIAGNOSTIC ===`);
+  console.log(`[ad-action-execute] catalog_product_id: ${catalogDiagnostic.catalog_product_id}`);
+  console.log(`[ad-action-execute] catalog_listing: ${catalogDiagnostic.catalog_listing}`);
+  console.log(`[ad-action-execute] parent_item_id: ${catalogDiagnostic.parent_item_id}`);
+  console.log(`[ad-action-execute] is_catalog_source: ${catalogDiagnostic.is_catalog_source}`);
+  console.log(`[ad-action-execute] blocked_fields: ${catalogDiagnostic.blocked_fields.join(", ") || "(none)"}`);
+
   console.log(`[ad-action-execute] Building clone payload from data:`, JSON.stringify({ 
     title: itemData.title, 
     category_id: itemData.category_id,
     resolved_from_catalog: !!catalogInfo,
+    is_catalog_source: catalogDiagnostic.is_catalog_source,
   }));
 
   // =========================================================================
@@ -1120,20 +1152,47 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
 
   // =========================================================================
   // BUILD NEW ITEM PAYLOAD (incluindo campos no body raiz)
+  // IMPORTANTE: Se is_catalog_source=true, NÃO enviar title, pictures, description
   // =========================================================================
+  const isCatalogSource = catalogDiagnostic.is_catalog_source;
+  const blockedFields = catalogDiagnostic.blocked_fields;
+
+  // Determinar se cada campo pode ser incluído
+  const canIncludeTitle = !isCatalogSource && checklist?.title !== false;
+  const canIncludePictures = !isCatalogSource && checklist?.pictures !== false && itemData.pictures;
+  const canIncludeDescription = !isCatalogSource && checklist?.description !== false;
+
+  console.log(`[ad-action-execute] === PAYLOAD FIELD DECISIONS ===`);
+  console.log(`[ad-action-execute] is_catalog_source: ${isCatalogSource}`);
+  console.log(`[ad-action-execute] canIncludeTitle: ${canIncludeTitle} (blocked: ${blockedFields.includes("title")})`);
+  console.log(`[ad-action-execute] canIncludePictures: ${canIncludePictures} (blocked: ${blockedFields.includes("pictures")})`);
+  console.log(`[ad-action-execute] canIncludeDescription: ${canIncludeDescription} (blocked: ${blockedFields.includes("description")})`);
+
   let newItem: any = {
-    title: checklist?.title !== false ? itemData.title : undefined,
     category_id: itemData.category_id,
     currency_id: itemData.currency_id || "BRL",
     listing_type_id: itemData.listing_type_id || "gold_special",
     condition: itemData.condition || "new",
-    pictures: checklist?.pictures !== false && itemData.pictures 
-      ? itemData.pictures.map((p: any) => ({ source: p.url || p.secure_url }))
-      : undefined,
     price: checklist?.price !== false ? itemData.price : undefined,
     available_quantity: checklist?.quantity !== false ? itemData.available_quantity : 1,
     attributes: finalAttributes.length > 0 ? finalAttributes : undefined,
   };
+
+  // CONDICIONAL: Apenas incluir title se NÃO for catálogo
+  if (canIncludeTitle) {
+    newItem.title = itemData.title;
+  }
+
+  // CONDICIONAL: Apenas incluir pictures se NÃO for catálogo
+  if (canIncludePictures) {
+    newItem.pictures = itemData.pictures.map((p: any) => ({ source: p.url || p.secure_url }));
+  }
+
+  // Se for catálogo, adicionar catalog_product_id ao payload (regra ML)
+  if (isCatalogSource && catalogDiagnostic.catalog_product_id) {
+    newItem.catalog_product_id = catalogDiagnostic.catalog_product_id;
+    console.log(`[ad-action-execute] Added catalog_product_id: ${catalogDiagnostic.catalog_product_id}`);
+  }
 
   // Adicionar body-level fields (family_name, etc.) - GARANTIDO no payload
   for (const [fieldName, fieldValue] of Object.entries(fillResult.bodyLevelFields)) {
@@ -1141,8 +1200,8 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     console.log(`[ad-action-execute] Added body-level field: ${fieldName} = "${fieldValue}"`);
   }
 
-  // Add description if included (fetch separately - only for regular items)
-  if (checklist?.description !== false && !isCatalogId(itemId)) {
+  // CONDICIONAL: Add description se NÃO for catálogo
+  if (canIncludeDescription && !isCatalogId(itemId)) {
     const descResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}/description`, {
       headers: { "Authorization": `Bearer ${accessToken}` },
     });
@@ -1153,13 +1212,27 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   }
 
   // Validate minimum required fields
-  if (!newItem.title || !newItem.category_id) {
+  // NOTA: Para catálogo, title é OPCIONAL (bloqueado pela API)
+  const needsTitle = !isCatalogSource;
+  if ((needsTitle && !newItem.title) || !newItem.category_id) {
+    // Se for catálogo e title está faltando, dar erro específico
+    if (isCatalogSource && !newItem.title && needsTitle) {
+      return {
+        success: false,
+        error: "CATALOG_CLONE_LIMITATION",
+        message: "Este anúncio pertence ao catálogo do Mercado Livre. O título é controlado pelo catálogo e não pode ser clonado diretamente.",
+        user_guidance: "Itens de catálogo têm título, fotos e descrição gerenciados pelo Mercado Livre. Tente clonar um anúncio fora do catálogo ou use a opção de cadastrar no catálogo.",
+        catalog_info: catalogInfo,
+        catalog_diagnostic: catalogDiagnostic,
+      };
+    }
     return {
       success: false,
       error: "INSUFFICIENT_DATA",
       message: "Dados insuficientes para clonagem. Título ou categoria não encontrados.",
       missing: { title: !newItem.title, category_id: !newItem.category_id },
       catalog_info: catalogInfo,
+      catalog_diagnostic: catalogDiagnostic,
     };
   }
 
@@ -1240,19 +1313,31 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
         includeNonRequired
       );
 
+      // Reconstruir payload com novos campos - RESPEITANDO REGRAS DE CATÁLOGO
       newItem = {
-        title: checklist?.title !== false ? itemData.title : undefined,
         category_id: itemData.category_id,
         currency_id: itemData.currency_id || "BRL",
         listing_type_id: itemData.listing_type_id || "gold_special",
         condition: itemData.condition || "new",
-        pictures: checklist?.pictures !== false && itemData.pictures 
-          ? itemData.pictures.map((p: any) => ({ source: p.url || p.secure_url }))
-          : undefined,
         price: checklist?.price !== false ? itemData.price : undefined,
         available_quantity: checklist?.quantity !== false ? itemData.available_quantity : 1,
         attributes: finalAttributes2.length > 0 ? finalAttributes2 : undefined,
       };
+
+      // CONDICIONAL: Apenas incluir title se NÃO for catálogo
+      if (canIncludeTitle) {
+        newItem.title = itemData.title;
+      }
+
+      // CONDICIONAL: Apenas incluir pictures se NÃO for catálogo
+      if (canIncludePictures) {
+        newItem.pictures = itemData.pictures.map((p: any) => ({ source: p.url || p.secure_url }));
+      }
+
+      // Se for catálogo, adicionar catalog_product_id ao payload (regra ML)
+      if (isCatalogSource && catalogDiagnostic.catalog_product_id) {
+        newItem.catalog_product_id = catalogDiagnostic.catalog_product_id;
+      }
 
       // Adicionar body-level fields (novos após retry)
       for (const [fieldName, fieldValue] of Object.entries(fillResult.bodyLevelFields)) {
@@ -1260,8 +1345,8 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
         console.log(`[ad-action-execute] [RETRY] Added body-level field: ${fieldName} = "${fieldValue}"`);
       }
 
-      // Re-adicionar description se necessário
-      if (checklist?.description !== false && !isCatalogId(itemId)) {
+      // CONDICIONAL: Re-adicionar description se NÃO for catálogo
+      if (canIncludeDescription && !isCatalogId(itemId)) {
         const descResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}/description`, {
           headers: { "Authorization": `Bearer ${accessToken}` },
         });
@@ -1321,6 +1406,29 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       (requiredCheck as any).finalExtractedMissing = finalExtracted;
     }
 
+    // Se for erro de invalid_fields com title e for catálogo, dar mensagem amigável
+    const hasInvalidTitle = createData?.cause?.some((c: any) => 
+      c.code === "item.invalid_title" || 
+      (c.code?.includes("invalid_fields") && c.message?.includes("title"))
+    ) || createData?.message?.includes("title");
+
+    if (hasInvalidTitle && isCatalogSource) {
+      return {
+        success: false,
+        error: "CATALOG_TITLE_BLOCKED",
+        message: "Este anúncio pertence ao catálogo do Mercado Livre. O campo 'título' é controlado pelo catálogo e não pode ser modificado.",
+        user_guidance: "Itens de catálogo têm título, fotos e descrição gerenciados pelo Mercado Livre. Esta é uma limitação da plataforma, não uma falha do sistema.",
+        api_error: createData,
+        catalog_diagnostic: catalogDiagnostic,
+        catalog_info: catalogInfo,
+        api_request: {
+          request_kind: "create",
+          http_method: CREATE_METHOD,
+          endpoint_url: CREATE_ENDPOINT,
+        },
+      };
+    }
+
     return { 
       success: false, 
       error: createData.message || "Failed to create cloned item", 
@@ -1329,6 +1437,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       attributes_sent: (newItem.attributes || []).map((a: any) => ({ id: a.id, value: a.value_name || a.value_id })),
       required_check: requiredCheck,
       catalog_info: catalogInfo,
+      catalog_diagnostic: catalogDiagnostic,
       // Log detalhado da chamada
       api_request: {
         request_kind: "create",
@@ -1353,6 +1462,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     body_level_fields: fillResult.bodyLevelFields,
     required_check: requiredCheck,
     catalog_info: catalogInfo,
+    catalog_diagnostic: catalogDiagnostic,
     // Log detalhado da chamada
     api_request: {
       request_kind: "create",
