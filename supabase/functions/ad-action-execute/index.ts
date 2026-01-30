@@ -11,28 +11,57 @@ interface ExecuteActionRequest {
   confirm?: boolean;
 }
 
-/**
- * REGRA OFICIAL DE RESOLUÇÃO:
- * 1. PRIORIDADE MÁXIMA: item_id já é MLB → usar direto
- * 2. MLBU é apenas camada de apresentação - fallback residual
- * 
- * O anúncio sempre nasce como MLB. MLBU é apenas camada pública de exibição.
- * O sistema NÃO promete clonar links públicos genéricos de catálogo.
- */
+// ============================================================================
+// CACHE DE ATRIBUTOS POR CATEGORIA (em memória, TTL 24h)
+// ============================================================================
+interface CategoryAttributeCache {
+  attributes: CategoryAttribute[];
+  requiredIds: string[];
+  fetchedAt: number;
+}
 
-/**
- * Check if itemId is a catalog/universal product ID (MLBU)
- * MLBU = Universal product catalog, not a sellable item
- */
+interface CategoryAttribute {
+  id: string;
+  name: string;
+  value_type: string;
+  tags?: { required?: boolean; catalog_required?: boolean };
+  values?: Array<{ id: string; name: string }>;
+  allowed_units?: Array<{ id: string; name: string }>;
+}
+
+const categoryAttributesCache = new Map<string, CategoryAttributeCache>();
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// ============================================================================
+// DEFAULTS DE ATRIBUTOS POR CATEGORIA (family_name e outros)
+// ============================================================================
+const CATEGORY_ATTRIBUTE_DEFAULTS: Record<string, Record<string, { value_name?: string; value_id?: string }>> = {
+  // Defaults genéricos aplicáveis a múltiplas categorias
+  "*": {
+    "FAMILY_NAME": { value_name: "Produto genérico" },
+    "IS_FLAMMABLE": { value_name: "Não" },
+    "IS_FRAGILE": { value_name: "Não" },
+  },
+  // Exemplos de defaults específicos por categoria (podem ser expandidos via Admin)
+  "MLB1051": { // Etiquetas
+    "FAMILY_NAME": { value_name: "Etiquetas adesivas" },
+  },
+  "MLB1953": { // Impressoras
+    "FAMILY_NAME": { value_name: "Impressoras térmicas" },
+  },
+};
+
+// ============================================================================
+// REGRA OFICIAL DE RESOLUÇÃO:
+// 1. PRIORIDADE MÁXIMA: item_id já é MLB → usar direto
+// 2. MLBU é apenas camada de apresentação - fallback residual
+// ============================================================================
+
 function isCatalogId(id: string): boolean {
   return /^MLBU/i.test((id || "").trim());
 }
 
-/**
- * Check if itemId is a regular item ID (MLB - directly clonable)
- */
 function isRegularItemId(id: string): boolean {
-  // MLB followed by digits, but NOT MLBU
   return /^MLB\d+$/i.test((id || "").trim());
 }
 
@@ -49,16 +78,6 @@ type ResolveCatalogResult = {
   tried: Array<{ productId: string; status?: number; body?: string }>;
 };
 
-/**
- * FALLBACK RESIDUAL: Resolve a catalog ID (MLBU) to a real item ID (MLB)
- * 
- * This is ONLY called when:
- * - The input is MLBU
- * - There was no MLB in the original link
- * 
- * Uses /products/{MLBU} and extracts buy_box_winner.item_id
- * May fail if there's no active seller - this is NOT a system error.
- */
 async function resolveCatalogItemFallback(
   accessToken: string,
   catalogIdRaw: string
@@ -67,20 +86,14 @@ async function resolveCatalogItemFallback(
   const tried: Array<{ productId: string; status?: number; body?: string }> = [];
 
   console.log(`[ad-action-execute] FALLBACK: Attempting catalog resolution for ${catalogId}`);
-  console.log(`[ad-action-execute] Note: This is a residual case - no MLB was found in the original link`);
 
   const res = await fetch(`https://api.mercadolibre.com/products/${catalogId}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 
-  console.log(`[ad-action-execute] /products/${catalogId} status: ${res.status}`);
-
   if (res.ok) {
     const product = await res.json();
-    console.log(`[ad-action-execute] Product found: ${product?.name ?? "(no name)"}`);
-
     if (!product?.buy_box_winner?.item_id) {
-      console.log(`[ad-action-execute] No buy_box_winner for catalog ${catalogId}`);
       return {
         ok: false,
         error: "Catálogo sem vendedor ativo",
@@ -101,7 +114,6 @@ async function resolveCatalogItemFallback(
   } else {
     const body = await res.text().catch(() => "");
     tried.push({ productId: catalogId, status: res.status, body });
-    console.log(`[ad-action-execute] /products/${catalogId} failed: ${body?.slice(0, 300)}`);
   }
 
   return {
@@ -110,6 +122,272 @@ async function resolveCatalogItemFallback(
     userGuidance: "A clonagem funciona a partir do anúncio base (MLB). Links públicos de catálogo podem exigir o link do anúncio do vendedor.",
     tried,
   };
+}
+
+// ============================================================================
+// ETAPA A: DESCOBRIR ATRIBUTOS OBRIGATÓRIOS DA CATEGORIA (COM CACHE)
+// ============================================================================
+async function fetchCategoryRequiredAttributes(
+  accessToken: string,
+  categoryId: string
+): Promise<{ attributes: CategoryAttribute[]; requiredIds: string[] }> {
+  // A1) Verificar cache
+  const cached = categoryAttributesCache.get(categoryId);
+  if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+    console.log(`[ad-action-execute] Category ${categoryId}: using cached attributes (${cached.requiredIds.length} required)`);
+    return { attributes: cached.attributes, requiredIds: cached.requiredIds };
+  }
+
+  // A2) Buscar da API
+  console.log(`[ad-action-execute] Category ${categoryId}: fetching attributes from ML API`);
+  
+  const response = await fetch(
+    `https://api.mercadolibre.com/categories/${categoryId}/attributes`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+
+  if (!response.ok) {
+    console.warn(`[ad-action-execute] Failed to fetch category attributes: ${response.status}`);
+    return { attributes: [], requiredIds: [] };
+  }
+
+  const allAttributes: CategoryAttribute[] = await response.json();
+  
+  // Filtrar obrigatórios (required ou catalog_required)
+  const requiredIds = allAttributes
+    .filter(attr => attr.tags?.required === true || attr.tags?.catalog_required === true)
+    .map(attr => attr.id);
+
+  console.log(`[ad-action-execute] Category ${categoryId}: found ${allAttributes.length} total, ${requiredIds.length} required`);
+  console.log(`[ad-action-execute] Required IDs: ${requiredIds.join(", ") || "(none)"}`);
+
+  // Guardar em cache
+  categoryAttributesCache.set(categoryId, {
+    attributes: allAttributes,
+    requiredIds,
+    fetchedAt: Date.now(),
+  });
+
+  return { attributes: allAttributes, requiredIds };
+}
+
+// ============================================================================
+// ETAPA B: NORMALIZAR ATRIBUTOS DO PAYLOAD
+// ============================================================================
+interface NormalizedAttribute {
+  id: string;
+  value_id?: string;
+  value_name?: string;
+  value_struct?: any;
+}
+
+function normalizeAndCleanAttributes(
+  sourceAttributes: any[],
+  categoryAttributes: CategoryAttribute[]
+): { attrsById: Map<string, NormalizedAttribute>; cleanedAttrs: NormalizedAttribute[] } {
+  const attrsById = new Map<string, NormalizedAttribute>();
+  const cleanedAttrs: NormalizedAttribute[] = [];
+
+  // Criar mapa de tipos esperados
+  const typeById = new Map<string, string>();
+  for (const catAttr of categoryAttributes) {
+    typeById.set(catAttr.id, catAttr.value_type);
+  }
+
+  for (const attr of sourceAttributes || []) {
+    if (!attr?.id) continue;
+
+    // B2) Limpar atributos inválidos
+    const hasValidValue = 
+      (attr.value_name && attr.value_name.trim() !== "") ||
+      attr.value_id ||
+      attr.value_struct;
+
+    if (!hasValidValue) {
+      console.log(`[ad-action-execute] Attr ${attr.id}: skipped (empty value)`);
+      continue;
+    }
+
+    // Verificar tipo numérico
+    const expectedType = typeById.get(attr.id);
+    if (expectedType === "number" || expectedType === "number_unit") {
+      if (!attr.value_struct?.number && !attr.value_name) {
+        console.log(`[ad-action-execute] Attr ${attr.id}: skipped (numeric without value)`);
+        continue;
+      }
+    }
+
+    const normalized: NormalizedAttribute = {
+      id: attr.id,
+      value_id: attr.value_id,
+      value_name: attr.value_name,
+      value_struct: attr.value_struct,
+    };
+
+    // Evitar duplicidade
+    if (!attrsById.has(attr.id)) {
+      attrsById.set(attr.id, normalized);
+      cleanedAttrs.push(normalized);
+    }
+  }
+
+  console.log(`[ad-action-execute] Normalized ${cleanedAttrs.length} valid attributes from source`);
+  return { attrsById, cleanedAttrs };
+}
+
+// ============================================================================
+// ETAPA C: VALIDAR E COMPLETAR OBRIGATÓRIOS
+// ============================================================================
+interface AttributeFillResult {
+  filled: NormalizedAttribute[];
+  missing: string[];
+  log: Array<{ attrId: string; source: string; value?: string }>;
+}
+
+function validateAndFillRequiredAttributes(
+  requiredIds: string[],
+  categoryAttributes: CategoryAttribute[],
+  sourceAttrsById: Map<string, NormalizedAttribute>,
+  itemData: any,
+  categoryId: string
+): AttributeFillResult {
+  const filled: NormalizedAttribute[] = [];
+  const missing: string[] = [];
+  const log: Array<{ attrId: string; source: string; value?: string }> = [];
+
+  // Mapa de atributos da categoria para acesso rápido
+  const catAttrById = new Map<string, CategoryAttribute>();
+  for (const attr of categoryAttributes) {
+    catAttrById.set(attr.id, attr);
+  }
+
+  for (const reqId of requiredIds) {
+    const catAttr = catAttrById.get(reqId);
+    let filledAttr: NormalizedAttribute | null = null;
+    let source = "";
+
+    // C1) Verificar se já existe no payload (fonte 1)
+    const sourceAttr = sourceAttrsById.get(reqId);
+    if (sourceAttr && (sourceAttr.value_id || sourceAttr.value_name || sourceAttr.value_struct)) {
+      filledAttr = { ...sourceAttr };
+      source = "item_fonte";
+    }
+
+    // C2) Fonte 2: Inferência baseada em atributos próximos
+    if (!filledAttr && catAttr) {
+      // ITEM_CONDITION → condition do item
+      if (reqId === "ITEM_CONDITION" && itemData.condition) {
+        filledAttr = { id: reqId, value_name: itemData.condition === "new" ? "Novo" : "Usado" };
+        source = "inferencia:condition";
+      }
+      // BRAND → buscar em attributes do item
+      else if (reqId === "BRAND") {
+        const brandAttr = sourceAttrsById.get("BRAND");
+        if (brandAttr) {
+          filledAttr = { ...brandAttr };
+          source = "inferencia:brand";
+        }
+      }
+    }
+
+    // C2.5) Fonte 3: Valores permitidos da categoria (primeiro valor como default)
+    if (!filledAttr && catAttr?.values && catAttr.values.length > 0) {
+      const defaultVal = catAttr.values[0];
+      filledAttr = { id: reqId, value_id: defaultVal.id, value_name: defaultVal.name };
+      source = "categoria:primeiro_valor";
+    }
+
+    // C3) Fonte 4: Defaults controlados por categoria
+    if (!filledAttr) {
+      // Tentar default específico da categoria
+      const categoryDefaults = CATEGORY_ATTRIBUTE_DEFAULTS[categoryId] || {};
+      const globalDefaults = CATEGORY_ATTRIBUTE_DEFAULTS["*"] || {};
+      
+      const specificDefault = categoryDefaults[reqId];
+      const globalDefault = globalDefaults[reqId];
+      const defaultValue = specificDefault || globalDefault;
+
+      if (defaultValue) {
+        filledAttr = { id: reqId, ...defaultValue };
+        source = specificDefault ? "default:categoria" : "default:global";
+      }
+    }
+
+    // C3.5) Fallback especial para FAMILY_NAME (derivar do título)
+    if (!filledAttr && (reqId === "FAMILY_NAME" || reqId.toLowerCase() === "family_name")) {
+      const derivedName = itemData.title
+        ? itemData.title.split(" ").slice(0, 4).join(" ")
+        : "Produto";
+      filledAttr = { id: reqId, value_name: derivedName };
+      source = "fallback:titulo";
+    }
+
+    // C3.6) Fallback genérico para tipos conhecidos
+    if (!filledAttr && catAttr) {
+      if (catAttr.value_type === "string") {
+        filledAttr = { id: reqId, value_name: "-" };
+        source = "fallback:string_generico";
+      } else if (catAttr.value_type === "boolean") {
+        filledAttr = { id: reqId, value_name: "Não" };
+        source = "fallback:boolean";
+      }
+    }
+
+    // Registrar resultado
+    if (filledAttr) {
+      filled.push(filledAttr);
+      log.push({ 
+        attrId: reqId, 
+        source, 
+        value: filledAttr.value_name || filledAttr.value_id || "(struct)" 
+      });
+      console.log(`[ad-action-execute] Required ${reqId}: ✓ ${source} → ${filledAttr.value_name || filledAttr.value_id}`);
+    } else {
+      missing.push(reqId);
+      log.push({ attrId: reqId, source: "MISSING" });
+      console.warn(`[ad-action-execute] Required ${reqId}: ✗ NO VALUE AVAILABLE`);
+    }
+  }
+
+  return { filled, missing, log };
+}
+
+// ============================================================================
+// ETAPA E: MONTAGEM FINAL COM VALIDAÇÃO
+// ============================================================================
+function buildFinalAttributesPayload(
+  filledRequired: NormalizedAttribute[],
+  cleanedSource: NormalizedAttribute[],
+  includeNonRequired: boolean
+): NormalizedAttribute[] {
+  const finalAttrs: NormalizedAttribute[] = [];
+  const includedIds = new Set<string>();
+
+  // Primeiro: todos os obrigatórios preenchidos
+  for (const attr of filledRequired) {
+    if (!includedIds.has(attr.id)) {
+      finalAttrs.push(attr);
+      includedIds.add(attr.id);
+    }
+  }
+
+  // Depois: atributos não-obrigatórios do item fonte (se permitido)
+  if (includeNonRequired) {
+    for (const attr of cleanedSource) {
+      if (!includedIds.has(attr.id)) {
+        finalAttrs.push(attr);
+        includedIds.add(attr.id);
+      }
+    }
+  }
+
+  // Remover duplicatas finais (por segurança)
+  const uniqueAttrs = Array.from(
+    new Map(finalAttrs.map(a => [a.id, a])).values()
+  );
+
+  console.log(`[ad-action-execute] Final payload: ${uniqueAttrs.length} attributes (${filledRequired.length} required)`);
+  return uniqueAttrs;
 }
 
 serve(async (req) => {
@@ -506,106 +784,86 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     resolved_from_catalog: !!catalogInfo,
   }));
 
-  // Fetch required attributes for the category
-  let requiredAttributes: Array<{ id: string; name: string; value_type: string; values?: any[] }> = [];
-  
+  // =========================================================================
+  // ETAPA A: Descobrir atributos obrigatórios da categoria
+  // =========================================================================
+  let categoryAttributes: CategoryAttribute[] = [];
+  let requiredIds: string[] = [];
+
   if (itemData.category_id) {
-    console.log(`[ad-action-execute] Fetching required attributes for category: ${itemData.category_id}`);
+    const catResult = await fetchCategoryRequiredAttributes(accessToken, itemData.category_id);
+    categoryAttributes = catResult.attributes;
+    requiredIds = catResult.requiredIds;
+  }
+
+  // =========================================================================
+  // ETAPA B: Normalizar atributos do item fonte
+  // =========================================================================
+  const { attrsById: sourceAttrsById, cleanedAttrs } = normalizeAndCleanAttributes(
+    itemData.attributes || [],
+    categoryAttributes
+  );
+
+  // =========================================================================
+  // ETAPA C: Validar e completar obrigatórios
+  // =========================================================================
+  const fillResult = validateAndFillRequiredAttributes(
+    requiredIds,
+    categoryAttributes,
+    sourceAttrsById,
+    itemData,
+    itemData.category_id || ""
+  );
+
+  // Log detalhado da validação
+  console.log(`[ad-action-execute] === VALIDATION SUMMARY ===`);
+  console.log(`[ad-action-execute] Category: ${itemData.category_id}`);
+  console.log(`[ad-action-execute] Required count: ${requiredIds.length}`);
+  console.log(`[ad-action-execute] Filled count: ${fillResult.filled.length}`);
+  console.log(`[ad-action-execute] Missing count: ${fillResult.missing.length}`);
+  
+  for (const entry of fillResult.log) {
+    console.log(`[ad-action-execute]   - ${entry.attrId}: ${entry.source}${entry.value ? ` = "${entry.value}"` : ""}`);
+  }
+
+  // C3) Se não conseguiu preencher obrigatórios → erro controlado
+  if (fillResult.missing.length > 0) {
+    console.error(`[ad-action-execute] CLONE BLOCKED: Missing required attributes: ${fillResult.missing.join(", ")}`);
     
-    const catAttrsResponse = await fetch(
-      `https://api.mercadolibre.com/categories/${itemData.category_id}/attributes`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
-    
-    if (catAttrsResponse.ok) {
-      const allAttributes = await catAttrsResponse.json();
-      requiredAttributes = allAttributes.filter((attr: any) => 
-        attr.tags?.required === true || attr.tags?.catalog_required === true
-      );
-      
-      console.log(`[ad-action-execute] Found ${requiredAttributes.length} required attributes for category`);
-      console.log(`[ad-action-execute] Required attribute IDs:`, requiredAttributes.map((a: any) => a.id));
-    } else {
-      console.warn(`[ad-action-execute] Failed to fetch category attributes: ${catAttrsResponse.status}`);
-    }
+    return {
+      success: false,
+      error: "MISSING_REQUIRED_ATTRIBUTES",
+      message: `Este produto exige campos obrigatórios definidos pelo Mercado Livre: ${fillResult.missing.join(", ")}. Complete os campos do anúncio e tente novamente.`,
+      user_guidance: "O Mercado Livre exige campos obrigatórios adicionais para esta categoria. Ajuste antes de clonar.",
+      missing_required_attributes: fillResult.missing,
+      category_id: itemData.category_id,
+      item_id: resolvedItemId,
+      validation_log: fillResult.log,
+      catalog_info: catalogInfo,
+    };
   }
 
-  // Build source attributes map for easy lookup
-  const sourceAttributesMap = new Map<string, any>();
-  if (itemData.attributes && Array.isArray(itemData.attributes)) {
-    for (const attr of itemData.attributes) {
-      if (attr.id) {
-        sourceAttributesMap.set(attr.id, attr);
-      }
-    }
+  // =========================================================================
+  // ETAPA E: Montagem final do payload
+  // =========================================================================
+  const includeNonRequired = checklist?.attributes !== false;
+  const finalAttributes = buildFinalAttributesPayload(
+    fillResult.filled,
+    cleanedAttrs,
+    includeNonRequired
+  );
+
+  // Validação final: sem duplicatas
+  const attrIdCounts = new Map<string, number>();
+  for (const attr of finalAttributes) {
+    attrIdCounts.set(attr.id, (attrIdCounts.get(attr.id) || 0) + 1);
+  }
+  const duplicates = Array.from(attrIdCounts.entries()).filter(([, count]) => count > 1);
+  if (duplicates.length > 0) {
+    console.warn(`[ad-action-execute] WARNING: Duplicate attributes detected: ${duplicates.map(([id]) => id).join(", ")}`);
   }
 
-  // Build attributes array ensuring all required fields are included
-  const finalAttributes: any[] = [];
-  const includedAttrIds = new Set<string>();
-
-  // First, add all required attributes (from category)
-  for (const reqAttr of requiredAttributes) {
-    const sourceAttr = sourceAttributesMap.get(reqAttr.id);
-    
-    if (sourceAttr && (sourceAttr.value_id || sourceAttr.value_name)) {
-      // Copy from source item
-      finalAttributes.push({
-        id: reqAttr.id,
-        value_id: sourceAttr.value_id,
-        value_name: sourceAttr.value_name,
-      });
-      includedAttrIds.add(reqAttr.id);
-      console.log(`[ad-action-execute] Required attr ${reqAttr.id}: copied from source`);
-    } else if (reqAttr.values && reqAttr.values.length > 0) {
-      // Use first allowed value as default
-      const defaultValue = reqAttr.values[0];
-      finalAttributes.push({
-        id: reqAttr.id,
-        value_id: defaultValue.id,
-        value_name: defaultValue.name,
-      });
-      includedAttrIds.add(reqAttr.id);
-      console.log(`[ad-action-execute] Required attr ${reqAttr.id}: using default value ${defaultValue.name}`);
-    } else {
-      // Try to use a generic fallback for known attribute types
-      let fallbackValue: any = null;
-      
-      if (reqAttr.id === "FAMILY_NAME" || reqAttr.id === "family_name") {
-        // For family_name, try to derive from title or use generic
-        fallbackValue = { value_name: itemData.title?.split(" ").slice(0, 3).join(" ") || "Produto" };
-      } else if (reqAttr.value_type === "string") {
-        fallbackValue = { value_name: "-" };
-      } else if (reqAttr.value_type === "boolean") {
-        fallbackValue = { value_name: "Não" };
-      }
-      
-      if (fallbackValue) {
-        finalAttributes.push({
-          id: reqAttr.id,
-          ...fallbackValue,
-        });
-        includedAttrIds.add(reqAttr.id);
-        console.log(`[ad-action-execute] Required attr ${reqAttr.id}: using fallback value`);
-      } else {
-        console.warn(`[ad-action-execute] Required attr ${reqAttr.id}: NO VALUE AVAILABLE`);
-      }
-    }
-  }
-
-  // Then, add remaining attributes from source (if checklist allows)
-  if (checklist?.attributes !== false && itemData.attributes) {
-    for (const attr of itemData.attributes) {
-      if (attr.id && !includedAttrIds.has(attr.id)) {
-        finalAttributes.push(attr);
-        includedAttrIds.add(attr.id);
-      }
-    }
-  }
-
-  console.log(`[ad-action-execute] Final attributes count: ${finalAttributes.length}`);
-
-  // Build new item payload based on checklist
+  // Build new item payload
   const newItem: any = {
     title: checklist?.title !== false ? itemData.title : undefined,
     category_id: itemData.category_id,
@@ -620,7 +878,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     attributes: finalAttributes.length > 0 ? finalAttributes : undefined,
   };
 
-  // Add description if included (fetch separately - only for regular items, not catalog)
+  // Add description if included (fetch separately - only for regular items)
   if (checklist?.description !== false && !isCatalogId(itemId)) {
     const descResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}/description`, {
       headers: { "Authorization": `Bearer ${accessToken}` },
@@ -635,11 +893,14 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   if (!newItem.title || !newItem.category_id) {
     return {
       success: false,
-      error: "Dados insuficientes para clonagem. Título ou categoria não encontrados.",
+      error: "INSUFFICIENT_DATA",
+      message: "Dados insuficientes para clonagem. Título ou categoria não encontrados.",
       missing: { title: !newItem.title, category_id: !newItem.category_id },
       catalog_info: catalogInfo,
     };
   }
+
+  console.log(`[ad-action-execute] Sending clone request with ${finalAttributes.length} attributes`);
 
   // Create new item
   const createResponse = await fetch(`https://api.mercadolibre.com/items`, {
@@ -652,15 +913,37 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   });
 
   const createData = await createResponse.json();
+  
   if (!createResponse.ok) {
+    console.error(`[ad-action-execute] Clone POST failed:`, JSON.stringify({
+      status: createResponse.status,
+      error: createData,
+      payload_attributes_count: finalAttributes.length,
+    }));
+
+    // Verificar se é erro de campos obrigatórios (para logging detalhado)
+    const isRequiredFieldError = 
+      createData?.cause?.some((c: any) => c.code === "item.attributes.missing_required") ||
+      createData?.message?.includes("required_fields") ||
+      createData?.message?.includes("body.required_fields");
+
+    if (isRequiredFieldError) {
+      console.error(`[ad-action-execute] ML still reports missing required fields despite validation!`);
+      console.error(`[ad-action-execute] This may indicate the category has additional unlisted requirements`);
+    }
+
     return { 
       success: false, 
       error: createData.message || "Failed to create cloned item", 
       api_error: createData,
       payload_sent: newItem,
+      attributes_sent: finalAttributes.map(a => ({ id: a.id, value: a.value_name || a.value_id })),
+      validation_log: fillResult.log,
       catalog_info: catalogInfo,
     };
   }
+
+  console.log(`[ad-action-execute] Clone SUCCESS: ${createData.id}`);
 
   return { 
     success: true, 
@@ -669,6 +952,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       : "Item cloned successfully", 
     new_item_id: createData.id,
     permalink: createData.permalink,
+    attributes_filled: fillResult.log.filter(l => l.source !== "item_fonte").map(l => l.attrId),
     catalog_info: catalogInfo,
   };
 }
