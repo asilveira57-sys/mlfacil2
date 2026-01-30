@@ -12,6 +12,15 @@ interface ExecuteActionRequest {
 }
 
 /**
+ * REGRA OFICIAL DE RESOLUÇÃO:
+ * 1. PRIORIDADE MÁXIMA: item_id já é MLB → usar direto
+ * 2. MLBU é apenas camada de apresentação - fallback residual
+ * 
+ * O anúncio sempre nasce como MLB. MLBU é apenas camada pública de exibição.
+ * O sistema NÃO promete clonar links públicos genéricos de catálogo.
+ */
+
+/**
  * Check if itemId is a catalog/universal product ID (MLBU)
  * MLBU = Universal product catalog, not a sellable item
  */
@@ -20,62 +29,69 @@ function isCatalogId(id: string): boolean {
 }
 
 /**
- * Fallback: convert MLBU to MLB for /products endpoint only
+ * Check if itemId is a regular item ID (MLB - directly clonable)
  */
-function toProductIdFallback(catalogId: string): string {
-  return catalogId.replace(/^MLBU/i, "MLB");
+function isRegularItemId(id: string): boolean {
+  // MLB followed by digits, but NOT MLBU
+  return /^MLB\d+$/i.test((id || "").trim());
 }
 
 type ResolveCatalogResult = {
   ok: true;
   itemId: string;
   productData?: any;
-  resolvedBy: "products:MLBU" | "products:MLB";
+  resolvedBy: "products:MLBU";
 } | {
   ok: false;
   error: string;
   productData?: any;
+  userGuidance: string;
   tried: Array<{ productId: string; status?: number; body?: string }>;
 };
 
 /**
- * Resolve a catalog ID (MLBU) to a real item ID (MLB) via the official API
+ * FALLBACK RESIDUAL: Resolve a catalog ID (MLBU) to a real item ID (MLB)
+ * 
+ * This is ONLY called when:
+ * - The input is MLBU
+ * - There was no MLB in the original link
+ * 
  * Uses /products/{MLBU} and extracts buy_box_winner.item_id
- * Fallback A/B: tries MLBU first, then MLB on /products endpoint only
+ * May fail if there's no active seller - this is NOT a system error.
  */
-async function resolveCatalogItem(
+async function resolveCatalogItemFallback(
   accessToken: string,
   catalogIdRaw: string
 ): Promise<ResolveCatalogResult> {
   const catalogId = (catalogIdRaw || "").trim();
   const tried: Array<{ productId: string; status?: number; body?: string }> = [];
 
-  console.log(`[ad-action-execute] Resolving catalog ID: ${catalogId}`);
+  console.log(`[ad-action-execute] FALLBACK: Attempting catalog resolution for ${catalogId}`);
+  console.log(`[ad-action-execute] Note: This is a residual case - no MLB was found in the original link`);
 
-  // A) Try as MLBU first
-  const productIdA = catalogId;
-  const resA = await fetch(`https://api.mercadolibre.com/products/${productIdA}`, {
+  const res = await fetch(`https://api.mercadolibre.com/products/${catalogId}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 
-  console.log(`[ad-action-execute] /products/${productIdA} status: ${resA.status}`);
+  console.log(`[ad-action-execute] /products/${catalogId} status: ${res.status}`);
 
-  if (resA.ok) {
-    const product = await resA.json();
-    console.log(`[ad-action-execute] Product found (A): ${product?.name ?? "(no name)"}`);
+  if (res.ok) {
+    const product = await res.json();
+    console.log(`[ad-action-execute] Product found: ${product?.name ?? "(no name)"}`);
 
     if (!product?.buy_box_winner?.item_id) {
-      console.log(`[ad-action-execute] No buy_box_winner for catalog (A) ${productIdA}`);
+      console.log(`[ad-action-execute] No buy_box_winner for catalog ${catalogId}`);
       return {
         ok: false,
-        error: "Este produto está em catálogo, mas não possui um vendedor ativo no momento. Cole o link de um anúncio específico (MLB) para continuar.",
+        error: "Catálogo sem vendedor ativo",
+        userGuidance: "Este produto está em catálogo, mas não possui um vendedor ativo no momento. Cole o link de um anúncio específico (MLB) para continuar.",
         productData: product,
-        tried: [{ productId: productIdA, status: resA.status }],
+        tried: [{ productId: catalogId, status: res.status }],
       };
     }
 
     const realItemId = product.buy_box_winner.item_id;
-    console.log(`[ad-action-execute] buy_box_winner.item_id resolved (A): ${realItemId}`);
+    console.log(`[ad-action-execute] buy_box_winner.item_id resolved: ${realItemId}`);
     return {
       ok: true,
       itemId: realItemId,
@@ -83,52 +99,15 @@ async function resolveCatalogItem(
       resolvedBy: "products:MLBU",
     };
   } else {
-    const bodyA = await resA.text().catch(() => "");
-    tried.push({ productId: productIdA, status: resA.status, body: bodyA });
-    console.log(`[ad-action-execute] /products/${productIdA} failed: ${bodyA?.slice(0, 300)}`);
-  }
-
-  // B) Fallback: try as MLB on /products (without normalizing to /items)
-  const productIdB = toProductIdFallback(catalogId);
-  if (productIdB !== productIdA) {
-    const resB = await fetch(`https://api.mercadolibre.com/products/${productIdB}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-
-    console.log(`[ad-action-execute] /products/${productIdB} status: ${resB.status}`);
-
-    if (resB.ok) {
-      const product = await resB.json();
-      console.log(`[ad-action-execute] Product found (B): ${product?.name ?? "(no name)"}`);
-
-      if (!product?.buy_box_winner?.item_id) {
-        console.log(`[ad-action-execute] No buy_box_winner for catalog (B) ${productIdB}`);
-        return {
-          ok: false,
-          error: "Este produto está em catálogo, mas não possui um vendedor ativo no momento. Cole o link de um anúncio específico (MLB) para continuar.",
-          productData: product,
-          tried: [...tried, { productId: productIdB, status: resB.status }],
-        };
-      }
-
-      const realItemId = product.buy_box_winner.item_id;
-      console.log(`[ad-action-execute] buy_box_winner.item_id resolved (B): ${realItemId}`);
-      return {
-        ok: true,
-        itemId: realItemId,
-        productData: product,
-        resolvedBy: "products:MLB",
-      };
-    } else {
-      const bodyB = await resB.text().catch(() => "");
-      tried.push({ productId: productIdB, status: resB.status, body: bodyB });
-      console.log(`[ad-action-execute] /products/${productIdB} failed: ${bodyB?.slice(0, 300)}`);
-    }
+    const body = await res.text().catch(() => "");
+    tried.push({ productId: catalogId, status: res.status, body });
+    console.log(`[ad-action-execute] /products/${catalogId} failed: ${body?.slice(0, 300)}`);
   }
 
   return {
     ok: false,
-    error: `Produto de catálogo não encontrado (${catalogId}). Verifique se o link está correto.`,
+    error: `Produto de catálogo não encontrado (${catalogId})`,
+    userGuidance: "A clonagem funciona a partir do anúncio base (MLB). Links públicos de catálogo podem exigir o link do anúncio do vendedor.",
     tried,
   };
 }
@@ -418,15 +397,22 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   let catalogInfo: any = null;
 
   console.log(`[ad-action-execute] Clone requested for ID: ${itemId}`);
+  console.log(`[ad-action-execute] ID type analysis: isRegularItemId=${isRegularItemId(itemId)}, isCatalogId=${isCatalogId(itemId)}`);
 
   // If no snapshot, we need to fetch item data
   if (!itemData || Object.keys(itemData).length === 0) {
-    // DETECTION: Is this a catalog ID (MLBU) or regular item (MLB)?
-    if (isCatalogId(itemId)) {
-      console.log(`[ad-action-execute] Detected CATALOG ID: ${itemId}`);
+    
+    // REGRA OFICIAL: MLB tem prioridade - vai direto para /items
+    if (isRegularItemId(itemId)) {
+      console.log(`[ad-action-execute] PRIORITY PATH: Regular item ID (MLB) detected - going directly to /items`);
+      // No catalog resolution needed - proceed directly to item fetch
+    }
+    // FALLBACK RESIDUAL: Somente se for MLBU e não houver MLB
+    else if (isCatalogId(itemId)) {
+      console.log(`[ad-action-execute] FALLBACK PATH: Catalog ID (MLBU) detected - attempting catalog resolution`);
+      console.log(`[ad-action-execute] Note: This is a residual case. The system does not guarantee cloning from catalog links.`);
 
-      // Resolve catalog via official API with A/B fallback
-      const catalogResult = await resolveCatalogItem(accessToken, itemId);
+      const catalogResult = await resolveCatalogItemFallback(accessToken, itemId);
       if (!catalogResult.ok) {
         console.error(
           `[ad-action-execute] Catalog resolve failed for ${itemId}`,
@@ -435,6 +421,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
         return {
           success: false,
           error: catalogResult.error,
+          user_guidance: catalogResult.userGuidance,
           is_catalog: true,
           catalog_id: itemId,
           tried: catalogResult.tried,
@@ -450,6 +437,8 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       };
 
       console.log(`[ad-action-execute] Catalog resolved to item: ${resolvedItemId}`);
+    } else {
+      console.log(`[ad-action-execute] Unknown ID format: ${itemId} - attempting as regular item`);
     }
 
     // Fetch real item (MLB)
