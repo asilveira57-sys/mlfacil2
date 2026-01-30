@@ -27,7 +27,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { extractMeliId } from '@/lib/meli/extractMeliId';
+import { extractMeliId, isCatalogMeliId } from '@/lib/meli/extractMeliId';
 import { useUpdateAction, useDuplicateAction, useReopenAction } from '@/hooks/useAdActionsMutations';
 import type { AdLifecycleAction, ActionStatus } from '@/types/ad-timeline';
 import { format } from 'date-fns';
@@ -291,12 +291,46 @@ export function ActionDetailsDialog({
                         Ver novo anúncio: {result.new_item_id}
                       </a>
                     )}
+                    {result?.catalog_info && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Clonado do catálogo {result.catalog_info.original_catalog_id} 
+                        {result.catalog_info.product_name && ` (${result.catalog_info.product_name})`}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Catalog Info Display (for failed catalog clones) */}
+            {isFailed && result?.is_catalog && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+                      Produto de catálogo: {result.catalog_id}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Tente colar o link de um anúncio específico (MLB) em vez da página de catálogo.
+                    </p>
                   </div>
                 </div>
               </div>
             )}
 
             <Separator />
+
+            {/* Catalog Warning for MLBU IDs */}
+            {link && detectedId && isCatalogMeliId(detectedId) && (
+              <div className="flex items-start gap-2 p-2 rounded-md bg-amber-500/10 border border-amber-500/30">
+                <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  Este é um produto de catálogo. O clone será feito com base no 
+                  vendedor que está vencendo a buy box neste momento.
+                </p>
+              </div>
+            )}
 
             {/* Link Input */}
             <div className="space-y-2">
