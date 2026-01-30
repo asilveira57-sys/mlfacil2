@@ -119,3 +119,12 @@ verify_jwt = false
 
 [functions.qa-engine]
 verify_jwt = false
+
+[functions.ad-action-execute]
+verify_jwt = false
+
+[functions.ad-item-snapshot]
+verify_jwt = false
+
+[functions.ad-timeline-recalculate]
+verify_jwt = false
