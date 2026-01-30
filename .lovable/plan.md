@@ -1,140 +1,289 @@
 
-Objetivo
-- Reduzir o atrito de “falhou → preciso achar o anúncio de novo” adicionando, dentro da Central de Ações (/anuncios/acoes), um fluxo de:
-  1) ver detalhes do que foi cadastrado (link/ID, checklist, motivo, payload/erro)
-  2) editar rapidamente
-  3) reenviar/tentar de novo sem refazer o processo inteiro
 
-Contexto atual (o que existe hoje)
-- A tela “Central de Ações” (src/pages/AdActionsCenter.tsx) lista ações por status:
-  - Rascunhos: DRAFT (tem “Executar” e “Cancelar”)
-  - Concluídas: SUCCESS/FAILED/CANCELLED (mostra só um trecho do erro em FAILED; não dá para repetir/editar)
-- A execução (hook useExecuteAction) chama a função de backend “ad-action-execute”.
-  - Essa função só executa ações em DRAFT ou QUEUED. Ou seja: FAILED não pode ser “executado de novo” direto, precisa voltar a DRAFT ou virar um novo rascunho.
-- “Clonar por Link” (src/components/ad-timeline/CloneByLinkDialog.tsx) cria o rascunho, mas hoje não salva o link original no banco (apenas o item_id extraído).
+## Objetivo
 
-Proposta de solução (UX/Produto)
-1) Adicionar “Detalhes / Editar / Tentar novamente” na Central de Ações
-- Em cada linha (principalmente em Concluídas → FAILED), adicionar ações claras:
-  - Ver detalhes (abre um modal/drawer com tudo o que foi cadastrado + erro completo)
-  - Tentar novamente (cria um novo rascunho copiando as configs, sem precisar buscar o anúncio novamente)
-  - Editar e criar novo rascunho (permite ajustar link/ID e checklist antes de reenviar)
-- Para DRAFT, também adicionar “Editar” (para você ajustar o checklist ou corrigir o link/ID antes de executar).
+Implementar um fluxo oficial, estável e sem scraping para resolver IDs de catálogo (MLBU) em um `item_id` real (MLB) e permitir clonagem correta, seguindo as regras da API oficial do Mercado Livre.
 
-2) Mostrar o erro completo (não só o trecho)
-- No “Ver detalhes”, exibir:
-  - Mensagem principal de erro
-  - Campos técnicos, quando existirem: error code, api_error, payload_sent, etc.
-  - Botão “Copiar diagnóstico” (copia JSON do result/checklist/IDs para facilitar suporte e debug)
-- Opcional: na tabela, manter o trecho curto, mas com um botão/ícone “Ver” para abrir o detalhe.
+---
 
-3) Salvar o link original (para não precisar procurar de novo)
-- Sem mexer no schema agora: salvar o link original dentro do JSON “checklist” (que já é um jsonb).
-  - Ex: checklist.source_url = "<link colado>"
-  - Ex: checklist.source_label = "manual_link"
-- Benefícios:
-  - O detalhe consegue mostrar exatamente o que você colou
-  - O “Editar” já abre com o link preenchido
-  - O “Tentar novamente” consegue reaproveitar o link
+## Problema Atual
 
-Decisões importantes (comportamento de “retry”)
-- Vou implementar dois modos (para você não perder histórico e também ter praticidade):
-  A) “Tentar novamente” (recomendado): DUPLICA a ação como um novo rascunho (novo registro em ad_lifecycle_actions)
-     - Vantagem: preserva o registro de falha anterior intacto
-  B) “Reabrir como rascunho” (opcional): altera a mesma ação FAILED → DRAFT e limpa result/source_snapshot
-     - Vantagem: não “polui” a lista com cópias
-     - Desvantagem: sobrescreve o último resultado no registro (perde o “estado final” do item, embora eventos possam existir em outras tabelas)
-- Se você preferir só um dos modos, eu deixo apenas o escolhido.
+O código atual tenta tratar MLBU como MLB através da função `normalizeProductId()`, que simplesmente remove o "U" do ID:
+- `MLBU1436905343` → `MLB1436905343`
 
-Arquitetura (como fica o fluxo)
-- Central de Ações:
-  - FAILED → “Editar e reenviar”
-    - abre modal com dados pré-carregados
-    - ao salvar: cria novo registro DRAFT com as novas configs
-    - opcional: já te leva para aba “Rascunhos” e destaca o novo rascunho
-- DRAFT → “Editar” (update do registro atual) ou “Executar”
-- “Clonar por Link” passa a gravar também checklist.source_url
+Isso gera 404 em todos os endpoints porque `MLB1436905343` não existe como produto/item — é um ID de catálogo universal.
 
-Implementação (o que será alterado no código)
-1) Criar um componente de edição/detalhes para ações
-- Novo componente (exemplo de caminho): src/components/ad-actions/ActionDetailsDialog.tsx
-  - Responsabilidades:
-    - Receber um AdLifecycleAction
-    - Mostrar:
-      - item_id, action_type, status, reason, updated_at
-      - checklist (UI amigável para os booleans; e exibir source_url quando existir)
-      - result (erro completo com formatação)
-    - Permitir edição:
-      - Campo “Link do anúncio” (ou “ID do anúncio”), com a mesma lógica de extração/normalização de IDs do CloneByLinkDialog
-      - Checklist de clonagem (se action_type === CLONE)
-      - Motivo (reason)
-    - Botões:
-      - “Salvar” (se status = DRAFT → update no mesmo registro)
-      - “Criar novo rascunho” (sempre disponível; duplica com as alterações)
-      - (Opcional) “Reabrir como rascunho” (se status = FAILED/CANCELLED → update status para DRAFT e limpar result)
+---
 
-2) Central de Ações (src/pages/AdActionsCenter.tsx)
-- Ajustar a coluna “Ações”:
-  - DRAFT: Executar + Editar + Cancelar
-  - FAILED: Ver detalhes + Editar e reenviar (abre modal já no modo “novo rascunho”) + (opcional) Reabrir
-  - SUCCESS: Ver detalhes + (manter “Ver novo anúncio” quando existir)
-- Melhorar a visualização do erro:
-  - Trocar o texto truncado por:
-    - “Falhou” + botão “Ver” para abrir o modal (onde o erro aparece completo)
+## Solução Proposta
 
-3) Reaproveitar a lógica de extrair ID do link
-- Extrair a função extractItemId (regex) para um util compartilhado (exemplo):
-  - src/lib/meli/extractMeliId.ts
-- Usar esse util em:
-  - CloneByLinkDialog
-  - ActionDetailsDialog (editar/retry)
+### Regras Obrigatórias (conforme prompt)
 
-4) Persistir o link original no checklist (CloneByLinkDialog.tsx)
-- No momento do insert do rascunho, incluir:
-  - checklist.source_url = link (string)
-  - checklist.source = 'manual_link' (já existe)
-- Assim, na Central de Ações você sempre consegue “ver o que foi colado” e editar.
+1. **MLBU nunca deve ser normalizado para MLB** - são coisas diferentes
+2. **Usar API oficial de catálogo** - `/products/{MLBU}` com `buy_box_winner.item_id`
+3. **Sem scraping** - nenhum fetch de HTML
+4. **Logs claros** - cada etapa logada para debug
+5. **Mensagem final clara** quando não há vendedor ativo
 
-5) Hooks/mutações (sem mexer em backend)
-- Adicionar no hook useAdTimeline.ts (ou criar hooks específicos) mutações para:
-  - updateAction (update de DRAFT: item_id, reason, checklist, updated_at)
-  - duplicateAction (insert copiando workspace_id, ml_account_id, action_type; com item_id/checklist/reason editados)
-  - reopenAction (opcional) (update action_status para DRAFT + limpar result/source_snapshot)
-- Todos invalidando a query ['ad-lifecycle-actions'] para atualizar a tabela.
+---
 
-Edge cases e cuidados
-- Ações não-CLONE:
-  - O modal deve esconder checklist de clonagem e só mostrar campos relevantes (reason / item_id).
-- “ml_account_id”:
-  - Ao duplicar, copiar o mesmo ml_account_id do registro para não exigir que você selecione a conta novamente.
-- Segurança/RLS:
-  - Já existe update (cancelar) hoje, então o update/insert seguirá o mesmo padrão e deve respeitar o workspace atual.
-- ID vs link:
-  - O campo principal no modal será “Link do anúncio” (mais amigável), mas sempre exibindo o “ID detectado”.
-  - Permitir também colar diretamente um ID.
-- UX:
-  - Após criar o novo rascunho a partir de FAILED, automaticamente:
-    - mudar para aba “Rascunhos”
-    - mostrar toast “Novo rascunho criado”
-    - (se possível) rolar/realçar o item recém-criado
+## Arquitetura do Novo Fluxo
 
-Plano de testes (end-to-end)
-1) Criar rascunho via “Clonar por Link” e validar que:
-   - aparece em Rascunhos
-   - o detalhe mostra também o link original (source_url)
-2) Executar um rascunho e forçar falha (ex: item que hoje dá erro)
-   - aparece em Concluídas como FAILED
-   - “Ver detalhes” mostra erro completo + JSON copiável
-3) Em FAILED → “Editar e reenviar”
-   - abrir modal com dados pré-preenchidos
-   - alterar link/ID/checklist
-   - criar novo rascunho
-   - executar e validar que o fluxo não exige refazer todo o processo
-4) Testar também em mobile (layout do modal/drawer e botões na tabela).
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         DETECÇÃO DE ORIGEM                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Input: MLB1234567890  → Tratar como ITEM NORMAL                         │
+│ Input: MLBU1234567890 → Tratar como CATÁLOGO (buy_box_winner)           │
+│ Input: /p/MLBU...     → Extrair MLBU e tratar como CATÁLOGO             │
+└─────────────────────────────────────────────────────────────────────────┘
 
-Sugestões de próximos passos (após isso)
-1) Testar o fluxo completo de “falhou → editar → reenviar” ponta a ponta na Central de Ações (incluindo mobile).
-2) Adicionar busca/filtro na Central de Ações (por item_id, motivo, status) para achar rapidamente ações antigas.
-3) Criar um “Histórico de tentativas” por ação (encadear retries) com um campo parent_action_id (exige ajuste no schema).
-4) Melhorar “diagnóstico guiado”: quando o erro for “token desconectado”, exibir botão “Reconectar conta” diretamente no detalhe.
-5) Exibir título/thumbnail do anúncio (quando existir no cache) na lista da Central de Ações para facilitar identificação.
+┌─────────────────────────────────────────────────────────────────────────┐
+│              FLUXO CATÁLOGO (quando ID começa com MLBU)                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│ 1. GET /products/{MLBU}                                                 │
+│    → Extrair buy_box_winner.item_id (ex: MLB5678901234)                 │
+│                                                                         │
+│ 2. Se não existe buy_box_winner:                                        │
+│    → Retornar erro claro com orientação                                 │
+│                                                                         │
+│ 3. Com o item_id real:                                                  │
+│    → GET /items/{item_id}                                               │
+│    → Seguir fluxo normal de clonagem                                    │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│              FLUXO ITEM NORMAL (quando ID começa com MLB)               │
+├─────────────────────────────────────────────────────────────────────────┤
+│ 1. GET /items/{MLB}                                                     │
+│    → Seguir fluxo normal de clonagem                                    │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Mudanças Técnicas
+
+### 1. Backend: `supabase/functions/ad-action-execute/index.ts`
+
+**Remover lógica problemática:**
+- Função `normalizeProductId()` que converte MLBU → MLB
+- Função `fetchCatalogItemData()` com múltiplos tiers de fallback
+
+**Adicionar nova lógica:**
+
+```typescript
+// Nova função de detecção
+function isCatalogId(itemId: string): boolean {
+  return /^MLBU/i.test(itemId); // Apenas MLBU é catálogo
+}
+
+// Nova função de resolução de catálogo (única fonte de verdade)
+async function resolveCatalogItem(
+  accessToken: string, 
+  catalogId: string
+): Promise<{ ok: boolean; itemId?: string; productData?: any; error?: string }> {
+  console.log(`[ad-action-execute] Resolving catalog ID: ${catalogId}`);
+  
+  // GET /products/{MLBU} (API oficial de catálogo)
+  const productRes = await fetch(
+    `https://api.mercadolibre.com/products/${catalogId}`,
+    { headers: { "Authorization": `Bearer ${accessToken}` } }
+  );
+  
+  console.log(`[ad-action-execute] /products/${catalogId} status: ${productRes.status}`);
+  
+  if (!productRes.ok) {
+    return { 
+      ok: false, 
+      error: `Produto de catálogo não encontrado (${catalogId}). Verifique se o link está correto.` 
+    };
+  }
+  
+  const product = await productRes.json();
+  console.log(`[ad-action-execute] Product found: ${product.name}`);
+  
+  // Verificar buy_box_winner
+  if (!product.buy_box_winner?.item_id) {
+    console.log(`[ad-action-execute] No buy_box_winner for catalog ${catalogId}`);
+    return { 
+      ok: false, 
+      error: "Este produto está em catálogo, mas não possui um vendedor ativo no momento. Cole o link de um anúncio específico (MLB) para continuar.",
+      productData: product,
+    };
+  }
+  
+  const realItemId = product.buy_box_winner.item_id;
+  console.log(`[ad-action-execute] buy_box_winner.item_id resolved: ${realItemId}`);
+  
+  return { ok: true, itemId: realItemId, productData: product };
+}
+```
+
+**Ajustar `executeCloneAction()`:**
+
+```typescript
+async function executeCloneAction(accessToken, itemId, snapshot, checklist) {
+  let itemData = snapshot;
+  let resolvedItemId = itemId;
+  let catalogInfo = null;
+  
+  if (!itemData || Object.keys(itemData).length === 0) {
+    // DETECÇÃO: É catálogo (MLBU) ou item normal (MLB)?
+    if (isCatalogId(itemId)) {
+      console.log(`[ad-action-execute] Detected CATALOG ID: ${itemId}`);
+      
+      // Resolver catálogo via API oficial
+      const catalogResult = await resolveCatalogItem(accessToken, itemId);
+      if (!catalogResult.ok) {
+        return { 
+          success: false, 
+          error: catalogResult.error,
+          is_catalog: true,
+          catalog_id: itemId,
+        };
+      }
+      
+      resolvedItemId = catalogResult.itemId;
+      catalogInfo = {
+        original_catalog_id: itemId,
+        buy_box_winner_id: resolvedItemId,
+        product_name: catalogResult.productData?.name,
+      };
+      
+      console.log(`[ad-action-execute] Catalog resolved to item: ${resolvedItemId}`);
+    }
+    
+    // Buscar item real (MLB)
+    console.log(`[ad-action-execute] Fetching item data: ${resolvedItemId}`);
+    const getResponse = await fetch(
+      `https://api.mercadolibre.com/items/${resolvedItemId}`,
+      { headers: { "Authorization": `Bearer ${accessToken}` } }
+    );
+    
+    if (!getResponse.ok) {
+      const errBody = await getResponse.text();
+      console.error(`[ad-action-execute] Failed to fetch item ${resolvedItemId}:`, errBody);
+      return { 
+        success: false, 
+        error: `Falha ao buscar detalhes do anúncio ${resolvedItemId}`, 
+        api_error: errBody,
+        catalog_info: catalogInfo,
+      };
+    }
+    
+    itemData = await getResponse.json();
+  }
+  
+  // Continuar fluxo normal de clonagem...
+}
+```
+
+### 2. Frontend: UX para Catálogo
+
+**Arquivo:** `src/components/ad-timeline/CloneByLinkDialog.tsx`
+
+Adicionar feedback visual quando o ID detectado for MLBU:
+
+```tsx
+{link && detectedId && (
+  <div className="space-y-1">
+    <p className="text-xs text-muted-foreground">
+      ID detectado: <span className="font-mono">{detectedId}</span>
+    </p>
+    {detectedId.startsWith('MLBU') && (
+      <div className="flex items-start gap-2 p-2 rounded-md bg-amber-500/10 border border-amber-500/30">
+        <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+        <p className="text-xs text-amber-700">
+          Este é um produto de catálogo. O clone será feito com base no 
+          vendedor que está vencendo a buy box neste momento.
+        </p>
+      </div>
+    )}
+  </div>
+)}
+```
+
+**Arquivo:** `src/components/ad-actions/ActionDetailsDialog.tsx`
+
+Mostrar informações de catálogo no resultado quando disponível.
+
+### 3. Frontend: `src/lib/meli/extractMeliId.ts`
+
+Manter a extração robusta que já existe, mas garantir que MLBU seja preservado:
+
+```typescript
+// Já funciona corretamente - MLBU é detectado e preservado
+// Apenas adicionar função auxiliar para identificar catálogo
+export function isCatalogMeliId(id: string): boolean {
+  return /^MLBU/i.test(id);
+}
+```
+
+---
+
+## Logging Obrigatório
+
+Cada etapa terá log claro:
+
+| Etapa | Log |
+|-------|-----|
+| Detecção | `[ad-action-execute] Detected CATALOG ID: MLBU...` |
+| Resolução | `[ad-action-execute] /products/MLBU... status: 200` |
+| buy_box_winner | `[ad-action-execute] buy_box_winner.item_id resolved: MLB...` |
+| Sem vendedor | `[ad-action-execute] No buy_box_winner for catalog MLBU...` |
+| Item final | `[ad-action-execute] Fetching item data: MLB...` |
+| Erro | `[ad-action-execute] Failed to fetch item MLB...: {error}` |
+
+---
+
+## O que NÃO será implementado
+
+- ❌ Scraping de HTML
+- ❌ Regex em página pública
+- ❌ Dependência de `/products/{id}/items` como fallback
+- ❌ Tentativas em loop com ID normalizado (MLBU→MLB)
+- ❌ Múltiplos tiers de fallback confusos
+
+---
+
+## Mensagens de Erro Finais
+
+| Cenário | Mensagem |
+|---------|----------|
+| Catálogo sem vendedor | "Este produto está em catálogo, mas não possui um vendedor ativo no momento. Cole o link de um anúncio específico (MLB) para continuar." |
+| Catálogo não encontrado | "Produto de catálogo não encontrado (MLBU...). Verifique se o link está correto." |
+| Item não encontrado | "Falha ao buscar detalhes do anúncio MLB..." |
+
+---
+
+## Critérios de Aceite
+
+1. ✅ MLBU nunca gera chamada para `/items/{MLBU}` diretamente
+2. ✅ Clonagem funciona com: ID MLBU, Link `/p/MLBU`, Link MLB direto
+3. ✅ Consumo de crédito reduzido (máximo 2 chamadas: `/products` + `/items`)
+4. ✅ Nenhum scraping ativo
+5. ✅ Logs permitem identificar exatamente onde falhou
+6. ✅ UX informa usuário sobre produto de catálogo
+
+---
+
+## Arquivos a Modificar
+
+| Arquivo | Ação |
+|---------|------|
+| `supabase/functions/ad-action-execute/index.ts` | Reescrever lógica de resolução MLBU |
+| `src/components/ad-timeline/CloneByLinkDialog.tsx` | Adicionar aviso visual para catálogo |
+| `src/components/ad-actions/ActionDetailsDialog.tsx` | Mostrar info de catálogo no resultado |
+| `src/lib/meli/extractMeliId.ts` | Adicionar `isCatalogMeliId()` |
+
+---
+
+## Plano de Testes
+
+1. Criar rascunho com link MLBU (ex: `MLBU1435399930`)
+2. Verificar logs no backend: deve aparecer resolução via `/products/{MLBU}`
+3. Se tiver buy_box_winner → clonagem deve funcionar
+4. Se não tiver buy_box_winner → erro claro deve aparecer
+5. Testar também com link MLB direto → fluxo deve ser direto
+
