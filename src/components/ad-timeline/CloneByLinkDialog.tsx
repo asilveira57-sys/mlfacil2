@@ -236,7 +236,7 @@ export function CloneByLinkDialog({ open, onOpenChange }: CloneByLinkDialogProps
               </div>
             )}
             {link && detectedId && (
-              <div className="space-y-1">
+              <div className="space-y-2">
                 <p className="text-xs text-muted-foreground">
                   ID detectado: <span className="font-mono">{detectedId}</span>
                   {extractionResult?.type === 'MLB' && (
@@ -244,28 +244,43 @@ export function CloneByLinkDialog({ open, onOpenChange }: CloneByLinkDialogProps
                   )}
                 </p>
                 
-                {/* MLB extracted from catalog link - success case */}
+                {/* Caso 1: MLB extraído de link de catálogo - sucesso */}
                 {extractionResult?.resolvedFromCatalogLink && extractionResult.type === 'MLB' && (
-                  <div className="flex items-start gap-2 p-2 rounded-md bg-green-500/10 border border-green-500/30">
-                    <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0 mt-0.5" />
+                  <div className="p-3 rounded-md bg-green-500/10 border border-green-500/30 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+                      <p className="text-sm font-medium text-green-700 dark:text-green-400">
+                        Anúncio base identificado
+                      </p>
+                    </div>
                     <p className="text-xs text-green-700 dark:text-green-400">
-                      Anúncio base identificado automaticamente a partir do link de catálogo.
+                      Este link aponta para um produto exibido em catálogo. 
+                      Identificamos automaticamente o anúncio base do vendedor e a clonagem será feita a partir dele.
+                    </p>
+                    <p className="text-xs text-green-600/80 dark:text-green-500/80 italic">
+                      O Mercado Livre pode exibir produtos em formato de catálogo, mesmo quando o anúncio original continua ativo.
                     </p>
                   </div>
                 )}
                 
-                {/* MLBU without MLB - residual fallback warning */}
+                {/* Caso 2: MLBU sem MLB identificável - aviso */}
                 {isCatalogMeliId(detectedId) && (
-                  <div className="flex items-start gap-2 p-2 rounded-md bg-amber-500/10 border border-amber-500/30">
-                    <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                    <div className="text-xs text-amber-700 dark:text-amber-400 space-y-1">
-                      <p className="font-medium">Link de catálogo detectado (MLBU)</p>
-                      <p>
-                        A clonagem funciona a partir do anúncio base (MLB). 
-                        Links públicos de catálogo podem exigir o link do anúncio do vendedor.
+                  <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/30 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+                      <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+                        Produto exibido em catálogo
                       </p>
-                      <p className="text-amber-600 dark:text-amber-500">
-                        O sistema tentará resolver via buy box, mas pode falhar se não houver vendedor ativo.
+                    </div>
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      Este link é de um produto exibido em formato de catálogo no Mercado Livre. 
+                      Para clonar corretamente, é necessário o link do anúncio do vendedor (MLB), 
+                      disponível no painel do Mercado Livre.
+                    </p>
+                    <div className="p-2 rounded bg-amber-500/5 border border-amber-500/20">
+                      <p className="text-xs text-amber-600 dark:text-amber-500">
+                        <strong>Dica:</strong> No painel do vendedor, use a opção "Ir para a página do produto" 
+                        ou "Gerenciar anúncio" para copiar o link correto.
                       </p>
                     </div>
                   </div>
