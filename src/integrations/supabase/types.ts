@@ -8749,6 +8749,7 @@ export type Database = {
         Row: {
           active_workspace_id: string | null
           created_at: string
+          language: string | null
           tasks_enabled: boolean
           updated_at: string
           user_id: string
@@ -8756,6 +8757,7 @@ export type Database = {
         Insert: {
           active_workspace_id?: string | null
           created_at?: string
+          language?: string | null
           tasks_enabled?: boolean
           updated_at?: string
           user_id: string
@@ -8763,6 +8765,7 @@ export type Database = {
         Update: {
           active_workspace_id?: string | null
           created_at?: string
+          language?: string | null
           tasks_enabled?: boolean
           updated_at?: string
           user_id?: string

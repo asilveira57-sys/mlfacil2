@@ -1,8 +1,10 @@
 import { ReactNode, createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
 import { Outlet, useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
 import { AccountSwitcher } from "./AccountSwitcher";
+import { LanguageSwitcher } from "./LanguageSwitcher";
 import { Separator } from "@/components/ui/separator";
 import { NotificationBell } from "@/components/notifications";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
@@ -44,6 +46,7 @@ export function useSetPageHeader(title: string, subtitle?: string, headerContent
 }
 
 export function AppShellLayout() {
+  const { t } = useTranslation();
   const { sellerId } = useActiveAccount();
   const { manualRefresh, isRefreshing } = useRefreshPolicy();
   const location = useLocation();
@@ -102,15 +105,16 @@ export function AppShellLayout() {
                       onClick={manualRefresh}
                       disabled={isRefreshing}
                       className="h-8 w-8"
-                      aria-label="Atualizar dados"
+                      aria-label={t('common:refresh_data')}
                     >
                       <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    <p>Atualizar dados</p>
+                    <p>{t('common:refresh_data')}</p>
                   </TooltipContent>
                 </Tooltip>
+                <LanguageSwitcher variant="compact" />
                 <NotificationBell sellerId={sellerId} />
                 <AccountSwitcher />
                 {headerState.headerContent}
