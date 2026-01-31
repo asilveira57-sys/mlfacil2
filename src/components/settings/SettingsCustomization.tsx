@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -28,6 +29,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
 };
 
 export default function SettingsCustomization() {
+  const { t } = useTranslation();
   const { toast } = useToast();
   
   const {
@@ -299,9 +301,9 @@ export default function SettingsCustomization() {
                                       />
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                      <p className="font-medium text-sm">{info.title}</p>
+                                      <p className="font-medium text-sm">{t(info.titleKey)}</p>
                                       <p className="text-xs text-muted-foreground truncate">
-                                        {info.description}
+                                        {t(info.descriptionKey)}
                                       </p>
                                     </div>
                                     <Switch
@@ -346,9 +348,9 @@ export default function SettingsCustomization() {
                             <IconComp className="h-4 w-4 text-muted-foreground" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="font-medium text-sm">{shortcut.title}</p>
+                            <p className="font-medium text-sm">{t(shortcut.titleKey)}</p>
                             <p className="text-xs text-muted-foreground truncate">
-                              {shortcut.description}
+                              {t(shortcut.descriptionKey)}
                             </p>
                           </div>
                           <Switch

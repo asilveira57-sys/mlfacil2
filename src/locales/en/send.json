@@ -1,0 +1,79 @@
+{
+  "title": "Send",
+  "subtitle": "Nurture your best listings",
+  "refresh": "Refresh",
+  "data_updated": "Data updated",
+  "planted_success": "{{title}} has been planted!",
+  "removed_success": "Listing removed from Send",
+  "garden": {
+    "title": "Your Listings Garden",
+    "subtitle": "The space where you nurture the listings that sustain your business",
+    "healthy": "Healthy",
+    "needs_attention": "Need attention",
+    "planted": "Planted",
+    "free_seeds": "Free seeds",
+    "empty_title": "Your garden is empty",
+    "empty_desc": "Plant your first Curve A listings to start nurturing",
+    "view_eligible": "View eligible listings"
+  },
+  "tabs": {
+    "my_garden": "My Garden",
+    "eligible": "Eligible",
+    "curve_aplus": "Curve A+"
+  },
+  "search": "Search listing...",
+  "eligible": {
+    "empty_title": "No eligible listings",
+    "empty_desc": "Only Curve A listings (80% of revenue) can be planted. Run the ABC analysis first."
+  },
+  "aplus": {
+    "what_is": "What is Curve A+?",
+    "description": "Listings that sell consistently across multiple consecutive periods, demonstrating stability and not depending on seasonality alone.",
+    "empty_title": "No A+ candidates yet",
+    "empty_desc": "Listings are promoted to A+ automatically when they sell consistently for 3+ consecutive periods.",
+    "consecutive_periods": "{{count}} consecutive periods",
+    "total_revenue": "Total revenue",
+    "stability": "Stability"
+  },
+  "how_it_works": {
+    "title": "How it works",
+    "rule_1": "Only <strong>Curve A</strong> or <strong>A+</strong> listings can be planted",
+    "rule_2": "Each seed allows you to nurture 1 listing",
+    "rule_3": "Detailed metrics only run for listings in Send",
+    "rule_4": "Take care of your listings to watch them grow"
+  },
+  "remove_dialog": {
+    "title": "Remove from Send?",
+    "description": "The listing will be removed from your garden and the seed will be returned to your balance. History will be kept, but the current cycle will end.",
+    "cancel": "Cancel",
+    "confirm": "Remove"
+  },
+  "seeds": {
+    "title": "Your Seeds",
+    "plan": "Plan",
+    "buy_more": "Buy more",
+    "available": "Available",
+    "in_use": "In use",
+    "total": "Total",
+    "usage": "Seed usage",
+    "empty_warning": "No seeds available. Buy more or remove a listing.",
+    "low_warning": "Few seeds remaining. Consider buying more.",
+    "cultivating": "{{count}} listings cultivating",
+    "limit": "Limit: 100"
+  },
+  "plant_stages": {
+    "seed": "Seed",
+    "sprout": "Sprout",
+    "growing": "Growing",
+    "mature": "Mature",
+    "fruiting": "Fruiting",
+    "days_planted": "{{count}} days planted",
+    "days_to_next": "{{count}}d to {{stage}}"
+  },
+  "health_status": {
+    "healthy": "Healthy",
+    "stagnant": "Stagnant",
+    "weakening": "Weakening",
+    "dormant": "Dormant"
+  }
+}
