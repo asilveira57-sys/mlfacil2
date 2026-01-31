@@ -2233,6 +2233,85 @@ export type Database = {
           },
         ]
       }
+      clone_drafts: {
+        Row: {
+          captured_at: string
+          created_at: string
+          created_item_id: string | null
+          draft_payload: Json
+          error_details: Json | null
+          error_message: string | null
+          id: string
+          ml_account_id: string | null
+          raw_snapshot: Json
+          source_item_id: string
+          source_url: string | null
+          status: string
+          updated_at: string
+          user_id: string
+          validation_logs: Json | null
+          workspace_id: string
+        }
+        Insert: {
+          captured_at?: string
+          created_at?: string
+          created_item_id?: string | null
+          draft_payload?: Json
+          error_details?: Json | null
+          error_message?: string | null
+          id?: string
+          ml_account_id?: string | null
+          raw_snapshot?: Json
+          source_item_id: string
+          source_url?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+          validation_logs?: Json | null
+          workspace_id: string
+        }
+        Update: {
+          captured_at?: string
+          created_at?: string
+          created_item_id?: string | null
+          draft_payload?: Json
+          error_details?: Json | null
+          error_message?: string | null
+          id?: string
+          ml_account_id?: string | null
+          raw_snapshot?: Json
+          source_item_id?: string
+          source_url?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+          validation_logs?: Json | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clone_drafts_ml_account_id_fkey"
+            columns: ["ml_account_id"]
+            isOneToOne: false
+            referencedRelation: "ml_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "clone_drafts_ml_account_id_fkey"
+            columns: ["ml_account_id"]
+            isOneToOne: false
+            referencedRelation: "unified_marketplace_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "clone_drafts_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       collaborator_module_access: {
         Row: {
           collaborator_id: string

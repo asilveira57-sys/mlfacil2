@@ -1,0 +1,168 @@
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { AlertCircle, Package, Scale, Ruler, Info } from 'lucide-react';
+import { DraftPayload, Attribute, CATALOG_FORCING_ATTRIBUTES } from '../types';
+
+interface LogisticsTabProps {
+  payload: DraftPayload;
+  onPayloadChange: (updates: Partial<DraftPayload>) => void;
+  onBack: () => void;
+  onContinue: () => void;
+}
+
+export function LogisticsTab({
+  payload,
+  onPayloadChange,
+  onBack,
+  onContinue,
+}: LogisticsTabProps) {
+  const dimensionsValid = 
+    payload.seller_package_height > 0 &&
+    payload.seller_package_width > 0 &&
+    payload.seller_package_length > 0 &&
+    payload.seller_package_weight > 0;
+  
+  // Separar atributos que serão usados vs removidos
+  const excludedAttributes = payload.attributes?.filter(attr => 
+    CATALOG_FORCING_ATTRIBUTES.has(attr.id?.toUpperCase())
+  ) || [];
+  
+  return (
+    <div className="space-y-6">
+      {/* Dimensões do pacote */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Package className="h-5 w-5 text-primary" />
+          <Label className="text-base font-medium">Dimensões do pacote</Label>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Informe as dimensões da embalagem para cálculo de frete
+        </p>
+        
+        {!dimensionsValid && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              Todas as dimensões são obrigatórias para publicar o anúncio.
+            </AlertDescription>
+          </Alert>
+        )}
+        
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="height" className="flex items-center gap-1">
+              <Ruler className="h-3 w-3" />
+              Altura (cm)
+            </Label>
+            <Input
+              id="height"
+              type="number"
+              min={0}
+              step={0.1}
+              value={payload.seller_package_height || ''}
+              onChange={(e) => onPayloadChange({ 
+                seller_package_height: parseFloat(e.target.value) || 0 
+              })}
+              placeholder="0"
+              className={payload.seller_package_height <= 0 ? 'border-destructive' : ''}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="width" className="flex items-center gap-1">
+              <Ruler className="h-3 w-3" />
+              Largura (cm)
+            </Label>
+            <Input
+              id="width"
+              type="number"
+              min={0}
+              step={0.1}
+              value={payload.seller_package_width || ''}
+              onChange={(e) => onPayloadChange({ 
+                seller_package_width: parseFloat(e.target.value) || 0 
+              })}
+              placeholder="0"
+              className={payload.seller_package_width <= 0 ? 'border-destructive' : ''}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="length" className="flex items-center gap-1">
+              <Ruler className="h-3 w-3" />
+              Comprimento (cm)
+            </Label>
+            <Input
+              id="length"
+              type="number"
+              min={0}
+              step={0.1}
+              value={payload.seller_package_length || ''}
+              onChange={(e) => onPayloadChange({ 
+                seller_package_length: parseFloat(e.target.value) || 0 
+              })}
+              placeholder="0"
+              className={payload.seller_package_length <= 0 ? 'border-destructive' : ''}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="weight" className="flex items-center gap-1">
+              <Scale className="h-3 w-3" />
+              Peso (g)
+            </Label>
+            <Input
+              id="weight"
+              type="number"
+              min={0}
+              step={1}
+              value={payload.seller_package_weight || ''}
+              onChange={(e) => onPayloadChange({ 
+                seller_package_weight: parseFloat(e.target.value) || 0 
+              })}
+              placeholder="0"
+              className={payload.seller_package_weight <= 0 ? 'border-destructive' : ''}
+            />
+          </div>
+        </div>
+      </div>
+      
+      {/* Campos que não serão usados */}
+      <div className="space-y-3 pt-4 border-t">
+        <div className="flex items-center gap-2">
+          <Info className="h-5 w-5 text-muted-foreground" />
+          <Label className="text-base font-medium text-muted-foreground">
+            Campos que não serão copiados
+          </Label>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Para garantir que o anúncio seja criado como <strong>anúncio normal</strong> (não catálogo), 
+          os seguintes identificadores não serão incluídos na criação:
+        </p>
+        <div className="bg-muted/50 rounded-lg p-4 space-y-2 text-sm">
+          <ul className="list-disc list-inside space-y-1 text-muted-foreground">
+            <li>GTIN / EAN / UPC / ISBN</li>
+            <li>MPN / Part Number</li>
+            <li>Código do Fabricante</li>
+            <li>SKU do fornecedor</li>
+            <li>Modelo Alfanumérico</li>
+          </ul>
+          {excludedAttributes.length > 0 && (
+            <p className="text-xs mt-2 text-destructive">
+              {excludedAttributes.length} atributo(s) deste tipo encontrado(s) no anúncio original e removido(s).
+            </p>
+          )}
+        </div>
+      </div>
+      
+      {/* Navegação */}
+      <div className="flex justify-between pt-4 border-t">
+        <Button variant="outline" onClick={onBack}>
+          Voltar
+        </Button>
+        <Button onClick={onContinue} disabled={!dimensionsValid}>
+          Continuar
+        </Button>
+      </div>
+    </div>
+  );
+}

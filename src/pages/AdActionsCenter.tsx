@@ -42,6 +42,7 @@ import { ptBR } from "date-fns/locale";
 import { useAdLifecycleActions, useExecuteAction, useCancelAction } from "@/hooks/useAdTimeline";
 import type { AdLifecycleAction, ActionStatus } from "@/types/ad-timeline";
 import { UnifiedCloneModal } from "@/components/clone/UnifiedCloneModal";
+import { NewListingCloneModal } from "@/components/clone/new-listing";
 import { ActionDetailsDialog } from "@/components/ad-actions/ActionDetailsDialog";
 import { useCurrentWorkspaceId } from "@/hooks/useCurrentWorkspaceId";
 
@@ -66,6 +67,7 @@ export default function AdActionsCenter() {
   const [activeTab, setActiveTab] = useState("drafts");
   const [confirmAction, setConfirmAction] = useState<AdLifecycleAction | null>(null);
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
+  const [newListingCloneOpen, setNewListingCloneOpen] = useState(false);
   const [detailsAction, setDetailsAction] = useState<AdLifecycleAction | null>(null);
 
   const statusFilters: Record<string, string> = {
@@ -227,11 +229,17 @@ export default function AdActionsCenter() {
       subtitle="Gerencie ações de encerramento, republicação e clonagem"
     >
       <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
-        <Button onClick={() => setCloneDialogOpen(true)} className="gap-2">
-          <Copy className="h-4 w-4" />
-          Clonar anúncio (automático)
-        </Button>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Button onClick={() => setNewListingCloneOpen(true)} className="gap-2">
+              <Copy className="h-4 w-4" />
+              Clonar como anúncio novo
+            </Button>
+            <Button onClick={() => setCloneDialogOpen(true)} variant="outline" className="gap-2">
+              <Copy className="h-4 w-4" />
+              Clonar (automático)
+            </Button>
+          </div>
         </div>
 
         <Tabs defaultValue="drafts" value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -322,6 +330,9 @@ export default function AdActionsCenter() {
 
       {/* Unified Clone Modal */}
       <UnifiedCloneModal open={cloneDialogOpen} onOpenChange={setCloneDialogOpen} />
+
+      {/* New Listing Clone Modal */}
+      <NewListingCloneModal open={newListingCloneOpen} onOpenChange={setNewListingCloneOpen} />
 
       {/* Action Details Dialog */}
       <ActionDetailsDialog
