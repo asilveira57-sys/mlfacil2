@@ -54,7 +54,10 @@ const SettingsProfile = () => {
     avatarUrl: "",
   });
 
-  // Load profile on mount
+  // Load profile once on mount.
+  // IMPORTANT: Do not depend on `t` here; in some setups `t` can change identity
+  // during renders (or when i18n updates), which would re-run this effect and
+  // repeatedly call setState → infinite loop / maximum update depth.
   useEffect(() => {
     const loadProfile = async () => {
       try {
@@ -114,7 +117,7 @@ const SettingsProfile = () => {
     };
 
     loadProfile();
-  }, [t]);
+  }, []);
 
   const formatCPF = (value: string) => {
     const numbers = value.replace(/\D/g, "").slice(0, 11);
