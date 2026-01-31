@@ -508,11 +508,16 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
       }
       
       if (!execResult?.success) {
-        // Don't consume credit on validation errors
-        const errorMsg = execResult?.result?.message || execResult?.result?.error || 'Falha na clonagem';
+        // Extrair a melhor mensagem possível (evitar "body.invalid_fields" genérico)
+        const apiError = execResult?.result?.api_error;
+        const deepMsg =
+          apiError?.error ||
+          apiError?.message ||
+          execResult?.result?.message ||
+          execResult?.result?.error ||
+          'Falha na clonagem';
         const userGuidance = execResult?.result?.user_guidance;
-        
-        throw new Error(userGuidance ? `${errorMsg}\n\n${userGuidance}` : errorMsg);
+        throw new Error(userGuidance ? `${deepMsg}\n\n${userGuidance}` : deepMsg);
       }
       
       // Success!
@@ -528,6 +533,7 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
       const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido';
       console.error('[UnifiedCloneModal] Execute error:', err);
       setError(errorMessage);
+      toast.error('Falha na clonagem', { description: errorMessage.split('\n')[0] });
     } finally {
       setLoading(false);
     }
@@ -538,7 +544,7 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
   
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[600px] max-h-[90vh] flex flex-col p-0 overflow-hidden">
+      <DialogContent className="sm:max-w-[720px] max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
         <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <Copy className="h-5 w-5" />
@@ -549,7 +555,7 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
           </DialogDescription>
         </DialogHeader>
         
-        <ScrollArea className="flex-1 min-h-0 px-6">
+        <ScrollArea type="always" className="flex-1 min-h-0 px-6">
           <div className="pb-4">
             {/* Step 1: Input */}
             {step === 'input' && (
@@ -575,13 +581,6 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
                       Colar
                     </Button>
                   </div>
-                  
-                  {error && (
-                    <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/30">
-                      <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
-                      <p className="text-sm text-destructive whitespace-pre-wrap">{error}</p>
-                    </div>
-                  )}
                   
                   {inputValue && detectedId && (
                     <div className="flex items-center gap-2">
@@ -639,7 +638,7 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
                 </div>
                 
                 {/* Detection Results */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="p-3 rounded-md border">
                     <p className="text-xs text-muted-foreground mb-1">Origem detectada</p>
                     <Badge variant={preview.clone_mode === 'internal' ? 'default' : 'secondary'}>
@@ -881,12 +880,6 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
                   </div>
                 </div>
                 
-                {error && (
-                  <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/30">
-                    <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
-                    <p className="text-sm text-destructive whitespace-pre-wrap">{error}</p>
-                  </div>
-                )}
               </div>
             )}
             
@@ -970,16 +963,20 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
                   />
                 </div>
                 
-                {error && (
-                  <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/30">
-                    <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
-                    <p className="text-sm text-destructive whitespace-pre-wrap">{error}</p>
-                  </div>
-                )}
               </div>
             )}
           </div>
         </ScrollArea>
+
+        {/* Error banner (sempre visível, não depende do scroll) */}
+        {error && (
+          <div className="px-6 pb-3 shrink-0">
+            <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/30">
+              <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+              <p className="text-sm text-destructive whitespace-pre-wrap">{error}</p>
+            </div>
+          </div>
+        )}
         
         {/* Fixed Footer */}
         <div className="px-6 py-4 border-t shrink-0 flex justify-end gap-2 bg-background">
