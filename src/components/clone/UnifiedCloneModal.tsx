@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -193,6 +193,44 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
     create_paused: true, // Default: criar pausado
   });
   const [confirmText, setConfirmText] = useState('');
+  
+  // Restaurar dados do formulário após reconexão (se houver backup no sessionStorage)
+  const restoreFormBackup = useCallback(() => {
+    try {
+      const backupRaw = sessionStorage.getItem('clone_form_backup');
+      if (!backupRaw) return;
+      
+      const backup = JSON.parse(backupRaw);
+      
+      // Verificar se o backup não é muito antigo (máximo 30 minutos)
+      const maxAge = 30 * 60 * 1000; // 30 minutos
+      if (Date.now() - backup.timestamp > maxAge) {
+        sessionStorage.removeItem('clone_form_backup');
+        return;
+      }
+      
+      // Restaurar dados
+      if (backup.inputValue) setInputValue(backup.inputValue);
+      if (backup.preview) setPreview(backup.preview);
+      if (backup.formData) setFormData(backup.formData);
+      if (backup.step) setStep(backup.step);
+      
+      // Limpar backup após restaurar
+      sessionStorage.removeItem('clone_form_backup');
+      
+      console.log('[UnifiedCloneModal] Form data restored from backup');
+    } catch (err) {
+      console.warn('[UnifiedCloneModal] Failed to restore form backup:', err);
+      sessionStorage.removeItem('clone_form_backup');
+    }
+  }, []);
+  
+  // Tentar restaurar ao abrir o modal
+  useEffect(() => {
+    if (open) {
+      restoreFormBackup();
+    }
+  }, [open, restoreFormBackup]);
   
   const detectedId = useMemo(() => extractMeliId(inputValue), [inputValue]);
   
@@ -994,20 +1032,35 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
         {/* Error banner (sempre visível, não depende do scroll) */}
         {error && (
           <div className="px-6 pb-3 shrink-0">
-            <div className="flex flex-col gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/30">
+            <div className="flex flex-col gap-3 p-3 rounded-md bg-destructive/10 border border-destructive/30">
               <div className="flex items-start gap-2">
                 <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
                 <p className="text-sm text-destructive whitespace-pre-wrap">{error}</p>
               </div>
               {authExpired && (
-                <Button 
-                  variant="destructive" 
-                  size="sm"
-                  onClick={() => window.location.href = '/configuracoes'}
-                  className="self-start"
-                >
-                  Reconectar Mercado Livre
-                </Button>
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs text-muted-foreground">
+                    Seu formulário será preservado. Após reconectar, volte e clique em "Executar Clonagem" novamente.
+                  </p>
+                  <Button 
+                    variant="destructive" 
+                    size="sm"
+                    onClick={() => {
+                      // Salvar dados no sessionStorage antes de navegar
+                      sessionStorage.setItem('clone_form_backup', JSON.stringify({
+                        inputValue,
+                        preview,
+                        formData,
+                        step,
+                        timestamp: Date.now(),
+                      }));
+                      window.location.href = '/configuracoes';
+                    }}
+                    className="self-start"
+                  >
+                    Reconectar Mercado Livre
+                  </Button>
+                </div>
               )}
             </div>
           </div>
