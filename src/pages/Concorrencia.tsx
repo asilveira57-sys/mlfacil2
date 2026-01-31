@@ -15,7 +15,8 @@ import {
   AlertTriangle,
   Eye,
   DollarSign,
-  Copy
+  Copy,
+  ShieldCheck
 } from 'lucide-react';
 import { CompetitorOverview } from '@/components/competitor/CompetitorOverview';
 import { CompetitorListings } from '@/components/competitor/CompetitorListings';
@@ -26,6 +27,7 @@ import { TrackedCompetitorsTab } from '@/components/competitor/TrackedCompetitor
 import { TrackingAlertsTab } from '@/components/competitor/TrackingAlertsTab';
 import { PriceSuggestionsTab } from '@/components/competitor/PriceSuggestionsTab';
 import { PageContainer } from '@/components/layout/PageContainer';
+import { AntiCatalogCloneModal } from '@/components/clone-anti-catalog';
 
 interface MlAccount {
   id: string;
@@ -37,8 +39,10 @@ export default function Concorrencia() {
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState<MlAccount[]>([]);
   const [selectedSellerId, setSelectedSellerId] = useState<string>('');
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [activeTab, setActiveTab] = useState('tracked');
   const [loading, setLoading] = useState(true);
+  const [antiCatalogModalOpen, setAntiCatalogModalOpen] = useState(false);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -58,6 +62,7 @@ export default function Concorrencia() {
       if (mlAccounts && mlAccounts.length > 0) {
         setAccounts(mlAccounts);
         setSelectedSellerId(mlAccounts[0].ml_user_id);
+        setSelectedAccountId(mlAccounts[0].id);
       }
       setLoading(false);
     };
@@ -65,10 +70,18 @@ export default function Concorrencia() {
     checkAuth();
   }, [navigate]);
 
+  const handleAccountChange = (sellerId: string) => {
+    setSelectedSellerId(sellerId);
+    const account = accounts.find(a => a.ml_user_id === sellerId);
+    if (account) {
+      setSelectedAccountId(account.id);
+    }
+  };
+
   const headerContent = (
     <div className="flex items-center gap-3">
       {accounts.length > 1 && (
-        <Select value={selectedSellerId} onValueChange={setSelectedSellerId}>
+        <Select value={selectedSellerId} onValueChange={handleAccountChange}>
           <SelectTrigger className="w-48">
             <SelectValue placeholder="Selecione a conta" />
           </SelectTrigger>
@@ -81,10 +94,19 @@ export default function Concorrencia() {
           </SelectContent>
         </Select>
       )}
-      <Button asChild>
+      {/* NOVO BOTÃO ISOLADO - Anti-Catálogo v3 */}
+      <Button 
+        variant="default" 
+        onClick={() => setAntiCatalogModalOpen(true)}
+        className="bg-primary"
+      >
+        <ShieldCheck className="h-4 w-4 mr-2" />
+        Clonar como Anúncio Novo
+      </Button>
+      <Button asChild variant="outline">
         <Link to="/anuncios/acoes">
           <Copy className="h-4 w-4 mr-2" />
-          Clonar
+          Central de Ações
         </Link>
       </Button>
     </div>
@@ -195,6 +217,13 @@ export default function Concorrencia() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Modal Anti-Catálogo v3 - ISOLADO */}
+      <AntiCatalogCloneModal
+        open={antiCatalogModalOpen}
+        onOpenChange={setAntiCatalogModalOpen}
+        mlAccountId={selectedAccountId}
+      />
     </PageContainer>
   );
 }
