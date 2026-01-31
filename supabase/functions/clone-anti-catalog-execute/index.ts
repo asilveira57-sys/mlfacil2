@@ -242,9 +242,26 @@ async function createItemWithFamilyNameRetry(
     last_api_response: null,
   };
 
-  // Verificar se já sabemos que essa categoria exige family_name
-  if (familyNameRequiredCache.get(categoryId)) {
-    addLog('📦 [MERCADOLIVRE] Categoria conhecida por exigir family_name, adicionando preventivamente', { categoryId });
+  // ============================================
+  // VERIFICAR SE CATEGORIA EXIGE family_name (PREVENTIVO)
+  // ============================================
+  // Prioridade 1: Mapeamento estático (SEMPRE inclui para categorias conhecidas)
+  // Prioridade 2: Cache dinâmico (categorias que falharam antes)
+  const staticFamilyName = FAMILY_NAME_BY_CATEGORY[categoryId];
+  const cachedRequirement = familyNameRequiredCache.get(categoryId);
+  
+  if (staticFamilyName) {
+    addLog('📦 [MERCADOLIVRE] Categoria com family_name OBRIGATÓRIO (mapeamento estático)', { 
+      categoryId, 
+      family_name: staticFamilyName 
+    });
+    itemPayload.family_name = staticFamilyName;
+    result.diagnostic.family_name_included = true;
+    result.diagnostic.family_name_source = "static_mapping";
+    result.diagnostic.family_name_value = staticFamilyName;
+    result.diagnostic.payload_keys_sent = Object.keys(itemPayload);
+  } else if (cachedRequirement) {
+    addLog('📦 [MERCADOLIVRE] Categoria conhecida por exigir family_name (cache)', { categoryId });
     const familyNameData = await getFamilyName(categoryId, accessToken);
     const familyNameValue = familyNameData.value || deriveFamilyNameFromTitle(title);
     itemPayload.family_name = familyNameValue;
@@ -261,6 +278,7 @@ async function createItemWithFamilyNameRetry(
     category_id: itemPayload.category_id,
     title: itemPayload.title?.substring(0, 50),
     price: itemPayload.price,
+    family_name: itemPayload.family_name || null,
     has_family_name: !!itemPayload.family_name,
     payload_keys: Object.keys(itemPayload),
     attributes_ids: (itemPayload.attributes || []).map((a: any) => a.id),
