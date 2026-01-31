@@ -54,6 +54,10 @@ interface MarketplaceAccount {
   email: string | null;
   is_active: boolean;
   token_expires_at: string | null;
+  connection_status: 'connected' | 'attention' | 'disconnected' | 'revoked';
+  last_api_ok_at: string | null;
+  last_api_error_code: string | null;
+  consecutive_failures: number;
   updated_at: string;
 }
 
@@ -97,10 +101,10 @@ const SettingsCompanies = () => {
 
       if (companiesError) throw companiesError;
 
-      // Fetch ML accounts (source of truth)
+      // Fetch ML accounts (source of truth) with new tracking fields
       const { data: accountsData, error: accountsError } = await supabase
         .from("ml_accounts")
-        .select("id, ml_user_id, nickname, email, is_active, token_expires_at, updated_at")
+        .select("id, ml_user_id, nickname, email, is_active, token_expires_at, connection_status, last_api_ok_at, last_api_error_code, consecutive_failures, updated_at")
         .eq("user_id", user.id)
         .order("is_active", { ascending: false });
 
@@ -242,10 +246,53 @@ const SettingsCompanies = () => {
   };
 
   const getAccountStatus = (account: MarketplaceAccount) => {
-    if (isTokenExpired(account.token_expires_at)) {
-      return { label: "Expirada", color: "bg-amber-500/10 text-amber-600 border-amber-200" };
+    // Use connection_status as primary source of truth
+    const status = account.connection_status || 'connected';
+    
+    switch (status) {
+      case 'connected':
+        return { 
+          label: "Conectada", 
+          color: "bg-green-500/10 text-green-600 border-green-200",
+          icon: CheckCircle2,
+          needsReconnect: false,
+        };
+      case 'attention':
+        return { 
+          label: "Atenção", 
+          color: "bg-amber-500/10 text-amber-600 border-amber-200",
+          icon: XCircle,
+          needsReconnect: false, // Can try auto-refresh first
+        };
+      case 'revoked':
+        return { 
+          label: "Revogada", 
+          color: "bg-red-500/10 text-red-600 border-red-200",
+          icon: XCircle,
+          needsReconnect: true,
+        };
+      case 'disconnected':
+      default:
+        return { 
+          label: "Desconectada", 
+          color: "bg-gray-500/10 text-gray-600 border-gray-200",
+          icon: XCircle,
+          needsReconnect: true,
+        };
     }
-    return { label: "Conectada", color: "bg-green-500/10 text-green-600 border-green-200" };
+  };
+
+  const formatLastOk = (lastOkAt: string | null) => {
+    if (!lastOkAt) return null;
+    const date = new Date(lastOkAt);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    
+    if (diffHours < 1) return 'há menos de 1h';
+    if (diffHours < 24) return `há ${diffHours}h`;
+    const diffDays = Math.floor(diffHours / 24);
+    return `há ${diffDays}d`;
   };
 
   if (loading) {
@@ -362,33 +409,38 @@ const SettingsCompanies = () => {
             <div className="space-y-3">
               {accounts.map((account) => {
                 const status = getAccountStatus(account);
+                const StatusIcon = status.icon;
+                const lastOk = formatLastOk(account.last_api_ok_at);
+                
                 return (
                   <div
                     key={account.id}
                     className="flex items-center justify-between p-4 border rounded-lg"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-lg bg-yellow-500/10 flex items-center justify-center">
-                        <Store className="h-5 w-5 text-yellow-600" />
+                      <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                        <Store className="h-5 w-5 text-primary" />
                       </div>
                       <div>
                         <h5 className="font-medium text-sm">
                           {account.nickname || account.email || `Seller ${account.ml_user_id}`}
                         </h5>
-                        <p className="text-xs text-muted-foreground">
-                          ID: {account.ml_user_id}
-                        </p>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <span>ID: {account.ml_user_id}</span>
+                          {lastOk && status.label === 'Conectada' && (
+                            <span className="text-success">• Última sync {lastOk}</span>
+                          )}
+                          {account.last_api_error_code && status.needsReconnect && (
+                            <span className="text-destructive">• Erro: {account.last_api_error_code}</span>
+                          )}
+                        </div>
                       </div>
                     </div>
                     
                     <div className="flex items-center gap-3">
                       <div className="flex flex-col items-end gap-1">
                         <Badge variant="outline" className={status.color}>
-                          {isTokenExpired(account.token_expires_at) ? (
-                            <XCircle className="h-3 w-3 mr-1" />
-                          ) : (
-                            <CheckCircle2 className="h-3 w-3 mr-1" />
-                          )}
+                          <StatusIcon className="h-3 w-3 mr-1" />
                           {status.label}
                         </Badge>
                         {account.is_active && (
@@ -399,7 +451,25 @@ const SettingsCompanies = () => {
                       </div>
                       
                       <div className="flex gap-2">
-                        {!account.is_active && (
+                        {/* Show Reconnect button for revoked/disconnected accounts */}
+                        {status.needsReconnect && (
+                          <Button
+                            size="sm"
+                            variant="default"
+                            onClick={handleConnectAccount}
+                            disabled={saving}
+                          >
+                            {saving ? (
+                              <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                            ) : (
+                              <RefreshCw className="h-4 w-4 mr-1" />
+                            )}
+                            Reconectar
+                          </Button>
+                        )}
+                        
+                        {/* Show Set Active button only for connected accounts that are not active */}
+                        {!account.is_active && !status.needsReconnect && (
                           <Button
                             size="sm"
                             variant="outline"
@@ -408,6 +478,7 @@ const SettingsCompanies = () => {
                             Definir ativa
                           </Button>
                         )}
+                        
                         <Button
                           size="sm"
                           variant="ghost"

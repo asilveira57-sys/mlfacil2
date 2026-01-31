@@ -4666,11 +4666,17 @@ export type Database = {
       ml_accounts: {
         Row: {
           access_token: string
+          connection_status: string | null
+          consecutive_failures: number | null
           country_id: string | null
           created_at: string
           email: string | null
           id: string
           is_active: boolean | null
+          last_api_error_at: string | null
+          last_api_error_code: string | null
+          last_api_ok_at: string | null
+          last_token_refresh_at: string | null
           ml_user_id: string
           nickname: string | null
           refresh_token: string
@@ -4680,11 +4686,17 @@ export type Database = {
         }
         Insert: {
           access_token: string
+          connection_status?: string | null
+          consecutive_failures?: number | null
           country_id?: string | null
           created_at?: string
           email?: string | null
           id?: string
           is_active?: boolean | null
+          last_api_error_at?: string | null
+          last_api_error_code?: string | null
+          last_api_ok_at?: string | null
+          last_token_refresh_at?: string | null
           ml_user_id: string
           nickname?: string | null
           refresh_token: string
@@ -4694,11 +4706,17 @@ export type Database = {
         }
         Update: {
           access_token?: string
+          connection_status?: string | null
+          consecutive_failures?: number | null
           country_id?: string | null
           created_at?: string
           email?: string | null
           id?: string
           is_active?: boolean | null
+          last_api_error_at?: string | null
+          last_api_error_code?: string | null
+          last_api_ok_at?: string | null
+          last_token_refresh_at?: string | null
           ml_user_id?: string
           nickname?: string | null
           refresh_token?: string

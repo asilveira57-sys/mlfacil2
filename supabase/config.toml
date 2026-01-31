@@ -137,3 +137,6 @@ verify_jwt = false
 
 [functions.create-listing-capture]
 verify_jwt = false
+
+[functions.ml-token-refresh]
+verify_jwt = false

@@ -56,9 +56,9 @@ export function AccountSwitcher() {
     switch (status) {
       case 'connected':
         return <CheckCircle2 className="h-3 w-3 text-success" />;
-      case 'expired':
+      case 'attention':
         return <AlertTriangle className="h-3 w-3 text-warning" />;
-      case 'error':
+      case 'revoked':
       case 'disconnected':
         return <XCircle className="h-3 w-3 text-destructive" />;
     }
@@ -67,8 +67,8 @@ export function AccountSwitcher() {
   const getStatusLabel = (status: ActiveAccount['status']) => {
     switch (status) {
       case 'connected': return 'Conectada';
-      case 'expired': return 'Expirada';
-      case 'error': return 'Erro';
+      case 'attention': return 'Atenção';
+      case 'revoked': return 'Revogada';
       case 'disconnected': return 'Desconectada';
     }
   };
