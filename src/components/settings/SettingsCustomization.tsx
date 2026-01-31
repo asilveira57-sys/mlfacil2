@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -46,6 +47,7 @@ export default function SettingsCustomization() {
     cardsTheme,
     setCardsColor,
     isSynced,
+    setIsSynced,
     breakSync,
     applySyncedTheme,
     menuPresets,
@@ -57,6 +59,17 @@ export default function SettingsCustomization() {
     saving,
     hasChanges,
   } = useThemeCustomization();
+
+  // Track if initial sync has been applied
+  const initialSyncApplied = useRef(false);
+
+  // Apply synced theme on initial load when sync is active
+  useEffect(() => {
+    if (!companyLoading && !themeLoading && isSynced && activeColor && !initialSyncApplied.current) {
+      applySyncedTheme(activeColor.hsl);
+      initialSyncApplied.current = true;
+    }
+  }, [companyLoading, themeLoading, isSynced, activeColor, applySyncedTheme]);
 
   // Apply synced theme when company color changes and sync is active
   const handleCompanyColorChange = async (colorKey: string) => {
@@ -71,6 +84,7 @@ export default function SettingsCustomization() {
 
   // Enable sync and apply current company color
   const handleEnableSync = () => {
+    setIsSynced(true);
     applySyncedTheme(activeColor.hsl);
   };
 
