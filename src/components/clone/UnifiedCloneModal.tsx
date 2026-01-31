@@ -169,6 +169,7 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
   const [step, setStep] = useState<ModalStep>('input');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [authExpired, setAuthExpired] = useState(false);
   
   // Step 1: Input
   const [inputValue, setInputValue] = useState('');
@@ -216,6 +217,7 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
     setStep('input');
     setLoading(false);
     setError(null);
+    setAuthExpired(false);
     setInputValue('');
     setPreview(null);
     setFormData({
@@ -508,6 +510,16 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
       }
       
       if (!execResult?.success) {
+        // Verificar se é erro de AUTH_EXPIRED
+        const errorCode = execResult?.result?.error;
+        const requiresReconnection = execResult?.result?.requires_reconnection;
+        
+        if (errorCode === 'AUTH_EXPIRED' || requiresReconnection) {
+          setError('Token expirado. Reconecte a conta do Mercado Livre para continuar.');
+          setAuthExpired(true);
+          return;
+        }
+        
         // Extrair a melhor mensagem possível (evitar "body.invalid_fields" genérico)
         const apiError = execResult?.result?.api_error;
         const deepMsg =
@@ -517,6 +529,17 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
           execResult?.result?.error ||
           'Falha na clonagem';
         const userGuidance = execResult?.result?.user_guidance;
+        
+        // Se CATALOG_FALLBACK foi usado, mencionar
+        if (execResult?.result?.catalog_fallback?.title_fallback_used) {
+          const titleUpdateStatus = execResult.result.catalog_fallback.post_create_title_update;
+          if (titleUpdateStatus === 'blocked_or_not_allowed') {
+            toast.warning('Aviso: Título não pôde ser atualizado', {
+              description: 'O item foi criado, mas o título é controlado pelo catálogo.',
+            });
+          }
+        }
+        
         throw new Error(userGuidance ? `${deepMsg}\n\n${userGuidance}` : deepMsg);
       }
       
@@ -971,9 +994,21 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
         {/* Error banner (sempre visível, não depende do scroll) */}
         {error && (
           <div className="px-6 pb-3 shrink-0">
-            <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/30">
-              <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
-              <p className="text-sm text-destructive whitespace-pre-wrap">{error}</p>
+            <div className="flex flex-col gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/30">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+                <p className="text-sm text-destructive whitespace-pre-wrap">{error}</p>
+              </div>
+              {authExpired && (
+                <Button 
+                  variant="destructive" 
+                  size="sm"
+                  onClick={() => window.location.href = '/configuracoes'}
+                  className="self-start"
+                >
+                  Reconectar Mercado Livre
+                </Button>
+              )}
             </div>
           </div>
         )}
