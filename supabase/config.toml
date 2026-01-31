@@ -134,3 +134,6 @@ verify_jwt = false
 
 [functions.facebook-conversions]
 verify_jwt = false
+
+[functions.create-listing-capture]
+verify_jwt = false
