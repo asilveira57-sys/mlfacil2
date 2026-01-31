@@ -140,3 +140,6 @@ verify_jwt = false
 
 [functions.ml-token-refresh]
 verify_jwt = false
+
+[functions.clone-anti-catalog-execute]
+verify_jwt = false
