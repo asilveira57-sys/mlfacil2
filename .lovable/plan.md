@@ -1,104 +1,224 @@
 
+# Plano: Adicionar Logging Detalhado à Edge Function Anti-Catálogo
 
-# Plano de Correção: Modal de Clonagem Automática
-
-## Problemas Identificados
-
-### 1. Campo de URL muito estreito (Imagem 1)
-O campo de entrada para a URL está com largura insuficiente para exibir links longos do Mercado Livre, causando overflow visual.
-
-### 2. Falta de barra de rolagem (Imagem 2)
-Embora o componente `ScrollArea` esteja implementado, a rolagem não está funcionando corretamente, impedindo o acesso aos campos abaixo.
-
-### 3. Descrição vazia (Imagem 3)
-A resposta da API veio do cache (`source: "cache"`), e o cache não inclui a descrição do anúncio. Quando os dados vêm do cache, os campos de descrição e dimensões ficam vazios.
-
-### 4. Botão "Continuar" desabilitado (Imagem 4 e 5)
-O botão está condicionado a `!hasPictures`, mas os dados do cache não incluem o array de fotos (`pictures`), fazendo com que a validação `hasPictures` retorne `false`.
+## Objetivo
+Adicionar console.log com emojis em cada etapa do processo de criação de anúncio para diagnosticar erros, incluindo os logs na resposta da Edge Function.
 
 ---
 
-## Soluções Propostas
+## Análise da Situação Atual
 
-### Correção 1: Largura do campo de URL
-Aumentar a largura mínima do container do input e remover a limitação de espaço que corta o texto.
+A edge function `clone-anti-catalog-execute/index.ts` já possui alguns logs básicos:
+- `[ANTI-CATALOG-V3] First attempt payload keys:`
+- `[ANTI-CATALOG-V3] First attempt response:`
+- `[ANTI-CATALOG-V3] Retry payload with family_name:`
+- `[ANTI-CATALOG-V3] Retry response:`
 
-**Mudanças:**
-- Remover `flex-1` que limita a largura
-- Usar `w-full min-w-0` para garantir responsividade
-- Ajustar padding e overflow do input
+No entanto, faltam:
+1. Logs formatados com emojis para fácil visualização
+2. Array de logs acumulados para retorno na resposta
+3. Timestamp em cada log
+4. Logs específicos para cada etapa do retry
+5. Inclusão de `last_payload_sent` e `last_api_response` no retorno
 
-### Correção 2: Barra de rolagem obrigatória
-Garantir que o `ScrollArea` funcione corretamente com altura máxima fixa e overflow visível.
+---
 
-**Mudanças:**
-- Adicionar `overflow-hidden` no `DialogContent`
-- Garantir `flex-1 min-h-0` no ScrollArea para permitir o cálculo correto de altura
-- Forçar a altura máxima do conteúdo rolável
+## Implementação
 
-### Correção 3: Descrição do cache
-Modificar a edge function `ad-item-snapshot` para:
-1. Quando usar cache, também buscar a descrição via API pública
-2. Incluir a descrição no retorno do cache
+### 1. Criar Sistema de Coleta de Logs
 
-**Mudanças no backend:**
-```text
-- Após encontrar item no cache, chamar fetchDescriptionPublic()
-- Adicionar campo description no retorno do cache
+Adicionar no início da função `createItemWithFamilyNameRetry`:
+
+```typescript
+// Array para coletar logs
+const executionLogs: string[] = [];
+
+function addLog(message: string, data?: any) {
+  const timestamp = new Date().toISOString();
+  const logEntry = data 
+    ? `[${timestamp}] ${message} ${JSON.stringify(data)}`
+    : `[${timestamp}] ${message}`;
+  executionLogs.push(logEntry);
+  console.log(logEntry);
+}
 ```
 
-### Correção 4: Fotos do cache + validação do botão
-O cache inclui apenas `thumbnail`, não o array `pictures`. A lógica precisa considerar o thumbnail como foto válida quando `pictures` estiver ausente.
+### 2. Adicionar Logs na Primeira Tentativa
 
-**Mudanças:**
-- Quando `pictures` estiver vazio mas `thumbnail` existir, criar um array com a foto do thumbnail
-- Ajustar a validação `hasPictures` para considerar esse caso
-
-### Correção 5: Dimensões do item fonte
-O cache não inclui os atributos de dimensões. Precisamos:
-1. Também buscar atributos do item via API quando vem do cache
-2. Ou armazenar os atributos no cache para uso futuro
-
-**Solução prática:**
-- Quando vem do cache, fazer uma chamada pública adicional para `/items/{id}` para obter atributos (já que o cache está incompleto)
-- Dessa forma, teremos descrição, fotos e dimensões
-
----
-
-## Resumo das Alterações
-
-| Arquivo | Tipo | Mudança |
-|---------|------|---------|
-| `UnifiedCloneModal.tsx` | UI | Ajustar largura do input de URL |
-| `UnifiedCloneModal.tsx` | UI | Corrigir ScrollArea para funcionar sempre |
-| `UnifiedCloneModal.tsx` | UI | Ajustar lógica de `hasPictures` para considerar thumbnail |
-| `ad-item-snapshot/index.ts` | Backend | Quando usar cache, buscar dados complementares via API pública (descrição, fotos, atributos) |
-
----
-
-## Detalhes Técnicos
-
-### UnifiedCloneModal.tsx - Mudanças de UI
-
-```text
-Linha 557-575: Ajustar layout do input
-- Trocar estrutura flex para empilhar melhor em telas menores
-- Aumentar largura mínima do campo
-
-Linha 539: Garantir DialogContent com overflow correto
-- Manter max-h-[90vh] e flex flex-col
-- Adicionar overflow-hidden explícito
-
-Linha 550: Garantir ScrollArea funcional
-- Usar flex-1 min-h-0 para cálculo correto de altura
+**Antes do primeiro POST:**
+```typescript
+addLog('🚀 [MERCADOLIVRE] Tentativa 1 - Payload SEM family_name', {
+  category_id: itemPayload.category_id,
+  title: itemPayload.title?.substring(0, 50),
+  price: itemPayload.price,
+  has_family_name: !!itemPayload.family_name,
+  payload_keys: Object.keys(itemPayload),
+  attributes_ids: (itemPayload.attributes || []).map((a: any) => a.id)
+});
 ```
 
-### ad-item-snapshot/index.ts - Mudanças no Cache
+**Após resposta do primeiro POST (erro):**
+```typescript
+addLog('❌ [MERCADOLIVRE] Erro na tentativa 1', {
+  status: createResponse.status,
+  error_code: createData?.error,
+  message: createData?.message,
+  cause: createData?.cause,
+  full_error: createData
+});
+```
 
-Quando o dado vem do cache (linhas 346-367):
-1. Chamar `fetchItemPublic()` para obter dados completos
-2. Chamar `fetchDescriptionPublic()` para obter descrição
-3. Se falhar, usar dados do cache como fallback
+**Após resposta do primeiro POST (sucesso):**
+```typescript
+addLog('✅ [MERCADOLIVRE] Anúncio criado com sucesso na tentativa 1', {
+  item_id: createData.id,
+  permalink: createData.permalink
+});
+```
 
-Essa abordagem garante que, mesmo quando o cache é utilizado para identificar rapidamente o item, os dados retornados sejam completos e incluam descrição, fotos e atributos de dimensões.
+### 3. Adicionar Logs na Detecção de Retry
 
+**Ao detectar necessidade de family_name:**
+```typescript
+addLog('🔄 [MERCADOLIVRE] Detectado erro required_fields, buscando family_name...');
+```
+
+**Após buscar family_name:**
+```typescript
+addLog('📋 [MERCADOLIVRE] family_name obtido', {
+  category_id: categoryId,
+  family_name: familyNameValue,
+  source: familyNameSource
+});
+```
+
+### 4. Adicionar Logs na Segunda Tentativa
+
+**Antes do segundo POST:**
+```typescript
+addLog('🚀 [MERCADOLIVRE] Tentativa 2 - Payload COM family_name', {
+  category_id: retryPayload.category_id,
+  family_name: retryPayload.family_name,
+  title: retryPayload.title?.substring(0, 50),
+  payload_keys: Object.keys(retryPayload),
+  attributes_ids: (retryPayload.attributes || []).map((a: any) => a.id)
+});
+```
+
+**Após resposta do segundo POST (sucesso):**
+```typescript
+addLog('✅ [MERCADOLIVRE] Anúncio criado com sucesso no retry', {
+  item_id: createData.id,
+  retry_count: 2,
+  family_name_used: familyNameValue
+});
+```
+
+**Após resposta do segundo POST (erro):**
+```typescript
+addLog('❌ [MERCADOLIVRE] Erro na tentativa 2 (retry)', {
+  status: createResponse.status,
+  error_code: createData?.error,
+  message: createData?.message,
+  cause: createData?.cause,
+  full_error: createData
+});
+```
+
+### 5. Atualizar Interface de Resultado
+
+Adicionar novos campos à interface `CreateItemResult`:
+
+```typescript
+interface CreateItemResult {
+  // ... campos existentes ...
+  
+  // Novos campos para debug
+  execution_logs: string[];
+  last_payload_sent: Record<string, any>;
+  last_api_response: any;
+}
+```
+
+### 6. Incluir Logs na Resposta
+
+Atualizar o retorno para incluir:
+
+```typescript
+result.execution_logs = executionLogs;
+result.last_payload_sent = lastPayloadSent; // Guardar o último payload enviado
+result.last_api_response = createData;      // Guardar a última resposta da API
+```
+
+---
+
+## Seção Técnica: Detalhes da Implementação
+
+### Arquivo a Modificar
+- `supabase/functions/clone-anti-catalog-execute/index.ts`
+
+### Estrutura dos Logs
+Cada log seguirá o padrão:
+```
+[2026-01-31T18:00:00.000Z] 🚀 [MERCADOLIVRE] Mensagem { dados_json }
+```
+
+### Variáveis de Tracking
+```typescript
+let lastPayloadSent: Record<string, any> = {};
+let lastApiResponse: any = null;
+```
+
+### Pontos de Inserção de Log
+
+| Linha Atual | Ação | Tipo de Log |
+|-------------|------|-------------|
+| ~234 | Antes do 1º POST | 🚀 Tentativa 1 |
+| ~252 | Após 1º POST (erro) | ❌ Erro tentativa 1 |
+| ~255-259 | Após 1º POST (sucesso) | ✅ Sucesso tentativa 1 |
+| ~266 | Detecta retry | 🔄 Detectado required_fields |
+| ~287 | Após buscar family_name | 📋 family_name obtido |
+| ~302 | Antes do 2º POST | 🚀 Tentativa 2 |
+| ~319 | Após 2º POST | ✅/❌ Resultado retry |
+| ~350 | Erro final | ❌ Erro final |
+
+### Retorno Atualizado da Função
+
+```typescript
+return {
+  success: true/false,
+  item_id?: string,
+  permalink?: string,
+  error?: string,
+  error_code?: string,
+  api_status?: number,
+  api_error?: any,
+  retry_info: { ... },
+  diagnostic: { ... },
+  // Novos campos:
+  execution_logs: string[],
+  last_payload_sent: Record<string, any>,
+  last_api_response: any
+};
+```
+
+---
+
+## Resultado Esperado
+
+Após implementação, ao clicar em "Clonar como Anúncio Novo" e ocorrer erro:
+
+1. **Nos logs da Edge Function** (via Cloud View):
+   - Sequência completa com emojis
+   - Payloads enviados
+   - Respostas da API
+
+2. **Na resposta da API** (visível no frontend):
+   - `execution_logs`: Array com todos os passos
+   - `last_payload_sent`: Último payload enviado
+   - `last_api_response`: Resposta completa do Mercado Livre
+
+Isso permitirá identificar exatamente:
+- Se o retry está sendo executado
+- Se o `family_name` está sendo adicionado corretamente
+- Qual resposta exata a API está retornando
