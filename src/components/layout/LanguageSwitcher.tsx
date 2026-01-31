@@ -40,6 +40,11 @@ export function LanguageSwitcher({ variant = 'compact', className }: LanguageSwi
         >
           {variant === 'icon' ? (
             <Globe className="h-4 w-4" />
+          ) : variant === 'full' ? (
+            <>
+              <span className="text-base">{currentLabel.flag}</span>
+              <span className="text-xs font-medium">{currentLabel.label}</span>
+            </>
           ) : (
             <>
               <Globe className="h-4 w-4" />

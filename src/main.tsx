@@ -2,6 +2,9 @@ import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
 
+// Initialize i18n
+import './lib/i18n';
+
 if (import.meta.env.DEV) {
   (window as any).__APP_BOOT_COUNT__ = ((window as any).__APP_BOOT_COUNT__ ?? 0) + 1;
   // eslint-disable-next-line no-console

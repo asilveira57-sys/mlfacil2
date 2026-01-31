@@ -6,6 +6,7 @@ import { BarChart3, Menu } from "lucide-react";
 import { useSiteContentContext } from "@/contexts/SiteContentContext";
 import { EditableText } from "@/components/admin/EditableText";
 import { EditableImage } from "@/components/admin/EditableImage";
+import { LanguageSwitcher } from "@/components/layout/LanguageSwitcher";
 
 export function LandingHeader() {
   const navigate = useNavigate();
@@ -75,6 +76,7 @@ export function LandingHeader() {
 
           {/* Desktop CTAs */}
           <div className="hidden md:flex items-center gap-3">
+            <LanguageSwitcher variant="compact" />
             <Button 
               variant="ghost" 
               onClick={() => navigate("/auth")}
@@ -107,6 +109,10 @@ export function LandingHeader() {
                   ))}
                 </nav>
                 <div className="flex flex-col gap-3 pt-4 border-t">
+                  <div className="flex items-center justify-between px-4 py-2 text-sm text-muted-foreground">
+                    <span>Idioma</span>
+                    <LanguageSwitcher variant="full" />
+                  </div>
                   <Button 
                     variant="outline" 
                     onClick={() => { navigate("/auth"); setMobileMenuOpen(false); }}
