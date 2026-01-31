@@ -74,7 +74,7 @@ interface MarketplaceAccount {
 interface Company {
   id: string;
   display_name: string;
-  billing_type: "pf" | "pj";
+  billing_type: "PF" | "PJ";
   is_active: boolean;
   created_at: string;
 }
@@ -82,6 +82,7 @@ interface Company {
 interface BillingData {
   nomeFantasia: string | null;
   razaoSocial: string | null;
+  personType: "pf" | "pj" | null;
 }
 
 const SettingsCompanies = () => {
@@ -90,7 +91,7 @@ const SettingsCompanies = () => {
   const [loading, setLoading] = useState(true);
   const [showNewCompanyDialog, setShowNewCompanyDialog] = useState(false);
   const [newCompanyName, setNewCompanyName] = useState("");
-  const [newCompanyType, setNewCompanyType] = useState<"pf" | "pj">("pj");
+  const [newCompanyType, setNewCompanyType] = useState<"PF" | "PJ">("PJ");
   const [saving, setSaving] = useState(false);
   const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
   const [showDisconnectDialog, setShowDisconnectDialog] = useState(false);
@@ -128,18 +129,18 @@ const SettingsCompanies = () => {
 
       if (accountsError) throw accountsError;
 
-      // Fetch billing data for autofill
+      // Fetch billing data from billing_info table for autofill
       const { data: billingResult } = await supabase
-        .from("company_billing")
-        .select("trade_name, legal_name, companies!inner(user_id)")
-        .eq("companies.user_id", user.id)
-        .limit(1)
+        .from("billing_info")
+        .select("nome_fantasia, razao_social, person_type")
+        .eq("user_id", user.id)
         .maybeSingle();
 
       if (billingResult) {
         setBillingData({
-          nomeFantasia: billingResult.trade_name,
-          razaoSocial: billingResult.legal_name,
+          nomeFantasia: billingResult.nome_fantasia,
+          razaoSocial: billingResult.razao_social,
+          personType: billingResult.person_type as "pf" | "pj" | null,
         });
       }
 
@@ -171,8 +172,11 @@ const SettingsCompanies = () => {
     if (billingData) {
       const name = billingData.nomeFantasia || billingData.razaoSocial || "";
       setNewCompanyName(name);
-      if (billingData.razaoSocial || billingData.nomeFantasia) {
-        setNewCompanyType("pj");
+      // Set type based on billing preference
+      if (billingData.personType === "pj" || billingData.razaoSocial || billingData.nomeFantasia) {
+        setNewCompanyType("PJ");
+      } else {
+        setNewCompanyType("PF");
       }
       toast.success("Dados de faturamento aplicados");
     }
@@ -201,7 +205,7 @@ const SettingsCompanies = () => {
       if (error) throw error;
 
       setNewCompanyName("");
-      setNewCompanyType("pj");
+      setNewCompanyType("PJ");
       setShowNewCompanyDialog(false);
       toast.success("Empresa criada com sucesso!");
       fetchData();
@@ -529,18 +533,18 @@ const SettingsCompanies = () => {
                   <Label>Tipo</Label>
                   <RadioGroup
                     value={newCompanyType}
-                    onValueChange={(v) => setNewCompanyType(v as "pf" | "pj")}
+                    onValueChange={(v) => setNewCompanyType(v as "PF" | "PJ")}
                     className="flex gap-6"
                   >
                     <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="pf" id="new-pf" />
+                      <RadioGroupItem value="PF" id="new-pf" />
                       <Label htmlFor="new-pf" className="flex items-center gap-2 cursor-pointer">
                         <User className="h-4 w-4" />
                         Pessoa Física
                       </Label>
                     </div>
                     <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="pj" id="new-pj" />
+                      <RadioGroupItem value="PJ" id="new-pj" />
                       <Label htmlFor="new-pj" className="flex items-center gap-2 cursor-pointer">
                         <Building className="h-4 w-4" />
                         Pessoa Jurídica
@@ -583,7 +587,7 @@ const SettingsCompanies = () => {
                     <div>
                       <h4 className="font-semibold text-foreground">{company.display_name}</h4>
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span>{company.billing_type === "pf" ? "Pessoa Física" : "Pessoa Jurídica"}</span>
+                        <span>{company.billing_type === "PF" ? "Pessoa Física" : "Pessoa Jurídica"}</span>
                         <span>•</span>
                         <span>{companyAccounts.length} conta{companyAccounts.length !== 1 ? 's' : ''} ML</span>
                       </div>
