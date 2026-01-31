@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { ActiveAccountProvider } from "@/contexts/ActiveAccountContext";
 import { UserAccessProvider } from "@/contexts/UserAccessContext";
 import { RefreshPolicyProvider } from "@/contexts/RefreshPolicyContext";
+import { FacebookTrackingProvider } from "@/contexts/FacebookTrackingContext";
 import { RouteChangeCleanup } from "@/components/layout/RouteChangeCleanup";
 import { AppShellLayout } from "@/components/layout/AppShellLayout";
 import { OnboardingWizard } from "@/components/onboarding";
@@ -107,6 +108,7 @@ const App = () => {
               <Toaster />
               <Sonner />
               <BrowserRouter>
+              <FacebookTrackingProvider>
               <RouteChangeCleanup />
               <SeoHead />
               <OnboardingWizard />
@@ -162,6 +164,7 @@ const App = () => {
                 <Route path="*" element={<NotFound />} />
               </Routes>
               </ModuleAccessGuard>
+              </FacebookTrackingProvider>
               </BrowserRouter>
             </UserAccessProvider>
           </ActiveAccountProvider>
