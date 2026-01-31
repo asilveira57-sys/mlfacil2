@@ -32,6 +32,8 @@ import {
   ReferenceSnapshot, 
   FinalListingPayload,
   filterSafeAttributes,
+  filterAttributesWithControl,
+  removeDuplicateCondition,
 } from './types';
 import { useCreateListingCapture } from './useCreateListingCapture';
 import { useCreateListingDraft } from './useCreateListingDraft';
@@ -178,11 +180,21 @@ export function CreateListingModal({ open, onOpenChange }: CreateListingModalPro
       
       // Montar checklist para criar anúncio NORMAL (anti-catálogo)
       const checklist = {
-        // Flag crítica: criar como anúncio normal
+        // =====================================================
+        // FLAGS CRÍTICAS: ANTI-CATÁLOGO
+        // =====================================================
         create_as_normal: true,
         force_standard_listing: true,
+        catalog_listing: false,  // CRÍTICO: Força criação como anúncio normal
+        anti_catalog_enabled: true,
         
-        // Dados do anúncio
+        // Controle de identificadores pelo usuário
+        include_gtin: payload.include_gtin,
+        include_sku: payload.include_sku,
+        
+        // =====================================================
+        // DADOS DO ANÚNCIO
+        // =====================================================
         final_title: payload.title,
         final_description: payload.description,
         final_price: payload.price,
@@ -193,7 +205,7 @@ export function CreateListingModal({ open, onOpenChange }: CreateListingModalPro
         listing_type: payload.listing_type_id,
         create_paused: payload.initial_status === 'paused',
         
-        // Dimensões
+        // Dimensões (SELLER_PACKAGE_* obrigatórios)
         seller_package_height: payload.package_height,
         seller_package_width: payload.package_width,
         seller_package_length: payload.package_length,
@@ -211,7 +223,6 @@ export function CreateListingModal({ open, onOpenChange }: CreateListingModalPro
         // Metadados
         source: 'create_listing_v2',
         source_url: sourceUrl,
-        anti_catalog_enabled: true,
         
         copy_title: true,
         copy_description: true,
@@ -439,9 +450,11 @@ export function CreateListingModal({ open, onOpenChange }: CreateListingModalPro
               </TabsContent>
               
               <TabsContent value="identifiers" className="mt-0">
-                {snapshot && (
+                {snapshot && draftManager.draft?.final_payload && (
                   <IdentifiersStep
                     snapshot={snapshot}
+                    payload={draftManager.draft.final_payload}
+                    onPayloadChange={handlePayloadChange}
                     onBack={handleBackToLogistics}
                     onContinue={handleContinueFromIdentifiers}
                   />
