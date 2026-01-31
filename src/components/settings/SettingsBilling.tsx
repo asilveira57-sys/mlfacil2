@@ -3,7 +3,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -11,10 +10,10 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2, User, Building, UserCheck, AlertCircle, CheckCircle2, Star } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
 
 interface BillingData {
-  personType: "pf" | "pj";
-  isPreferred: boolean;
+  billingPreference: "pf" | "pj";
   // PF
   cpf: string;
   pfCep: string;
@@ -46,8 +45,7 @@ const SettingsBilling = () => {
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
   const [hasExistingData, setHasExistingData] = useState(false);
   const [billing, setBilling] = useState<BillingData>({
-    personType: "pf",
-    isPreferred: true,
+    billingPreference: "pf",
     cpf: "",
     pfCep: "",
     pfCity: "",
@@ -91,8 +89,7 @@ const SettingsBilling = () => {
         if (billingInfo) {
           setHasExistingData(true);
           setBilling({
-            personType: (billingInfo.person_type as "pf" | "pj") || "pf",
-            isPreferred: billingInfo.is_preferred ?? true,
+            billingPreference: (billingInfo.person_type as "pf" | "pj") || "pf",
             cpf: billingInfo.cpf || "",
             pfCep: billingInfo.pf_cep || "",
             pfCity: billingInfo.pf_city || "",
@@ -120,10 +117,10 @@ const SettingsBilling = () => {
 
   const hasProfileData = profileData && (profileData.cpf || profileData.address_cep);
 
-  const handleAutoFillFromProfile = () => {
+  const handleAutoFillFromProfile = (type: "pf" | "pj") => {
     if (!profileData) return;
 
-    if (billing.personType === "pf") {
+    if (type === "pf") {
       setBilling((prev) => ({
         ...prev,
         cpf: profileData.cpf || prev.cpf,
@@ -206,19 +203,23 @@ const SettingsBilling = () => {
     return numbers.length === 11;
   };
 
+  const isPfComplete = billing.cpf && validateCPF(billing.cpf);
+  const isPjComplete = billing.cnpj && validateCNPJ(billing.cnpj) && billing.razaoSocial;
+
   const handleSave = async () => {
-    if (billing.personType === "pf") {
+    // Validate based on preference
+    if (billing.billingPreference === "pf") {
       if (!billing.cpf || !validateCPF(billing.cpf)) {
-        toast.error("CPF inválido");
+        toast.error("CPF inválido. Preencha o CPF para faturar como Pessoa Física.");
         return;
       }
     } else {
       if (!billing.cnpj || !validateCNPJ(billing.cnpj)) {
-        toast.error("CNPJ inválido");
+        toast.error("CNPJ inválido. Preencha o CNPJ para faturar como Pessoa Jurídica.");
         return;
       }
       if (!billing.razaoSocial) {
-        toast.error("Razão Social é obrigatória");
+        toast.error("Razão Social é obrigatória para faturar como Pessoa Jurídica.");
         return;
       }
     }
@@ -233,8 +234,8 @@ const SettingsBilling = () => {
 
       const billingData = {
         user_id: user.id,
-        person_type: billing.personType,
-        is_preferred: billing.isPreferred,
+        person_type: billing.billingPreference,
+        is_preferred: true,
         cpf: billing.cpf || null,
         pf_cep: billing.pfCep || null,
         pf_city: billing.pfCity || null,
@@ -274,30 +275,6 @@ const SettingsBilling = () => {
     }
   };
 
-  const handleSetAsPreferred = async () => {
-    setBilling((prev) => ({ ...prev, isPreferred: true }));
-    
-    // If already has existing data, update immediately
-    if (hasExistingData) {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-
-        await supabase
-          .from("billing_info")
-          .update({ is_preferred: true })
-          .eq("user_id", user.id);
-
-        toast.success("Preferência de faturamento definida!");
-      } catch (err) {
-        console.error("Error updating preference:", err);
-        toast.error("Erro ao atualizar preferência");
-      }
-    } else {
-      toast.info("Salve os dados para definir a preferência");
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -306,33 +283,29 @@ const SettingsBilling = () => {
     );
   }
 
-  const isDataComplete = billing.personType === "pf" 
-    ? (billing.cpf && validateCPF(billing.cpf))
-    : (billing.cnpj && validateCNPJ(billing.cnpj) && billing.razaoSocial);
+  const isCurrentPreferenceComplete = billing.billingPreference === "pf" ? isPfComplete : isPjComplete;
 
   return (
     <div className="space-y-6">
       {/* Status Card */}
-      {hasExistingData && isDataComplete && (
-        <Alert className="border-green-200 bg-green-50 text-green-800">
+      {hasExistingData && isCurrentPreferenceComplete && (
+        <Alert className="border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-400">
           <CheckCircle2 className="h-4 w-4" />
-          <AlertDescription className="flex items-center justify-between">
+          <AlertDescription className="flex items-center gap-2">
             <span>
-              Dados de faturamento configurados como{" "}
-              <strong>{billing.personType === "pf" ? "Pessoa Física" : "Pessoa Jurídica"}</strong>
-              {billing.isPreferred && (
-                <Badge variant="secondary" className="ml-2 bg-green-100 text-green-700">
-                  <Star className="mr-1 h-3 w-3" />
-                  Preferência Ativa
-                </Badge>
-              )}
+              Faturamento configurado para{" "}
+              <strong>{billing.billingPreference === "pf" ? "Pessoa Física (CPF)" : "Pessoa Jurídica (CNPJ)"}</strong>
             </span>
+            <Badge variant="secondary" className="bg-green-500/20 text-green-700 dark:text-green-400">
+              <Star className="mr-1 h-3 w-3" />
+              Ativo
+            </Badge>
           </AlertDescription>
         </Alert>
       )}
 
       {!hasExistingData && (
-        <Alert className="border-amber-200 bg-amber-50 text-amber-800">
+        <Alert className="border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
             <strong>Dados de faturamento obrigatórios:</strong> Configure seus dados fiscais para poder contratar um plano e receber notas fiscais.
@@ -340,272 +313,332 @@ const SettingsBilling = () => {
         </Alert>
       )}
 
-      {/* Person Type Selection */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Tipo de Pessoa</CardTitle>
+      {/* Billing Preference Selection - PROMINENT */}
+      <Card className="border-2 border-primary/20">
+        <CardHeader className="pb-4">
+          <CardTitle className="flex items-center gap-2">
+            <Star className="h-5 w-5 text-primary" />
+            Faturar para
+          </CardTitle>
           <CardDescription>
-            Selecione o tipo de pessoa para faturamento e emissão de notas fiscais
+            Selecione como deseja receber suas notas fiscais. Esta é a preferência que será usada no checkout.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <RadioGroup
-            value={billing.personType}
-            onValueChange={(v) => setBilling((p) => ({ ...p, personType: v as "pf" | "pj" }))}
-            className="flex gap-6"
-          >
-            <div className="flex items-center space-x-3">
-              <RadioGroupItem value="pf" id="pf" />
-              <Label htmlFor="pf" className="flex items-center gap-2 cursor-pointer">
-                <User className="h-4 w-4" />
-                Pessoa Física
-              </Label>
-            </div>
-            <div className="flex items-center space-x-3">
-              <RadioGroupItem value="pj" id="pj" />
-              <Label htmlFor="pj" className="flex items-center gap-2 cursor-pointer">
-                <Building className="h-4 w-4" />
-                Pessoa Jurídica
-              </Label>
-            </div>
-          </RadioGroup>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {/* PF Option */}
+            <button
+              type="button"
+              onClick={() => setBilling((p) => ({ ...p, billingPreference: "pf" }))}
+              className={cn(
+                "relative flex flex-col items-center gap-3 rounded-lg border-2 p-6 transition-all hover:bg-accent/50",
+                billing.billingPreference === "pf"
+                  ? "border-primary bg-primary/5 shadow-md"
+                  : "border-border hover:border-primary/50"
+              )}
+            >
+              {billing.billingPreference === "pf" && (
+                <div className="absolute -top-2 -right-2">
+                  <Badge className="bg-primary text-primary-foreground">
+                    <CheckCircle2 className="mr-1 h-3 w-3" />
+                    Selecionado
+                  </Badge>
+                </div>
+              )}
+              <div className={cn(
+                "flex h-14 w-14 items-center justify-center rounded-full",
+                billing.billingPreference === "pf" ? "bg-primary text-primary-foreground" : "bg-muted"
+              )}>
+                <User className="h-7 w-7" />
+              </div>
+              <div className="text-center">
+                <h3 className="font-semibold text-lg">Pessoa Física</h3>
+                <p className="text-sm text-muted-foreground">Faturar no CPF</p>
+              </div>
+              {isPfComplete && (
+                <Badge variant="outline" className="mt-1 border-green-500/50 text-green-600">
+                  <CheckCircle2 className="mr-1 h-3 w-3" />
+                  Dados preenchidos
+                </Badge>
+              )}
+              {!isPfComplete && (
+                <Badge variant="outline" className="mt-1 border-amber-500/50 text-amber-600">
+                  <AlertCircle className="mr-1 h-3 w-3" />
+                  Preencher dados
+                </Badge>
+              )}
+            </button>
+
+            {/* PJ Option */}
+            <button
+              type="button"
+              onClick={() => setBilling((p) => ({ ...p, billingPreference: "pj" }))}
+              className={cn(
+                "relative flex flex-col items-center gap-3 rounded-lg border-2 p-6 transition-all hover:bg-accent/50",
+                billing.billingPreference === "pj"
+                  ? "border-primary bg-primary/5 shadow-md"
+                  : "border-border hover:border-primary/50"
+              )}
+            >
+              {billing.billingPreference === "pj" && (
+                <div className="absolute -top-2 -right-2">
+                  <Badge className="bg-primary text-primary-foreground">
+                    <CheckCircle2 className="mr-1 h-3 w-3" />
+                    Selecionado
+                  </Badge>
+                </div>
+              )}
+              <div className={cn(
+                "flex h-14 w-14 items-center justify-center rounded-full",
+                billing.billingPreference === "pj" ? "bg-primary text-primary-foreground" : "bg-muted"
+              )}>
+                <Building className="h-7 w-7" />
+              </div>
+              <div className="text-center">
+                <h3 className="font-semibold text-lg">Pessoa Jurídica</h3>
+                <p className="text-sm text-muted-foreground">Faturar no CNPJ</p>
+              </div>
+              {isPjComplete && (
+                <Badge variant="outline" className="mt-1 border-green-500/50 text-green-600">
+                  <CheckCircle2 className="mr-1 h-3 w-3" />
+                  Dados preenchidos
+                </Badge>
+              )}
+              {!isPjComplete && (
+                <Badge variant="outline" className="mt-1 border-amber-500/50 text-amber-600">
+                  <AlertCircle className="mr-1 h-3 w-3" />
+                  Preencher dados
+                </Badge>
+              )}
+            </button>
+          </div>
         </CardContent>
       </Card>
 
       {/* PF Form */}
-      {billing.personType === "pf" && (
-        <Card>
-          <CardHeader className="flex flex-row items-start justify-between space-y-0">
-            <div className="space-y-1">
-              <CardTitle>Dados Pessoa Física</CardTitle>
-              <CardDescription>Dados para emissão de nota fiscal como pessoa física</CardDescription>
+      <Card className={cn(
+        "transition-all",
+        billing.billingPreference === "pf" ? "ring-2 ring-primary/30" : "opacity-75"
+      )}>
+        <CardHeader className="flex flex-row items-start justify-between space-y-0">
+          <div className="space-y-1">
+            <CardTitle className="flex items-center gap-2">
+              <User className="h-5 w-5" />
+              Dados Pessoa Física
+              {billing.billingPreference === "pf" && (
+                <Badge variant="default" className="ml-2">Ativo</Badge>
+              )}
+            </CardTitle>
+            <CardDescription>Dados para emissão de nota fiscal como pessoa física</CardDescription>
+          </div>
+          {hasProfileData && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleAutoFillFromProfile("pf")}
+              disabled={loadingProfile}
+              className="shrink-0"
+            >
+              <UserCheck className="mr-2 h-4 w-4" />
+              Preencher com Perfil
+            </Button>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="pf-cpf">CPF *</Label>
+              <Input
+                id="pf-cpf"
+                value={billing.cpf}
+                onChange={(e) => setBilling((p) => ({ ...p, cpf: formatCPF(e.target.value) }))}
+                placeholder="000.000.000-00"
+              />
             </div>
-            {hasProfileData ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleAutoFillFromProfile}
-                disabled={loadingProfile}
-                className="shrink-0"
-              >
-                <UserCheck className="mr-2 h-4 w-4" />
-                Preencher com Perfil
-              </Button>
-            ) : (
-              <Alert variant="default" className="w-auto border-amber-200 bg-amber-50 text-amber-800 py-2 px-3">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription className="text-xs">
-                  Preencha seus dados no <strong>Perfil</strong> primeiro
-                </AlertDescription>
-              </Alert>
-            )}
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="pf-cpf">CPF *</Label>
-                <Input
-                  id="pf-cpf"
-                  value={billing.cpf}
-                  onChange={(e) => setBilling((p) => ({ ...p, cpf: formatCPF(e.target.value) }))}
-                  placeholder="000.000.000-00"
-                />
-              </div>
-            </div>
+          </div>
 
-            <Separator />
+          <Separator />
 
-            <h4 className="font-medium text-sm text-muted-foreground">Endereço de Faturamento</h4>
+          <h4 className="font-medium text-sm text-muted-foreground">Endereço de Faturamento</h4>
 
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="space-y-2">
-                <Label htmlFor="pf-cep">CEP</Label>
-                <div className="relative">
-                  <Input
-                    id="pf-cep"
-                    value={billing.pfCep}
-                    onChange={(e) => setBilling((p) => ({ ...p, pfCep: formatCEP(e.target.value) }))}
-                    onBlur={() => handleCepBlur("pfCep")}
-                    placeholder="00000-000"
-                  />
-                  {loadingCep && (
-                    <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
-                  )}
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="pf-city">Município</Label>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="space-y-2">
+              <Label htmlFor="pf-cep">CEP</Label>
+              <div className="relative">
                 <Input
-                  id="pf-city"
-                  value={billing.pfCity}
-                  onChange={(e) => setBilling((p) => ({ ...p, pfCity: e.target.value }))}
-                  placeholder="Cidade"
+                  id="pf-cep"
+                  value={billing.pfCep}
+                  onChange={(e) => setBilling((p) => ({ ...p, pfCep: formatCEP(e.target.value) }))}
+                  onBlur={() => handleCepBlur("pfCep")}
+                  placeholder="00000-000"
                 />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="pf-state">UF</Label>
-                <Input
-                  id="pf-state"
-                  value={billing.pfState}
-                  onChange={(e) => setBilling((p) => ({ ...p, pfState: e.target.value }))}
-                  placeholder="UF"
-                  maxLength={2}
-                />
+                {loadingCep && (
+                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+                )}
               </div>
             </div>
-          </CardContent>
-        </Card>
-      )}
+            <div className="space-y-2">
+              <Label htmlFor="pf-city">Município</Label>
+              <Input
+                id="pf-city"
+                value={billing.pfCity}
+                onChange={(e) => setBilling((p) => ({ ...p, pfCity: e.target.value }))}
+                placeholder="Cidade"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pf-state">UF</Label>
+              <Input
+                id="pf-state"
+                value={billing.pfState}
+                onChange={(e) => setBilling((p) => ({ ...p, pfState: e.target.value }))}
+                placeholder="UF"
+                maxLength={2}
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* PJ Form */}
-      {billing.personType === "pj" && (
-        <Card>
-          <CardHeader className="flex flex-row items-start justify-between space-y-0">
-            <div className="space-y-1">
-              <CardTitle>Dados Pessoa Jurídica</CardTitle>
-              <CardDescription>Dados empresariais para emissão de nota fiscal</CardDescription>
+      <Card className={cn(
+        "transition-all",
+        billing.billingPreference === "pj" ? "ring-2 ring-primary/30" : "opacity-75"
+      )}>
+        <CardHeader className="flex flex-row items-start justify-between space-y-0">
+          <div className="space-y-1">
+            <CardTitle className="flex items-center gap-2">
+              <Building className="h-5 w-5" />
+              Dados Pessoa Jurídica
+              {billing.billingPreference === "pj" && (
+                <Badge variant="default" className="ml-2">Ativo</Badge>
+              )}
+            </CardTitle>
+            <CardDescription>Dados empresariais para emissão de nota fiscal</CardDescription>
+          </div>
+          {hasProfileData && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleAutoFillFromProfile("pj")}
+              disabled={loadingProfile}
+              className="shrink-0"
+            >
+              <UserCheck className="mr-2 h-4 w-4" />
+              Preencher Endereço com Perfil
+            </Button>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="pj-cnpj">CNPJ *</Label>
+              <Input
+                id="pj-cnpj"
+                value={billing.cnpj}
+                onChange={(e) => setBilling((p) => ({ ...p, cnpj: formatCNPJ(e.target.value) }))}
+                placeholder="00.000.000/0000-00"
+              />
             </div>
-            {hasProfileData ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleAutoFillFromProfile}
-                disabled={loadingProfile}
-                className="shrink-0"
-              >
-                <UserCheck className="mr-2 h-4 w-4" />
-                Preencher Endereço com Perfil
-              </Button>
-            ) : (
-              <Alert variant="default" className="w-auto border-amber-200 bg-amber-50 text-amber-800 py-2 px-3">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription className="text-xs">
-                  Preencha o endereço no <strong>Perfil</strong> primeiro
-                </AlertDescription>
-              </Alert>
-            )}
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="pj-cnpj">CNPJ *</Label>
-                <Input
-                  id="pj-cnpj"
-                  value={billing.cnpj}
-                  onChange={(e) => setBilling((p) => ({ ...p, cnpj: formatCNPJ(e.target.value) }))}
-                  placeholder="00.000.000/0000-00"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="razao-social">Razão Social *</Label>
-                <Input
-                  id="razao-social"
-                  value={billing.razaoSocial}
-                  onChange={(e) => setBilling((p) => ({ ...p, razaoSocial: e.target.value }))}
-                  placeholder="Razão Social da Empresa"
-                />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="razao-social">Razão Social *</Label>
+              <Input
+                id="razao-social"
+                value={billing.razaoSocial}
+                onChange={(e) => setBilling((p) => ({ ...p, razaoSocial: e.target.value }))}
+                placeholder="Razão Social da Empresa"
+              />
             </div>
+          </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="nome-fantasia">Nome Fantasia</Label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="nome-fantasia">Nome Fantasia</Label>
+              <Input
+                id="nome-fantasia"
+                value={billing.nomeFantasia}
+                onChange={(e) => setBilling((p) => ({ ...p, nomeFantasia: e.target.value }))}
+                placeholder="Nome Fantasia"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ie">Inscrição Estadual</Label>
+              <div className="flex gap-2">
                 <Input
-                  id="nome-fantasia"
-                  value={billing.nomeFantasia}
-                  onChange={(e) => setBilling((p) => ({ ...p, nomeFantasia: e.target.value }))}
-                  placeholder="Nome Fantasia"
+                  id="ie"
+                  value={billing.inscricaoEstadual}
+                  onChange={(e) => setBilling((p) => ({ ...p, inscricaoEstadual: e.target.value }))}
+                  placeholder="Inscrição Estadual"
+                  disabled={billing.isento}
+                  className="flex-1"
                 />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="ie">Inscrição Estadual</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="ie"
-                    value={billing.inscricaoEstadual}
-                    onChange={(e) => setBilling((p) => ({ ...p, inscricaoEstadual: e.target.value }))}
-                    placeholder="Inscrição Estadual"
-                    disabled={billing.isento}
-                    className="flex-1"
+                <div className="flex items-center gap-2 px-3 bg-muted rounded-md">
+                  <Checkbox
+                    id="isento"
+                    checked={billing.isento}
+                    onCheckedChange={(checked) =>
+                      setBilling((p) => ({
+                        ...p,
+                        isento: !!checked,
+                        inscricaoEstadual: checked ? "" : p.inscricaoEstadual,
+                      }))
+                    }
                   />
-                  <div className="flex items-center gap-2 px-3 bg-muted rounded-md">
-                    <Checkbox
-                      id="isento"
-                      checked={billing.isento}
-                      onCheckedChange={(checked) =>
-                        setBilling((p) => ({
-                          ...p,
-                          isento: !!checked,
-                          inscricaoEstadual: checked ? "" : p.inscricaoEstadual,
-                        }))
-                      }
-                    />
-                    <Label htmlFor="isento" className="text-sm cursor-pointer">
-                      Isento
-                    </Label>
-                  </div>
+                  <Label htmlFor="isento" className="text-sm cursor-pointer">
+                    Isento
+                  </Label>
                 </div>
               </div>
             </div>
+          </div>
 
-            <Separator />
+          <Separator />
 
-            <h4 className="font-medium text-sm text-muted-foreground">Endereço da Empresa</h4>
+          <h4 className="font-medium text-sm text-muted-foreground">Endereço da Empresa</h4>
 
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="space-y-2">
-                <Label htmlFor="pj-cep">CEP</Label>
-                <div className="relative">
-                  <Input
-                    id="pj-cep"
-                    value={billing.pjCep}
-                    onChange={(e) => setBilling((p) => ({ ...p, pjCep: formatCEP(e.target.value) }))}
-                    onBlur={() => handleCepBlur("pjCep")}
-                    placeholder="00000-000"
-                  />
-                  {loadingCep && (
-                    <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
-                  )}
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="pj-city">Município</Label>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="space-y-2">
+              <Label htmlFor="pj-cep">CEP</Label>
+              <div className="relative">
                 <Input
-                  id="pj-city"
-                  value={billing.pjCity}
-                  onChange={(e) => setBilling((p) => ({ ...p, pjCity: e.target.value }))}
-                  placeholder="Cidade"
+                  id="pj-cep"
+                  value={billing.pjCep}
+                  onChange={(e) => setBilling((p) => ({ ...p, pjCep: formatCEP(e.target.value) }))}
+                  onBlur={() => handleCepBlur("pjCep")}
+                  placeholder="00000-000"
                 />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="pj-state">UF</Label>
-                <Input
-                  id="pj-state"
-                  value={billing.pjState}
-                  onChange={(e) => setBilling((p) => ({ ...p, pjState: e.target.value }))}
-                  placeholder="UF"
-                  maxLength={2}
-                />
+                {loadingCep && (
+                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+                )}
               </div>
             </div>
-          </CardContent>
-        </Card>
-      )}
+            <div className="space-y-2">
+              <Label htmlFor="pj-city">Município</Label>
+              <Input
+                id="pj-city"
+                value={billing.pjCity}
+                onChange={(e) => setBilling((p) => ({ ...p, pjCity: e.target.value }))}
+                placeholder="Cidade"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pj-state">UF</Label>
+              <Input
+                id="pj-state"
+                value={billing.pjState}
+                onChange={(e) => setBilling((p) => ({ ...p, pjState: e.target.value }))}
+                placeholder="UF"
+                maxLength={2}
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <Separator />
 
       {/* Actions */}
       <div className="flex flex-col sm:flex-row gap-3 justify-end">
-        {hasExistingData && !billing.isPreferred && (
-          <Button 
-            variant="outline" 
-            onClick={handleSetAsPreferred}
-            disabled={!isDataComplete}
-          >
-            <Star className="mr-2 h-4 w-4" />
-            Definir como Preferência de Faturamento
-          </Button>
-        )}
         <Button onClick={handleSave} disabled={saving} size="lg">
           {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Salvar Dados Fiscais
