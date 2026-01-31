@@ -319,10 +319,9 @@ function mapMlAccountToUnified(row: Record<string, unknown>): UnifiedMarketplace
     }
   }
   
-  // If explicitly marked as inactive, treat as disconnected
-  if (!isActive && connectionStatus === 'connected') {
-    connectionStatus = 'disconnected';
-  }
+  // NOTE: We do NOT downgrade status based on is_active flag anymore.
+  // is_active only indicates which account is "selected" for the UI, not connection health.
+  // connection_status is the single source of truth for connection state.
 
   return {
     id: row.id as string,
