@@ -548,43 +548,65 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
       }
       
       if (!execResult?.success) {
-        // Verificar se é erro de AUTH_EXPIRED
-        const errorCode = execResult?.result?.error;
-        const requiresReconnection = execResult?.result?.requires_reconnection;
+        const result = execResult?.result;
+        const errorCode = result?.error;
+        const requiresReconnection = result?.requires_reconnection;
         
-        if (errorCode === 'AUTH_EXPIRED' || requiresReconnection) {
-          setError('Token expirado. Reconecte a conta do Mercado Livre para continuar.');
+        // Verificar se é erro de AUTH_EXPIRED ou UNAUTHORIZED
+        if (errorCode === 'AUTH_EXPIRED' || errorCode === 'UNAUTHORIZED' || 
+            errorCode === 'ML_ACCOUNT_MISSING_TOKEN' || requiresReconnection) {
+          setError('Token expirado ou conta desconectada. Reconecte a conta do Mercado Livre para continuar.');
           setAuthExpired(true);
+          setLoading(false);
           return;
         }
         
-        // Extrair a melhor mensagem possível (evitar "body.invalid_fields" genérico)
-        const apiError = execResult?.result?.api_error;
-        const deepMsg =
-          apiError?.error ||
-          apiError?.message ||
-          execResult?.result?.message ||
-          execResult?.result?.error ||
-          'Falha na clonagem';
-        const userGuidance = execResult?.result?.user_guidance;
+        // Verificar se é erro de catálogo que requer estratégia diferente
+        const isCatalogError = errorCode === 'CATALOG_TITLE_BLOCKED' || 
+                               errorCode === 'CATALOG_PICTURES_BLOCKED';
         
-        // Se CATALOG_FALLBACK foi usado, mencionar
-        if (execResult?.result?.catalog_fallback?.title_fallback_used) {
-          const titleUpdateStatus = execResult.result.catalog_fallback.post_create_title_update;
+        // Extrair a melhor mensagem possível
+        const apiError = result?.api_error;
+        let deepMsg = '';
+        let userGuidance = result?.user_guidance || '';
+        
+        // Priorizar mensagens amigáveis para erros de catálogo
+        if (isCatalogError) {
+          deepMsg = result?.message || 'Este anúncio está vinculado ao catálogo do Mercado Livre.';
+        } else if (apiError?.message?.includes('body.invalid_fields')) {
+          // Melhorar mensagem de body.invalid_fields
+          deepMsg = 'O Mercado Livre bloqueou alguns campos deste anúncio. Este item pode estar vinculado ao catálogo.';
+          userGuidance = result?.user_guidance || 
+            'Itens de catálogo têm título, fotos e descrição controlados pelo Mercado Livre. Tente clonar outro anúncio ou entre em contato com o suporte.';
+        } else {
+          deepMsg = apiError?.error ||
+            apiError?.message ||
+            result?.message ||
+            result?.error ||
+            'Falha na clonagem';
+        }
+        
+        // Se CATALOG_FALLBACK foi usado com sucesso, não é erro
+        if (result?.catalog_fallback?.title_fallback_used && result?.new_item_id) {
+          const titleUpdateStatus = result.catalog_fallback.post_create_title_update;
           if (titleUpdateStatus === 'blocked_or_not_allowed') {
-            toast.warning('Aviso: Título não pôde ser atualizado', {
+            toast.warning('Aviso: Título não pôde ser personalizado', {
               description: 'O item foi criado, mas o título é controlado pelo catálogo.',
             });
           }
+          // Continuar para sucesso
+        } else {
+          // É erro real
+          setError(userGuidance ? `${deepMsg}\n\n${userGuidance}` : deepMsg);
+          setLoading(false);
+          return;
         }
-        
-        throw new Error(userGuidance ? `${deepMsg}\n\n${userGuidance}` : deepMsg);
       }
       
       // Success!
       const statusMsg = formData.create_paused ? '(pausado)' : '(ativo)';
       toast.success('Anúncio clonado com sucesso!', {
-        description: `Novo ID: ${execResult.result?.new_item_id} ${statusMsg}`,
+        description: `Novo ID: ${execResult?.result?.new_item_id} ${statusMsg}`,
       });
       
       queryClient.invalidateQueries({ queryKey: ['ad-lifecycle-actions'] });
@@ -1029,22 +1051,25 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
           </div>
         </ScrollArea>
 
-        {/* Error banner (sempre visível, não depende do scroll) */}
+        {/* Error banner (sempre visível e fixo, não depende do scroll) */}
         {error && (
-          <div className="px-6 pb-3 shrink-0">
-            <div className="flex flex-col gap-3 p-3 rounded-md bg-destructive/10 border border-destructive/30">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
-                <p className="text-sm text-destructive whitespace-pre-wrap">{error}</p>
+          <div className="px-6 pb-3 shrink-0 border-t border-destructive/20">
+            <div className="flex flex-col gap-3 p-4 rounded-md bg-destructive/10 border border-destructive/30 mt-3">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-destructive mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-destructive">Erro na clonagem</p>
+                  <p className="text-sm text-destructive/80 mt-1 whitespace-pre-wrap break-words">{error}</p>
+                </div>
               </div>
               {authExpired && (
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-3 pt-2 border-t border-destructive/20">
                   <p className="text-xs text-muted-foreground">
-                    Seu formulário será preservado. Após reconectar, volte e clique em "Executar Clonagem" novamente.
+                    💾 Seu formulário será preservado automaticamente. Após reconectar, volte aqui e o clone continuará de onde parou.
                   </p>
                   <Button 
                     variant="destructive" 
-                    size="sm"
+                    size="default"
                     onClick={() => {
                       // Salvar dados no sessionStorage antes de navegar
                       sessionStorage.setItem('clone_form_backup', JSON.stringify({
@@ -1056,9 +1081,9 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
                       }));
                       window.location.href = '/configuracoes';
                     }}
-                    className="self-start"
+                    className="w-full sm:w-auto"
                   >
-                    Reconectar Mercado Livre
+                    🔗 Reconectar Mercado Livre
                   </Button>
                 </div>
               )}

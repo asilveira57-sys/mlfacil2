@@ -683,6 +683,22 @@ async function validateAndRefreshTokenIfNeeded(
   };
 }
 
+// ============================================================================
+// ATRIBUTOS QUE FORÇAM VÍNCULO COM CATÁLOGO - REMOVER SEMPRE em createAsNormal=true
+// Estes atributos fazem o ML associar automaticamente o anúncio ao catálogo,
+// bloqueando edição de título, fotos e descrição
+// ============================================================================
+const CATALOG_FORCING_ATTRIBUTE_IDS = new Set([
+  "GTIN",        // Código de barras EAN/UPC/GTIN
+  "EAN",         // European Article Number
+  "UPC",         // Universal Product Code
+  "ISBN",        // International Standard Book Number
+  "MPN",         // Manufacturer Part Number
+  "PART_NUMBER", // Número de peça
+  "ALPHANUMERIC_MODEL", // Modelo alfanumérico
+  "MANUFACTURER_CODE", // Código do fabricante
+]);
+
 function normalizeAndCleanAttributes(
   sourceAttributes: any[],
   categoryAttributes: CategoryAttribute[],
@@ -709,7 +725,7 @@ function normalizeAndCleanAttributes(
 
     // REGRA CRÍTICA: Ao criar como anúncio normal, REMOVER atributos que forçam catálogo
     // Isso evita o erro "body.invalid_fields" para title
-    if (createAsNormal && CATALOG_FORCING_ATTRIBUTES.has(attrIdUpper)) {
+    if (createAsNormal && CATALOG_FORCING_ATTRIBUTE_IDS.has(attrIdUpper)) {
       console.log(`[ad-action-execute] Attr ${attr.id}: REMOVED (forces catalog binding in normal clone)`);
       removedCatalogForcing.push(attr.id);
       continue;
