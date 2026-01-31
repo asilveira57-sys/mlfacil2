@@ -121,6 +121,9 @@ export function ReferenceTab({
                 <p>ID: {snapshot.item_id}</p>
                 <p>Categoria: {snapshot.category_id}</p>
                 <p>Fotos: {snapshot.pictures?.length || 0}</p>
+                {snapshot.description && (
+                  <p className="text-primary">✓ Descrição capturada</p>
+                )}
                 {snapshot.variations && snapshot.variations.length > 0 && (
                   <p>Variações: {snapshot.variations.length}</p>
                 )}
