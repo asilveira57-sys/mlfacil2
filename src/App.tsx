@@ -40,6 +40,7 @@ import AdTimelineRadar from "./pages/AdTimelineRadar";
 import AdTimelineDetail from "./pages/AdTimelineDetail";
 import AdActionsCenter from "./pages/AdActionsCenter";
 import Send from "./pages/Send";
+import FreightManagement from "./pages/FreightManagement";
 import NotFound from "./pages/NotFound";
 import { AdminRoute } from "./components/auth/AdminRoute";
 
@@ -154,6 +155,7 @@ const App = () => {
                   <Route path="/send" element={<Send />} />
                   <Route path="/send/:itemId" element={<Send />} />
                   <Route path="/send/sementes" element={<Send />} />
+                  <Route path="/frete" element={<FreightManagement />} />
 
                   {/* Admin routes (also inside persistent shell) */}
                   <Route path="/admin/*" element={<AdminRoute><Admin /></AdminRoute>} />

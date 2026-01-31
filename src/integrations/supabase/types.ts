@@ -2982,6 +2982,308 @@ export type Database = {
         }
         Relationships: []
       }
+      freight_bulk_jobs: {
+        Row: {
+          completed_at: string | null
+          context_config: Json | null
+          created_at: string
+          error_details: Json | null
+          error_items: number | null
+          filters: Json | null
+          id: string
+          job_type: string
+          processed_items: number | null
+          ruleset_id: string | null
+          seller_id: string
+          skipped_items: number | null
+          started_at: string | null
+          status: string
+          total_items: number | null
+          updated_items: number | null
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          context_config?: Json | null
+          created_at?: string
+          error_details?: Json | null
+          error_items?: number | null
+          filters?: Json | null
+          id?: string
+          job_type?: string
+          processed_items?: number | null
+          ruleset_id?: string | null
+          seller_id: string
+          skipped_items?: number | null
+          started_at?: string | null
+          status?: string
+          total_items?: number | null
+          updated_items?: number | null
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          context_config?: Json | null
+          created_at?: string
+          error_details?: Json | null
+          error_items?: number | null
+          filters?: Json | null
+          id?: string
+          job_type?: string
+          processed_items?: number | null
+          ruleset_id?: string | null
+          seller_id?: string
+          skipped_items?: number | null
+          started_at?: string | null
+          status?: string
+          total_items?: number | null
+          updated_items?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      freight_divergence_log: {
+        Row: {
+          ad_type: string | null
+          charged_shipping_value: number | null
+          created_at: string
+          divergence_reason: string | null
+          expected_shipping_value: number | null
+          id: string
+          item_id: string
+          logistic_mode: string | null
+          order_date: string
+          order_id: string
+          paid_shipping_value: number | null
+          product_price: number | null
+          product_weight: number | null
+          resolution_notes: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          ruleset_id: string | null
+          seller_id: string
+          shipping_diff_percent: number | null
+          shipping_diff_value: number | null
+          shipping_flag: string
+          updated_at: string
+          user_id: string
+          variation_id: string | null
+        }
+        Insert: {
+          ad_type?: string | null
+          charged_shipping_value?: number | null
+          created_at?: string
+          divergence_reason?: string | null
+          expected_shipping_value?: number | null
+          id?: string
+          item_id: string
+          logistic_mode?: string | null
+          order_date: string
+          order_id: string
+          paid_shipping_value?: number | null
+          product_price?: number | null
+          product_weight?: number | null
+          resolution_notes?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          ruleset_id?: string | null
+          seller_id: string
+          shipping_diff_percent?: number | null
+          shipping_diff_value?: number | null
+          shipping_flag?: string
+          updated_at?: string
+          user_id: string
+          variation_id?: string | null
+        }
+        Update: {
+          ad_type?: string | null
+          charged_shipping_value?: number | null
+          created_at?: string
+          divergence_reason?: string | null
+          expected_shipping_value?: number | null
+          id?: string
+          item_id?: string
+          logistic_mode?: string | null
+          order_date?: string
+          order_id?: string
+          paid_shipping_value?: number | null
+          product_price?: number | null
+          product_weight?: number | null
+          resolution_notes?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          ruleset_id?: string | null
+          seller_id?: string
+          shipping_diff_percent?: number | null
+          shipping_diff_value?: number | null
+          shipping_flag?: string
+          updated_at?: string
+          user_id?: string
+          variation_id?: string | null
+        }
+        Relationships: []
+      }
+      freight_rule_lines: {
+        Row: {
+          ad_type: string
+          created_at: string
+          dimensions_limit_policy: string | null
+          dimensions_limit_value: number | null
+          id: string
+          is_free_shipping: boolean | null
+          logistic_mode: string
+          notes: string | null
+          price_band_max: number | null
+          price_band_min: number
+          ruleset_id: string
+          seller_pays_formula: string | null
+          seller_pays_value: number
+          sort_order: number | null
+          subsidy_type: string
+          subsidy_value: number | null
+          weight_max: number | null
+          weight_min: number
+        }
+        Insert: {
+          ad_type?: string
+          created_at?: string
+          dimensions_limit_policy?: string | null
+          dimensions_limit_value?: number | null
+          id?: string
+          is_free_shipping?: boolean | null
+          logistic_mode: string
+          notes?: string | null
+          price_band_max?: number | null
+          price_band_min?: number
+          ruleset_id: string
+          seller_pays_formula?: string | null
+          seller_pays_value?: number
+          sort_order?: number | null
+          subsidy_type?: string
+          subsidy_value?: number | null
+          weight_max?: number | null
+          weight_min?: number
+        }
+        Update: {
+          ad_type?: string
+          created_at?: string
+          dimensions_limit_policy?: string | null
+          dimensions_limit_value?: number | null
+          id?: string
+          is_free_shipping?: boolean | null
+          logistic_mode?: string
+          notes?: string | null
+          price_band_max?: number | null
+          price_band_min?: number
+          ruleset_id?: string
+          seller_pays_formula?: string | null
+          seller_pays_value?: number
+          sort_order?: number | null
+          subsidy_type?: string
+          subsidy_value?: number | null
+          weight_max?: number | null
+          weight_min?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "freight_rule_lines_ruleset_id_fkey"
+            columns: ["ruleset_id"]
+            isOneToOne: false
+            referencedRelation: "freight_rulesets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      freight_rulesets: {
+        Row: {
+          country: string
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          marketplace: string
+          name: string
+          status: string
+          updated_at: string
+          valid_from: string
+          valid_until: string | null
+        }
+        Insert: {
+          country?: string
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          marketplace?: string
+          name: string
+          status?: string
+          updated_at?: string
+          valid_from: string
+          valid_until?: string | null
+        }
+        Update: {
+          country?: string
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          marketplace?: string
+          name?: string
+          status?: string
+          updated_at?: string
+          valid_from?: string
+          valid_until?: string | null
+        }
+        Relationships: []
+      }
+      freight_settings: {
+        Row: {
+          active_ruleset_id: string | null
+          comparison_mode: string | null
+          created_at: string
+          id: string
+          profile_a_dimensions_sum: number | null
+          profile_a_weight_max: number | null
+          profile_b_dimensions_sum: number | null
+          profile_b_weight_max: number | null
+          seller_id: string
+          tolerance_percent: number | null
+          tolerance_value: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          active_ruleset_id?: string | null
+          comparison_mode?: string | null
+          created_at?: string
+          id?: string
+          profile_a_dimensions_sum?: number | null
+          profile_a_weight_max?: number | null
+          profile_b_dimensions_sum?: number | null
+          profile_b_weight_max?: number | null
+          seller_id: string
+          tolerance_percent?: number | null
+          tolerance_value?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          active_ruleset_id?: string | null
+          comparison_mode?: string | null
+          created_at?: string
+          id?: string
+          profile_a_dimensions_sum?: number | null
+          profile_a_weight_max?: number | null
+          profile_b_dimensions_sum?: number | null
+          profile_b_weight_max?: number | null
+          seller_id?: string
+          tolerance_percent?: number | null
+          tolerance_value?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       highlights_items: {
         Row: {
           created_at: string
@@ -4197,10 +4499,18 @@ export type Database = {
           condition: string | null
           created_at: string
           currency_id: string | null
+          dimensions_source: string | null
+          expected_freight_cost: number | null
+          expected_freight_ruleset_id: string | null
+          expected_freight_updated_at: string | null
+          freight_calculation_notes: string | null
+          freight_profile: string | null
           health: number | null
+          height_cm: number | null
           id: string
           item_id: string
           last_sync_at: string
+          length_cm: number | null
           listing_type_id: string | null
           logistic_type: string | null
           original_price: number | null
@@ -4215,6 +4525,8 @@ export type Database = {
           title_short: string | null
           user_id: string
           variation_id: string
+          weight_kg: number | null
+          width_cm: number | null
         }
         Insert: {
           available_quantity?: number | null
@@ -4223,10 +4535,18 @@ export type Database = {
           condition?: string | null
           created_at?: string
           currency_id?: string | null
+          dimensions_source?: string | null
+          expected_freight_cost?: number | null
+          expected_freight_ruleset_id?: string | null
+          expected_freight_updated_at?: string | null
+          freight_calculation_notes?: string | null
+          freight_profile?: string | null
           health?: number | null
+          height_cm?: number | null
           id?: string
           item_id: string
           last_sync_at?: string
+          length_cm?: number | null
           listing_type_id?: string | null
           logistic_type?: string | null
           original_price?: number | null
@@ -4241,6 +4561,8 @@ export type Database = {
           title_short?: string | null
           user_id: string
           variation_id?: string
+          weight_kg?: number | null
+          width_cm?: number | null
         }
         Update: {
           available_quantity?: number | null
@@ -4249,10 +4571,18 @@ export type Database = {
           condition?: string | null
           created_at?: string
           currency_id?: string | null
+          dimensions_source?: string | null
+          expected_freight_cost?: number | null
+          expected_freight_ruleset_id?: string | null
+          expected_freight_updated_at?: string | null
+          freight_calculation_notes?: string | null
+          freight_profile?: string | null
           health?: number | null
+          height_cm?: number | null
           id?: string
           item_id?: string
           last_sync_at?: string
+          length_cm?: number | null
           listing_type_id?: string | null
           logistic_type?: string | null
           original_price?: number | null
@@ -4267,6 +4597,8 @@ export type Database = {
           title_short?: string | null
           user_id?: string
           variation_id?: string
+          weight_kg?: number | null
+          width_cm?: number | null
         }
         Relationships: []
       }
