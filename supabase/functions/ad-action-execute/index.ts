@@ -37,33 +37,33 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 // ============================================================================
 // DEFAULTS DE ATRIBUTOS POR CATEGORIA (tabela interna)
 // Chave: (categoryId, attrId) → value_id ou value_name
+// NOTA: family_name é enviado SOMENTE se a API retornar body.required_fields pedindo
 // ============================================================================
 const CATEGORY_ATTRIBUTE_DEFAULTS: Record<string, Record<string, { value_name?: string; value_id?: string }>> = {
   // Defaults genéricos aplicáveis a múltiplas categorias
   "*": {
-    "FAMILY_NAME": { value_name: "Produto genérico" },
     "IS_FLAMMABLE": { value_name: "Não" },
     "IS_FRAGILE": { value_name: "Não" },
     "HAS_FRAGRANCE": { value_name: "Não" },
     "CONTAINS_LATEX": { value_name: "Não" },
   },
   // Defaults específicos por categoria (expandir via Admin futuramente)
-  "MLB1051": { "FAMILY_NAME": { value_name: "Etiquetas adesivas" } },
-  "MLB1684": { "FAMILY_NAME": { value_name: "Etiquetas impressas" } },
-  "MLB1953": { "FAMILY_NAME": { value_name: "Impressoras térmicas" } },
+  "MLB1051": { },
+  "MLB1684": { },
+  "MLB1953": { },
 };
 
 // ============================================================================
-// BODY-LEVEL REQUIRED FIELDS: Campos obrigatórios no body raiz, NÃO em attributes[]
-// A API exige que esses campos estejam no root do JSON payload
+// BODY-LEVEL FIELDS: Campos que podem ir no body raiz
+// family_name: NUNCA enviar por padrão. Só enviar se a API pedir após erro.
+// catalog_listing: NUNCA enviar (v3)
 // ============================================================================
 const BODY_LEVEL_REQUIRED_FIELDS: Record<string, { 
   fallbackFromTitle?: boolean;
   defaultValue?: string;
   maxLength?: number;
 }> = {
-  family_name: { fallbackFromTitle: true, maxLength: 60 },
-  // Adicionar outros campos body-level conforme descobertos
+  // family_name REMOVIDO do padrão - só será adicionado via retry se API exigir
 };
 
 // Lista de alias (case-insensitive) para cada campo body-level
@@ -77,16 +77,23 @@ const BODY_LEVEL_FIELDS = new Set<string>(
 );
 
 // Whitelist de campos permitidos no body raiz (sanitizer)
+// REMOVIDO: catalog_listing, family_name - nunca enviar por padrão (v3)
 const ALLOWED_BODY_FIELDS = new Set([
   "title", "category_id", "currency_id", "listing_type_id", "condition",
   "pictures", "price", "available_quantity", "attributes", "description",
   "buying_mode", "sale_terms", "shipping", "variations", "status",
-  // Para catálogo (opcional)
-  "catalog_product_id",
-  // CRÍTICO: catalog_listing: false força anúncio normal
+  // Para catálogo (opcional) - removido catalog_product_id para anti-catálogo
+  // "catalog_product_id",
+  // REMOVIDO: "catalog_listing" - v3 anti-catálogo não envia este campo
+  // REMOVIDO: "family_name" - v3 anti-catálogo não envia por padrão
+]);
+
+// CAMPOS PROIBIDOS NO ANTI-CATÁLOGO v3 (nunca enviar)
+const ANTI_CATALOG_V3_FORBIDDEN_BODY_FIELDS = new Set([
   "catalog_listing",
-  // Body-level fields (adicionados dinamicamente)
-  "family_name",
+  "catalog_product_id",
+  "parent_item_id",
+  "family_name", // Só enviar se API retornar body.required_fields
 ]);
 
 // listing_type_id que exigem pictures - não usar em catálogo com pictures bloqueadas
@@ -189,17 +196,6 @@ function isListingTypeUnavailableError(apiError: any): boolean {
 
 /**
  * resolveListingTypeId - Resolve o listing_type_id com estratégia de fallback
- * PRIORIDADE:
- *   1. Cache da categoria (último tipo que funcionou)
- *   2. Item fonte (se disponível e não é "free")
- *   3. Default do sistema (gold_special)
- *   4. Fallback guiado pela API (se erro ocorreu)
- * 
- * @param sourceListingType - listing_type_id do item fonte (pode ser undefined)
- * @param categoryId - ID da categoria (para cache)
- * @param defaultType - tipo padrão do sistema (gold_special)
- * @param suggestedTypes - tipos sugeridos pela API após erro (ex: [gold_pro, gold_special])
- * @param fallbackIndex - índice do fallback a usar
  */
 function resolveListingTypeId(
   sourceListingType: string | undefined,
@@ -208,11 +204,8 @@ function resolveListingTypeId(
   suggestedTypes: string[] = [],
   fallbackIndex: number = -1
 ): ListingTypeResolution {
-  // =========================================================================
-  // FALLBACK GUIADO PELA API: Usar tipos sugeridos após erro
-  // =========================================================================
+  // FALLBACK GUIADO PELA API
   if (fallbackIndex >= 0 && suggestedTypes.length > 0) {
-    // Priorizar gold_special > gold_pro > resto
     const prioritizedSuggested = [
       ...suggestedTypes.filter(t => t === "gold_special"),
       ...suggestedTypes.filter(t => t === "gold_pro"),
@@ -231,7 +224,6 @@ function resolveListingTypeId(
     }
   }
 
-  // Fallback usando lista padrão (se não houver tipos sugeridos)
   if (fallbackIndex >= 0 && fallbackIndex < DEFAULT_LISTING_TYPE_FALLBACKS.length) {
     return {
       listing_type_id: DEFAULT_LISTING_TYPE_FALLBACKS[fallbackIndex],
@@ -240,9 +232,7 @@ function resolveListingTypeId(
     };
   }
 
-  // =========================================================================
-  // CACHE DA CATEGORIA: Usar último tipo que funcionou
-  // =========================================================================
+  // CACHE DA CATEGORIA
   if (categoryId) {
     const cachedType = listingTypeCacheByCategory.get(categoryId);
     if (cachedType) {
@@ -254,10 +244,7 @@ function resolveListingTypeId(
     }
   }
 
-  // =========================================================================
-  // ITEM FONTE: Usar se disponível e não for "free"
-  // REGRA: Nunca usar "free" como default - evitar erro "unavailable"
-  // =========================================================================
+  // ITEM FONTE
   if (sourceListingType && sourceListingType.trim() && sourceListingType.trim().toLowerCase() !== "free") {
     return {
       listing_type_id: sourceListingType.trim(),
@@ -265,36 +252,25 @@ function resolveListingTypeId(
     };
   }
 
-  // Se fonte é "free", usar default do sistema (gold_special)
   if (sourceListingType && sourceListingType.trim().toLowerCase() === "free") {
     console.log(`[ad-action-execute] Source listing_type is "free" - using default ${defaultType} instead`);
   }
 
-  // =========================================================================
-  // DEFAULT DO SISTEMA: gold_special (configurável via Admin futuro)
-  // =========================================================================
   return {
     listing_type_id: defaultType,
     source: "default",
   };
 }
 
-/**
- * saveListingTypeCacheForCategory - Salva o listing_type_id que funcionou para a categoria
- */
 function saveListingTypeCacheForCategory(categoryId: string, listingTypeId: string): void {
   if (!categoryId || !listingTypeId) return;
   listingTypeCacheByCategory.set(categoryId, listingTypeId);
   console.log(`[ad-action-execute] CACHE SAVE: category ${categoryId} → ${listingTypeId}`);
 }
 
-/**
- * isListingTypeError - Verifica se o erro da API é relacionado a listing_type_id
- */
 function isListingTypeError(apiError: any): boolean {
   if (!apiError) return false;
 
-  // Verificar no cause[]
   if (apiError.cause && Array.isArray(apiError.cause)) {
     for (const cause of apiError.cause) {
       if (
@@ -303,7 +279,6 @@ function isListingTypeError(apiError: any): boolean {
         cause.code?.includes("listing_type") ||
         (cause.message && cause.message.toLowerCase().includes("listing_type"))
       ) {
-        // Verificar se menciona listing_type_id especificamente
         if (
           cause.message?.includes("listing_type_id") ||
           cause.references?.includes("listing_type_id")
@@ -314,7 +289,6 @@ function isListingTypeError(apiError: any): boolean {
     }
   }
 
-  // Verificar na message principal
   if (apiError.message) {
     const msg = apiError.message.toLowerCase();
     if (msg.includes("listing_type_id") && (msg.includes("required") || msg.includes("invalid"))) {
@@ -326,9 +300,7 @@ function isListingTypeError(apiError: any): boolean {
 }
 
 // ============================================================================
-// REGRA OFICIAL DE RESOLUÇÃO:
-// 1. PRIORIDADE MÁXIMA: item_id já é MLB → usar direto
-// 2. MLBU é apenas camada de apresentação - fallback residual
+// REGRA OFICIAL DE RESOLUÇÃO DE CATÁLOGO
 // ============================================================================
 
 function isCatalogId(id: string): boolean {
@@ -477,302 +449,104 @@ interface NormalizedAttribute {
 // ============================================================================
 // ATRIBUTOS PROIBIDOS EM CLONE "NORMAL" (forçam vinculação a catálogo)
 // Se estes atributos forem enviados, a API do ML bloqueia a edição de título/fotos
-// e retorna "body.invalid_fields" para title
 // ============================================================================
 const CATALOG_FORCING_ATTRIBUTES = new Set([
   "GTIN",
-  "EAN",
+  "EAN", 
   "UPC",
   "ISBN",
-  "MPN", // Manufacturer Part Number também pode forçar catálogo
+  "MPN",
+  "PART_NUMBER",
+  "ALPHANUMERIC_MODEL",
+  "MANUFACTURER_CODE",
+  // Não remover SKU/SELLER_SKU aqui - controlado via checklist
 ]);
 
-// ============================================================================
-// HELPER: Detecta erro 401 (token expirado/inválido)
-// ============================================================================
-function is401Error(response: Response): boolean {
-  return response.status === 401;
-}
-
-// ============================================================================
-// HELPER: Detecta erro body.invalid_fields para title
-// ============================================================================
-function isTitleInvalidFieldsError(apiError: any): boolean {
-  if (!apiError) return false;
-  
-  // Verificar no cause[]
-  if (apiError.cause && Array.isArray(apiError.cause)) {
-    for (const cause of apiError.cause) {
-      if (cause.code === "body.invalid_fields" || cause.code === "item.title.invalid") {
-        if (cause.message?.toLowerCase().includes("title")) {
-          return true;
-        }
-      }
-    }
-  }
-  
-  // Verificar na message principal
-  if (apiError.message) {
-    const msg = apiError.message.toLowerCase();
-    if (msg.includes("body.invalid_fields") && msg.includes("title")) {
-      return true;
-    }
-    if (msg.includes("fields [title] are invalid")) {
-      return true;
-    }
-  }
-  
-  return false;
-}
-
-// ============================================================================
-// HELPER: Extrai campos inválidos de body.invalid_fields
-// ============================================================================
-function extractInvalidFields(apiError: any): string[] {
-  const invalidFields: string[] = [];
-  if (!apiError) return invalidFields;
-  
-  // Padrão: "The fields [title] are invalid"
-  const msgMatch = apiError.message?.match(/fields \[([^\]]+)\]/i);
-  if (msgMatch) {
-    const fields = msgMatch[1].split(",").map((f: string) => f.trim().toLowerCase());
-    invalidFields.push(...fields);
-  }
-  
-  // Verificar no cause[]
-  if (apiError.cause && Array.isArray(apiError.cause)) {
-    for (const cause of apiError.cause) {
-      const causeMatch = cause.message?.match(/fields \[([^\]]+)\]/i);
-      if (causeMatch) {
-        const fields = causeMatch[1].split(",").map((f: string) => f.trim().toLowerCase());
-        for (const f of fields) {
-          if (!invalidFields.includes(f)) invalidFields.push(f);
-        }
-      }
-    }
-  }
-  
-  return invalidFields;
-}
-
-// ============================================================================
-// HELPER: Tentar refresh do token de acesso
-// ============================================================================
-async function tryRefreshToken(
-  supabase: any,
-  mlAccountId: string
-): Promise<{ success: boolean; newAccessToken?: string; error?: string }> {
-  try {
-    console.log(`[ad-action-execute] Attempting token refresh for account ${mlAccountId}`);
-    
-    // Buscar refresh_token
-    const { data: account, error: fetchError } = await supabase
-      .from("ml_accounts")
-      .select("refresh_token, ml_user_id")
-      .eq("id", mlAccountId)
-      .single();
-    
-    if (fetchError || !account?.refresh_token) {
-      console.error(`[ad-action-execute] No refresh_token available for account ${mlAccountId}`);
-      return { success: false, error: "NO_REFRESH_TOKEN" };
-    }
-    
-    // Chamar API do ML para refresh
-    const ML_APP_ID = Deno.env.get("ML_APP_ID") || "";
-    const ML_CLIENT_SECRET = Deno.env.get("ML_CLIENT_SECRET") || "";
-    
-    if (!ML_APP_ID || !ML_CLIENT_SECRET) {
-      console.error(`[ad-action-execute] ML_APP_ID or ML_CLIENT_SECRET not configured`);
-      return { success: false, error: "ML_CREDENTIALS_NOT_CONFIGURED" };
-    }
-    
-    const refreshResponse = await fetch("https://api.mercadolibre.com/oauth/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        client_id: ML_APP_ID,
-        client_secret: ML_CLIENT_SECRET,
-        refresh_token: account.refresh_token,
-      }),
-    });
-    
-    if (!refreshResponse.ok) {
-      const errBody = await refreshResponse.text().catch(() => "");
-      console.error(`[ad-action-execute] Token refresh failed: ${refreshResponse.status} - ${errBody}`);
-      return { success: false, error: "REFRESH_FAILED" };
-    }
-    
-    const tokenData = await refreshResponse.json();
-    
-    // Atualizar tokens no banco
-    const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000).toISOString();
-    const { error: updateError } = await supabase
-      .from("ml_accounts")
-      .update({
-        access_token: tokenData.access_token,
-        refresh_token: tokenData.refresh_token || account.refresh_token,
-        token_expires_at: expiresAt,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", mlAccountId);
-    
-    if (updateError) {
-      console.error(`[ad-action-execute] Failed to save refreshed token: ${updateError.message}`);
-      return { success: false, error: "TOKEN_SAVE_FAILED" };
-    }
-    
-    console.log(`[ad-action-execute] Token refreshed successfully for account ${mlAccountId}`);
-    return { success: true, newAccessToken: tokenData.access_token };
-  } catch (err: any) {
-    console.error(`[ad-action-execute] Token refresh exception: ${err.message}`);
-    return { success: false, error: err.message };
-  }
-}
-
-// ============================================================================
-// GUARD DE AUTENTICAÇÃO: Validar e renovar token ANTES de qualquer operação
-// Retorna token válido ou erro de reconexão
-// ============================================================================
-interface TokenValidationResult {
-  valid: boolean;
-  accessToken?: string;
-  error?: string;
-  requires_reconnection?: boolean;
-}
-
-async function validateAndRefreshTokenIfNeeded(
-  accessToken: string,
-  supabase: any,
-  mlAccountId: string
-): Promise<TokenValidationResult> {
-  // 1. Testar token atual com chamada leve (GET /users/me)
-  console.log(`[ad-action-execute] AUTH GUARD: Testing token validity...`);
-  
-  const testResponse = await fetch("https://api.mercadolibre.com/users/me", {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  
-  // 2. Se token válido, retornar sucesso imediato
-  if (testResponse.ok) {
-    console.log(`[ad-action-execute] AUTH GUARD: Token is valid`);
-    return { valid: true, accessToken };
-  }
-  
-  // 3. Se não for 401, é outro tipo de erro (rede, etc)
-  if (testResponse.status !== 401) {
-    console.warn(`[ad-action-execute] AUTH GUARD: Unexpected status ${testResponse.status}`);
-    // Continuar tentando usar o token
-    return { valid: true, accessToken };
-  }
-  
-  // 4. Token inválido (401) - tentar refresh UMA VEZ
-  console.warn(`[ad-action-execute] AUTH GUARD: Token invalid (401) - attempting refresh...`);
-  
-  const refreshResult = await tryRefreshToken(supabase, mlAccountId);
-  
-  if (refreshResult.success && refreshResult.newAccessToken) {
-    console.log(`[ad-action-execute] AUTH GUARD: Token refreshed successfully`);
-    return { valid: true, accessToken: refreshResult.newAccessToken };
-  }
-  
-  // 5. Refresh falhou - exigir reconexão
-  console.error(`[ad-action-execute] AUTH GUARD: Token refresh failed - reconnection required`);
-  return {
-    valid: false,
-    error: "AUTH_EXPIRED",
-    requires_reconnection: true,
-  };
-}
-
-// ============================================================================
-// ATRIBUTOS QUE FORÇAM VÍNCULO COM CATÁLOGO - REMOVER SEMPRE em createAsNormal=true
-// Estes atributos fazem o ML associar automaticamente o anúncio ao catálogo,
-// bloqueando edição de título, fotos e descrição
-// ============================================================================
-const CATALOG_FORCING_ATTRIBUTE_IDS = new Set([
-  "GTIN",        // Código de barras EAN/UPC/GTIN
-  "EAN",         // European Article Number
-  "UPC",         // Universal Product Code
-  "ISBN",        // International Standard Book Number
-  "MPN",         // Manufacturer Part Number
-  "PART_NUMBER", // Número de peça
-  "ALPHANUMERIC_MODEL", // Modelo alfanumérico
-  "MANUFACTURER_CODE", // Código do fabricante
+// ATRIBUTOS ESSENCIAIS: Sempre copiar do item de origem se existirem
+const ESSENTIAL_ATTRIBUTES = new Set([
+  "BRAND",
+  "MODEL",
+  "FINISH",
+  "GRAMMAGE",
+  "PAPER_SIZE",
+  "PAPER_TYPE",
+  // Adicionar outros conforme necessário
 ]);
 
+/**
+ * normalizeAndCleanAttributes - Normaliza e filtra atributos
+ * REGRA v3: Remover ITEM_CONDITION, PACKAGE_*, e identificadores de catálogo
+ */
 function normalizeAndCleanAttributes(
-  sourceAttributes: any[],
+  rawAttributes: any[],
   categoryAttributes: CategoryAttribute[],
   removeNotModifiable: boolean = true,
-  createAsNormal: boolean = true // NOVO: se true, remove atributos que forçam catálogo
-): { attrsById: Map<string, NormalizedAttribute>; cleanedAttrs: NormalizedAttribute[]; removedNotModifiable: string[]; removedCatalogForcing: string[] } {
+  removeCatalogForcing: boolean = true
+): { 
+  attrsById: Map<string, NormalizedAttribute>; 
+  cleanedAttrs: NormalizedAttribute[];
+  removedNotModifiable: string[];
+  removedCatalogForcing: string[];
+} {
   const attrsById = new Map<string, NormalizedAttribute>();
   const cleanedAttrs: NormalizedAttribute[] = [];
   const removedNotModifiable: string[] = [];
   const removedCatalogForcing: string[] = [];
 
-  // Criar mapa de tipos esperados
-  const typeById = new Map<string, string>();
-  const tagsById = new Map<string, any>();
-  for (const catAttr of categoryAttributes) {
-    typeById.set(catAttr.id, catAttr.value_type);
-    tagsById.set(catAttr.id, catAttr.tags || {});
+  // Mapa de atributos da categoria para verificar tags
+  const catAttrById = new Map<string, CategoryAttribute>();
+  for (const attr of categoryAttributes) {
+    catAttrById.set(attr.id, attr);
   }
 
-  for (const attr of sourceAttributes || []) {
+  for (const attr of rawAttributes || []) {
     if (!attr?.id) continue;
 
     const attrIdUpper = attr.id.toUpperCase();
 
-    // REGRA CRÍTICA: Ao criar como anúncio normal, REMOVER atributos que forçam catálogo
-    // Isso evita o erro "body.invalid_fields" para title
-    if (createAsNormal && CATALOG_FORCING_ATTRIBUTE_IDS.has(attrIdUpper)) {
-      console.log(`[ad-action-execute] Attr ${attr.id}: REMOVED (forces catalog binding in normal clone)`);
-      removedCatalogForcing.push(attr.id);
+    // ITEM_CONDITION: Sempre remover (conflita com body.condition)
+    if (attrIdUpper === "ITEM_CONDITION") {
+      removedNotModifiable.push(attr.id);
       continue;
     }
 
-    // Verificar se o atributo é "not modifiable" (read-only) - remover para reduzir warnings
+    // PACKAGE_*: Sempre remover (conflita com SELLER_PACKAGE_*)
+    if (attrIdUpper.startsWith("PACKAGE_") && !attrIdUpper.startsWith("SELLER_PACKAGE")) {
+      removedNotModifiable.push(attr.id);
+      continue;
+    }
+
+    // Remover not-modifiable se solicitado
     if (removeNotModifiable) {
-      const attrTags = tagsById.get(attr.id) || {};
-      // Atributos com read_only ou variation_attribute não devem ser copiados
-      if (attrTags.read_only === true || attrTags.hidden === true) {
-        console.log(`[ad-action-execute] Attr ${attr.id}: skipped (not modifiable/hidden)`);
+      const catAttr = catAttrById.get(attr.id);
+      if ((catAttr?.tags as any)?.not_modifiable === true) {
         removedNotModifiable.push(attr.id);
         continue;
       }
     }
 
-    // 3.1 Limpar atributos inválidos
-    const hasValidValue = 
-      (attr.value_name && attr.value_name.trim() !== "") ||
-      attr.value_id ||
-      attr.value_struct;
-
-    if (!hasValidValue) {
-      console.log(`[ad-action-execute] Attr ${attr.id}: skipped (empty value)`);
+    // Remover atributos que forçam catálogo
+    if (removeCatalogForcing && CATALOG_FORCING_ATTRIBUTES.has(attrIdUpper)) {
+      removedCatalogForcing.push(attr.id);
       continue;
     }
 
-    // Verificar tipo numérico sem valor
-    const expectedType = typeById.get(attr.id);
-    if (expectedType === "number" || expectedType === "number_unit") {
-      if (!attr.value_struct?.number && !attr.value_name) {
-        console.log(`[ad-action-execute] Attr ${attr.id}: skipped (numeric without value)`);
-        continue;
-      }
+    // Normalizar
+    const normalized: NormalizedAttribute = { id: attr.id };
+    
+    // Priorizar value_id se existir
+    if (attr.value_id && attr.value_id !== "-1") {
+      normalized.value_id = attr.value_id;
+    }
+    if (attr.value_name) {
+      normalized.value_name = attr.value_name;
+    }
+    if (attr.value_struct) {
+      normalized.value_struct = attr.value_struct;
     }
 
-    const normalized: NormalizedAttribute = {
-      id: attr.id,
-      value_id: attr.value_id,
-      value_name: attr.value_name,
-      value_struct: attr.value_struct,
-    };
-
-    // 3.2 Evitar duplicados por id (manter o último/mais completo)
-    if (!attrsById.has(attr.id)) {
+    // Só adicionar se tiver algum valor
+    if (normalized.value_id || normalized.value_name || normalized.value_struct) {
       attrsById.set(attr.id, normalized);
       cleanedAttrs.push(normalized);
     }
@@ -791,13 +565,13 @@ interface AttributeFillResult {
   missing: string[];
   bodyLevelFields: Record<string, string>; // Campos que vão no body raiz
   log: Array<{ attrId: string; source: string; value?: string; target: "attributes" | "body" }>;
-  requiredBodyFieldKeys: string[]; // Lista de campos body-level que são required
-  filledBodyByFallback: string[]; // Campos body preenchidos por fallback
-  filledBodyByDefaults: string[]; // Campos body preenchidos por defaults
+  requiredBodyFieldKeys: string[];
+  filledBodyByFallback: string[];
+  filledBodyByDefaults: string[];
 }
 
 interface FillEngineInput {
-  requiredIds: string[]; // IDs de atributos obrigatórios da categoria
+  requiredIds: string[];
   extraBodyFields?: string[]; // Campos body-level adicionais (ex: extraídos do erro da API)
   categoryAttributes: CategoryAttribute[];
   sourceAttrsById: Map<string, NormalizedAttribute>;
@@ -808,6 +582,9 @@ interface FillEngineInput {
 /**
  * Motor único de preenchimento - pode ser chamado múltiplas vezes
  * (preflight validation → fill → second validation)
+ * 
+ * MUDANÇA v3: NÃO preencher family_name por padrão
+ * Só preencher se vier em extraBodyFields (após erro da API)
  */
 function validateAndFillRequiredAttributes(input: FillEngineInput): AttributeFillResult {
   const { requiredIds, extraBodyFields = [], categoryAttributes, sourceAttrsById, itemData, categoryId } = input;
@@ -827,23 +604,18 @@ function validateAndFillRequiredAttributes(input: FillEngineInput): AttributeFil
   }
 
   // =========================================================================
-  // FASE 1: Garantir campos body-level (family_name, etc.)
-  // São tratados PRIMEIRO porque a API os exige no root
+  // FASE 1: Campos body-level - SOMENTE SE VIERAM EM extraBodyFields
+  // v3: Não preencher family_name automaticamente
   // =========================================================================
-  const allBodyFieldKeys = new Set<string>([
-    ...Object.keys(BODY_LEVEL_REQUIRED_FIELDS),
-    ...extraBodyFields.map(f => f.toLowerCase()),
-  ]);
-
-  for (const fieldKey of allBodyFieldKeys) {
-    requiredBodyFieldKeys.push(fieldKey);
+  for (const fieldKey of extraBodyFields) {
+    const fieldKeyLower = fieldKey.toLowerCase();
+    requiredBodyFieldKeys.push(fieldKeyLower);
     
-    const config = BODY_LEVEL_REQUIRED_FIELDS[fieldKey] || {};
     let resolvedValue: string | undefined;
     let source = "";
 
-    // Tentar buscar do item fonte (body-level pode estar nos attributes também)
-    const aliases = BODY_LEVEL_FIELD_ALIASES[fieldKey] || [fieldKey, fieldKey.toUpperCase()];
+    // Tentar buscar do item fonte
+    const aliases = BODY_LEVEL_FIELD_ALIASES[fieldKeyLower] || [fieldKey, fieldKey.toUpperCase()];
     for (const alias of aliases) {
       const sourceAttr = sourceAttrsById.get(alias);
       if (sourceAttr?.value_name) {
@@ -851,7 +623,6 @@ function validateAndFillRequiredAttributes(input: FillEngineInput): AttributeFil
         source = "item_fonte";
         break;
       }
-      // Tentar buscar diretamente dos atributos raw do item
       const rawAttr = itemData.attributes?.find((a: any) => a.id === alias);
       if (rawAttr?.value_name) {
         resolvedValue = rawAttr.value_name;
@@ -860,59 +631,33 @@ function validateAndFillRequiredAttributes(input: FillEngineInput): AttributeFil
       }
     }
 
-    // Tentar defaults do sistema
-    if (!resolvedValue) {
-      const categoryDefaults = CATEGORY_ATTRIBUTE_DEFAULTS[categoryId] || {};
-      const globalDefaults = CATEGORY_ATTRIBUTE_DEFAULTS["*"] || {};
-      for (const alias of aliases) {
-        const specificDefault = categoryDefaults[alias];
-        const globalDefault = globalDefaults[alias];
-        const defaultValue = specificDefault || globalDefault;
-        if (defaultValue?.value_name) {
-          resolvedValue = defaultValue.value_name;
-          source = specificDefault ? "default:categoria" : "default:global";
-          filledBodyByDefaults.push(fieldKey);
-          break;
-        }
-      }
-    }
-
-    // Fallback dinâmico (baseado em título para family_name)
-    if (!resolvedValue && config.fallbackFromTitle && itemData.title) {
+    // Fallback específico para family_name
+    if (!resolvedValue && fieldKeyLower === "family_name" && itemData.title) {
       const cleanTitle = itemData.title
         .replace(/\s*[-–]\s*\d+\s*(unidades?|pcs?|un)?\s*$/i, "")
         .replace(/\s*\d{4,}\s*/g, " ")
         .replace(/\s+/g, " ")
         .trim();
       
-      const maxLen = config.maxLength || 60;
       let fallbackValue = cleanTitle.split(" ").slice(0, 5).join(" ");
-      if (fallbackValue.length > maxLen) {
-        fallbackValue = fallbackValue.substring(0, maxLen).replace(/\s+\S*$/, "");
+      if (fallbackValue.length > 60) {
+        fallbackValue = fallbackValue.substring(0, 60).replace(/\s+\S*$/, "");
       }
       
       resolvedValue = fallbackValue || itemData.title.split(" ").slice(0, 4).join(" ");
       source = "fallback:titulo_limpo";
-      filledBodyByFallback.push(fieldKey);
-    }
-
-    // Fallback genérico
-    if (!resolvedValue && config.defaultValue) {
-      resolvedValue = config.defaultValue;
-      source = "fallback:generico";
-      filledBodyByFallback.push(fieldKey);
+      filledBodyByFallback.push(fieldKeyLower);
     }
 
     if (!resolvedValue) {
       resolvedValue = "Produto";
       source = "fallback:ultimo_recurso";
-      filledBodyByFallback.push(fieldKey);
+      filledBodyByFallback.push(fieldKeyLower);
     }
 
-    // Aplicar no body
-    bodyLevelFields[fieldKey] = resolvedValue;
-    log.push({ attrId: fieldKey, source, value: resolvedValue, target: "body" });
-    console.log(`[ad-action-execute] Body field ${fieldKey}: ✓ ${source} = "${resolvedValue}"`);
+    bodyLevelFields[fieldKeyLower] = resolvedValue;
+    log.push({ attrId: fieldKeyLower, source, value: resolvedValue, target: "body" });
+    console.log(`[ad-action-execute] Body field ${fieldKeyLower}: ✓ ${source} = "${resolvedValue}"`);
   }
 
   // =========================================================================
@@ -970,158 +715,74 @@ function validateAndFillRequiredAttributes(input: FillEngineInput): AttributeFil
       source = "categoria:primeiro_valor";
     }
 
-    // 5. Inferências específicas
-    if (!resolvedValue && !resolvedValueId && catAttr) {
-      if (reqId === "ITEM_CONDITION" && itemData.condition) {
-        resolvedValue = itemData.condition === "new" ? "Novo" : "Usado";
-        source = "inferencia:condition";
-      }
-    }
+    // 5. Inferências específicas (EXCETO ITEM_CONDITION que foi removido)
+    // ...
 
-    // 6. Fallback genérico para tipos conhecidos
-    if (!resolvedValue && !resolvedValueId && catAttr) {
-      if (catAttr.value_type === "string") {
-        resolvedValue = "-";
-        source = "fallback:string_generico";
-      } else if (catAttr.value_type === "boolean") {
-        resolvedValue = "Não";
-        source = "fallback:boolean";
-      }
-    }
-
-    // Registrar resultado
     if (resolvedValue || resolvedValueId) {
-      const displayValue = resolvedValue || resolvedValueId || "(struct)";
-      
-      const filledAttr: NormalizedAttribute = { id: reqId };
-      if (resolvedValueId) filledAttr.value_id = resolvedValueId;
-      if (resolvedValue) filledAttr.value_name = resolvedValue;
-      
+      const filledAttr: NormalizedAttribute = {
+        id: reqId,
+        value_id: resolvedValueId,
+        value_name: resolvedValue,
+      };
       filled.push(filledAttr);
-      log.push({ attrId: reqId, source, value: displayValue, target: "attributes" });
-      console.log(`[ad-action-execute] Required ${reqId}: ✓ ${source} = "${displayValue}"`);
+      log.push({ attrId: reqId, source, value: resolvedValue || resolvedValueId, target: "attributes" });
+      console.log(`[ad-action-execute] Attr ${reqId}: ✓ ${source} = ${resolvedValueId || `"${resolvedValue}"`}`);
     } else {
       missing.push(reqId);
-      log.push({ attrId: reqId, source: "MISSING", target: "attributes" });
-      console.warn(`[ad-action-execute] Required ${reqId}: ✗ NO VALUE AVAILABLE`);
+      console.log(`[ad-action-execute] Attr ${reqId}: ✗ MISSING`);
     }
   }
 
-  return { filled, missing, bodyLevelFields, log, requiredBodyFieldKeys, filledBodyByFallback, filledBodyByDefaults };
+  return {
+    filled,
+    missing,
+    bodyLevelFields,
+    log,
+    requiredBodyFieldKeys,
+    filledBodyByFallback,
+    filledBodyByDefaults,
+  };
 }
 
 // ============================================================================
-// Extrator de campos faltantes do erro da API do Mercado Livre
-// ============================================================================
-interface ExtractedMissingFields {
-  bodyFields: string[];
-  attributeFields: string[];
-  raw: any;
-}
-
-function extractMissingFieldsFromApiError(apiError: any): ExtractedMissingFields {
-  const bodyFields: string[] = [];
-  const attributeFields: string[] = [];
-
-  if (!apiError) return { bodyFields, attributeFields, raw: apiError };
-
-  // Padrão 1: cause[].code === "item.attributes.missing_required"
-  if (apiError.cause && Array.isArray(apiError.cause)) {
-    for (const cause of apiError.cause) {
-      if (cause.code === "item.attributes.missing_required" || cause.code === "body.required_fields") {
-        // Tentar extrair field names do message
-        const match = cause.message?.match(/properties \[([^\]]+)\]/i);
-        if (match) {
-          const fields = match[1].split(",").map((f: string) => f.trim().toLowerCase());
-          for (const field of fields) {
-            if (BODY_LEVEL_REQUIRED_FIELDS[field] || BODY_LEVEL_FIELD_ALIASES[field]) {
-              bodyFields.push(field);
-            } else {
-              attributeFields.push(field);
-            }
-          }
-        }
-        // Tentar extrair do references
-        if (cause.references && Array.isArray(cause.references)) {
-          for (const ref of cause.references) {
-            const field = (ref as string).toLowerCase();
-            if (BODY_LEVEL_REQUIRED_FIELDS[field] || BODY_LEVEL_FIELD_ALIASES[field]) {
-              bodyFields.push(field);
-            } else {
-              attributeFields.push(field);
-            }
-          }
-        }
-      }
-    }
-  }
-
-  // Padrão 2: message contém "body.required_fields" ou "properties [...]"
-  if (apiError.message) {
-    const match = apiError.message.match(/properties \[([^\]]+)\]/i);
-    if (match) {
-      const fields = match[1].split(",").map((f: string) => f.trim().toLowerCase());
-      for (const field of fields) {
-        if (BODY_LEVEL_REQUIRED_FIELDS[field] || BODY_LEVEL_FIELD_ALIASES[field]) {
-          if (!bodyFields.includes(field)) bodyFields.push(field);
-        } else {
-          if (!attributeFields.includes(field)) attributeFields.push(field);
-        }
-      }
-    }
-  }
-
-  return { bodyFields, attributeFields, raw: apiError };
-}
-
-// ============================================================================
-// Sanitizer: garante que apenas campos permitidos vão no body final
-// ============================================================================
-function sanitizePayload(payload: any): any {
-  const sanitized: any = {};
-  
-  for (const [key, value] of Object.entries(payload)) {
-    // Permitir apenas campos na whitelist ou body-level fields
-    if (ALLOWED_BODY_FIELDS.has(key) || BODY_LEVEL_REQUIRED_FIELDS[key]) {
-      sanitized[key] = value;
-    } else {
-      console.warn(`[ad-action-execute] Sanitizer: removed unexpected field "${key}"`);
-    }
-  }
-  
-  return sanitized;
-}
-
-// ============================================================================
-// ETAPA E: Montagem final do payload de atributos
+// ETAPA 5: Construir payload final de atributos
 // ============================================================================
 function buildFinalAttributesPayload(
   filledRequired: NormalizedAttribute[],
-  cleanedSource: NormalizedAttribute[],
-  includeNonRequired: boolean
+  sourceAttrs: NormalizedAttribute[],
+  includeNonRequired: boolean = true,
+  essentialOnly: boolean = false
 ): NormalizedAttribute[] {
   const finalAttrs: NormalizedAttribute[] = [];
-  const includedIds = new Set<string>();
+  const addedIds = new Set<string>();
 
-  // Primeiro: todos os obrigatórios preenchidos
+  // 1. Adicionar obrigatórios preenchidos
   for (const attr of filledRequired) {
-    if (!includedIds.has(attr.id)) {
+    if (!addedIds.has(attr.id)) {
       finalAttrs.push(attr);
-      includedIds.add(attr.id);
+      addedIds.add(attr.id);
     }
   }
 
-  // Depois: atributos não-obrigatórios do item fonte (se permitido)
-  if (includeNonRequired) {
-    for (const attr of cleanedSource) {
-      if (!includedIds.has(attr.id)) {
+  // 2. Se essentialOnly=true, adicionar apenas atributos essenciais
+  if (essentialOnly) {
+    for (const attr of sourceAttrs) {
+      if (!addedIds.has(attr.id) && ESSENTIAL_ATTRIBUTES.has(attr.id.toUpperCase())) {
         finalAttrs.push(attr);
-        includedIds.add(attr.id);
+        addedIds.add(attr.id);
+      }
+    }
+  } else if (includeNonRequired) {
+    // 3. Adicionar não-obrigatórios do source se permitido
+    for (const attr of sourceAttrs) {
+      if (!addedIds.has(attr.id)) {
+        finalAttrs.push(attr);
+        addedIds.add(attr.id);
       }
     }
   }
 
-  // Remover duplicatas finais (por segurança)
+  // Remover duplicatas finais
   const uniqueAttrs = Array.from(
     new Map(finalAttrs.map(a => [a.id, a])).values()
   );
@@ -1129,6 +790,241 @@ function buildFinalAttributesPayload(
   console.log(`[ad-action-execute] Final payload: ${uniqueAttrs.length} attributes (${filledRequired.length} required)`);
   return uniqueAttrs;
 }
+
+// ============================================================================
+// HELPERS PARA DETECÇÃO DE ERROS
+// ============================================================================
+
+function extractMissingFieldsFromApiError(apiError: any): { 
+  bodyFields: string[]; 
+  attributeFields: string[];
+} {
+  const bodyFields: string[] = [];
+  const attributeFields: string[] = [];
+
+  if (!apiError) return { bodyFields, attributeFields };
+
+  // Verificar no cause[]
+  if (apiError.cause && Array.isArray(apiError.cause)) {
+    for (const cause of apiError.cause) {
+      if (cause.code === "body.required_fields") {
+        // Campos body-level
+        const refs = cause.references || [];
+        for (const ref of refs) {
+          if (typeof ref === "string") {
+            bodyFields.push(ref);
+          }
+        }
+      } else if (cause.code === "item.attributes.missing_required") {
+        // Atributos
+        const refs = cause.references || [];
+        for (const ref of refs) {
+          if (typeof ref === "string") {
+            attributeFields.push(ref);
+          }
+        }
+      }
+    }
+  }
+
+  return { bodyFields, attributeFields };
+}
+
+function isTitleInvalidFieldsError(apiError: any): boolean {
+  if (!apiError) return false;
+
+  // Verificar no cause[]
+  if (apiError.cause && Array.isArray(apiError.cause)) {
+    for (const cause of apiError.cause) {
+      if (
+        cause.code === "body.invalid_fields" &&
+        cause.message?.toLowerCase().includes("title")
+      ) {
+        return true;
+      }
+    }
+  }
+
+  // Verificar na message principal
+  if (apiError.message) {
+    const msg = apiError.message.toLowerCase();
+    if (msg.includes("invalid_fields") && msg.includes("title")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function extractInvalidFields(apiError: any): string[] {
+  const fields: string[] = [];
+
+  if (!apiError) return fields;
+
+  if (apiError.cause && Array.isArray(apiError.cause)) {
+    for (const cause of apiError.cause) {
+      if (cause.code === "body.invalid_fields") {
+        // Extrair campos da mensagem
+        const match = cause.message?.match(/\[([^\]]+)\]/);
+        if (match) {
+          const extracted = match[1].split(",").map((f: string) => f.trim());
+          fields.push(...extracted);
+        }
+      }
+    }
+  }
+
+  return fields;
+}
+
+function is401Error(response: Response): boolean {
+  return response.status === 401;
+}
+
+// ============================================================================
+// TOKEN REFRESH HELPERS
+// ============================================================================
+
+async function tryRefreshToken(
+  supabase: any,
+  mlAccountId: string
+): Promise<{ success: boolean; newAccessToken?: string; error?: string }> {
+  try {
+    console.log(`[ad-action-execute] Attempting token refresh for account ${mlAccountId}`);
+    
+    const ML_APP_ID = Deno.env.get('ML_APP_ID') || '';
+    const ML_SECRET_KEY = Deno.env.get('ML_SECRET_KEY') || '';
+    
+    // Buscar refresh_token da conta
+    const { data: account, error: accountError } = await supabase
+      .from('ml_accounts')
+      .select('refresh_token, ml_user_id')
+      .eq('id', mlAccountId)
+      .single();
+    
+    if (accountError || !account) {
+      console.error(`[ad-action-execute] Account not found for refresh: ${accountError?.message}`);
+      return { success: false, error: 'Account not found' };
+    }
+    
+    if (!account.refresh_token) {
+      console.error(`[ad-action-execute] No refresh token for account ${mlAccountId}`);
+      return { success: false, error: 'No refresh token' };
+    }
+    
+    // Chamar API do ML para refresh
+    const tokenResponse = await fetch('https://api.mercadolibre.com/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: ML_APP_ID,
+        client_secret: ML_SECRET_KEY,
+        refresh_token: account.refresh_token,
+      }),
+    });
+    
+    if (!tokenResponse.ok) {
+      const errorText = await tokenResponse.text();
+      console.error(`[ad-action-execute] Token refresh failed: ${tokenResponse.status} ${errorText}`);
+      
+      // Marcar conta como revogada se invalid_grant
+      if (errorText.includes('invalid_grant')) {
+        await supabase
+          .from('ml_accounts')
+          .update({
+            connection_status: 'revoked',
+            is_active: false,
+            last_api_error_code: 'invalid_grant',
+            last_api_error_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', mlAccountId);
+      }
+      
+      return { success: false, error: 'Token refresh failed' };
+    }
+    
+    const tokenData = await tokenResponse.json();
+    const expiresAt = new Date();
+    expiresAt.setSeconds(expiresAt.getSeconds() + tokenData.expires_in);
+    const now = new Date().toISOString();
+    
+    // Atualizar tokens na conta
+    await supabase
+      .from('ml_accounts')
+      .update({
+        access_token: tokenData.access_token,
+        refresh_token: tokenData.refresh_token,
+        token_expires_at: expiresAt.toISOString(),
+        connection_status: 'connected',
+        is_active: true,
+        last_token_refresh_at: now,
+        last_api_ok_at: now,
+        last_api_error_code: null,
+        last_api_error_at: null,
+        consecutive_failures: 0,
+        updated_at: now,
+      })
+      .eq('id', mlAccountId);
+    
+    console.log(`[ad-action-execute] Token refreshed successfully for account ${mlAccountId}`);
+    return { success: true, newAccessToken: tokenData.access_token };
+  } catch (err: any) {
+    console.error(`[ad-action-execute] Token refresh exception: ${err.message}`);
+    return { success: false, error: err.message };
+  }
+}
+
+async function validateAndRefreshTokenIfNeeded(
+  accessToken: string,
+  supabase: any,
+  mlAccountId: string
+): Promise<{ valid: boolean; accessToken?: string }> {
+  // Testar token atual
+  const testResponse = await fetch("https://api.mercadolibre.com/users/me", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  
+  if (testResponse.ok) {
+    return { valid: true, accessToken };
+  }
+  
+  if (testResponse.status === 401) {
+    // Tentar refresh
+    const refreshResult = await tryRefreshToken(supabase, mlAccountId);
+    if (refreshResult.success && refreshResult.newAccessToken) {
+      return { valid: true, accessToken: refreshResult.newAccessToken };
+    }
+  }
+  
+  return { valid: false };
+}
+
+// ============================================================================
+// SANITIZER DE PAYLOAD
+// ============================================================================
+
+function sanitizePayload(payload: any): any {
+  const sanitized: any = {};
+  
+  for (const [key, value] of Object.entries(payload)) {
+    // v3: Remover campos proibidos no anti-catálogo
+    if (ANTI_CATALOG_V3_FORBIDDEN_BODY_FIELDS.has(key)) {
+      continue;
+    }
+    
+    if (ALLOWED_BODY_FIELDS.has(key) && value !== undefined) {
+      sanitized[key] = value;
+    }
+  }
+  
+  return sanitized;
+}
+
+// ============================================================================
+// MAIN HANDLER
+// ============================================================================
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -1305,8 +1201,8 @@ serve(async (req) => {
               action.item_id,
               action.source_snapshot,
               action.checklist,
-              supabase, // Passar supabase para refresh token
-              action.ml_account_id // Passar ID da conta para refresh token
+              supabase,
+              action.ml_account_id
             );
             break;
           default:
@@ -1414,10 +1310,9 @@ async function executeCloneAction(
   itemId: string,
   snapshot: any,
   checklist: any,
-  supabase?: any, // Para refresh token
-  mlAccountId?: string // Para refresh token
+  supabase?: any,
+  mlAccountId?: string
 ) {
-  // Variável para token atual (pode ser atualizado após refresh)
   let currentAccessToken = accessToken;
   let itemData = snapshot;
   let resolvedItemId = itemId;
@@ -1427,8 +1322,7 @@ async function executeCloneAction(
   console.log(`[ad-action-execute] ID type analysis: isRegularItemId=${isRegularItemId(itemId)}, isCatalogId=${isCatalogId(itemId)}`);
 
   // =========================================================================
-  // GUARD DE AUTENTICAÇÃO: Validar token ANTES de qualquer operação
-  // Evita gastar recursos com requests que vão falhar por auth
+  // GUARD DE AUTENTICAÇÃO
   // =========================================================================
   if (supabase && mlAccountId) {
     console.log(`[ad-action-execute] === AUTH GUARD: Pre-validating token ===`);
@@ -1442,35 +1336,23 @@ async function executeCloneAction(
         message: "Token expirado ou inválido. Reconecte sua conta do Mercado Livre para continuar.",
         user_guidance: "Clique em 'Reconectar Mercado Livre' para renovar a autorização da sua conta.",
         requires_reconnection: true,
-        api_request: {
-          request_kind: "auth_validation",
-          http_method: "GET",
-          endpoint_url: "https://api.mercadolibre.com/users/me",
-        },
       };
     }
     
-    // Usar token atualizado (pode ter sido renovado)
     currentAccessToken = authCheck.accessToken!;
     console.log(`[ad-action-execute] AUTH GUARD: Token validated/refreshed successfully`);
-  } else {
-    console.warn(`[ad-action-execute] AUTH GUARD: Skipped (no supabase or mlAccountId provided)`);
   }
 
   // If no snapshot, we need to fetch item data
   if (!itemData || Object.keys(itemData).length === 0) {
     
-    // REGRA OFICIAL: MLB tem prioridade - vai direto para /items
     if (isRegularItemId(itemId)) {
-      console.log(`[ad-action-execute] PRIORITY PATH: Regular item ID (MLB) detected - going directly to /items`);
-    }
-    // FALLBACK RESIDUAL: Somente se for MLBU e não houver MLB
-    else if (isCatalogId(itemId)) {
-      console.log(`[ad-action-execute] FALLBACK PATH: Catalog ID (MLBU) detected - attempting catalog resolution`);
+      console.log(`[ad-action-execute] PRIORITY PATH: Regular item ID (MLB) detected`);
+    } else if (isCatalogId(itemId)) {
+      console.log(`[ad-action-execute] FALLBACK PATH: Catalog ID (MLBU) detected`);
 
       const catalogResult = await resolveCatalogItemFallback(currentAccessToken, itemId);
       if (!catalogResult.ok) {
-        console.error(`[ad-action-execute] Catalog resolve failed for ${itemId}`, catalogResult.tried);
         return {
           success: false,
           error: catalogResult.error,
@@ -1486,12 +1368,9 @@ async function executeCloneAction(
         original_catalog_id: itemId,
         buy_box_winner_id: resolvedItemId,
         resolved_by: catalogResult.resolvedBy,
-        product_name: catalogResult.productData?.name,
       };
 
       console.log(`[ad-action-execute] Catalog resolved to item: ${resolvedItemId}`);
-    } else {
-      console.log(`[ad-action-execute] Unknown ID format: ${itemId} - attempting as regular item`);
     }
 
     // Fetch real item (MLB)
@@ -1500,50 +1379,14 @@ async function executeCloneAction(
       headers: { Authorization: `Bearer ${currentAccessToken}` },
     });
 
-    const responseStatus = getResponse.status;
-    console.log(`[ad-action-execute] /items/${resolvedItemId} response status: ${responseStatus}`);
-
     if (!getResponse.ok) {
       const errBody = await getResponse.text().catch(() => "");
-      
-      console.error(`[ad-action-execute] /items/${resolvedItemId} FAILED`, JSON.stringify({
-        status: responseStatus,
-        body_preview: errBody?.slice(0, 500),
-        item_id: resolvedItemId,
-        original_id: itemId,
-      }));
-
-      let errorType = "UNKNOWN";
-      let userMessage = `Falha ao buscar detalhes do anúncio ${resolvedItemId}`;
-      
-      if (responseStatus === 403) {
-        errorType = "ACCESS_DENIED";
-        userMessage = `Sem permissão para acessar o anúncio ${resolvedItemId}. Este anúncio pode pertencer a outro vendedor.`;
-      } else if (responseStatus === 404) {
-        errorType = "NOT_FOUND";
-        userMessage = `Anúncio ${resolvedItemId} não encontrado. Pode ter sido excluído ou o ID está incorreto.`;
-      } else if (responseStatus === 401) {
-        errorType = "UNAUTHORIZED";
-        userMessage = `Token expirado ou inválido. Reconecte sua conta do Mercado Livre.`;
-      } else if (responseStatus >= 500) {
-        errorType = "ML_SERVER_ERROR";
-        userMessage = `Erro temporário no Mercado Livre (${responseStatus}). Tente novamente em alguns minutos.`;
-      }
-
-      let parsedError: any = null;
-      try {
-        parsedError = JSON.parse(errBody);
-      } catch {
-        // Not JSON
-      }
-
       return {
         success: false,
-        error: errorType,
-        message: userMessage,
-        api_status: responseStatus,
-        api_error: parsedError || errBody,
-        catalog_info: catalogInfo,
+        error: getResponse.status === 404 ? "NOT_FOUND" : "FETCH_FAILED",
+        message: `Falha ao buscar item ${resolvedItemId}`,
+        api_status: getResponse.status,
+        api_error: errBody,
       };
     }
 
@@ -1551,51 +1394,17 @@ async function executeCloneAction(
   }
 
   // =========================================================================
-  // ETAPA 1.5: DIAGNÓSTICO DE CATÁLOGO - Detectar se o item fonte é de catálogo
-  // REGRA NOVA: SEMPRE criar como anúncio NORMAL (não catálogo)
-  // Isso permite edição de título, fotos e descrição
+  // DIAGNÓSTICO DE CATÁLOGO
   // =========================================================================
-  const catalogDiagnostic = {
-    catalog_product_id: itemData.catalog_product_id || null,
-    catalog_listing: itemData.catalog_listing ?? null,
-    parent_item_id: itemData.parent_item_id || null,
-    is_catalog_source: false, // Origem do item
-    create_as_normal: true, // SEMPRE criar como normal
-    blocked_fields: [] as string[],
-  };
-
-  // Determinar se o ITEM FONTE é de catálogo (para logging)
   const sourceIsCatalog = !!(
-    catalogDiagnostic.catalog_product_id ||
+    itemData.catalog_product_id ||
     itemData.catalog_listing === true ||
-    catalogDiagnostic.parent_item_id
+    itemData.parent_item_id
   );
-  catalogDiagnostic.is_catalog_source = sourceIsCatalog;
-
-  // REGRA: Criar SEMPRE como anúncio normal (não catálogo)
-  // Não bloquear campos - usuário pode editar tudo
-  const createAsNormal = checklist?.create_as_normal !== false; // Default: true
-  
-  if (createAsNormal) {
-    catalogDiagnostic.blocked_fields = []; // Nenhum campo bloqueado
-  } else if (sourceIsCatalog) {
-    // Modo legado (não usado mais): bloquear campos se for catálogo
-    catalogDiagnostic.blocked_fields = ["title", "pictures", "description"];
-  }
 
   console.log(`[ad-action-execute] === CATALOG DIAGNOSTIC ===`);
   console.log(`[ad-action-execute] source_is_catalog: ${sourceIsCatalog}`);
-  console.log(`[ad-action-execute] create_as_normal: ${createAsNormal}`);
-  console.log(`[ad-action-execute] catalog_product_id: ${catalogDiagnostic.catalog_product_id}`);
-  console.log(`[ad-action-execute] blocked_fields: ${catalogDiagnostic.blocked_fields.join(", ") || "(none - creating as normal)"}`);
-
-  console.log(`[ad-action-execute] Building clone payload from data:`, JSON.stringify({ 
-    title: itemData.title, 
-    category_id: itemData.category_id,
-    resolved_from_catalog: !!catalogInfo,
-    source_is_catalog: sourceIsCatalog,
-    create_as_normal: createAsNormal,
-  }));
+  console.log(`[ad-action-execute] catalog_product_id: ${itemData.catalog_product_id || "(none)"}`);
 
   // =========================================================================
   // ETAPA 2: Descobrir atributos obrigatórios da categoria
@@ -1610,246 +1419,132 @@ async function executeCloneAction(
   }
 
   // =========================================================================
-  // ETAPA 3: Normalizar atributos do item fonte (removendo not-modifiable e catalog-forcing)
-  // REGRA: Quando createAsNormal=true, remover GTIN/EAN/UPC/ISBN para evitar erro "title invalid"
+  // ETAPA 3: Normalizar atributos (remover ITEM_CONDITION, PACKAGE_*, identificadores de catálogo)
   // =========================================================================
   const { attrsById: sourceAttrsById, cleanedAttrs, removedNotModifiable, removedCatalogForcing } = normalizeAndCleanAttributes(
     itemData.attributes || [],
     categoryAttributes,
-    true, // removeNotModifiable = true
-    createAsNormal // NOVO: remover atributos que forçam catálogo
+    true, // removeNotModifiable
+    true  // removeCatalogForcing
   );
-
-  if (removedCatalogForcing.length > 0) {
-    console.log(`[ad-action-execute] Removed catalog-forcing attributes: ${removedCatalogForcing.join(", ")}`);
-    (catalogDiagnostic as any).removed_catalog_forcing = removedCatalogForcing;
-  }
 
   // =========================================================================
   // ETAPA 4: PREFLIGHT - Validar e completar obrigatórios (1ª passagem)
-  // Fluxo: validate → fill → validate → create
+  // NÃO preencher family_name por padrão (v3)
   // =========================================================================
   console.log(`[ad-action-execute] === PREFLIGHT VALIDATION (Pass 1) ===`);
   
   let fillResult = validateAndFillRequiredAttributes({
     requiredIds,
-    extraBodyFields: [], // Primeira passagem sem campos extras
+    extraBodyFields: [], // NÃO enviar family_name por padrão
     categoryAttributes,
     sourceAttrsById,
     itemData,
     categoryId: itemData.category_id || "",
   });
 
-  // =========================================================================
-  // ETAPA 5: Log obrigatório expandido (para debug detalhado)
-  // =========================================================================
-  let requiredCheck = {
-    categoryId: itemData.category_id,
-    requiredAttributeIds: requiredIds,
-    requiredBodyFieldKeys: fillResult.requiredBodyFieldKeys,
-    missingRequiredBeforeFill: requiredIds.filter(id => !sourceAttrsById.has(id)),
-    filledByItemSource: fillResult.log.filter(l => l.source.startsWith("item_fonte")).map(l => l.attrId),
-    filledByDefaults: fillResult.log.filter(l => l.source.startsWith("default:")).map(l => l.attrId),
-    filledByFallback: fillResult.log.filter(l => l.source.startsWith("fallback:")).map(l => l.attrId),
-    filledByCategoria: fillResult.log.filter(l => l.source.startsWith("categoria:")).map(l => l.attrId),
-    filledByInferencia: fillResult.log.filter(l => l.source.startsWith("inferencia:")).map(l => l.attrId),
-    filledBodyByFallback: fillResult.filledBodyByFallback,
-    filledBodyByDefaults: fillResult.filledBodyByDefaults,
-    missingAfterFill: fillResult.missing,
-    bodyLevelFields: fillResult.bodyLevelFields,
-  };
-
   console.log(`[ad-action-execute] === REQUIRED CHECK SUMMARY (Pass 1) ===`);
-  console.log(`[ad-action-execute] ${JSON.stringify(requiredCheck, null, 2)}`);
-  
-  for (const entry of fillResult.log) {
-    console.log(`[ad-action-execute]   - ${entry.attrId}: ${entry.source} → ${entry.target}${entry.value ? ` = "${entry.value}"` : ""}`);
-  }
+  console.log(`[ad-action-execute] requiredIds: ${requiredIds.join(", ") || "(none)"}`);
+  console.log(`[ad-action-execute] missingAfterFill: ${fillResult.missing.join(", ") || "(none)"}`);
 
-  // Se faltar obrigatório após primeira passagem → erro controlado
   if (fillResult.missing.length > 0) {
-    console.error(`[ad-action-execute] CLONE BLOCKED: Missing required attributes: ${fillResult.missing.join(", ")}`);
-    
     return {
       success: false,
       error: "MISSING_REQUIRED_ATTRIBUTES",
-      message: `O Mercado Livre exige campos obrigatórios adicionais para esta categoria: ${fillResult.missing.join(", ")}. Ajuste e tente novamente.`,
-      user_guidance: "Este produto exige um dado obrigatório definido pelo Mercado Livre. Complete os campos do anúncio e tente novamente.",
+      message: `Campos obrigatórios faltando: ${fillResult.missing.join(", ")}`,
       missing_required_attributes: fillResult.missing,
       category_id: itemData.category_id,
-      item_id: resolvedItemId,
-      required_check: requiredCheck,
-      catalog_info: catalogInfo,
     };
   }
 
   // =========================================================================
-  // ETAPA E: Montagem final do payload
+  // ETAPA 5: Montagem do payload
+  // v3: Enviar obrigatórios + essenciais (BRAND, PAPER_*, etc.)
   // =========================================================================
   const includeNonRequired = checklist?.attributes !== false;
+  const essentialOnlyMode = checklist?.essential_only === true;
+  
   const finalAttributes = buildFinalAttributesPayload(
     fillResult.filled,
     cleanedAttrs,
-    includeNonRequired
+    includeNonRequired,
+    essentialOnlyMode
   );
 
-  // Validação final: sem duplicatas
-  const attrIdCounts = new Map<string, number>();
-  for (const attr of finalAttributes) {
-    attrIdCounts.set(attr.id, (attrIdCounts.get(attr.id) || 0) + 1);
-  }
-  const duplicates = Array.from(attrIdCounts.entries()).filter(([, count]) => count > 1);
-  if (duplicates.length > 0) {
-    console.warn(`[ad-action-execute] WARNING: Duplicate attributes detected: ${duplicates.map(([id]) => id).join(", ")}`);
-  }
-
   // =========================================================================
-  // ESTRATÉGIA DE listing_type_id - OBRIGATÓRIO EM TODA CHAMADA POST /items
-  // Usar resolveListingTypeId() com fallback automático se necessário
+  // LISTING TYPE RESOLUTION
   // =========================================================================
-  const isCatalogSource = catalogDiagnostic.is_catalog_source;
-  const blockedFields = catalogDiagnostic.blocked_fields;
-  const picturesBlocked = blockedFields.includes("pictures");
-
-  // Resolver listing_type_id inicial - com cache por categoria
   const categoryIdForCache = itemData.category_id || "";
   let listingTypeResolution = resolveListingTypeId(
     itemData.listing_type_id,
     categoryIdForCache,
     DEFAULT_LISTING_TYPE_ID,
-    [], // sem sugestões da API ainda
-    -1  // sem fallback ainda
+    [],
+    -1
   );
   let listingTypeToUse = listingTypeResolution.listing_type_id;
-  let listingTypeStrategy: "source" | "default" | "fallback" | "catalog_safe" | "cache" | "api_suggested" | "user_override" = 
-    listingTypeResolution.source === "source_item" ? "source" : 
-    listingTypeResolution.source === "cache" ? "cache" : "default";
-  
-  // Tipos sugeridos pela API (preenchidos após erro)
-  let apiSuggestedTypes: string[] = [];
 
-  // NOVO FLUXO: Como criamos SEMPRE como anúncio normal, não precisamos verificar pictures bloqueadas
-  // A menos que explicitamente configurado para criar como catálogo (modo legado)
-  if (!createAsNormal && sourceIsCatalog && picturesBlocked) {
-    if (LISTING_TYPES_REQUIRING_PICTURES.has(listingTypeToUse)) {
-      console.log(`[ad-action-execute] CATALOG STRATEGY: listing_type_id "${listingTypeToUse}" requires pictures but pictures are blocked`);
-      listingTypeToUse = CATALOG_SAFE_LISTING_TYPES[0] || "bronze";
-      listingTypeStrategy = "catalog_safe";
-      console.log(`[ad-action-execute] CATALOG STRATEGY: Switched to catalog-safe listing_type_id: ${listingTypeToUse}`);
-    }
-  }
-
-  console.log(`[ad-action-execute] === LISTING_TYPE_ID RESOLUTION ===`);
-  console.log(`[ad-action-execute] source_listing_type: ${itemData.listing_type_id || "(none)"}`);
-  console.log(`[ad-action-execute] resolved_listing_type: ${listingTypeToUse}`);
-  console.log(`[ad-action-execute] resolution_source: ${listingTypeResolution.source}`);
-  console.log(`[ad-action-execute] final_strategy: ${listingTypeStrategy}`);
-
-  // =========================================================================
-  // REGRA NOVA: Como criamos SEMPRE como anúncio normal, TODOS os campos são permitidos
-  // =========================================================================
-  const canIncludeTitle = checklist?.title !== false; // SEMPRE permitido (criando como normal)
-  const canIncludePictures = checklist?.pictures !== false && itemData.pictures; // SEMPRE permitido
-  const canIncludeDescription = checklist?.description !== false; // SEMPRE permitido
-
-  console.log(`[ad-action-execute] === PAYLOAD FIELD DECISIONS (create_as_normal=${createAsNormal}) ===`);
-  console.log(`[ad-action-execute] source_is_catalog: ${sourceIsCatalog}`);
-  console.log(`[ad-action-execute] canIncludeTitle: ${canIncludeTitle}`);
-  console.log(`[ad-action-execute] canIncludePictures: ${canIncludePictures}`);
-  console.log(`[ad-action-execute] canIncludeDescription: ${canIncludeDescription}`);
-  console.log(`[ad-action-execute] removedNotModifiable: ${removedNotModifiable.join(", ") || "(none)"}`);
-
-  // =========================================================================
-  // PRE-VALIDATION: Garantir campos obrigatórios antes do POST
-  // =========================================================================
-  const preValidation = {
-    listing_type_id: checklist?.override_listing_type || listingTypeToUse, // Priorizar override do usuário
-    currency_id: itemData.currency_id || "BRL",
-    has_category: !!itemData.category_id,
-    has_price: !!(checklist?.override_price ?? itemData.price),
-  };
-
-  // Se usuário escolheu listing_type diferente, usar
-  if (checklist?.override_listing_type) {
-    listingTypeToUse = checklist.override_listing_type;
-    listingTypeStrategy = "user_override";
+  // User override
+  if (checklist?.override_listing_type || checklist?.listing_type) {
+    listingTypeToUse = checklist.override_listing_type || checklist.listing_type;
     console.log(`[ad-action-execute] User override listing_type_id: ${listingTypeToUse}`);
   }
 
-  console.log(`[ad-action-execute] === PRE-VALIDATION ===`);
-  console.log(`[ad-action-execute] ${JSON.stringify(preValidation)}`);
+  console.log(`[ad-action-execute] === LISTING_TYPE_ID RESOLUTION ===`);
+  console.log(`[ad-action-execute] resolved: ${listingTypeToUse} (source: ${listingTypeResolution.source})`);
 
   // =========================================================================
-  // ETAPA X: Incluir seller_package_* obrigatórios do checklist
-  // Estes campos são OBRIGATÓRIOS para evitar erro item.attribute.missing.seller.package.dimensions
+  // SELLER_PACKAGE_* do checklist
   // =========================================================================
   const sellerPackageAttributes: NormalizedAttribute[] = [];
   
   if (checklist?.seller_package_height && checklist.seller_package_height > 0) {
     sellerPackageAttributes.push({
       id: "SELLER_PACKAGE_HEIGHT",
-      value_name: String(checklist.seller_package_height),
+      value_name: `${checklist.seller_package_height} cm`,
     });
   }
   if (checklist?.seller_package_width && checklist.seller_package_width > 0) {
     sellerPackageAttributes.push({
       id: "SELLER_PACKAGE_WIDTH",
-      value_name: String(checklist.seller_package_width),
+      value_name: `${checklist.seller_package_width} cm`,
     });
   }
   if (checklist?.seller_package_length && checklist.seller_package_length > 0) {
     sellerPackageAttributes.push({
       id: "SELLER_PACKAGE_LENGTH",
-      value_name: String(checklist.seller_package_length),
+      value_name: `${checklist.seller_package_length} cm`,
     });
   }
   if (checklist?.seller_package_weight && checklist.seller_package_weight > 0) {
     sellerPackageAttributes.push({
       id: "SELLER_PACKAGE_WEIGHT",
-      value_name: String(checklist.seller_package_weight),
+      value_name: `${checklist.seller_package_weight} g`,
     });
   }
 
   console.log(`[ad-action-execute] seller_package_* from checklist: ${sellerPackageAttributes.map(a => a.id).join(", ") || "(none)"}`);
 
-  // Mesclar seller_package_* com finalAttributes (prioridade para checklist)
-  const packageAttrIds = new Set(sellerPackageAttributes.map(a => a.id));
-  const attributesWithPackage = [
-    ...sellerPackageAttributes,
-    ...finalAttributes.filter(a => !packageAttrIds.has(a.id)),
-  ];
-
   // =========================================================================
-  // BUILD NEW ITEM PAYLOAD - SEMPRE como anúncio NORMAL (sem catalog_product_id)
-  // =========================================================================
-  
-  // =========================================================================
-  // FILTRO DE ATRIBUTOS ANTI-CATÁLOGO
-  // Remover GTIN/SKU conforme configuração do checklist
+  // FILTRO FINAL DE ATRIBUTOS (GTIN/SKU conforme checkboxes)
   // =========================================================================
   const gtinIdentifiers = new Set(['GTIN', 'EAN', 'UPC', 'ISBN']);
   const skuIdentifiers = new Set(['SKU', 'SELLER_SKU']);
-  const duplicatePackageAttrs = new Set(['PACKAGE_HEIGHT', 'PACKAGE_WIDTH', 'PACKAGE_LENGTH', 'PACKAGE_WEIGHT']);
-  const alwaysBlockedAttrs = new Set(['MPN', 'PART_NUMBER', 'ALPHANUMERIC_MODEL', 'MANUFACTURER_CODE', 'ITEM_CONDITION']);
   
   const includeGtin = checklist?.include_gtin === true;
   const includeSku = checklist?.include_sku === true;
   
   const removedAttributes: string[] = [];
-  const filteredAttributesWithPackage = attributesWithPackage.filter((attr: NormalizedAttribute) => {
+  
+  // Mesclar seller_package_* com finalAttributes
+  const packageAttrIds = new Set(sellerPackageAttributes.map(a => a.id));
+  const attributesWithPackage = [
+    ...sellerPackageAttributes,
+    ...finalAttributes.filter(a => !packageAttrIds.has(a.id)),
+  ];
+  
+  const filteredAttributes = attributesWithPackage.filter((attr: NormalizedAttribute) => {
     const attrIdUpper = attr.id?.toUpperCase() || '';
-    
-    // Sempre bloquear atributos perigosos
-    if (alwaysBlockedAttrs.has(attrIdUpper)) {
-      removedAttributes.push(attr.id);
-      return false;
-    }
-    
-    // Sempre bloquear PACKAGE_* duplicados
-    if (duplicatePackageAttrs.has(attrIdUpper)) {
-      removedAttributes.push(attr.id);
-      return false;
-    }
     
     // Controle de GTIN
     if (gtinIdentifiers.has(attrIdUpper) && !includeGtin) {
@@ -1865,156 +1560,105 @@ async function executeCloneAction(
     
     return true;
   });
-  
+
   console.log(`[ad-action-execute] === ANTI-CATALOG ATTRIBUTE FILTER ===`);
   console.log(`[ad-action-execute] include_gtin: ${includeGtin}`);
   console.log(`[ad-action-execute] include_sku: ${includeSku}`);
   console.log(`[ad-action-execute] attributes_removed: [${removedAttributes.join(', ')}]`);
-  console.log(`[ad-action-execute] attributes_after_filter: ${filteredAttributesWithPackage.length}`);
-  
+  console.log(`[ad-action-execute] attributes_after_filter: ${filteredAttributes.length}`);
+
+  // =========================================================================
+  // BUILD PAYLOAD - v3 Anti-catálogo
+  // REMOVIDO: catalog_listing, catalog_product_id, family_name
+  // =========================================================================
   let newItem: any = {
+    title: checklist?.final_title || checklist?.override_title || itemData.title,
     category_id: itemData.category_id,
-    currency_id: preValidation.currency_id,
-    listing_type_id: listingTypeToUse, // OBRIGATÓRIO - SEMPRE PRESENTE
+    currency_id: itemData.currency_id || "BRL",
+    listing_type_id: listingTypeToUse,
     condition: itemData.condition || "new",
-    price: checklist?.override_price ?? (checklist?.price !== false ? itemData.price : undefined),
-    available_quantity: checklist?.override_quantity ?? (checklist?.quantity !== false ? itemData.available_quantity : 1),
-    attributes: filteredAttributesWithPackage.length > 0 ? filteredAttributesWithPackage : undefined,
+    price: checklist?.final_price ?? checklist?.override_price ?? itemData.price,
+    available_quantity: checklist?.final_quantity ?? checklist?.override_quantity ?? itemData.available_quantity ?? 1,
+    attributes: filteredAttributes.length > 0 ? filteredAttributes : undefined,
   };
 
-  // =========================================================================
-  // CRÍTICO: catalog_listing: false - FORÇA ANÚNCIO NORMAL
-  // Isso impede que o ML interprete como fluxo de catálogo e bloqueie o título
-  // =========================================================================
-  if (checklist?.anti_catalog_enabled === true || checklist?.catalog_listing === false) {
-    newItem.catalog_listing = false;
-    console.log(`[ad-action-execute] === ANTI-CATALOG MODE ACTIVE ===`);
-    console.log(`[ad-action-execute] catalog_listing: false (FORCED)`);
-  }
-
-  // TÍTULO: Usar override do usuário se disponível, senão usar do item fonte
-  if (canIncludeTitle) {
-    newItem.title = checklist?.override_title || checklist?.final_title || itemData.title;
-    console.log(`[ad-action-execute] Title: ${checklist?.override_title || checklist?.final_title ? "user_override" : "source_item"} = "${newItem.title?.substring(0, 40)}..."`);
-  }
-
-  // FOTOS: Sempre incluir quando criando como normal
-  if (canIncludePictures) {
-    // Usar fotos do checklist se disponíveis, senão do item fonte
-    const picturesSource = checklist?.final_pictures || itemData.pictures;
-    newItem.pictures = picturesSource.map((p: any) => ({ source: p.url || p.secure_url || p.source }));
+  // FOTOS
+  const picturesSource = checklist?.final_pictures || itemData.pictures;
+  if (picturesSource && Array.isArray(picturesSource) && picturesSource.length > 0) {
+    newItem.pictures = picturesSource.map((p: any) => ({ 
+      source: p.secure_url || p.url || p.source 
+    }));
     console.log(`[ad-action-execute] Pictures: ${newItem.pictures.length} images`);
   }
 
-  // IMPORTANTE: NÃO incluir catalog_product_id quando criando como normal
-  // Isso permite que o anúncio seja editável (título, fotos, descrição)
-  if (!createAsNormal && sourceIsCatalog && catalogDiagnostic.catalog_product_id) {
-    newItem.catalog_product_id = catalogDiagnostic.catalog_product_id;
-    console.log(`[ad-action-execute] [LEGACY MODE] Added catalog_product_id: ${catalogDiagnostic.catalog_product_id}`);
-  } else {
-    console.log(`[ad-action-execute] catalog_product_id: OMITTED (creating as normal listing)`);
-  }
-
-  // =========================================================================
-  // STATUS: Criar pausado ou ativo conforme seleção do usuário
-  // =========================================================================
+  // STATUS
   if (checklist?.create_paused === true) {
     newItem.status = "paused";
     console.log(`[ad-action-execute] Status: paused (user selected)`);
+  }
+
+  // DESCRIÇÃO
+  if (checklist?.final_description || checklist?.override_description) {
+    newItem.description = { plain_text: checklist.final_description || checklist.override_description };
+    console.log(`[ad-action-execute] Description: from checklist`);
   } else {
-    // Por padrão, não definir status - o ML cria como "active"
-    console.log(`[ad-action-execute] Status: active (default)`);
-  }
-
-  // Adicionar body-level fields (family_name, etc.) - GARANTIDO no payload
-  for (const [fieldName, fieldValue] of Object.entries(fillResult.bodyLevelFields)) {
-    newItem[fieldName] = fieldValue;
-    console.log(`[ad-action-execute] Added body-level field: ${fieldName} = "${fieldValue}"`);
-  }
-
-  // DESCRIÇÃO: Usar override do usuário se disponível
-  if (canIncludeDescription) {
-    if (checklist?.override_description) {
-      newItem.description = { plain_text: checklist.override_description };
-      console.log(`[ad-action-execute] Description: user_override`);
-    } else {
-      // Buscar descrição do item fonte
+    // Buscar descrição do item fonte
+    try {
       const descResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}/description`, {
-        headers: { "Authorization": `Bearer ${currentAccessToken}` },
+        headers: { Authorization: `Bearer ${currentAccessToken}` },
       });
       if (descResponse.ok) {
         const descData = await descResponse.json();
         newItem.description = { plain_text: descData.plain_text || descData.text };
-        console.log(`[ad-action-execute] Description: source_item`);
+        console.log(`[ad-action-execute] Description: from source item`);
       }
+    } catch (e) {
+      console.warn(`[ad-action-execute] Failed to fetch description: ${e}`);
     }
   }
 
-  // Validate minimum required fields
-  if (!newItem.title || !newItem.category_id) {
-    return {
-      success: false,
-      error: "INSUFFICIENT_DATA",
-      message: "Dados insuficientes para clonagem. Título ou categoria não encontrados.",
-      missing: { title: !newItem.title, category_id: !newItem.category_id },
-      catalog_info: catalogInfo,
-      catalog_diagnostic: catalogDiagnostic,
-    };
-  }
-
-  // =========================================================================
-  // SANITIZE: Garantir que apenas campos permitidos vão no body
-  // =========================================================================
+  // Sanitize - remove campos proibidos
   newItem = sanitizePayload(newItem);
 
-  console.log(`[ad-action-execute] Sending clone request with ${filteredAttributesWithPackage.length} attributes`);
-  console.log(`[ad-action-execute] Body-level fields in payload: ${JSON.stringify(fillResult.bodyLevelFields)}`);
-  console.log(`[ad-action-execute] Payload keys: ${Object.keys(newItem).join(", ")}`);
-  
   // =========================================================================
-  // DIAGNÓSTICO DETALHADO ANTI-CATÁLOGO (salvo no log para debugging)
+  // DIAGNÓSTICO DETALHADO (para log)
   // =========================================================================
   const antiCatalogDiagnostic = {
-    catalog_listing: newItem.catalog_listing,
     include_gtin: includeGtin,
     include_sku: includeSku,
-    attributes_removed: removedAttributes,
-    attributes_count_final: filteredAttributesWithPackage.length,
-    create_as_normal: createAsNormal,
-    source_is_catalog: sourceIsCatalog,
-    title_present: !!newItem.title,
-    pictures_count: newItem.pictures?.length || 0,
-    payload_keys: Object.keys(newItem),
+    attributes_removed: [...removedNotModifiable, ...removedCatalogForcing, ...removedAttributes],
+    attributes_ids_sent: (newItem.attributes || []).map((a: any) => a.id),
+    payload_keys_sent: Object.keys(newItem),
+    removed_fields: ["family_name", "catalog_listing", "catalog_product_id"],
   };
-  console.log(`[ad-action-execute] === ANTI-CATALOG DIAGNOSTIC ===`);
+  
+  console.log(`[ad-action-execute] === ANTI-CATALOG v3 DIAGNOSTIC ===`);
   console.log(JSON.stringify(antiCatalogDiagnostic, null, 2));
 
   // =========================================================================
-  // CLONE SEMPRE USA: POST /items (criar novo anúncio)
-  // NUNCA usar PUT /items/{id} para clone - isso é para update
+  // CREATE ITEM - POST /items
   // =========================================================================
   const CREATE_ENDPOINT = "https://api.mercadolibre.com/items";
   const CREATE_METHOD = "POST";
-  
-  // Log obrigatório: request_kind, method, endpoint
-  console.log(`[ad-action-execute] === API REQUEST (Pass 1) ===`);
-  console.log(`[ad-action-execute] request_kind=create`);
+
+  console.log(`[ad-action-execute] === API REQUEST ===`);
   console.log(`[ad-action-execute] method=${CREATE_METHOD}`);
   console.log(`[ad-action-execute] endpoint=${CREATE_ENDPOINT}`);
-  
+  console.log(`[ad-action-execute] payload_keys: ${Object.keys(newItem).join(", ")}`);
+
   let createResponse = await fetch(CREATE_ENDPOINT, {
     method: CREATE_METHOD,
     headers: {
-      "Authorization": `Bearer ${currentAccessToken}`,
+      Authorization: `Bearer ${currentAccessToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(newItem),
   });
 
   let createData = await createResponse.json();
-  
+
   // =========================================================================
-  // TRATAMENTO 401 - TOKEN EXPIRADO: Tentar refresh automático
+  // TRATAMENTO 401 - TOKEN EXPIRADO
   // =========================================================================
   if (is401Error(createResponse) && supabase && mlAccountId) {
     console.warn(`[ad-action-execute] 401 UNAUTHORIZED - Attempting token refresh...`);
@@ -2022,531 +1666,132 @@ async function executeCloneAction(
     const refreshResult = await tryRefreshToken(supabase, mlAccountId);
     if (refreshResult.success && refreshResult.newAccessToken) {
       currentAccessToken = refreshResult.newAccessToken;
-      console.log(`[ad-action-execute] Token refreshed successfully - retrying request`);
       
-      // Retry com novo token
       createResponse = await fetch(CREATE_ENDPOINT, {
         method: CREATE_METHOD,
         headers: {
-          "Authorization": `Bearer ${currentAccessToken}`,
+          Authorization: `Bearer ${currentAccessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(newItem),
       });
       createData = await createResponse.json();
-      
-      // Se ainda for 401 após refresh, retornar erro de reconexão
-      if (is401Error(createResponse)) {
-        console.error(`[ad-action-execute] Still 401 after token refresh - account needs reconnection`);
-        return {
-          success: false,
-          error: "AUTH_EXPIRED",
-          message: "Token expirado. Reconecte a conta do Mercado Livre para continuar.",
-          user_guidance: "Clique em 'Reconectar Mercado Livre' para renovar a autorização da sua conta.",
-          requires_reconnection: true,
-          api_error: createData,
-          api_request: {
-            request_kind: "create",
-            http_method: CREATE_METHOD,
-            endpoint_url: CREATE_ENDPOINT,
-          },
-        };
-      }
-    } else {
-      // Refresh falhou - retornar erro de reconexão
-      console.error(`[ad-action-execute] Token refresh failed: ${refreshResult.error}`);
+    }
+    
+    if (is401Error(createResponse)) {
       return {
         success: false,
         error: "AUTH_EXPIRED",
-        message: "Token expirado. Reconecte a conta do Mercado Livre para continuar.",
-        user_guidance: "Clique em 'Reconectar Mercado Livre' para renovar a autorização da sua conta.",
+        message: "Token expirado. Reconecte a conta do Mercado Livre.",
         requires_reconnection: true,
-        refresh_error: refreshResult.error,
         api_error: createData,
-        api_request: {
-          request_kind: "create",
-          http_method: CREATE_METHOD,
-          endpoint_url: CREATE_ENDPOINT,
-        },
       };
     }
   }
-  
-  // =========================================================================
-  // RETRY LOOP: Se falhar, tentar recovery de campos e fallback de listing_type
-  // ESTRATÉGIA GUIADA PELA API: Extrair tipos sugeridos da mensagem de erro
-  // NOVA ESTRATÉGIA: CATALOG_FALLBACK - Retry sem title se bloqueado
-  // =========================================================================
-  let currentFallbackIndex = -1; // -1 = sem fallback ainda
-  let listingTypeFallbackUsed = false;
-  let lastListingTypeAttempted = listingTypeToUse;
-  let listingTypeFallbackChain: string[] = [];
-  const MAX_LISTING_TYPE_FALLBACKS = 2;
-  
-  // Variáveis para CATALOG_FALLBACK
-  let titleFallbackAttempted = false;
-  let fallbackRemovedFields: string[] = [];
-  let originalTitle: string | undefined = newItem.title;
-  let postCreateTitleUpdate: string | undefined;
-  let createdWithoutTitle = false;
 
-  while (!createResponse.ok && currentFallbackIndex < MAX_LISTING_TYPE_FALLBACKS) {
-    // Verificar se é erro de listing_type_id.unavailable (ex: "free is not available")
-    const isListingTypeUnavailable = isListingTypeUnavailableError(createData);
-    const isListingTypeIssue = isListingTypeError(createData) || isListingTypeUnavailable;
+  // =========================================================================
+  // RETRY: Se API pedir body.required_fields (ex: family_name)
+  // =========================================================================
+  if (!createResponse.ok) {
     const extractedMissing = extractMissingFieldsFromApiError(createData);
     
-    // =========================================================================
-    // CATALOG_FALLBACK: Se erro body.invalid_fields para title, remover title e reenviar
-    // Aplicável quando: item é de catálogo E API bloqueia title
-    // =========================================================================
-    const isTitleBlocked = isTitleInvalidFieldsError(createData);
-    if (isTitleBlocked && !titleFallbackAttempted) {
-      console.warn(`[ad-action-execute] === CATALOG_FALLBACK: Title blocked - removing title and retrying ===`);
-      console.warn(`[ad-action-execute] isCatalogSource=${isCatalogSource}, original_title="${originalTitle?.substring(0, 40)}..."`);
+    // Se API pediu campos body-level (ex: family_name), tentar preencher e reenviar
+    if (extractedMissing.bodyFields.length > 0) {
+      console.warn(`[ad-action-execute] API requires body fields: ${extractedMissing.bodyFields.join(", ")}`);
       
-      titleFallbackAttempted = true;
-      
-      // Extrair quais campos estão inválidos
-      const invalidFieldsExtracted = extractInvalidFields(createData);
-      console.warn(`[ad-action-execute] Invalid fields extracted: ${invalidFieldsExtracted.join(", ") || "(none)"}`);
-      
-      // Remover title do payload
-      delete newItem.title;
-      fallbackRemovedFields.push("title");
-      
-      // Tentar criar sem title
-      console.log(`[ad-action-execute] === API REQUEST (CATALOG_FALLBACK - without title) ===`);
-      console.log(`[ad-action-execute] request_kind=create`);
-      console.log(`[ad-action-execute] method=${CREATE_METHOD}`);
-      console.log(`[ad-action-execute] fallback_removed_fields=${fallbackRemovedFields.join(", ")}`);
-      
-      createResponse = await fetch(CREATE_ENDPOINT, {
-        method: CREATE_METHOD,
-        headers: {
-          "Authorization": `Bearer ${currentAccessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(newItem),
-      });
-      
-      createData = await createResponse.json();
-      
-      // Se sucesso, marcar que criou sem título
-      if (createResponse.ok) {
-        createdWithoutTitle = true;
-        console.log(`[ad-action-execute] CATALOG_FALLBACK SUCCESS: Item created without title`);
-      }
-      
-      continue;
-    }
-    
-    // Se for erro de listing_type_id, tentar fallback GUIADO PELA API
-    if (isListingTypeIssue && currentFallbackIndex < MAX_LISTING_TYPE_FALLBACKS - 1) {
-      currentFallbackIndex++;
-      
-      // Extrair tipos sugeridos da resposta da API (ex: [gold_pro, gold_special])
-      if (apiSuggestedTypes.length === 0) {
-        apiSuggestedTypes = extractSuggestedListingTypes(createData);
-      }
-      
-      // Resolver com base nos tipos sugeridos ou fallback padrão
-      const fallbackResolution = resolveListingTypeId(
-        undefined,
-        categoryIdForCache,
-        DEFAULT_LISTING_TYPE_ID,
-        apiSuggestedTypes,
-        currentFallbackIndex
-      );
-      
-      listingTypeToUse = fallbackResolution.listing_type_id;
-      listingTypeStrategy = fallbackResolution.source === "api_suggested" ? "api_suggested" : "fallback";
-      listingTypeFallbackUsed = true;
-      lastListingTypeAttempted = listingTypeToUse;
-      listingTypeFallbackChain.push(listingTypeToUse);
-
-      console.warn(`[ad-action-execute] LISTING_TYPE FALLBACK [${currentFallbackIndex + 1}/${MAX_LISTING_TYPE_FALLBACKS}]:`);
-      console.warn(`[ad-action-execute]   → Trying: ${listingTypeToUse}`);
-      console.warn(`[ad-action-execute]   → Source: ${fallbackResolution.source}`);
-      console.warn(`[ad-action-execute]   → API suggested: ${apiSuggestedTypes.join(", ") || "(none)"}`);
-
-      // Reconstruir payload com novo listing_type_id
-      newItem.listing_type_id = listingTypeToUse;
-
-      console.log(`[ad-action-execute] === API REQUEST (Fallback ${currentFallbackIndex + 1}) ===`);
-      console.log(`[ad-action-execute] listing_type_id=${listingTypeToUse}`);
-      
-      createResponse = await fetch(CREATE_ENDPOINT, {
-        method: CREATE_METHOD,
-        headers: {
-          "Authorization": `Bearer ${currentAccessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(newItem),
-      });
-
-      createData = await createResponse.json();
-      continue;
-    }
-
-    // Se há campos faltantes (não listing_type), tentar preencher
-    if (extractedMissing.bodyFields.length > 0 || extractedMissing.attributeFields.length > 0) {
-      console.warn(`[ad-action-execute] API returned missing fields - attempting recovery`);
-      console.warn(`[ad-action-execute] Extracted body fields: ${extractedMissing.bodyFields.join(", ") || "(none)"}`);
-      console.warn(`[ad-action-execute] Extracted attribute fields: ${extractedMissing.attributeFields.join(", ") || "(none)"}`);
-
-      // =========================================================================
-      // PREFLIGHT (Pass 2): Reexecutar motor de preenchimento com campos extras
-      // =========================================================================
-      console.log(`[ad-action-execute] === PREFLIGHT VALIDATION (Pass 2 - Recovery) ===`);
-      
-      fillResult = validateAndFillRequiredAttributes({
-        requiredIds: [...requiredIds, ...extractedMissing.attributeFields.map(f => f.toUpperCase())],
+      // Preencher campos body-level que a API exigiu
+      const retryFillResult = validateAndFillRequiredAttributes({
+        requiredIds,
         extraBodyFields: extractedMissing.bodyFields,
         categoryAttributes,
         sourceAttrsById,
         itemData,
         categoryId: itemData.category_id || "",
       });
-
-      // Atualizar requiredCheck com informações da segunda passagem
-      requiredCheck = {
-        ...requiredCheck,
-        requiredBodyFieldKeys: fillResult.requiredBodyFieldKeys,
-        filledBodyByFallback: fillResult.filledBodyByFallback,
-        filledBodyByDefaults: fillResult.filledBodyByDefaults,
-        bodyLevelFields: fillResult.bodyLevelFields,
-        missingAfterFill: fillResult.missing,
-        recoveryAttempt: true,
-        recoveryExtractedFields: extractedMissing,
-      } as any;
-
-      // Reconstruir payload com novos campos
-      const finalAttributes2 = buildFinalAttributesPayload(
-        fillResult.filled,
-        cleanedAttrs,
-        includeNonRequired
-      );
-
-      // Reconstruir payload com novos campos - RESPEITANDO REGRAS DE CATÁLOGO
-      // IMPORTANTE: listing_type_id SEMPRE presente
-      newItem = {
-        category_id: itemData.category_id,
-        currency_id: itemData.currency_id || "BRL",
-        listing_type_id: listingTypeToUse, // OBRIGATÓRIO - SEMPRE PRESENTE
-        condition: itemData.condition || "new",
-        price: checklist?.override_price ?? (checklist?.price !== false ? itemData.price : undefined),
-        available_quantity: checklist?.override_quantity ?? (checklist?.quantity !== false ? itemData.available_quantity : 1),
-        attributes: finalAttributes2.length > 0 ? finalAttributes2 : undefined,
-      };
-
-      // TÍTULO: Usar override do usuário se disponível, senão usar do item fonte
-      if (canIncludeTitle) {
-        newItem.title = checklist?.override_title || itemData.title;
-      }
-
-      // FOTOS: Sempre incluir quando criando como normal
-      if (canIncludePictures) {
-        newItem.pictures = itemData.pictures.map((p: any) => ({ source: p.url || p.secure_url }));
-      }
-
-      // IMPORTANTE: NÃO incluir catalog_product_id quando criando como normal
-      if (!createAsNormal && sourceIsCatalog && catalogDiagnostic.catalog_product_id) {
-        newItem.catalog_product_id = catalogDiagnostic.catalog_product_id;
-      }
-
-      // Adicionar body-level fields (novos após retry)
-      for (const [fieldName, fieldValue] of Object.entries(fillResult.bodyLevelFields)) {
-        newItem[fieldName] = fieldValue;
-        console.log(`[ad-action-execute] [RETRY] Added body-level field: ${fieldName} = "${fieldValue}"`);
-      }
-
-      // CONDICIONAL: Re-adicionar description se NÃO for catálogo
-      if (canIncludeDescription && !isCatalogId(itemId)) {
-      const descResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}/description`, {
-          headers: { "Authorization": `Bearer ${currentAccessToken}` },
-        });
-        if (descResponse.ok) {
-          const descData = await descResponse.json();
-          newItem.description = { plain_text: descData.plain_text || descData.text };
-        }
-      }
-
-      // Sanitize novamente
-      newItem = sanitizePayload(newItem);
-
-      console.log(`[ad-action-execute] [RETRY] Sending clone request with ${finalAttributes2.length} attributes`);
-      console.log(`[ad-action-execute] [RETRY] Body-level fields: ${JSON.stringify(fillResult.bodyLevelFields)}`);
-      console.log(`[ad-action-execute] [RETRY] listing_type_id: ${listingTypeToUse}`);
-
-      // =========================================================================
-      // CREATE ITEM (2ª tentativa) - SEMPRE POST /items
-      // =========================================================================
-      console.log(`[ad-action-execute] === API REQUEST (Pass 2 - RETRY) ===`);
-      console.log(`[ad-action-execute] request_kind=create`);
-      console.log(`[ad-action-execute] method=${CREATE_METHOD}`);
-      console.log(`[ad-action-execute] endpoint=${CREATE_ENDPOINT}`);
       
+      // Adicionar campos body ao payload
+      for (const [fieldName, fieldValue] of Object.entries(retryFillResult.bodyLevelFields)) {
+        newItem[fieldName] = fieldValue;
+        console.log(`[ad-action-execute] [RETRY] Added body field: ${fieldName} = "${fieldValue}"`);
+      }
+      
+      // Retry
+      console.log(`[ad-action-execute] === API REQUEST (RETRY with body fields) ===`);
       createResponse = await fetch(CREATE_ENDPOINT, {
         method: CREATE_METHOD,
         headers: {
-          "Authorization": `Bearer ${currentAccessToken}`,
+          Authorization: `Bearer ${currentAccessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(newItem),
       });
-
       createData = await createResponse.json();
     }
-
-    // Se chegamos aqui e ainda falhou, sair do loop para evitar loop infinito
-    break;
+    
+    // Se API pediu listing_type_id fallback
+    if (!createResponse.ok && isListingTypeUnavailableError(createData)) {
+      const suggestedTypes = extractSuggestedListingTypes(createData);
+      
+      if (suggestedTypes.length > 0) {
+        const fallbackResolution = resolveListingTypeId(
+          undefined,
+          categoryIdForCache,
+          DEFAULT_LISTING_TYPE_ID,
+          suggestedTypes,
+          0
+        );
+        
+        newItem.listing_type_id = fallbackResolution.listing_type_id;
+        console.log(`[ad-action-execute] [RETRY] listing_type_id fallback: ${fallbackResolution.listing_type_id}`);
+        
+        createResponse = await fetch(CREATE_ENDPOINT, {
+          method: CREATE_METHOD,
+          headers: {
+            Authorization: `Bearer ${currentAccessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(newItem),
+        });
+        createData = await createResponse.json();
+      }
+    }
   }
-  
+
+  // =========================================================================
+  // RESULTADO FINAL
+  // =========================================================================
   if (!createResponse.ok) {
-    console.error(`[ad-action-execute] Clone ${CREATE_METHOD} ${CREATE_ENDPOINT} FAILED:`, JSON.stringify({
-      status: createResponse.status,
-      error: createData,
-      payload_attributes_count: finalAttributes.length,
-      body_level_fields: fillResult.bodyLevelFields,
-      listing_type_used: listingTypeToUse,
-      listing_type_fallback_used: listingTypeFallbackUsed,
-      listing_type_fallback_chain: listingTypeFallbackChain,
-      api_suggested_types: apiSuggestedTypes,
-    }));
-
-    // Verificar se é erro de campos obrigatórios (para logging detalhado)
-    const isRequiredFieldError = 
-      createData?.cause?.some((c: any) => c.code === "item.attributes.missing_required") ||
-      createData?.message?.includes("required_fields") ||
-      createData?.message?.includes("body.required_fields");
-
-    // Verificar se é erro específico de listing_type_id (required ou unavailable)
-    const isListingTypeRequiredError = isListingTypeError(createData);
-    const isListingTypeUnavailable = isListingTypeUnavailableError(createData);
-
-    if (isListingTypeRequiredError || isListingTypeUnavailable) {
-      console.error(`[ad-action-execute] LISTING_TYPE_ID ERROR: All fallbacks exhausted`);
-      console.error(`[ad-action-execute]   → Fallback chain: ${listingTypeFallbackChain.join(" → ") || "(none)"}`);
-      console.error(`[ad-action-execute]   → API suggested types: ${apiSuggestedTypes.join(", ") || "(none)"}`);
-      
-      return {
-        success: false,
-        error: isListingTypeUnavailable ? "LISTING_TYPE_UNAVAILABLE" : "LISTING_TYPE_VALIDATION_FAILED",
-        message: `Não foi possível publicar com os tipos de anúncio disponíveis para essa categoria. Verifique o tipo de anúncio permitido e preferências de envio da conta.`,
-        user_guidance: isListingTypeUnavailable 
-          ? `O tipo de anúncio selecionado não está disponível para sua conta. Tipos sugeridos: ${apiSuggestedTypes.join(", ") || "não identificados"}.`
-          : "O tipo de anúncio não é compatível com esta categoria. Tente novamente ou entre em contato com o suporte.",
-        api_error: createData,
-        listing_type_resolution: {
-          original_source: listingTypeResolution.source,
-          last_attempted: lastListingTypeAttempted,
-          fallback_used: listingTypeFallbackUsed,
-          fallback_chain: listingTypeFallbackChain,
-          api_suggested_types: apiSuggestedTypes,
-          fallback_index: currentFallbackIndex,
-        },
-        payload_sent: newItem,
-        catalog_info: catalogInfo,
-        api_request: {
-          request_kind: "create",
-          http_method: CREATE_METHOD,
-          endpoint_url: CREATE_ENDPOINT,
-        },
-      };
-    }
-
-    if (isRequiredFieldError) {
-      console.error(`[ad-action-execute] ML still reports missing required fields despite validation!`);
-      console.error(`[ad-action-execute] This may indicate the category has additional unlisted requirements`);
-      
-      // Última tentativa de extração para diagnóstico
-      const finalExtracted = extractMissingFieldsFromApiError(createData);
-      (requiredCheck as any).finalExtractedMissing = finalExtracted;
-    }
-
-    // Verificar se é erro de requiresPictures (listing_type exige fotos mas não enviamos)
-    const requiresPicturesError = createData?.cause?.some((c: any) => 
-      c.code === "item.pictures.required" ||
-      c.code === "pictures.required" ||
-      c.message?.includes("pictures") ||
-      c.message?.includes("requiresPictures")
-    ) || createData?.message?.toLowerCase().includes("picture");
-
-    if (requiresPicturesError && isCatalogSource && picturesBlocked) {
-      console.warn(`[ad-action-execute] CATALOG PICTURES CONFLICT: ML requires pictures but they are blocked for catalog items`);
-      return {
-        success: false,
-        error: "CATALOG_PICTURES_BLOCKED",
-        message: "Este produto de catálogo exige fotos para o tipo de anúncio, mas fotos são gerenciadas pelo catálogo. Não é possível clonar este item diretamente.",
-        user_guidance: "Itens de catálogo têm fotos gerenciadas pelo Mercado Livre. O tipo de anúncio selecionado exige fotos próprias. Tente usar a opção de cadastrar no catálogo diretamente pelo painel do Mercado Livre.",
-        api_error: createData,
-        catalog_diagnostic: { 
-          ...catalogDiagnostic, 
-          listing_type_strategy: listingTypeStrategy,
-          listing_type_attempted: listingTypeToUse,
-          listing_type_fallback_used: listingTypeFallbackUsed,
-          pictures_blocked: picturesBlocked,
-        },
-        catalog_info: catalogInfo,
-        api_request: {
-          request_kind: "create",
-          http_method: CREATE_METHOD,
-          endpoint_url: CREATE_ENDPOINT,
-        },
-      };
-    }
-
-    // Se for erro de invalid_fields com title e for catálogo, dar mensagem amigável
-    const hasInvalidTitle = createData?.cause?.some((c: any) => 
-      c.code === "item.invalid_title" || 
-      (c.code?.includes("invalid_fields") && c.message?.includes("title"))
-    ) || createData?.message?.includes("title");
-
-    if (hasInvalidTitle && isCatalogSource) {
-      return {
-        success: false,
-        error: "CATALOG_TITLE_BLOCKED",
-        message: "Este anúncio pertence ao catálogo do Mercado Livre. O campo 'título' é controlado pelo catálogo e não pode ser modificado.",
-        user_guidance: "Itens de catálogo têm título, fotos e descrição gerenciados pelo Mercado Livre. Esta é uma limitação da plataforma, não uma falha do sistema.",
-        api_error: createData,
-        catalog_diagnostic: {
-          ...catalogDiagnostic,
-          listing_type_strategy: listingTypeStrategy,
-          listing_type_attempted: listingTypeToUse,
-        },
-        catalog_info: catalogInfo,
-        api_request: {
-          request_kind: "create",
-          http_method: CREATE_METHOD,
-          endpoint_url: CREATE_ENDPOINT,
-        },
-      };
-    }
-
-    return { 
-      success: false, 
-      error: createData.message || "Failed to create cloned item", 
+    console.error(`[ad-action-execute] Clone FAILED:`, JSON.stringify(createData));
+    
+    // Verificar se é erro de título inválido
+    const isTitleBlocked = isTitleInvalidFieldsError(createData);
+    
+    return {
+      success: false,
+      error: isTitleBlocked ? "TITLE_BLOCKED_BY_CATALOG" : (createData.message || "Failed to create item"),
+      message: isTitleBlocked 
+        ? "O Mercado Livre bloqueou o campo 'título'. Isso pode indicar que a categoria ou produto está forçando catálogo automaticamente, mesmo sem GTIN/SKU. Tente criar diretamente no painel do ML ou use outra categoria."
+        : (createData.message || "Erro ao criar anúncio"),
       api_error: createData,
       payload_sent: newItem,
-      attributes_sent: (newItem.attributes || []).map((a: any) => ({ id: a.id, value: a.value_name || a.value_id })),
-      required_check: requiredCheck,
-      catalog_info: catalogInfo,
-      catalog_diagnostic: {
-        ...catalogDiagnostic,
-        listing_type_strategy: listingTypeStrategy,
-        listing_type_attempted: listingTypeToUse,
-        listing_type_fallback_used: listingTypeFallbackUsed,
-        removed_not_modifiable: removedNotModifiable,
-      },
-      // Log detalhado da chamada
-      api_request: {
-        request_kind: "create",
-        http_method: CREATE_METHOD,
-        endpoint_url: CREATE_ENDPOINT,
-      },
+      anti_catalog_diagnostic: antiCatalogDiagnostic,
     };
   }
 
   console.log(`[ad-action-execute] Clone SUCCESS: ${createData.id}`);
-  console.log(`[ad-action-execute] === FINAL API CALL SUMMARY ===`);
-  console.log(`[ad-action-execute] request_kind=create | method=${CREATE_METHOD} | endpoint=${CREATE_ENDPOINT} | result=SUCCESS`);
-  console.log(`[ad-action-execute] listing_type_id=${listingTypeToUse} | fallback_used=${listingTypeFallbackUsed}`);
-  console.log(`[ad-action-execute] title_fallback_used=${createdWithoutTitle} | removed_fields=${fallbackRemovedFields.join(",") || "none"}`);
 
-  // =========================================================================
-  // POST-CREATE TITLE UPDATE: Se criou sem título, tentar PATCH com título
-  // Aplicável quando: CATALOG_FALLBACK removeu título e usuário forneceu override
-  // =========================================================================
-  if (createdWithoutTitle && originalTitle) {
-    const newItemId = createData.id;
-    console.log(`[ad-action-execute] === CATALOG_FALLBACK: Attempting post-create title update via PATCH ===`);
-    console.log(`[ad-action-execute] new_item_id=${newItemId}, title="${originalTitle.substring(0, 40)}..."`);
-    
-    try {
-      const patchResponse = await fetch(`https://api.mercadolibre.com/items/${newItemId}`, {
-        method: "PUT",
-        headers: {
-          "Authorization": `Bearer ${currentAccessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ title: originalTitle }),
-      });
-      
-      if (patchResponse.ok) {
-        console.log(`[ad-action-execute] CATALOG_FALLBACK: Title updated successfully via PATCH`);
-        postCreateTitleUpdate = "success";
-      } else {
-        const patchError = await patchResponse.json().catch(() => ({}));
-        console.warn(`[ad-action-execute] CATALOG_FALLBACK: Title PATCH blocked - ${patchResponse.status}`, patchError);
-        postCreateTitleUpdate = "blocked_or_not_allowed";
-      }
-    } catch (patchErr: any) {
-      console.warn(`[ad-action-execute] CATALOG_FALLBACK: Title PATCH exception - ${patchErr.message}`);
-      postCreateTitleUpdate = "exception";
-    }
+  // Cache do listing_type_id que funcionou
+  if (categoryIdForCache && newItem.listing_type_id) {
+    saveListingTypeCacheForCategory(categoryIdForCache, newItem.listing_type_id);
   }
 
-  // =========================================================================
-  // CACHE: Salvar listing_type_id que funcionou para a categoria
-  // Próximas clonagens da mesma categoria usarão este tipo primeiro
-  // =========================================================================
-  if (categoryIdForCache && listingTypeToUse) {
-    saveListingTypeCacheForCategory(categoryIdForCache, listingTypeToUse);
-  }
-
-  // =========================================================================
-  // WARNINGS: Processar warnings não críticos (ex: shipping.lost_me1_by_user)
-  // Estes warnings NÃO devem bloquear a operação, apenas registrar em log
-  // =========================================================================
-  const warnings: string[] = [];
-  if (createData.warnings && Array.isArray(createData.warnings)) {
-    for (const warning of createData.warnings) {
-      const warningCode = typeof warning === "string" ? warning : warning.code || warning.message || JSON.stringify(warning);
-      console.warn(`[ad-action-execute] WARNING (non-blocking): ${warningCode}`);
-      warnings.push(warningCode);
-    }
-  }
-
-  return { 
-    success: true, 
-    message: catalogInfo 
-      ? "Item clonado com sucesso a partir do catálogo" 
-      : "Item cloned successfully", 
+  return {
+    success: true,
+    message: "Anúncio criado com sucesso",
     new_item_id: createData.id,
     permalink: createData.permalink,
-    attributes_filled: fillResult.log.filter(l => l.source !== "item_fonte").map(l => l.attrId),
-    body_level_fields: fillResult.bodyLevelFields,
-    required_check: requiredCheck,
-    listing_type_resolution: {
-      listing_type_used: listingTypeToUse,
-      source: listingTypeResolution.source,
-      strategy: listingTypeStrategy,
-      fallback_used: listingTypeFallbackUsed,
-      fallback_chain: listingTypeFallbackChain,
-      api_suggested_types: apiSuggestedTypes.length > 0 ? apiSuggestedTypes : undefined,
-      fallback_index: listingTypeFallbackUsed ? currentFallbackIndex : undefined,
-    },
-    // CATALOG_FALLBACK info
-    catalog_fallback: createdWithoutTitle ? {
-      title_fallback_used: true,
-      fallback_removed_fields: fallbackRemovedFields,
-      original_title: originalTitle,
-      post_create_title_update: postCreateTitleUpdate,
-    } : undefined,
-    warnings: warnings.length > 0 ? warnings : undefined,
+    anti_catalog_diagnostic: antiCatalogDiagnostic,
     catalog_info: catalogInfo,
-    catalog_diagnostic: {
-      ...catalogDiagnostic,
-      listing_type_strategy: listingTypeStrategy,
-      listing_type_used: listingTypeToUse,
-      removed_not_modifiable: removedNotModifiable,
-    },
-    // Log detalhado da chamada
-    api_request: {
-      request_kind: "create",
-      http_method: CREATE_METHOD,
-      endpoint_url: CREATE_ENDPOINT,
-    },
+    listing_type_used: newItem.listing_type_id,
   };
 }
