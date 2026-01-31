@@ -443,28 +443,84 @@ serve(async (req) => {
           });
         }
         
-        // Fallback para cache puro (sem dados complementares)
-        return new Response(JSON.stringify({
-          success: true,
-          source: "cache",
-          resolved_item_id: resolvedItemId,
-          catalog_resolution: catalogResolution,
-          item: {
-            id: cachedItem.item_id,
-            title: cachedItem.title,
-            price: cachedItem.price,
-            thumbnail: cachedItem.thumbnail,
-            status: cachedItem.status,
-            available_quantity: cachedItem.available_quantity,
-            sold_quantity: cachedItem.sold_quantity,
-            category_id: cachedItem.category_id,
-            seller_id: cachedItem.seller_id,
-            is_catalog_source: false,
-          },
-        }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+      // Fallback para cache puro - AINDA ASSIM buscar dados públicos para completar
+      // Isso garante que descrição, fotos e dimensões estejam disponíveis
+      console.log(`[ad-item-snapshot] Cache fallback: attempting public fetch for missing data`);
+      
+      try {
+        const [publicResult, descResult] = await Promise.all([
+          fetchItemPublic(resolvedItemId),
+          fetchDescriptionPublic(resolvedItemId)
+        ]);
+        
+        if (publicResult.ok && publicResult.data) {
+          const publicData = publicResult.data;
+          const dimensions = extractPackageDimensions(publicData.attributes);
+          
+          const isCatalogSource = !!(
+            publicData.catalog_product_id ||
+            publicData.catalog_listing === true ||
+            publicData.parent_item_id
+          );
+          
+          return new Response(JSON.stringify({
+            success: true,
+            source: "cache+public_fallback",
+            resolved_item_id: resolvedItemId,
+            catalog_resolution: catalogResolution,
+            item: {
+              id: publicData.id,
+              title: publicData.title,
+              price: publicData.price,
+              thumbnail: publicData.thumbnail || publicData.pictures?.[0]?.url,
+              pictures: publicData.pictures,
+              status: publicData.status,
+              available_quantity: publicData.available_quantity,
+              sold_quantity: publicData.sold_quantity,
+              category_id: publicData.category_id,
+              seller_id: publicData.seller_id,
+              description: descResult,
+              attributes: publicData.attributes,
+              listing_type_id: publicData.listing_type_id,
+              catalog_product_id: publicData.catalog_product_id,
+              catalog_listing: publicData.catalog_listing,
+              parent_item_id: publicData.parent_item_id,
+              is_catalog_source: isCatalogSource,
+              seller_package_height: dimensions.height,
+              seller_package_width: dimensions.width,
+              seller_package_length: dimensions.length,
+              seller_package_weight: dimensions.weight,
+            },
+          }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      } catch (e) {
+        console.log(`[ad-item-snapshot] Public fallback failed, using cache only: ${e}`);
       }
+      
+      // Último recurso: cache puro (sem dados complementares)
+      return new Response(JSON.stringify({
+        success: true,
+        source: "cache_only",
+        resolved_item_id: resolvedItemId,
+        catalog_resolution: catalogResolution,
+        item: {
+          id: cachedItem.item_id,
+          title: cachedItem.title,
+          price: cachedItem.price,
+          thumbnail: cachedItem.thumbnail,
+          status: cachedItem.status,
+          available_quantity: cachedItem.available_quantity,
+          sold_quantity: cachedItem.sold_quantity,
+          category_id: cachedItem.category_id,
+          seller_id: cachedItem.seller_id,
+          is_catalog_source: false,
+        },
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
       // Nem público nem cache - retornar erro
       return new Response(JSON.stringify({ 
