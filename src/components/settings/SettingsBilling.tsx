@@ -7,12 +7,14 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, User, Building, UserCheck, AlertCircle } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Loader2, User, Building, UserCheck, AlertCircle, CheckCircle2, Star } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 
 interface BillingData {
   personType: "pf" | "pj";
+  isPreferred: boolean;
   // PF
   cpf: string;
   pfCep: string;
@@ -38,11 +40,14 @@ interface ProfileData {
 
 const SettingsBilling = () => {
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [loadingCep, setLoadingCep] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
+  const [hasExistingData, setHasExistingData] = useState(false);
   const [billing, setBilling] = useState<BillingData>({
     personType: "pf",
+    isPreferred: true,
     cpf: "",
     pfCep: "",
     pfCity: "",
@@ -59,24 +64,58 @@ const SettingsBilling = () => {
 
   // Carrega dados do perfil para verificar se podem ser usados
   useEffect(() => {
-    const loadProfileData = async () => {
+    const loadData = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        if (!user) {
+          setLoading(false);
+          return;
+        }
 
-        const { data } = await supabase
+        // Load profile data
+        const { data: profile } = await supabase
           .from("profiles")
           .select("cpf, address_cep, address_city, address_state")
           .eq("user_id", user.id)
           .maybeSingle();
 
-        setProfileData(data);
+        setProfileData(profile);
+
+        // Load existing billing info
+        const { data: billingInfo } = await supabase
+          .from("billing_info")
+          .select("*")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (billingInfo) {
+          setHasExistingData(true);
+          setBilling({
+            personType: (billingInfo.person_type as "pf" | "pj") || "pf",
+            isPreferred: billingInfo.is_preferred ?? true,
+            cpf: billingInfo.cpf || "",
+            pfCep: billingInfo.pf_cep || "",
+            pfCity: billingInfo.pf_city || "",
+            pfState: billingInfo.pf_state || "",
+            cnpj: billingInfo.cnpj || "",
+            razaoSocial: billingInfo.razao_social || "",
+            nomeFantasia: billingInfo.nome_fantasia || "",
+            inscricaoEstadual: billingInfo.inscricao_estadual || "",
+            isento: billingInfo.is_ie_exempt || false,
+            pjCep: billingInfo.pj_cep || "",
+            pjCity: billingInfo.pj_city || "",
+            pjState: billingInfo.pj_state || "",
+          });
+        }
       } catch (err) {
-        console.error("Error loading profile for autofill:", err);
+        console.error("Error loading billing data:", err);
+        toast.error("Erro ao carregar dados de faturamento");
+      } finally {
+        setLoading(false);
       }
     };
 
-    loadProfileData();
+    loadData();
   }, []);
 
   const hasProfileData = profileData && (profileData.cpf || profileData.address_cep);
@@ -162,10 +201,15 @@ const SettingsBilling = () => {
     return numbers.length === 14;
   };
 
+  const validateCPF = (cpf: string) => {
+    const numbers = cpf.replace(/\D/g, "");
+    return numbers.length === 11;
+  };
+
   const handleSave = async () => {
     if (billing.personType === "pf") {
-      if (!billing.cpf) {
-        toast.error("CPF é obrigatório");
+      if (!billing.cpf || !validateCPF(billing.cpf)) {
+        toast.error("CPF inválido");
         return;
       }
     } else {
@@ -181,17 +225,121 @@ const SettingsBilling = () => {
 
     setSaving(true);
     try {
-      await new Promise((r) => setTimeout(r, 1000));
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast.error("Usuário não autenticado");
+        return;
+      }
+
+      const billingData = {
+        user_id: user.id,
+        person_type: billing.personType,
+        is_preferred: billing.isPreferred,
+        cpf: billing.cpf || null,
+        pf_cep: billing.pfCep || null,
+        pf_city: billing.pfCity || null,
+        pf_state: billing.pfState || null,
+        cnpj: billing.cnpj || null,
+        razao_social: billing.razaoSocial || null,
+        nome_fantasia: billing.nomeFantasia || null,
+        inscricao_estadual: billing.inscricaoEstadual || null,
+        is_ie_exempt: billing.isento,
+        pj_cep: billing.pjCep || null,
+        pj_city: billing.pjCity || null,
+        pj_state: billing.pjState || null,
+      };
+
+      if (hasExistingData) {
+        const { error } = await supabase
+          .from("billing_info")
+          .update(billingData)
+          .eq("user_id", user.id);
+
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("billing_info")
+          .insert(billingData);
+
+        if (error) throw error;
+        setHasExistingData(true);
+      }
+
       toast.success("Dados fiscais salvos com sucesso!");
-    } catch {
+    } catch (err) {
+      console.error("Error saving billing data:", err);
       toast.error("Erro ao salvar dados fiscais");
     } finally {
       setSaving(false);
     }
   };
 
+  const handleSetAsPreferred = async () => {
+    setBilling((prev) => ({ ...prev, isPreferred: true }));
+    
+    // If already has existing data, update immediately
+    if (hasExistingData) {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        await supabase
+          .from("billing_info")
+          .update({ is_preferred: true })
+          .eq("user_id", user.id);
+
+        toast.success("Preferência de faturamento definida!");
+      } catch (err) {
+        console.error("Error updating preference:", err);
+        toast.error("Erro ao atualizar preferência");
+      }
+    } else {
+      toast.info("Salve os dados para definir a preferência");
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  const isDataComplete = billing.personType === "pf" 
+    ? (billing.cpf && validateCPF(billing.cpf))
+    : (billing.cnpj && validateCNPJ(billing.cnpj) && billing.razaoSocial);
+
   return (
     <div className="space-y-6">
+      {/* Status Card */}
+      {hasExistingData && isDataComplete && (
+        <Alert className="border-green-200 bg-green-50 text-green-800">
+          <CheckCircle2 className="h-4 w-4" />
+          <AlertDescription className="flex items-center justify-between">
+            <span>
+              Dados de faturamento configurados como{" "}
+              <strong>{billing.personType === "pf" ? "Pessoa Física" : "Pessoa Jurídica"}</strong>
+              {billing.isPreferred && (
+                <Badge variant="secondary" className="ml-2 bg-green-100 text-green-700">
+                  <Star className="mr-1 h-3 w-3" />
+                  Preferência Ativa
+                </Badge>
+              )}
+            </span>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {!hasExistingData && (
+        <Alert className="border-amber-200 bg-amber-50 text-amber-800">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            <strong>Dados de faturamento obrigatórios:</strong> Configure seus dados fiscais para poder contratar um plano e receber notas fiscais.
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Person Type Selection */}
       <Card>
         <CardHeader>
@@ -446,7 +594,18 @@ const SettingsBilling = () => {
 
       <Separator />
 
-      <div className="flex justify-end">
+      {/* Actions */}
+      <div className="flex flex-col sm:flex-row gap-3 justify-end">
+        {hasExistingData && !billing.isPreferred && (
+          <Button 
+            variant="outline" 
+            onClick={handleSetAsPreferred}
+            disabled={!isDataComplete}
+          >
+            <Star className="mr-2 h-4 w-4" />
+            Definir como Preferência de Faturamento
+          </Button>
+        )}
         <Button onClick={handleSave} disabled={saving} size="lg">
           {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Salvar Dados Fiscais

@@ -2000,6 +2000,69 @@ export type Database = {
           },
         ]
       }
+      billing_info: {
+        Row: {
+          cnpj: string | null
+          cpf: string | null
+          created_at: string
+          id: string
+          inscricao_estadual: string | null
+          is_ie_exempt: boolean | null
+          is_preferred: boolean
+          nome_fantasia: string | null
+          person_type: string
+          pf_cep: string | null
+          pf_city: string | null
+          pf_state: string | null
+          pj_cep: string | null
+          pj_city: string | null
+          pj_state: string | null
+          razao_social: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          cnpj?: string | null
+          cpf?: string | null
+          created_at?: string
+          id?: string
+          inscricao_estadual?: string | null
+          is_ie_exempt?: boolean | null
+          is_preferred?: boolean
+          nome_fantasia?: string | null
+          person_type?: string
+          pf_cep?: string | null
+          pf_city?: string | null
+          pf_state?: string | null
+          pj_cep?: string | null
+          pj_city?: string | null
+          pj_state?: string | null
+          razao_social?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          cnpj?: string | null
+          cpf?: string | null
+          created_at?: string
+          id?: string
+          inscricao_estadual?: string | null
+          is_ie_exempt?: boolean | null
+          is_preferred?: boolean
+          nome_fantasia?: string | null
+          person_type?: string
+          pf_cep?: string | null
+          pf_city?: string | null
+          pf_state?: string | null
+          pj_cep?: string | null
+          pj_city?: string | null
+          pj_state?: string | null
+          razao_social?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       blog_categories: {
         Row: {
           created_at: string
