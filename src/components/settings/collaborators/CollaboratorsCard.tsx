@@ -74,22 +74,82 @@ export function CollaboratorsCard() {
   const [permissionsModalOpen, setPermissionsModalOpen] = useState(false);
   const [permissionsCollaborator, setPermissionsCollaborator] = useState<CollaboratorWithModules | null>(null);
   
-  // Confirm dialog states
+  // Confirm dialog states - store collaborator ID and action type instead of callbacks
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean;
-    title: string;
-    description: string;
-    confirmLabel: string;
-    confirmVariant: 'default' | 'destructive';
-    onConfirm: () => void;
+    type: 'sendInvite' | 'disable' | 'enable' | 'delete' | null;
+    collaboratorId: string | null;
+    collaboratorName: string;
+    collaboratorEmail: string;
   }>({
     open: false,
-    title: '',
-    description: '',
-    confirmLabel: 'Confirmar',
-    confirmVariant: 'default',
-    onConfirm: () => {},
+    type: null,
+    collaboratorId: null,
+    collaboratorName: '',
+    collaboratorEmail: '',
   });
+
+  // Derive dialog properties from type
+  const getDialogProps = () => {
+    switch (confirmDialog.type) {
+      case 'sendInvite':
+        return {
+          title: 'Enviar Convite',
+          description: `Deseja enviar um convite de acesso para ${confirmDialog.collaboratorEmail}?`,
+          confirmLabel: 'Enviar',
+          confirmVariant: 'default' as const,
+        };
+      case 'disable':
+        return {
+          title: 'Desativar Colaborador',
+          description: `Deseja desativar o acesso de ${confirmDialog.collaboratorName}? O colaborador não poderá mais acessar o sistema até ser reativado.`,
+          confirmLabel: 'Desativar',
+          confirmVariant: 'destructive' as const,
+        };
+      case 'enable':
+        return {
+          title: 'Reativar Colaborador',
+          description: `Deseja reativar o acesso de ${confirmDialog.collaboratorName}?`,
+          confirmLabel: 'Reativar',
+          confirmVariant: 'default' as const,
+        };
+      case 'delete':
+        return {
+          title: 'Excluir Colaborador',
+          description: `Tem certeza que deseja excluir ${confirmDialog.collaboratorName}? Esta ação remove o colaborador desta empresa e impede o acesso permanentemente.`,
+          confirmLabel: 'Excluir',
+          confirmVariant: 'destructive' as const,
+        };
+      default:
+        return {
+          title: '',
+          description: '',
+          confirmLabel: 'Confirmar',
+          confirmVariant: 'default' as const,
+        };
+    }
+  };
+
+  const handleConfirmAction = async () => {
+    if (!confirmDialog.collaboratorId || !confirmDialog.type) return;
+    
+    switch (confirmDialog.type) {
+      case 'sendInvite':
+        await sendInvite(confirmDialog.collaboratorId);
+        break;
+      case 'disable':
+        await disableCollaborator(confirmDialog.collaboratorId);
+        break;
+      case 'enable':
+        await enableCollaborator(confirmDialog.collaboratorId);
+        break;
+      case 'delete':
+        await deleteCollaborator(confirmDialog.collaboratorId);
+        break;
+    }
+    
+    setConfirmDialog(prev => ({ ...prev, open: false }));
+  };
 
   // Only show for workspace admins
   if (myRole !== 'admin') {
@@ -114,56 +174,40 @@ export function CollaboratorsCard() {
   const handleSendInvite = (collab: CollaboratorWithModules) => {
     setConfirmDialog({
       open: true,
-      title: 'Enviar Convite',
-      description: `Deseja enviar um convite de acesso para ${collab.email}?`,
-      confirmLabel: 'Enviar',
-      confirmVariant: 'default',
-      onConfirm: async () => {
-        await sendInvite(collab.id);
-        setConfirmDialog(prev => ({ ...prev, open: false }));
-      },
+      type: 'sendInvite',
+      collaboratorId: collab.id,
+      collaboratorName: collab.name,
+      collaboratorEmail: collab.email,
     });
   };
 
   const handleDisable = (collab: CollaboratorWithModules) => {
     setConfirmDialog({
       open: true,
-      title: 'Desativar Colaborador',
-      description: `Deseja desativar o acesso de ${collab.name}? O colaborador não poderá mais acessar o sistema até ser reativado.`,
-      confirmLabel: 'Desativar',
-      confirmVariant: 'destructive',
-      onConfirm: async () => {
-        await disableCollaborator(collab.id);
-        setConfirmDialog(prev => ({ ...prev, open: false }));
-      },
+      type: 'disable',
+      collaboratorId: collab.id,
+      collaboratorName: collab.name,
+      collaboratorEmail: collab.email,
     });
   };
 
   const handleEnable = (collab: CollaboratorWithModules) => {
     setConfirmDialog({
       open: true,
-      title: 'Reativar Colaborador',
-      description: `Deseja reativar o acesso de ${collab.name}?`,
-      confirmLabel: 'Reativar',
-      confirmVariant: 'default',
-      onConfirm: async () => {
-        await enableCollaborator(collab.id);
-        setConfirmDialog(prev => ({ ...prev, open: false }));
-      },
+      type: 'enable',
+      collaboratorId: collab.id,
+      collaboratorName: collab.name,
+      collaboratorEmail: collab.email,
     });
   };
 
   const handleDelete = (collab: CollaboratorWithModules) => {
     setConfirmDialog({
       open: true,
-      title: 'Excluir Colaborador',
-      description: `Tem certeza que deseja excluir ${collab.name}? Esta ação remove o colaborador desta empresa e impede o acesso permanentemente.`,
-      confirmLabel: 'Excluir',
-      confirmVariant: 'destructive',
-      onConfirm: async () => {
-        await deleteCollaborator(collab.id);
-        setConfirmDialog(prev => ({ ...prev, open: false }));
-      },
+      type: 'delete',
+      collaboratorId: collab.id,
+      collaboratorName: collab.name,
+      collaboratorEmail: collab.email,
     });
   };
 
@@ -336,32 +380,38 @@ export function CollaboratorsCard() {
         </CardContent>
       </Card>
 
-      {/* Create/Edit Modal */}
-      <CollaboratorFormModal
-        open={formOpen}
-        onOpenChange={setFormOpen}
-        collaborator={editingCollaborator}
-        onSubmit={handleFormSubmit}
-      />
+      {/* Create/Edit Modal - only render when formOpen */}
+      {formOpen && (
+        <CollaboratorFormModal
+          open={formOpen}
+          onOpenChange={setFormOpen}
+          collaborator={editingCollaborator}
+          onSubmit={handleFormSubmit}
+        />
+      )}
 
-      {/* Permissions Modal */}
-      <CollaboratorFormModal
-        open={permissionsModalOpen}
-        onOpenChange={setPermissionsModalOpen}
-        collaborator={permissionsCollaborator}
-        onSubmit={handlePermissionsSubmit}
-      />
+      {/* Permissions Modal - only render when permissionsModalOpen */}
+      {permissionsModalOpen && (
+        <CollaboratorFormModal
+          open={permissionsModalOpen}
+          onOpenChange={setPermissionsModalOpen}
+          collaborator={permissionsCollaborator}
+          onSubmit={handlePermissionsSubmit}
+        />
+      )}
 
-      {/* Confirm Dialog */}
-      <CollaboratorConfirmDialog
-        open={confirmDialog.open}
-        onOpenChange={(open) => setConfirmDialog(prev => ({ ...prev, open }))}
-        title={confirmDialog.title}
-        description={confirmDialog.description}
-        confirmLabel={confirmDialog.confirmLabel}
-        confirmVariant={confirmDialog.confirmVariant}
-        onConfirm={confirmDialog.onConfirm}
-      />
+      {/* Confirm Dialog - only render when open */}
+      {confirmDialog.open && (
+        <CollaboratorConfirmDialog
+          open={confirmDialog.open}
+          onOpenChange={(open) => setConfirmDialog(prev => ({ ...prev, open }))}
+          title={getDialogProps().title}
+          description={getDialogProps().description}
+          confirmLabel={getDialogProps().confirmLabel}
+          confirmVariant={getDialogProps().confirmVariant}
+          onConfirm={handleConfirmAction}
+        />
+      )}
     </>
   );
 }
