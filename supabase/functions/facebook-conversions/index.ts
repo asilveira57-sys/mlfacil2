@@ -5,7 +5,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
-// SHA256 hash for PII data
+// SHA256 hash for PII data (Facebook requires lowercase hex)
 async function sha256(text: string): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(text.toLowerCase().trim());
@@ -14,55 +14,101 @@ async function sha256(text: string): Promise<string> {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Normalize and hash user data
-async function normalizeUserData(userData: any): Promise<any> {
-  const normalized: any = {};
+// Normalize and hash user data according to Facebook SDK format
+async function buildUserData(userData: any): Promise<Record<string, any>> {
+  const result: Record<string, any> = {};
 
+  // Hashed PII fields (Facebook expects arrays)
   if (userData.email) {
-    normalized.em = [await sha256(userData.email)];
+    result.em = [await sha256(userData.email)];
   }
   if (userData.phone) {
-    // Remove non-digits and hash
     const phone = userData.phone.replace(/\D/g, '');
-    normalized.ph = [await sha256(phone)];
+    result.ph = phone ? [await sha256(phone)] : [];
   }
   if (userData.firstName) {
-    normalized.fn = [await sha256(userData.firstName)];
+    result.fn = [await sha256(userData.firstName)];
   }
   if (userData.lastName) {
-    normalized.ln = [await sha256(userData.lastName)];
+    result.ln = [await sha256(userData.lastName)];
   }
   if (userData.city) {
-    normalized.ct = [await sha256(userData.city)];
+    result.ct = [await sha256(userData.city)];
   }
   if (userData.state) {
-    normalized.st = [await sha256(userData.state)];
+    result.st = [await sha256(userData.state)];
   }
   if (userData.country) {
-    normalized.country = [await sha256(userData.country)];
+    result.country = [await sha256(userData.country)];
   }
   if (userData.zipCode) {
-    normalized.zp = [await sha256(userData.zipCode)];
+    result.zp = [await sha256(userData.zipCode)];
   }
   if (userData.externalId) {
-    normalized.external_id = [await sha256(userData.externalId)];
+    result.external_id = [await sha256(userData.externalId)];
   }
 
-  // Non-hashed fields
+  // Non-hashed fields (matching SDK format)
   if (userData.clientIpAddress) {
-    normalized.client_ip_address = userData.clientIpAddress;
+    result.client_ip_address = userData.clientIpAddress;
   }
   if (userData.clientUserAgent) {
-    normalized.client_user_agent = userData.clientUserAgent;
+    result.client_user_agent = userData.clientUserAgent;
   }
   if (userData.fbc) {
-    normalized.fbc = userData.fbc;
+    result.fbc = userData.fbc;
   }
   if (userData.fbp) {
-    normalized.fbp = userData.fbp;
+    result.fbp = userData.fbp;
   }
 
-  return normalized;
+  return result;
+}
+
+// Build custom_data object matching Facebook SDK CustomData format
+function buildCustomData(customData: any): Record<string, any> | undefined {
+  if (!customData) return undefined;
+
+  const result: Record<string, any> = {};
+
+  // Standard e-commerce fields
+  if (customData.value !== undefined) {
+    result.value = customData.value;
+  }
+  if (customData.currency) {
+    result.currency = customData.currency;
+  }
+  if (customData.content_name) {
+    result.content_name = customData.content_name;
+  }
+  if (customData.content_category) {
+    result.content_category = customData.content_category;
+  }
+  if (customData.content_type) {
+    result.content_type = customData.content_type;
+  }
+  if (customData.content_ids && customData.content_ids.length > 0) {
+    result.content_ids = customData.content_ids;
+  }
+  if (customData.contents && customData.contents.length > 0) {
+    result.contents = customData.contents;
+  }
+  if (customData.num_items !== undefined) {
+    result.num_items = customData.num_items;
+  }
+  if (customData.search_string) {
+    result.search_string = customData.search_string;
+  }
+  if (customData.status !== undefined) {
+    result.status = customData.status;
+  }
+
+  // Page path for PageView
+  if (customData.page_path) {
+    result.page_path = customData.page_path;
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 serve(async (req) => {
@@ -78,22 +124,16 @@ serve(async (req) => {
     if (!accessToken) {
       console.error('[FB CAPI] FACEBOOK_ACCESS_TOKEN not configured');
       return new Response(
-        JSON.stringify({ error: 'Access token not configured' }),
-        { 
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        }
+        JSON.stringify({ ok: false, error: { code: 'CONFIG_ERROR', message: 'Access token not configured' } }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
     if (!pixelId) {
       console.error('[FB CAPI] FACEBOOK_PIXEL_ID not configured');
       return new Response(
-        JSON.stringify({ error: 'Pixel ID not configured' }),
-        { 
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        }
+        JSON.stringify({ ok: false, error: { code: 'CONFIG_ERROR', message: 'Pixel ID not configured' } }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -101,38 +141,44 @@ serve(async (req) => {
 
     if (!event || !event.eventName) {
       return new Response(
-        JSON.stringify({ error: 'Event name is required' }),
-        { 
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        }
+        JSON.stringify({ ok: false, error: { code: 'VALIDATION_ERROR', message: 'Event name is required' } }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
     console.log('[FB CAPI] Processing event:', event.eventName);
 
-    // Build event data for Facebook
-    const eventData: any = {
+    // Build ServerEvent data structure matching Facebook SDK
+    const serverEvent: Record<string, any> = {
       event_name: event.eventName,
       event_time: event.eventTime || Math.floor(Date.now() / 1000),
       action_source: event.actionSource || 'website',
     };
 
+    // Add event_source_url if available
     if (event.eventSourceUrl) {
-      eventData.event_source_url = event.eventSourceUrl;
+      serverEvent.event_source_url = event.eventSourceUrl;
     }
 
-    // Add user data with proper hashing
+    // Add event_id for deduplication (combining with pixel events)
+    if (event.eventId) {
+      serverEvent.event_id = event.eventId;
+    }
+
+    // Build UserData matching SDK format
     if (event.userData) {
-      eventData.user_data = await normalizeUserData(event.userData);
+      serverEvent.user_data = await buildUserData(event.userData);
     }
 
-    // Add custom data
-    if (event.customData) {
-      eventData.custom_data = event.customData;
+    // Build CustomData matching SDK format
+    const customData = buildCustomData(event.customData);
+    if (customData) {
+      serverEvent.custom_data = customData;
     }
 
-    // Send to Facebook Conversions API
+    console.log('[FB CAPI] ServerEvent payload:', JSON.stringify(serverEvent, null, 2));
+
+    // Send EventRequest to Facebook Conversions API (matching SDK's execute())
     const fbResponse = await fetch(
       `https://graph.facebook.com/v18.0/${pixelId}/events`,
       {
@@ -141,7 +187,7 @@ serve(async (req) => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          data: [eventData],
+          data: [serverEvent],
           access_token: accessToken,
         }),
       }
@@ -153,13 +199,14 @@ serve(async (req) => {
       console.error('[FB CAPI] Facebook API error:', fbResult);
       return new Response(
         JSON.stringify({ 
-          error: 'Facebook API error', 
-          details: fbResult 
+          ok: false, 
+          error: { 
+            code: 'FB_API_ERROR', 
+            message: fbResult.error?.message || 'Facebook API error',
+            details: fbResult 
+          } 
         }),
-        { 
-          status: fbResponse.status,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        }
+        { status: fbResponse.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -171,22 +218,19 @@ serve(async (req) => {
 
     return new Response(
       JSON.stringify({ 
-        success: true,
-        eventsReceived: fbResult.events_received,
-        fbtrace: fbResult.fbtrace_id,
+        ok: true,
+        data: {
+          eventsReceived: fbResult.events_received,
+          fbtrace: fbResult.fbtrace_id,
+        }
       }),
-      { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      }
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {
     console.error('[FB CAPI] Error:', error);
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
-      { 
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      }
+      JSON.stringify({ ok: false, error: { code: 'INTERNAL_ERROR', message: error instanceof Error ? error.message : 'Unknown error' } }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 });
