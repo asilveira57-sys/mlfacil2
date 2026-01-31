@@ -131,6 +131,7 @@ export interface UseThemeCustomizationResult {
   // Sync
   isSynced: boolean;
   setIsSynced: (synced: boolean) => void;
+  breakSync: () => void; // Explicitly break sync and copy current colors
   
   // Presets
   menuPresets: ThemePreset[];
@@ -141,6 +142,7 @@ export interface UseThemeCustomizationResult {
   // Actions
   saveSettings: () => Promise<void>;
   resetToDefault: () => void;
+  applySyncedTheme: (companyColorHsl: string) => void; // Apply company color to all areas
   
   // State
   loading: boolean;
@@ -167,6 +169,38 @@ const DEFAULT_CARDS_THEME: CardThemeSettings = {
   card_indicator_warning: '25 95% 53%',
   card_indicator_critical: '0 84% 60%',
 };
+
+// Generate theme from company color
+export function generateThemeFromCompanyColor(companyColorHsl: string): { menu: MenuThemeSettings; cards: CardThemeSettings } {
+  const baseColor = parseHSL(companyColorHsl);
+  if (!baseColor) {
+    return { menu: DEFAULT_MENU_THEME, cards: DEFAULT_CARDS_THEME };
+  }
+
+  // Menu theme derived from company color
+  const menuTheme: MenuThemeSettings = {
+    menu_bg_color: '0 0% 100%', // White background
+    menu_item_color: `${baseColor.h} ${Math.min(baseColor.s, 30)}% 20%`,
+    menu_item_active_color: hslToString(baseColor), // Company color as active
+    menu_item_hover_color: `${baseColor.h} ${Math.max(baseColor.s - 40, 10)}% 95%`,
+    menu_icon_color: `${baseColor.h} ${Math.min(baseColor.s, 20)}% 45%`,
+    menu_text_color: `${baseColor.h} ${Math.min(baseColor.s, 30)}% 20%`,
+  };
+
+  // Cards theme derived from company color
+  const cardsTheme: CardThemeSettings = {
+    card_bg_color: '0 0% 100%',
+    card_title_color: `${baseColor.h} ${Math.min(baseColor.s, 30)}% 15%`,
+    card_value_color: `${baseColor.h} ${Math.min(baseColor.s, 40)}% 20%`,
+    card_text_secondary_color: `${baseColor.h} ${Math.min(baseColor.s, 15)}% 50%`,
+    card_border_color: `${baseColor.h} ${Math.min(baseColor.s, 20)}% 90%`,
+    card_indicator_positive: '142 71% 45%',
+    card_indicator_warning: '25 95% 53%',
+    card_indicator_critical: '0 84% 60%',
+  };
+
+  return { menu: menuTheme, cards: cardsTheme };
+}
 
 export function useThemeCustomization(): UseThemeCustomizationResult {
   const { activeAccountId } = useActiveAccount();
@@ -344,6 +378,20 @@ export function useThemeCustomization(): UseThemeCustomizationResult {
   const resetToDefault = useCallback(() => {
     setMenuTheme(DEFAULT_MENU_THEME);
     setCardsTheme(DEFAULT_CARDS_THEME);
+    setIsSynced(true);
+  }, []);
+
+  // Apply synced theme from company color
+  const applySyncedTheme = useCallback((companyColorHsl: string) => {
+    const { menu, cards } = generateThemeFromCompanyColor(companyColorHsl);
+    setMenuTheme(menu);
+    setCardsTheme(cards);
+  }, []);
+
+  // Break sync - copy current colors to allow independent editing
+  const breakSync = useCallback(() => {
+    // Current colors are already set, just disable sync
+    setIsSynced(false);
   }, []);
 
   // Check for changes
@@ -364,12 +412,14 @@ export function useThemeCustomization(): UseThemeCustomizationResult {
     setCardsColor,
     isSynced,
     setIsSynced,
+    breakSync,
     menuPresets,
     cardsPresets,
     globalPresets,
     applyPreset,
     saveSettings,
     resetToDefault,
+    applySyncedTheme,
     loading,
     saving,
     hasChanges,

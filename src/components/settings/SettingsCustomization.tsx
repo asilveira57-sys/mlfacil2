@@ -46,7 +46,8 @@ export default function SettingsCustomization() {
     cardsTheme,
     setCardsColor,
     isSynced,
-    setIsSynced,
+    breakSync,
+    applySyncedTheme,
     menuPresets,
     cardsPresets,
     applyPreset,
@@ -56,6 +57,22 @@ export default function SettingsCustomization() {
     saving,
     hasChanges,
   } = useThemeCustomization();
+
+  // Apply synced theme when company color changes and sync is active
+  const handleCompanyColorChange = async (colorKey: string) => {
+    await setCompanyColor(colorKey);
+    if (isSynced) {
+      const selectedColor = availableColors.find(c => c.key === colorKey);
+      if (selectedColor) {
+        applySyncedTheme(selectedColor.hsl);
+      }
+    }
+  };
+
+  // Enable sync and apply current company color
+  const handleEnableSync = () => {
+    applySyncedTheme(activeColor.hsl);
+  };
 
   const handleDragEnd = (result: DropResult) => {
     if (!result.destination) return;
@@ -143,7 +160,7 @@ export default function SettingsCustomization() {
                 {availableColors.map((color) => (
                   <button
                     key={color.key}
-                    onClick={() => setCompanyColor(color.key)}
+                    onClick={() => handleCompanyColorChange(color.key)}
                     className={cn(
                       "relative flex flex-col items-center gap-2 p-3 rounded-lg border-2 transition-all hover:scale-105",
                       activeColor.key === color.key
@@ -325,6 +342,7 @@ export default function SettingsCustomization() {
             onColorChange={setMenuColor}
             presets={menuPresets}
             onApplyPreset={applyPreset}
+            isSynced={isSynced}
           />
         </TabsContent>
 
@@ -335,6 +353,7 @@ export default function SettingsCustomization() {
             onColorChange={setCardsColor}
             presets={cardsPresets}
             onApplyPreset={applyPreset}
+            isSynced={isSynced}
           />
         </TabsContent>
 
@@ -342,11 +361,14 @@ export default function SettingsCustomization() {
         <TabsContent value="sync" className="mt-6">
           <SyncSettings
             isSynced={isSynced}
-            onSyncChange={setIsSynced}
+            onBreakSync={breakSync}
+            onEnableSync={handleEnableSync}
             hasChanges={hasChanges}
             saving={saving}
             onSave={handleSaveTheme}
             onReset={resetToDefault}
+            companyColorHex={activeColor.hex}
+            companyColorName={activeColor.name}
           />
         </TabsContent>
       </Tabs>

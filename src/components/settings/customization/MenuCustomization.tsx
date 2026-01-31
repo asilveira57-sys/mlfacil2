@@ -3,18 +3,16 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ColorWheel } from './ColorWheel';
+import { SyncedOverlay } from './SyncedOverlay';
 import { 
   MenuThemeSettings, 
   ThemePreset,
-  parseHSL,
-  hslToString,
 } from '@/hooks/useThemeCustomization';
 import { 
   Menu, 
   LayoutDashboard, 
   Settings, 
   BarChart3,
-  Check,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -23,6 +21,7 @@ interface MenuCustomizationProps {
   onColorChange: (key: keyof MenuThemeSettings, value: string) => void;
   presets: ThemePreset[];
   onApplyPreset: (preset: ThemePreset) => void;
+  isSynced?: boolean;
 }
 
 const colorFields: { key: keyof MenuThemeSettings; label: string; description: string }[] = [
@@ -38,6 +37,7 @@ export function MenuCustomization({
   onColorChange, 
   presets,
   onApplyPreset,
+  isSynced = false,
 }: MenuCustomizationProps) {
   const menuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', active: true },
@@ -58,6 +58,7 @@ export function MenuCustomization({
       </CardHeader>
       
       <CardContent className="space-y-6">
+        <SyncedOverlay isSynced={isSynced} areaName="o menu lateral">
         {/* Presets */}
         <div className="space-y-3">
           <Label className="text-sm font-medium">Temas Rápidos</Label>
@@ -214,6 +215,7 @@ export function MenuCustomization({
             </div>
           </div>
         </div>
+        </SyncedOverlay>
       </CardContent>
     </Card>
   );
