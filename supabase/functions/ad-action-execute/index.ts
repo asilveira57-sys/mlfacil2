@@ -485,6 +485,149 @@ const CATALOG_FORCING_ATTRIBUTES = new Set([
   "MPN", // Manufacturer Part Number também pode forçar catálogo
 ]);
 
+// ============================================================================
+// HELPER: Detecta erro 401 (token expirado/inválido)
+// ============================================================================
+function is401Error(response: Response): boolean {
+  return response.status === 401;
+}
+
+// ============================================================================
+// HELPER: Detecta erro body.invalid_fields para title
+// ============================================================================
+function isTitleInvalidFieldsError(apiError: any): boolean {
+  if (!apiError) return false;
+  
+  // Verificar no cause[]
+  if (apiError.cause && Array.isArray(apiError.cause)) {
+    for (const cause of apiError.cause) {
+      if (cause.code === "body.invalid_fields" || cause.code === "item.title.invalid") {
+        if (cause.message?.toLowerCase().includes("title")) {
+          return true;
+        }
+      }
+    }
+  }
+  
+  // Verificar na message principal
+  if (apiError.message) {
+    const msg = apiError.message.toLowerCase();
+    if (msg.includes("body.invalid_fields") && msg.includes("title")) {
+      return true;
+    }
+    if (msg.includes("fields [title] are invalid")) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+// ============================================================================
+// HELPER: Extrai campos inválidos de body.invalid_fields
+// ============================================================================
+function extractInvalidFields(apiError: any): string[] {
+  const invalidFields: string[] = [];
+  if (!apiError) return invalidFields;
+  
+  // Padrão: "The fields [title] are invalid"
+  const msgMatch = apiError.message?.match(/fields \[([^\]]+)\]/i);
+  if (msgMatch) {
+    const fields = msgMatch[1].split(",").map((f: string) => f.trim().toLowerCase());
+    invalidFields.push(...fields);
+  }
+  
+  // Verificar no cause[]
+  if (apiError.cause && Array.isArray(apiError.cause)) {
+    for (const cause of apiError.cause) {
+      const causeMatch = cause.message?.match(/fields \[([^\]]+)\]/i);
+      if (causeMatch) {
+        const fields = causeMatch[1].split(",").map((f: string) => f.trim().toLowerCase());
+        for (const f of fields) {
+          if (!invalidFields.includes(f)) invalidFields.push(f);
+        }
+      }
+    }
+  }
+  
+  return invalidFields;
+}
+
+// ============================================================================
+// HELPER: Tentar refresh do token de acesso
+// ============================================================================
+async function tryRefreshToken(
+  supabase: any,
+  mlAccountId: string
+): Promise<{ success: boolean; newAccessToken?: string; error?: string }> {
+  try {
+    console.log(`[ad-action-execute] Attempting token refresh for account ${mlAccountId}`);
+    
+    // Buscar refresh_token
+    const { data: account, error: fetchError } = await supabase
+      .from("ml_accounts")
+      .select("refresh_token, ml_user_id")
+      .eq("id", mlAccountId)
+      .single();
+    
+    if (fetchError || !account?.refresh_token) {
+      console.error(`[ad-action-execute] No refresh_token available for account ${mlAccountId}`);
+      return { success: false, error: "NO_REFRESH_TOKEN" };
+    }
+    
+    // Chamar API do ML para refresh
+    const ML_APP_ID = Deno.env.get("ML_APP_ID") || "";
+    const ML_CLIENT_SECRET = Deno.env.get("ML_CLIENT_SECRET") || "";
+    
+    if (!ML_APP_ID || !ML_CLIENT_SECRET) {
+      console.error(`[ad-action-execute] ML_APP_ID or ML_CLIENT_SECRET not configured`);
+      return { success: false, error: "ML_CREDENTIALS_NOT_CONFIGURED" };
+    }
+    
+    const refreshResponse = await fetch("https://api.mercadolibre.com/oauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        client_id: ML_APP_ID,
+        client_secret: ML_CLIENT_SECRET,
+        refresh_token: account.refresh_token,
+      }),
+    });
+    
+    if (!refreshResponse.ok) {
+      const errBody = await refreshResponse.text().catch(() => "");
+      console.error(`[ad-action-execute] Token refresh failed: ${refreshResponse.status} - ${errBody}`);
+      return { success: false, error: "REFRESH_FAILED" };
+    }
+    
+    const tokenData = await refreshResponse.json();
+    
+    // Atualizar tokens no banco
+    const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000).toISOString();
+    const { error: updateError } = await supabase
+      .from("ml_accounts")
+      .update({
+        access_token: tokenData.access_token,
+        refresh_token: tokenData.refresh_token || account.refresh_token,
+        token_expires_at: expiresAt,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", mlAccountId);
+    
+    if (updateError) {
+      console.error(`[ad-action-execute] Failed to save refreshed token: ${updateError.message}`);
+      return { success: false, error: "TOKEN_SAVE_FAILED" };
+    }
+    
+    console.log(`[ad-action-execute] Token refreshed successfully for account ${mlAccountId}`);
+    return { success: true, newAccessToken: tokenData.access_token };
+  } catch (err: any) {
+    console.error(`[ad-action-execute] Token refresh exception: ${err.message}`);
+    return { success: false, error: err.message };
+  }
+}
+
 function normalizeAndCleanAttributes(
   sourceAttributes: any[],
   categoryAttributes: CategoryAttribute[],
@@ -1088,7 +1231,9 @@ serve(async (req) => {
               mlAccount.access_token,
               action.item_id,
               action.source_snapshot,
-              action.checklist
+              action.checklist,
+              supabase, // Passar supabase para refresh token
+              action.ml_account_id // Passar ID da conta para refresh token
             );
             break;
           default:
@@ -1191,7 +1336,16 @@ async function executeRelistAction(accessToken: string, itemId: string) {
   return { success: true, message: "Item relisted successfully", new_item_id: data.id };
 }
 
-async function executeCloneAction(accessToken: string, itemId: string, snapshot: any, checklist: any) {
+async function executeCloneAction(
+  accessToken: string,
+  itemId: string,
+  snapshot: any,
+  checklist: any,
+  supabase?: any, // Para refresh token
+  mlAccountId?: string // Para refresh token
+) {
+  // Variável para token atual (pode ser atualizado após refresh)
+  let currentAccessToken = accessToken;
   let itemData = snapshot;
   let resolvedItemId = itemId;
   let catalogInfo: any = null;
@@ -1210,7 +1364,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     else if (isCatalogId(itemId)) {
       console.log(`[ad-action-execute] FALLBACK PATH: Catalog ID (MLBU) detected - attempting catalog resolution`);
 
-      const catalogResult = await resolveCatalogItemFallback(accessToken, itemId);
+      const catalogResult = await resolveCatalogItemFallback(currentAccessToken, itemId);
       if (!catalogResult.ok) {
         console.error(`[ad-action-execute] Catalog resolve failed for ${itemId}`, catalogResult.tried);
         return {
@@ -1239,7 +1393,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     // Fetch real item (MLB)
     console.log(`[ad-action-execute] Fetching item data: ${resolvedItemId}`);
     const getResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: { Authorization: `Bearer ${currentAccessToken}` },
     });
 
     const responseStatus = getResponse.status;
@@ -1346,7 +1500,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   let requiredIds: string[] = [];
 
   if (itemData.category_id) {
-    const catResult = await fetchCategoryRequiredAttributes(accessToken, itemData.category_id);
+    const catResult = await fetchCategoryRequiredAttributes(currentAccessToken, itemData.category_id);
     categoryAttributes = catResult.attributes;
     requiredIds = catResult.requiredIds;
   }
@@ -1620,7 +1774,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     } else {
       // Buscar descrição do item fonte
       const descResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}/description`, {
-        headers: { "Authorization": `Bearer ${accessToken}` },
+        headers: { "Authorization": `Bearer ${currentAccessToken}` },
       });
       if (descResponse.ok) {
         const descData = await descResponse.json();
@@ -1667,7 +1821,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   let createResponse = await fetch(CREATE_ENDPOINT, {
     method: CREATE_METHOD,
     headers: {
-      "Authorization": `Bearer ${accessToken}`,
+      "Authorization": `Bearer ${currentAccessToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(newItem),
@@ -1676,21 +1830,132 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   let createData = await createResponse.json();
   
   // =========================================================================
+  // TRATAMENTO 401 - TOKEN EXPIRADO: Tentar refresh automático
+  // =========================================================================
+  if (is401Error(createResponse) && supabase && mlAccountId) {
+    console.warn(`[ad-action-execute] 401 UNAUTHORIZED - Attempting token refresh...`);
+    
+    const refreshResult = await tryRefreshToken(supabase, mlAccountId);
+    if (refreshResult.success && refreshResult.newAccessToken) {
+      currentAccessToken = refreshResult.newAccessToken;
+      console.log(`[ad-action-execute] Token refreshed successfully - retrying request`);
+      
+      // Retry com novo token
+      createResponse = await fetch(CREATE_ENDPOINT, {
+        method: CREATE_METHOD,
+        headers: {
+          "Authorization": `Bearer ${currentAccessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(newItem),
+      });
+      createData = await createResponse.json();
+      
+      // Se ainda for 401 após refresh, retornar erro de reconexão
+      if (is401Error(createResponse)) {
+        console.error(`[ad-action-execute] Still 401 after token refresh - account needs reconnection`);
+        return {
+          success: false,
+          error: "AUTH_EXPIRED",
+          message: "Token expirado. Reconecte a conta do Mercado Livre para continuar.",
+          user_guidance: "Clique em 'Reconectar Mercado Livre' para renovar a autorização da sua conta.",
+          requires_reconnection: true,
+          api_error: createData,
+          api_request: {
+            request_kind: "create",
+            http_method: CREATE_METHOD,
+            endpoint_url: CREATE_ENDPOINT,
+          },
+        };
+      }
+    } else {
+      // Refresh falhou - retornar erro de reconexão
+      console.error(`[ad-action-execute] Token refresh failed: ${refreshResult.error}`);
+      return {
+        success: false,
+        error: "AUTH_EXPIRED",
+        message: "Token expirado. Reconecte a conta do Mercado Livre para continuar.",
+        user_guidance: "Clique em 'Reconectar Mercado Livre' para renovar a autorização da sua conta.",
+        requires_reconnection: true,
+        refresh_error: refreshResult.error,
+        api_error: createData,
+        api_request: {
+          request_kind: "create",
+          http_method: CREATE_METHOD,
+          endpoint_url: CREATE_ENDPOINT,
+        },
+      };
+    }
+  }
+  
+  // =========================================================================
   // RETRY LOOP: Se falhar, tentar recovery de campos e fallback de listing_type
   // ESTRATÉGIA GUIADA PELA API: Extrair tipos sugeridos da mensagem de erro
-  // Máximo de 2 fallbacks
+  // NOVA ESTRATÉGIA: CATALOG_FALLBACK - Retry sem title se bloqueado
   // =========================================================================
   let currentFallbackIndex = -1; // -1 = sem fallback ainda
   let listingTypeFallbackUsed = false;
   let lastListingTypeAttempted = listingTypeToUse;
   let listingTypeFallbackChain: string[] = [];
   const MAX_LISTING_TYPE_FALLBACKS = 2;
+  
+  // Variáveis para CATALOG_FALLBACK
+  let titleFallbackAttempted = false;
+  let fallbackRemovedFields: string[] = [];
+  let originalTitle: string | undefined = newItem.title;
+  let postCreateTitleUpdate: string | undefined;
+  let createdWithoutTitle = false;
 
   while (!createResponse.ok && currentFallbackIndex < MAX_LISTING_TYPE_FALLBACKS) {
     // Verificar se é erro de listing_type_id.unavailable (ex: "free is not available")
     const isListingTypeUnavailable = isListingTypeUnavailableError(createData);
     const isListingTypeIssue = isListingTypeError(createData) || isListingTypeUnavailable;
     const extractedMissing = extractMissingFieldsFromApiError(createData);
+    
+    // =========================================================================
+    // CATALOG_FALLBACK: Se erro body.invalid_fields para title, remover title e reenviar
+    // Aplicável quando: item é de catálogo E API bloqueia title
+    // =========================================================================
+    const isTitleBlocked = isTitleInvalidFieldsError(createData);
+    if (isTitleBlocked && !titleFallbackAttempted) {
+      console.warn(`[ad-action-execute] === CATALOG_FALLBACK: Title blocked - removing title and retrying ===`);
+      console.warn(`[ad-action-execute] isCatalogSource=${isCatalogSource}, original_title="${originalTitle?.substring(0, 40)}..."`);
+      
+      titleFallbackAttempted = true;
+      
+      // Extrair quais campos estão inválidos
+      const invalidFieldsExtracted = extractInvalidFields(createData);
+      console.warn(`[ad-action-execute] Invalid fields extracted: ${invalidFieldsExtracted.join(", ") || "(none)"}`);
+      
+      // Remover title do payload
+      delete newItem.title;
+      fallbackRemovedFields.push("title");
+      
+      // Tentar criar sem title
+      console.log(`[ad-action-execute] === API REQUEST (CATALOG_FALLBACK - without title) ===`);
+      console.log(`[ad-action-execute] request_kind=create`);
+      console.log(`[ad-action-execute] method=${CREATE_METHOD}`);
+      console.log(`[ad-action-execute] fallback_removed_fields=${fallbackRemovedFields.join(", ")}`);
+      
+      createResponse = await fetch(CREATE_ENDPOINT, {
+        method: CREATE_METHOD,
+        headers: {
+          "Authorization": `Bearer ${currentAccessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(newItem),
+      });
+      
+      createData = await createResponse.json();
+      
+      // Se sucesso, marcar que criou sem título
+      if (createResponse.ok) {
+        createdWithoutTitle = true;
+        console.log(`[ad-action-execute] CATALOG_FALLBACK SUCCESS: Item created without title`);
+      }
+      
+      continue;
+    }
     
     // Se for erro de listing_type_id, tentar fallback GUIADO PELA API
     if (isListingTypeIssue && currentFallbackIndex < MAX_LISTING_TYPE_FALLBACKS - 1) {
@@ -1730,7 +1995,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       createResponse = await fetch(CREATE_ENDPOINT, {
         method: CREATE_METHOD,
         headers: {
-          "Authorization": `Bearer ${accessToken}`,
+          "Authorization": `Bearer ${currentAccessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(newItem),
@@ -1814,8 +2079,8 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
 
       // CONDICIONAL: Re-adicionar description se NÃO for catálogo
       if (canIncludeDescription && !isCatalogId(itemId)) {
-        const descResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}/description`, {
-          headers: { "Authorization": `Bearer ${accessToken}` },
+      const descResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}/description`, {
+          headers: { "Authorization": `Bearer ${currentAccessToken}` },
         });
         if (descResponse.ok) {
           const descData = await descResponse.json();
@@ -1841,7 +2106,7 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       createResponse = await fetch(CREATE_ENDPOINT, {
         method: CREATE_METHOD,
         headers: {
-          "Authorization": `Bearer ${accessToken}`,
+          "Authorization": `Bearer ${currentAccessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(newItem),
@@ -2003,6 +2268,40 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   console.log(`[ad-action-execute] === FINAL API CALL SUMMARY ===`);
   console.log(`[ad-action-execute] request_kind=create | method=${CREATE_METHOD} | endpoint=${CREATE_ENDPOINT} | result=SUCCESS`);
   console.log(`[ad-action-execute] listing_type_id=${listingTypeToUse} | fallback_used=${listingTypeFallbackUsed}`);
+  console.log(`[ad-action-execute] title_fallback_used=${createdWithoutTitle} | removed_fields=${fallbackRemovedFields.join(",") || "none"}`);
+
+  // =========================================================================
+  // POST-CREATE TITLE UPDATE: Se criou sem título, tentar PATCH com título
+  // Aplicável quando: CATALOG_FALLBACK removeu título e usuário forneceu override
+  // =========================================================================
+  if (createdWithoutTitle && originalTitle) {
+    const newItemId = createData.id;
+    console.log(`[ad-action-execute] === CATALOG_FALLBACK: Attempting post-create title update via PATCH ===`);
+    console.log(`[ad-action-execute] new_item_id=${newItemId}, title="${originalTitle.substring(0, 40)}..."`);
+    
+    try {
+      const patchResponse = await fetch(`https://api.mercadolibre.com/items/${newItemId}`, {
+        method: "PUT",
+        headers: {
+          "Authorization": `Bearer ${currentAccessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ title: originalTitle }),
+      });
+      
+      if (patchResponse.ok) {
+        console.log(`[ad-action-execute] CATALOG_FALLBACK: Title updated successfully via PATCH`);
+        postCreateTitleUpdate = "success";
+      } else {
+        const patchError = await patchResponse.json().catch(() => ({}));
+        console.warn(`[ad-action-execute] CATALOG_FALLBACK: Title PATCH blocked - ${patchResponse.status}`, patchError);
+        postCreateTitleUpdate = "blocked_or_not_allowed";
+      }
+    } catch (patchErr: any) {
+      console.warn(`[ad-action-execute] CATALOG_FALLBACK: Title PATCH exception - ${patchErr.message}`);
+      postCreateTitleUpdate = "exception";
+    }
+  }
 
   // =========================================================================
   // CACHE: Salvar listing_type_id que funcionou para a categoria
@@ -2044,6 +2343,13 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
       api_suggested_types: apiSuggestedTypes.length > 0 ? apiSuggestedTypes : undefined,
       fallback_index: listingTypeFallbackUsed ? currentFallbackIndex : undefined,
     },
+    // CATALOG_FALLBACK info
+    catalog_fallback: createdWithoutTitle ? {
+      title_fallback_used: true,
+      fallback_removed_fields: fallbackRemovedFields,
+      original_title: originalTitle,
+      post_create_title_update: postCreateTitleUpdate,
+    } : undefined,
     warnings: warnings.length > 0 ? warnings : undefined,
     catalog_info: catalogInfo,
     catalog_diagnostic: {
