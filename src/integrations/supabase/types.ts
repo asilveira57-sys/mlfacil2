@@ -8070,6 +8070,138 @@ export type Database = {
         }
         Relationships: []
       }
+      ui_theme_presets: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          is_default: boolean | null
+          is_system: boolean | null
+          name: string
+          scope: string
+          theme_data: Json
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_default?: boolean | null
+          is_system?: boolean | null
+          name: string
+          scope: string
+          theme_data?: Json
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_default?: boolean | null
+          is_system?: boolean | null
+          name?: string
+          scope?: string
+          theme_data?: Json
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      ui_theme_settings: {
+        Row: {
+          accent_color: string | null
+          active_preset_id: string | null
+          background_color: string | null
+          card_bg_color: string | null
+          card_border_color: string | null
+          card_indicator_critical: string | null
+          card_indicator_positive: string | null
+          card_indicator_warning: string | null
+          card_text_secondary_color: string | null
+          card_title_color: string | null
+          card_value_color: string | null
+          company_id: string
+          contrast_mode: string | null
+          created_at: string
+          id: string
+          is_synced: boolean | null
+          menu_bg_color: string | null
+          menu_icon_color: string | null
+          menu_item_active_color: string | null
+          menu_item_color: string | null
+          menu_item_hover_color: string | null
+          menu_text_color: string | null
+          primary_color: string | null
+          scope: string
+          secondary_color: string | null
+          text_primary_color: string | null
+          text_secondary_color: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          accent_color?: string | null
+          active_preset_id?: string | null
+          background_color?: string | null
+          card_bg_color?: string | null
+          card_border_color?: string | null
+          card_indicator_critical?: string | null
+          card_indicator_positive?: string | null
+          card_indicator_warning?: string | null
+          card_text_secondary_color?: string | null
+          card_title_color?: string | null
+          card_value_color?: string | null
+          company_id: string
+          contrast_mode?: string | null
+          created_at?: string
+          id?: string
+          is_synced?: boolean | null
+          menu_bg_color?: string | null
+          menu_icon_color?: string | null
+          menu_item_active_color?: string | null
+          menu_item_color?: string | null
+          menu_item_hover_color?: string | null
+          menu_text_color?: string | null
+          primary_color?: string | null
+          scope: string
+          secondary_color?: string | null
+          text_primary_color?: string | null
+          text_secondary_color?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          accent_color?: string | null
+          active_preset_id?: string | null
+          background_color?: string | null
+          card_bg_color?: string | null
+          card_border_color?: string | null
+          card_indicator_critical?: string | null
+          card_indicator_positive?: string | null
+          card_indicator_warning?: string | null
+          card_text_secondary_color?: string | null
+          card_title_color?: string | null
+          card_value_color?: string | null
+          company_id?: string
+          contrast_mode?: string | null
+          created_at?: string
+          id?: string
+          is_synced?: boolean | null
+          menu_bg_color?: string | null
+          menu_icon_color?: string | null
+          menu_item_active_color?: string | null
+          menu_item_color?: string | null
+          menu_item_hover_color?: string | null
+          menu_text_color?: string | null
+          primary_color?: string | null
+          scope?: string
+          secondary_color?: string | null
+          text_primary_color?: string | null
+          text_secondary_color?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_access_state: {
         Row: {
           active_subscription_id: string | null
