@@ -35,6 +35,18 @@ const categoryAttributesCache = new Map<string, CategoryAttributeCache>();
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 // ============================================================================
+// CACHE DE REGRAS ANTI-CATÁLOGO POR CATEGORIA
+// Quando a API exige family_name, salvamos para já incluir no próximo POST
+// ============================================================================
+interface AntiCatalogCategoryRule {
+  family_name_required: boolean;
+  default_family_name?: string;
+  last_updated: number;
+}
+
+const antiCatalogCategoryRulesCache = new Map<string, AntiCatalogCategoryRule>();
+
+// ============================================================================
 // DEFAULTS DE ATRIBUTOS POR CATEGORIA (tabela interna)
 // Chave: (categoryId, attrId) → value_id ou value_name
 // NOTA: family_name é enviado SOMENTE se a API retornar body.required_fields pedindo
@@ -82,10 +94,9 @@ const ALLOWED_BODY_FIELDS = new Set([
   "title", "category_id", "currency_id", "listing_type_id", "condition",
   "pictures", "price", "available_quantity", "attributes", "description",
   "buying_mode", "sale_terms", "shipping", "variations", "status",
-  // Para catálogo (opcional) - removido catalog_product_id para anti-catálogo
-  // "catalog_product_id",
+  // family_name: só adicionado dinamicamente via retry ou cache
+  // REMOVIDO: "catalog_product_id" - anti-catálogo
   // REMOVIDO: "catalog_listing" - v3 anti-catálogo não envia este campo
-  // REMOVIDO: "family_name" - v3 anti-catálogo não envia por padrão
 ]);
 
 // CAMPOS PROIBIDOS NO ANTI-CATÁLOGO v3 (nunca enviar)
@@ -93,7 +104,8 @@ const ANTI_CATALOG_V3_FORBIDDEN_BODY_FIELDS = new Set([
   "catalog_listing",
   "catalog_product_id",
   "parent_item_id",
-  "family_name", // Só enviar se API retornar body.required_fields
+  "product_id",
+  // family_name é adicionado dinamicamente - não proibido de forma absoluta
 ]);
 
 // listing_type_id que exigem pictures - não usar em catálogo com pictures bloqueadas
@@ -470,6 +482,10 @@ const ESSENTIAL_ATTRIBUTES = new Set([
   "GRAMMAGE",
   "PAPER_SIZE",
   "PAPER_TYPE",
+  "PAPER_FORMAT",
+  "PAPER_WEIGHT",
+  "SHEETS_NUMBER",
+  "UNITS_PER_PACKAGE",
   // Adicionar outros conforme necessário
 ]);
 
@@ -614,24 +630,33 @@ function validateAndFillRequiredAttributes(input: FillEngineInput): AttributeFil
     let resolvedValue: string | undefined;
     let source = "";
 
-    // Tentar buscar do item fonte
+    // 1. Tentar buscar do snapshot/item fonte
     const aliases = BODY_LEVEL_FIELD_ALIASES[fieldKeyLower] || [fieldKey, fieldKey.toUpperCase()];
     for (const alias of aliases) {
       const sourceAttr = sourceAttrsById.get(alias);
       if (sourceAttr?.value_name) {
         resolvedValue = sourceAttr.value_name;
-        source = "item_fonte";
+        source = "snapshot:attribute";
         break;
       }
       const rawAttr = itemData.attributes?.find((a: any) => a.id === alias);
       if (rawAttr?.value_name) {
         resolvedValue = rawAttr.value_name;
-        source = "item_fonte:raw";
+        source = "snapshot:raw";
         break;
       }
     }
 
-    // Fallback específico para family_name
+    // 2. Verificar cache de regras anti-catálogo por categoria
+    if (!resolvedValue && fieldKeyLower === "family_name") {
+      const categoryRule = antiCatalogCategoryRulesCache.get(categoryId);
+      if (categoryRule?.default_family_name) {
+        resolvedValue = categoryRule.default_family_name;
+        source = "cache:categoria";
+      }
+    }
+
+    // 3. Fallback baseado no título (para family_name)
     if (!resolvedValue && fieldKeyLower === "family_name" && itemData.title) {
       const cleanTitle = itemData.title
         .replace(/\s*[-–]\s*\d+\s*(unidades?|pcs?|un)?\s*$/i, "")
@@ -649,10 +674,12 @@ function validateAndFillRequiredAttributes(input: FillEngineInput): AttributeFil
       filledBodyByFallback.push(fieldKeyLower);
     }
 
+    // 4. Fallback neutro baseado na categoria
     if (!resolvedValue) {
       resolvedValue = "Produto";
-      source = "fallback:ultimo_recurso";
+      source = "fallback:neutro";
       filledBodyByFallback.push(fieldKeyLower);
+      console.warn(`[ad-action-execute] WARNING: Using neutral fallback for ${fieldKeyLower}. Consider adding category-specific default.`);
     }
 
     bodyLevelFields[fieldKeyLower] = resolvedValue;
@@ -715,9 +742,6 @@ function validateAndFillRequiredAttributes(input: FillEngineInput): AttributeFil
       source = "categoria:primeiro_valor";
     }
 
-    // 5. Inferências específicas (EXCETO ITEM_CONDITION que foi removido)
-    // ...
-
     if (resolvedValue || resolvedValueId) {
       const filledAttr: NormalizedAttribute = {
         id: reqId,
@@ -746,15 +770,17 @@ function validateAndFillRequiredAttributes(input: FillEngineInput): AttributeFil
 
 // ============================================================================
 // ETAPA 5: Construir payload final de atributos
+// v3: Obrigatórios + Essenciais (não todos)
 // ============================================================================
 function buildFinalAttributesPayload(
   filledRequired: NormalizedAttribute[],
   sourceAttrs: NormalizedAttribute[],
-  includeNonRequired: boolean = true,
-  essentialOnly: boolean = false
+  requiredIds: string[],
+  essentialOnlyMode: boolean = true
 ): NormalizedAttribute[] {
   const finalAttrs: NormalizedAttribute[] = [];
   const addedIds = new Set<string>();
+  const requiredSet = new Set(requiredIds);
 
   // 1. Adicionar obrigatórios preenchidos
   for (const attr of filledRequired) {
@@ -764,18 +790,27 @@ function buildFinalAttributesPayload(
     }
   }
 
-  // 2. Se essentialOnly=true, adicionar apenas atributos essenciais
-  if (essentialOnly) {
-    for (const attr of sourceAttrs) {
-      if (!addedIds.has(attr.id) && ESSENTIAL_ATTRIBUTES.has(attr.id.toUpperCase())) {
+  // 2. Adicionar essenciais do item de origem
+  for (const attr of sourceAttrs) {
+    if (!addedIds.has(attr.id)) {
+      const attrIdUpper = attr.id.toUpperCase();
+      
+      // Se é obrigatório (não preenchido acima), adicionar
+      if (requiredSet.has(attr.id)) {
         finalAttrs.push(attr);
         addedIds.add(attr.id);
+        continue;
       }
-    }
-  } else if (includeNonRequired) {
-    // 3. Adicionar não-obrigatórios do source se permitido
-    for (const attr of sourceAttrs) {
-      if (!addedIds.has(attr.id)) {
+      
+      // Se é essencial (BRAND, PAPER_*, etc.), adicionar
+      if (ESSENTIAL_ATTRIBUTES.has(attrIdUpper)) {
+        finalAttrs.push(attr);
+        addedIds.add(attr.id);
+        continue;
+      }
+      
+      // v3: Só adicionar não-essenciais se essentialOnlyMode=false
+      if (!essentialOnlyMode) {
         finalAttrs.push(attr);
         addedIds.add(attr.id);
       }
@@ -787,7 +822,7 @@ function buildFinalAttributesPayload(
     new Map(finalAttrs.map(a => [a.id, a])).values()
   );
 
-  console.log(`[ad-action-execute] Final payload: ${uniqueAttrs.length} attributes (${filledRequired.length} required)`);
+  console.log(`[ad-action-execute] Final payload: ${uniqueAttrs.length} attributes (${filledRequired.length} required, essentialOnly=${essentialOnlyMode})`);
   return uniqueAttrs;
 }
 
@@ -1003,10 +1038,17 @@ async function validateAndRefreshTokenIfNeeded(
 
 // ============================================================================
 // SANITIZER DE PAYLOAD
+// v3: Remover campos proibidos, permitir family_name se adicionado via retry
 // ============================================================================
 
-function sanitizePayload(payload: any): any {
+function sanitizePayload(payload: any, allowFamilyName: boolean = false): any {
   const sanitized: any = {};
+  
+  // Campos dinamicamente permitidos (via retry)
+  const dynamicAllowed = new Set(ALLOWED_BODY_FIELDS);
+  if (allowFamilyName) {
+    dynamicAllowed.add("family_name");
+  }
   
   for (const [key, value] of Object.entries(payload)) {
     // v3: Remover campos proibidos no anti-catálogo
@@ -1014,7 +1056,7 @@ function sanitizePayload(payload: any): any {
       continue;
     }
     
-    if (ALLOWED_BODY_FIELDS.has(key) && value !== undefined) {
+    if (dynamicAllowed.has(key) && value !== undefined) {
       sanitized[key] = value;
     }
   }
@@ -1411,11 +1453,24 @@ async function executeCloneAction(
   // =========================================================================
   let categoryAttributes: CategoryAttribute[] = [];
   let requiredIds: string[] = [];
+  const categoryId = itemData.category_id || "";
 
-  if (itemData.category_id) {
-    const catResult = await fetchCategoryRequiredAttributes(currentAccessToken, itemData.category_id);
+  if (categoryId) {
+    const catResult = await fetchCategoryRequiredAttributes(currentAccessToken, categoryId);
     categoryAttributes = catResult.attributes;
     requiredIds = catResult.requiredIds;
+  }
+
+  // =========================================================================
+  // VERIFICAR CACHE DE REGRAS ANTI-CATÁLOGO
+  // Se já sabemos que esta categoria exige family_name, adicionar ao preflight
+  // =========================================================================
+  const categoryRule = antiCatalogCategoryRulesCache.get(categoryId);
+  const preflightBodyFields: string[] = [];
+  
+  if (categoryRule?.family_name_required) {
+    console.log(`[ad-action-execute] CACHE HIT: Category ${categoryId} requires family_name (cached)`);
+    preflightBodyFields.push("family_name");
   }
 
   // =========================================================================
@@ -1430,22 +1485,23 @@ async function executeCloneAction(
 
   // =========================================================================
   // ETAPA 4: PREFLIGHT - Validar e completar obrigatórios (1ª passagem)
-  // NÃO preencher family_name por padrão (v3)
+  // v3: NÃO preencher family_name por padrão (exceto se cache indica necessidade)
   // =========================================================================
   console.log(`[ad-action-execute] === PREFLIGHT VALIDATION (Pass 1) ===`);
   
   let fillResult = validateAndFillRequiredAttributes({
     requiredIds,
-    extraBodyFields: [], // NÃO enviar family_name por padrão
+    extraBodyFields: preflightBodyFields, // Inclui family_name se cache indicar
     categoryAttributes,
     sourceAttrsById,
     itemData,
-    categoryId: itemData.category_id || "",
+    categoryId,
   });
 
   console.log(`[ad-action-execute] === REQUIRED CHECK SUMMARY (Pass 1) ===`);
   console.log(`[ad-action-execute] requiredIds: ${requiredIds.join(", ") || "(none)"}`);
   console.log(`[ad-action-execute] missingAfterFill: ${fillResult.missing.join(", ") || "(none)"}`);
+  console.log(`[ad-action-execute] bodyFieldsFromCache: ${preflightBodyFields.join(", ") || "(none)"}`);
 
   if (fillResult.missing.length > 0) {
     return {
@@ -1453,7 +1509,7 @@ async function executeCloneAction(
       error: "MISSING_REQUIRED_ATTRIBUTES",
       message: `Campos obrigatórios faltando: ${fillResult.missing.join(", ")}`,
       missing_required_attributes: fillResult.missing,
-      category_id: itemData.category_id,
+      category_id: categoryId,
     };
   }
 
@@ -1461,40 +1517,32 @@ async function executeCloneAction(
   // ETAPA 5: Montagem do payload
   // v3: Enviar obrigatórios + essenciais (BRAND, PAPER_*, etc.)
   // =========================================================================
-  const includeNonRequired = checklist?.attributes !== false;
-  const essentialOnlyMode = checklist?.essential_only === true;
+  const essentialOnlyMode = true; // v3: sempre obrigatórios + essenciais
   
   const finalAttributes = buildFinalAttributesPayload(
     fillResult.filled,
     cleanedAttrs,
-    includeNonRequired,
+    requiredIds,
     essentialOnlyMode
   );
 
   // =========================================================================
   // LISTING TYPE RESOLUTION
   // =========================================================================
-  const categoryIdForCache = itemData.category_id || "";
   let listingTypeResolution = resolveListingTypeId(
     itemData.listing_type_id,
-    categoryIdForCache,
+    categoryId,
     DEFAULT_LISTING_TYPE_ID,
     [],
     -1
   );
+
   let listingTypeToUse = listingTypeResolution.listing_type_id;
 
-  // User override
-  if (checklist?.override_listing_type || checklist?.listing_type) {
-    listingTypeToUse = checklist.override_listing_type || checklist.listing_type;
-    console.log(`[ad-action-execute] User override listing_type_id: ${listingTypeToUse}`);
-  }
-
-  console.log(`[ad-action-execute] === LISTING_TYPE_ID RESOLUTION ===`);
-  console.log(`[ad-action-execute] resolved: ${listingTypeToUse} (source: ${listingTypeResolution.source})`);
+  console.log(`[ad-action-execute] listing_type_id resolution: ${listingTypeToUse} (source: ${listingTypeResolution.source})`);
 
   // =========================================================================
-  // SELLER_PACKAGE_* do checklist
+  // SELLER_PACKAGE_* ATTRIBUTES
   // =========================================================================
   const sellerPackageAttributes: NormalizedAttribute[] = [];
   
@@ -1569,11 +1617,12 @@ async function executeCloneAction(
 
   // =========================================================================
   // BUILD PAYLOAD - v3 Anti-catálogo
-  // REMOVIDO: catalog_listing, catalog_product_id, family_name
+  // REMOVIDO: catalog_listing, catalog_product_id, product_id
+  // family_name: só adicionar se cache indicar ou via retry
   // =========================================================================
   let newItem: any = {
     title: checklist?.final_title || checklist?.override_title || itemData.title,
-    category_id: itemData.category_id,
+    category_id: categoryId,
     currency_id: itemData.currency_id || "BRL",
     listing_type_id: listingTypeToUse,
     condition: itemData.condition || "new",
@@ -1581,6 +1630,12 @@ async function executeCloneAction(
     available_quantity: checklist?.final_quantity ?? checklist?.override_quantity ?? itemData.available_quantity ?? 1,
     attributes: filteredAttributes.length > 0 ? filteredAttributes : undefined,
   };
+
+  // Adicionar family_name se veio do preflight (cache)
+  if (fillResult.bodyLevelFields.family_name) {
+    newItem.family_name = fillResult.bodyLevelFields.family_name;
+    console.log(`[ad-action-execute] family_name added from preflight: "${newItem.family_name}"`);
+  }
 
   // FOTOS
   const picturesSource = checklist?.final_pictures || itemData.pictures;
@@ -1617,11 +1672,14 @@ async function executeCloneAction(
     }
   }
 
+  // Flag para controle de family_name no sanitizer
+  let allowFamilyNameInPayload = !!newItem.family_name;
+
   // Sanitize - remove campos proibidos
-  newItem = sanitizePayload(newItem);
+  newItem = sanitizePayload(newItem, allowFamilyNameInPayload);
 
   // =========================================================================
-  // DIAGNÓSTICO DETALHADO (para log)
+  // DIAGNÓSTICO DETALHADO (para log e retorno)
   // =========================================================================
   const antiCatalogDiagnostic = {
     include_gtin: includeGtin,
@@ -1629,7 +1687,11 @@ async function executeCloneAction(
     attributes_removed: [...removedNotModifiable, ...removedCatalogForcing, ...removedAttributes],
     attributes_ids_sent: (newItem.attributes || []).map((a: any) => a.id),
     payload_keys_sent: Object.keys(newItem),
-    removed_fields: ["family_name", "catalog_listing", "catalog_product_id"],
+    removed_fields: ["catalog_listing", "catalog_product_id", "product_id"],
+    family_name_included: !!newItem.family_name,
+    family_name_source: fillResult.bodyLevelFields.family_name 
+      ? (preflightBodyFields.includes("family_name") ? "cache:categoria" : "retry") 
+      : null,
   };
   
   console.log(`[ad-action-execute] === ANTI-CATALOG v3 DIAGNOSTIC ===`);
@@ -1641,7 +1703,7 @@ async function executeCloneAction(
   const CREATE_ENDPOINT = "https://api.mercadolibre.com/items";
   const CREATE_METHOD = "POST";
 
-  console.log(`[ad-action-execute] === API REQUEST ===`);
+  console.log(`[ad-action-execute] === API REQUEST (1st attempt) ===`);
   console.log(`[ad-action-execute] method=${CREATE_METHOD}`);
   console.log(`[ad-action-execute] endpoint=${CREATE_ENDPOINT}`);
   console.log(`[ad-action-execute] payload_keys: ${Object.keys(newItem).join(", ")}`);
@@ -1691,13 +1753,22 @@ async function executeCloneAction(
 
   // =========================================================================
   // RETRY: Se API pedir body.required_fields (ex: family_name)
+  // Regra v3: Retry automático 1x, com telemetria e cache
   // =========================================================================
+  let retryInfo: any = null;
+  
   if (!createResponse.ok) {
     const extractedMissing = extractMissingFieldsFromApiError(createData);
     
     // Se API pediu campos body-level (ex: family_name), tentar preencher e reenviar
     if (extractedMissing.bodyFields.length > 0) {
       console.warn(`[ad-action-execute] API requires body fields: ${extractedMissing.bodyFields.join(", ")}`);
+      
+      retryInfo = {
+        required_fields: extractedMissing.bodyFields,
+        retry_count: 1,
+        category_id: categoryId,
+      };
       
       // Preencher campos body-level que a API exigiu
       const retryFillResult = validateAndFillRequiredAttributes({
@@ -1706,17 +1777,34 @@ async function executeCloneAction(
         categoryAttributes,
         sourceAttrsById,
         itemData,
-        categoryId: itemData.category_id || "",
+        categoryId,
       });
       
       // Adicionar campos body ao payload
       for (const [fieldName, fieldValue] of Object.entries(retryFillResult.bodyLevelFields)) {
         newItem[fieldName] = fieldValue;
         console.log(`[ad-action-execute] [RETRY] Added body field: ${fieldName} = "${fieldValue}"`);
+        
+        // Salvar no cache de regras anti-catálogo
+        if (fieldName === "family_name") {
+          antiCatalogCategoryRulesCache.set(categoryId, {
+            family_name_required: true,
+            default_family_name: fieldValue,
+            last_updated: Date.now(),
+          });
+          console.log(`[ad-action-execute] [CACHE] Saved family_name_required=true for category ${categoryId}`);
+          
+          retryInfo.family_name_used = fieldValue;
+        }
       }
+      
+      // Re-sanitize com family_name permitido
+      newItem = sanitizePayload(newItem, true);
       
       // Retry
       console.log(`[ad-action-execute] === API REQUEST (RETRY with body fields) ===`);
+      console.log(`[ad-action-execute] payload_keys: ${Object.keys(newItem).join(", ")}`);
+      
       createResponse = await fetch(CREATE_ENDPOINT, {
         method: CREATE_METHOD,
         headers: {
@@ -1735,7 +1823,7 @@ async function executeCloneAction(
       if (suggestedTypes.length > 0) {
         const fallbackResolution = resolveListingTypeId(
           undefined,
-          categoryIdForCache,
+          categoryId,
           DEFAULT_LISTING_TYPE_ID,
           suggestedTypes,
           0
@@ -1759,30 +1847,45 @@ async function executeCloneAction(
 
   // =========================================================================
   // RESULTADO FINAL
+  // v3: Não mascarar erro de title - retornar diagnóstico claro
   // =========================================================================
   if (!createResponse.ok) {
     console.error(`[ad-action-execute] Clone FAILED:`, JSON.stringify(createData));
     
     // Verificar se é erro de título inválido
     const isTitleBlocked = isTitleInvalidFieldsError(createData);
+    const invalidFields = extractInvalidFields(createData);
+    
+    // Extrair informações detalhadas do erro
+    const errorDetails = {
+      api_status: createResponse.status,
+      api_error: createData,
+      invalid_fields: invalidFields,
+      is_title_error: isTitleBlocked,
+      retry_info: retryInfo,
+    };
     
     return {
       success: false,
-      error: isTitleBlocked ? "TITLE_BLOCKED_BY_CATALOG" : (createData.message || "Failed to create item"),
+      error: isTitleBlocked ? "TITLE_BLOCKED_BY_CATALOG" : (createData.error || createData.message || "CLONE_FAILED"),
       message: isTitleBlocked 
-        ? "O Mercado Livre bloqueou o campo 'título'. Isso pode indicar que a categoria ou produto está forçando catálogo automaticamente, mesmo sem GTIN/SKU. Tente criar diretamente no painel do ML ou use outra categoria."
+        ? "O Mercado Livre bloqueou o campo 'título'. Isso indica que a categoria ou produto está forçando catálogo automaticamente. Tente criar diretamente no painel do ML ou use outra categoria."
         : (createData.message || "Erro ao criar anúncio"),
-      api_error: createData,
+      ...errorDetails,
       payload_sent: newItem,
-      anti_catalog_diagnostic: antiCatalogDiagnostic,
+      anti_catalog_diagnostic: {
+        ...antiCatalogDiagnostic,
+        family_name_included: !!newItem.family_name,
+        retry_performed: !!retryInfo,
+      },
     };
   }
 
   console.log(`[ad-action-execute] Clone SUCCESS: ${createData.id}`);
 
   // Cache do listing_type_id que funcionou
-  if (categoryIdForCache && newItem.listing_type_id) {
-    saveListingTypeCacheForCategory(categoryIdForCache, newItem.listing_type_id);
+  if (categoryId && newItem.listing_type_id) {
+    saveListingTypeCacheForCategory(categoryId, newItem.listing_type_id);
   }
 
   return {
@@ -1790,7 +1893,12 @@ async function executeCloneAction(
     message: "Anúncio criado com sucesso",
     new_item_id: createData.id,
     permalink: createData.permalink,
-    anti_catalog_diagnostic: antiCatalogDiagnostic,
+    anti_catalog_diagnostic: {
+      ...antiCatalogDiagnostic,
+      family_name_included: !!newItem.family_name,
+      retry_performed: !!retryInfo,
+    },
+    retry_info: retryInfo,
     catalog_info: catalogInfo,
     listing_type_used: newItem.listing_type_id,
   };
