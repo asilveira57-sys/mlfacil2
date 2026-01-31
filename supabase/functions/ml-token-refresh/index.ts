@@ -106,11 +106,12 @@ serve(async (req) => {
         const errorJson = JSON.parse(errorText);
         if (errorJson.error === 'invalid_grant') {
           errorCode = 'invalid_grant';
-          // Mark account as revoked
+           // Mark account as revoked
           await supabaseAdmin
             .from('ml_accounts')
             .update({
               connection_status: 'revoked',
+               is_active: false,
               last_api_error_code: 'invalid_grant',
               last_api_error_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
@@ -144,6 +145,7 @@ serve(async (req) => {
         refresh_token: tokenData.refresh_token,
         token_expires_at: expiresAt.toISOString(),
         connection_status: 'connected',
+        is_active: true,
         last_token_refresh_at: now,
         last_api_ok_at: now,
         last_api_error_code: null,

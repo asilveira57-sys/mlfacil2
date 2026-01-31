@@ -83,7 +83,7 @@ const SettingsCompanies = () => {
   const [showDisconnectDialog, setShowDisconnectDialog] = useState(false);
   const [accountToDisconnect, setAccountToDisconnect] = useState<MarketplaceAccount | null>(null);
   
-  const { setActiveAccount, refreshAccounts: refreshActiveAccountContext } = useActiveAccount();
+  const { activeAccountId, setActiveAccount, refreshAccounts: refreshActiveAccountContext } = useActiveAccount();
 
   // Fetch companies and accounts from backend
   const fetchData = useCallback(async () => {
@@ -443,7 +443,7 @@ const SettingsCompanies = () => {
                           <StatusIcon className="h-3 w-3 mr-1" />
                           {status.label}
                         </Badge>
-                        {account.is_active && (
+                        {account.id === activeAccountId && (
                           <Badge variant="secondary" className="text-xs">
                             Conta Ativa
                           </Badge>
@@ -469,7 +469,7 @@ const SettingsCompanies = () => {
                         )}
                         
                         {/* Show Set Active button only for connected accounts that are not active */}
-                        {!account.is_active && !status.needsReconnect && (
+                        {account.id !== activeAccountId && !status.needsReconnect && (
                           <Button
                             size="sm"
                             variant="outline"
