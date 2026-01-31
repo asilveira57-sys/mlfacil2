@@ -1703,10 +1703,23 @@ async function executeCloneAction(
   const CREATE_ENDPOINT = "https://api.mercadolibre.com/items";
   const CREATE_METHOD = "POST";
 
+  // =========================================================================
+  // FAMILY_NAME HARDCODED - Categorias conhecidas que exigem este campo
+  // =========================================================================
+  const CATEGORY_FAMILY_NAME: Record<string, string> = {
+    "MLB1684": "Etiquetas impressas",
+  };
+
+  if (newItem.category_id && CATEGORY_FAMILY_NAME[newItem.category_id] && !newItem.family_name) {
+    newItem.family_name = CATEGORY_FAMILY_NAME[newItem.category_id];
+    console.log(`[ad-action-execute] ✅ family_name adicionado para categoria ${newItem.category_id}: ${newItem.family_name}`);
+  }
+
   console.log(`[ad-action-execute] === API REQUEST (1st attempt) ===`);
   console.log(`[ad-action-execute] method=${CREATE_METHOD}`);
   console.log(`[ad-action-execute] endpoint=${CREATE_ENDPOINT}`);
   console.log(`[ad-action-execute] payload_keys: ${Object.keys(newItem).join(", ")}`);
+  console.log(`[ad-action-execute] family_name_present: ${!!newItem.family_name}`);
 
   let createResponse = await fetch(CREATE_ENDPOINT, {
     method: CREATE_METHOD,
