@@ -1563,6 +1563,17 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     console.log(`[ad-action-execute] catalog_product_id: OMITTED (creating as normal listing)`);
   }
 
+  // =========================================================================
+  // STATUS: Criar pausado ou ativo conforme seleção do usuário
+  // =========================================================================
+  if (checklist?.create_paused === true) {
+    newItem.status = "paused";
+    console.log(`[ad-action-execute] Status: paused (user selected)`);
+  } else {
+    // Por padrão, não definir status - o ML cria como "active"
+    console.log(`[ad-action-execute] Status: active (default)`);
+  }
+
   // Adicionar body-level fields (family_name, etc.) - GARANTIDO no payload
   for (const [fieldName, fieldValue] of Object.entries(fillResult.bodyLevelFields)) {
     newItem[fieldName] = fieldValue;
