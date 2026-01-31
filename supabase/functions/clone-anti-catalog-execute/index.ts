@@ -404,25 +404,140 @@ Deno.serve(async (req) => {
     }
 
     // Buscar token ML
+    console.log("[ANTI-CATALOG-V3] Looking up ML account:", ml_account_id, "for user:", userId);
+    
     const { data: account, error: accError } = await supabase
       .from("ml_accounts")
-      .select("access_token, seller_id")
+      .select("id, ml_user_id, access_token, refresh_token, token_expires_at, connection_status")
       .eq("id", ml_account_id)
       .eq("user_id", userId)
       .single();
 
-    if (accError || !account?.access_token) {
+    console.log("[ANTI-CATALOG-V3] Account lookup result:", { 
+      found: !!account, 
+      error: accError?.message,
+      hasToken: !!account?.access_token,
+      status: account?.connection_status 
+    });
+
+    if (accError || !account) {
       return new Response(
         JSON.stringify({
           success: false,
-          error: "Conta ML não encontrada ou token expirado",
-          error_code: "AUTH_EXPIRED",
+          error: "Conta ML não encontrada para este usuário",
+          error_code: "ACCOUNT_NOT_FOUND",
+          debug: { ml_account_id, userId, dbError: accError?.message }
+        }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (!account.access_token) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "Conta ML não possui token de acesso. Por favor, reconecte a conta.",
+          error_code: "NO_ACCESS_TOKEN",
         }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const accessToken = account.access_token;
+    // Verificar se o token está expirado e tentar refresh
+    let accessToken = account.access_token;
+    const expiresAt = account.token_expires_at ? new Date(account.token_expires_at) : null;
+    const now = new Date();
+    const fiveMinutesFromNow = new Date(now.getTime() + 5 * 60 * 1000);
+
+    if (expiresAt && expiresAt < fiveMinutesFromNow) {
+      console.log("[ANTI-CATALOG-V3] Token expired or expiring soon, attempting refresh...");
+      
+      if (!account.refresh_token) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: "Token expirado e não há refresh token. Por favor, reconecte a conta.",
+            error_code: "AUTH_EXPIRED",
+          }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Tentar refresh do token
+      const ML_APP_ID = Deno.env.get("ML_APP_ID") || "";
+      const ML_SECRET_KEY = Deno.env.get("ML_SECRET_KEY") || "";
+
+      try {
+        const tokenResponse = await fetch("https://api.mercadolibre.com/oauth/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            grant_type: "refresh_token",
+            client_id: ML_APP_ID,
+            client_secret: ML_SECRET_KEY,
+            refresh_token: account.refresh_token,
+          }),
+        });
+
+        if (!tokenResponse.ok) {
+          const errorText = await tokenResponse.text();
+          console.error("[ANTI-CATALOG-V3] Token refresh failed:", tokenResponse.status, errorText);
+          
+          // Marcar conta como revogada
+          await supabase
+            .from("ml_accounts")
+            .update({
+              connection_status: "revoked",
+              is_active: false,
+              last_api_error_code: "invalid_grant",
+              last_api_error_at: now.toISOString(),
+              updated_at: now.toISOString(),
+            })
+            .eq("id", ml_account_id);
+
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: "Token expirado e refresh falhou. Por favor, reconecte a conta.",
+              error_code: "AUTH_EXPIRED",
+            }),
+            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const tokenData = await tokenResponse.json();
+        const newExpiresAt = new Date();
+        newExpiresAt.setSeconds(newExpiresAt.getSeconds() + tokenData.expires_in);
+
+        // Atualizar tokens no banco
+        await supabase
+          .from("ml_accounts")
+          .update({
+            access_token: tokenData.access_token,
+            refresh_token: tokenData.refresh_token,
+            token_expires_at: newExpiresAt.toISOString(),
+            connection_status: "connected",
+            is_active: true,
+            last_token_refresh_at: now.toISOString(),
+            last_api_ok_at: now.toISOString(),
+            updated_at: now.toISOString(),
+          })
+          .eq("id", ml_account_id);
+
+        accessToken = tokenData.access_token;
+        console.log("[ANTI-CATALOG-V3] Token refreshed successfully");
+      } catch (refreshError: any) {
+        console.error("[ANTI-CATALOG-V3] Token refresh error:", refreshError);
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: "Erro ao renovar token. Por favor, reconecte a conta.",
+            error_code: "REFRESH_ERROR",
+          }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
 
     // ============================================
     // MONTAR PAYLOAD ANTI-CATÁLOGO
