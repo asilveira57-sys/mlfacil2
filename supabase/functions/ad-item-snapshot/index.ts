@@ -8,8 +8,153 @@ const corsHeaders = {
 
 interface SnapshotRequest {
   item_id: string;
+  id_type?: 'MLB' | 'MLBU';
   ml_account_id?: string;
   seller_id?: string;
+}
+
+// ============================================================================
+// RESOLUÇÃO DE MLBU → MLB (Catálogo para Item Real)
+// ============================================================================
+async function resolveMLBUtoMLB(mlbuId: string, accessToken?: string): Promise<{
+  ok: boolean;
+  itemId?: string;
+  error?: string;
+  productData?: any;
+}> {
+  console.log(`[ad-item-snapshot] Resolving MLBU: ${mlbuId}`);
+  
+  // Tentar buscar o produto do catálogo via API pública
+  const headers: Record<string, string> = {};
+  if (accessToken) {
+    headers["Authorization"] = `Bearer ${accessToken}`;
+  }
+  
+  // A API de produtos aceita MLBU diretamente
+  const productResponse = await fetch(`https://api.mercadolibre.com/products/${mlbuId}`, {
+    headers,
+  });
+  
+  if (!productResponse.ok) {
+    // Tentar com prefixo MLB no mesmo ID numérico
+    const numericPart = mlbuId.replace(/^MLBU/i, '');
+    const mlbId = `MLB${numericPart}`;
+    
+    console.log(`[ad-item-snapshot] MLBU not found, trying MLB format: ${mlbId}`);
+    
+    const mlbResponse = await fetch(`https://api.mercadolibre.com/products/${mlbId}`, {
+      headers,
+    });
+    
+    if (!mlbResponse.ok) {
+      return {
+        ok: false,
+        error: `Produto de catálogo não encontrado: ${mlbuId}`,
+      };
+    }
+    
+    const productData = await mlbResponse.json();
+    if (productData.buy_box_winner?.item_id) {
+      return {
+        ok: true,
+        itemId: productData.buy_box_winner.item_id,
+        productData,
+      };
+    }
+    
+    return {
+      ok: false,
+      error: "Catálogo sem vendedor ativo (buy_box vazio)",
+      productData,
+    };
+  }
+  
+  const productData = await productResponse.json();
+  
+  // Extrair o item_id do buy_box_winner
+  if (productData.buy_box_winner?.item_id) {
+    console.log(`[ad-item-snapshot] MLBU resolved to MLB: ${productData.buy_box_winner.item_id}`);
+    return {
+      ok: true,
+      itemId: productData.buy_box_winner.item_id,
+      productData,
+    };
+  }
+  
+  return {
+    ok: false,
+    error: "Catálogo sem vendedor ativo (buy_box vazio)",
+    productData,
+  };
+}
+
+// ============================================================================
+// BUSCA PÚBLICA DE ITEM (para clone externo - sem necessidade de token)
+// ============================================================================
+async function fetchItemPublic(itemId: string): Promise<{
+  ok: boolean;
+  data?: any;
+  error?: string;
+  status?: number;
+}> {
+  console.log(`[ad-item-snapshot] Fetching item PUBLIC (no auth): ${itemId}`);
+  
+  // Endpoint público de item (não requer autenticação para dados básicos)
+  const response = await fetch(`https://api.mercadolibre.com/items/${itemId}`);
+  
+  if (!response.ok) {
+    return {
+      ok: false,
+      error: `Item não encontrado: ${itemId}`,
+      status: response.status,
+    };
+  }
+  
+  const data = await response.json();
+  return { ok: true, data };
+}
+
+// ============================================================================
+// BUSCA AUTENTICADA DE ITEM (para clone interno - com descrição completa)
+// ============================================================================
+async function fetchItemAuthenticated(itemId: string, accessToken: string): Promise<{
+  ok: boolean;
+  data?: any;
+  description?: string;
+  error?: string;
+  status?: number;
+}> {
+  console.log(`[ad-item-snapshot] Fetching item AUTHENTICATED: ${itemId}`);
+  
+  const response = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  
+  if (!response.ok) {
+    return {
+      ok: false,
+      error: `Erro ao buscar item: ${response.status}`,
+      status: response.status,
+    };
+  }
+  
+  const data = await response.json();
+  
+  // Também buscar descrição
+  let description: string | undefined;
+  try {
+    const descResponse = await fetch(`https://api.mercadolibre.com/items/${itemId}/description`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (descResponse.ok) {
+      const descData = await descResponse.json();
+      description = descData.plain_text || descData.text;
+    }
+  } catch (e) {
+    console.log(`[ad-item-snapshot] Could not fetch description: ${e}`);
+  }
+  
+  return { ok: true, data, description };
 }
 
 serve(async (req) => {
@@ -40,7 +185,7 @@ serve(async (req) => {
       });
     }
 
-    const { item_id, ml_account_id, seller_id } = await req.json() as SnapshotRequest;
+    const { item_id, id_type, ml_account_id, seller_id } = await req.json() as SnapshotRequest;
 
     if (!item_id) {
       return new Response(JSON.stringify({ success: false, error: "item_id is required" }), {
@@ -49,12 +194,59 @@ serve(async (req) => {
       });
     }
 
-    // Normalize item_id - ensure MLB format
-    const normalizedId = item_id.replace(/-/g, '').toUpperCase();
+    // Normalize item_id
+    let normalizedId = item_id.replace(/-/g, '').toUpperCase();
+    let resolvedItemId = normalizedId;
+    let catalogResolution: any = null;
     
-    console.log(`[ad-item-snapshot] Fetching item: ${normalizedId} for user: ${user.id}`);
+    console.log(`[ad-item-snapshot] Processing: ${normalizedId}, type: ${id_type || 'auto'}`);
 
-    // Get ML account credentials - try multiple strategies
+    // =========================================================================
+    // ETAPA 1: Resolver MLBU para MLB se necessário
+    // =========================================================================
+    if (id_type === 'MLBU' || /^MLBU/i.test(normalizedId)) {
+      // Tentar obter token para resolução (opcional)
+      let accessTokenForResolution: string | undefined;
+      
+      if (seller_id) {
+        const { data: mlAccount } = await supabase
+          .from("ml_accounts")
+          .select("access_token")
+          .eq("ml_user_id", String(seller_id))
+          .eq("user_id", user.id)
+          .maybeSingle();
+        accessTokenForResolution = mlAccount?.access_token || undefined;
+      }
+      
+      const resolution = await resolveMLBUtoMLB(normalizedId, accessTokenForResolution);
+      
+      if (!resolution.ok) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: "CATALOG_RESOLUTION_FAILED",
+          message: resolution.error || "Não foi possível resolver o link de catálogo",
+          user_guidance: "Cole o link de um anúncio específico (MLB) em vez do link de catálogo (/up/MLBU...).",
+          original_id: normalizedId,
+          catalog_data: resolution.productData,
+        }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      
+      resolvedItemId = resolution.itemId!;
+      catalogResolution = {
+        original_catalog_id: normalizedId,
+        resolved_item_id: resolvedItemId,
+        product_name: resolution.productData?.name,
+      };
+      
+      console.log(`[ad-item-snapshot] MLBU resolved: ${normalizedId} → ${resolvedItemId}`);
+    }
+
+    // =========================================================================
+    // ETAPA 2: Buscar credenciais ML (para clone interno ou dados extras)
+    // =========================================================================
     let mlAccount: { access_token: string | null; ml_user_id: string } | null = null;
     
     // Strategy 1: By ml_account_id (UUID)
@@ -90,82 +282,103 @@ serve(async (req) => {
       mlAccount = data;
     }
 
-    if (!mlAccount?.access_token) {
-      // Try to get from cache as fallback
-      const { data: cachedItem } = await supabase
-        .from("meli_listings_cache")
-        .select("*")
-        .eq("item_id", normalizedId)
-        .single();
+    // =========================================================================
+    // ETAPA 3: Buscar dados do item
+    // REGRA: Para clone externo, usar endpoint PÚBLICO (não requer token do dono)
+    // =========================================================================
+    let itemData: any = null;
+    let description: string | undefined;
+    let fetchMethod: 'public' | 'authenticated' | 'cache' = 'public';
+    
+    // Primeiro, tentar busca pública (funciona para qualquer item)
+    const publicResult = await fetchItemPublic(resolvedItemId);
+    
+    if (publicResult.ok) {
+      itemData = publicResult.data;
+      fetchMethod = 'public';
+      
+      // Se temos token E o item é nosso, buscar dados extras (descrição)
+      if (mlAccount?.access_token && String(itemData.seller_id) === String(mlAccount.ml_user_id)) {
+        const authResult = await fetchItemAuthenticated(resolvedItemId, mlAccount.access_token);
+        if (authResult.ok) {
+          itemData = authResult.data;
+          description = authResult.description;
+          fetchMethod = 'authenticated';
+        }
+      }
+    } else {
+      // Fallback: tentar autenticado se temos token
+      if (mlAccount?.access_token) {
+        const authResult = await fetchItemAuthenticated(resolvedItemId, mlAccount.access_token);
+        if (authResult.ok) {
+          itemData = authResult.data;
+          description = authResult.description;
+          fetchMethod = 'authenticated';
+        } else if (authResult.status === 403 || authResult.status === 404) {
+          // Retornar erro apropriado
+          return new Response(JSON.stringify({
+            success: false,
+            error: authResult.status === 403 ? "ACCESS_DENIED" : "NOT_FOUND",
+            message: authResult.status === 403 
+              ? `Sem permissão para acessar o anúncio ${resolvedItemId}`
+              : `Anúncio ${resolvedItemId} não encontrado`,
+            api_status: authResult.status,
+            catalog_resolution: catalogResolution,
+          }), {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+      
+      // Último recurso: cache local
+      if (!itemData) {
+        const { data: cachedItem } = await supabase
+          .from("meli_listings_cache")
+          .select("*")
+          .eq("item_id", resolvedItemId)
+          .single();
 
-      if (cachedItem) {
-        console.log(`[ad-item-snapshot] Returning cached data for ${normalizedId}`);
-        return new Response(JSON.stringify({
-          success: true,
-          source: "cache",
-          item: {
-            id: cachedItem.item_id,
-            title: cachedItem.title,
-            price: cachedItem.price,
-            thumbnail: cachedItem.thumbnail,
-            status: cachedItem.status,
-            available_quantity: cachedItem.available_quantity,
-            sold_quantity: cachedItem.sold_quantity,
-            category_id: cachedItem.category_id,
-            seller_id: cachedItem.seller_id,
-            is_catalog_source: false,
-          },
+        if (cachedItem) {
+          console.log(`[ad-item-snapshot] Returning cached data for ${resolvedItemId}`);
+          return new Response(JSON.stringify({
+            success: true,
+            source: "cache",
+            resolved_item_id: resolvedItemId,
+            catalog_resolution: catalogResolution,
+            item: {
+              id: cachedItem.item_id,
+              title: cachedItem.title,
+              price: cachedItem.price,
+              thumbnail: cachedItem.thumbnail,
+              status: cachedItem.status,
+              available_quantity: cachedItem.available_quantity,
+              sold_quantity: cachedItem.sold_quantity,
+              category_id: cachedItem.category_id,
+              seller_id: cachedItem.seller_id,
+              is_catalog_source: false,
+            },
+          }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        return new Response(JSON.stringify({ 
+          success: false, 
+          error: "ITEM_NOT_FOUND",
+          message: `Não foi possível obter dados do anúncio ${resolvedItemId}`,
+          user_guidance: "Verifique se o ID está correto e tente novamente.",
         }), {
+          status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-
-      return new Response(JSON.stringify({ 
-        success: false, 
-        error: "NO_ML_ACCOUNT",
-        message: "Nenhuma conta do Mercado Livre conectada ou token expirado" 
-      }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
     }
 
-    // Fetch item from ML API
-    const itemResponse = await fetch(`https://api.mercadolibre.com/items/${normalizedId}`, {
-      headers: { Authorization: `Bearer ${mlAccount.access_token}` },
-    });
-
-    if (!itemResponse.ok) {
-      const errorText = await itemResponse.text();
-      console.error(`[ad-item-snapshot] ML API error: ${itemResponse.status} - ${errorText}`);
-      
-      let errorType = "UNKNOWN";
-      let userMessage = `Erro ao buscar anúncio ${normalizedId}`;
-      
-      if (itemResponse.status === 404) {
-        errorType = "NOT_FOUND";
-        userMessage = `Anúncio ${normalizedId} não encontrado`;
-      } else if (itemResponse.status === 403) {
-        errorType = "ACCESS_DENIED";
-        userMessage = `Sem permissão para acessar ${normalizedId}`;
-      } else if (itemResponse.status === 401) {
-        errorType = "UNAUTHORIZED";
-        userMessage = "Token expirado - reconecte sua conta";
-      }
-      
-      return new Response(JSON.stringify({ 
-        success: false, 
-        error: errorType,
-        message: userMessage,
-        api_status: itemResponse.status 
-      }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const itemData = await itemResponse.json();
-
+    // =========================================================================
+    // ETAPA 4: Processar dados e retornar
+    // =========================================================================
+    
     // Detect catalog status
     const isCatalogSource = !!(
       itemData.catalog_product_id ||
@@ -173,24 +386,12 @@ serve(async (req) => {
       itemData.parent_item_id
     );
 
-    // Also fetch description for complete data
-    let description = null;
-    try {
-      const descResponse = await fetch(`https://api.mercadolibre.com/items/${normalizedId}/description`, {
-        headers: { Authorization: `Bearer ${mlAccount.access_token}` },
-      });
-      if (descResponse.ok) {
-        const descData = await descResponse.json();
-        description = descData.plain_text || descData.text;
-      }
-    } catch (e: any) {
-      console.log(`[ad-item-snapshot] Could not fetch description: ${e?.message || e}`);
-    }
-
     // Build comprehensive response
     const response = {
       success: true,
-      source: "api",
+      source: fetchMethod,
+      resolved_item_id: resolvedItemId,
+      catalog_resolution: catalogResolution,
       item: {
         id: itemData.id,
         title: itemData.title,
@@ -219,11 +420,11 @@ serve(async (req) => {
         sale_terms: itemData.sale_terms,
         variations: itemData.variations,
       },
-      user_seller_id: mlAccount.ml_user_id,
-      is_own_item: String(itemData.seller_id) === String(mlAccount.ml_user_id),
+      user_seller_id: mlAccount?.ml_user_id,
+      is_own_item: mlAccount?.ml_user_id ? String(itemData.seller_id) === String(mlAccount.ml_user_id) : false,
     };
 
-    console.log(`[ad-item-snapshot] Success: ${normalizedId}, is_own=${response.is_own_item}, is_catalog=${isCatalogSource}`);
+    console.log(`[ad-item-snapshot] Success: ${resolvedItemId}, is_own=${response.is_own_item}, is_catalog=${isCatalogSource}, fetch_method=${fetchMethod}`);
 
     return new Response(JSON.stringify(response), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
