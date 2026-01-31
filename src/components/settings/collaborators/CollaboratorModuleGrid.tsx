@@ -74,8 +74,7 @@ export function CollaboratorModuleGrid({
               selectedModules[mod.key] 
                 ? 'border-primary/30 bg-primary/5' 
                 : 'border-border bg-background hover:border-muted-foreground/30'
-            } ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-            onClick={() => !disabled && handleToggle(mod.key, !selectedModules[mod.key])}
+            } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             <Checkbox
               id={`module-${mod.key}`}
@@ -88,7 +87,8 @@ export function CollaboratorModuleGrid({
               <div className="flex items-center gap-2">
                 <Label
                   htmlFor={`module-${mod.key}`}
-                  className="text-sm font-medium cursor-pointer"
+                  className="text-sm font-medium cursor-pointer select-none"
+                  onClick={() => !disabled && handleToggle(mod.key, !selectedModules[mod.key])}
                 >
                   {mod.label}
                 </Label>
