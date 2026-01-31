@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -36,33 +36,52 @@ export function CollaboratorFormModal({
   const [modules, setModules] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
 
+  // Guard against repeated initialization loops while the dialog is open.
+  // In some cases, parent props can change identity during renders (even if
+  // the underlying data didn't), which would retrigger the effect below and
+  // repeatedly call setState → "Maximum update depth exceeded".
+  const lastInitKeyRef = useRef<string | null>(null);
+
   const isEditing = !!collaborator;
   const hasAccepted = collaborator?.accepted_at != null;
 
   // Initialize form when opening
   useEffect(() => {
-    if (open) {
-      if (collaborator) {
-        setName(collaborator.name);
-        setEmail(collaborator.email);
-        // Build modules map from existing access
-        const moduleMap: Record<string, boolean> = {};
-        MODULE_CATALOG.forEach(mod => {
-          const access = collaborator.modules.find(m => m.module_key === mod.key);
-          moduleMap[mod.key] = access?.enabled ?? false;
-        });
-        setModules(moduleMap);
-      } else {
-        setName('');
-        setEmail('');
-        // Default all modules to false
-        const defaultModules: Record<string, boolean> = {};
-        MODULE_CATALOG.forEach(mod => {
-          defaultModules[mod.key] = false;
-        });
-        setModules(defaultModules);
-      }
+    if (!open) {
+      lastInitKeyRef.current = null;
+      return;
     }
+
+    const initKey = collaborator
+      ? `edit:${collaborator.id}:${collaborator.updated_at ?? ''}`
+      : 'create';
+
+    if (lastInitKeyRef.current === initKey) return;
+    lastInitKeyRef.current = initKey;
+
+    if (collaborator) {
+      setName(collaborator.name);
+      setEmail(collaborator.email);
+
+      // Build modules map from existing access
+      const moduleMap: Record<string, boolean> = {};
+      MODULE_CATALOG.forEach((mod) => {
+        const access = collaborator.modules.find((m) => m.module_key === mod.key);
+        moduleMap[mod.key] = access?.enabled ?? false;
+      });
+      setModules(moduleMap);
+      return;
+    }
+
+    setName('');
+    setEmail('');
+
+    // Default all modules to false
+    const defaultModules: Record<string, boolean> = {};
+    MODULE_CATALOG.forEach((mod) => {
+      defaultModules[mod.key] = false;
+    });
+    setModules(defaultModules);
   }, [open, collaborator]);
 
   const handleSubmit = async (e: React.FormEvent) => {
