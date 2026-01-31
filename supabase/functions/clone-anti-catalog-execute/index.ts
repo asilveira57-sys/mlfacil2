@@ -14,13 +14,12 @@ const corsHeaders = {
 // REGRAS ANTI-CATÁLOGO v3
 // ============================================
 
-// Campos que NUNCA podem ser enviados no POST /items
+// Campos que NUNCA podem ser enviados no POST /items (exceto family_name via retry)
 const FORBIDDEN_BODY_FIELDS = new Set([
   "catalog_listing",
   "catalog_product_id",
   "product_id",
   "parent_item_id",
-  "family_name", // Só envia via retry se API exigir
 ]);
 
 // Atributos que NUNCA podem ser enviados (forçam catálogo)
@@ -46,7 +45,17 @@ const DUPLICATE_ATTRIBUTES = new Set([
   "PACKAGE_WEIGHT",
 ]);
 
-// Cache de categorias que exigem family_name
+// ============================================
+// MAPEAMENTO ESTÁTICO DE FAMILY_NAME POR CATEGORIA
+// ============================================
+const FAMILY_NAME_BY_CATEGORY: Record<string, string> = {
+  "MLB1684": "Etiquetas impressas",
+  "MLB1499": "Produto de papelaria",
+  "MLB1430": "Suprimentos de impressão",
+  "MLB1132": "Acessórios para escritório",
+};
+
+// Cache dinâmico de categorias que exigem family_name (persistido em memória)
 const familyNameRequiredCache = new Map<string, boolean>();
 
 // ============================================
@@ -63,47 +72,284 @@ function filterSafeAttributes(attributes: any[]): any[] {
   return attributes.filter((attr) => isAttributeSafe(attr.id));
 }
 
-function extractMissingFields(apiError: any): { bodyFields: string[] } {
-  const bodyFields: string[] = [];
+/**
+ * Verifica se o erro da API é do tipo "body.required_fields" contendo um campo específico
+ */
+function isRequiredFieldsError(apiError: any, fieldName: string): boolean {
+  if (!apiError) return false;
 
-  if (!apiError) return { bodyFields };
-
-  // Formato: { cause: [{ code: "body.required_fields", ... }] }
+  // Verifica em cause/causes
   const causes = apiError.cause || apiError.causes || [];
   for (const c of causes) {
     if (c.code === "body.required_fields" || c.code === "item.required_fields") {
-      const missing = c.references || [];
-      for (const ref of missing) {
-        if (typeof ref === "string") {
-          bodyFields.push(ref);
-        }
+      const references = c.references || [];
+      if (references.includes(fieldName)) {
+        return true;
       }
     }
   }
 
-  // Formato: { message: "...", error: "..." }
+  // Verifica na mensagem
   const message = apiError.message || apiError.error || "";
-  if (message.includes("family_name")) {
-    if (!bodyFields.includes("family_name")) {
-      bodyFields.push("family_name");
+  if (message.toLowerCase().includes(fieldName.toLowerCase())) {
+    // Verifica se parece ser um erro de campo obrigatório
+    if (message.includes("required") || message.includes("obrigatório")) {
+      return true;
     }
   }
 
-  return { bodyFields };
+  return false;
 }
 
-function deriveFamilyName(title: string, categoryId: string): string {
-  // Fallback simples: primeiras 4 palavras do título
+/**
+ * Busca o family_name para uma categoria
+ * 1. Primeiro verifica mapeamento estático
+ * 2. Se não encontrar, consulta API de categorias do ML
+ */
+async function getFamilyName(
+  categoryId: string,
+  accessToken: string
+): Promise<{ value: string | null; source: "static_mapping" | "api_category" | "title_fallback" | null }> {
+  // 1. Verificar mapeamento estático
+  const staticValue = FAMILY_NAME_BY_CATEGORY[categoryId];
+  if (staticValue) {
+    console.log(`[ANTI-CATALOG-V3] family_name from static mapping: "${staticValue}"`);
+    return { value: staticValue, source: "static_mapping" };
+  }
+
+  // 2. Consultar API de categorias com timeout de 5 segundos
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+    const response = await fetch(
+      `https://api.mercadolibre.com/categories/${categoryId}`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal: controller.signal,
+      }
+    );
+    clearTimeout(timeoutId);
+
+    if (response.ok) {
+      const data = await response.json();
+      
+      // Tentar extrair family_name de diferentes locais
+      const familyName = 
+        data?.settings?.catalog_family_name ||
+        data?.family_name ||
+        data?.name;
+      
+      if (familyName) {
+        console.log(`[ANTI-CATALOG-V3] family_name from API: "${familyName}"`);
+        return { value: familyName, source: "api_category" };
+      }
+    }
+  } catch (error: any) {
+    console.warn(`[ANTI-CATALOG-V3] Failed to fetch category: ${error.message}`);
+  }
+
+  return { value: null, source: null };
+}
+
+/**
+ * Deriva um family_name de fallback baseado no título
+ */
+function deriveFamilyNameFromTitle(title: string): string {
   if (title) {
     const words = title.split(/\s+/).slice(0, 4).join(" ");
     if (words.length > 0) return words;
   }
-  // Fallback por categoria (pode ser expandido)
-  const categoryFallbacks: Record<string, string> = {
-    MLB1684: "Etiquetas impressas",
-    MLB1499: "Produto de papelaria",
+  return "Produto";
+}
+
+// ============================================
+// INTERFACE DE RESULTADO
+// ============================================
+interface CreateItemResult {
+  success: boolean;
+  item_id?: string;
+  permalink?: string;
+  error?: string;
+  error_code?: string;
+  api_status?: number;
+  api_error?: any;
+  retry_info: {
+    attempted: boolean;
+    retry_count: number;
+    field_added?: string;
+    success_on_retry?: boolean;
   };
-  return categoryFallbacks[categoryId] || "Produto";
+  diagnostic: {
+    payload_keys_sent: string[];
+    attributes_ids_sent: string[];
+    removed_fields: string[];
+    family_name_included: boolean;
+    family_name_source: "static_mapping" | "api_category" | "title_fallback" | null;
+    family_name_value: string | null;
+  };
+}
+
+// ============================================
+// FUNÇÃO PRINCIPAL DE CRIAÇÃO COM RETRY
+// ============================================
+async function createItemWithFamilyNameRetry(
+  itemPayload: Record<string, any>,
+  categoryId: string,
+  accessToken: string,
+  title: string
+): Promise<CreateItemResult> {
+  const CREATE_ENDPOINT = "https://api.mercadolibre.com/items";
+  
+  // Resultado inicial
+  const result: CreateItemResult = {
+    success: false,
+    retry_info: {
+      attempted: false,
+      retry_count: 0,
+      success_on_retry: false,
+    },
+    diagnostic: {
+      payload_keys_sent: Object.keys(itemPayload),
+      attributes_ids_sent: (itemPayload.attributes || []).map((a: any) => a.id),
+      removed_fields: [...FORBIDDEN_BODY_FIELDS],
+      family_name_included: false,
+      family_name_source: null,
+      family_name_value: null,
+    },
+  };
+
+  // Verificar se já sabemos que essa categoria exige family_name
+  if (familyNameRequiredCache.get(categoryId)) {
+    console.log(`[ANTI-CATALOG-V3] Category ${categoryId} known to require family_name, adding preemptively`);
+    const familyNameData = await getFamilyName(categoryId, accessToken);
+    const familyNameValue = familyNameData.value || deriveFamilyNameFromTitle(title);
+    itemPayload.family_name = familyNameValue;
+    result.diagnostic.family_name_included = true;
+    result.diagnostic.family_name_source = familyNameData.source || "title_fallback";
+    result.diagnostic.family_name_value = familyNameValue;
+    result.diagnostic.payload_keys_sent = Object.keys(itemPayload);
+  }
+
+  console.log("[ANTI-CATALOG-V3] First attempt payload keys:", Object.keys(itemPayload));
+  console.log("[ANTI-CATALOG-V3] First attempt payload:", JSON.stringify(itemPayload, null, 2));
+
+  // ============================================
+  // PRIMEIRA TENTATIVA
+  // ============================================
+  let createResponse = await fetch(CREATE_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(itemPayload),
+  });
+
+  let createData = await createResponse.json();
+  result.retry_info.retry_count = 1;
+
+  console.log("[ANTI-CATALOG-V3] First attempt response:", createResponse.status, JSON.stringify(createData));
+
+  // Se sucesso na primeira tentativa
+  if (createResponse.ok) {
+    result.success = true;
+    result.item_id = createData.id;
+    result.permalink = createData.permalink;
+    return result;
+  }
+
+  // ============================================
+  // VERIFICAR SE PRECISA DE RETRY POR family_name
+  // ============================================
+  if (isRequiredFieldsError(createData, "family_name") && !result.diagnostic.family_name_included) {
+    console.log("[ANTI-CATALOG-V3] API requires family_name, initiating retry...");
+    
+    result.retry_info.attempted = true;
+    result.retry_info.field_added = "family_name";
+
+    // Salvar no cache para próximas criações
+    familyNameRequiredCache.set(categoryId, true);
+
+    // Buscar family_name
+    const familyNameData = await getFamilyName(categoryId, accessToken);
+    let familyNameValue: string;
+    let familyNameSource: "static_mapping" | "api_category" | "title_fallback";
+
+    if (familyNameData.value) {
+      familyNameValue = familyNameData.value;
+      familyNameSource = familyNameData.source!;
+    } else {
+      // Fallback: usar primeiras palavras do título
+      familyNameValue = deriveFamilyNameFromTitle(title);
+      familyNameSource = "title_fallback";
+      console.warn(`[ANTI-CATALOG-V3] WARNING: Using title fallback for family_name: "${familyNameValue}"`);
+    }
+
+    // Atualizar diagnóstico
+    result.diagnostic.family_name_included = true;
+    result.diagnostic.family_name_source = familyNameSource;
+    result.diagnostic.family_name_value = familyNameValue;
+
+    // Criar payload de retry COM family_name no nível raiz
+    const retryPayload = {
+      ...itemPayload,
+      family_name: familyNameValue,
+    };
+
+    result.diagnostic.payload_keys_sent = Object.keys(retryPayload);
+
+    console.log("[ANTI-CATALOG-V3] Retry payload with family_name:", JSON.stringify(retryPayload, null, 2));
+
+    // ============================================
+    // SEGUNDA TENTATIVA (RETRY)
+    // ============================================
+    createResponse = await fetch(CREATE_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(retryPayload),
+    });
+
+    createData = await createResponse.json();
+    result.retry_info.retry_count = 2;
+
+    console.log("[ANTI-CATALOG-V3] Retry response:", createResponse.status, JSON.stringify(createData));
+
+    if (createResponse.ok) {
+      result.success = true;
+      result.item_id = createData.id;
+      result.permalink = createData.permalink;
+      result.retry_info.success_on_retry = true;
+      return result;
+    }
+  }
+
+  // ============================================
+  // TRATAR ERRO FINAL
+  // ============================================
+  const errorMessage = createData?.message || createData?.error || "Erro desconhecido";
+  const errorCause = createData?.cause || [];
+
+  let errorCode = "CREATE_FAILED";
+  if (errorCause.some((c: any) => c.code?.includes("title"))) {
+    errorCode = "TITLE_BLOCKED_BY_CATALOG";
+  } else if (createResponse.status === 401) {
+    errorCode = "AUTH_EXPIRED";
+  } else if (createResponse.status === 403) {
+    errorCode = "ACCESS_DENIED";
+  }
+
+  result.error = errorMessage;
+  result.error_code = errorCode;
+  result.api_status = createResponse.status;
+  result.api_error = createData;
+
+  console.log("[ANTI-CATALOG-V3] Final error:", errorCode, errorMessage);
+
+  return result;
 }
 
 // ============================================
@@ -177,7 +423,6 @@ Deno.serve(async (req) => {
     }
 
     const accessToken = account.access_token;
-    const sellerId = account.seller_id;
 
     // ============================================
     // MONTAR PAYLOAD ANTI-CATÁLOGO
@@ -216,7 +461,7 @@ Deno.serve(async (req) => {
     // Combinar atributos
     const finalAttributes = [...safeAttributes, ...sellerPackageAttrs];
 
-    // Payload base (SEM campos proibidos)
+    // Payload base (SEM campos proibidos, SEM family_name inicial)
     const itemPayload: Record<string, any> = {
       title: payload.title,
       category_id: category_id,
@@ -234,141 +479,27 @@ Deno.serve(async (req) => {
       itemPayload.description = { plain_text: payload.description };
     }
 
-    // Verificar cache de family_name
-    if (familyNameRequiredCache.get(category_id)) {
-      itemPayload.family_name = deriveFamilyName(payload.title, category_id);
-    }
-
     // Remover qualquer campo proibido que possa ter vazado
     for (const field of FORBIDDEN_BODY_FIELDS) {
       delete itemPayload[field];
     }
 
-    // Diagnóstico
-    const diagnostic = {
-      payload_keys_sent: Object.keys(itemPayload),
-      attributes_ids_sent: finalAttributes.map((a: any) => a.id),
-      removed_fields: [...FORBIDDEN_BODY_FIELDS],
-    };
-
-    console.log("[ANTI-CATALOG-V3] Creating item with payload:", JSON.stringify(itemPayload, null, 2));
-    console.log("[ANTI-CATALOG-V3] Diagnostic:", diagnostic);
-
     // ============================================
-    // PRIMEIRA TENTATIVA DE CRIAÇÃO
+    // EXECUTAR CRIAÇÃO COM RETRY AUTOMÁTICO
     // ============================================
+    const createResult = await createItemWithFamilyNameRetry(
+      itemPayload,
+      category_id,
+      accessToken,
+      payload.title
+    );
 
-    let createResponse = await fetch("https://api.mercadolibre.com/items", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify(itemPayload),
-    });
-
-    let createData = await createResponse.json();
-
-    console.log("[ANTI-CATALOG-V3] First attempt response:", createResponse.status, JSON.stringify(createData));
-
-    // ============================================
-    // RETRY SE family_name FOR EXIGIDO
-    // ============================================
-
-    let retryInfo = {
-      attempted: false,
-      field_added: undefined as string | undefined,
-      success_on_retry: false,
-    };
-
-    if (!createResponse.ok) {
-      const { bodyFields } = extractMissingFields(createData);
-
-      if (bodyFields.includes("family_name")) {
-        console.log("[ANTI-CATALOG-V3] API requires family_name, retrying...");
-
-        retryInfo.attempted = true;
-        retryInfo.field_added = "family_name";
-
-        // Salvar no cache
-        familyNameRequiredCache.set(category_id, true);
-
-        // Adicionar family_name e tentar novamente
-        const retryPayload = {
-          ...itemPayload,
-          family_name: deriveFamilyName(payload.title, category_id),
-        };
-
-        console.log("[ANTI-CATALOG-V3] Retry payload with family_name:", retryPayload.family_name);
-
-        createResponse = await fetch("https://api.mercadolibre.com/items", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify(retryPayload),
-        });
-
-        createData = await createResponse.json();
-        console.log("[ANTI-CATALOG-V3] Retry response:", createResponse.status, JSON.stringify(createData));
-
-        if (createResponse.ok) {
-          retryInfo.success_on_retry = true;
-        }
-      }
-    }
-
-    // ============================================
-    // PROCESSAR RESULTADO
-    // ============================================
-
-    if (!createResponse.ok) {
-      // Verificar se é erro de título (não mascarar)
-      const errorMessage = createData?.message || createData?.error || "Erro desconhecido";
-      const errorCause = createData?.cause || [];
-      
-      let errorCode = "CREATE_FAILED";
-      if (errorCause.some((c: any) => c.code?.includes("title"))) {
-        errorCode = "TITLE_BLOCKED_BY_CATALOG";
-      } else if (createResponse.status === 401) {
-        errorCode = "AUTH_EXPIRED";
-      } else if (createResponse.status === 403) {
-        errorCode = "ACCESS_DENIED";
-      }
-
-      console.log("[ANTI-CATALOG-V3] Creation failed:", errorCode, errorMessage);
-
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: errorMessage,
-          error_code: errorCode,
-          api_status: createResponse.status,
-          api_error: createData,
-          retry_info: retryInfo,
-          diagnostic,
-        }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Sucesso!
-    const newItemId = createData.id;
-    const permalink = createData.permalink;
-
-    console.log("[ANTI-CATALOG-V3] Item created successfully:", newItemId);
-
+    // Retornar resultado
     return new Response(
-      JSON.stringify({
-        success: true,
-        item_id: newItemId,
-        permalink,
-        retry_info: retryInfo,
-        diagnostic,
-      }),
+      JSON.stringify(createResult),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
+
   } catch (error: any) {
     console.error("[ANTI-CATALOG-V3] Unexpected error:", error);
 
