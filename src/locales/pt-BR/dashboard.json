@@ -16,5 +16,52 @@
   "session_expired_desc": "Faça login novamente para continuar",
   "connect_error": "Erro ao conectar",
   "connect_error_desc": "Não foi possível iniciar a conexão com o Mercado Livre",
-  "mercado_livre": "Mercado Livre"
+  "mercado_livre": "Mercado Livre",
+  "quick_access": "Acessos Rápidos",
+  "quick_access_desc": "Ações mais utilizadas",
+  "your_modules": "Seus Módulos",
+  "your_modules_desc": "Acesse todas as funcionalidades do sistema",
+  "access": "Acessar",
+  "kpi": {
+    "orders_30d": "Pedidos (30d)",
+    "pending_alerts": "Alertas Pendentes",
+    "active_campaigns": "Campanhas Ativas",
+    "active_promotions": "Promoções Ativas"
+  },
+  "modules": {
+    "radiography": "Radiografia",
+    "radiography_desc": "Análise profunda de anúncios com score, eventos e sugestões de otimização.",
+    "trends": "Tendências",
+    "trends_desc": "Produtos em alta, mais vendidos e oportunidades por categoria.",
+    "market": "Mercado",
+    "market_desc": "Dashboard premium de analytics com navegação por categorias.",
+    "competition": "Concorrência",
+    "competition_desc": "Monitore preços, posições e estratégias dos concorrentes.",
+    "abc_curve": "Curva ABC",
+    "abc_curve_desc": "Identifique produtos, clientes e regiões mais importantes.",
+    "costs": "Custos",
+    "costs_desc": "Análise financeira com margens, impostos e lucro líquido.",
+    "ads": "Mercado ADS",
+    "ads_desc": "Analytics e automação de campanhas publicitárias.",
+    "tasks": "Tarefas",
+    "tasks_desc": "Central de tarefas, promoções e automações.",
+    "post_sale": "Pós-Venda",
+    "post_sale_desc": "Mensagens de orientação e suporte ao comprador.",
+    "timeline": "Linha do Tempo",
+    "timeline_desc": "Radar de anúncios sem vendas e ações de republicação/clonagem.",
+    "labels": "Etiquetas",
+    "labels_desc": "Gerencie e imprima etiquetas em PDF ou ZPL.",
+    "zpl_converter": "ZPL Converter",
+    "zpl_converter_desc": "Converta etiquetas para formato ZPL de impressoras térmicas.",
+    "settings": "Configurações",
+    "settings_desc": "Perfil, empresas, integrações e assinatura."
+  },
+  "shortcuts": {
+    "import_sales": "Importar Vendas",
+    "import_sales_desc": "Sincronize pedidos do Mercado Livre",
+    "ads": "Mercado ADS",
+    "ads_desc": "Gerencie campanhas publicitárias",
+    "validate_costs": "Validar Custos",
+    "validate_costs_desc": "Revise margens e precificação"
+  }
 }

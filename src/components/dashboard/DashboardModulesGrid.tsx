@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,8 +21,8 @@ import {
 } from "lucide-react";
 
 interface Module {
-  title: string;
-  description: string;
+  titleKey: string;
+  descriptionKey: string;
   icon: React.ElementType;
   route: string;
   color: string;
@@ -32,8 +33,8 @@ interface Module {
 
 const modules: Module[] = [
   {
-    title: "Radiografia",
-    description: "Análise profunda de anúncios com score, eventos e sugestões de otimização.",
+    titleKey: "dashboard:modules.radiography",
+    descriptionKey: "dashboard:modules.radiography_desc",
     icon: Activity,
     route: "/radiografia",
     color: "text-violet-500",
@@ -41,8 +42,8 @@ const modules: Module[] = [
     borderColor: "border-violet-500/20 hover:border-violet-500/40",
   },
   {
-    title: "Tendências",
-    description: "Produtos em alta, mais vendidos e oportunidades por categoria.",
+    titleKey: "dashboard:modules.trends",
+    descriptionKey: "dashboard:modules.trends_desc",
     icon: TrendingUp,
     route: "/tendencias",
     color: "text-orange-500",
@@ -50,8 +51,8 @@ const modules: Module[] = [
     borderColor: "border-orange-500/20 hover:border-orange-500/40",
   },
   {
-    title: "Mercado",
-    description: "Dashboard premium de analytics com navegação por categorias.",
+    titleKey: "dashboard:modules.market",
+    descriptionKey: "dashboard:modules.market_desc",
     icon: Store,
     route: "/mercado",
     color: "text-emerald-500",
@@ -59,8 +60,8 @@ const modules: Module[] = [
     borderColor: "border-emerald-500/20 hover:border-emerald-500/40",
   },
   {
-    title: "Concorrência",
-    description: "Monitore preços, posições e estratégias dos concorrentes.",
+    titleKey: "dashboard:modules.competition",
+    descriptionKey: "dashboard:modules.competition_desc",
     icon: Target,
     route: "/concorrencia",
     color: "text-red-500",
@@ -68,8 +69,8 @@ const modules: Module[] = [
     borderColor: "border-red-500/20 hover:border-red-500/40",
   },
   {
-    title: "Curva ABC",
-    description: "Identifique produtos, clientes e regiões mais importantes.",
+    titleKey: "dashboard:modules.abc_curve",
+    descriptionKey: "dashboard:modules.abc_curve_desc",
     icon: BarChart3,
     route: "/abc-analysis",
     color: "text-cyan-500",
@@ -77,8 +78,8 @@ const modules: Module[] = [
     borderColor: "border-cyan-500/20 hover:border-cyan-500/40",
   },
   {
-    title: "Custos",
-    description: "Análise financeira com margens, impostos e lucro líquido.",
+    titleKey: "dashboard:modules.costs",
+    descriptionKey: "dashboard:modules.costs_desc",
     icon: DollarSign,
     route: "/custos",
     color: "text-green-500",
@@ -86,8 +87,8 @@ const modules: Module[] = [
     borderColor: "border-green-500/20 hover:border-green-500/40",
   },
   {
-    title: "Mercado ADS",
-    description: "Analytics e automação de campanhas publicitárias.",
+    titleKey: "dashboard:modules.ads",
+    descriptionKey: "dashboard:modules.ads_desc",
     icon: Megaphone,
     route: "/publicidade",
     color: "text-pink-500",
@@ -95,8 +96,8 @@ const modules: Module[] = [
     borderColor: "border-pink-500/20 hover:border-pink-500/40",
   },
   {
-    title: "Tarefas",
-    description: "Central de tarefas, promoções e automações.",
+    titleKey: "dashboard:modules.tasks",
+    descriptionKey: "dashboard:modules.tasks_desc",
     icon: ListChecks,
     route: "/tarefas",
     color: "text-amber-500",
@@ -104,8 +105,8 @@ const modules: Module[] = [
     borderColor: "border-amber-500/20 hover:border-amber-500/40",
   },
   {
-    title: "Pós-Venda",
-    description: "Mensagens de orientação e suporte ao comprador.",
+    titleKey: "dashboard:modules.post_sale",
+    descriptionKey: "dashboard:modules.post_sale_desc",
     icon: MessageSquareText,
     route: "/mensagens",
     color: "text-sky-500",
@@ -113,8 +114,8 @@ const modules: Module[] = [
     borderColor: "border-sky-500/20 hover:border-sky-500/40",
   },
   {
-    title: "Linha do Tempo",
-    description: "Radar de anúncios sem vendas e ações de republicação/clonagem.",
+    titleKey: "dashboard:modules.timeline",
+    descriptionKey: "dashboard:modules.timeline_desc",
     icon: History,
     route: "/anuncios/linha-do-tempo",
     color: "text-indigo-500",
@@ -122,8 +123,8 @@ const modules: Module[] = [
     borderColor: "border-indigo-500/20 hover:border-indigo-500/40",
   },
   {
-    title: "Etiquetas",
-    description: "Gerencie e imprima etiquetas em PDF ou ZPL.",
+    titleKey: "dashboard:modules.labels",
+    descriptionKey: "dashboard:modules.labels_desc",
     icon: Package,
     route: "/shipping-labels",
     color: "text-blue-500",
@@ -131,8 +132,8 @@ const modules: Module[] = [
     borderColor: "border-blue-500/20 hover:border-blue-500/40",
   },
   {
-    title: "ZPL Converter",
-    description: "Converta etiquetas para formato ZPL de impressoras térmicas.",
+    titleKey: "dashboard:modules.zpl_converter",
+    descriptionKey: "dashboard:modules.zpl_converter_desc",
     icon: Printer,
     route: "/zpl-converter",
     color: "text-slate-500",
@@ -140,8 +141,8 @@ const modules: Module[] = [
     borderColor: "border-slate-500/20 hover:border-slate-500/40",
   },
   {
-    title: "Configurações",
-    description: "Perfil, empresas, integrações e assinatura.",
+    titleKey: "dashboard:modules.settings",
+    descriptionKey: "dashboard:modules.settings_desc",
     icon: Settings,
     route: "/settings",
     color: "text-muted-foreground",
@@ -151,15 +152,16 @@ const modules: Module[] = [
 ];
 
 export function DashboardModulesGrid() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-lg font-semibold text-foreground">Seus Módulos</h3>
+          <h3 className="text-lg font-semibold text-foreground">{t('dashboard:your_modules')}</h3>
           <p className="text-sm text-muted-foreground">
-            Acesse todas as funcionalidades do sistema
+            {t('dashboard:your_modules_desc')}
           </p>
         </div>
       </div>
@@ -167,7 +169,7 @@ export function DashboardModulesGrid() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {modules.map((module) => (
           <Card
-            key={module.title}
+            key={module.titleKey}
             className={`group p-4 cursor-pointer transition-all duration-200 hover:shadow-lg border-2 ${module.borderColor}`}
             onClick={() => navigate(module.route)}
           >
@@ -177,7 +179,7 @@ export function DashboardModulesGrid() {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <h4 className="font-semibold text-sm text-foreground">{module.title}</h4>
+                  <h4 className="font-semibold text-sm text-foreground">{t(module.titleKey)}</h4>
                   {module.badge && (
                     <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
                       {module.badge}
@@ -185,7 +187,7 @@ export function DashboardModulesGrid() {
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                  {module.description}
+                  {t(module.descriptionKey)}
                 </p>
               </div>
             </div>
@@ -195,7 +197,7 @@ export function DashboardModulesGrid() {
                 size="sm"
                 className="h-7 text-xs gap-1 text-muted-foreground group-hover:text-primary"
               >
-                Acessar
+                {t('dashboard:access')}
                 <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
               </Button>
             </div>

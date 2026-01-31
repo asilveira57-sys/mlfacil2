@@ -16,5 +16,52 @@
   "session_expired_desc": "Please log in again to continue",
   "connect_error": "Connection error",
   "connect_error_desc": "Unable to start connection with Mercado Livre",
-  "mercado_livre": "Mercado Livre"
+  "mercado_livre": "Mercado Livre",
+  "quick_access": "Quick Access",
+  "quick_access_desc": "Most used actions",
+  "your_modules": "Your Modules",
+  "your_modules_desc": "Access all system features",
+  "access": "Access",
+  "kpi": {
+    "orders_30d": "Orders (30d)",
+    "pending_alerts": "Pending Alerts",
+    "active_campaigns": "Active Campaigns",
+    "active_promotions": "Active Promotions"
+  },
+  "modules": {
+    "radiography": "Radiography",
+    "radiography_desc": "Deep listing analysis with score, events and optimization suggestions.",
+    "trends": "Trends",
+    "trends_desc": "Trending products, bestsellers and opportunities by category.",
+    "market": "Market",
+    "market_desc": "Premium analytics dashboard with category navigation.",
+    "competition": "Competition",
+    "competition_desc": "Monitor prices, positions and competitor strategies.",
+    "abc_curve": "ABC Curve",
+    "abc_curve_desc": "Identify the most important products, customers and regions.",
+    "costs": "Costs",
+    "costs_desc": "Financial analysis with margins, taxes and net profit.",
+    "ads": "Mercado ADS",
+    "ads_desc": "Analytics and advertising campaign automation.",
+    "tasks": "Tasks",
+    "tasks_desc": "Task center, promotions and automations.",
+    "post_sale": "Post-Sale",
+    "post_sale_desc": "Guidance and buyer support messages.",
+    "timeline": "Timeline",
+    "timeline_desc": "No-sale listing radar and republish/clone actions.",
+    "labels": "Labels",
+    "labels_desc": "Manage and print labels in PDF or ZPL.",
+    "zpl_converter": "ZPL Converter",
+    "zpl_converter_desc": "Convert labels to ZPL format for thermal printers.",
+    "settings": "Settings",
+    "settings_desc": "Profile, companies, integrations and subscription."
+  },
+  "shortcuts": {
+    "import_sales": "Import Sales",
+    "import_sales_desc": "Sync orders from Mercado Livre",
+    "ads": "Mercado ADS",
+    "ads_desc": "Manage advertising campaigns",
+    "validate_costs": "Validate Costs",
+    "validate_costs_desc": "Review margins and pricing"
+  }
 }

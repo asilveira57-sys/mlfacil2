@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -18,6 +19,7 @@ interface KpiData {
 }
 
 export function DashboardKpiCards({ sellerId }: { sellerId?: string }) {
+  const { t, i18n } = useTranslation();
   const [data, setData] = useState<KpiData>({
     totalOrders: 0,
     pendingAlerts: 0,
@@ -83,30 +85,39 @@ export function DashboardKpiCards({ sellerId }: { sellerId?: string }) {
     fetchKpis();
   }, [sellerId]);
 
+  // Get locale for number formatting
+  const getLocale = () => {
+    switch (i18n.language) {
+      case 'en': return 'en-US';
+      case 'es': return 'es-ES';
+      default: return 'pt-BR';
+    }
+  };
+
   const kpis = [
     {
-      title: "Pedidos (30d)",
+      title: t('dashboard:kpi.orders_30d'),
       value: data.totalOrders,
       icon: ShoppingCart,
       color: "text-blue-500",
       bgColor: "bg-blue-500/10",
     },
     {
-      title: "Alertas Pendentes",
+      title: t('dashboard:kpi.pending_alerts'),
       value: data.pendingAlerts,
       icon: AlertTriangle,
       color: "text-amber-500",
       bgColor: "bg-amber-500/10",
     },
     {
-      title: "Campanhas Ativas",
+      title: t('dashboard:kpi.active_campaigns'),
       value: data.activeCampaigns,
       icon: Megaphone,
       color: "text-pink-500",
       bgColor: "bg-pink-500/10",
     },
     {
-      title: "Promoções Ativas",
+      title: t('dashboard:kpi.active_promotions'),
       value: data.activePromotions,
       icon: TrendingUp,
       color: "text-emerald-500",
@@ -143,7 +154,7 @@ export function DashboardKpiCards({ sellerId }: { sellerId?: string }) {
             <div>
               <p className="text-xs text-muted-foreground">{kpi.title}</p>
               <p className="text-2xl font-bold text-foreground">
-                {kpi.value.toLocaleString("pt-BR")}
+                {kpi.value.toLocaleString(getLocale())}
               </p>
             </div>
           </div>
