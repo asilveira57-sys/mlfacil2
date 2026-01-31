@@ -205,9 +205,11 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
     );
   }, [formData]);
   
-  // Validar fotos
+  // Validar fotos - considerar thumbnail quando pictures estiver vazio
   const hasPictures = useMemo(() => {
-    return preview?.pictures && preview.pictures.length > 0;
+    const hasPicturesArray = preview?.pictures && preview.pictures.length > 0;
+    const hasThumbnail = !!preview?.thumbnail;
+    return hasPicturesArray || hasThumbnail;
   }, [preview]);
   
   const resetModal = useCallback(() => {
@@ -536,7 +538,7 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
   
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[600px] max-h-[90vh] flex flex-col p-0">
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] flex flex-col p-0 overflow-hidden">
         <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <Copy className="h-5 w-5" />
@@ -547,15 +549,15 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
           </DialogDescription>
         </DialogHeader>
         
-        <ScrollArea className="flex-1 px-6">
+        <ScrollArea className="flex-1 min-h-0 px-6">
           <div className="pb-4">
             {/* Step 1: Input */}
             {step === 'input' && (
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="clone-input">ID do anúncio ou URL do Mercado Livre</Label>
-                  <div className="flex gap-2">
-                    <div className="relative flex-1">
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="relative w-full min-w-0">
                       <Link className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
                         id="clone-input"
@@ -565,11 +567,11 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
                           setInputValue(e.target.value);
                           setError(null);
                         }}
-                        className="pl-9"
+                        className="pl-9 w-full"
                         autoFocus
                       />
                     </div>
-                    <Button variant="outline" onClick={handlePaste} type="button">
+                    <Button variant="outline" onClick={handlePaste} type="button" className="shrink-0">
                       Colar
                     </Button>
                   </div>

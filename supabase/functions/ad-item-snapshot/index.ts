@@ -118,6 +118,35 @@ async function fetchItemPublic(itemId: string): Promise<{
   return { ok: true, data };
 }
 
+// Extrair atributos de dimensões do item
+function extractPackageDimensions(attributes: any[]): {
+  height?: number;
+  width?: number;
+  length?: number;
+  weight?: number;
+} {
+  const result: { height?: number; width?: number; length?: number; weight?: number } = {};
+  
+  if (!attributes || !Array.isArray(attributes)) return result;
+  
+  for (const attr of attributes) {
+    const id = attr.id?.toUpperCase();
+    const value = attr.value_name ? parseFloat(attr.value_name) : attr.value_struct?.number;
+    
+    if (id === 'SELLER_PACKAGE_HEIGHT' || id === 'PACKAGE_HEIGHT') {
+      result.height = value;
+    } else if (id === 'SELLER_PACKAGE_WIDTH' || id === 'PACKAGE_WIDTH') {
+      result.width = value;
+    } else if (id === 'SELLER_PACKAGE_LENGTH' || id === 'PACKAGE_LENGTH') {
+      result.length = value;
+    } else if (id === 'SELLER_PACKAGE_WEIGHT' || id === 'PACKAGE_WEIGHT') {
+      result.weight = value;
+    }
+  }
+  
+  return result;
+}
+
 // Buscar descrição pública (sem autenticação)
 async function fetchDescriptionPublic(itemId: string): Promise<string | undefined> {
   try {
@@ -344,7 +373,77 @@ serve(async (req) => {
         .single();
 
       if (cachedItem) {
-        console.log(`[ad-item-snapshot] Returning cached data for ${resolvedItemId}`);
+        console.log(`[ad-item-snapshot] Found cached data for ${resolvedItemId}, fetching complementary public data`);
+        
+        // Cache encontrado mas incompleto - buscar dados complementares via API pública
+        // Isso garante que descrição, fotos e atributos estejam disponíveis
+        let publicData: any = null;
+        let publicDescription: string | undefined = undefined;
+        
+        try {
+          // Buscar dados completos do item e descrição em paralelo
+          const [publicResult, descResult] = await Promise.all([
+            fetchItemPublic(resolvedItemId),
+            fetchDescriptionPublic(resolvedItemId)
+          ]);
+          
+          if (publicResult.ok) {
+            publicData = publicResult.data;
+            console.log(`[ad-item-snapshot] Complementary public data fetched successfully`);
+          }
+          publicDescription = descResult;
+        } catch (e) {
+          console.log(`[ad-item-snapshot] Failed to fetch complementary data, using cache only: ${e}`);
+        }
+        
+        // Se conseguiu dados públicos, usar eles (mais completos)
+        // Senão, usar cache como fallback
+        if (publicData) {
+          // Extrair dimensões dos atributos
+          const dimensions = extractPackageDimensions(publicData.attributes);
+          
+          // Detectar se é catálogo
+          const isCatalogSource = !!(
+            publicData.catalog_product_id ||
+            publicData.catalog_listing === true ||
+            publicData.parent_item_id
+          );
+          
+          return new Response(JSON.stringify({
+            success: true,
+            source: "cache+public",
+            resolved_item_id: resolvedItemId,
+            catalog_resolution: catalogResolution,
+            item: {
+              id: publicData.id,
+              title: publicData.title,
+              price: publicData.price,
+              thumbnail: publicData.thumbnail || publicData.pictures?.[0]?.url,
+              pictures: publicData.pictures,
+              status: publicData.status,
+              available_quantity: publicData.available_quantity,
+              sold_quantity: publicData.sold_quantity,
+              category_id: publicData.category_id,
+              seller_id: publicData.seller_id,
+              description: publicDescription,
+              attributes: publicData.attributes,
+              listing_type_id: publicData.listing_type_id,
+              catalog_product_id: publicData.catalog_product_id,
+              catalog_listing: publicData.catalog_listing,
+              parent_item_id: publicData.parent_item_id,
+              is_catalog_source: isCatalogSource,
+              // Dimensões extraídas
+              seller_package_height: dimensions.height,
+              seller_package_width: dimensions.width,
+              seller_package_length: dimensions.length,
+              seller_package_weight: dimensions.weight,
+            },
+          }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        
+        // Fallback para cache puro (sem dados complementares)
         return new Response(JSON.stringify({
           success: true,
           source: "cache",
