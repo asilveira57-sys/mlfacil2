@@ -23,6 +23,7 @@ import {
   Tags,
   History,
   Sprout,
+  BookOpen,
 } from "lucide-react";
 import {
   Collapsible,
@@ -89,6 +90,7 @@ const analyticsNavItems: NavItem[] = [
 
 const toolsNavItems: NavItem[] = [
   { titleKey: "nav:zpl_converter", url: "/zpl-converter", icon: Printer },
+  { titleKey: "nav:blog", url: "/blog", icon: BookOpen, badgeKey: "nav:coming_soon" },
   { titleKey: "nav:reports", url: "/dashboard", icon: FileText, badgeKey: "nav:coming_soon" },
 ];
 
