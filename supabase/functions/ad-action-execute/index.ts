@@ -80,9 +80,11 @@ const BODY_LEVEL_FIELDS = new Set<string>(
 const ALLOWED_BODY_FIELDS = new Set([
   "title", "category_id", "currency_id", "listing_type_id", "condition",
   "pictures", "price", "available_quantity", "attributes", "description",
-  "buying_mode", "sale_terms", "shipping", "variations",
-  // Para catálogo
+  "buying_mode", "sale_terms", "shipping", "variations", "status",
+  // Para catálogo (opcional)
   "catalog_product_id",
+  // CRÍTICO: catalog_listing: false força anúncio normal
+  "catalog_listing",
   // Body-level fields (adicionados dinamicamente)
   "family_name",
 ]);
@@ -1820,6 +1822,56 @@ async function executeCloneAction(
   // =========================================================================
   // BUILD NEW ITEM PAYLOAD - SEMPRE como anúncio NORMAL (sem catalog_product_id)
   // =========================================================================
+  
+  // =========================================================================
+  // FILTRO DE ATRIBUTOS ANTI-CATÁLOGO
+  // Remover GTIN/SKU conforme configuração do checklist
+  // =========================================================================
+  const gtinIdentifiers = new Set(['GTIN', 'EAN', 'UPC', 'ISBN']);
+  const skuIdentifiers = new Set(['SKU', 'SELLER_SKU']);
+  const duplicatePackageAttrs = new Set(['PACKAGE_HEIGHT', 'PACKAGE_WIDTH', 'PACKAGE_LENGTH', 'PACKAGE_WEIGHT']);
+  const alwaysBlockedAttrs = new Set(['MPN', 'PART_NUMBER', 'ALPHANUMERIC_MODEL', 'MANUFACTURER_CODE', 'ITEM_CONDITION']);
+  
+  const includeGtin = checklist?.include_gtin === true;
+  const includeSku = checklist?.include_sku === true;
+  
+  const removedAttributes: string[] = [];
+  const filteredAttributesWithPackage = attributesWithPackage.filter((attr: NormalizedAttribute) => {
+    const attrIdUpper = attr.id?.toUpperCase() || '';
+    
+    // Sempre bloquear atributos perigosos
+    if (alwaysBlockedAttrs.has(attrIdUpper)) {
+      removedAttributes.push(attr.id);
+      return false;
+    }
+    
+    // Sempre bloquear PACKAGE_* duplicados
+    if (duplicatePackageAttrs.has(attrIdUpper)) {
+      removedAttributes.push(attr.id);
+      return false;
+    }
+    
+    // Controle de GTIN
+    if (gtinIdentifiers.has(attrIdUpper) && !includeGtin) {
+      removedAttributes.push(attr.id);
+      return false;
+    }
+    
+    // Controle de SKU
+    if (skuIdentifiers.has(attrIdUpper) && !includeSku) {
+      removedAttributes.push(attr.id);
+      return false;
+    }
+    
+    return true;
+  });
+  
+  console.log(`[ad-action-execute] === ANTI-CATALOG ATTRIBUTE FILTER ===`);
+  console.log(`[ad-action-execute] include_gtin: ${includeGtin}`);
+  console.log(`[ad-action-execute] include_sku: ${includeSku}`);
+  console.log(`[ad-action-execute] attributes_removed: [${removedAttributes.join(', ')}]`);
+  console.log(`[ad-action-execute] attributes_after_filter: ${filteredAttributesWithPackage.length}`);
+  
   let newItem: any = {
     category_id: itemData.category_id,
     currency_id: preValidation.currency_id,
@@ -1827,18 +1879,30 @@ async function executeCloneAction(
     condition: itemData.condition || "new",
     price: checklist?.override_price ?? (checklist?.price !== false ? itemData.price : undefined),
     available_quantity: checklist?.override_quantity ?? (checklist?.quantity !== false ? itemData.available_quantity : 1),
-    attributes: attributesWithPackage.length > 0 ? attributesWithPackage : undefined,
+    attributes: filteredAttributesWithPackage.length > 0 ? filteredAttributesWithPackage : undefined,
   };
+
+  // =========================================================================
+  // CRÍTICO: catalog_listing: false - FORÇA ANÚNCIO NORMAL
+  // Isso impede que o ML interprete como fluxo de catálogo e bloqueie o título
+  // =========================================================================
+  if (checklist?.anti_catalog_enabled === true || checklist?.catalog_listing === false) {
+    newItem.catalog_listing = false;
+    console.log(`[ad-action-execute] === ANTI-CATALOG MODE ACTIVE ===`);
+    console.log(`[ad-action-execute] catalog_listing: false (FORCED)`);
+  }
 
   // TÍTULO: Usar override do usuário se disponível, senão usar do item fonte
   if (canIncludeTitle) {
-    newItem.title = checklist?.override_title || itemData.title;
-    console.log(`[ad-action-execute] Title: ${checklist?.override_title ? "user_override" : "source_item"} = "${newItem.title?.substring(0, 40)}..."`);
+    newItem.title = checklist?.override_title || checklist?.final_title || itemData.title;
+    console.log(`[ad-action-execute] Title: ${checklist?.override_title || checklist?.final_title ? "user_override" : "source_item"} = "${newItem.title?.substring(0, 40)}..."`);
   }
 
   // FOTOS: Sempre incluir quando criando como normal
   if (canIncludePictures) {
-    newItem.pictures = itemData.pictures.map((p: any) => ({ source: p.url || p.secure_url }));
+    // Usar fotos do checklist se disponíveis, senão do item fonte
+    const picturesSource = checklist?.final_pictures || itemData.pictures;
+    newItem.pictures = picturesSource.map((p: any) => ({ source: p.url || p.secure_url || p.source }));
     console.log(`[ad-action-execute] Pictures: ${newItem.pictures.length} images`);
   }
 
@@ -1903,9 +1967,27 @@ async function executeCloneAction(
   // =========================================================================
   newItem = sanitizePayload(newItem);
 
-  console.log(`[ad-action-execute] Sending clone request with ${finalAttributes.length} attributes`);
+  console.log(`[ad-action-execute] Sending clone request with ${filteredAttributesWithPackage.length} attributes`);
   console.log(`[ad-action-execute] Body-level fields in payload: ${JSON.stringify(fillResult.bodyLevelFields)}`);
   console.log(`[ad-action-execute] Payload keys: ${Object.keys(newItem).join(", ")}`);
+  
+  // =========================================================================
+  // DIAGNÓSTICO DETALHADO ANTI-CATÁLOGO (salvo no log para debugging)
+  // =========================================================================
+  const antiCatalogDiagnostic = {
+    catalog_listing: newItem.catalog_listing,
+    include_gtin: includeGtin,
+    include_sku: includeSku,
+    attributes_removed: removedAttributes,
+    attributes_count_final: filteredAttributesWithPackage.length,
+    create_as_normal: createAsNormal,
+    source_is_catalog: sourceIsCatalog,
+    title_present: !!newItem.title,
+    pictures_count: newItem.pictures?.length || 0,
+    payload_keys: Object.keys(newItem),
+  };
+  console.log(`[ad-action-execute] === ANTI-CATALOG DIAGNOSTIC ===`);
+  console.log(JSON.stringify(antiCatalogDiagnostic, null, 2));
 
   // =========================================================================
   // CLONE SEMPRE USA: POST /items (criar novo anúncio)

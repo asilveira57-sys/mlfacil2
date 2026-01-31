@@ -141,6 +141,10 @@ export interface FinalListingPayload {
   
   // Categoria (herdada)
   category_id: string;
+  
+  // NOVAS FLAGS: Controle de identificadores pelo usuário
+  include_gtin: boolean;  // Se true, envia GTIN/EAN/UPC/ISBN
+  include_sku: boolean;   // Se true, envia SKU/SELLER_SKU
 }
 
 // Configuração de validação
@@ -169,7 +173,7 @@ export type CreateListingStep =
   | 'identifiers' // Aviso anti-catálogo
   | 'publish';    // Confirmação e criação
 
-// Lista de atributos que NUNCA devem ser copiados (forçam catálogo)
+// Lista de atributos que NUNCA devem ser copiados por padrão (forçam catálogo)
 export const CATALOG_BLOCKING_IDENTIFIERS = new Set([
   'GTIN',
   'EAN',
@@ -183,6 +187,28 @@ export const CATALOG_BLOCKING_IDENTIFIERS = new Set([
   'SELLER_SKU',
 ]);
 
+// Identificadores de GTIN (forçam catálogo com alta probabilidade)
+export const GTIN_IDENTIFIERS = new Set([
+  'GTIN',
+  'EAN',
+  'UPC',
+  'ISBN',
+]);
+
+// Identificadores de SKU (podem forçar catálogo dependendo da categoria)
+export const SKU_IDENTIFIERS = new Set([
+  'SKU',
+  'SELLER_SKU',
+]);
+
+// Atributos de PACKAGE duplicados (conflitam com SELLER_PACKAGE_*)
+export const DUPLICATE_PACKAGE_ATTRS = new Set([
+  'PACKAGE_HEIGHT',
+  'PACKAGE_WIDTH',
+  'PACKAGE_LENGTH',
+  'PACKAGE_WEIGHT',
+]);
+
 // Validar se um atributo é seguro para copiar
 export function isAttributeSafeForNormalListing(attrId: string): boolean {
   return !CATALOG_BLOCKING_IDENTIFIERS.has(attrId?.toUpperCase());
@@ -192,4 +218,60 @@ export function isAttributeSafeForNormalListing(attrId: string): boolean {
 export function filterSafeAttributes(attributes: ReferenceAttribute[]): ReferenceAttribute[] {
   if (!attributes || !Array.isArray(attributes)) return [];
   return attributes.filter(attr => isAttributeSafeForNormalListing(attr.id));
+}
+
+// Filtrar atributos com controle granular (para o usuário decidir GTIN/SKU)
+export function filterAttributesWithControl(
+  attributes: ReferenceAttribute[],
+  options: { includeGtin: boolean; includeSku: boolean }
+): {
+  filtered: ReferenceAttribute[];
+  removed: string[];
+} {
+  if (!attributes || !Array.isArray(attributes)) {
+    return { filtered: [], removed: [] };
+  }
+  
+  const removed: string[] = [];
+  
+  const filtered = attributes.filter(attr => {
+    const attrIdUpper = attr.id?.toUpperCase() || '';
+    
+    // Sempre remover PACKAGE_* duplicados
+    if (DUPLICATE_PACKAGE_ATTRS.has(attrIdUpper)) {
+      removed.push(attr.id);
+      return false;
+    }
+    
+    // Sempre remover identificadores perigosos (MPN, PART_NUMBER, etc.)
+    if (['MPN', 'PART_NUMBER', 'ALPHANUMERIC_MODEL', 'MANUFACTURER_CODE'].includes(attrIdUpper)) {
+      removed.push(attr.id);
+      return false;
+    }
+    
+    // Controle de GTIN
+    if (GTIN_IDENTIFIERS.has(attrIdUpper)) {
+      if (!options.includeGtin) {
+        removed.push(attr.id);
+        return false;
+      }
+    }
+    
+    // Controle de SKU
+    if (SKU_IDENTIFIERS.has(attrIdUpper)) {
+      if (!options.includeSku) {
+        removed.push(attr.id);
+        return false;
+      }
+    }
+    
+    return true;
+  });
+  
+  return { filtered, removed };
+}
+
+// Remover ITEM_CONDITION duplicado (já existe "condition" no body)
+export function removeDuplicateCondition(attributes: ReferenceAttribute[]): ReferenceAttribute[] {
+  return attributes.filter(attr => attr.id?.toUpperCase() !== 'ITEM_CONDITION');
 }

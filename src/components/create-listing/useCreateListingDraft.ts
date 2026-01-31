@@ -100,6 +100,9 @@ export function useCreateListingDraft() {
         listing_type_id: listingType,
         initial_status: 'paused', // Default: criar pausado para revisão
         category_id: snapshot.category_id,
+        // NOVAS FLAGS: Por padrão, NÃO incluir GTIN/SKU (anti-catálogo)
+        include_gtin: false,
+        include_sku: false,
       };
       
       // Usar a tabela clone_drafts existente
