@@ -628,6 +628,61 @@ async function tryRefreshToken(
   }
 }
 
+// ============================================================================
+// GUARD DE AUTENTICAÇÃO: Validar e renovar token ANTES de qualquer operação
+// Retorna token válido ou erro de reconexão
+// ============================================================================
+interface TokenValidationResult {
+  valid: boolean;
+  accessToken?: string;
+  error?: string;
+  requires_reconnection?: boolean;
+}
+
+async function validateAndRefreshTokenIfNeeded(
+  accessToken: string,
+  supabase: any,
+  mlAccountId: string
+): Promise<TokenValidationResult> {
+  // 1. Testar token atual com chamada leve (GET /users/me)
+  console.log(`[ad-action-execute] AUTH GUARD: Testing token validity...`);
+  
+  const testResponse = await fetch("https://api.mercadolibre.com/users/me", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  
+  // 2. Se token válido, retornar sucesso imediato
+  if (testResponse.ok) {
+    console.log(`[ad-action-execute] AUTH GUARD: Token is valid`);
+    return { valid: true, accessToken };
+  }
+  
+  // 3. Se não for 401, é outro tipo de erro (rede, etc)
+  if (testResponse.status !== 401) {
+    console.warn(`[ad-action-execute] AUTH GUARD: Unexpected status ${testResponse.status}`);
+    // Continuar tentando usar o token
+    return { valid: true, accessToken };
+  }
+  
+  // 4. Token inválido (401) - tentar refresh UMA VEZ
+  console.warn(`[ad-action-execute] AUTH GUARD: Token invalid (401) - attempting refresh...`);
+  
+  const refreshResult = await tryRefreshToken(supabase, mlAccountId);
+  
+  if (refreshResult.success && refreshResult.newAccessToken) {
+    console.log(`[ad-action-execute] AUTH GUARD: Token refreshed successfully`);
+    return { valid: true, accessToken: refreshResult.newAccessToken };
+  }
+  
+  // 5. Refresh falhou - exigir reconexão
+  console.error(`[ad-action-execute] AUTH GUARD: Token refresh failed - reconnection required`);
+  return {
+    valid: false,
+    error: "AUTH_EXPIRED",
+    requires_reconnection: true,
+  };
+}
+
 function normalizeAndCleanAttributes(
   sourceAttributes: any[],
   categoryAttributes: CategoryAttribute[],
@@ -1352,6 +1407,37 @@ async function executeCloneAction(
 
   console.log(`[ad-action-execute] Clone requested for ID: ${itemId}`);
   console.log(`[ad-action-execute] ID type analysis: isRegularItemId=${isRegularItemId(itemId)}, isCatalogId=${isCatalogId(itemId)}`);
+
+  // =========================================================================
+  // GUARD DE AUTENTICAÇÃO: Validar token ANTES de qualquer operação
+  // Evita gastar recursos com requests que vão falhar por auth
+  // =========================================================================
+  if (supabase && mlAccountId) {
+    console.log(`[ad-action-execute] === AUTH GUARD: Pre-validating token ===`);
+    const authCheck = await validateAndRefreshTokenIfNeeded(currentAccessToken, supabase, mlAccountId);
+    
+    if (!authCheck.valid) {
+      console.error(`[ad-action-execute] AUTH GUARD: Token validation failed - reconnection required`);
+      return {
+        success: false,
+        error: "AUTH_EXPIRED",
+        message: "Token expirado ou inválido. Reconecte sua conta do Mercado Livre para continuar.",
+        user_guidance: "Clique em 'Reconectar Mercado Livre' para renovar a autorização da sua conta.",
+        requires_reconnection: true,
+        api_request: {
+          request_kind: "auth_validation",
+          http_method: "GET",
+          endpoint_url: "https://api.mercadolibre.com/users/me",
+        },
+      };
+    }
+    
+    // Usar token atualizado (pode ter sido renovado)
+    currentAccessToken = authCheck.accessToken!;
+    console.log(`[ad-action-execute] AUTH GUARD: Token validated/refreshed successfully`);
+  } else {
+    console.warn(`[ad-action-execute] AUTH GUARD: Skipped (no supabase or mlAccountId provided)`);
+  }
 
   // If no snapshot, we need to fetch item data
   if (!itemData || Object.keys(itemData).length === 0) {
