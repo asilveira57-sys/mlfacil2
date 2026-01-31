@@ -1,224 +1,155 @@
 
-# Plano: Adicionar Logging Detalhado à Edge Function Anti-Catálogo
 
-## Objetivo
-Adicionar console.log com emojis em cada etapa do processo de criação de anúncio para diagnosticar erros, incluindo os logs na resposta da Edge Function.
+## Plano: Reorganização de Empresas e Contas ML com Hierarquia Menu/Submenu
 
----
-
-## Análise da Situação Atual
-
-A edge function `clone-anti-catalog-execute/index.ts` já possui alguns logs básicos:
-- `[ANTI-CATALOG-V3] First attempt payload keys:`
-- `[ANTI-CATALOG-V3] First attempt response:`
-- `[ANTI-CATALOG-V3] Retry payload with family_name:`
-- `[ANTI-CATALOG-V3] Retry response:`
-
-No entanto, faltam:
-1. Logs formatados com emojis para fácil visualização
-2. Array de logs acumulados para retorno na resposta
-3. Timestamp em cada log
-4. Logs específicos para cada etapa do retry
-5. Inclusão de `last_payload_sent` e `last_api_response` no retorno
+### Objetivo
+Criar uma estrutura hierárquica onde **Empresas** são o nível superior e as **Contas do Mercado Livre** ficam subordinadas a elas, como um menu expandível. Além disso, adicionar opção de criar empresa usando o Nome Fantasia do faturamento e vincular integrações ERP (Olist/Bling) ao nível da empresa.
 
 ---
 
-## Implementação
+### 1. Mudanças no Banco de Dados
 
-### 1. Criar Sistema de Coleta de Logs
-
-Adicionar no início da função `createItemWithFamilyNameRetry`:
-
-```typescript
-// Array para coletar logs
-const executionLogs: string[] = [];
-
-function addLog(message: string, data?: any) {
-  const timestamp = new Date().toISOString();
-  const logEntry = data 
-    ? `[${timestamp}] ${message} ${JSON.stringify(data)}`
-    : `[${timestamp}] ${message}`;
-  executionLogs.push(logEntry);
-  console.log(logEntry);
-}
+#### 1.1 Adicionar `company_id` na tabela `ml_accounts`
+```sql
+ALTER TABLE ml_accounts 
+ADD COLUMN company_id UUID REFERENCES companies(id) ON DELETE SET NULL;
 ```
 
-### 2. Adicionar Logs na Primeira Tentativa
-
-**Antes do primeiro POST:**
-```typescript
-addLog('🚀 [MERCADOLIVRE] Tentativa 1 - Payload SEM family_name', {
-  category_id: itemPayload.category_id,
-  title: itemPayload.title?.substring(0, 50),
-  price: itemPayload.price,
-  has_family_name: !!itemPayload.family_name,
-  payload_keys: Object.keys(itemPayload),
-  attributes_ids: (itemPayload.attributes || []).map((a: any) => a.id)
-});
-```
-
-**Após resposta do primeiro POST (erro):**
-```typescript
-addLog('❌ [MERCADOLIVRE] Erro na tentativa 1', {
-  status: createResponse.status,
-  error_code: createData?.error,
-  message: createData?.message,
-  cause: createData?.cause,
-  full_error: createData
-});
-```
-
-**Após resposta do primeiro POST (sucesso):**
-```typescript
-addLog('✅ [MERCADOLIVRE] Anúncio criado com sucesso na tentativa 1', {
-  item_id: createData.id,
-  permalink: createData.permalink
-});
-```
-
-### 3. Adicionar Logs na Detecção de Retry
-
-**Ao detectar necessidade de family_name:**
-```typescript
-addLog('🔄 [MERCADOLIVRE] Detectado erro required_fields, buscando family_name...');
-```
-
-**Após buscar family_name:**
-```typescript
-addLog('📋 [MERCADOLIVRE] family_name obtido', {
-  category_id: categoryId,
-  family_name: familyNameValue,
-  source: familyNameSource
-});
-```
-
-### 4. Adicionar Logs na Segunda Tentativa
-
-**Antes do segundo POST:**
-```typescript
-addLog('🚀 [MERCADOLIVRE] Tentativa 2 - Payload COM family_name', {
-  category_id: retryPayload.category_id,
-  family_name: retryPayload.family_name,
-  title: retryPayload.title?.substring(0, 50),
-  payload_keys: Object.keys(retryPayload),
-  attributes_ids: (retryPayload.attributes || []).map((a: any) => a.id)
-});
-```
-
-**Após resposta do segundo POST (sucesso):**
-```typescript
-addLog('✅ [MERCADOLIVRE] Anúncio criado com sucesso no retry', {
-  item_id: createData.id,
-  retry_count: 2,
-  family_name_used: familyNameValue
-});
-```
-
-**Após resposta do segundo POST (erro):**
-```typescript
-addLog('❌ [MERCADOLIVRE] Erro na tentativa 2 (retry)', {
-  status: createResponse.status,
-  error_code: createData?.error,
-  message: createData?.message,
-  cause: createData?.cause,
-  full_error: createData
-});
-```
-
-### 5. Atualizar Interface de Resultado
-
-Adicionar novos campos à interface `CreateItemResult`:
-
-```typescript
-interface CreateItemResult {
-  // ... campos existentes ...
-  
-  // Novos campos para debug
-  execution_logs: string[];
-  last_payload_sent: Record<string, any>;
-  last_api_response: any;
-}
-```
-
-### 6. Incluir Logs na Resposta
-
-Atualizar o retorno para incluir:
-
-```typescript
-result.execution_logs = executionLogs;
-result.last_payload_sent = lastPayloadSent; // Guardar o último payload enviado
-result.last_api_response = createData;      // Guardar a última resposta da API
+#### 1.2 Criar índice para performance
+```sql
+CREATE INDEX idx_ml_accounts_company_id ON ml_accounts(company_id);
 ```
 
 ---
 
-## Seção Técnica: Detalhes da Implementação
+### 2. Mudanças nas Edge Functions
 
-### Arquivo a Modificar
-- `supabase/functions/clone-anti-catalog-execute/index.ts`
+#### 2.1 Atualizar `ml-auth-url/index.ts`
+- Receber `companyId` no body da requisição
+- Incluir `companyId` no state do OAuth para ser recuperado no callback
 
-### Estrutura dos Logs
-Cada log seguirá o padrão:
-```
-[2026-01-31T18:00:00.000Z] 🚀 [MERCADOLIVRE] Mensagem { dados_json }
-```
-
-### Variáveis de Tracking
-```typescript
-let lastPayloadSent: Record<string, any> = {};
-let lastApiResponse: any = null;
-```
-
-### Pontos de Inserção de Log
-
-| Linha Atual | Ação | Tipo de Log |
-|-------------|------|-------------|
-| ~234 | Antes do 1º POST | 🚀 Tentativa 1 |
-| ~252 | Após 1º POST (erro) | ❌ Erro tentativa 1 |
-| ~255-259 | Após 1º POST (sucesso) | ✅ Sucesso tentativa 1 |
-| ~266 | Detecta retry | 🔄 Detectado required_fields |
-| ~287 | Após buscar family_name | 📋 family_name obtido |
-| ~302 | Antes do 2º POST | 🚀 Tentativa 2 |
-| ~319 | Após 2º POST | ✅/❌ Resultado retry |
-| ~350 | Erro final | ❌ Erro final |
-
-### Retorno Atualizado da Função
-
-```typescript
-return {
-  success: true/false,
-  item_id?: string,
-  permalink?: string,
-  error?: string,
-  error_code?: string,
-  api_status?: number,
-  api_error?: any,
-  retry_info: { ... },
-  diagnostic: { ... },
-  // Novos campos:
-  execution_logs: string[],
-  last_payload_sent: Record<string, any>,
-  last_api_response: any
-};
-```
+#### 2.2 Atualizar `ml-oauth-callback/index.ts`
+- Extrair `companyId` do state
+- Ao criar/atualizar conta ML, associar ao `company_id` se fornecido
 
 ---
 
-## Resultado Esperado
+### 3. Mudanças na Interface - `SettingsCompanies.tsx`
 
-Após implementação, ao clicar em "Clonar como Anúncio Novo" e ocorrer erro:
+#### 3.1 Nova Estrutura Visual: Accordion de Empresas
+Substituir a lista plana por uma estrutura acordeão expandível:
 
-1. **Nos logs da Edge Function** (via Cloud View):
-   - Sequência completa com emojis
-   - Payloads enviados
-   - Respostas da API
+```
+┌─────────────────────────────────────────────────┐
+│ 🏢 MINHA LOJA LTDA                    [Expandir]│
+│    Pessoa Jurídica • 2 contas ML                │
+├─────────────────────────────────────────────────┤
+│   ├─ 🏬 ADECONEXVV                   [Conectada]│
+│   │     ID: 66043362 • Última sync há 11h       │
+│   │                            [Conta Ativa]    │
+│   │                                             │
+│   └─ 🏬 MLFACIL_CONSULTORIA          [Conectada]│
+│         ID: 1667452966 • Última sync há 7h      │
+│                             [Definir ativa]     │
+│                                                 │
+│   [+ Conectar conta ML a esta empresa]          │
+├─────────────────────────────────────────────────┤
+│   ⚙️ Integrações ERP                            │
+│   ├─ Olist: Token configurado ✓                 │
+│   └─ Bling: Pendente configuração               │
+└─────────────────────────────────────────────────┘
 
-2. **Na resposta da API** (visível no frontend):
-   - `execution_logs`: Array com todos os passos
-   - `last_payload_sent`: Último payload enviado
-   - `last_api_response`: Resposta completa do Mercado Livre
+┌─────────────────────────────────────────────────┐
+│ 🏢 Contas sem empresa                [Expandir] │
+│    1 conta não vinculada                        │
+├─────────────────────────────────────────────────┤
+│   └─ 🏬 CONTA_AVULSA                 [Conectada]│
+│         [Vincular a empresa]                    │
+└─────────────────────────────────────────────────┘
+```
 
-Isso permitirá identificar exatamente:
-- Se o retry está sendo executado
-- Se o `family_name` está sendo adicionado corretamente
-- Qual resposta exata a API está retornando
+#### 3.2 Modal "Nova Empresa" com Opção de Usar Dados de Faturamento
+Adicionar botão para preencher o nome automaticamente com dados de faturamento:
+
+```
+┌─────────────────────────────────────────────────┐
+│ Adicionar Nova Empresa                    [X]   │
+│                                                 │
+│ [Usar dados de faturamento]                     │
+│                                                 │
+│ Nome interno da empresa                         │
+│ ┌─────────────────────────────────────────────┐ │
+│ │ Ex: Minha Loja ES                           │ │
+│ └─────────────────────────────────────────────┘ │
+│                                                 │
+│ Tipo                                            │
+│ ○ Pessoa Física   ● Pessoa Jurídica             │
+│                                                 │
+│              [Cancelar]  [Criar Empresa]        │
+└─────────────────────────────────────────────────┘
+```
+
+- Ao clicar "Usar dados de faturamento":
+  - Se PJ: Preenche com `nomeFantasia` ou `razaoSocial` do billing
+  - Se PF: Preenche com nome do perfil do usuário
+
+#### 3.3 Vincular Conta ML ao Conectar
+Ao clicar "Conectar conta ML" dentro de uma empresa:
+- Passa `companyId` para a edge function `ml-auth-url`
+- O callback associa automaticamente a nova conta à empresa
+
+#### 3.4 Mover Conta entre Empresas
+Adicionar dropdown para contas "soltas" poderem ser associadas a uma empresa existente.
+
+---
+
+### 4. Mudanças nas Integrações ERP
+
+#### 4.1 Vincular Integrações à Empresa
+A tabela `erp_integrations` já possui `company_id`. Exibir seção de integrações ERP dentro do acordeão de cada empresa.
+
+#### 4.2 Mover Configuração de Token
+Os tokens Olist/Bling devem ser configurados no contexto da empresa, não globalmente.
+
+---
+
+### 5. Arquivos a Serem Modificados
+
+| Arquivo | Alteração |
+|---------|-----------|
+| `SettingsCompanies.tsx` | Refatorar para estrutura acordeão; adicionar modal com autofill de billing |
+| `SettingsIntegrations.tsx` | Remover (mover lógica para dentro de SettingsCompanies) |
+| `ml-auth-url/index.ts` | Passar companyId no state |
+| `ml-oauth-callback/index.ts` | Salvar company_id na conta ML |
+| `src/locales/*/settings.json` | Adicionar traduções para novos textos |
+
+---
+
+### 6. Fluxo de Uso Esperado
+
+1. Usuário cria empresa (manual ou usando nome de faturamento)
+2. Clica em "Conectar conta ML" dentro da empresa
+3. Autoriza no Mercado Livre
+4. Conta é automaticamente vinculada à empresa
+5. Configura token Olist/Bling na mesma empresa
+6. Sistema filtra dados por empresa selecionada
+
+---
+
+### Seção Técnica
+
+**Migração de Dados Existentes:**
+- Contas ML sem `company_id` ficam na seção "Contas sem empresa"
+- Usuário pode vincular manualmente
+
+**Componentes Novos:**
+- `CompanyAccordionItem.tsx` - Item expandível por empresa
+- `LinkAccountToCompanyDialog.tsx` - Modal para vincular conta solta
+
+**Queries Alteradas:**
+- Fetch de contas ML deve incluir JOIN com companies
+- Agrupamento por company_id no frontend
+
+**Dependência do Radix Accordion:**
+- Já instalado: `@radix-ui/react-accordion`
+
