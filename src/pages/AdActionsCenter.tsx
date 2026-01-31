@@ -43,6 +43,7 @@ import { useAdLifecycleActions, useExecuteAction, useCancelAction } from "@/hook
 import type { AdLifecycleAction, ActionStatus } from "@/types/ad-timeline";
 import { UnifiedCloneModal } from "@/components/clone/UnifiedCloneModal";
 import { NewListingCloneModal } from "@/components/clone/new-listing";
+import { CreateListingModal } from "@/components/create-listing";
 import { ActionDetailsDialog } from "@/components/ad-actions/ActionDetailsDialog";
 import { useCurrentWorkspaceId } from "@/hooks/useCurrentWorkspaceId";
 
@@ -68,6 +69,7 @@ export default function AdActionsCenter() {
   const [confirmAction, setConfirmAction] = useState<AdLifecycleAction | null>(null);
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
   const [newListingCloneOpen, setNewListingCloneOpen] = useState(false);
+  const [createListingOpen, setCreateListingOpen] = useState(false);
   const [detailsAction, setDetailsAction] = useState<AdLifecycleAction | null>(null);
 
   const statusFilters: Record<string, string> = {
@@ -231,11 +233,15 @@ export default function AdActionsCenter() {
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-2">
-            <Button onClick={() => setNewListingCloneOpen(true)} className="gap-2">
+            <Button onClick={() => setCreateListingOpen(true)} className="gap-2">
+              <Copy className="h-4 w-4" />
+              Clonar como anúncio novo (v2)
+            </Button>
+            <Button onClick={() => setNewListingCloneOpen(true)} variant="outline" className="gap-2">
               <Copy className="h-4 w-4" />
               Clonar como anúncio novo
             </Button>
-            <Button onClick={() => setCloneDialogOpen(true)} variant="outline" className="gap-2">
+            <Button onClick={() => setCloneDialogOpen(true)} variant="ghost" className="gap-2">
               <Copy className="h-4 w-4" />
               Clonar (automático)
             </Button>
@@ -333,6 +339,9 @@ export default function AdActionsCenter() {
 
       {/* New Listing Clone Modal */}
       <NewListingCloneModal open={newListingCloneOpen} onOpenChange={setNewListingCloneOpen} />
+
+      {/* Create Listing Modal (v2 - Anti-catálogo) */}
+      <CreateListingModal open={createListingOpen} onOpenChange={setCreateListingOpen} />
 
       {/* Action Details Dialog */}
       <ActionDetailsDialog
