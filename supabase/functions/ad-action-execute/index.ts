@@ -472,14 +472,29 @@ interface NormalizedAttribute {
   value_struct?: any;
 }
 
+// ============================================================================
+// ATRIBUTOS PROIBIDOS EM CLONE "NORMAL" (forçam vinculação a catálogo)
+// Se estes atributos forem enviados, a API do ML bloqueia a edição de título/fotos
+// e retorna "body.invalid_fields" para title
+// ============================================================================
+const CATALOG_FORCING_ATTRIBUTES = new Set([
+  "GTIN",
+  "EAN",
+  "UPC",
+  "ISBN",
+  "MPN", // Manufacturer Part Number também pode forçar catálogo
+]);
+
 function normalizeAndCleanAttributes(
   sourceAttributes: any[],
   categoryAttributes: CategoryAttribute[],
-  removeNotModifiable: boolean = true
-): { attrsById: Map<string, NormalizedAttribute>; cleanedAttrs: NormalizedAttribute[]; removedNotModifiable: string[] } {
+  removeNotModifiable: boolean = true,
+  createAsNormal: boolean = true // NOVO: se true, remove atributos que forçam catálogo
+): { attrsById: Map<string, NormalizedAttribute>; cleanedAttrs: NormalizedAttribute[]; removedNotModifiable: string[]; removedCatalogForcing: string[] } {
   const attrsById = new Map<string, NormalizedAttribute>();
   const cleanedAttrs: NormalizedAttribute[] = [];
   const removedNotModifiable: string[] = [];
+  const removedCatalogForcing: string[] = [];
 
   // Criar mapa de tipos esperados
   const typeById = new Map<string, string>();
@@ -491,6 +506,16 @@ function normalizeAndCleanAttributes(
 
   for (const attr of sourceAttributes || []) {
     if (!attr?.id) continue;
+
+    const attrIdUpper = attr.id.toUpperCase();
+
+    // REGRA CRÍTICA: Ao criar como anúncio normal, REMOVER atributos que forçam catálogo
+    // Isso evita o erro "body.invalid_fields" para title
+    if (createAsNormal && CATALOG_FORCING_ATTRIBUTES.has(attrIdUpper)) {
+      console.log(`[ad-action-execute] Attr ${attr.id}: REMOVED (forces catalog binding in normal clone)`);
+      removedCatalogForcing.push(attr.id);
+      continue;
+    }
 
     // Verificar se o atributo é "not modifiable" (read-only) - remover para reduzir warnings
     if (removeNotModifiable) {
@@ -537,8 +562,8 @@ function normalizeAndCleanAttributes(
     }
   }
 
-  console.log(`[ad-action-execute] Normalized ${cleanedAttrs.length} valid attributes from source (removed ${removedNotModifiable.length} not-modifiable)`);
-  return { attrsById, cleanedAttrs, removedNotModifiable };
+  console.log(`[ad-action-execute] Normalized ${cleanedAttrs.length} valid attributes from source (removed ${removedNotModifiable.length} not-modifiable, ${removedCatalogForcing.length} catalog-forcing)`);
+  return { attrsById, cleanedAttrs, removedNotModifiable, removedCatalogForcing };
 }
 
 // ============================================================================
@@ -1327,13 +1352,20 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   }
 
   // =========================================================================
-  // ETAPA 3: Normalizar atributos do item fonte (removendo not-modifiable)
+  // ETAPA 3: Normalizar atributos do item fonte (removendo not-modifiable e catalog-forcing)
+  // REGRA: Quando createAsNormal=true, remover GTIN/EAN/UPC/ISBN para evitar erro "title invalid"
   // =========================================================================
-  const { attrsById: sourceAttrsById, cleanedAttrs, removedNotModifiable } = normalizeAndCleanAttributes(
+  const { attrsById: sourceAttrsById, cleanedAttrs, removedNotModifiable, removedCatalogForcing } = normalizeAndCleanAttributes(
     itemData.attributes || [],
     categoryAttributes,
-    true // removeNotModifiable = true
+    true, // removeNotModifiable = true
+    createAsNormal // NOVO: remover atributos que forçam catálogo
   );
+
+  if (removedCatalogForcing.length > 0) {
+    console.log(`[ad-action-execute] Removed catalog-forcing attributes: ${removedCatalogForcing.join(", ")}`);
+    (catalogDiagnostic as any).removed_catalog_forcing = removedCatalogForcing;
+  }
 
   // =========================================================================
   // ETAPA 4: PREFLIGHT - Validar e completar obrigatórios (1ª passagem)
