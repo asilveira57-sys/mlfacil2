@@ -342,7 +342,7 @@ export function NewListingCloneModal({ open, onOpenChange }: NewListingCloneModa
   
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
+      <DialogContent className="max-w-3xl h-[90vh] max-h-[90vh] flex flex-col overflow-hidden">
         {/* Header fixo */}
         <DialogHeader className="flex-shrink-0 border-b pb-4">
           <div className="flex items-center justify-between">
