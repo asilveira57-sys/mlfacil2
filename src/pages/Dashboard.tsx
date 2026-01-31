@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
 import { User } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
@@ -58,6 +59,7 @@ interface SyncDebugInfo {
 }
 
 const Dashboard = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [user, setUser] = useState<User | null>(null);
@@ -493,8 +495,8 @@ const Dashboard = () => {
 
   return (
     <PageContainer 
-      title="Dashboard" 
-      subtitle="Visão geral das suas operações no Mercado Livre"
+      title={t('dashboard:title')} 
+      subtitle={t('dashboard:subtitle')}
       headerContent={headerContent}
     >
       <div className="p-4 lg:p-6 space-y-6">

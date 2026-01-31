@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCompanyCustomization } from "@/hooks/useCompanyCustomization";
@@ -15,6 +16,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
 };
 
 export function DashboardQuickActions() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { enabledShortcuts, activeColor, loading } = useCompanyCustomization();
 
@@ -46,8 +48,8 @@ export function DashboardQuickActions() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-lg font-semibold text-foreground">Acessos Rápidos</h3>
-          <p className="text-sm text-muted-foreground">Ações mais utilizadas</p>
+          <h3 className="text-lg font-semibold text-foreground">{t('dashboard:quick_access')}</h3>
+          <p className="text-sm text-muted-foreground">{t('dashboard:quick_access_desc')}</p>
         </div>
       </div>
       

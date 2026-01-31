@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,6 +31,7 @@ interface ProfileData {
 }
 
 const SettingsProfile = () => {
+  const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingCep, setLoadingCep] = useState(false);
@@ -71,7 +73,7 @@ const SettingsProfile = () => {
 
         if (error) {
           console.error("Error loading profile:", error);
-          toast.error("Erro ao carregar perfil");
+          toast.error(t('settings:profile.load_error'));
           setLoading(false);
           return;
         }
@@ -105,14 +107,14 @@ const SettingsProfile = () => {
         }
       } catch (err) {
         console.error("Error loading profile:", err);
-        toast.error("Erro ao carregar perfil");
+        toast.error(t('settings:profile.load_error'));
       } finally {
         setLoading(false);
       }
     };
 
     loadProfile();
-  }, []);
+  }, [t]);
 
   const formatCPF = (value: string) => {
     const numbers = value.replace(/\D/g, "").slice(0, 11);
@@ -153,7 +155,7 @@ const SettingsProfile = () => {
         }));
       }
     } catch {
-      toast.error("Erro ao buscar CEP");
+      toast.error(t('settings:profile.cep_error'));
     } finally {
       setLoadingCep(false);
     }
@@ -179,15 +181,15 @@ const SettingsProfile = () => {
 
   const handleSave = async () => {
     if (!profile.fullName.trim()) {
-      toast.error("Nome completo é obrigatório");
+      toast.error(t('settings:profile.full_name_required'));
       return;
     }
     if (profile.cpf && !validateCPF(profile.cpf)) {
-      toast.error("CPF inválido");
+      toast.error(t('settings:profile.cpf_invalid'));
       return;
     }
     if (profile.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profile.email)) {
-      toast.error("E-mail inválido");
+      toast.error(t('settings:profile.email_invalid'));
       return;
     }
 
@@ -195,7 +197,7 @@ const SettingsProfile = () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        toast.error("Usuário não autenticado");
+        toast.error(t('settings:profile.not_authenticated'));
         return;
       }
 
@@ -248,14 +250,14 @@ const SettingsProfile = () => {
 
       if (error) {
         console.error("Error saving profile:", error);
-        toast.error("Erro ao salvar perfil");
+        toast.error(t('settings:profile.save_error'));
         return;
       }
 
-      toast.success("Perfil salvo com sucesso!");
+      toast.success(t('settings:profile.save_success'));
     } catch (err) {
       console.error("Error saving profile:", err);
-      toast.error("Erro ao salvar perfil");
+      toast.error(t('settings:profile.save_error'));
     } finally {
       setSaving(false);
     }
@@ -299,18 +301,18 @@ const SettingsProfile = () => {
             </div>
             <div className="text-center sm:text-left flex-1">
               <h2 className="text-2xl font-semibold text-foreground">
-                {profile.fullName || "Seu Nome"}
+                {profile.fullName || t('settings:profile.your_name')}
               </h2>
               <div className="flex items-center justify-center sm:justify-start gap-2 mt-2">
                 {profile.emailVerified ? (
                   <Badge variant="outline" className="bg-green-500/10 text-green-600 border-green-200">
                     <CheckCircle2 className="h-3 w-3 mr-1" />
-                    E-mail verificado
+                    {t('settings:profile.email_verified')}
                   </Badge>
                 ) : (
                   <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-200">
                     <AlertCircle className="h-3 w-3 mr-1" />
-                    E-mail não verificado
+                    {t('settings:profile.email_not_verified')}
                   </Badge>
                 )}
               </div>
@@ -322,22 +324,22 @@ const SettingsProfile = () => {
       {/* Personal Data */}
       <Card>
         <CardHeader>
-          <CardTitle>Dados Pessoais</CardTitle>
-          <CardDescription>Informações básicas do seu perfil</CardDescription>
+          <CardTitle>{t('settings:profile.personal_data')}</CardTitle>
+          <CardDescription>{t('settings:profile.personal_data_desc')}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="fullName">Nome completo *</Label>
+              <Label htmlFor="fullName">{t('settings:profile.full_name')} *</Label>
               <Input
                 id="fullName"
                 value={profile.fullName}
                 onChange={(e) => setProfile((p) => ({ ...p, fullName: e.target.value }))}
-                placeholder="Seu nome completo"
+                placeholder={t('settings:profile.full_name_placeholder')}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="cpf">CPF</Label>
+              <Label htmlFor="cpf">{t('settings:profile.cpf')}</Label>
               <Input
                 id="cpf"
                 value={profile.cpf}
@@ -349,17 +351,17 @@ const SettingsProfile = () => {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="email">E-mail</Label>
+              <Label htmlFor="email">{t('settings:profile.email')}</Label>
               <Input
                 id="email"
                 type="email"
                 value={profile.email}
                 onChange={(e) => setProfile((p) => ({ ...p, email: e.target.value }))}
-                placeholder="seu@email.com"
+                placeholder={t('settings:profile.email_placeholder')}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="whatsapp">WhatsApp</Label>
+              <Label htmlFor="whatsapp">{t('settings:profile.whatsapp')}</Label>
               <Input
                 id="whatsapp"
                 value={profile.whatsapp}
@@ -374,8 +376,8 @@ const SettingsProfile = () => {
       {/* Social Links */}
       <Card>
         <CardHeader>
-          <CardTitle>Redes Sociais</CardTitle>
-          <CardDescription>Links para suas redes sociais</CardDescription>
+          <CardTitle>{t('settings:profile.social_networks')}</CardTitle>
+          <CardDescription>{t('settings:profile.social_networks_desc')}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-3">
@@ -406,7 +408,7 @@ const SettingsProfile = () => {
             <div className="space-y-2">
               <Label htmlFor="otherLink" className="flex items-center gap-2">
                 <Link2 className="h-4 w-4" />
-                Outro link
+                {t('settings:profile.other_link')}
               </Label>
               <Input
                 id="otherLink"
@@ -422,13 +424,13 @@ const SettingsProfile = () => {
       {/* Address */}
       <Card>
         <CardHeader>
-          <CardTitle>Endereço Pessoal</CardTitle>
-          <CardDescription>Seu endereço de residência</CardDescription>
+          <CardTitle>{t('settings:profile.address')}</CardTitle>
+          <CardDescription>{t('settings:profile.address_desc')}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="space-y-2">
-              <Label htmlFor="cep">CEP</Label>
+              <Label htmlFor="cep">{t('settings:profile.cep')}</Label>
               <div className="relative">
                 <Input
                   id="cep"
@@ -443,19 +445,19 @@ const SettingsProfile = () => {
               </div>
             </div>
             <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="street">Rua</Label>
+              <Label htmlFor="street">{t('settings:profile.street')}</Label>
               <Input
                 id="street"
                 value={profile.street}
                 onChange={(e) => setProfile((p) => ({ ...p, street: e.target.value }))}
-                placeholder="Nome da rua"
+                placeholder={t('settings:profile.street_placeholder')}
               />
             </div>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-4">
             <div className="space-y-2">
-              <Label htmlFor="number">Número</Label>
+              <Label htmlFor="number">{t('settings:profile.number')}</Label>
               <Input
                 id="number"
                 value={profile.number}
@@ -464,37 +466,37 @@ const SettingsProfile = () => {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="complement">Complemento</Label>
+              <Label htmlFor="complement">{t('settings:profile.complement')}</Label>
               <Input
                 id="complement"
                 value={profile.complement}
                 onChange={(e) => setProfile((p) => ({ ...p, complement: e.target.value }))}
-                placeholder="Apto, Bloco..."
+                placeholder={t('settings:profile.complement_placeholder')}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="neighborhood">Bairro</Label>
+              <Label htmlFor="neighborhood">{t('settings:profile.neighborhood')}</Label>
               <Input
                 id="neighborhood"
                 value={profile.neighborhood}
                 onChange={(e) => setProfile((p) => ({ ...p, neighborhood: e.target.value }))}
-                placeholder="Bairro"
+                placeholder={t('settings:profile.neighborhood')}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="city">Cidade</Label>
+              <Label htmlFor="city">{t('settings:profile.city')}</Label>
               <Input
                 id="city"
                 value={profile.city}
                 onChange={(e) => setProfile((p) => ({ ...p, city: e.target.value }))}
-                placeholder="Cidade"
+                placeholder={t('settings:profile.city')}
               />
             </div>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-4">
             <div className="space-y-2">
-              <Label htmlFor="state">Estado</Label>
+              <Label htmlFor="state">{t('settings:profile.state')}</Label>
               <Input
                 id="state"
                 value={profile.state}
@@ -512,7 +514,7 @@ const SettingsProfile = () => {
       <div className="flex justify-end">
         <Button onClick={handleSave} disabled={saving} size="lg">
           {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Salvar Perfil
+          {saving ? t('settings:profile.saving') : t('settings:profile.save_profile')}
         </Button>
       </div>
     </div>

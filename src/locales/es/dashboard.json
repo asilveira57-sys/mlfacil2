@@ -16,5 +16,52 @@
   "session_expired_desc": "Inicia sesión nuevamente para continuar",
   "connect_error": "Error al conectar",
   "connect_error_desc": "No fue posible iniciar la conexión con Mercado Libre",
-  "mercado_livre": "Mercado Libre"
+  "mercado_livre": "Mercado Libre",
+  "quick_access": "Accesos Rápidos",
+  "quick_access_desc": "Acciones más utilizadas",
+  "your_modules": "Tus Módulos",
+  "your_modules_desc": "Accede a todas las funcionalidades del sistema",
+  "access": "Acceder",
+  "kpi": {
+    "orders_30d": "Pedidos (30d)",
+    "pending_alerts": "Alertas Pendientes",
+    "active_campaigns": "Campañas Activas",
+    "active_promotions": "Promociones Activas"
+  },
+  "modules": {
+    "radiography": "Radiografía",
+    "radiography_desc": "Análisis profundo de anuncios con score, eventos y sugerencias de optimización.",
+    "trends": "Tendencias",
+    "trends_desc": "Productos en alza, más vendidos y oportunidades por categoría.",
+    "market": "Mercado",
+    "market_desc": "Dashboard premium de analytics con navegación por categorías.",
+    "competition": "Competencia",
+    "competition_desc": "Monitorea precios, posiciones y estrategias de competidores.",
+    "abc_curve": "Curva ABC",
+    "abc_curve_desc": "Identifica productos, clientes y regiones más importantes.",
+    "costs": "Costos",
+    "costs_desc": "Análisis financiero con márgenes, impuestos y ganancia neta.",
+    "ads": "Mercado ADS",
+    "ads_desc": "Analytics y automatización de campañas publicitarias.",
+    "tasks": "Tareas",
+    "tasks_desc": "Central de tareas, promociones y automatizaciones.",
+    "post_sale": "Post-Venta",
+    "post_sale_desc": "Mensajes de orientación y soporte al comprador.",
+    "timeline": "Línea de Tiempo",
+    "timeline_desc": "Radar de anuncios sin ventas y acciones de republicación/clonación.",
+    "labels": "Etiquetas",
+    "labels_desc": "Gestiona e imprime etiquetas en PDF o ZPL.",
+    "zpl_converter": "ZPL Converter",
+    "zpl_converter_desc": "Convierte etiquetas a formato ZPL para impresoras térmicas.",
+    "settings": "Configuración",
+    "settings_desc": "Perfil, empresas, integraciones y suscripción."
+  },
+  "shortcuts": {
+    "import_sales": "Importar Ventas",
+    "import_sales_desc": "Sincroniza pedidos de Mercado Libre",
+    "ads": "Mercado ADS",
+    "ads_desc": "Gestiona campañas publicitarias",
+    "validate_costs": "Validar Costos",
+    "validate_costs_desc": "Revisa márgenes y precios"
+  }
 }
