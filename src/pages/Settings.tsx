@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { User, Receipt, Building2, Plug, CreditCard, Palette } from "lucide-react";
+import { User, Receipt, Building2, Plug, CreditCard, Palette, Users } from "lucide-react";
 import SettingsProfile from "@/components/settings/SettingsProfile";
 import SettingsBilling from "@/components/settings/SettingsBilling";
 import SettingsCompanies from "@/components/settings/SettingsCompanies";
@@ -15,6 +15,7 @@ const Settings = () => {
 
   const tabs = [
     { id: "profile", label: "Perfil", icon: User },
+    { id: "collaborators", label: "Colaboradores", icon: Users },
     { id: "customization", label: "Personalização", icon: Palette },
     { id: "billing", label: "Faturamento", icon: Receipt },
     { id: "companies", label: "Empresas e Contas", icon: Building2 },
@@ -29,7 +30,7 @@ const Settings = () => {
     >
       <div className="container mx-auto py-6 px-4 max-w-6xl">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-6 h-auto p-1 bg-muted/50">
+          <TabsList className="grid w-full grid-cols-7 h-auto p-1 bg-muted/50">
             {tabs.map((tab) => (
               <TabsTrigger
                 key={tab.id}
@@ -42,9 +43,11 @@ const Settings = () => {
             ))}
           </TabsList>
 
-          <TabsContent value="profile" className="mt-6 space-y-6">
+          <TabsContent value="profile" className="mt-6">
             <SettingsProfile />
-            {/* Collaborators Card - Only visible for workspace admins */}
+          </TabsContent>
+
+          <TabsContent value="collaborators" className="mt-6">
             <CollaboratorsCard />
           </TabsContent>
 
