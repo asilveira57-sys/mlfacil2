@@ -1269,40 +1269,49 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
 
   // =========================================================================
   // ETAPA 1.5: DIAGNÓSTICO DE CATÁLOGO - Detectar se o item fonte é de catálogo
-  // Isso afeta quais campos podem ser enviados no POST /items
+  // REGRA NOVA: SEMPRE criar como anúncio NORMAL (não catálogo)
+  // Isso permite edição de título, fotos e descrição
   // =========================================================================
   const catalogDiagnostic = {
     catalog_product_id: itemData.catalog_product_id || null,
     catalog_listing: itemData.catalog_listing ?? null,
     parent_item_id: itemData.parent_item_id || null,
-    is_catalog_source: false,
+    is_catalog_source: false, // Origem do item
+    create_as_normal: true, // SEMPRE criar como normal
     blocked_fields: [] as string[],
   };
 
-  // Determinar se é item de catálogo
-  catalogDiagnostic.is_catalog_source = !!(
+  // Determinar se o ITEM FONTE é de catálogo (para logging)
+  const sourceIsCatalog = !!(
     catalogDiagnostic.catalog_product_id ||
-    catalogDiagnostic.catalog_listing === true ||
+    itemData.catalog_listing === true ||
     catalogDiagnostic.parent_item_id
   );
+  catalogDiagnostic.is_catalog_source = sourceIsCatalog;
 
-  // Se for catálogo, estes campos são bloqueados pela API
-  if (catalogDiagnostic.is_catalog_source) {
+  // REGRA: Criar SEMPRE como anúncio normal (não catálogo)
+  // Não bloquear campos - usuário pode editar tudo
+  const createAsNormal = checklist?.create_as_normal !== false; // Default: true
+  
+  if (createAsNormal) {
+    catalogDiagnostic.blocked_fields = []; // Nenhum campo bloqueado
+  } else if (sourceIsCatalog) {
+    // Modo legado (não usado mais): bloquear campos se for catálogo
     catalogDiagnostic.blocked_fields = ["title", "pictures", "description"];
   }
 
   console.log(`[ad-action-execute] === CATALOG DIAGNOSTIC ===`);
+  console.log(`[ad-action-execute] source_is_catalog: ${sourceIsCatalog}`);
+  console.log(`[ad-action-execute] create_as_normal: ${createAsNormal}`);
   console.log(`[ad-action-execute] catalog_product_id: ${catalogDiagnostic.catalog_product_id}`);
-  console.log(`[ad-action-execute] catalog_listing: ${catalogDiagnostic.catalog_listing}`);
-  console.log(`[ad-action-execute] parent_item_id: ${catalogDiagnostic.parent_item_id}`);
-  console.log(`[ad-action-execute] is_catalog_source: ${catalogDiagnostic.is_catalog_source}`);
-  console.log(`[ad-action-execute] blocked_fields: ${catalogDiagnostic.blocked_fields.join(", ") || "(none)"}`);
+  console.log(`[ad-action-execute] blocked_fields: ${catalogDiagnostic.blocked_fields.join(", ") || "(none - creating as normal)"}`);
 
   console.log(`[ad-action-execute] Building clone payload from data:`, JSON.stringify({ 
     title: itemData.title, 
     category_id: itemData.category_id,
     resolved_from_catalog: !!catalogInfo,
-    is_catalog_source: catalogDiagnostic.is_catalog_source,
+    source_is_catalog: sourceIsCatalog,
+    create_as_normal: createAsNormal,
   }));
 
   // =========================================================================
@@ -1422,18 +1431,18 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     -1  // sem fallback ainda
   );
   let listingTypeToUse = listingTypeResolution.listing_type_id;
-  let listingTypeStrategy: "source" | "default" | "fallback" | "catalog_safe" | "cache" | "api_suggested" = 
+  let listingTypeStrategy: "source" | "default" | "fallback" | "catalog_safe" | "cache" | "api_suggested" | "user_override" = 
     listingTypeResolution.source === "source_item" ? "source" : 
     listingTypeResolution.source === "cache" ? "cache" : "default";
   
   // Tipos sugeridos pela API (preenchidos após erro)
   let apiSuggestedTypes: string[] = [];
 
-  // Se for catálogo com pictures bloqueadas e listing_type exige pictures, usar tipo seguro
-  if (isCatalogSource && picturesBlocked) {
+  // NOVO FLUXO: Como criamos SEMPRE como anúncio normal, não precisamos verificar pictures bloqueadas
+  // A menos que explicitamente configurado para criar como catálogo (modo legado)
+  if (!createAsNormal && sourceIsCatalog && picturesBlocked) {
     if (LISTING_TYPES_REQUIRING_PICTURES.has(listingTypeToUse)) {
       console.log(`[ad-action-execute] CATALOG STRATEGY: listing_type_id "${listingTypeToUse}" requires pictures but pictures are blocked`);
-      // Usar o primeiro tipo seguro para catálogo
       listingTypeToUse = CATALOG_SAFE_LISTING_TYPES[0] || "bronze";
       listingTypeStrategy = "catalog_safe";
       console.log(`[ad-action-execute] CATALOG STRATEGY: Switched to catalog-safe listing_type_id: ${listingTypeToUse}`);
@@ -1446,60 +1455,112 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
   console.log(`[ad-action-execute] resolution_source: ${listingTypeResolution.source}`);
   console.log(`[ad-action-execute] final_strategy: ${listingTypeStrategy}`);
 
-  // Determinar se cada campo pode ser incluído
-  const canIncludeTitle = !isCatalogSource && checklist?.title !== false;
-  const canIncludePictures = !isCatalogSource && checklist?.pictures !== false && itemData.pictures;
-  const canIncludeDescription = !isCatalogSource && checklist?.description !== false;
+  // =========================================================================
+  // REGRA NOVA: Como criamos SEMPRE como anúncio normal, TODOS os campos são permitidos
+  // =========================================================================
+  const canIncludeTitle = checklist?.title !== false; // SEMPRE permitido (criando como normal)
+  const canIncludePictures = checklist?.pictures !== false && itemData.pictures; // SEMPRE permitido
+  const canIncludeDescription = checklist?.description !== false; // SEMPRE permitido
 
-  console.log(`[ad-action-execute] === PAYLOAD FIELD DECISIONS ===`);
-  console.log(`[ad-action-execute] is_catalog_source: ${isCatalogSource}`);
-  console.log(`[ad-action-execute] pictures_blocked: ${picturesBlocked}`);
-  console.log(`[ad-action-execute] listing_type_to_use: ${listingTypeToUse}`);
-  console.log(`[ad-action-execute] canIncludeTitle: ${canIncludeTitle} (blocked: ${blockedFields.includes("title")})`);
-  console.log(`[ad-action-execute] canIncludePictures: ${canIncludePictures} (blocked: ${picturesBlocked})`);
-  console.log(`[ad-action-execute] canIncludeDescription: ${canIncludeDescription} (blocked: ${blockedFields.includes("description")})`);
+  console.log(`[ad-action-execute] === PAYLOAD FIELD DECISIONS (create_as_normal=${createAsNormal}) ===`);
+  console.log(`[ad-action-execute] source_is_catalog: ${sourceIsCatalog}`);
+  console.log(`[ad-action-execute] canIncludeTitle: ${canIncludeTitle}`);
+  console.log(`[ad-action-execute] canIncludePictures: ${canIncludePictures}`);
+  console.log(`[ad-action-execute] canIncludeDescription: ${canIncludeDescription}`);
   console.log(`[ad-action-execute] removedNotModifiable: ${removedNotModifiable.join(", ") || "(none)"}`);
 
   // =========================================================================
   // PRE-VALIDATION: Garantir campos obrigatórios antes do POST
   // =========================================================================
   const preValidation = {
-    listing_type_id: listingTypeToUse, // SEMPRE presente
+    listing_type_id: checklist?.override_listing_type || listingTypeToUse, // Priorizar override do usuário
     currency_id: itemData.currency_id || "BRL",
     has_category: !!itemData.category_id,
     has_price: !!(checklist?.override_price ?? itemData.price),
   };
 
+  // Se usuário escolheu listing_type diferente, usar
+  if (checklist?.override_listing_type) {
+    listingTypeToUse = checklist.override_listing_type;
+    listingTypeStrategy = "user_override";
+    console.log(`[ad-action-execute] User override listing_type_id: ${listingTypeToUse}`);
+  }
+
   console.log(`[ad-action-execute] === PRE-VALIDATION ===`);
   console.log(`[ad-action-execute] ${JSON.stringify(preValidation)}`);
 
   // =========================================================================
-  // BUILD NEW ITEM PAYLOAD - listing_type_id SEMPRE OBRIGATÓRIO
+  // ETAPA X: Incluir seller_package_* obrigatórios do checklist
+  // Estes campos são OBRIGATÓRIOS para evitar erro item.attribute.missing.seller.package.dimensions
+  // =========================================================================
+  const sellerPackageAttributes: NormalizedAttribute[] = [];
+  
+  if (checklist?.seller_package_height && checklist.seller_package_height > 0) {
+    sellerPackageAttributes.push({
+      id: "SELLER_PACKAGE_HEIGHT",
+      value_name: String(checklist.seller_package_height),
+    });
+  }
+  if (checklist?.seller_package_width && checklist.seller_package_width > 0) {
+    sellerPackageAttributes.push({
+      id: "SELLER_PACKAGE_WIDTH",
+      value_name: String(checklist.seller_package_width),
+    });
+  }
+  if (checklist?.seller_package_length && checklist.seller_package_length > 0) {
+    sellerPackageAttributes.push({
+      id: "SELLER_PACKAGE_LENGTH",
+      value_name: String(checklist.seller_package_length),
+    });
+  }
+  if (checklist?.seller_package_weight && checklist.seller_package_weight > 0) {
+    sellerPackageAttributes.push({
+      id: "SELLER_PACKAGE_WEIGHT",
+      value_name: String(checklist.seller_package_weight),
+    });
+  }
+
+  console.log(`[ad-action-execute] seller_package_* from checklist: ${sellerPackageAttributes.map(a => a.id).join(", ") || "(none)"}`);
+
+  // Mesclar seller_package_* com finalAttributes (prioridade para checklist)
+  const packageAttrIds = new Set(sellerPackageAttributes.map(a => a.id));
+  const attributesWithPackage = [
+    ...sellerPackageAttributes,
+    ...finalAttributes.filter(a => !packageAttrIds.has(a.id)),
+  ];
+
+  // =========================================================================
+  // BUILD NEW ITEM PAYLOAD - SEMPRE como anúncio NORMAL (sem catalog_product_id)
   // =========================================================================
   let newItem: any = {
     category_id: itemData.category_id,
     currency_id: preValidation.currency_id,
-    listing_type_id: preValidation.listing_type_id, // OBRIGATÓRIO - SEMPRE PRESENTE
+    listing_type_id: listingTypeToUse, // OBRIGATÓRIO - SEMPRE PRESENTE
     condition: itemData.condition || "new",
     price: checklist?.override_price ?? (checklist?.price !== false ? itemData.price : undefined),
     available_quantity: checklist?.override_quantity ?? (checklist?.quantity !== false ? itemData.available_quantity : 1),
-    attributes: finalAttributes.length > 0 ? finalAttributes : undefined,
+    attributes: attributesWithPackage.length > 0 ? attributesWithPackage : undefined,
   };
 
-  // CONDICIONAL: Apenas incluir title se NÃO for catálogo
+  // TÍTULO: Usar override do usuário se disponível, senão usar do item fonte
   if (canIncludeTitle) {
-    newItem.title = itemData.title;
+    newItem.title = checklist?.override_title || itemData.title;
+    console.log(`[ad-action-execute] Title: ${checklist?.override_title ? "user_override" : "source_item"} = "${newItem.title?.substring(0, 40)}..."`);
   }
 
-  // CONDICIONAL: Apenas incluir pictures se NÃO for catálogo
+  // FOTOS: Sempre incluir quando criando como normal
   if (canIncludePictures) {
     newItem.pictures = itemData.pictures.map((p: any) => ({ source: p.url || p.secure_url }));
+    console.log(`[ad-action-execute] Pictures: ${newItem.pictures.length} images`);
   }
 
-  // Se for catálogo, adicionar catalog_product_id ao payload (regra ML)
-  if (isCatalogSource && catalogDiagnostic.catalog_product_id) {
+  // IMPORTANTE: NÃO incluir catalog_product_id quando criando como normal
+  // Isso permite que o anúncio seja editável (título, fotos, descrição)
+  if (!createAsNormal && sourceIsCatalog && catalogDiagnostic.catalog_product_id) {
     newItem.catalog_product_id = catalogDiagnostic.catalog_product_id;
-    console.log(`[ad-action-execute] Added catalog_product_id: ${catalogDiagnostic.catalog_product_id}`);
+    console.log(`[ad-action-execute] [LEGACY MODE] Added catalog_product_id: ${catalogDiagnostic.catalog_product_id}`);
+  } else {
+    console.log(`[ad-action-execute] catalog_product_id: OMITTED (creating as normal listing)`);
   }
 
   // Adicionar body-level fields (family_name, etc.) - GARANTIDO no payload
@@ -1508,32 +1569,26 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
     console.log(`[ad-action-execute] Added body-level field: ${fieldName} = "${fieldValue}"`);
   }
 
-  // CONDICIONAL: Add description se NÃO for catálogo
-  if (canIncludeDescription && !isCatalogId(itemId)) {
-    const descResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}/description`, {
-      headers: { "Authorization": `Bearer ${accessToken}` },
-    });
-    if (descResponse.ok) {
-      const descData = await descResponse.json();
-      newItem.description = { plain_text: descData.plain_text || descData.text };
+  // DESCRIÇÃO: Usar override do usuário se disponível
+  if (canIncludeDescription) {
+    if (checklist?.override_description) {
+      newItem.description = { plain_text: checklist.override_description };
+      console.log(`[ad-action-execute] Description: user_override`);
+    } else {
+      // Buscar descrição do item fonte
+      const descResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}/description`, {
+        headers: { "Authorization": `Bearer ${accessToken}` },
+      });
+      if (descResponse.ok) {
+        const descData = await descResponse.json();
+        newItem.description = { plain_text: descData.plain_text || descData.text };
+        console.log(`[ad-action-execute] Description: source_item`);
+      }
     }
   }
 
   // Validate minimum required fields
-  // NOTA: Para catálogo, title é OPCIONAL (bloqueado pela API)
-  const needsTitle = !isCatalogSource;
-  if ((needsTitle && !newItem.title) || !newItem.category_id) {
-    // Se for catálogo e title está faltando, dar erro específico
-    if (isCatalogSource && !newItem.title && needsTitle) {
-      return {
-        success: false,
-        error: "CATALOG_CLONE_LIMITATION",
-        message: "Este anúncio pertence ao catálogo do Mercado Livre. O título é controlado pelo catálogo e não pode ser clonado diretamente.",
-        user_guidance: "Itens de catálogo têm título, fotos e descrição gerenciados pelo Mercado Livre. Tente clonar um anúncio fora do catálogo ou use a opção de cadastrar no catálogo.",
-        catalog_info: catalogInfo,
-        catalog_diagnostic: catalogDiagnostic,
-      };
-    }
+  if (!newItem.title || !newItem.category_id) {
     return {
       success: false,
       error: "INSUFFICIENT_DATA",
@@ -1693,18 +1748,18 @@ async function executeCloneAction(accessToken: string, itemId: string, snapshot:
         attributes: finalAttributes2.length > 0 ? finalAttributes2 : undefined,
       };
 
-      // CONDICIONAL: Apenas incluir title se NÃO for catálogo
+      // TÍTULO: Usar override do usuário se disponível, senão usar do item fonte
       if (canIncludeTitle) {
-        newItem.title = itemData.title;
+        newItem.title = checklist?.override_title || itemData.title;
       }
 
-      // CONDICIONAL: Apenas incluir pictures se NÃO for catálogo
+      // FOTOS: Sempre incluir quando criando como normal
       if (canIncludePictures) {
         newItem.pictures = itemData.pictures.map((p: any) => ({ source: p.url || p.secure_url }));
       }
 
-      // Se for catálogo, adicionar catalog_product_id ao payload (regra ML)
-      if (isCatalogSource && catalogDiagnostic.catalog_product_id) {
+      // IMPORTANTE: NÃO incluir catalog_product_id quando criando como normal
+      if (!createAsNormal && sourceIsCatalog && catalogDiagnostic.catalog_product_id) {
         newItem.catalog_product_id = catalogDiagnostic.catalog_product_id;
       }
 

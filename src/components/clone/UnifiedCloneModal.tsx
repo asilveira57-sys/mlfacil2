@@ -10,9 +10,14 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Link, AlertCircle, CheckCircle2, Info, Copy } from 'lucide-react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { 
+  Loader2, Link, AlertCircle, CheckCircle2, Info, Copy, 
+  ChevronDown, Package, Scale 
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
@@ -26,9 +31,11 @@ interface UnifiedCloneModalProps {
 interface ItemPreviewData {
   item_id: string;
   title: string;
+  description?: string;
   price: number;
   available_quantity: number;
   thumbnail?: string;
+  pictures?: Array<{ url?: string; secure_url?: string }>;
   category_id?: string;
   listing_type_id?: string;
   seller_id: string;
@@ -36,18 +43,35 @@ interface ItemPreviewData {
   catalog_product_id?: string;
   clone_mode: 'internal' | 'external';
   listing_mode: 'catalog' | 'standard';
+  // Seller package dimensions from source item
+  seller_package_height?: number;
+  seller_package_width?: number;
+  seller_package_length?: number;
+  seller_package_weight?: number;
 }
 
 interface CloneFormData {
+  title: string;
+  description: string;
   price: number;
   quantity: number;
   sku: string;
   listing_type: string;
+  // Seller package dimensions - OBRIGATÓRIO
+  seller_package_height: number;
+  seller_package_width: number;
+  seller_package_length: number;
+  seller_package_weight: number;
+  // Advanced options
+  create_paused: boolean;
 }
 
 type ModalStep = 'input' | 'preview' | 'confirm';
 
-// Regex patterns for MLB extraction
+// ============================================================================
+// REGEX PATTERNS - Extração de ID do Mercado Livre
+// REGRA OFICIAL: Prioriza MLB sobre MLBU
+// ============================================================================
 const MLB_PATTERNS = [
   /item_id[=:]?(MLB\d{8,})/i,
   /pdp_filters=item_id[=:]?(MLB\d{8,})/i,
@@ -56,26 +80,79 @@ const MLB_PATTERNS = [
   /(?<!MLBU?)(MLB\d{8,})/i,
 ];
 
-function extractMlbId(input: string): string | null {
+// MLBU patterns - fallback quando não encontra MLB
+const MLBU_PATTERNS = [
+  /\/up\/(MLBU\d+)/i,
+  /\/p\/(MLBU\d+)/i,
+  /(MLBU\d{8,})/i,
+];
+
+interface ExtractedId {
+  id: string;
+  type: 'MLB' | 'MLBU';
+}
+
+function extractMeliId(input: string): ExtractedId | null {
   if (!input?.trim()) return null;
   const trimmed = input.trim();
   
+  // Prioridade 1: Tentar extrair MLB direto
   for (const pattern of MLB_PATTERNS) {
     const match = trimmed.match(pattern);
     if (match) {
       const id = (match[1] || match[0]).replace(/-/g, '').toUpperCase();
       if (/^MLB\d+$/.test(id)) {
-        return id;
+        return { id, type: 'MLB' };
       }
     }
   }
   
   // Direct MLB check
   if (/^MLB\d{8,}$/i.test(trimmed)) {
-    return trimmed.toUpperCase();
+    return { id: trimmed.toUpperCase(), type: 'MLB' };
+  }
+  
+  // Prioridade 2: Tentar extrair MLBU (fallback)
+  for (const pattern of MLBU_PATTERNS) {
+    const match = trimmed.match(pattern);
+    if (match) {
+      const id = (match[1] || match[0]).replace(/-/g, '').toUpperCase();
+      if (/^MLBU\d+$/.test(id)) {
+        return { id, type: 'MLBU' };
+      }
+    }
   }
   
   return null;
+}
+
+// Extrair atributos de dimensões do item
+function extractPackageDimensions(attributes: any[]): {
+  height?: number;
+  width?: number;
+  length?: number;
+  weight?: number;
+} {
+  const result: { height?: number; width?: number; length?: number; weight?: number } = {};
+  
+  if (!attributes || !Array.isArray(attributes)) return result;
+  
+  for (const attr of attributes) {
+    const id = attr.id?.toUpperCase();
+    const value = attr.value_name ? parseFloat(attr.value_name) : attr.value_struct?.number;
+    
+    if (id === 'SELLER_PACKAGE_HEIGHT' || id === 'PACKAGE_HEIGHT') {
+      result.height = value;
+    } else if (id === 'SELLER_PACKAGE_WIDTH' || id === 'PACKAGE_WIDTH') {
+      result.width = value;
+    } else if (id === 'SELLER_PACKAGE_LENGTH' || id === 'PACKAGE_LENGTH') {
+      result.length = value;
+    } else if (id === 'SELLER_PACKAGE_WEIGHT' || id === 'PACKAGE_WEIGHT') {
+      result.weight = value;
+    }
+  }
+  
+  return result;
 }
 
 export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps) {
@@ -94,14 +171,32 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
   
   // Step 3: Editable form + confirmation
   const [formData, setFormData] = useState<CloneFormData>({
+    title: '',
+    description: '',
     price: 0,
     quantity: 1,
     sku: '',
     listing_type: 'gold_special',
+    seller_package_height: 0,
+    seller_package_width: 0,
+    seller_package_length: 0,
+    seller_package_weight: 0,
+    create_paused: false,
   });
   const [confirmText, setConfirmText] = useState('');
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   
-  const detectedId = useMemo(() => extractMlbId(inputValue), [inputValue]);
+  const detectedId = useMemo(() => extractMeliId(inputValue), [inputValue]);
+  
+  // Validar dimensões
+  const dimensionsValid = useMemo(() => {
+    return (
+      formData.seller_package_height > 0 &&
+      formData.seller_package_width > 0 &&
+      formData.seller_package_length > 0 &&
+      formData.seller_package_weight > 0
+    );
+  }, [formData]);
   
   const resetModal = useCallback(() => {
     setStep('input');
@@ -109,8 +204,21 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
     setError(null);
     setInputValue('');
     setPreview(null);
-    setFormData({ price: 0, quantity: 1, sku: '', listing_type: 'gold_special' });
+    setFormData({
+      title: '',
+      description: '',
+      price: 0,
+      quantity: 1,
+      sku: '',
+      listing_type: 'gold_special',
+      seller_package_height: 0,
+      seller_package_width: 0,
+      seller_package_length: 0,
+      seller_package_weight: 0,
+      create_paused: false,
+    });
     setConfirmText('');
+    setAdvancedOpen(false);
   }, []);
   
   const handleClose = useCallback((open: boolean) => {
@@ -151,20 +259,14 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
       const user = authData?.user;
       if (!user) throw new Error('Não autenticado');
       
-      const { data: mlAccount } = await supabase
-        .from('ml_accounts')
-        .select('access_token, ml_user_id')
-        .eq('ml_user_id', String(activeAccount.sellerId))
-        .eq('user_id', user.id)
-        .maybeSingle();
-      
-      if (!mlAccount?.access_token) {
-        throw new Error('Conta do ML não conectada ou token expirado');
-      }
-      
       // Fetch item data from ML API via edge function
+      // Passar o ID extraído e informar se é MLBU para resolução no backend
       const { data, error: fetchError } = await supabase.functions.invoke('ad-item-snapshot', {
-        body: { item_id: detectedId },
+        body: { 
+          item_id: detectedId.id, 
+          id_type: detectedId.type,
+          seller_id: activeAccount.sellerId,
+        },
       });
       
       if (fetchError || !data?.success) {
@@ -186,12 +288,17 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
       );
       const listingMode: 'catalog' | 'standard' = isCatalogSource ? 'catalog' : 'standard';
       
+      // Extrair dimensões do item fonte
+      const dimensions = extractPackageDimensions(itemData.attributes);
+      
       const previewData: ItemPreviewData = {
-        item_id: detectedId,
+        item_id: data.resolved_item_id || itemData.id || detectedId.id,
         title: itemData.title,
+        description: itemData.description,
         price: itemData.price,
         available_quantity: itemData.available_quantity || 1,
         thumbnail: itemData.thumbnail || itemData.pictures?.[0]?.url,
+        pictures: itemData.pictures,
         category_id: itemData.category_id,
         listing_type_id: itemData.listing_type_id || 'gold_special',
         seller_id: itemSellerId,
@@ -199,14 +306,25 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
         catalog_product_id: itemData.catalog_product_id,
         clone_mode: cloneMode,
         listing_mode: listingMode,
+        seller_package_height: dimensions.height,
+        seller_package_width: dimensions.width,
+        seller_package_length: dimensions.length,
+        seller_package_weight: dimensions.weight,
       };
       
       setPreview(previewData);
       setFormData({
+        title: itemData.title || '',
+        description: itemData.description || '',
         price: itemData.price,
         quantity: itemData.available_quantity || 1,
         sku: '',
-        listing_type: itemData.listing_type_id || 'gold_special',
+        listing_type: itemData.listing_type_id === 'free' ? 'gold_special' : (itemData.listing_type_id || 'gold_special'),
+        seller_package_height: dimensions.height || 0,
+        seller_package_width: dimensions.width || 0,
+        seller_package_length: dimensions.length || 0,
+        seller_package_weight: dimensions.weight || 0,
+        create_paused: false,
       });
       setStep('preview');
       
@@ -221,6 +339,18 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
   
   // Step 2 → Step 3: Move to confirmation
   const handleProceedToConfirm = () => {
+    // Validar dimensões obrigatórias
+    if (!dimensionsValid) {
+      setError('Preencha todas as dimensões do pacote (altura, largura, comprimento e peso) antes de continuar.');
+      return;
+    }
+    
+    if (!formData.title.trim()) {
+      setError('O título é obrigatório.');
+      return;
+    }
+    
+    setError(null);
     setConfirmText('');
     setStep('confirm');
   };
@@ -283,21 +413,41 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
         throw new Error('Workspace não encontrado');
       }
       
-      // Build checklist with all necessary data
+      // Build checklist with ALL necessary data
+      // IMPORTANTE: Sempre criar como "normal" (não catálogo)
       const checklist = {
-        title: !preview.is_catalog_source,
-        description: !preview.is_catalog_source,
-        pictures: !preview.is_catalog_source,
+        // SEMPRE criar como anúncio normal (não catálogo)
+        create_as_normal: true, // Flag para o backend
+        
+        // Campos sempre editáveis no clone normal
+        title: true,
+        description: true,
+        pictures: true,
         attributes: true,
         price: true,
-        source: 'unified_clone',
+        
+        source: 'unified_clone_v2',
         source_url: inputValue.trim(),
         clone_mode: preview.clone_mode,
         listing_mode: preview.listing_mode,
+        is_catalog_source: preview.is_catalog_source,
+        
+        // Overrides do usuário
+        override_title: formData.title !== preview.title ? formData.title : undefined,
+        override_description: formData.description !== preview.description ? formData.description : undefined,
         override_price: formData.price !== preview.price ? formData.price : undefined,
         override_quantity: formData.quantity !== preview.available_quantity ? formData.quantity : undefined,
         override_sku: formData.sku || undefined,
-        override_listing_type: formData.listing_type !== preview.listing_type_id ? formData.listing_type : undefined,
+        override_listing_type: formData.listing_type,
+        
+        // Dimensões do pacote (OBRIGATÓRIO)
+        seller_package_height: formData.seller_package_height,
+        seller_package_width: formData.seller_package_width,
+        seller_package_length: formData.seller_package_length,
+        seller_package_weight: formData.seller_package_weight,
+        
+        // Opções avançadas
+        create_paused: formData.create_paused,
       };
       
       // Create action with status QUEUED (ready to execute)
@@ -309,7 +459,7 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
           item_id: preview.item_id,
           action_type: 'CLONE',
           action_status: 'QUEUED',
-          reason: `CLONE_${preview.clone_mode.toUpperCase()}`,
+          reason: `CLONE_${preview.clone_mode.toUpperCase()}_NORMAL`,
           checklist: checklist as never,
           created_by: user.id,
         })
@@ -356,7 +506,7 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
   
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[520px]">
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Copy className="h-5 w-5" />
@@ -403,7 +553,10 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4 text-primary" />
                   <p className="text-sm text-muted-foreground">
-                    ID detectado: <span className="font-mono font-medium">{detectedId}</span>
+                    ID detectado: <span className="font-mono font-medium">{detectedId.id}</span>
+                    {detectedId.type === 'MLBU' && (
+                      <span className="ml-2 text-xs text-warning">(catálogo - será resolvido)</span>
+                    )}
                   </p>
                 </div>
               )}
@@ -421,9 +574,8 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
             <div className="flex items-start gap-2 p-3 rounded-md bg-muted/50">
               <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
               <p className="text-xs text-muted-foreground">
-                Cole o link de qualquer anúncio do Mercado Livre. O sistema detectará 
-                automaticamente se é interno (sua conta) ou externo (outra conta), 
-                e se pertence ao catálogo.
+                Cole o link de qualquer anúncio do Mercado Livre (incluindo links de catálogo /up/MLBU...). 
+                O sistema detectará automaticamente se é interno (sua conta) ou externo (outra conta).
               </p>
             </div>
             
@@ -480,33 +632,65 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
                 </Badge>
               </div>
               <div className="p-3 rounded-md border">
-                <p className="text-xs text-muted-foreground mb-1">Tipo</p>
+                <p className="text-xs text-muted-foreground mb-1">Tipo do anúncio fonte</p>
                 <Badge variant={preview.listing_mode === 'catalog' ? 'outline' : 'default'}>
-                  {preview.listing_mode === 'catalog' ? 'Catálogo' : 'Não catálogo'}
+                  {preview.listing_mode === 'catalog' ? 'Catálogo' : 'Normal'}
                 </Badge>
               </div>
             </div>
             
-            {/* Catalog Warning */}
+            {/* Catalog Alert - SEMPRE criar como normal */}
             {preview.is_catalog_source && (
-              <div className="flex items-start gap-2 p-3 rounded-md bg-warning/10 border border-warning/30">
-                <AlertCircle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
-                <p className="text-xs text-warning">
-                  Anúncio de catálogo: título, fotos e descrição são gerenciados pelo 
-                  Mercado Livre e não serão copiados.
-                </p>
+              <div className="flex items-start gap-2 p-3 rounded-md bg-primary/10 border border-primary/30">
+                <Info className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+                <div className="text-xs text-primary">
+                  <p className="font-medium">Anúncio de catálogo detectado</p>
+                  <p className="mt-1">
+                    Por padrão, o clone será criado como <strong>anúncio normal</strong> (não catálogo) 
+                    para permitir edição de título, fotos e descrição. Você pode vincular ao catálogo depois, se desejar.
+                  </p>
+                </div>
               </div>
             )}
             
             <Separator />
             
-            {/* Editable Fields */}
-            <div className="space-y-3">
-              <p className="text-sm font-medium">Ajustar antes de clonar (opcional)</p>
+            {/* Editable Fields - SEMPRE editáveis (clone como normal) */}
+            <div className="space-y-4">
+              <p className="text-sm font-medium">Dados do novo anúncio</p>
+              
+              {/* TÍTULO - SEMPRE EDITÁVEL */}
+              <div className="space-y-1">
+                <Label htmlFor="clone-title" className="text-xs">
+                  Título <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="clone-title"
+                  value={formData.title}
+                  onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+                  placeholder="Título do anúncio"
+                  maxLength={60}
+                />
+                <p className="text-xs text-muted-foreground">{formData.title.length}/60 caracteres</p>
+              </div>
+              
+              {/* DESCRIÇÃO - SEMPRE EDITÁVEL (clone normal) */}
+              <div className="space-y-1">
+                <Label htmlFor="clone-description" className="text-xs">Descrição</Label>
+                <Textarea
+                  id="clone-description"
+                  value={formData.description}
+                  onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="Descrição do produto..."
+                  rows={3}
+                />
+              </div>
               
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <Label htmlFor="clone-price" className="text-xs">Preço (R$)</Label>
+                  <Label htmlFor="clone-price" className="text-xs">
+                    Preço (R$) <span className="text-destructive">*</span>
+                  </Label>
                   <Input
                     id="clone-price"
                     type="number"
@@ -516,7 +700,9 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="clone-qty" className="text-xs">Quantidade</Label>
+                  <Label htmlFor="clone-qty" className="text-xs">
+                    Quantidade <span className="text-destructive">*</span>
+                  </Label>
                   <Input
                     id="clone-qty"
                     type="number"
@@ -538,6 +724,120 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
               </div>
             </div>
             
+            <Separator />
+            
+            {/* DIMENSÕES DO PACOTE - OBRIGATÓRIO */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Package className="h-4 w-4 text-muted-foreground" />
+                <p className="text-sm font-medium">
+                  Dimensões do pacote <span className="text-destructive">*</span>
+                </p>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label htmlFor="package-height" className="text-xs">Altura (cm)</Label>
+                  <Input
+                    id="package-height"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={formData.seller_package_height || ''}
+                    onChange={(e) => setFormData(prev => ({ ...prev, seller_package_height: parseFloat(e.target.value) || 0 }))}
+                    placeholder="Ex: 10"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="package-width" className="text-xs">Largura (cm)</Label>
+                  <Input
+                    id="package-width"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={formData.seller_package_width || ''}
+                    onChange={(e) => setFormData(prev => ({ ...prev, seller_package_width: parseFloat(e.target.value) || 0 }))}
+                    placeholder="Ex: 15"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="package-length" className="text-xs">Comprimento (cm)</Label>
+                  <Input
+                    id="package-length"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={formData.seller_package_length || ''}
+                    onChange={(e) => setFormData(prev => ({ ...prev, seller_package_length: parseFloat(e.target.value) || 0 }))}
+                    placeholder="Ex: 20"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="package-weight" className="text-xs">
+                    <div className="flex items-center gap-1">
+                      <Scale className="h-3 w-3" />
+                      Peso (g)
+                    </div>
+                  </Label>
+                  <Input
+                    id="package-weight"
+                    type="number"
+                    step="1"
+                    min="0"
+                    value={formData.seller_package_weight || ''}
+                    onChange={(e) => setFormData(prev => ({ ...prev, seller_package_weight: parseFloat(e.target.value) || 0 }))}
+                    placeholder="Ex: 500"
+                  />
+                </div>
+              </div>
+              
+              {!dimensionsValid && (
+                <p className="text-xs text-warning">
+                  Preencha todas as dimensões para evitar erros de validação do Mercado Livre.
+                </p>
+              )}
+            </div>
+            
+            {/* Advanced Options */}
+            <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" className="w-full justify-between p-2 h-auto">
+                  <span className="text-sm text-muted-foreground">Opções avançadas</span>
+                  <ChevronDown className={`h-4 w-4 transition-transform ${advancedOpen ? 'rotate-180' : ''}`} />
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="space-y-3 pt-2">
+                <div className="space-y-1">
+                  <Label htmlFor="clone-listing-type" className="text-xs">Modalidade do anúncio</Label>
+                  <select
+                    id="clone-listing-type"
+                    value={formData.listing_type}
+                    onChange={(e) => setFormData(prev => ({ ...prev, listing_type: e.target.value }))}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    <option value="gold_special">Clássico</option>
+                    <option value="gold_pro">Premium</option>
+                    <option value="gold">Gold</option>
+                    <option value="silver">Silver</option>
+                    <option value="bronze">Bronze</option>
+                  </select>
+                </div>
+                
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="create-paused"
+                    checked={formData.create_paused}
+                    onChange={(e) => setFormData(prev => ({ ...prev, create_paused: e.target.checked }))}
+                    className="h-4 w-4 rounded border-input"
+                  />
+                  <Label htmlFor="create-paused" className="text-xs">
+                    Criar anúncio pausado
+                  </Label>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+            
             {error && (
               <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/30">
                 <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
@@ -549,7 +849,7 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
               <Button variant="outline" onClick={() => setStep('input')}>
                 Voltar
               </Button>
-              <Button onClick={handleProceedToConfirm}>
+              <Button onClick={handleProceedToConfirm} disabled={!dimensionsValid || !formData.title.trim()}>
                 Continuar
               </Button>
             </DialogFooter>
@@ -564,15 +864,24 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
               <p className="text-sm font-medium">Resumo da clonagem</p>
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div className="text-muted-foreground">ID fonte:</div>
-                <div className="font-mono">{preview.item_id}</div>
+                <div className="font-mono text-xs">{preview.item_id}</div>
                 <div className="text-muted-foreground">Origem:</div>
                 <div>{preview.clone_mode === 'internal' ? 'Sua conta' : 'Conta externa'}</div>
-                <div className="text-muted-foreground">Tipo:</div>
-                <div>{preview.listing_mode === 'catalog' ? 'Catálogo' : 'Padrão'}</div>
+                <div className="text-muted-foreground">Tipo de criação:</div>
+                <div className="flex items-center gap-1">
+                  <Badge variant="default" className="text-xs">Normal (não catálogo)</Badge>
+                </div>
+                <div className="text-muted-foreground">Modalidade:</div>
+                <div className="capitalize">{formData.listing_type.replace('_', ' ')}</div>
                 <div className="text-muted-foreground">Preço:</div>
                 <div>R$ {formData.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
                 <div className="text-muted-foreground">Quantidade:</div>
                 <div>{formData.quantity}</div>
+              </div>
+              <Separator className="my-2" />
+              <div className="text-sm">
+                <div className="text-muted-foreground mb-1">Título final:</div>
+                <div className="font-medium text-xs">{formData.title}</div>
               </div>
             </div>
             
