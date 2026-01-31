@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { User, Receipt, Building2, Plug, CreditCard, Palette, Users, Globe } from "lucide-react";
@@ -16,7 +16,8 @@ const Settings = () => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState("profile");
 
-  const tabs = [
+  // Memoize tabs array to prevent re-creation on each render
+  const tabs = useMemo(() => [
     { id: "profile", label: t('common:profile'), icon: User },
     { id: "language", label: t('common:language'), icon: Globe },
     { id: "collaborators", label: t('nav:collaborators'), icon: Users },
@@ -25,7 +26,7 @@ const Settings = () => {
     { id: "companies", label: t('nav:companies'), icon: Building2 },
     { id: "integrations", label: t('nav:integrations'), icon: Plug },
     { id: "subscription", label: t('nav:subscription'), icon: CreditCard },
-  ];
+  ], [t]);
 
   return (
     <PageContainer 
@@ -56,7 +57,7 @@ const Settings = () => {
           </TabsContent>
 
           <TabsContent value="collaborators" className="mt-6">
-            <CollaboratorsCard />
+            {activeTab === "collaborators" && <CollaboratorsCard />}
           </TabsContent>
 
           <TabsContent value="customization" className="mt-6">
