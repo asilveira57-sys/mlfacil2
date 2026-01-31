@@ -1,0 +1,52 @@
+{
+  "language": {
+    "title": "Language",
+    "description": "Choose the interface language",
+    "current": "Current language"
+  },
+  "profile": {
+    "title": "Profile",
+    "description": "Manage your personal information"
+  },
+  "customization": {
+    "title": "Customization",
+    "description": "Customize the system appearance"
+  },
+  "billing": {
+    "title": "Billing",
+    "description": "Manage your billing information"
+  },
+  "companies": {
+    "title": "Companies & Accounts",
+    "description": "Manage your companies and connected accounts"
+  },
+  "integrations": {
+    "title": "Integrations",
+    "description": "Configure integrations with other services"
+  },
+  "subscription": {
+    "title": "Subscription",
+    "description": "Manage your plan and subscription"
+  },
+  "collaborators": {
+    "title": "Collaborators",
+    "description": "Manage your team's access"
+  },
+  "sync": {
+    "title": "Data Synchronization",
+    "description": "Manage your connections and Mercado Livre data sync",
+    "orders": "Orders",
+    "items": "Items",
+    "orders_with_items": "Orders w/ Items",
+    "synced_percent": "% Synced",
+    "syncing": "Syncing...",
+    "sync_orders": "Sync Orders",
+    "sync_started": "Sync started",
+    "sync_started_desc": "Orders are being synced in the background",
+    "sync_completed": "Sync completed",
+    "sync_completed_desc": "{{count}} orders synced",
+    "sync_error": "Sync error",
+    "sync_error_desc": "An error occurred during sync",
+    "sync_help": "Sync loads all orders and items from Mercado Livre to local cache, enabling faster and more complete analyses."
+  }
+}

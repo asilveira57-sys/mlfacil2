@@ -13,30 +13,24 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import { SettingsLanguage } from "@/components/settings/SettingsLanguage";
 
 const Settings = () => {
-  const { t, i18n } = useTranslation();
-  const currentLanguage = i18n.language;
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState("profile");
 
   const tabs = [
     { id: "profile", label: t('common:profile'), icon: User },
     { id: "language", label: t('common:language'), icon: Globe },
     { id: "collaborators", label: t('nav:collaborators'), icon: Users },
-    { id: "customization", label: "Personalização", icon: Palette },
+    { id: "customization", label: t('nav:customization'), icon: Palette },
     { id: "billing", label: t('nav:billing'), icon: Receipt },
-    { id: "companies", label: "Empresas e Contas", icon: Building2 },
+    { id: "companies", label: t('nav:companies'), icon: Building2 },
     { id: "integrations", label: t('nav:integrations'), icon: Plug },
-    { id: "subscription", label: "Assinatura", icon: CreditCard },
+    { id: "subscription", label: t('nav:subscription'), icon: CreditCard },
   ];
 
   return (
     <PageContainer 
       title={t('nav:settings')} 
-      subtitle={currentLanguage === 'pt-BR' 
-        ? "Gerencie seu perfil, idioma, empresas e integrações"
-        : currentLanguage === 'en'
-        ? "Manage your profile, language, companies and integrations"
-        : "Gestiona tu perfil, idioma, empresas e integraciones"
-      }
+      subtitle={t('nav:settings_subtitle')}
     >
       <div className="container mx-auto py-6 px-4 max-w-6xl">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">

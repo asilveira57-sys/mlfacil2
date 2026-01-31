@@ -8,18 +8,24 @@ import ptBRNav from '@/locales/pt-BR/nav.json';
 import ptBRAuth from '@/locales/pt-BR/auth.json';
 import ptBRErrors from '@/locales/pt-BR/errors.json';
 import ptBRActions from '@/locales/pt-BR/actions.json';
+import ptBRSettings from '@/locales/pt-BR/settings.json';
+import ptBRDashboard from '@/locales/pt-BR/dashboard.json';
 
 import enCommon from '@/locales/en/common.json';
 import enNav from '@/locales/en/nav.json';
 import enAuth from '@/locales/en/auth.json';
 import enErrors from '@/locales/en/errors.json';
 import enActions from '@/locales/en/actions.json';
+import enSettings from '@/locales/en/settings.json';
+import enDashboard from '@/locales/en/dashboard.json';
 
 import esCommon from '@/locales/es/common.json';
 import esNav from '@/locales/es/nav.json';
 import esAuth from '@/locales/es/auth.json';
 import esErrors from '@/locales/es/errors.json';
 import esActions from '@/locales/es/actions.json';
+import esSettings from '@/locales/es/settings.json';
+import esDashboard from '@/locales/es/dashboard.json';
 
 export const SUPPORTED_LANGUAGES = ['pt-BR', 'en', 'es'] as const;
 export type SupportedLanguage = typeof SUPPORTED_LANGUAGES[number];
@@ -37,6 +43,8 @@ const resources = {
     auth: ptBRAuth,
     errors: ptBRErrors,
     actions: ptBRActions,
+    settings: ptBRSettings,
+    dashboard: ptBRDashboard,
   },
   en: {
     common: enCommon,
@@ -44,6 +52,8 @@ const resources = {
     auth: enAuth,
     errors: enErrors,
     actions: enActions,
+    settings: enSettings,
+    dashboard: enDashboard,
   },
   es: {
     common: esCommon,
@@ -51,6 +61,8 @@ const resources = {
     auth: esAuth,
     errors: esErrors,
     actions: esActions,
+    settings: esSettings,
+    dashboard: esDashboard,
   },
 };
 
@@ -67,7 +79,7 @@ i18n
     resources,
     fallbackLng: 'pt-BR',
     defaultNS: 'common',
-    ns: ['common', 'nav', 'auth', 'errors', 'actions'],
+    ns: ['common', 'nav', 'auth', 'errors', 'actions', 'settings', 'dashboard'],
     
     detection: {
       order: detectionOrder,
