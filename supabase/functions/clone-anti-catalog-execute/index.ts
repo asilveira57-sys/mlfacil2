@@ -83,7 +83,15 @@ function isAttributeSafe(attrId: string): boolean {
 
 function filterSafeAttributes(attributes: any[]): any[] {
   if (!attributes || !Array.isArray(attributes)) return [];
-  return attributes.filter((attr) => isAttributeSafe(attr.id));
+  // Filtrar atributos perigosos mas PRESERVAR atributos obrigatórios como BRAND, PAPER_TYPE, PAPER_SIZE
+  return attributes.filter((attr) => {
+    const id = attr.id?.toUpperCase() || "";
+    // Bloquear apenas atributos de catálogo
+    if (FORBIDDEN_ATTRIBUTES.has(id)) return false;
+    // Bloquear duplicados que serão substituídos por SELLER_PACKAGE_*
+    if (DUPLICATE_ATTRIBUTES.has(id)) return false;
+    return true;
+  });
 }
 
 function isRequiredFieldsError(apiError: any, fieldName: string): boolean {
@@ -612,19 +620,19 @@ Deno.serve(async (req) => {
 
     const safeAttributes = filterSafeAttributes(payload.attributes || []);
 
-    // Dimensões de envio
+    // Dimensões de envio - IMPORTANTE: Adicionar unidade de medida (cm para dimensões, g para peso)
     const sellerPackageAttrs: any[] = [];
     if (payload.package_height > 0) {
-      sellerPackageAttrs.push({ id: "SELLER_PACKAGE_HEIGHT", value_name: String(payload.package_height) });
+      sellerPackageAttrs.push({ id: "SELLER_PACKAGE_HEIGHT", value_name: `${payload.package_height} cm` });
     }
     if (payload.package_width > 0) {
-      sellerPackageAttrs.push({ id: "SELLER_PACKAGE_WIDTH", value_name: String(payload.package_width) });
+      sellerPackageAttrs.push({ id: "SELLER_PACKAGE_WIDTH", value_name: `${payload.package_width} cm` });
     }
     if (payload.package_length > 0) {
-      sellerPackageAttrs.push({ id: "SELLER_PACKAGE_LENGTH", value_name: String(payload.package_length) });
+      sellerPackageAttrs.push({ id: "SELLER_PACKAGE_LENGTH", value_name: `${payload.package_length} cm` });
     }
     if (payload.package_weight > 0) {
-      sellerPackageAttrs.push({ id: "SELLER_PACKAGE_WEIGHT", value_name: String(payload.package_weight) });
+      sellerPackageAttrs.push({ id: "SELLER_PACKAGE_WEIGHT", value_name: `${payload.package_weight} g` });
     }
 
     const finalAttributes = [...safeAttributes, ...sellerPackageAttrs];
