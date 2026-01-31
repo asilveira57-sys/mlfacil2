@@ -128,3 +128,9 @@ verify_jwt = false
 
 [functions.ad-timeline-recalculate]
 verify_jwt = false
+
+[functions.facebook-get-pixel-id]
+verify_jwt = false
+
+[functions.facebook-conversions]
+verify_jwt = false
