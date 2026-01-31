@@ -23,15 +23,17 @@ serve(async (req) => {
 
     console.log('Processing OAuth callback with code');
 
-    // Parse state to get frontend origin and user_id
+    // Parse state to get frontend origin, user_id, and company_id
     let frontendOrigin = 'https://lovable.dev';
     let userId = '';
+    let companyId: string | null = null;
     
     try {
       if (state) {
         const stateData = JSON.parse(atob(state));
         frontendOrigin = stateData.origin || frontendOrigin;
         userId = stateData.userId || '';
+        companyId = stateData.companyId || null;
       }
     } catch (e) {
       console.log('Could not parse state, using default origin');
@@ -39,6 +41,7 @@ serve(async (req) => {
 
     console.log('Frontend origin:', frontendOrigin);
     console.log('User ID from state:', userId);
+    console.log('Company ID from state:', companyId || 'none');
 
     if (!userId) {
       // Redirect with error - no user ID
@@ -119,25 +122,32 @@ serve(async (req) => {
       // UPDATE existing account - just refresh tokens, keep everything else
       console.log('Updating existing account:', existingAccount.id);
       
+      const updateData: Record<string, unknown> = {
+        access_token: tokenData.access_token,
+        refresh_token: tokenData.refresh_token,
+        token_expires_at: expiresAt.toISOString(),
+        nickname: userData.nickname || null,
+        email: userData.email || null,
+        country_id: userData.site_id || null,
+        // Restore connection status to connected
+        connection_status: 'connected',
+        is_active: true,
+        last_token_refresh_at: now,
+        last_api_ok_at: now,
+        last_api_error_code: null,
+        last_api_error_at: null,
+        consecutive_failures: 0,
+        updated_at: now,
+      };
+      
+      // Update company_id if provided and not already set
+      if (companyId) {
+        updateData.company_id = companyId;
+      }
+      
       const { error: updateError } = await supabaseAdmin
         .from('ml_accounts')
-        .update({
-          access_token: tokenData.access_token,
-          refresh_token: tokenData.refresh_token,
-          token_expires_at: expiresAt.toISOString(),
-          nickname: userData.nickname || null,
-          email: userData.email || null,
-          country_id: userData.site_id || null,
-          // Restore connection status to connected
-          connection_status: 'connected',
-          is_active: true,
-          last_token_refresh_at: now,
-          last_api_ok_at: now,
-          last_api_error_code: null,
-          last_api_error_at: null,
-          consecutive_failures: 0,
-          updated_at: now,
-        })
+        .update(updateData)
         .eq('id', existingAccount.id);
 
       if (updateError) {
@@ -148,25 +158,32 @@ serve(async (req) => {
       }
     } else {
       // INSERT new account - does not affect other accounts
-      console.log('Creating new ML account for seller:', mlUserIdStr);
+      console.log('Creating new ML account for seller:', mlUserIdStr, 'with company:', companyId || 'none');
+      
+      const insertData: Record<string, unknown> = {
+        user_id: userId,
+        ml_user_id: mlUserIdStr,
+        access_token: tokenData.access_token,
+        refresh_token: tokenData.refresh_token,
+        token_expires_at: expiresAt.toISOString(),
+        nickname: userData.nickname || null,
+        email: userData.email || null,
+        country_id: userData.site_id || null,
+        connection_status: 'connected',
+        is_active: true,
+        last_token_refresh_at: now,
+        last_api_ok_at: now,
+        consecutive_failures: 0,
+      };
+      
+      // Add company_id if provided
+      if (companyId) {
+        insertData.company_id = companyId;
+      }
       
       const { error: insertError } = await supabaseAdmin
         .from('ml_accounts')
-        .insert({
-          user_id: userId,
-          ml_user_id: mlUserIdStr,
-          access_token: tokenData.access_token,
-          refresh_token: tokenData.refresh_token,
-          token_expires_at: expiresAt.toISOString(),
-          nickname: userData.nickname || null,
-          email: userData.email || null,
-          country_id: userData.site_id || null,
-          connection_status: 'connected',
-          is_active: true,
-          last_token_refresh_at: now,
-          last_api_ok_at: now,
-          consecutive_failures: 0,
-        });
+        .insert(insertData);
 
       if (insertError) {
         console.error('Error creating ML account:', insertError);

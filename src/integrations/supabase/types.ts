@@ -4998,6 +4998,7 @@ export type Database = {
       ml_accounts: {
         Row: {
           access_token: string
+          company_id: string | null
           connection_status: string | null
           consecutive_failures: number | null
           country_id: string | null
@@ -5018,6 +5019,7 @@ export type Database = {
         }
         Insert: {
           access_token: string
+          company_id?: string | null
           connection_status?: string | null
           consecutive_failures?: number | null
           country_id?: string | null
@@ -5038,6 +5040,7 @@ export type Database = {
         }
         Update: {
           access_token?: string
+          company_id?: string | null
           connection_status?: string | null
           consecutive_failures?: number | null
           country_id?: string | null
@@ -5056,7 +5059,15 @@ export type Database = {
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "ml_accounts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       module_tag_assignments: {
         Row: {

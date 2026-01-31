@@ -25,12 +25,18 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import {
   Building2,
   Plus,
@@ -42,6 +48,9 @@ import {
   Building,
   Unplug,
   RefreshCw,
+  FileText,
+  Link2,
+  ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -59,6 +68,7 @@ interface MarketplaceAccount {
   last_api_error_code: string | null;
   consecutive_failures: number;
   updated_at: string;
+  company_id: string | null;
 }
 
 interface Company {
@@ -69,23 +79,31 @@ interface Company {
   created_at: string;
 }
 
+interface BillingData {
+  nomeFantasia: string | null;
+  razaoSocial: string | null;
+}
+
 const SettingsCompanies = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [accounts, setAccounts] = useState<MarketplaceAccount[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [showNewCompanyDialog, setShowNewCompanyDialog] = useState(false);
-  const [showCompanySheet, setShowCompanySheet] = useState(false);
   const [newCompanyName, setNewCompanyName] = useState("");
   const [newCompanyType, setNewCompanyType] = useState<"pf" | "pj">("pj");
   const [saving, setSaving] = useState(false);
   const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
   const [showDisconnectDialog, setShowDisconnectDialog] = useState(false);
   const [accountToDisconnect, setAccountToDisconnect] = useState<MarketplaceAccount | null>(null);
+  const [billingData, setBillingData] = useState<BillingData | null>(null);
+  const [showLinkDialog, setShowLinkDialog] = useState(false);
+  const [accountToLink, setAccountToLink] = useState<MarketplaceAccount | null>(null);
+  const [selectedCompanyForLink, setSelectedCompanyForLink] = useState<string>("");
+  const [connectingForCompany, setConnectingForCompany] = useState<string | null>(null);
   
   const { activeAccountId, setActiveAccount, refreshAccounts: refreshActiveAccountContext } = useActiveAccount();
 
-  // Fetch companies and accounts from backend
+  // Fetch companies, accounts, and billing from backend
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -101,14 +119,29 @@ const SettingsCompanies = () => {
 
       if (companiesError) throw companiesError;
 
-      // Fetch ML accounts (source of truth) with new tracking fields
+      // Fetch ML accounts with company_id
       const { data: accountsData, error: accountsError } = await supabase
         .from("ml_accounts")
-        .select("id, ml_user_id, nickname, email, is_active, token_expires_at, connection_status, last_api_ok_at, last_api_error_code, consecutive_failures, updated_at")
+        .select("id, ml_user_id, nickname, email, is_active, token_expires_at, connection_status, last_api_ok_at, last_api_error_code, consecutive_failures, updated_at, company_id")
         .eq("user_id", user.id)
         .order("is_active", { ascending: false });
 
       if (accountsError) throw accountsError;
+
+      // Fetch billing data for autofill
+      const { data: billingResult } = await supabase
+        .from("company_billing")
+        .select("trade_name, legal_name, companies!inner(user_id)")
+        .eq("companies.user_id", user.id)
+        .limit(1)
+        .maybeSingle();
+
+      if (billingResult) {
+        setBillingData({
+          nomeFantasia: billingResult.trade_name,
+          razaoSocial: billingResult.legal_name,
+        });
+      }
 
       setCompanies((companiesData || []) as Company[]);
       setAccounts((accountsData || []) as MarketplaceAccount[]);
@@ -123,6 +156,27 @@ const SettingsCompanies = () => {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Get accounts grouped by company
+  const accountsByCompany = accounts.reduce<Record<string, MarketplaceAccount[]>>((acc, account) => {
+    const key = account.company_id || 'unlinked';
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(account);
+    return acc;
+  }, {});
+
+  const unlinkedAccounts = accountsByCompany['unlinked'] || [];
+
+  const handleUseBillingData = () => {
+    if (billingData) {
+      const name = billingData.nomeFantasia || billingData.razaoSocial || "";
+      setNewCompanyName(name);
+      if (billingData.razaoSocial || billingData.nomeFantasia) {
+        setNewCompanyType("pj");
+      }
+      toast.success("Dados de faturamento aplicados");
+    }
+  };
 
   const handleCreateCompany = async () => {
     if (!newCompanyName.trim()) {
@@ -159,8 +213,9 @@ const SettingsCompanies = () => {
     }
   };
 
-  const handleConnectAccount = async () => {
+  const handleConnectAccount = async (companyId?: string | null) => {
     setSaving(true);
+    setConnectingForCompany(companyId || null);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
@@ -168,12 +223,12 @@ const SettingsCompanies = () => {
         return;
       }
 
-      // Call ml-auth-url to get OAuth URL
+      // Call ml-auth-url to get OAuth URL with company context
       const { data, error } = await supabase.functions.invoke("ml-auth-url", {
         headers: { Authorization: `Bearer ${session.access_token}` },
         body: { 
           frontendOrigin: window.location.origin,
-          companyId: selectedCompany?.id || null,
+          companyId: companyId || null,
         },
       });
 
@@ -187,6 +242,32 @@ const SettingsCompanies = () => {
       toast.error("Erro ao conectar conta");
     } finally {
       setSaving(false);
+      setConnectingForCompany(null);
+    }
+  };
+
+  const handleLinkAccountToCompany = async () => {
+    if (!accountToLink || !selectedCompanyForLink) return;
+
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from("ml_accounts")
+        .update({ company_id: selectedCompanyForLink })
+        .eq("id", accountToLink.id);
+
+      if (error) throw error;
+
+      toast.success("Conta vinculada à empresa!");
+      setShowLinkDialog(false);
+      setAccountToLink(null);
+      setSelectedCompanyForLink("");
+      fetchData();
+    } catch (err) {
+      console.error("[SettingsCompanies] Error linking account:", err);
+      toast.error("Erro ao vincular conta");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -198,7 +279,6 @@ const SettingsCompanies = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Não autenticado");
 
-      // Clear tokens and mark as disconnected
       const { error } = await supabase
         .from("ml_accounts")
         .update({
@@ -206,6 +286,7 @@ const SettingsCompanies = () => {
           refresh_token: null,
           token_expires_at: null,
           is_active: false,
+          connection_status: 'disconnected',
           updated_at: new Date().toISOString(),
         })
         .eq("id", accountToDisconnect.id)
@@ -217,7 +298,6 @@ const SettingsCompanies = () => {
       setShowDisconnectDialog(false);
       setAccountToDisconnect(null);
       
-      // Refresh data
       fetchData();
       refreshActiveAccountContext();
     } catch (err) {
@@ -240,13 +320,7 @@ const SettingsCompanies = () => {
     }
   };
 
-  const isTokenExpired = (expiresAt: string | null) => {
-    if (!expiresAt) return true;
-    return new Date(expiresAt) < new Date();
-  };
-
   const getAccountStatus = (account: MarketplaceAccount) => {
-    // Use connection_status as primary source of truth
     const status = account.connection_status || 'connected';
     
     switch (status) {
@@ -262,7 +336,7 @@ const SettingsCompanies = () => {
           label: "Atenção", 
           color: "bg-amber-500/10 text-amber-600 border-amber-200",
           icon: XCircle,
-          needsReconnect: false, // Can try auto-refresh first
+          needsReconnect: false,
         };
       case 'revoked':
         return { 
@@ -295,6 +369,104 @@ const SettingsCompanies = () => {
     return `há ${diffDays}d`;
   };
 
+  const renderAccountCard = (account: MarketplaceAccount, showLinkOption = false) => {
+    const status = getAccountStatus(account);
+    const StatusIcon = status.icon;
+    const lastOk = formatLastOk(account.last_api_ok_at);
+    
+    return (
+      <div
+        key={account.id}
+        className="flex items-center justify-between p-3 border rounded-lg bg-background"
+      >
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center">
+            <Store className="h-4 w-4 text-primary" />
+          </div>
+          <div>
+            <h5 className="font-medium text-sm">
+              {account.nickname || account.email || `Seller ${account.ml_user_id}`}
+            </h5>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>ID: {account.ml_user_id}</span>
+            {lastOk && status.label === 'Conectada' && (
+                <span className="text-success">• Última sync {lastOk}</span>
+              )}
+            </div>
+          </div>
+        </div>
+        
+        <div className="flex items-center gap-2">
+          <div className="flex flex-col items-end gap-1">
+            <Badge variant="outline" className={status.color}>
+              <StatusIcon className="h-3 w-3 mr-1" />
+              {status.label}
+            </Badge>
+            {account.id === activeAccountId && (
+              <Badge variant="secondary" className="text-xs">
+                Conta Ativa
+              </Badge>
+            )}
+          </div>
+          
+          <div className="flex gap-1">
+            {showLinkOption && companies.length > 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                title="Vincular a empresa"
+                onClick={() => {
+                  setAccountToLink(account);
+                  setShowLinkDialog(true);
+                }}
+              >
+                <Link2 className="h-4 w-4" />
+              </Button>
+            )}
+            
+            {status.needsReconnect && (
+              <Button
+                size="sm"
+                variant="default"
+                onClick={() => handleConnectAccount(account.company_id)}
+                disabled={saving}
+              >
+                {saving && connectingForCompany === account.company_id ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                ) : (
+                  <RefreshCw className="h-4 w-4 mr-1" />
+                )}
+                Reconectar
+              </Button>
+            )}
+            
+            {account.id !== activeAccountId && !status.needsReconnect && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleSetActiveAccount(account.id)}
+              >
+                Definir ativa
+              </Button>
+            )}
+            
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+              onClick={() => {
+                setAccountToDisconnect(account);
+                setShowDisconnectDialog(true);
+              }}
+            >
+              <Unplug className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -310,7 +482,7 @@ const SettingsCompanies = () => {
         <div>
           <h3 className="text-lg font-medium">Empresas e Contas</h3>
           <p className="text-sm text-muted-foreground">
-            Gerencie suas empresas e contas do Mercado Livre
+            Organize suas contas do Mercado Livre por empresa
           </p>
         </div>
         <div className="flex gap-2">
@@ -329,10 +501,21 @@ const SettingsCompanies = () => {
               <DialogHeader>
                 <DialogTitle>Adicionar Nova Empresa</DialogTitle>
                 <DialogDescription>
-                  Crie uma nova empresa para organizar suas contas
+                  Crie uma nova empresa para organizar suas contas do Mercado Livre
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
+                {billingData && (billingData.nomeFantasia || billingData.razaoSocial) && (
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start"
+                    onClick={handleUseBillingData}
+                  >
+                    <FileText className="h-4 w-4 mr-2" />
+                    Usar dados de faturamento
+                  </Button>
+                )}
+                
                 <div className="space-y-2">
                   <Label htmlFor="company-name">Nome interno da empresa</Label>
                   <Input
@@ -380,23 +563,121 @@ const SettingsCompanies = () => {
         </div>
       </div>
 
-      {/* ML Accounts Section (Primary) */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Store className="h-5 w-5" />
-            Contas do Mercado Livre
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {accounts.length === 0 ? (
+      {/* Companies Accordion */}
+      {companies.length > 0 ? (
+        <Accordion type="multiple" defaultValue={companies.map(c => c.id)} className="space-y-3">
+          {companies.map((company) => {
+            const companyAccounts = accountsByCompany[company.id] || [];
+            
+            return (
+              <AccordionItem
+                key={company.id}
+                value={company.id}
+                className="border rounded-lg px-4 bg-card"
+              >
+                <AccordionTrigger className="hover:no-underline py-4">
+                  <div className="flex items-center gap-3 text-left">
+                    <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                      <Building2 className="h-5 w-5 text-primary" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-foreground">{company.display_name}</h4>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>{company.billing_type === "pf" ? "Pessoa Física" : "Pessoa Jurídica"}</span>
+                        <span>•</span>
+                        <span>{companyAccounts.length} conta{companyAccounts.length !== 1 ? 's' : ''} ML</span>
+                      </div>
+                    </div>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent className="pb-4">
+                  <div className="space-y-3 pl-2 border-l-2 border-muted ml-5">
+                    {/* ML Accounts under this company */}
+                    {companyAccounts.length > 0 ? (
+                      <div className="space-y-2 pl-4">
+                        {companyAccounts.map(account => renderAccountCard(account))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground pl-4 py-2">
+                        Nenhuma conta vinculada a esta empresa
+                      </p>
+                    )}
+                    
+                    {/* Connect new account button */}
+                    <div className="pl-4 pt-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleConnectAccount(company.id)}
+                        disabled={saving}
+                      >
+                        {saving && connectingForCompany === company.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        ) : (
+                          <Plus className="h-4 w-4 mr-2" />
+                        )}
+                        Conectar conta ML a esta empresa
+                      </Button>
+                    </div>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            );
+          })}
+        </Accordion>
+      ) : (
+        <Card className="border-dashed">
+          <CardContent className="pt-6">
+            <div className="text-center py-4">
+              <Building2 className="h-8 w-8 mx-auto text-muted-foreground/50" />
+              <p className="text-sm text-muted-foreground mt-2">
+                Crie empresas para organizar suas contas do Mercado Livre
+              </p>
+              <Button 
+                className="mt-4" 
+                onClick={() => setShowNewCompanyDialog(true)}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Criar primeira empresa
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Unlinked Accounts Section */}
+      {unlinkedAccounts.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Store className="h-5 w-5" />
+              Contas sem empresa
+              <Badge variant="secondary" className="ml-2">{unlinkedAccounts.length}</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {unlinkedAccounts.map(account => renderAccountCard(account, true))}
+            
+            {companies.length === 0 && (
+              <p className="text-xs text-muted-foreground mt-2">
+                Crie uma empresa para vincular essas contas
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Connect account if no accounts exist */}
+      {accounts.length === 0 && (
+        <Card>
+          <CardContent className="pt-6">
             <div className="text-center py-8 border rounded-lg border-dashed">
               <Store className="h-12 w-12 mx-auto text-muted-foreground/50" />
               <h4 className="mt-4 font-medium text-foreground">Nenhuma conta conectada</h4>
               <p className="text-sm text-muted-foreground mt-1">
                 Conecte sua conta do Mercado Livre para começar
               </p>
-              <Button className="mt-4" onClick={handleConnectAccount} disabled={saving}>
+              <Button className="mt-4" onClick={() => handleConnectAccount(null)} disabled={saving}>
                 {saving ? (
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 ) : (
@@ -405,223 +686,55 @@ const SettingsCompanies = () => {
                 Conectar Conta ML
               </Button>
             </div>
-          ) : (
-            <div className="space-y-3">
-              {accounts.map((account) => {
-                const status = getAccountStatus(account);
-                const StatusIcon = status.icon;
-                const lastOk = formatLastOk(account.last_api_ok_at);
-                
-                return (
-                  <div
-                    key={account.id}
-                    className="flex items-center justify-between p-4 border rounded-lg"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                        <Store className="h-5 w-5 text-primary" />
-                      </div>
-                      <div>
-                        <h5 className="font-medium text-sm">
-                          {account.nickname || account.email || `Seller ${account.ml_user_id}`}
-                        </h5>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <span>ID: {account.ml_user_id}</span>
-                          {lastOk && status.label === 'Conectada' && (
-                            <span className="text-success">• Última sync {lastOk}</span>
-                          )}
-                          {account.last_api_error_code && status.needsReconnect && (
-                            <span className="text-destructive">• Erro: {account.last_api_error_code}</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-3">
-                      <div className="flex flex-col items-end gap-1">
-                        <Badge variant="outline" className={status.color}>
-                          <StatusIcon className="h-3 w-3 mr-1" />
-                          {status.label}
-                        </Badge>
-                        {account.id === activeAccountId && (
-                          <Badge variant="secondary" className="text-xs">
-                            Conta Ativa
-                          </Badge>
-                        )}
-                      </div>
-                      
-                      <div className="flex gap-2">
-                        {/* Show Reconnect button for revoked/disconnected accounts */}
-                        {status.needsReconnect && (
-                          <Button
-                            size="sm"
-                            variant="default"
-                            onClick={handleConnectAccount}
-                            disabled={saving}
-                          >
-                            {saving ? (
-                              <Loader2 className="h-4 w-4 animate-spin mr-1" />
-                            ) : (
-                              <RefreshCw className="h-4 w-4 mr-1" />
-                            )}
-                            Reconectar
-                          </Button>
-                        )}
-                        
-                        {/* Show Set Active button only for connected accounts that are not active */}
-                        {account.id !== activeAccountId && !status.needsReconnect && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleSetActiveAccount(account.id)}
-                          >
-                            Definir ativa
-                          </Button>
-                        )}
-                        
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                          onClick={() => {
-                            setAccountToDisconnect(account);
-                            setShowDisconnectDialog(true);
-                          }}
-                        >
-                          <Unplug className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-              
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={handleConnectAccount}
-                disabled={saving}
-              >
-                {saving ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : (
-                  <Plus className="h-4 w-4 mr-2" />
-                )}
-                Conectar outra conta
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Companies List */}
-      {companies.length > 0 && (
-        <div className="grid gap-4">
-          <h4 className="text-sm font-medium text-muted-foreground">Empresas cadastradas</h4>
-          {companies.map((company) => (
-            <Card
-              key={company.id}
-              className="cursor-pointer hover:border-primary/50 transition-colors"
-              onClick={() => {
-                setSelectedCompany(company);
-                setShowCompanySheet(true);
-              }}
-            >
-              <CardContent className="pt-6">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <Building2 className="h-6 w-6 text-primary" />
-                    </div>
-                    <div>
-                      <h4 className="font-semibold text-foreground">{company.display_name}</h4>
-                      <Badge variant="outline" className="text-xs mt-1">
-                        {company.billing_type === "pf" ? "Pessoa Física" : "Pessoa Jurídica"}
-                      </Badge>
-                    </div>
-                  </div>
-                  <Badge
-                    variant="outline"
-                    className={
-                      company.is_active
-                        ? "bg-green-500/10 text-green-600 border-green-200"
-                        : "bg-gray-500/10 text-gray-600 border-gray-200"
-                    }
-                  >
-                    {company.is_active ? "Ativa" : "Inativa"}
-                  </Badge>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {/* Empty state for companies */}
-      {companies.length === 0 && accounts.length > 0 && (
-        <Card className="border-dashed">
-          <CardContent className="pt-6">
-            <div className="text-center py-4">
-              <Building2 className="h-8 w-8 mx-auto text-muted-foreground/50" />
-              <p className="text-sm text-muted-foreground mt-2">
-                Você pode criar empresas para organizar suas contas (opcional)
-              </p>
-            </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Company Detail Sheet */}
-      <Sheet open={showCompanySheet} onOpenChange={setShowCompanySheet}>
-        <SheetContent className="sm:max-w-lg overflow-y-auto">
-          {selectedCompany && (
-            <>
-              <SheetHeader>
-                <SheetTitle className="flex items-center gap-2">
-                  <Building2 className="h-5 w-5" />
-                  {selectedCompany.display_name}
-                </SheetTitle>
-                <SheetDescription>
-                  Detalhes da empresa
-                </SheetDescription>
-              </SheetHeader>
-
-              <div className="space-y-6 mt-6">
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base">Dados da Empresa</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Nome</span>
-                      <span className="font-medium">{selectedCompany.display_name}</span>
+      {/* Link Account to Company Dialog */}
+      <Dialog open={showLinkDialog} onOpenChange={setShowLinkDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Vincular conta a empresa</DialogTitle>
+            <DialogDescription>
+              Selecione a empresa para vincular a conta{" "}
+              <strong>{accountToLink?.nickname || accountToLink?.ml_user_id}</strong>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Label htmlFor="company-select">Empresa</Label>
+            <Select
+              value={selectedCompanyForLink}
+              onValueChange={setSelectedCompanyForLink}
+            >
+              <SelectTrigger id="company-select" className="mt-2">
+                <SelectValue placeholder="Selecione uma empresa" />
+              </SelectTrigger>
+              <SelectContent>
+                {companies.map(company => (
+                  <SelectItem key={company.id} value={company.id}>
+                    <div className="flex items-center gap-2">
+                      <Building2 className="h-4 w-4" />
+                      {company.display_name}
                     </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Tipo</span>
-                      <span className="font-medium">
-                        {selectedCompany.billing_type === "pf" ? "Pessoa Física" : "Pessoa Jurídica"}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Status</span>
-                      <Badge
-                        variant="outline"
-                        className={
-                          selectedCompany.is_active
-                            ? "bg-green-500/10 text-green-600 border-green-200"
-                            : "bg-gray-500/10 text-gray-600 border-gray-200"
-                        }
-                      >
-                        {selectedCompany.is_active ? "Ativa" : "Inativa"}
-                      </Badge>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowLinkDialog(false)}>
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleLinkAccountToCompany} 
+              disabled={saving || !selectedCompanyForLink}
+            >
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Vincular
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Disconnect Confirmation Dialog */}
       <AlertDialog open={showDisconnectDialog} onOpenChange={setShowDisconnectDialog}>

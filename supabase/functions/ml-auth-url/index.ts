@@ -41,8 +41,9 @@ serve(async (req) => {
 
     console.log('Generating auth URL for user:', user.id);
 
-    // Try to get frontend origin from multiple sources
+    // Try to get frontend origin and companyId from request body
     let frontendOrigin = '';
+    let companyId = '';
     
     // 1. Try request body first
     try {
@@ -51,6 +52,9 @@ serve(async (req) => {
         const body = JSON.parse(bodyText);
         if (body.frontendOrigin) {
           frontendOrigin = body.frontendOrigin;
+        }
+        if (body.companyId) {
+          companyId = body.companyId;
         }
       }
     } catch (e) {
@@ -86,13 +90,16 @@ serve(async (req) => {
       throw new Error('ML_APP_ID not configured');
     }
 
-    // Generate state parameter with frontend origin AND user ID encoded
+    // Generate state parameter with frontend origin, user ID, and company ID encoded
     const stateData = {
       nonce: crypto.randomUUID(),
       origin: frontendOrigin,
       userId: user.id, // Include user ID for secure server-side save
+      companyId: companyId || null, // Include company ID for linking
     };
     const state = btoa(JSON.stringify(stateData));
+
+    console.log('State data:', { origin: frontendOrigin, userId: user.id, companyId: companyId || 'none' });
 
     // Construct Mercado Livre authorization URL (Brazilian domain uses "mercadolivre" with "v")
     const authUrl = new URL('https://auth.mercadolivre.com.br/authorization');
