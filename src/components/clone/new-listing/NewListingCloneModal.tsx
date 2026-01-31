@@ -23,7 +23,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { useQueryClient } from '@tanstack/react-query';
 
-import { TabStep, RawSnapshot, DraftPayload, CATALOG_FORCING_ATTRIBUTES } from './types';
+import { TabStep, RawSnapshot, DraftPayload, CATALOG_FORCING_ATTRIBUTES, Attribute } from './types';
 import { useCloneDraft } from './useCloneDraft';
 import { ReferenceTab, ContentTab, LogisticsTab, PublishTab } from './tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -114,6 +114,39 @@ export function NewListingCloneModal({ open, onOpenChange }: NewListingCloneModa
   const handleBackToContent = () => setActiveTab('content');
   const handleBackToLogistics = () => setActiveTab('logistics');
   
+  // CORREÇÃO 6: Montar atributos finais com base nos toggles
+  const buildFinalAttributes = (payload: DraftPayload, rawSnapshot: RawSnapshot): Attribute[] => {
+    // Começar com atributos seguros (já filtrados)
+    const baseAttributes = [...(payload.attributes || [])];
+    
+    // Se o usuário optou por incluir GTIN/EAN
+    if (payload.include_gtin && payload.captured_gtin) {
+      // Adicionar GTIN se não existir
+      const hasGtin = baseAttributes.some(a => a.id?.toUpperCase() === 'GTIN');
+      if (!hasGtin) {
+        baseAttributes.push({
+          id: 'GTIN',
+          value_name: payload.captured_gtin,
+        });
+      }
+    }
+    
+    // Se o usuário optou por incluir SKU
+    if (payload.include_sku && payload.captured_sku) {
+      const hasSku = baseAttributes.some(a => 
+        a.id?.toUpperCase() === 'SELLER_SKU' || a.id?.toUpperCase() === 'SKU'
+      );
+      if (!hasSku) {
+        baseAttributes.push({
+          id: 'SELLER_SKU',
+          value_name: payload.captured_sku,
+        });
+      }
+    }
+    
+    return baseAttributes;
+  };
+  
   // Executar criação do anúncio
   const handleExecute = async () => {
     if (!draft || !payload || !activeAccount?.sellerId) {
@@ -172,6 +205,25 @@ export function NewListingCloneModal({ open, onOpenChange }: NewListingCloneModa
         .update({ status: 'CREATING' })
         .eq('id', draft.id);
       
+      // CORREÇÃO 6: Montar atributos finais com base nos toggles do usuário
+      const finalAttributes = buildFinalAttributes(payload, draft.raw_snapshot);
+      
+      // CORREÇÃO 6: Log de diagnóstico detalhado
+      const diagnostics = {
+        category_id: payload.category_id,
+        listing_type_id: payload.listing_type_id,
+        pictures_count: payload.pictures?.length || 0,
+        description_present: !!payload.description,
+        include_gtin: payload.include_gtin,
+        include_sku: payload.include_sku,
+        final_attributes_count: finalAttributes.length,
+        catalog_forcing_attrs: finalAttributes.filter(a => 
+          CATALOG_FORCING_ATTRIBUTES.has(a.id?.toUpperCase())
+        ).map(a => a.id),
+      };
+      
+      console.log('[NewListingClone] Execution diagnostics:', diagnostics);
+      
       // Montar checklist para o execute
       const checklist = {
         create_as_normal: true,
@@ -206,10 +258,11 @@ export function NewListingCloneModal({ open, onOpenChange }: NewListingCloneModa
         // Categoria
         category_id: payload.category_id,
         
-        // Atributos seguros
-        final_attributes: payload.attributes.filter(attr => 
-          !CATALOG_FORCING_ATTRIBUTES.has(attr.id?.toUpperCase())
-        ),
+        // CORREÇÃO 5/6: Atributos controlados pelo usuário
+        final_attributes: finalAttributes,
+        
+        // CORREÇÃO 6: Diagnóstico para debug
+        diagnostics,
       };
       
       // Criar ação no sistema existente
@@ -254,7 +307,15 @@ export function NewListingCloneModal({ open, onOpenChange }: NewListingCloneModa
           throw new Error('Token expirado. Reconecte sua conta do Mercado Livre.');
         }
         
-        throw new Error(result?.message || 'Erro desconhecido na criação');
+        // CORREÇÃO 6: Mensagem de erro orientada
+        let errorMessage = result?.message || 'Erro desconhecido na criação';
+        
+        if (errorMessage.includes('title') && errorMessage.includes('invalid')) {
+          errorMessage = 'O Mercado Livre está tratando este item como fluxo controlado. ' +
+            'Remova GTIN/EAN (aba Logística), revise os atributos e tente novamente.';
+        }
+        
+        throw new Error(errorMessage);
       }
       
       // Sucesso!
@@ -399,7 +460,7 @@ export function NewListingCloneModal({ open, onOpenChange }: NewListingCloneModa
             ))}
           </TabsList>
           
-          {/* Conteúdo rolável */}
+          {/* CORREÇÃO 8: Conteúdo com rolagem sempre visível */}
           <ScrollArea className="flex-1 min-h-0 mt-4" type="always">
             <div className="pr-4">
               <TabsContent value="reference" className="mt-0">

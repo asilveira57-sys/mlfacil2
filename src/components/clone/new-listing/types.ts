@@ -38,6 +38,28 @@ export interface RawSnapshot {
   shipping?: Record<string, unknown>;
   is_catalog_source: boolean;
   catalog_product_id?: string;
+  
+  // Captura detalhada
+  capture_log?: CaptureLog;
+  
+  // GTIN/EAN/SKU capturados (para controle do usuário)
+  captured_gtin?: string;
+  captured_ean?: string;
+  captured_sku?: string;
+}
+
+export interface CaptureLog {
+  pictures_count: number;
+  pictures_source: 'api_full' | 'api_thumbnail_fallback' | 'none';
+  description_captured: boolean;
+  description_source?: 'api_public' | 'api_authenticated' | 'none';
+  dimensions_captured: boolean;
+  dimensions_source?: 'attributes' | 'none';
+  attributes_count: number;
+  gtin_found: boolean;
+  ean_found: boolean;
+  sku_found: boolean;
+  errors?: string[];
 }
 
 export interface DraftPayload {
@@ -57,7 +79,7 @@ export interface DraftPayload {
   seller_package_length: number;
   seller_package_weight: number;
   
-  // Atributos (filtrando catalogáveis)
+  // Atributos (filtrando catalogáveis por default)
   attributes: Attribute[];
   
   // Publicação
@@ -66,6 +88,14 @@ export interface DraftPayload {
   
   // Categoria (herdada)
   category_id: string;
+  
+  // Controle de GTIN/EAN/SKU (toggles do usuário)
+  include_gtin?: boolean; // Default: false
+  include_sku?: boolean;  // Default: false
+  
+  // Valores capturados (exibição)
+  captured_gtin?: string;
+  captured_sku?: string;
 }
 
 export interface Picture {
@@ -102,7 +132,7 @@ export interface ValidationLog {
 
 export type TabStep = 'reference' | 'content' | 'logistics' | 'publish';
 
-// Lista de atributos que forçam vínculo com catálogo - NUNCA enviar
+// Lista de atributos que forçam vínculo com catálogo - NUNCA enviar por default
 export const CATALOG_FORCING_ATTRIBUTES = new Set([
   'GTIN',
   'EAN',
@@ -112,5 +142,13 @@ export const CATALOG_FORCING_ATTRIBUTES = new Set([
   'PART_NUMBER',
   'ALPHANUMERIC_MODEL',
   'MANUFACTURER_CODE',
+  'SKU',
+]);
+
+// Atributos de identificação que podem ser controlados pelo usuário
+export const USER_CONTROLLABLE_IDENTIFIERS = new Set([
+  'GTIN',
+  'EAN',
+  'SELLER_SKU',
   'SKU',
 ]);

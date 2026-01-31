@@ -13,6 +13,20 @@ interface SnapshotRequest {
   seller_id?: string;
 }
 
+interface CaptureLog {
+  pictures_count: number;
+  pictures_source: 'api_full' | 'api_thumbnail_fallback' | 'none';
+  description_captured: boolean;
+  description_source?: 'api_public' | 'api_authenticated' | 'none';
+  dimensions_captured: boolean;
+  dimensions_source?: 'attributes' | 'none';
+  attributes_count: number;
+  gtin_found: boolean;
+  ean_found: boolean;
+  sku_found: boolean;
+  errors: string[];
+}
+
 // ============================================================================
 // RESOLUÇÃO DE MLBU → MLB (Catálogo para Item Real)
 // ============================================================================
@@ -24,19 +38,16 @@ async function resolveMLBUtoMLB(mlbuId: string, accessToken?: string): Promise<{
 }> {
   console.log(`[ad-item-snapshot] Resolving MLBU: ${mlbuId}`);
   
-  // Tentar buscar o produto do catálogo via API pública
   const headers: Record<string, string> = {};
   if (accessToken) {
     headers["Authorization"] = `Bearer ${accessToken}`;
   }
   
-  // A API de produtos aceita MLBU diretamente
   const productResponse = await fetch(`https://api.mercadolibre.com/products/${mlbuId}`, {
     headers,
   });
   
   if (!productResponse.ok) {
-    // Tentar com prefixo MLB no mesmo ID numérico
     const numericPart = mlbuId.replace(/^MLBU/i, '');
     const mlbId = `MLB${numericPart}`;
     
@@ -71,7 +82,6 @@ async function resolveMLBUtoMLB(mlbuId: string, accessToken?: string): Promise<{
   
   const productData = await productResponse.json();
   
-  // Extrair o item_id do buy_box_winner
   if (productData.buy_box_winner?.item_id) {
     console.log(`[ad-item-snapshot] MLBU resolved to MLB: ${productData.buy_box_winner.item_id}`);
     return {
@@ -90,7 +100,6 @@ async function resolveMLBUtoMLB(mlbuId: string, accessToken?: string): Promise<{
 
 // ============================================================================
 // BUSCA PÚBLICA DE ITEM (para clone externo - sem necessidade de token)
-// REGRA: Para itens externos, SEMPRE usar endpoint público para evitar ACCESS_DENIED
 // ============================================================================
 async function fetchItemPublic(itemId: string): Promise<{
   ok: boolean;
@@ -100,7 +109,6 @@ async function fetchItemPublic(itemId: string): Promise<{
 }> {
   console.log(`[ad-item-snapshot] Fetching item PUBLIC (no auth): ${itemId}`);
   
-  // Endpoint público de item (não requer autenticação para dados básicos)
   const response = await fetch(`https://api.mercadolibre.com/items/${itemId}`);
   
   if (!response.ok) {
@@ -114,18 +122,58 @@ async function fetchItemPublic(itemId: string): Promise<{
   }
   
   const data = await response.json();
-  console.log(`[ad-item-snapshot] Public fetch SUCCESS: ${itemId}, seller_id=${data.seller_id}`);
+  console.log(`[ad-item-snapshot] Public fetch SUCCESS: ${itemId}, seller_id=${data.seller_id}, pictures=${data.pictures?.length || 0}`);
   return { ok: true, data };
 }
 
-// Extrair atributos de dimensões do item
+// ============================================================================
+// BUSCA DE DESCRIÇÃO PÚBLICA (com retry)
+// ============================================================================
+async function fetchDescriptionPublic(itemId: string, retries = 2): Promise<{
+  text?: string;
+  source: 'api_public' | 'none';
+  error?: string;
+}> {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      console.log(`[ad-item-snapshot] Fetching description PUBLIC: ${itemId} (attempt ${attempt + 1})`);
+      
+      const response = await fetch(`https://api.mercadolibre.com/items/${itemId}/description`, {
+        signal: AbortSignal.timeout(10000), // 10s timeout
+      });
+      
+      if (response.ok) {
+        const descData = await response.json();
+        const text = descData.plain_text || descData.text || '';
+        console.log(`[ad-item-snapshot] Description fetched: ${text.length} chars`);
+        return { text, source: 'api_public' };
+      }
+      
+      console.log(`[ad-item-snapshot] Description fetch failed: ${response.status}`);
+    } catch (e: any) {
+      console.log(`[ad-item-snapshot] Description fetch error (attempt ${attempt + 1}): ${e.message}`);
+      if (attempt < retries - 1) {
+        await new Promise(r => setTimeout(r, 1000)); // Wait 1s before retry
+      }
+    }
+  }
+  
+  return { source: 'none', error: 'Failed to fetch description after retries' };
+}
+
+// ============================================================================
+// EXTRAÇÃO DE DIMENSÕES DO PACOTE
+// ============================================================================
 function extractPackageDimensions(attributes: any[]): {
   height?: number;
   width?: number;
   length?: number;
   weight?: number;
+  found: boolean;
 } {
-  const result: { height?: number; width?: number; length?: number; weight?: number } = {};
+  const result: { height?: number; width?: number; length?: number; weight?: number; found: boolean } = {
+    found: false,
+  };
   
   if (!attributes || !Array.isArray(attributes)) return result;
   
@@ -133,32 +181,91 @@ function extractPackageDimensions(attributes: any[]): {
     const id = attr.id?.toUpperCase();
     const value = attr.value_name ? parseFloat(attr.value_name) : attr.value_struct?.number;
     
-    if (id === 'SELLER_PACKAGE_HEIGHT' || id === 'PACKAGE_HEIGHT') {
-      result.height = value;
-    } else if (id === 'SELLER_PACKAGE_WIDTH' || id === 'PACKAGE_WIDTH') {
-      result.width = value;
-    } else if (id === 'SELLER_PACKAGE_LENGTH' || id === 'PACKAGE_LENGTH') {
-      result.length = value;
-    } else if (id === 'SELLER_PACKAGE_WEIGHT' || id === 'PACKAGE_WEIGHT') {
-      result.weight = value;
+    if (value && !isNaN(value)) {
+      if (id === 'SELLER_PACKAGE_HEIGHT' || id === 'PACKAGE_HEIGHT') {
+        result.height = value;
+        result.found = true;
+      } else if (id === 'SELLER_PACKAGE_WIDTH' || id === 'PACKAGE_WIDTH') {
+        result.width = value;
+        result.found = true;
+      } else if (id === 'SELLER_PACKAGE_LENGTH' || id === 'PACKAGE_LENGTH') {
+        result.length = value;
+        result.found = true;
+      } else if (id === 'SELLER_PACKAGE_WEIGHT' || id === 'PACKAGE_WEIGHT') {
+        result.weight = value;
+        result.found = true;
+      }
     }
   }
   
   return result;
 }
 
-// Buscar descrição pública (sem autenticação)
-async function fetchDescriptionPublic(itemId: string): Promise<string | undefined> {
-  try {
-    const response = await fetch(`https://api.mercadolibre.com/items/${itemId}/description`);
-    if (response.ok) {
-      const descData = await response.json();
-      return descData.plain_text || descData.text;
+// ============================================================================
+// EXTRAÇÃO DE GTIN/EAN/SKU
+// ============================================================================
+function extractIdentifiers(attributes: any[]): {
+  gtin?: string;
+  ean?: string;
+  sku?: string;
+} {
+  const result: { gtin?: string; ean?: string; sku?: string } = {};
+  
+  if (!attributes || !Array.isArray(attributes)) return result;
+  
+  for (const attr of attributes) {
+    const id = attr.id?.toUpperCase();
+    const value = attr.value_name || attr.value_id;
+    
+    if (!value) continue;
+    
+    if (id === 'GTIN') {
+      result.gtin = value;
+    } else if (id === 'EAN') {
+      result.ean = value;
+    } else if (id === 'SELLER_SKU' || id === 'SKU') {
+      result.sku = value;
     }
-  } catch (e) {
-    console.log(`[ad-item-snapshot] Could not fetch public description: ${e}`);
   }
-  return undefined;
+  
+  return result;
+}
+
+// ============================================================================
+// PROCESSAMENTO DE FOTOS COMPLETAS
+// ============================================================================
+function processAllPictures(pictures: any[], thumbnail?: string): {
+  processed: Array<{ id: string; url: string; secure_url: string }>;
+  source: 'api_full' | 'api_thumbnail_fallback' | 'none';
+} {
+  if (!pictures || !Array.isArray(pictures) || pictures.length === 0) {
+    // Fallback para thumbnail
+    if (thumbnail) {
+      const secureUrl = thumbnail.replace(/^http:\/\//i, 'https://');
+      console.log(`[ad-item-snapshot] No pictures array, using thumbnail fallback`);
+      return {
+        processed: [{ id: 'thumb', url: secureUrl, secure_url: secureUrl }],
+        source: 'api_thumbnail_fallback',
+      };
+    }
+    return { processed: [], source: 'none' };
+  }
+  
+  // Processar todas as fotos do array completo
+  const processed = pictures
+    .map((p: any, index: number) => {
+      // Priorizar secure_url, depois url
+      const secureUrl = (p.secure_url || p.url || '').replace(/^http:\/\//i, 'https://');
+      return {
+        id: p.id || `pic_${index}`,
+        url: secureUrl,
+        secure_url: secureUrl,
+      };
+    })
+    .filter((p) => p.url && p.url.length > 0);
+  
+  console.log(`[ad-item-snapshot] Processed ${processed.length} pictures from ${pictures.length} original`);
+  return { processed, source: 'api_full' };
 }
 
 // ============================================================================
@@ -168,6 +275,7 @@ async function fetchItemAuthenticated(itemId: string, accessToken: string): Prom
   ok: boolean;
   data?: any;
   description?: string;
+  descriptionSource?: 'api_authenticated' | 'none';
   error?: string;
   status?: number;
 }> {
@@ -187,8 +295,10 @@ async function fetchItemAuthenticated(itemId: string, accessToken: string): Prom
   
   const data = await response.json();
   
-  // Também buscar descrição
+  // Também buscar descrição com autenticação
   let description: string | undefined;
+  let descriptionSource: 'api_authenticated' | 'none' = 'none';
+  
   try {
     const descResponse = await fetch(`https://api.mercadolibre.com/items/${itemId}/description`, {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -196,12 +306,15 @@ async function fetchItemAuthenticated(itemId: string, accessToken: string): Prom
     if (descResponse.ok) {
       const descData = await descResponse.json();
       description = descData.plain_text || descData.text;
+      if (description) {
+        descriptionSource = 'api_authenticated';
+      }
     }
   } catch (e) {
-    console.log(`[ad-item-snapshot] Could not fetch description: ${e}`);
+    console.log(`[ad-item-snapshot] Could not fetch description with auth: ${e}`);
   }
   
-  return { ok: true, data, description };
+  return { ok: true, data, description, descriptionSource };
 }
 
 serve(async (req) => {
@@ -241,6 +354,19 @@ serve(async (req) => {
       });
     }
 
+    // Initialize capture log
+    const captureLog: CaptureLog = {
+      pictures_count: 0,
+      pictures_source: 'none',
+      description_captured: false,
+      dimensions_captured: false,
+      attributes_count: 0,
+      gtin_found: false,
+      ean_found: false,
+      sku_found: false,
+      errors: [],
+    };
+
     // Normalize item_id
     let normalizedId = item_id.replace(/-/g, '').toUpperCase();
     let resolvedItemId = normalizedId;
@@ -252,7 +378,6 @@ serve(async (req) => {
     // ETAPA 1: Resolver MLBU para MLB se necessário
     // =========================================================================
     if (id_type === 'MLBU' || /^MLBU/i.test(normalizedId)) {
-      // Tentar obter token para resolução (opcional)
       let accessTokenForResolution: string | undefined;
       
       if (seller_id) {
@@ -296,7 +421,6 @@ serve(async (req) => {
     // =========================================================================
     let mlAccount: { access_token: string | null; ml_user_id: string } | null = null;
     
-    // Strategy 1: By ml_account_id (UUID)
     if (ml_account_id) {
       const { data } = await supabase
         .from("ml_accounts")
@@ -306,7 +430,6 @@ serve(async (req) => {
       mlAccount = data;
     }
     
-    // Strategy 2: By seller_id
     if (!mlAccount?.access_token && seller_id) {
       const { data } = await supabase
         .from("ml_accounts")
@@ -317,7 +440,6 @@ serve(async (req) => {
       mlAccount = data;
     }
     
-    // Strategy 3: Get any connected account for this user
     if (!mlAccount?.access_token) {
       const { data } = await supabase
         .from("ml_accounts")
@@ -330,41 +452,50 @@ serve(async (req) => {
     }
 
     // =========================================================================
-    // ETAPA 3: Buscar dados do item
-    // REGRA: Para clone externo, usar endpoint PÚBLICO (não requer token do dono)
-    // IMPORTANTE: SEMPRE priorizar busca pública para evitar ACCESS_DENIED
+    // ETAPA 3: Buscar dados do item (SEMPRE buscar dados completos)
     // =========================================================================
     let itemData: any = null;
     let description: string | undefined;
+    let descriptionSource: 'api_public' | 'api_authenticated' | 'none' = 'none';
     let fetchMethod: 'public' | 'authenticated' | 'cache' = 'public';
     
-    // Primeiro, tentar busca pública (funciona para qualquer item - interno ou externo)
+    // Primeiro, tentar busca pública
     const publicResult = await fetchItemPublic(resolvedItemId);
     
     if (publicResult.ok) {
       itemData = publicResult.data;
       fetchMethod = 'public';
       
-      // Determinar se o item é do usuário logado (interno) ou de outro vendedor (externo)
+      // Determinar se o item é do usuário logado
       const isOwnItem = mlAccount?.ml_user_id && String(itemData.seller_id) === String(mlAccount.ml_user_id);
       
       if (isOwnItem && mlAccount?.access_token) {
-        // Item INTERNO: buscar dados extras com autenticação (descrição completa)
+        // Item INTERNO: buscar dados extras com autenticação
         console.log(`[ad-item-snapshot] Item is INTERNAL - fetching with auth for extra data`);
         const authResult = await fetchItemAuthenticated(resolvedItemId, mlAccount.access_token);
         if (authResult.ok) {
           itemData = authResult.data;
           description = authResult.description;
+          descriptionSource = authResult.descriptionSource || 'none';
           fetchMethod = 'authenticated';
         }
       } else {
         // Item EXTERNO: buscar descrição publicamente
         console.log(`[ad-item-snapshot] Item is EXTERNAL - fetching public description`);
-        description = await fetchDescriptionPublic(resolvedItemId);
+        const descResult = await fetchDescriptionPublic(resolvedItemId);
+        description = descResult.text;
+        descriptionSource = descResult.source;
+        if (descResult.error) {
+          captureLog.errors.push(descResult.error);
+        }
       }
+      
+      captureLog.description_captured = !!description;
+      captureLog.description_source = descriptionSource;
     } else {
       // Se busca pública falhou, tentar cache local
       console.log(`[ad-item-snapshot] Public fetch failed - trying cache`);
+      captureLog.errors.push(`Public API failed: ${publicResult.status}`);
       
       const { data: cachedItem } = await supabase
         .from("meli_listings_cache")
@@ -373,185 +504,114 @@ serve(async (req) => {
         .single();
 
       if (cachedItem) {
-        console.log(`[ad-item-snapshot] Found cached data for ${resolvedItemId}, fetching complementary public data`);
+        console.log(`[ad-item-snapshot] Found cached data for ${resolvedItemId}`);
+        fetchMethod = 'cache';
         
-        // Cache encontrado mas incompleto - buscar dados complementares via API pública
-        // Isso garante que descrição, fotos e atributos estejam disponíveis
-        let publicData: any = null;
-        let publicDescription: string | undefined = undefined;
-        
+        // Tentar buscar dados complementares via API pública mesmo com cache
         try {
-          // Buscar dados completos do item e descrição em paralelo
-          const [publicResult, descResult] = await Promise.all([
+          const [publicRetry, descResult] = await Promise.all([
             fetchItemPublic(resolvedItemId),
             fetchDescriptionPublic(resolvedItemId)
           ]);
           
-          if (publicResult.ok) {
-            publicData = publicResult.data;
-            console.log(`[ad-item-snapshot] Complementary public data fetched successfully`);
+          if (publicRetry.ok) {
+            itemData = publicRetry.data;
+            description = descResult.text;
+            descriptionSource = descResult.source;
+            captureLog.description_captured = !!description;
+            captureLog.description_source = descriptionSource;
+          } else {
+            // Usar cache como fallback final
+            itemData = {
+              id: cachedItem.item_id,
+              title: cachedItem.title,
+              price: cachedItem.price,
+              thumbnail: cachedItem.thumbnail,
+              status: cachedItem.status,
+              available_quantity: cachedItem.available_quantity,
+              sold_quantity: cachedItem.sold_quantity,
+              category_id: cachedItem.category_id,
+              seller_id: cachedItem.seller_id,
+              pictures: [],
+              attributes: [],
+            };
+            captureLog.errors.push('Using cache fallback - no pictures or attributes');
           }
-          publicDescription = descResult;
-        } catch (e) {
-          console.log(`[ad-item-snapshot] Failed to fetch complementary data, using cache only: ${e}`);
+        } catch (e: any) {
+          captureLog.errors.push(`Cache fallback error: ${e.message}`);
+          itemData = {
+            id: cachedItem.item_id,
+            title: cachedItem.title,
+            price: cachedItem.price,
+            thumbnail: cachedItem.thumbnail,
+            status: cachedItem.status,
+            available_quantity: cachedItem.available_quantity,
+            category_id: cachedItem.category_id,
+            seller_id: cachedItem.seller_id,
+            pictures: [],
+            attributes: [],
+          };
         }
-        
-        // Se conseguiu dados públicos, usar eles (mais completos)
-        // Senão, usar cache como fallback
-        if (publicData) {
-          // Extrair dimensões dos atributos
-          const dimensions = extractPackageDimensions(publicData.attributes);
-          
-          // Detectar se é catálogo
-          const isCatalogSource = !!(
-            publicData.catalog_product_id ||
-            publicData.catalog_listing === true ||
-            publicData.parent_item_id
-          );
-          
-          return new Response(JSON.stringify({
-            success: true,
-            source: "cache+public",
-            resolved_item_id: resolvedItemId,
-            catalog_resolution: catalogResolution,
-            item: {
-              id: publicData.id,
-              title: publicData.title,
-              price: publicData.price,
-              thumbnail: publicData.thumbnail || publicData.pictures?.[0]?.url,
-              pictures: publicData.pictures,
-              status: publicData.status,
-              available_quantity: publicData.available_quantity,
-              sold_quantity: publicData.sold_quantity,
-              category_id: publicData.category_id,
-              seller_id: publicData.seller_id,
-              description: publicDescription,
-              attributes: publicData.attributes,
-              listing_type_id: publicData.listing_type_id,
-              catalog_product_id: publicData.catalog_product_id,
-              catalog_listing: publicData.catalog_listing,
-              parent_item_id: publicData.parent_item_id,
-              is_catalog_source: isCatalogSource,
-              // Dimensões extraídas
-              seller_package_height: dimensions.height,
-              seller_package_width: dimensions.width,
-              seller_package_length: dimensions.length,
-              seller_package_weight: dimensions.weight,
-            },
-          }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-        
-      // Fallback para cache puro - AINDA ASSIM buscar dados públicos para completar
-      // Isso garante que descrição, fotos e dimensões estejam disponíveis
-      console.log(`[ad-item-snapshot] Cache fallback: attempting public fetch for missing data`);
-      
-      try {
-        const [publicResult, descResult] = await Promise.all([
-          fetchItemPublic(resolvedItemId),
-          fetchDescriptionPublic(resolvedItemId)
-        ]);
-        
-        if (publicResult.ok && publicResult.data) {
-          const publicData = publicResult.data;
-          const dimensions = extractPackageDimensions(publicData.attributes);
-          
-          const isCatalogSource = !!(
-            publicData.catalog_product_id ||
-            publicData.catalog_listing === true ||
-            publicData.parent_item_id
-          );
-          
-          return new Response(JSON.stringify({
-            success: true,
-            source: "cache+public_fallback",
-            resolved_item_id: resolvedItemId,
-            catalog_resolution: catalogResolution,
-            item: {
-              id: publicData.id,
-              title: publicData.title,
-              price: publicData.price,
-              thumbnail: publicData.thumbnail || publicData.pictures?.[0]?.url,
-              pictures: publicData.pictures,
-              status: publicData.status,
-              available_quantity: publicData.available_quantity,
-              sold_quantity: publicData.sold_quantity,
-              category_id: publicData.category_id,
-              seller_id: publicData.seller_id,
-              description: descResult,
-              attributes: publicData.attributes,
-              listing_type_id: publicData.listing_type_id,
-              catalog_product_id: publicData.catalog_product_id,
-              catalog_listing: publicData.catalog_listing,
-              parent_item_id: publicData.parent_item_id,
-              is_catalog_source: isCatalogSource,
-              seller_package_height: dimensions.height,
-              seller_package_width: dimensions.width,
-              seller_package_length: dimensions.length,
-              seller_package_weight: dimensions.weight,
-            },
-          }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-      } catch (e) {
-        console.log(`[ad-item-snapshot] Public fallback failed, using cache only: ${e}`);
       }
       
-      // Último recurso: cache puro (sem dados complementares)
-      return new Response(JSON.stringify({
-        success: true,
-        source: "cache_only",
-        resolved_item_id: resolvedItemId,
-        catalog_resolution: catalogResolution,
-        item: {
-          id: cachedItem.item_id,
-          title: cachedItem.title,
-          price: cachedItem.price,
-          thumbnail: cachedItem.thumbnail,
-          status: cachedItem.status,
-          available_quantity: cachedItem.available_quantity,
-          sold_quantity: cachedItem.sold_quantity,
-          category_id: cachedItem.category_id,
-          seller_id: cachedItem.seller_id,
-          is_catalog_source: false,
-        },
-      }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-      // Nem público nem cache - retornar erro
-      return new Response(JSON.stringify({ 
-        success: false, 
-        error: "ITEM_NOT_FOUND",
-        message: `Não foi possível obter dados do anúncio ${resolvedItemId}`,
-        user_guidance: "Verifique se o ID está correto e tente novamente.",
-        api_status: publicResult.status,
-      }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      if (!itemData) {
+        return new Response(JSON.stringify({ 
+          success: false, 
+          error: "ITEM_NOT_FOUND",
+          message: `Não foi possível obter dados do anúncio ${resolvedItemId}`,
+          user_guidance: "Verifique se o ID está correto e tente novamente.",
+          api_status: publicResult.status,
+          capture_log: captureLog,
+        }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     // =========================================================================
-    // ETAPA 4: Processar dados e retornar
+    // ETAPA 4: Processar fotos completas
     // =========================================================================
+    const { processed: processedPictures, source: picturesSource } = processAllPictures(
+      itemData.pictures,
+      itemData.thumbnail
+    );
     
-    // Detect catalog status
+    captureLog.pictures_count = processedPictures.length;
+    captureLog.pictures_source = picturesSource;
+
+    // =========================================================================
+    // ETAPA 5: Extrair dimensões e identificadores
+    // =========================================================================
+    const dimensions = extractPackageDimensions(itemData.attributes || []);
+    captureLog.dimensions_captured = dimensions.found;
+    captureLog.dimensions_source = dimensions.found ? 'attributes' : 'none';
+    
+    const identifiers = extractIdentifiers(itemData.attributes || []);
+    captureLog.gtin_found = !!identifiers.gtin;
+    captureLog.ean_found = !!identifiers.ean;
+    captureLog.sku_found = !!identifiers.sku;
+    
+    captureLog.attributes_count = (itemData.attributes || []).length;
+
+    // =========================================================================
+    // ETAPA 6: Detect catalog status
+    // =========================================================================
     const isCatalogSource = !!(
       itemData.catalog_product_id ||
       itemData.catalog_listing === true ||
       itemData.parent_item_id
     );
 
-    // Build comprehensive response
+    // =========================================================================
+    // ETAPA 7: Build comprehensive response
+    // =========================================================================
     const response = {
       success: true,
       source: fetchMethod,
       resolved_item_id: resolvedItemId,
       catalog_resolution: catalogResolution,
+      capture_log: captureLog,
       item: {
         id: itemData.id,
         title: itemData.title,
@@ -564,17 +624,29 @@ serve(async (req) => {
         listing_type_id: itemData.listing_type_id,
         category_id: itemData.category_id,
         thumbnail: itemData.thumbnail,
-        pictures: itemData.pictures,
-        attributes: itemData.attributes,
+        // FOTOS COMPLETAS (todas)
+        pictures: processedPictures,
+        // ATRIBUTOS COMPLETOS
+        attributes: itemData.attributes || [],
         seller_id: itemData.seller_id,
         status: itemData.status,
         permalink: itemData.permalink,
-        description: description,
+        // DESCRIÇÃO COMPLETA
+        description: description || '',
         // Catalog info
         catalog_product_id: itemData.catalog_product_id,
         catalog_listing: itemData.catalog_listing,
         parent_item_id: itemData.parent_item_id,
         is_catalog_source: isCatalogSource,
+        // DIMENSÕES EXTRAÍDAS
+        seller_package_height: dimensions.height,
+        seller_package_width: dimensions.width,
+        seller_package_length: dimensions.length,
+        seller_package_weight: dimensions.weight,
+        // IDENTIFICADORES CAPTURADOS (para controle do usuário)
+        captured_gtin: identifiers.gtin || identifiers.ean,
+        captured_ean: identifiers.ean,
+        captured_sku: identifiers.sku,
         // Additional fields for cloning
         shipping: itemData.shipping,
         sale_terms: itemData.sale_terms,
@@ -584,7 +656,7 @@ serve(async (req) => {
       is_own_item: mlAccount?.ml_user_id ? String(itemData.seller_id) === String(mlAccount.ml_user_id) : false,
     };
 
-    console.log(`[ad-item-snapshot] Success: ${resolvedItemId}, is_own=${response.is_own_item}, is_catalog=${isCatalogSource}, fetch_method=${fetchMethod}`);
+    console.log(`[ad-item-snapshot] Success: ${resolvedItemId}, is_own=${response.is_own_item}, is_catalog=${isCatalogSource}, fetch_method=${fetchMethod}, pictures=${captureLog.pictures_count}, desc=${captureLog.description_captured}, dims=${captureLog.dimensions_captured}`);
 
     return new Response(JSON.stringify(response), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
