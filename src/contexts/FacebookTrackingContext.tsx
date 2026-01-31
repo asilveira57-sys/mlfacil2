@@ -49,8 +49,10 @@ export function FacebookTrackingProvider({ children }: FacebookTrackingProviderP
   // Initialize Pixel on mount
   useEffect(() => {
     supabase.functions.invoke('facebook-get-pixel-id').then(({ data }) => {
-      if (data?.pixelId) {
-        initFacebookPixel(data.pixelId);
+      // Handle standardized response format { ok, data }
+      const pixelId = data?.data?.pixelId || data?.pixelId;
+      if (pixelId) {
+        initFacebookPixel(pixelId);
         // Track initial page view
         pixelPageView();
         getCurrentUserData().then(userData => {
