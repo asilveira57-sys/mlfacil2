@@ -90,6 +90,7 @@ async function resolveMLBUtoMLB(mlbuId: string, accessToken?: string): Promise<{
 
 // ============================================================================
 // BUSCA PÚBLICA DE ITEM (para clone externo - sem necessidade de token)
+// REGRA: Para itens externos, SEMPRE usar endpoint público para evitar ACCESS_DENIED
 // ============================================================================
 async function fetchItemPublic(itemId: string): Promise<{
   ok: boolean;
@@ -103,6 +104,8 @@ async function fetchItemPublic(itemId: string): Promise<{
   const response = await fetch(`https://api.mercadolibre.com/items/${itemId}`);
   
   if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    console.log(`[ad-item-snapshot] Public fetch failed: ${response.status} - ${errorText.slice(0, 200)}`);
     return {
       ok: false,
       error: `Item não encontrado: ${itemId}`,
@@ -111,7 +114,22 @@ async function fetchItemPublic(itemId: string): Promise<{
   }
   
   const data = await response.json();
+  console.log(`[ad-item-snapshot] Public fetch SUCCESS: ${itemId}, seller_id=${data.seller_id}`);
   return { ok: true, data };
+}
+
+// Buscar descrição pública (sem autenticação)
+async function fetchDescriptionPublic(itemId: string): Promise<string | undefined> {
+  try {
+    const response = await fetch(`https://api.mercadolibre.com/items/${itemId}/description`);
+    if (response.ok) {
+      const descData = await response.json();
+      return descData.plain_text || descData.text;
+    }
+  } catch (e) {
+    console.log(`[ad-item-snapshot] Could not fetch public description: ${e}`);
+  }
+  return undefined;
 }
 
 // ============================================================================
@@ -285,94 +303,81 @@ serve(async (req) => {
     // =========================================================================
     // ETAPA 3: Buscar dados do item
     // REGRA: Para clone externo, usar endpoint PÚBLICO (não requer token do dono)
+    // IMPORTANTE: SEMPRE priorizar busca pública para evitar ACCESS_DENIED
     // =========================================================================
     let itemData: any = null;
     let description: string | undefined;
     let fetchMethod: 'public' | 'authenticated' | 'cache' = 'public';
     
-    // Primeiro, tentar busca pública (funciona para qualquer item)
+    // Primeiro, tentar busca pública (funciona para qualquer item - interno ou externo)
     const publicResult = await fetchItemPublic(resolvedItemId);
     
     if (publicResult.ok) {
       itemData = publicResult.data;
       fetchMethod = 'public';
       
-      // Se temos token E o item é nosso, buscar dados extras (descrição)
-      if (mlAccount?.access_token && String(itemData.seller_id) === String(mlAccount.ml_user_id)) {
+      // Determinar se o item é do usuário logado (interno) ou de outro vendedor (externo)
+      const isOwnItem = mlAccount?.ml_user_id && String(itemData.seller_id) === String(mlAccount.ml_user_id);
+      
+      if (isOwnItem && mlAccount?.access_token) {
+        // Item INTERNO: buscar dados extras com autenticação (descrição completa)
+        console.log(`[ad-item-snapshot] Item is INTERNAL - fetching with auth for extra data`);
         const authResult = await fetchItemAuthenticated(resolvedItemId, mlAccount.access_token);
         if (authResult.ok) {
           itemData = authResult.data;
           description = authResult.description;
           fetchMethod = 'authenticated';
         }
+      } else {
+        // Item EXTERNO: buscar descrição publicamente
+        console.log(`[ad-item-snapshot] Item is EXTERNAL - fetching public description`);
+        description = await fetchDescriptionPublic(resolvedItemId);
       }
     } else {
-      // Fallback: tentar autenticado se temos token
-      if (mlAccount?.access_token) {
-        const authResult = await fetchItemAuthenticated(resolvedItemId, mlAccount.access_token);
-        if (authResult.ok) {
-          itemData = authResult.data;
-          description = authResult.description;
-          fetchMethod = 'authenticated';
-        } else if (authResult.status === 403 || authResult.status === 404) {
-          // Retornar erro apropriado
-          return new Response(JSON.stringify({
-            success: false,
-            error: authResult.status === 403 ? "ACCESS_DENIED" : "NOT_FOUND",
-            message: authResult.status === 403 
-              ? `Sem permissão para acessar o anúncio ${resolvedItemId}`
-              : `Anúncio ${resolvedItemId} não encontrado`,
-            api_status: authResult.status,
-            catalog_resolution: catalogResolution,
-          }), {
-            status: 200,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-      }
+      // Se busca pública falhou, tentar cache local
+      console.log(`[ad-item-snapshot] Public fetch failed - trying cache`);
       
-      // Último recurso: cache local
-      if (!itemData) {
-        const { data: cachedItem } = await supabase
-          .from("meli_listings_cache")
-          .select("*")
-          .eq("item_id", resolvedItemId)
-          .single();
+      const { data: cachedItem } = await supabase
+        .from("meli_listings_cache")
+        .select("*")
+        .eq("item_id", resolvedItemId)
+        .single();
 
-        if (cachedItem) {
-          console.log(`[ad-item-snapshot] Returning cached data for ${resolvedItemId}`);
-          return new Response(JSON.stringify({
-            success: true,
-            source: "cache",
-            resolved_item_id: resolvedItemId,
-            catalog_resolution: catalogResolution,
-            item: {
-              id: cachedItem.item_id,
-              title: cachedItem.title,
-              price: cachedItem.price,
-              thumbnail: cachedItem.thumbnail,
-              status: cachedItem.status,
-              available_quantity: cachedItem.available_quantity,
-              sold_quantity: cachedItem.sold_quantity,
-              category_id: cachedItem.category_id,
-              seller_id: cachedItem.seller_id,
-              is_catalog_source: false,
-            },
-          }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-
-        return new Response(JSON.stringify({ 
-          success: false, 
-          error: "ITEM_NOT_FOUND",
-          message: `Não foi possível obter dados do anúncio ${resolvedItemId}`,
-          user_guidance: "Verifique se o ID está correto e tente novamente.",
+      if (cachedItem) {
+        console.log(`[ad-item-snapshot] Returning cached data for ${resolvedItemId}`);
+        return new Response(JSON.stringify({
+          success: true,
+          source: "cache",
+          resolved_item_id: resolvedItemId,
+          catalog_resolution: catalogResolution,
+          item: {
+            id: cachedItem.item_id,
+            title: cachedItem.title,
+            price: cachedItem.price,
+            thumbnail: cachedItem.thumbnail,
+            status: cachedItem.status,
+            available_quantity: cachedItem.available_quantity,
+            sold_quantity: cachedItem.sold_quantity,
+            category_id: cachedItem.category_id,
+            seller_id: cachedItem.seller_id,
+            is_catalog_source: false,
+          },
         }), {
-          status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+
+      // Nem público nem cache - retornar erro
+      return new Response(JSON.stringify({ 
+        success: false, 
+        error: "ITEM_NOT_FOUND",
+        message: `Não foi possível obter dados do anúncio ${resolvedItemId}`,
+        user_guidance: "Verifique se o ID está correto e tente novamente.",
+        api_status: publicResult.status,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // =========================================================================

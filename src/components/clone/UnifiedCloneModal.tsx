@@ -3,7 +3,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -13,15 +12,22 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { 
   Loader2, Link, AlertCircle, CheckCircle2, Info, Copy, 
-  ChevronDown, Package, Scale 
+  Package, Scale, Pause, Play
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { useQueryClient } from '@tanstack/react-query';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 interface UnifiedCloneModalProps {
   open: boolean;
@@ -56,13 +62,14 @@ interface CloneFormData {
   price: number;
   quantity: number;
   sku: string;
-  listing_type: string;
+  barcode: string;
+  listing_type: 'gold_special' | 'gold_pro';
   // Seller package dimensions - OBRIGATÓRIO
   seller_package_height: number;
   seller_package_width: number;
   seller_package_length: number;
   seller_package_weight: number;
-  // Advanced options
+  // Status
   create_paused: boolean;
 }
 
@@ -176,15 +183,15 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
     price: 0,
     quantity: 1,
     sku: '',
+    barcode: '',
     listing_type: 'gold_special',
     seller_package_height: 0,
     seller_package_width: 0,
     seller_package_length: 0,
     seller_package_weight: 0,
-    create_paused: false,
+    create_paused: true, // Default: criar pausado
   });
   const [confirmText, setConfirmText] = useState('');
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   
   const detectedId = useMemo(() => extractMeliId(inputValue), [inputValue]);
   
@@ -198,6 +205,11 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
     );
   }, [formData]);
   
+  // Validar fotos
+  const hasPictures = useMemo(() => {
+    return preview?.pictures && preview.pictures.length > 0;
+  }, [preview]);
+  
   const resetModal = useCallback(() => {
     setStep('input');
     setLoading(false);
@@ -210,15 +222,15 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
       price: 0,
       quantity: 1,
       sku: '',
+      barcode: '',
       listing_type: 'gold_special',
       seller_package_height: 0,
       seller_package_width: 0,
       seller_package_length: 0,
       seller_package_weight: 0,
-      create_paused: false,
+      create_paused: true,
     });
     setConfirmText('');
-    setAdvancedOpen(false);
   }, []);
   
   const handleClose = useCallback((open: boolean) => {
@@ -313,18 +325,26 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
       };
       
       setPreview(previewData);
+      
+      // Determinar listing_type inicial - apenas gold_special ou gold_pro
+      let initialListingType: 'gold_special' | 'gold_pro' = 'gold_special';
+      if (itemData.listing_type_id === 'gold_pro') {
+        initialListingType = 'gold_pro';
+      }
+      
       setFormData({
         title: itemData.title || '',
         description: itemData.description || '',
         price: itemData.price,
         quantity: itemData.available_quantity || 1,
         sku: '',
-        listing_type: itemData.listing_type_id === 'free' ? 'gold_special' : (itemData.listing_type_id || 'gold_special'),
+        barcode: '',
+        listing_type: initialListingType,
         seller_package_height: dimensions.height || 0,
         seller_package_width: dimensions.width || 0,
         seller_package_length: dimensions.length || 0,
         seller_package_weight: dimensions.weight || 0,
-        create_paused: false,
+        create_paused: true, // Default: criar pausado
       });
       setStep('preview');
       
@@ -347,6 +367,11 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
     
     if (!formData.title.trim()) {
       setError('O título é obrigatório.');
+      return;
+    }
+    
+    if (!hasPictures) {
+      setError('É necessário pelo menos 1 foto para clonar o anúncio.');
       return;
     }
     
@@ -426,7 +451,7 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
         attributes: true,
         price: true,
         
-        source: 'unified_clone_v2',
+        source: 'unified_clone_v3',
         source_url: inputValue.trim(),
         clone_mode: preview.clone_mode,
         listing_mode: preview.listing_mode,
@@ -438,6 +463,7 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
         override_price: formData.price !== preview.price ? formData.price : undefined,
         override_quantity: formData.quantity !== preview.available_quantity ? formData.quantity : undefined,
         override_sku: formData.sku || undefined,
+        override_barcode: formData.barcode || undefined,
         override_listing_type: formData.listing_type,
         
         // Dimensões do pacote (OBRIGATÓRIO)
@@ -446,7 +472,7 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
         seller_package_length: formData.seller_package_length,
         seller_package_weight: formData.seller_package_weight,
         
-        // Opções avançadas
+        // Status: Pausado ou Ativo
         create_paused: formData.create_paused,
       };
       
@@ -488,8 +514,9 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
       }
       
       // Success!
+      const statusMsg = formData.create_paused ? '(pausado)' : '(ativo)';
       toast.success('Anúncio clonado com sucesso!', {
-        description: `Novo ID: ${execResult.result?.new_item_id}`,
+        description: `Novo ID: ${execResult.result?.new_item_id} ${statusMsg}`,
       });
       
       queryClient.invalidateQueries({ queryKey: ['ad-lifecycle-actions'] });
@@ -504,10 +531,13 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
     }
   };
   
+  const listingTypeLabel = formData.listing_type === 'gold_pro' ? 'Premium' : 'Clássico';
+  const statusLabel = formData.create_paused ? 'Pausado' : 'Ativo';
+  
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] flex flex-col p-0">
+        <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <Copy className="h-5 w-5" />
             Clonar anúncio (automático)
@@ -517,69 +547,442 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
           </DialogDescription>
         </DialogHeader>
         
-        {/* Step 1: Input */}
-        {step === 'input' && (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="clone-input">ID do anúncio ou URL do Mercado Livre</Label>
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Link className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <ScrollArea className="flex-1 px-6">
+          <div className="pb-4">
+            {/* Step 1: Input */}
+            {step === 'input' && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="clone-input">ID do anúncio ou URL do Mercado Livre</Label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Link className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="clone-input"
+                        placeholder="https://www.mercadolivre.com.br/... ou MLB..."
+                        value={inputValue}
+                        onChange={(e) => {
+                          setInputValue(e.target.value);
+                          setError(null);
+                        }}
+                        className="pl-9"
+                        autoFocus
+                      />
+                    </div>
+                    <Button variant="outline" onClick={handlePaste} type="button">
+                      Colar
+                    </Button>
+                  </div>
+                  
+                  {error && (
+                    <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/30">
+                      <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+                      <p className="text-sm text-destructive whitespace-pre-wrap">{error}</p>
+                    </div>
+                  )}
+                  
+                  {inputValue && detectedId && (
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-primary" />
+                      <p className="text-sm text-muted-foreground">
+                        ID detectado: <span className="font-mono font-medium">{detectedId.id}</span>
+                        {detectedId.type === 'MLBU' && (
+                          <span className="ml-2 text-xs text-warning">(catálogo - será resolvido)</span>
+                        )}
+                      </p>
+                    </div>
+                  )}
+                  
+                  {inputValue && !detectedId && (
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4 text-warning" />
+                      <p className="text-sm text-warning">
+                        Nenhum ID de anúncio (MLB) encontrado
+                      </p>
+                    </div>
+                  )}
+                </div>
+                
+                <div className="flex items-start gap-2 p-3 rounded-md bg-muted/50">
+                  <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                  <p className="text-xs text-muted-foreground">
+                    Cole o link de qualquer anúncio do Mercado Livre (incluindo links de catálogo /up/MLBU...). 
+                    O sistema detectará automaticamente se é interno (sua conta) ou externo (outra conta).
+                  </p>
+                </div>
+              </div>
+            )}
+            
+            {/* Step 2: Preview */}
+            {step === 'preview' && preview && (
+              <div className="space-y-4">
+                {/* Item Preview Card */}
+                <div className="flex gap-4 p-4 rounded-lg border bg-muted/30">
+                  {preview.thumbnail && (
+                    <img 
+                      src={preview.thumbnail} 
+                      alt={preview.title}
+                      className="w-20 h-20 object-cover rounded-md"
+                    />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm line-clamp-2">{preview.title}</p>
+                    <p className="text-lg font-bold mt-1">
+                      R$ {preview.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      ID: <span className="font-mono">{preview.item_id}</span>
+                    </p>
+                  </div>
+                </div>
+                
+                {/* Detection Results */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 rounded-md border">
+                    <p className="text-xs text-muted-foreground mb-1">Origem detectada</p>
+                    <Badge variant={preview.clone_mode === 'internal' ? 'default' : 'secondary'}>
+                      {preview.clone_mode === 'internal' ? 'Interno (sua conta)' : 'Externo (outra conta)'}
+                    </Badge>
+                  </div>
+                  <div className="p-3 rounded-md border">
+                    <p className="text-xs text-muted-foreground mb-1">Tipo do anúncio fonte</p>
+                    <Badge variant={preview.listing_mode === 'catalog' ? 'outline' : 'default'}>
+                      {preview.listing_mode === 'catalog' ? 'Catálogo' : 'Normal'}
+                    </Badge>
+                  </div>
+                </div>
+                
+                {/* Catalog Alert - SEMPRE criar como normal */}
+                {preview.is_catalog_source && (
+                  <div className="flex items-start gap-2 p-3 rounded-md bg-primary/10 border border-primary/30">
+                    <Info className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+                    <div className="text-xs text-primary">
+                      <p className="font-medium">Anúncio de catálogo detectado</p>
+                      <p className="mt-1">
+                        Por padrão, o clone será criado como <strong>anúncio normal</strong> (não catálogo) 
+                        para permitir edição de título, fotos e descrição. Você pode vincular ao catálogo depois, se desejar.
+                      </p>
+                    </div>
+                  </div>
+                )}
+                
+                <Separator />
+                
+                {/* Editable Fields - SEMPRE editáveis (clone como normal) */}
+                <div className="space-y-4">
+                  <p className="text-sm font-medium">Dados do novo anúncio</p>
+                  
+                  {/* TÍTULO - SEMPRE EDITÁVEL */}
+                  <div className="space-y-1">
+                    <Label htmlFor="clone-title" className="text-xs">
+                      Título <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="clone-title"
+                      value={formData.title}
+                      onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+                      placeholder="Título do anúncio"
+                      maxLength={60}
+                    />
+                    <p className="text-xs text-muted-foreground">{formData.title.length}/60 caracteres</p>
+                  </div>
+                  
+                  {/* DESCRIÇÃO - SEMPRE EDITÁVEL (clone normal) */}
+                  <div className="space-y-1">
+                    <Label htmlFor="clone-description" className="text-xs">Descrição</Label>
+                    <Textarea
+                      id="clone-description"
+                      value={formData.description}
+                      onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                      placeholder="Descrição do produto..."
+                      rows={3}
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label htmlFor="clone-price" className="text-xs">
+                        Preço (R$) <span className="text-destructive">*</span>
+                      </Label>
+                      <Input
+                        id="clone-price"
+                        type="number"
+                        step="0.01"
+                        value={formData.price}
+                        onChange={(e) => setFormData(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="clone-qty" className="text-xs">
+                        Quantidade <span className="text-destructive">*</span>
+                      </Label>
+                      <Input
+                        id="clone-qty"
+                        type="number"
+                        min="1"
+                        value={formData.quantity}
+                        onChange={(e) => setFormData(prev => ({ ...prev, quantity: parseInt(e.target.value) || 1 }))}
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label htmlFor="clone-sku" className="text-xs">SKU (opcional)</Label>
+                      <Input
+                        id="clone-sku"
+                        placeholder="Código interno"
+                        value={formData.sku}
+                        onChange={(e) => setFormData(prev => ({ ...prev, sku: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="clone-barcode" className="text-xs">Código de barras (opcional)</Label>
+                      <Input
+                        id="clone-barcode"
+                        placeholder="EAN/GTIN"
+                        value={formData.barcode}
+                        onChange={(e) => setFormData(prev => ({ ...prev, barcode: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+                
+                <Separator />
+                
+                {/* DIMENSÕES DO PACOTE - OBRIGATÓRIO */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Package className="h-4 w-4 text-muted-foreground" />
+                    <p className="text-sm font-medium">
+                      Dimensões do pacote <span className="text-destructive">*</span>
+                    </p>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label htmlFor="package-height" className="text-xs">Altura (cm)</Label>
+                      <Input
+                        id="package-height"
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        value={formData.seller_package_height || ''}
+                        onChange={(e) => setFormData(prev => ({ ...prev, seller_package_height: parseFloat(e.target.value) || 0 }))}
+                        placeholder="Ex: 10"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="package-width" className="text-xs">Largura (cm)</Label>
+                      <Input
+                        id="package-width"
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        value={formData.seller_package_width || ''}
+                        onChange={(e) => setFormData(prev => ({ ...prev, seller_package_width: parseFloat(e.target.value) || 0 }))}
+                        placeholder="Ex: 15"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="package-length" className="text-xs">Comprimento (cm)</Label>
+                      <Input
+                        id="package-length"
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        value={formData.seller_package_length || ''}
+                        onChange={(e) => setFormData(prev => ({ ...prev, seller_package_length: parseFloat(e.target.value) || 0 }))}
+                        placeholder="Ex: 20"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="package-weight" className="text-xs">
+                        <div className="flex items-center gap-1">
+                          <Scale className="h-3 w-3" />
+                          Peso (g)
+                        </div>
+                      </Label>
+                      <Input
+                        id="package-weight"
+                        type="number"
+                        step="1"
+                        min="0"
+                        value={formData.seller_package_weight || ''}
+                        onChange={(e) => setFormData(prev => ({ ...prev, seller_package_weight: parseFloat(e.target.value) || 0 }))}
+                        placeholder="Ex: 500"
+                      />
+                    </div>
+                  </div>
+                  
+                  {!dimensionsValid && (
+                    <p className="text-xs text-warning">
+                      Preencha todas as dimensões para evitar erros de validação do Mercado Livre.
+                    </p>
+                  )}
+                </div>
+                
+                <Separator />
+                
+                {/* Opções de publicação */}
+                <div className="space-y-3">
+                  <p className="text-sm font-medium">Opções de publicação</p>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Tipo de anúncio - APENAS Clássico ou Premium */}
+                    <div className="space-y-1">
+                      <Label htmlFor="clone-listing-type" className="text-xs">Tipo de anúncio</Label>
+                      <Select
+                        value={formData.listing_type}
+                        onValueChange={(value: 'gold_special' | 'gold_pro') => 
+                          setFormData(prev => ({ ...prev, listing_type: value }))
+                        }
+                      >
+                        <SelectTrigger id="clone-listing-type">
+                          <SelectValue placeholder="Selecione" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="gold_special">Clássico</SelectItem>
+                          <SelectItem value="gold_pro">Premium</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    {/* Status do anúncio - Ativo ou Pausado */}
+                    <div className="space-y-1">
+                      <Label htmlFor="clone-status" className="text-xs">Status na criação</Label>
+                      <Select
+                        value={formData.create_paused ? 'paused' : 'active'}
+                        onValueChange={(value: string) => 
+                          setFormData(prev => ({ ...prev, create_paused: value === 'paused' }))
+                        }
+                      >
+                        <SelectTrigger id="clone-status">
+                          <SelectValue placeholder="Selecione" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="paused">
+                            <div className="flex items-center gap-2">
+                              <Pause className="h-3 w-3" />
+                              Pausado
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="active">
+                            <div className="flex items-center gap-2">
+                              <Play className="h-3 w-3" />
+                              Ativo
+                            </div>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+                
+                {error && (
+                  <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/30">
+                    <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+                    <p className="text-sm text-destructive whitespace-pre-wrap">{error}</p>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {/* Step 3: Confirmation */}
+            {step === 'confirm' && preview && (
+              <div className="space-y-4">
+                {/* Summary */}
+                <div className="p-4 rounded-lg border bg-muted/30 space-y-3">
+                  <p className="text-sm font-medium">Resumo da clonagem</p>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="text-muted-foreground">ID fonte:</div>
+                    <div className="font-mono text-xs">{preview.item_id}</div>
+                    <div className="text-muted-foreground">Origem:</div>
+                    <div>{preview.clone_mode === 'internal' ? 'Sua conta' : 'Conta externa'}</div>
+                    <div className="text-muted-foreground">Tipo de criação:</div>
+                    <div>
+                      <Badge variant="default" className="text-xs">Normal (não catálogo)</Badge>
+                    </div>
+                    <div className="text-muted-foreground">Modalidade:</div>
+                    <div>{listingTypeLabel}</div>
+                    <div className="text-muted-foreground">Status:</div>
+                    <div className="flex items-center gap-1">
+                      {formData.create_paused ? (
+                        <><Pause className="h-3 w-3" /> {statusLabel}</>
+                      ) : (
+                        <><Play className="h-3 w-3" /> {statusLabel}</>
+                      )}
+                    </div>
+                    <div className="text-muted-foreground">Preço:</div>
+                    <div>R$ {formData.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                    <div className="text-muted-foreground">Quantidade:</div>
+                    <div>{formData.quantity}</div>
+                  </div>
+                  
+                  <Separator className="my-2" />
+                  
+                  <div className="text-sm">
+                    <div className="text-muted-foreground mb-1">Título final:</div>
+                    <div className="font-medium text-xs">{formData.title}</div>
+                  </div>
+                  
+                  <Separator className="my-2" />
+                  
+                  <div className="grid grid-cols-4 gap-2 text-xs">
+                    <div className="text-center p-2 rounded bg-muted">
+                      <div className="text-muted-foreground">Altura</div>
+                      <div className="font-medium">{formData.seller_package_height} cm</div>
+                    </div>
+                    <div className="text-center p-2 rounded bg-muted">
+                      <div className="text-muted-foreground">Largura</div>
+                      <div className="font-medium">{formData.seller_package_width} cm</div>
+                    </div>
+                    <div className="text-center p-2 rounded bg-muted">
+                      <div className="text-muted-foreground">Compr.</div>
+                      <div className="font-medium">{formData.seller_package_length} cm</div>
+                    </div>
+                    <div className="text-center p-2 rounded bg-muted">
+                      <div className="text-muted-foreground">Peso</div>
+                      <div className="font-medium">{formData.seller_package_weight} g</div>
+                    </div>
+                  </div>
+                </div>
+                
+                <Separator />
+                
+                {/* Confirmation Input */}
+                <div className="space-y-2">
+                  <Label htmlFor="confirm-text" className="text-sm font-medium">
+                    Digite <span className="font-mono font-bold">CLONAR</span> para confirmar
+                  </Label>
                   <Input
-                    id="clone-input"
-                    placeholder="https://www.mercadolivre.com.br/... ou MLB..."
-                    value={inputValue}
+                    id="confirm-text"
+                    placeholder="CLONAR"
+                    value={confirmText}
                     onChange={(e) => {
-                      setInputValue(e.target.value);
+                      setConfirmText(e.target.value.toUpperCase());
                       setError(null);
                     }}
-                    className="pl-9"
+                    className="text-center font-mono text-lg tracking-widest"
                     autoFocus
                   />
                 </div>
-                <Button variant="outline" onClick={handlePaste} type="button">
-                  Colar
-                </Button>
+                
+                {error && (
+                  <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/30">
+                    <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+                    <p className="text-sm text-destructive whitespace-pre-wrap">{error}</p>
+                  </div>
+                )}
               </div>
-              
-              {error && (
-                <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/30">
-                  <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
-                  <p className="text-sm text-destructive whitespace-pre-wrap">{error}</p>
-                </div>
-              )}
-              
-              {inputValue && detectedId && (
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-primary" />
-                  <p className="text-sm text-muted-foreground">
-                    ID detectado: <span className="font-mono font-medium">{detectedId.id}</span>
-                    {detectedId.type === 'MLBU' && (
-                      <span className="ml-2 text-xs text-warning">(catálogo - será resolvido)</span>
-                    )}
-                  </p>
-                </div>
-              )}
-              
-              {inputValue && !detectedId && (
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4 text-warning" />
-                  <p className="text-sm text-warning">
-                    Nenhum ID de anúncio (MLB) encontrado
-                  </p>
-                </div>
-              )}
-            </div>
-            
-            <div className="flex items-start gap-2 p-3 rounded-md bg-muted/50">
-              <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-              <p className="text-xs text-muted-foreground">
-                Cole o link de qualquer anúncio do Mercado Livre (incluindo links de catálogo /up/MLBU...). 
-                O sistema detectará automaticamente se é interno (sua conta) ou externo (outra conta).
-              </p>
-            </div>
-            
-            <DialogFooter>
+            )}
+          </div>
+        </ScrollArea>
+        
+        {/* Fixed Footer */}
+        <div className="px-6 py-4 border-t shrink-0 flex justify-end gap-2 bg-background">
+          {step === 'input' && (
+            <>
               <Button variant="outline" onClick={() => handleClose(false)}>
                 Cancelar
               </Button>
@@ -596,323 +999,22 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
                   'Analisar anúncio'
                 )}
               </Button>
-            </DialogFooter>
-          </div>
-        )}
-        
-        {/* Step 2: Preview */}
-        {step === 'preview' && preview && (
-          <div className="space-y-4">
-            {/* Item Preview Card */}
-            <div className="flex gap-4 p-4 rounded-lg border bg-muted/30">
-              {preview.thumbnail && (
-                <img 
-                  src={preview.thumbnail} 
-                  alt={preview.title}
-                  className="w-20 h-20 object-cover rounded-md"
-                />
-              )}
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-sm line-clamp-2">{preview.title}</p>
-                <p className="text-lg font-bold mt-1">
-                  R$ {preview.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  ID: <span className="font-mono">{preview.item_id}</span>
-                </p>
-              </div>
-            </div>
-            
-            {/* Detection Results */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-3 rounded-md border">
-                <p className="text-xs text-muted-foreground mb-1">Origem detectada</p>
-                <Badge variant={preview.clone_mode === 'internal' ? 'default' : 'secondary'}>
-                  {preview.clone_mode === 'internal' ? 'Interno (sua conta)' : 'Externo (outra conta)'}
-                </Badge>
-              </div>
-              <div className="p-3 rounded-md border">
-                <p className="text-xs text-muted-foreground mb-1">Tipo do anúncio fonte</p>
-                <Badge variant={preview.listing_mode === 'catalog' ? 'outline' : 'default'}>
-                  {preview.listing_mode === 'catalog' ? 'Catálogo' : 'Normal'}
-                </Badge>
-              </div>
-            </div>
-            
-            {/* Catalog Alert - SEMPRE criar como normal */}
-            {preview.is_catalog_source && (
-              <div className="flex items-start gap-2 p-3 rounded-md bg-primary/10 border border-primary/30">
-                <Info className="h-4 w-4 text-primary mt-0.5 shrink-0" />
-                <div className="text-xs text-primary">
-                  <p className="font-medium">Anúncio de catálogo detectado</p>
-                  <p className="mt-1">
-                    Por padrão, o clone será criado como <strong>anúncio normal</strong> (não catálogo) 
-                    para permitir edição de título, fotos e descrição. Você pode vincular ao catálogo depois, se desejar.
-                  </p>
-                </div>
-              </div>
-            )}
-            
-            <Separator />
-            
-            {/* Editable Fields - SEMPRE editáveis (clone como normal) */}
-            <div className="space-y-4">
-              <p className="text-sm font-medium">Dados do novo anúncio</p>
-              
-              {/* TÍTULO - SEMPRE EDITÁVEL */}
-              <div className="space-y-1">
-                <Label htmlFor="clone-title" className="text-xs">
-                  Título <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="clone-title"
-                  value={formData.title}
-                  onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
-                  placeholder="Título do anúncio"
-                  maxLength={60}
-                />
-                <p className="text-xs text-muted-foreground">{formData.title.length}/60 caracteres</p>
-              </div>
-              
-              {/* DESCRIÇÃO - SEMPRE EDITÁVEL (clone normal) */}
-              <div className="space-y-1">
-                <Label htmlFor="clone-description" className="text-xs">Descrição</Label>
-                <Textarea
-                  id="clone-description"
-                  value={formData.description}
-                  onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                  placeholder="Descrição do produto..."
-                  rows={3}
-                />
-              </div>
-              
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label htmlFor="clone-price" className="text-xs">
-                    Preço (R$) <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    id="clone-price"
-                    type="number"
-                    step="0.01"
-                    value={formData.price}
-                    onChange={(e) => setFormData(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="clone-qty" className="text-xs">
-                    Quantidade <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    id="clone-qty"
-                    type="number"
-                    min="1"
-                    value={formData.quantity}
-                    onChange={(e) => setFormData(prev => ({ ...prev, quantity: parseInt(e.target.value) || 1 }))}
-                  />
-                </div>
-              </div>
-              
-              <div className="space-y-1">
-                <Label htmlFor="clone-sku" className="text-xs">SKU (opcional)</Label>
-                <Input
-                  id="clone-sku"
-                  placeholder="Código interno do produto"
-                  value={formData.sku}
-                  onChange={(e) => setFormData(prev => ({ ...prev, sku: e.target.value }))}
-                />
-              </div>
-            </div>
-            
-            <Separator />
-            
-            {/* DIMENSÕES DO PACOTE - OBRIGATÓRIO */}
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Package className="h-4 w-4 text-muted-foreground" />
-                <p className="text-sm font-medium">
-                  Dimensões do pacote <span className="text-destructive">*</span>
-                </p>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label htmlFor="package-height" className="text-xs">Altura (cm)</Label>
-                  <Input
-                    id="package-height"
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    value={formData.seller_package_height || ''}
-                    onChange={(e) => setFormData(prev => ({ ...prev, seller_package_height: parseFloat(e.target.value) || 0 }))}
-                    placeholder="Ex: 10"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="package-width" className="text-xs">Largura (cm)</Label>
-                  <Input
-                    id="package-width"
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    value={formData.seller_package_width || ''}
-                    onChange={(e) => setFormData(prev => ({ ...prev, seller_package_width: parseFloat(e.target.value) || 0 }))}
-                    placeholder="Ex: 15"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="package-length" className="text-xs">Comprimento (cm)</Label>
-                  <Input
-                    id="package-length"
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    value={formData.seller_package_length || ''}
-                    onChange={(e) => setFormData(prev => ({ ...prev, seller_package_length: parseFloat(e.target.value) || 0 }))}
-                    placeholder="Ex: 20"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="package-weight" className="text-xs">
-                    <div className="flex items-center gap-1">
-                      <Scale className="h-3 w-3" />
-                      Peso (g)
-                    </div>
-                  </Label>
-                  <Input
-                    id="package-weight"
-                    type="number"
-                    step="1"
-                    min="0"
-                    value={formData.seller_package_weight || ''}
-                    onChange={(e) => setFormData(prev => ({ ...prev, seller_package_weight: parseFloat(e.target.value) || 0 }))}
-                    placeholder="Ex: 500"
-                  />
-                </div>
-              </div>
-              
-              {!dimensionsValid && (
-                <p className="text-xs text-warning">
-                  Preencha todas as dimensões para evitar erros de validação do Mercado Livre.
-                </p>
-              )}
-            </div>
-            
-            {/* Advanced Options */}
-            <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
-              <CollapsibleTrigger asChild>
-                <Button variant="ghost" className="w-full justify-between p-2 h-auto">
-                  <span className="text-sm text-muted-foreground">Opções avançadas</span>
-                  <ChevronDown className={`h-4 w-4 transition-transform ${advancedOpen ? 'rotate-180' : ''}`} />
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="space-y-3 pt-2">
-                <div className="space-y-1">
-                  <Label htmlFor="clone-listing-type" className="text-xs">Modalidade do anúncio</Label>
-                  <select
-                    id="clone-listing-type"
-                    value={formData.listing_type}
-                    onChange={(e) => setFormData(prev => ({ ...prev, listing_type: e.target.value }))}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                  >
-                    <option value="gold_special">Clássico</option>
-                    <option value="gold_pro">Premium</option>
-                    <option value="gold">Gold</option>
-                    <option value="silver">Silver</option>
-                    <option value="bronze">Bronze</option>
-                  </select>
-                </div>
-                
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="create-paused"
-                    checked={formData.create_paused}
-                    onChange={(e) => setFormData(prev => ({ ...prev, create_paused: e.target.checked }))}
-                    className="h-4 w-4 rounded border-input"
-                  />
-                  <Label htmlFor="create-paused" className="text-xs">
-                    Criar anúncio pausado
-                  </Label>
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
-            
-            {error && (
-              <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/30">
-                <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
-                <p className="text-sm text-destructive whitespace-pre-wrap">{error}</p>
-              </div>
-            )}
-            
-            <DialogFooter>
+            </>
+          )}
+          
+          {step === 'preview' && (
+            <>
               <Button variant="outline" onClick={() => setStep('input')}>
                 Voltar
               </Button>
-              <Button onClick={handleProceedToConfirm} disabled={!dimensionsValid || !formData.title.trim()}>
+              <Button onClick={handleProceedToConfirm} disabled={!dimensionsValid || !formData.title.trim() || !hasPictures}>
                 Continuar
               </Button>
-            </DialogFooter>
-          </div>
-        )}
-        
-        {/* Step 3: Confirmation */}
-        {step === 'confirm' && preview && (
-          <div className="space-y-4">
-            {/* Summary */}
-            <div className="p-4 rounded-lg border bg-muted/30 space-y-2">
-              <p className="text-sm font-medium">Resumo da clonagem</p>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div className="text-muted-foreground">ID fonte:</div>
-                <div className="font-mono text-xs">{preview.item_id}</div>
-                <div className="text-muted-foreground">Origem:</div>
-                <div>{preview.clone_mode === 'internal' ? 'Sua conta' : 'Conta externa'}</div>
-                <div className="text-muted-foreground">Tipo de criação:</div>
-                <div className="flex items-center gap-1">
-                  <Badge variant="default" className="text-xs">Normal (não catálogo)</Badge>
-                </div>
-                <div className="text-muted-foreground">Modalidade:</div>
-                <div className="capitalize">{formData.listing_type.replace('_', ' ')}</div>
-                <div className="text-muted-foreground">Preço:</div>
-                <div>R$ {formData.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                <div className="text-muted-foreground">Quantidade:</div>
-                <div>{formData.quantity}</div>
-              </div>
-              <Separator className="my-2" />
-              <div className="text-sm">
-                <div className="text-muted-foreground mb-1">Título final:</div>
-                <div className="font-medium text-xs">{formData.title}</div>
-              </div>
-            </div>
-            
-            <Separator />
-            
-            {/* Confirmation Input */}
-            <div className="space-y-2">
-              <Label htmlFor="confirm-text" className="text-sm font-medium">
-                Digite <span className="font-mono font-bold">CLONAR</span> para confirmar
-              </Label>
-              <Input
-                id="confirm-text"
-                placeholder="CLONAR"
-                value={confirmText}
-                onChange={(e) => {
-                  setConfirmText(e.target.value.toUpperCase());
-                  setError(null);
-                }}
-                className="text-center font-mono text-lg tracking-widest"
-                autoFocus
-              />
-            </div>
-            
-            {error && (
-              <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/30">
-                <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
-                <p className="text-sm text-destructive whitespace-pre-wrap">{error}</p>
-              </div>
-            )}
-            
-            <DialogFooter>
+            </>
+          )}
+          
+          {step === 'confirm' && (
+            <>
               <Button variant="outline" onClick={() => setStep('preview')}>
                 Voltar
               </Button>
@@ -933,9 +1035,9 @@ export function UnifiedCloneModal({ open, onOpenChange }: UnifiedCloneModalProps
                   </>
                 )}
               </Button>
-            </DialogFooter>
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );
