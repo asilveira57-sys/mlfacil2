@@ -3,6 +3,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ColorWheel } from './ColorWheel';
+import { SyncedOverlay } from './SyncedOverlay';
 import { 
   CardThemeSettings, 
   ThemePreset,
@@ -20,6 +21,7 @@ interface CardsCustomizationProps {
   onColorChange: (key: keyof CardThemeSettings, value: string) => void;
   presets: ThemePreset[];
   onApplyPreset: (preset: ThemePreset) => void;
+  isSynced?: boolean;
 }
 
 const colorFields: { key: keyof CardThemeSettings; label: string; description: string }[] = [
@@ -41,6 +43,7 @@ export function CardsCustomization({
   onColorChange, 
   presets,
   onApplyPreset,
+  isSynced = false,
 }: CardsCustomizationProps) {
   const sampleCards = [
     { 
@@ -87,6 +90,7 @@ export function CardsCustomization({
       </CardHeader>
       
       <CardContent className="space-y-6">
+        <SyncedOverlay isSynced={isSynced} areaName="os cards">
         {/* Presets */}
         <div className="space-y-3">
           <Label className="text-sm font-medium">Temas Rápidos</Label>
@@ -207,6 +211,7 @@ export function CardsCustomization({
             ))}
           </div>
         </div>
+        </SyncedOverlay>
       </CardContent>
     </Card>
   );
