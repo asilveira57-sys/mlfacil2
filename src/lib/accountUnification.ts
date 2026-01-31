@@ -12,6 +12,9 @@
 
 import { supabase } from '@/integrations/supabase/client';
 
+// Connection status types
+export type ConnectionStatus = 'connected' | 'attention' | 'disconnected' | 'revoked';
+
 // Unified account interface
 export interface UnifiedMarketplaceAccount {
   id: string;              // ml_accounts.id
@@ -20,11 +23,17 @@ export interface UnifiedMarketplaceAccount {
   nickname: string | null;
   email: string | null;
   provider: 'mercadolivre';
-  status: 'connected' | 'expired' | 'error' | 'disconnected';
+  status: ConnectionStatus;
   isActive: boolean;
   accessToken?: string;
   refreshToken?: string;
   expiresAt?: string;
+  // New tracking fields
+  connectionStatus: ConnectionStatus;
+  lastApiOkAt?: string;
+  lastApiErrorCode?: string;
+  lastApiErrorAt?: string;
+  consecutiveFailures: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -254,14 +263,15 @@ export async function getAccountBySellerId(sellerId: string): Promise<UnifiedMar
  */
 export async function updateAccountStatus(
   accountId: string,
-  status: 'connected' | 'expired' | 'error' | 'disconnected'
+  status: ConnectionStatus
 ): Promise<boolean> {
-  const isActive = status === 'connected';
+  const isActive = status === 'connected' || status === 'attention';
 
   const { error } = await supabase
     .from('ml_accounts')
     .update({
       is_active: isActive,
+      connection_status: status,
       updated_at: new Date().toISOString(),
     })
     .eq('id', accountId);
@@ -293,18 +303,25 @@ export async function updateAccountStatus(
 
 /**
  * Map ml_accounts row to unified interface.
+ * Uses connection_status as primary source of truth for status.
  */
 function mapMlAccountToUnified(row: Record<string, unknown>): UnifiedMarketplaceAccount {
   const isActive = row.is_active as boolean;
-  let status: UnifiedMarketplaceAccount['status'] = 'disconnected';
   
-  if (isActive) {
+  // Use connection_status directly if available, otherwise derive from token state
+  let connectionStatus = (row.connection_status as ConnectionStatus) || 'disconnected';
+  
+  // Override based on token state if connection_status says connected but token is expired
+  if (connectionStatus === 'connected') {
     const tokenExpiresAt = row.token_expires_at as string | null;
-    if (tokenExpiresAt && new Date(tokenExpiresAt) < new Date()) {
-      status = 'expired';
-    } else {
-      status = 'connected';
+    if (!tokenExpiresAt || new Date(tokenExpiresAt) < new Date()) {
+      connectionStatus = 'attention'; // Token expired, needs refresh
     }
+  }
+  
+  // If explicitly marked as inactive, treat as disconnected
+  if (!isActive && connectionStatus === 'connected') {
+    connectionStatus = 'disconnected';
   }
 
   return {
@@ -314,11 +331,16 @@ function mapMlAccountToUnified(row: Record<string, unknown>): UnifiedMarketplace
     nickname: row.nickname as string | null,
     email: row.email as string | null,
     provider: 'mercadolivre',
-    status,
+    status: connectionStatus,
     isActive,
     accessToken: row.access_token as string | undefined,
     refreshToken: row.refresh_token as string | undefined,
     expiresAt: row.token_expires_at as string | undefined,
+    connectionStatus,
+    lastApiOkAt: row.last_api_ok_at as string | undefined,
+    lastApiErrorCode: row.last_api_error_code as string | undefined,
+    lastApiErrorAt: row.last_api_error_at as string | undefined,
+    consecutiveFailures: (row.consecutive_failures as number) || 0,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };

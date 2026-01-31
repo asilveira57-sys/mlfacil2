@@ -99,40 +99,85 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    // Garante somente 1 conta ativa por usuário
-    await supabaseAdmin
+    const mlUserIdStr = userData.id.toString();
+    const now = new Date().toISOString();
+
+    // ================================================================
+    // MULTI-ACCOUNT FIX: Do NOT deactivate other accounts!
+    // Each account maintains its own independent connection status.
+    // ================================================================
+    
+    // Check if this specific ML account already exists for this user
+    const { data: existingAccount } = await supabaseAdmin
       .from('ml_accounts')
-      .update({ is_active: false })
+      .select('id')
       .eq('user_id', userId)
-      .eq('is_active', true);
+      .eq('ml_user_id', mlUserIdStr)
+      .maybeSingle();
 
-    // Save ML account directly to database (secure - no tokens in URL)
-    const { error: upsertError } = await supabaseAdmin
-      .from('ml_accounts')
-      .upsert({
-        user_id: userId,
-        ml_user_id: userData.id.toString(),
-        access_token: tokenData.access_token,
-        refresh_token: tokenData.refresh_token,
-        token_expires_at: expiresAt.toISOString(),
-        nickname: userData.nickname || null,
-        email: userData.email || null,
-        country_id: userData.site_id || null,
-        is_active: true,
-        updated_at: new Date().toISOString(),
-      }, {
-        onConflict: 'user_id,ml_user_id'
-      });
+    if (existingAccount) {
+      // UPDATE existing account - just refresh tokens, keep everything else
+      console.log('Updating existing account:', existingAccount.id);
+      
+      const { error: updateError } = await supabaseAdmin
+        .from('ml_accounts')
+        .update({
+          access_token: tokenData.access_token,
+          refresh_token: tokenData.refresh_token,
+          token_expires_at: expiresAt.toISOString(),
+          nickname: userData.nickname || null,
+          email: userData.email || null,
+          country_id: userData.site_id || null,
+          // Restore connection status to connected
+          connection_status: 'connected',
+          is_active: true,
+          last_token_refresh_at: now,
+          last_api_ok_at: now,
+          last_api_error_code: null,
+          last_api_error_at: null,
+          consecutive_failures: 0,
+          updated_at: now,
+        })
+        .eq('id', existingAccount.id);
 
-    if (upsertError) {
-      console.error('Error saving ML account:', upsertError);
-      const errorUrl = new URL(`${frontendOrigin}/dashboard`);
-      errorUrl.searchParams.set('ml_error', 'save_failed');
-      return Response.redirect(errorUrl.toString(), 302);
+      if (updateError) {
+        console.error('Error updating ML account:', updateError);
+        const errorUrl = new URL(`${frontendOrigin}/dashboard`);
+        errorUrl.searchParams.set('ml_error', 'save_failed');
+        return Response.redirect(errorUrl.toString(), 302);
+      }
+    } else {
+      // INSERT new account - does not affect other accounts
+      console.log('Creating new ML account for seller:', mlUserIdStr);
+      
+      const { error: insertError } = await supabaseAdmin
+        .from('ml_accounts')
+        .insert({
+          user_id: userId,
+          ml_user_id: mlUserIdStr,
+          access_token: tokenData.access_token,
+          refresh_token: tokenData.refresh_token,
+          token_expires_at: expiresAt.toISOString(),
+          nickname: userData.nickname || null,
+          email: userData.email || null,
+          country_id: userData.site_id || null,
+          connection_status: 'connected',
+          is_active: true,
+          last_token_refresh_at: now,
+          last_api_ok_at: now,
+          consecutive_failures: 0,
+        });
+
+      if (insertError) {
+        console.error('Error creating ML account:', insertError);
+        const errorUrl = new URL(`${frontendOrigin}/dashboard`);
+        errorUrl.searchParams.set('ml_error', 'save_failed');
+        return Response.redirect(errorUrl.toString(), 302);
+      }
     }
 
     console.log('ML account saved successfully');
-    console.log('ML OAuth completed successfully');
+    console.log('ML OAuth completed successfully - other accounts unaffected');
 
     // Redirect back to frontend dashboard with simple success flag (NO TOKENS!)
     const redirectUrl = new URL(`${frontendOrigin}/dashboard`);

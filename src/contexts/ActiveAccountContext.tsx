@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { getAllAccounts, UnifiedMarketplaceAccount } from '@/lib/accountUnification';
+import { getAllAccounts, UnifiedMarketplaceAccount, ConnectionStatus } from '@/lib/accountUnification';
 
 // Account from ml_accounts (source of truth via accountUnification)
 export interface ActiveAccount {
@@ -11,7 +11,11 @@ export interface ActiveAccount {
   email: string | null;
   isActive: boolean;
   provider: 'mercadolivre';
-  status: 'connected' | 'expired' | 'error' | 'disconnected';
+  status: ConnectionStatus;
+  // Extended tracking
+  lastApiOkAt?: string;
+  lastApiErrorCode?: string;
+  consecutiveFailures?: number;
 }
 
 interface ActiveAccountContextType {
@@ -63,6 +67,9 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
       isActive: acc.isActive,
       provider: acc.provider,
       status: acc.status,
+      lastApiOkAt: acc.lastApiOkAt,
+      lastApiErrorCode: acc.lastApiErrorCode,
+      consecutiveFailures: acc.consecutiveFailures,
     }));
   }, []);
 
