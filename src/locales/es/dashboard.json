@@ -1,0 +1,20 @@
+{
+  "title": "Dashboard",
+  "subtitle": "Vista general de tus operaciones en Mercado Libre",
+  "ml_connected": "ML Conectado",
+  "ml_disconnected": "ML Desconectado",
+  "connect": "Conectar",
+  "connected": "Conectado",
+  "disconnected": "Desconectado",
+  "connecting": "Conectando...",
+  "connecting_desc": "Redirigiendo a Mercado Libre",
+  "connection_error": "Error de conexión",
+  "connection_error_desc": "Error al conectar: {{error}}",
+  "connection_success": "¡Conectado!",
+  "connection_success_desc": "Tu cuenta de Mercado Libre fue conectada exitosamente",
+  "session_expired": "Sesión expirada",
+  "session_expired_desc": "Inicia sesión nuevamente para continuar",
+  "connect_error": "Error al conectar",
+  "connect_error_desc": "No fue posible iniciar la conexión con Mercado Libre",
+  "mercado_livre": "Mercado Libre"
+}

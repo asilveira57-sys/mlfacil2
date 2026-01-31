@@ -1,0 +1,52 @@
+{
+  "language": {
+    "title": "Idioma",
+    "description": "Elige el idioma de la interfaz",
+    "current": "Idioma actual"
+  },
+  "profile": {
+    "title": "Perfil",
+    "description": "Gestiona tu información personal"
+  },
+  "customization": {
+    "title": "Personalización",
+    "description": "Personaliza la apariencia del sistema"
+  },
+  "billing": {
+    "title": "Facturación",
+    "description": "Gestiona tus datos de facturación"
+  },
+  "companies": {
+    "title": "Empresas y Cuentas",
+    "description": "Gestiona tus empresas y cuentas conectadas"
+  },
+  "integrations": {
+    "title": "Integraciones",
+    "description": "Configura integraciones con otros servicios"
+  },
+  "subscription": {
+    "title": "Suscripción",
+    "description": "Gestiona tu plan y suscripción"
+  },
+  "collaborators": {
+    "title": "Colaboradores",
+    "description": "Gestiona el acceso de tu equipo"
+  },
+  "sync": {
+    "title": "Sincronización de Datos",
+    "description": "Gestiona tus conexiones y sincronización de datos de Mercado Libre",
+    "orders": "Pedidos",
+    "items": "Artículos",
+    "orders_with_items": "Pedidos c/ Artículos",
+    "synced_percent": "% Sincronizado",
+    "syncing": "Sincronizando...",
+    "sync_orders": "Sincronizar Pedidos",
+    "sync_started": "Sincronización iniciada",
+    "sync_started_desc": "Los pedidos se están sincronizando en segundo plano",
+    "sync_completed": "Sincronización completada",
+    "sync_completed_desc": "{{count}} pedidos sincronizados",
+    "sync_error": "Error de sincronización",
+    "sync_error_desc": "Ocurrió un error durante la sincronización",
+    "sync_help": "La sincronización carga todos los pedidos y artículos de Mercado Libre al caché local, permitiendo análisis más rápidos y completos."
+  }
+}

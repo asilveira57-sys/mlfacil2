@@ -15,15 +15,10 @@ export function SettingsLanguage() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Globe className="h-5 w-5" />
-          {t('common:language')}
+          {t('settings:language.title')}
         </CardTitle>
         <CardDescription>
-          {t('common:language') === 'Idioma' 
-            ? 'Escolha o idioma da interface do sistema'
-            : t('common:language') === 'Language'
-            ? 'Choose the interface language'
-            : 'Elige el idioma de la interfaz'
-          }
+          {t('settings:language.description')}
         </CardDescription>
       </CardHeader>
       <CardContent>

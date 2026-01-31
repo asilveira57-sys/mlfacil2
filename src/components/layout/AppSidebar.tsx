@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   LayoutDashboard,
   Megaphone,
@@ -55,59 +56,60 @@ import { useCollaboratorAccess } from "@/hooks/useCollaboratorAccess";
 import { ModuleTagsDisplay } from "@/components/admin/ModuleTagBadge";
 
 interface NavItem {
-  title: string;
+  titleKey: string; // i18n key
   url: string;
   icon: React.ElementType;
-  badge?: string;
-  moduleId?: string; // For tag lookup
-  moduleKey?: string; // For access control
+  badgeKey?: string; // i18n key for badge
+  moduleId?: string;
+  moduleKey?: string;
 }
 
 // IDs devem coincidir com system_modules.id no banco de dados
 // moduleKey é usado para controle de acesso de colaboradores
 const mainNavItems: NavItem[] = [
-  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, moduleId: "dashboard", moduleKey: "dashboard" },
-  { title: "Vendas", url: "/shipping-labels", icon: Package, moduleId: "etiquetas", moduleKey: "etiquetas" },
-  { title: "Tarefas", url: "/tarefas", icon: ListChecks, moduleId: "tarefas", moduleKey: "tarefas" },
-  { title: "Send", url: "/send", icon: Sprout, moduleId: "send", moduleKey: "send" },
-  { title: "Promoções", url: "/promocoes", icon: Tag, moduleId: "promocoes", moduleKey: "promocoes" },
-  { title: "Mercado ADS", url: "/publicidade", icon: Megaphone, moduleId: "publicidade", moduleKey: "mercado_ads" },
-  { title: "Linha do Tempo", url: "/anuncios/linha-do-tempo", icon: History, moduleId: "linha-do-tempo", moduleKey: "linha_do_tempo" },
-  { title: "Pós-Venda", url: "/mensagens", icon: MessageSquareText, moduleId: "pos-venda", moduleKey: "pos_venda" },
-  { title: "Perguntas", url: "/perguntas", icon: MessageSquareText, moduleId: "perguntas", moduleKey: "perguntas" },
+  { titleKey: "nav:dashboard", url: "/dashboard", icon: LayoutDashboard, moduleId: "dashboard", moduleKey: "dashboard" },
+  { titleKey: "nav:sales", url: "/shipping-labels", icon: Package, moduleId: "etiquetas", moduleKey: "etiquetas" },
+  { titleKey: "nav:tasks", url: "/tarefas", icon: ListChecks, moduleId: "tarefas", moduleKey: "tarefas" },
+  { titleKey: "nav:send", url: "/send", icon: Sprout, moduleId: "send", moduleKey: "send" },
+  { titleKey: "nav:promotions", url: "/promocoes", icon: Tag, moduleId: "promocoes", moduleKey: "promocoes" },
+  { titleKey: "nav:ads", url: "/publicidade", icon: Megaphone, moduleId: "publicidade", moduleKey: "mercado_ads" },
+  { titleKey: "nav:timeline", url: "/anuncios/linha-do-tempo", icon: History, moduleId: "linha-do-tempo", moduleKey: "linha_do_tempo" },
+  { titleKey: "nav:post_sale", url: "/mensagens", icon: MessageSquareText, moduleId: "pos-venda", moduleKey: "pos_venda" },
+  { titleKey: "nav:questions", url: "/perguntas", icon: MessageSquareText, moduleId: "perguntas", moduleKey: "perguntas" },
 ];
 
 const analyticsNavItems: NavItem[] = [
-  { title: "Radiografia", url: "/radiografia", icon: Activity, moduleId: "radiografia", moduleKey: "radiografia" },
-  { title: "Mercado", url: "/mercado", icon: Store, moduleId: "mercado", moduleKey: "mercado" },
-  { title: "Tendências", url: "/tendencias", icon: TrendingUp, moduleId: "tendencias", moduleKey: "tendencias" },
-  { title: "Concorrência", url: "/concorrencia", icon: Target, moduleId: "concorrencia", moduleKey: "concorrencia" },
-  { title: "Curva ABC", url: "/abc-analysis", icon: BarChart3, moduleId: "abc", moduleKey: "abc" },
-  { title: "Custos", url: "/custos", icon: DollarSign, moduleId: "custos", moduleKey: "custos" },
+  { titleKey: "nav:radiography", url: "/radiografia", icon: Activity, moduleId: "radiografia", moduleKey: "radiografia" },
+  { titleKey: "nav:market", url: "/mercado", icon: Store, moduleId: "mercado", moduleKey: "mercado" },
+  { titleKey: "nav:trends", url: "/tendencias", icon: TrendingUp, moduleId: "tendencias", moduleKey: "tendencias" },
+  { titleKey: "nav:competitor", url: "/concorrencia", icon: Target, moduleId: "concorrencia", moduleKey: "concorrencia" },
+  { titleKey: "nav:abc_analysis", url: "/abc-analysis", icon: BarChart3, moduleId: "abc", moduleKey: "abc" },
+  { titleKey: "nav:costs", url: "/custos", icon: DollarSign, moduleId: "custos", moduleKey: "custos" },
 ];
 
 const toolsNavItems: NavItem[] = [
-  { title: "ZPL Converter", url: "/zpl-converter", icon: Printer },
-  { title: "Relatórios", url: "/dashboard", icon: FileText, badge: "Em breve" },
+  { titleKey: "nav:zpl_converter", url: "/zpl-converter", icon: Printer },
+  { titleKey: "nav:reports", url: "/dashboard", icon: FileText, badgeKey: "nav:coming_soon" },
 ];
 
 const configNavItems: NavItem[] = [
-  { title: "Configurações", url: "/settings", icon: Settings },
+  { titleKey: "nav:settings", url: "/settings", icon: Settings },
 ];
 
 const adminNavItems: NavItem[] = [
-  { title: "Dashboard Admin", url: "/admin", icon: LayoutDashboard },
-  { title: "Usuários", url: "/admin/usuarios", icon: Settings },
-  { title: "Planos", url: "/admin/planos", icon: Settings },
-  { title: "Pagamentos", url: "/admin/pagamentos", icon: Settings },
-  { title: "Tags de Módulos", url: "/admin/tags", icon: Tags },
-  { title: "Blog", url: "/admin/blog", icon: FileText },
-  { title: "SEO", url: "/admin/seo", icon: Settings },
-  { title: "Integrações", url: "/admin/integracoes", icon: Settings },
-  { title: "Configurações", url: "/admin/configuracoes", icon: Settings },
+  { titleKey: "nav:admin_dashboard", url: "/admin", icon: LayoutDashboard },
+  { titleKey: "nav:users", url: "/admin/usuarios", icon: Settings },
+  { titleKey: "nav:plans", url: "/admin/planos", icon: Settings },
+  { titleKey: "nav:payments", url: "/admin/pagamentos", icon: Settings },
+  { titleKey: "nav:module_tags", url: "/admin/tags", icon: Tags },
+  { titleKey: "nav:blog", url: "/admin/blog", icon: FileText },
+  { titleKey: "nav:seo", url: "/admin/seo", icon: Settings },
+  { titleKey: "nav:integrations", url: "/admin/integracoes", icon: Settings },
+  { titleKey: "nav:settings", url: "/admin/configuracoes", icon: Settings },
 ];
 
 export function AppSidebar() {
+  const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -133,17 +135,17 @@ export function AppSidebar() {
     console.info('[NAV] AppSidebar', location.pathname);
   }, [location.pathname]);
   
-  // State for collapsible groups
+  // State for collapsible groups - use translation keys
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
-    Principal: true,
-    Analytics: true,
-    Ferramentas: true,
-    Sistema: true,
-    Admin: true,
+    main: true,
+    analytics: true,
+    tools: true,
+    system: true,
+    admin: true,
   });
 
-  const toggleGroup = (label: string) => {
-    setOpenGroups(prev => ({ ...prev, [label]: !prev[label] }));
+  const toggleGroup = (key: string) => {
+    setOpenGroups(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
   const isActive = (url: string) => location.pathname === url || location.pathname.startsWith(url + '/');
@@ -151,21 +153,26 @@ export function AppSidebar() {
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     toast({
-      title: "Logout realizado",
-      description: "Você foi desconectado com sucesso",
+      title: t('nav:logout_success'),
+      description: t('nav:logout_description'),
     });
     navigate("/auth");
   };
 
-  const NavGroup = ({ label, items, icon: GroupIcon }: { label: string; items: NavItem[]; icon?: React.ElementType }) => {
-    const isOpen = openGroups[label] ?? true;
+  const NavGroup = ({ groupKey, labelKey, items, icon: GroupIcon }: { 
+    groupKey: string;
+    labelKey: string; 
+    items: NavItem[]; 
+    icon?: React.ElementType 
+  }) => {
+    const isOpen = openGroups[groupKey] ?? true;
     
     // Filter items based on collaborator access
     const filteredItems = items.filter(item => {
-      if (!item.moduleKey) return true; // No access control for this item
+      if (!item.moduleKey) return true;
       return hasModuleAccess(item.moduleKey);
     });
-    // Hide group if no items are accessible
+    
     if (filteredItems.length === 0) return null;
     
     // When collapsed, show items directly without collapsible header
@@ -176,8 +183,11 @@ export function AppSidebar() {
             <SidebarMenu>
               {filteredItems.map((item) => {
                 const moduleTags = item.moduleId ? moduleTagsMap.get(item.moduleId) || [] : [];
+                const title = t(item.titleKey);
+                const badge = item.badgeKey ? t(item.badgeKey) : undefined;
+                
                 return (
-                  <SidebarMenuItem key={item.title}>
+                  <SidebarMenuItem key={item.titleKey}>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <SidebarMenuButton
@@ -197,10 +207,10 @@ export function AppSidebar() {
                         </SidebarMenuButton>
                       </TooltipTrigger>
                       <TooltipContent side="right" className="flex items-center gap-2">
-                        {item.title}
-                        {item.badge && (
+                        {title}
+                        {badge && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                            {item.badge}
+                            {badge}
                           </span>
                         )}
                         {moduleTags.length > 0 && (
@@ -219,12 +229,12 @@ export function AppSidebar() {
     
     return (
       <SidebarGroup>
-        <Collapsible open={isOpen} onOpenChange={() => toggleGroup(label)}>
+        <Collapsible open={isOpen} onOpenChange={() => toggleGroup(groupKey)}>
           <CollapsibleTrigger asChild>
             <SidebarGroupLabel className="cursor-pointer hover:bg-sidebar-accent/50 rounded-md transition-colors flex items-center justify-between pr-2">
               <span className="flex items-center gap-2">
                 {GroupIcon && <GroupIcon className="h-4 w-4" />}
-                {label}
+                {t(labelKey)}
               </span>
               <ChevronDown className={cn(
                 "h-3.5 w-3.5 text-muted-foreground transition-transform duration-200",
@@ -237,8 +247,11 @@ export function AppSidebar() {
               <SidebarMenu>
                 {filteredItems.map((item) => {
                   const moduleTags = item.moduleId ? moduleTagsMap.get(item.moduleId) || [] : [];
+                  const title = t(item.titleKey);
+                  const badge = item.badgeKey ? t(item.badgeKey) : undefined;
+                  
                   return (
-                    <SidebarMenuItem key={item.title}>
+                    <SidebarMenuItem key={item.titleKey}>
                       <SidebarMenuButton
                         asChild
                         isActive={isActive(item.url)}
@@ -252,10 +265,10 @@ export function AppSidebar() {
                           className="flex items-center gap-3 w-full"
                         >
                           <item.icon className="h-4 w-4 shrink-0" />
-                          <span className="flex-1 truncate">{item.title}</span>
-                          {item.badge && (
+                          <span className="flex-1 truncate">{title}</span>
+                          {badge && (
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                              {item.badge}
+                              {badge}
                             </span>
                           )}
                           {moduleTags.length > 0 && (
@@ -295,14 +308,14 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent className="px-2">
-        <NavGroup label="Principal" items={mainNavItems} />
-        <NavGroup label="Analytics" items={analyticsNavItems} />
-        <NavGroup label="Ferramentas" items={toolsNavItems} />
-        <NavGroup label="Sistema" items={configNavItems} />
+        <NavGroup groupKey="main" labelKey="nav:main_menu" items={mainNavItems} />
+        <NavGroup groupKey="analytics" labelKey="nav:analytics" items={analyticsNavItems} />
+        <NavGroup groupKey="tools" labelKey="nav:tools" items={toolsNavItems} />
+        <NavGroup groupKey="system" labelKey="nav:system" items={configNavItems} />
         
         {/* Admin Section - Only visible to admins */}
         {isAdmin && (
-          <NavGroup label="Admin" items={adminNavItems} icon={Shield} />
+          <NavGroup groupKey="admin" labelKey="nav:admin" items={adminNavItems} icon={Shield} />
         )}
       </SidebarContent>
 
@@ -316,11 +329,11 @@ export function AppSidebar() {
                   className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                 >
                   <LogOut className="h-4 w-4 shrink-0" />
-                  {!isCollapsed && <span>Sair</span>}
+                  {!isCollapsed && <span>{t('nav:logout')}</span>}
                 </SidebarMenuButton>
               </TooltipTrigger>
               {isCollapsed && (
-                <TooltipContent side="right">Sair</TooltipContent>
+                <TooltipContent side="right">{t('nav:logout')}</TooltipContent>
               )}
             </Tooltip>
           </SidebarMenuItem>

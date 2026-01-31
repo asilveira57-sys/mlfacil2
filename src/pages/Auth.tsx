@@ -3,10 +3,13 @@ import { ThemeSupa } from "@supabase/auth-ui-shared";
 import { supabase } from "@/integrations/supabase/client";
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { BarChart3, TrendingUp, Target, Zap } from "lucide-react";
 
 const Auth = () => {
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
+  const currentYear = new Date().getFullYear();
 
   useEffect(() => {
     // Check session on mount (once)
@@ -27,6 +30,44 @@ const Auth = () => {
     return () => subscription.unsubscribe();
   }, [navigate]);
 
+  // Build localization object based on current language
+  const getLocalization = () => {
+    return {
+      variables: {
+        sign_in: {
+          email_label: t('auth:email'),
+          password_label: t('auth:password'),
+          email_input_placeholder: t('auth:email_placeholder', { defaultValue: 'seu@email.com' }),
+          password_input_placeholder: t('auth:password_placeholder', { defaultValue: 'Sua senha' }),
+          button_label: t('auth:sign_in'),
+          loading_button_label: t('auth:signing_in', { defaultValue: 'Entrando...' }),
+          social_provider_text: t('auth:or_continue_with') + " {{provider}}",
+          link_text: t('auth:has_account') + " " + t('auth:sign_in'),
+        },
+        sign_up: {
+          email_label: t('auth:email'),
+          password_label: t('auth:password'),
+          email_input_placeholder: t('auth:email_placeholder', { defaultValue: 'seu@email.com' }),
+          password_input_placeholder: t('auth:password_placeholder', { defaultValue: 'Escolha uma senha' }),
+          button_label: t('auth:create_account'),
+          loading_button_label: t('auth:creating_account', { defaultValue: 'Criando conta...' }),
+          social_provider_text: t('auth:or_continue_with') + " {{provider}}",
+          link_text: t('auth:no_account') + " " + t('auth:sign_up'),
+          confirmation_text: t('auth:check_inbox'),
+        },
+        forgotten_password: {
+          email_label: t('auth:email'),
+          password_label: t('auth:password'),
+          email_input_placeholder: t('auth:email_placeholder', { defaultValue: 'seu@email.com' }),
+          button_label: t('auth:reset_password'),
+          loading_button_label: t('auth:sending_reset', { defaultValue: 'Enviando instruções...' }),
+          link_text: t('auth:forgot_password'),
+          confirmation_text: t('auth:check_inbox'),
+        },
+      },
+    };
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-muted to-background flex">
       {/* Left Side - Branding */}
@@ -45,9 +86,9 @@ const Auth = () => {
                 <Target className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-xl font-semibold mb-2">Análise Completa de Anúncios</h3>
+                <h3 className="text-xl font-semibold mb-2">{t('auth:features.complete_analysis_title')}</h3>
                 <p className="text-primary-foreground/80 leading-relaxed">
-                  Obtenha insights profundos sobre performance, estoque, qualidade e concorrência dos seus produtos no Mercado Livre.
+                  {t('auth:features.complete_analysis_desc')}
                 </p>
               </div>
             </div>
@@ -57,9 +98,9 @@ const Auth = () => {
                 <TrendingUp className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-xl font-semibold mb-2">Monitoramento de Ranking</h3>
+                <h3 className="text-xl font-semibold mb-2">{t('auth:features.ranking_title')}</h3>
                 <p className="text-primary-foreground/80 leading-relaxed">
-                  Acompanhe suas posições nas buscas, analise palavras-chave e monitore a concorrência em tempo real.
+                  {t('auth:features.ranking_desc')}
                 </p>
               </div>
             </div>
@@ -69,9 +110,9 @@ const Auth = () => {
                 <Zap className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-xl font-semibold mb-2">Integração Automática</h3>
+                <h3 className="text-xl font-semibold mb-2">{t('auth:features.integration_title')}</h3>
                 <p className="text-primary-foreground/80 leading-relaxed">
-                  Extensão do Chrome que funciona diretamente nas páginas do Mercado Livre, sem necessidade de copiar e colar.
+                  {t('auth:features.integration_desc')}
                 </p>
               </div>
             </div>
@@ -79,7 +120,7 @@ const Auth = () => {
         </div>
         
         <div className="text-sm text-primary-foreground/60">
-          © 2024 ML Analyzer Pro. Ferramenta profissional para vendedores do Mercado Livre.
+          {t('auth:copyright', { year: currentYear })}
         </div>
       </div>
 
@@ -98,10 +139,10 @@ const Auth = () => {
           <div className="bg-card p-8 rounded-2xl shadow-elevated border border-border">
             <div className="mb-8">
               <h2 className="text-2xl font-bold text-card-foreground mb-2">
-                Bem-vindo de volta
+                {t('auth:login_title')}
               </h2>
               <p className="text-muted-foreground">
-                Entre com sua conta ou crie uma nova para começar
+                {t('auth:login_subtitle')}
               </p>
             </div>
 
@@ -150,40 +191,7 @@ const Auth = () => {
               }}
               providers={[]}
               redirectTo={`${window.location.origin}/dashboard`}
-              localization={{
-                variables: {
-                  sign_in: {
-                    email_label: "Email",
-                    password_label: "Senha",
-                    email_input_placeholder: "seu@email.com",
-                    password_input_placeholder: "Sua senha",
-                    button_label: "Entrar",
-                    loading_button_label: "Entrando...",
-                    social_provider_text: "Entrar com {{provider}}",
-                    link_text: "Já tem uma conta? Entre",
-                  },
-                  sign_up: {
-                    email_label: "Email",
-                    password_label: "Senha",
-                    email_input_placeholder: "seu@email.com",
-                    password_input_placeholder: "Escolha uma senha",
-                    button_label: "Criar conta",
-                    loading_button_label: "Criando conta...",
-                    social_provider_text: "Criar conta com {{provider}}",
-                    link_text: "Não tem uma conta? Crie uma",
-                    confirmation_text: "Verifique seu email para confirmar",
-                  },
-                  forgotten_password: {
-                    email_label: "Email",
-                    password_label: "Senha",
-                    email_input_placeholder: "seu@email.com",
-                    button_label: "Enviar instruções",
-                    loading_button_label: "Enviando instruções...",
-                    link_text: "Esqueceu sua senha?",
-                    confirmation_text: "Verifique seu email para redefinir sua senha",
-                  },
-                },
-              }}
+              localization={getLocalization()}
             />
           </div>
         </div>
