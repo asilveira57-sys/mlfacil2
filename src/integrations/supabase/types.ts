@@ -8119,6 +8119,7 @@ export type Database = {
           card_text_secondary_color: string | null
           card_title_color: string | null
           card_value_color: string | null
+          color_mode_preference: string | null
           company_id: string
           contrast_mode: string | null
           created_at: string
@@ -8150,6 +8151,7 @@ export type Database = {
           card_text_secondary_color?: string | null
           card_title_color?: string | null
           card_value_color?: string | null
+          color_mode_preference?: string | null
           company_id: string
           contrast_mode?: string | null
           created_at?: string
@@ -8181,6 +8183,7 @@ export type Database = {
           card_text_secondary_color?: string | null
           card_title_color?: string | null
           card_value_color?: string | null
+          color_mode_preference?: string | null
           company_id?: string
           contrast_mode?: string | null
           created_at?: string

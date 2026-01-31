@@ -7,9 +7,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useCompanyCustomization } from "@/hooks/useCompanyCustomization";
 import { useThemeCustomization } from "@/hooks/useThemeCustomization";
+import { useColorMode } from "@/hooks/useColorMode";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { Check, GripVertical, Palette, Zap, LucideIcon, Menu, LayoutGrid } from "lucide-react";
+import { Check, GripVertical, Palette, Zap, LucideIcon, Menu, LayoutGrid, Sun } from "lucide-react";
 import {
   CloudDownload, Megaphone, TrendingUp, DollarSign, Activity, Package,
   Tag, MessageCircle, BarChart3, CheckSquare, Clock, Eye, Box, Sprout
@@ -18,6 +19,7 @@ import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea
 import { MenuCustomization } from "./customization/MenuCustomization";
 import { CardsCustomization } from "./customization/CardsCustomization";
 import { SyncSettings } from "./customization/SyncSettings";
+import { ColorModeToggle } from "./customization/ColorModeToggle";
 
 // Map of icon names to components
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -59,6 +61,15 @@ export default function SettingsCustomization() {
     saving,
     hasChanges,
   } = useThemeCustomization();
+
+  const {
+    mode: colorMode,
+    effectiveMode,
+    setMode: setColorMode,
+    previewMode,
+    setPreviewMode,
+    loading: colorModeLoading,
+  } = useColorMode();
 
   // Track if initial sync has been applied
   const initialSyncApplied = useRef(false);
@@ -121,7 +132,7 @@ export default function SettingsCustomization() {
     }
   };
 
-  const loading = companyLoading || themeLoading;
+  const loading = companyLoading || themeLoading || colorModeLoading;
 
   if (loading) {
     return (
@@ -136,22 +147,26 @@ export default function SettingsCustomization() {
   return (
     <div className="space-y-6">
       <Tabs defaultValue="shortcuts" className="w-full">
-        <TabsList className="grid w-full grid-cols-4 h-auto p-1">
+        <TabsList className="grid w-full grid-cols-5 h-auto p-1">
           <TabsTrigger value="shortcuts" className="gap-2 py-2">
             <Zap className="h-4 w-4" />
             <span className="hidden sm:inline">Atalhos</span>
           </TabsTrigger>
           <TabsTrigger value="menu" className="gap-2 py-2">
             <Menu className="h-4 w-4" />
-            <span className="hidden sm:inline">Menu Lateral</span>
+            <span className="hidden sm:inline">Menu</span>
           </TabsTrigger>
           <TabsTrigger value="cards" className="gap-2 py-2">
             <LayoutGrid className="h-4 w-4" />
             <span className="hidden sm:inline">Cards</span>
           </TabsTrigger>
+          <TabsTrigger value="theme" className="gap-2 py-2">
+            <Sun className="h-4 w-4" />
+            <span className="hidden sm:inline">Tema</span>
+          </TabsTrigger>
           <TabsTrigger value="sync" className="gap-2 py-2">
             <Palette className="h-4 w-4" />
-            <span className="hidden sm:inline">Sincronização</span>
+            <span className="hidden sm:inline">Sync</span>
           </TabsTrigger>
         </TabsList>
 
@@ -368,6 +383,18 @@ export default function SettingsCustomization() {
             presets={cardsPresets}
             onApplyPreset={applyPreset}
             isSynced={isSynced}
+          />
+        </TabsContent>
+
+        {/* Theme Mode Tab */}
+        <TabsContent value="theme" className="mt-6">
+          <ColorModeToggle
+            mode={colorMode}
+            effectiveMode={effectiveMode}
+            onModeChange={setColorMode}
+            previewMode={previewMode}
+            onPreviewChange={setPreviewMode}
+            companyColorHex={activeColor.hex}
           />
         </TabsContent>
 
