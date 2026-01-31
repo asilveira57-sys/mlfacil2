@@ -7,6 +7,7 @@ import {
   DraftPayload, 
   DraftStatus,
   Attribute,
+  CaptureLog,
   CATALOG_FORCING_ATTRIBUTES 
 } from './types';
 
@@ -101,6 +102,33 @@ function filterSafeAttributes(attributes: Attribute[]): Attribute[] {
   });
 }
 
+function extractIdentifiers(attributes: Attribute[]): {
+  gtin?: string;
+  ean?: string;
+  sku?: string;
+} {
+  const result: { gtin?: string; ean?: string; sku?: string } = {};
+  
+  if (!attributes || !Array.isArray(attributes)) return result;
+  
+  for (const attr of attributes) {
+    const id = attr.id?.toUpperCase();
+    const value = attr.value_name || attr.value_id;
+    
+    if (!value) continue;
+    
+    if (id === 'GTIN') {
+      result.gtin = value;
+    } else if (id === 'EAN') {
+      result.ean = value;
+    } else if (id === 'SELLER_SKU' || id === 'SKU') {
+      result.sku = value;
+    }
+  }
+  
+  return result;
+}
+
 export function useCloneDraft() {
   const { activeAccount } = useActiveAccount();
   const [draft, setDraft] = useState<CloneDraft | null>(null);
@@ -137,38 +165,41 @@ export function useCloneDraft() {
       }
       
       const item = data.item;
+      const captureLog: CaptureLog = data.capture_log || {
+        pictures_count: 0,
+        pictures_source: 'none',
+        description_captured: false,
+        dimensions_captured: false,
+        attributes_count: 0,
+        gtin_found: false,
+        ean_found: false,
+        sku_found: false,
+        errors: [],
+      };
+      
+      // CORREÇÃO 1: Usar fotos completas já processadas pela edge function
+      const finalPictures = item.pictures || [];
+      
+      console.log(`[useCloneDraft] Capture log:`, captureLog);
+      console.log(`[useCloneDraft] Pictures: ${finalPictures.length}, Description: ${!!item.description}, Dimensions: ${captureLog.dimensions_captured}`);
+      
+      // Extrair dimensões dos atributos
       const dimensions = extractPackageDimensions(item.attributes || []);
       
-      // Processar fotos - garantir que temos URLs válidas
-      // A API retorna pictures com várias propriedades, precisamos normalizar
-      const processedPictures = (item.pictures || []).map((p: any) => {
-        // Priorizar secure_url, depois url, depois tentar construir de outras fontes
-        const secureUrl = p.secure_url || p.url || '';
-        // Converter http para https se necessário
-        const finalUrl = secureUrl.replace(/^http:\/\//i, 'https://');
-        return {
-          id: p.id || '',
-          url: finalUrl,
-          secure_url: finalUrl,
-        };
-      }).filter((p: any) => p.url && p.url.length > 0);
-      
-      // Se não temos fotos mas temos thumbnail, usar como foto principal
-      const finalPictures = processedPictures.length > 0 
-        ? processedPictures 
-        : (item.thumbnail ? [{ id: 'thumb', url: item.thumbnail.replace(/^http:\/\//i, 'https://'), secure_url: item.thumbnail.replace(/^http:\/\//i, 'https://') }] : []);
-      
-      console.log(`[useCloneDraft] Pictures processed: ${finalPictures.length} from ${(item.pictures || []).length} original + thumbnail fallback`);
+      // CORREÇÃO 4: Extrair identificadores para controle do usuário
+      const identifiers = extractIdentifiers(item.attributes || []);
       
       const snapshot: RawSnapshot = {
         item_id: data.resolved_item_id || item.id || extracted.id,
         title: item.title || '',
+        // CORREÇÃO 2: Usar descrição capturada pela edge function
         description: item.description || '',
         price: item.price || 0,
         available_quantity: item.available_quantity || 1,
         condition: item.condition || 'new',
         category_id: item.category_id || '',
         listing_type_id: item.listing_type_id || 'gold_special',
+        // CORREÇÃO 1: Fotos completas
         pictures: finalPictures,
         attributes: item.attributes || [],
         seller_id: String(item.seller_id),
@@ -181,6 +212,12 @@ export function useCloneDraft() {
           item.parent_item_id
         ),
         catalog_product_id: item.catalog_product_id,
+        // CORREÇÃO 7: Guardar log de captura
+        capture_log: captureLog,
+        // CORREÇÃO 4: Guardar identificadores capturados
+        captured_gtin: item.captured_gtin || identifiers.gtin,
+        captured_ean: item.captured_ean || identifiers.ean,
+        captured_sku: item.captured_sku || identifiers.sku,
       };
       
       return snapshot;
@@ -244,7 +281,10 @@ export function useCloneDraft() {
         mlAccountId = mlAccount?.id || null;
       }
       
+      // CORREÇÃO 3: Extrair dimensões do snapshot (já vieram da API)
       const dimensions = extractPackageDimensions(snapshot.attributes);
+      
+      // CORREÇÃO 5: Filtrar atributos seguros (remover GTIN/EAN/SKU etc)
       const safeAttributes = filterSafeAttributes(snapshot.attributes);
       
       // Determinar listing_type inicial
@@ -255,19 +295,29 @@ export function useCloneDraft() {
       
       const draftPayload: DraftPayload = {
         title: snapshot.title,
+        // CORREÇÃO 2: Descrição já vem preenchida do snapshot
         description: snapshot.description || '',
         price: snapshot.price,
         available_quantity: snapshot.available_quantity,
         condition: snapshot.condition,
+        // CORREÇÃO 1: Fotos já estão completas
         pictures: snapshot.pictures,
+        // CORREÇÃO 3: Dimensões pré-preenchidas quando existem
         seller_package_height: dimensions.height,
         seller_package_width: dimensions.width,
         seller_package_length: dimensions.length,
         seller_package_weight: dimensions.weight,
+        // CORREÇÃO 5: Apenas atributos seguros
         attributes: safeAttributes,
         listing_type_id: listingType,
         initial_status: 'paused', // Default: criar pausado
         category_id: snapshot.category_id,
+        // CORREÇÃO 4: Toggles desligados por padrão
+        include_gtin: false,
+        include_sku: false,
+        // Valores capturados para exibição
+        captured_gtin: snapshot.captured_gtin,
+        captured_sku: snapshot.captured_sku,
       };
       
       // Inserir no banco
