@@ -139,6 +139,27 @@ export function useCloneDraft() {
       const item = data.item;
       const dimensions = extractPackageDimensions(item.attributes || []);
       
+      // Processar fotos - garantir que temos URLs válidas
+      // A API retorna pictures com várias propriedades, precisamos normalizar
+      const processedPictures = (item.pictures || []).map((p: any) => {
+        // Priorizar secure_url, depois url, depois tentar construir de outras fontes
+        const secureUrl = p.secure_url || p.url || '';
+        // Converter http para https se necessário
+        const finalUrl = secureUrl.replace(/^http:\/\//i, 'https://');
+        return {
+          id: p.id || '',
+          url: finalUrl,
+          secure_url: finalUrl,
+        };
+      }).filter((p: any) => p.url && p.url.length > 0);
+      
+      // Se não temos fotos mas temos thumbnail, usar como foto principal
+      const finalPictures = processedPictures.length > 0 
+        ? processedPictures 
+        : (item.thumbnail ? [{ id: 'thumb', url: item.thumbnail.replace(/^http:\/\//i, 'https://'), secure_url: item.thumbnail.replace(/^http:\/\//i, 'https://') }] : []);
+      
+      console.log(`[useCloneDraft] Pictures processed: ${finalPictures.length} from ${(item.pictures || []).length} original + thumbnail fallback`);
+      
       const snapshot: RawSnapshot = {
         item_id: data.resolved_item_id || item.id || extracted.id,
         title: item.title || '',
@@ -148,11 +169,7 @@ export function useCloneDraft() {
         condition: item.condition || 'new',
         category_id: item.category_id || '',
         listing_type_id: item.listing_type_id || 'gold_special',
-        pictures: (item.pictures || []).map((p: any) => ({
-          id: p.id,
-          url: p.url,
-          secure_url: p.secure_url,
-        })),
+        pictures: finalPictures,
         attributes: item.attributes || [],
         seller_id: String(item.seller_id),
         thumbnail: item.thumbnail,

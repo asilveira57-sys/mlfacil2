@@ -400,7 +400,7 @@ export function NewListingCloneModal({ open, onOpenChange }: NewListingCloneModa
           </TabsList>
           
           {/* Conteúdo rolável */}
-          <ScrollArea className="flex-1 mt-4" type="always">
+          <ScrollArea className="flex-1 min-h-0 mt-4" type="always">
             <div className="pr-4">
               <TabsContent value="reference" className="mt-0">
                 <ReferenceTab
