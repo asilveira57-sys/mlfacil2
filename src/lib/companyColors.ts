@@ -98,8 +98,8 @@ export function getCompanyColor(colorKey: string): CompanyColor {
 // Available shortcuts that can be enabled/disabled
 export interface DashboardShortcut {
   key: string;
-  title: string;
-  description: string;
+  titleKey: string;
+  descriptionKey: string;
   icon: string; // lucide icon name
   route: string;
 }
@@ -107,92 +107,92 @@ export interface DashboardShortcut {
 export const AVAILABLE_SHORTCUTS: DashboardShortcut[] = [
   {
     key: 'shipping',
-    title: 'Importar Vendas',
-    description: 'Sincronize pedidos do Mercado Livre',
+    titleKey: 'dashboard:shortcuts.import_sales',
+    descriptionKey: 'dashboard:shortcuts.import_sales_desc',
     icon: 'CloudDownload',
     route: '/shipping-labels',
   },
   {
     key: 'send',
-    title: 'Send',
-    description: 'Cultive seus melhores anúncios',
+    titleKey: 'send:title',
+    descriptionKey: 'send:subtitle',
     icon: 'Sprout',
     route: '/send',
   },
   {
     key: 'ads',
-    title: 'Mercado ADS',
-    description: 'Gerencie campanhas publicitárias',
+    titleKey: 'dashboard:shortcuts.ads',
+    descriptionKey: 'dashboard:shortcuts.ads_desc',
     icon: 'Megaphone',
     route: '/publicidade',
   },
   {
     key: 'trends',
-    title: 'Ver Tendências',
-    description: 'Produtos em alta por categoria',
+    titleKey: 'dashboard:shortcuts.trends',
+    descriptionKey: 'dashboard:shortcuts.trends_desc',
     icon: 'TrendingUp',
     route: '/tendencias',
   },
   {
     key: 'costs',
-    title: 'Validar Custos',
-    description: 'Análise de margens e lucro',
+    titleKey: 'dashboard:shortcuts.validate_costs',
+    descriptionKey: 'dashboard:shortcuts.validate_costs_desc',
     icon: 'DollarSign',
     route: '/custos',
   },
   {
     key: 'radiography',
-    title: 'Radiografia',
-    description: 'Análise profunda de anúncios',
+    titleKey: 'dashboard:modules.radiography',
+    descriptionKey: 'dashboard:modules.radiography_desc',
     icon: 'Activity',
     route: '/radiografia',
   },
   {
     key: 'labels',
-    title: 'Gerar Etiquetas',
-    description: 'Imprima etiquetas PDF/ZPL',
+    titleKey: 'dashboard:shortcuts.labels',
+    descriptionKey: 'dashboard:shortcuts.labels_desc',
     icon: 'Package',
     route: '/shipping-labels',
   },
   {
     key: 'promotions',
-    title: 'Promoções',
-    description: 'Gerencie promoções ativas',
+    titleKey: 'dashboard:shortcuts.promotions',
+    descriptionKey: 'dashboard:shortcuts.promotions_desc',
     icon: 'Tag',
     route: '/promocoes',
   },
   {
     key: 'questions',
-    title: 'Perguntas',
-    description: 'Responda perguntas dos clientes',
+    titleKey: 'dashboard:shortcuts.questions',
+    descriptionKey: 'dashboard:shortcuts.questions_desc',
     icon: 'MessageCircle',
     route: '/perguntas',
   },
   {
     key: 'abc',
-    title: 'Análise ABC',
-    description: 'Classificação de produtos',
+    titleKey: 'dashboard:modules.abc_curve',
+    descriptionKey: 'dashboard:modules.abc_curve_desc',
     icon: 'BarChart3',
     route: '/abc-analysis',
   },
   {
     key: 'tasks',
-    title: 'Tarefas',
-    description: 'Gerencie suas tarefas',
+    titleKey: 'dashboard:modules.tasks',
+    descriptionKey: 'dashboard:modules.tasks_desc',
     icon: 'CheckSquare',
     route: '/tarefas',
   },
   {
     key: 'timeline',
-    title: 'Linha do Tempo',
-    description: 'Gaps de venda por anúncio',
+    titleKey: 'dashboard:modules.timeline',
+    descriptionKey: 'dashboard:modules.timeline_desc',
     icon: 'Clock',
     route: '/anuncios/linha-do-tempo',
   },
   {
     key: 'competitors',
-    title: 'Concorrência',
-    description: 'Monitore seus concorrentes',
+    titleKey: 'dashboard:shortcuts.competitors',
+    descriptionKey: 'dashboard:shortcuts.competitors_desc',
     icon: 'Eye',
     route: '/concorrencia',
   },

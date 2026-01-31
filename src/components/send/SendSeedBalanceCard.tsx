@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Sprout, Package, TrendingUp, AlertCircle } from "lucide-react";
@@ -20,6 +21,7 @@ export function SendSeedBalanceCard({
   planTier,
   onBuySeeds,
 }: SendSeedBalanceCardProps) {
+  const { t } = useTranslation('send');
   const usagePercent = totalSeeds > 0 ? (usedSeeds / totalSeeds) * 100 : 0;
   const isLow = availableSeeds <= 2;
   const isEmpty = availableSeeds === 0;
@@ -43,10 +45,11 @@ export function SendSeedBalanceCard({
               )} />
             </div>
             <div>
-              <h3 className="font-semibold text-foreground">Suas Sementes</h3>
-              <p className="text-sm text-muted-foreground">
-                Plano: <Badge variant="secondary" className="ml-1">{planTier}</Badge>
-              </p>
+              <h3 className="font-semibold text-foreground">{t('seeds.title')}</h3>
+              <div className="text-sm text-muted-foreground flex items-center gap-1">
+                <span>{t('seeds.plan')}:</span>
+                <Badge variant="secondary">{planTier}</Badge>
+              </div>
             </div>
           </div>
           
@@ -55,7 +58,7 @@ export function SendSeedBalanceCard({
               onClick={onBuySeeds}
               className="text-sm text-primary hover:underline font-medium"
             >
-              Comprar mais
+              {t('seeds.buy_more')}
             </button>
           )}
         </div>
@@ -69,22 +72,22 @@ export function SendSeedBalanceCard({
             )}>
               {availableSeeds}
             </p>
-            <p className="text-xs text-muted-foreground">Disponíveis</p>
+            <p className="text-xs text-muted-foreground">{t('seeds.available')}</p>
           </div>
           <div className="text-center p-3 rounded-lg bg-muted/50">
             <p className="text-2xl font-bold text-foreground">{usedSeeds}</p>
-            <p className="text-xs text-muted-foreground">Em uso</p>
+            <p className="text-xs text-muted-foreground">{t('seeds.in_use')}</p>
           </div>
           <div className="text-center p-3 rounded-lg bg-muted/50">
             <p className="text-2xl font-bold text-foreground">{totalSeeds}</p>
-            <p className="text-xs text-muted-foreground">Total</p>
+            <p className="text-xs text-muted-foreground">{t('seeds.total')}</p>
           </div>
         </div>
 
         {/* Usage bar */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Uso de sementes</span>
+            <span className="text-muted-foreground">{t('seeds.usage')}</span>
             <span className="font-medium">{usagePercent.toFixed(0)}%</span>
           </div>
           <div className="h-2 bg-muted rounded-full overflow-hidden">
@@ -103,7 +106,7 @@ export function SendSeedBalanceCard({
           <div className="mt-4 p-3 rounded-lg bg-destructive/10 border border-destructive/20 flex items-center gap-2">
             <AlertCircle className="h-4 w-4 text-destructive flex-shrink-0" />
             <p className="text-sm text-destructive">
-              Sem sementes disponíveis. Compre mais ou remova um anúncio.
+              {t('seeds.empty_warning')}
             </p>
           </div>
         )}
@@ -112,7 +115,7 @@ export function SendSeedBalanceCard({
           <div className="mt-4 p-3 rounded-lg bg-warning/10 border border-warning/20 flex items-center gap-2">
             <AlertCircle className="h-4 w-4 text-warning flex-shrink-0" />
             <p className="text-sm text-warning">
-              Poucas sementes restantes. Considere comprar mais.
+              {t('seeds.low_warning')}
             </p>
           </div>
         )}
@@ -121,11 +124,11 @@ export function SendSeedBalanceCard({
         <div className="mt-4 pt-4 border-t flex items-center justify-between text-sm">
           <div className="flex items-center gap-2 text-muted-foreground">
             <Package className="h-4 w-4" />
-            <span>{plantedCount} anúncios cultivando</span>
+            <span>{t('seeds.cultivating', { count: plantedCount })}</span>
           </div>
           <div className="flex items-center gap-2 text-muted-foreground">
             <TrendingUp className="h-4 w-4" />
-            <span>Limite: 100</span>
+            <span>{t('seeds.limit')}</span>
           </div>
         </div>
       </CardContent>

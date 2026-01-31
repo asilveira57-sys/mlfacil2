@@ -62,6 +62,16 @@
     "ads": "Mercado ADS",
     "ads_desc": "Gestiona campañas publicitarias",
     "validate_costs": "Validar Costos",
-    "validate_costs_desc": "Revisa márgenes y precios"
+    "validate_costs_desc": "Revisa márgenes y precios",
+    "trends": "Ver Tendencias",
+    "trends_desc": "Productos en tendencia por categoría",
+    "labels": "Generar Etiquetas",
+    "labels_desc": "Imprime etiquetas en PDF/ZPL",
+    "promotions": "Promociones",
+    "promotions_desc": "Gestiona promociones activas",
+    "questions": "Preguntas",
+    "questions_desc": "Responde preguntas de clientes",
+    "competitors": "Competencia",
+    "competitors_desc": "Monitorea a tus competidores"
   }
 }

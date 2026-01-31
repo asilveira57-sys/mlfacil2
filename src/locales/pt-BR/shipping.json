@@ -1,0 +1,25 @@
+{
+  "title": "Etiquetas de Envio",
+  "search_placeholder": "Buscar pedido, comprador ou destinatário...",
+  "period": "Período",
+  "all": "Todos",
+  "today": "Hoje",
+  "days_7": "7 dias",
+  "days_15": "15 dias",
+  "days_30": "30 dias",
+  "custom": "Personalizado",
+  "select_start_date": "Selecione a data inicial",
+  "select_end_date": "Selecione a data final",
+  "period_selected": "Período selecionado",
+  "clear_period": "Limpar período",
+  "refresh": "Atualizar",
+  "status": {
+    "all": "Todos",
+    "ready": "Para imprimir",
+    "waiting_nf": "Aguardando NF",
+    "reprint": "Reimprimir"
+  },
+  "orders_count": "{{count}} pedido",
+  "orders_count_plural": "{{count}} pedidos",
+  "no_orders": "Nenhum pedido encontrado para o período selecionado"
+}

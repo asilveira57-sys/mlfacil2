@@ -62,6 +62,16 @@
     "ads": "Mercado ADS",
     "ads_desc": "Manage advertising campaigns",
     "validate_costs": "Validate Costs",
-    "validate_costs_desc": "Review margins and pricing"
+    "validate_costs_desc": "Review margins and pricing",
+    "trends": "View Trends",
+    "trends_desc": "Trending products by category",
+    "labels": "Generate Labels",
+    "labels_desc": "Print labels in PDF/ZPL",
+    "promotions": "Promotions",
+    "promotions_desc": "Manage active promotions",
+    "questions": "Questions",
+    "questions_desc": "Answer customer questions",
+    "competitors": "Competition",
+    "competitors_desc": "Monitor your competitors"
   }
 }

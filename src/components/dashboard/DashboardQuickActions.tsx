@@ -82,9 +82,9 @@ export function DashboardQuickActions() {
                   />
                 </div>
                 <div>
-                  <h4 className="font-medium text-sm text-foreground">{shortcut.title}</h4>
+                  <h4 className="font-medium text-sm text-foreground">{t(shortcut.titleKey)}</h4>
                   <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">
-                    {shortcut.description}
+                    {t(shortcut.descriptionKey)}
                   </p>
                 </div>
               </div>

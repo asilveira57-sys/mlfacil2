@@ -1,0 +1,25 @@
+{
+  "title": "Shipping Labels",
+  "search_placeholder": "Search order, buyer or recipient...",
+  "period": "Period",
+  "all": "All",
+  "today": "Today",
+  "days_7": "7 days",
+  "days_15": "15 days",
+  "days_30": "30 days",
+  "custom": "Custom",
+  "select_start_date": "Select start date",
+  "select_end_date": "Select end date",
+  "period_selected": "Period selected",
+  "clear_period": "Clear period",
+  "refresh": "Refresh",
+  "status": {
+    "all": "All",
+    "ready": "Ready to print",
+    "waiting_nf": "Waiting NF",
+    "reprint": "Reprint"
+  },
+  "orders_count": "{{count}} order",
+  "orders_count_plural": "{{count}} orders",
+  "no_orders": "No orders found for the selected period"
+}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Settings } from 'lucide-react';
@@ -21,6 +22,7 @@ interface MLAccount {
 }
 
 export default function ShippingLabels() {
+  const { t } = useTranslation('shipping');
   const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
@@ -133,7 +135,7 @@ export default function ShippingLabels() {
 
   if (loading) {
     return (
-      <PageContainer title="Etiquetas de Envio">
+      <PageContainer title={t('title')}>
         <div className="flex items-center justify-center h-64">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
         </div>
@@ -143,7 +145,7 @@ export default function ShippingLabels() {
 
   return (
     <PageContainer 
-      title="Etiquetas de Envio" 
+      title={t('title')} 
       subtitle={mlAccount?.nickname || mlAccount?.email || undefined}
       headerContent={headerContent}
     >

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Calendar } from '@/components/ui/calendar';
@@ -7,7 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { RefreshCw, Clock, CalendarIcon, Search, X } from 'lucide-react';
 import { FinalStatus, PeriodFilter, SyncPhase, DateRange } from '@/hooks/useShippingLabels';
 import { formatDistanceToNow, format } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
+import { ptBR, enUS, es } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 
 // Filter status types (only the ones shown as filter chips)
@@ -31,13 +32,6 @@ interface ShippingFiltersProps {
   totalCount: number;
 }
 
-const STATUS_LABELS: Record<FilterStatus, string> = {
-  all: 'Todos',
-  pronta: 'Para imprimir',
-  aguardando_nf: 'Aguardando NF',
-  reimprimir: 'Reimprimir',
-};
-
 const STATUS_VARIANTS: Record<FilterStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   all: 'outline',
   pronta: 'default',
@@ -47,16 +41,20 @@ const STATUS_VARIANTS: Record<FilterStatus, 'default' | 'secondary' | 'destructi
 
 type QuickPeriod = Exclude<PeriodFilter, 'custom'>;
 
-const PERIOD_OPTIONS: { value: QuickPeriod; label: string }[] = [
-  { value: 'all', label: 'Todos' },
-  { value: 'today', label: 'Hoje' },
-  { value: '7d', label: '7 dias' },
-  { value: '15d', label: '15 dias' },
-  { value: '30d', label: '30 dias' },
+const PERIOD_KEYS: { value: QuickPeriod; labelKey: string }[] = [
+  { value: 'all', labelKey: 'all' },
+  { value: 'today', labelKey: 'today' },
+  { value: '7d', labelKey: 'days_7' },
+  { value: '15d', labelKey: 'days_15' },
+  { value: '30d', labelKey: 'days_30' },
 ];
 
-// Phase labels kept for reference but not displayed anymore
-// const PHASE_LABELS: Record<SyncPhase, string> = { ... };
+const STATUS_KEYS: { value: FilterStatus; labelKey: string }[] = [
+  { value: 'all', labelKey: 'status.all' },
+  { value: 'pronta', labelKey: 'status.ready' },
+  { value: 'aguardando_nf', labelKey: 'status.waiting_nf' },
+  { value: 'reimprimir', labelKey: 'status.reprint' },
+];
 
 export function ShippingFilters({
   statusFilter,
@@ -75,7 +73,17 @@ export function ShippingFilters({
   lastSyncAt,
   totalCount,
 }: ShippingFiltersProps) {
+  const { t, i18n } = useTranslation('shipping');
   const [datePickerOpen, setDatePickerOpen] = useState(false);
+
+  // Get locale for date-fns
+  const getDateLocale = () => {
+    switch (i18n.language) {
+      case 'en': return enUS;
+      case 'es': return es;
+      default: return ptBR;
+    }
+  };
 
   const handleQuickPeriod = (period: PeriodFilter) => {
     setPeriodFilter(period);
@@ -102,9 +110,15 @@ export function ShippingFilters({
   };
 
   const formatDateRange = () => {
-    if (!customDateRange.from) return 'Selecionar período';
-    if (!customDateRange.to) return format(customDateRange.from, 'dd/MM/yyyy', { locale: ptBR });
-    return `${format(customDateRange.from, 'dd/MM/yyyy', { locale: ptBR })} - ${format(customDateRange.to, 'dd/MM/yyyy', { locale: ptBR })}`;
+    if (!customDateRange.from) return t('custom');
+    if (!customDateRange.to) return format(customDateRange.from, 'dd/MM/yyyy', { locale: getDateLocale() });
+    return `${format(customDateRange.from, 'dd/MM/yyyy', { locale: getDateLocale() })} - ${format(customDateRange.to, 'dd/MM/yyyy', { locale: getDateLocale() })}`;
+  };
+
+  const getOrdersCountText = () => {
+    return totalCount === 1 
+      ? t('orders_count', { count: totalCount })
+      : t('orders_count_plural', { count: totalCount });
   };
 
   return (
@@ -114,7 +128,7 @@ export function ShippingFilters({
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           type="text"
-          placeholder="Buscar pedido, comprador ou destinatário..."
+          placeholder={t('search_placeholder')}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="pl-9 pr-9"
@@ -132,8 +146,8 @@ export function ShippingFilters({
       {/* Top bar with period and sync */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm text-muted-foreground">Período:</span>
-          {PERIOD_OPTIONS.map((option) => (
+          <span className="text-sm text-muted-foreground">{t('period')}:</span>
+          {PERIOD_KEYS.map((option) => (
             <Button
               key={option.value}
               variant={periodFilter === option.value ? 'default' : 'outline'}
@@ -141,7 +155,7 @@ export function ShippingFilters({
               onClick={() => handleQuickPeriod(option.value)}
               disabled={isSyncing}
             >
-              {option.label}
+              {t(option.labelKey)}
             </Button>
           ))}
           
@@ -158,17 +172,17 @@ export function ShippingFilters({
                 disabled={isSyncing}
               >
                 <CalendarIcon className="mr-2 h-4 w-4" />
-                {periodFilter === 'custom' ? formatDateRange() : 'Personalizado'}
+                {periodFilter === 'custom' ? formatDateRange() : t('custom')}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="start">
               <div className="p-3 border-b">
                 <p className="text-sm text-muted-foreground">
                   {!customDateRange.from 
-                    ? 'Selecione a data inicial' 
+                    ? t('select_start_date') 
                     : !customDateRange.to 
-                      ? 'Selecione a data final' 
-                      : 'Período selecionado'}
+                      ? t('select_end_date') 
+                      : t('period_selected')}
                 </p>
                 {customDateRange.from && (
                   <p className="text-sm font-medium mt-1">
@@ -180,7 +194,7 @@ export function ShippingFilters({
                 mode="single"
                 selected={customDateRange.to || customDateRange.from || undefined}
                 onSelect={handleDateSelect}
-                locale={ptBR}
+                locale={getDateLocale()}
                 disabled={(date) => date > new Date()}
                 modifiers={{
                   range_start: customDateRange.from || undefined,
@@ -208,7 +222,7 @@ export function ShippingFilters({
                       setDatePickerOpen(false);
                     }}
                   >
-                    Limpar período
+                    {t('clear_period')}
                   </Button>
                 </div>
               )}
@@ -224,7 +238,7 @@ export function ShippingFilters({
               <span>
                 {formatDistanceToNow(new Date(lastSyncAt), { 
                   addSuffix: true, 
-                  locale: ptBR 
+                  locale: getDateLocale() 
                 })}
               </span>
             </div>
@@ -238,7 +252,7 @@ export function ShippingFilters({
             className="gap-2"
           >
             <RefreshCw className={`h-4 w-4 ${isSyncing ? 'animate-spin text-primary' : ''}`} />
-            {!isSyncing && 'Atualizar'}
+            {!isSyncing && t('refresh')}
           </Button>
         </div>
       </div>
@@ -246,25 +260,25 @@ export function ShippingFilters({
       {/* Status chips */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap gap-2">
-          {(Object.keys(STATUS_LABELS) as FilterStatus[]).map((status) => (
+          {STATUS_KEYS.map((status) => (
             <Badge
-              key={status}
-              variant={statusFilter === status ? STATUS_VARIANTS[status] : 'outline'}
+              key={status.value}
+              variant={statusFilter === status.value ? STATUS_VARIANTS[status.value] : 'outline'}
               className={`cursor-pointer px-3 py-1.5 text-sm ${
-                statusFilter === status ? '' : 'opacity-70 hover:opacity-100'
+                statusFilter === status.value ? '' : 'opacity-70 hover:opacity-100'
               }`}
-              onClick={() => setStatusFilter(status)}
+              onClick={() => setStatusFilter(status.value)}
             >
-              {STATUS_LABELS[status]}
+              {t(status.labelKey)}
               <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-background/20 text-xs">
-                {statusCounts[status]}
+                {statusCounts[status.value]}
               </span>
             </Badge>
           ))}
         </div>
         
         <span className="text-sm text-muted-foreground">
-          {totalCount} pedido{totalCount !== 1 ? 's' : ''}
+          {getOrdersCountText()}
         </span>
       </div>
     </div>

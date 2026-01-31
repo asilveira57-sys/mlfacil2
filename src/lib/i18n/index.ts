@@ -10,6 +10,8 @@ import ptBRErrors from '@/locales/pt-BR/errors.json';
 import ptBRActions from '@/locales/pt-BR/actions.json';
 import ptBRSettings from '@/locales/pt-BR/settings.json';
 import ptBRDashboard from '@/locales/pt-BR/dashboard.json';
+import ptBRSend from '@/locales/pt-BR/send.json';
+import ptBRShipping from '@/locales/pt-BR/shipping.json';
 
 import enCommon from '@/locales/en/common.json';
 import enNav from '@/locales/en/nav.json';
@@ -18,6 +20,8 @@ import enErrors from '@/locales/en/errors.json';
 import enActions from '@/locales/en/actions.json';
 import enSettings from '@/locales/en/settings.json';
 import enDashboard from '@/locales/en/dashboard.json';
+import enSend from '@/locales/en/send.json';
+import enShipping from '@/locales/en/shipping.json';
 
 import esCommon from '@/locales/es/common.json';
 import esNav from '@/locales/es/nav.json';
@@ -26,6 +30,8 @@ import esErrors from '@/locales/es/errors.json';
 import esActions from '@/locales/es/actions.json';
 import esSettings from '@/locales/es/settings.json';
 import esDashboard from '@/locales/es/dashboard.json';
+import esSend from '@/locales/es/send.json';
+import esShipping from '@/locales/es/shipping.json';
 
 export const SUPPORTED_LANGUAGES = ['pt-BR', 'en', 'es'] as const;
 export type SupportedLanguage = typeof SUPPORTED_LANGUAGES[number];
@@ -45,6 +51,8 @@ const resources = {
     actions: ptBRActions,
     settings: ptBRSettings,
     dashboard: ptBRDashboard,
+    send: ptBRSend,
+    shipping: ptBRShipping,
   },
   en: {
     common: enCommon,
@@ -54,6 +62,8 @@ const resources = {
     actions: enActions,
     settings: enSettings,
     dashboard: enDashboard,
+    send: enSend,
+    shipping: enShipping,
   },
   es: {
     common: esCommon,
@@ -63,6 +73,8 @@ const resources = {
     actions: esActions,
     settings: esSettings,
     dashboard: esDashboard,
+    send: esSend,
+    shipping: esShipping,
   },
 };
 
@@ -79,7 +91,7 @@ i18n
     resources,
     fallbackLng: 'pt-BR',
     defaultNS: 'common',
-    ns: ['common', 'nav', 'auth', 'errors', 'actions', 'settings', 'dashboard'],
+    ns: ['common', 'nav', 'auth', 'errors', 'actions', 'settings', 'dashboard', 'send', 'shipping'],
     
     detection: {
       order: detectionOrder,

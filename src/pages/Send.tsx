@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,7 @@ import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 
 export default function Send() {
+  const { t } = useTranslation('send');
   const navigate = useNavigate();
   const { sellerId } = useActiveAccount();
   const {
@@ -90,13 +92,13 @@ export default function Send() {
     setIsRefreshing(true);
     await refreshData();
     setIsRefreshing(false);
-    toast.success("Dados atualizados");
+    toast.success(t('data_updated'));
   };
 
   const handlePlant = async (item: EligibleItem) => {
     const success = await plantItem(item.item_id, item.item_title || undefined, item.item_thumbnail || undefined, item.abc_class);
     if (success) {
-      toast.success(`${item.item_title || item.item_id} foi plantado!`);
+      toast.success(t('planted_success', { title: item.item_title || item.item_id }));
     }
   };
 
@@ -104,7 +106,7 @@ export default function Send() {
     if (!itemToRemove) return;
     const success = await removeItem(itemToRemove);
     if (success) {
-      toast.success("Anúncio removido do Send");
+      toast.success(t('removed_success'));
     }
     setItemToRemove(null);
   };
@@ -122,13 +124,13 @@ export default function Send() {
       disabled={isRefreshing}
     >
       <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-      Atualizar
+      {t('refresh')}
     </Button>
   );
 
   if (loading) {
     return (
-      <PageContainer title="Send" subtitle="Cultive seus melhores anúncios">
+      <PageContainer title={t('title')} subtitle={t('subtitle')}>
         <div className="container mx-auto py-6 px-4 max-w-7xl space-y-6">
           <Skeleton className="h-40 w-full" />
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -143,8 +145,8 @@ export default function Send() {
 
   return (
     <PageContainer 
-      title="Send" 
-      subtitle="Cultive seus melhores anúncios"
+      title={t('title')} 
+      subtitle={t('subtitle')}
       headerContent={headerContent}
     >
       <div className="container mx-auto py-6 px-4 max-w-7xl space-y-6">
@@ -157,9 +159,9 @@ export default function Send() {
                   <Sprout className="h-6 w-6 text-success" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-foreground">Seu Jardim de Anúncios</h2>
+                  <h2 className="text-xl font-bold text-foreground">{t('garden.title')}</h2>
                   <p className="text-sm text-muted-foreground">
-                    O espaço onde você cultiva os anúncios que sustentam seu negócio
+                    {t('garden.subtitle')}
                   </p>
                 </div>
               </div>
@@ -168,19 +170,19 @@ export default function Send() {
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
                 <div className="p-3 rounded-lg bg-background/80 backdrop-blur">
                   <p className="text-2xl font-bold text-success">{healthyCount}</p>
-                  <p className="text-xs text-muted-foreground">Saudáveis</p>
+                  <p className="text-xs text-muted-foreground">{t('garden.healthy')}</p>
                 </div>
                 <div className="p-3 rounded-lg bg-background/80 backdrop-blur">
                   <p className="text-2xl font-bold text-warning">{needsAttentionCount}</p>
-                  <p className="text-xs text-muted-foreground">Precisam atenção</p>
+                  <p className="text-xs text-muted-foreground">{t('garden.needs_attention')}</p>
                 </div>
                 <div className="p-3 rounded-lg bg-background/80 backdrop-blur">
                   <p className="text-2xl font-bold text-foreground">{plantedCount}</p>
-                  <p className="text-xs text-muted-foreground">Plantados</p>
+                  <p className="text-xs text-muted-foreground">{t('garden.planted')}</p>
                 </div>
                 <div className="p-3 rounded-lg bg-background/80 backdrop-blur">
                   <p className="text-2xl font-bold text-primary">{availableSeeds}</p>
-                  <p className="text-xs text-muted-foreground">Sementes livres</p>
+                  <p className="text-xs text-muted-foreground">{t('garden.free_seeds')}</p>
                 </div>
               </div>
             </div>
@@ -221,14 +223,14 @@ export default function Send() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm flex items-center gap-2">
                   <Info className="h-4 w-4" />
-                  Como funciona
+                  {t('how_it_works.title')}
                 </CardTitle>
               </CardHeader>
               <CardContent className="text-xs text-muted-foreground space-y-2">
-                <p>• Apenas anúncios <strong>Curva A</strong> ou <strong>A+</strong> podem ser plantados</p>
-                <p>• Cada semente permite cultivar 1 anúncio</p>
-                <p>• Métricas detalhadas só rodam para anúncios no Send</p>
-                <p>• Cuide dos seus anúncios para vê-los crescer</p>
+                <p dangerouslySetInnerHTML={{ __html: `• ${t('how_it_works.rule_1')}` }} />
+                <p>• {t('how_it_works.rule_2')}</p>
+                <p>• {t('how_it_works.rule_3')}</p>
+                <p>• {t('how_it_works.rule_4')}</p>
               </CardContent>
             </Card>
           </div>
@@ -240,14 +242,14 @@ export default function Send() {
                 <TabsList>
                   <TabsTrigger value="garden" className="gap-2">
                     <Leaf className="h-4 w-4" />
-                    Meu Jardim
+                    {t('tabs.my_garden')}
                     {plantedCount > 0 && (
                       <Badge variant="secondary" className="ml-1">{plantedCount}</Badge>
                     )}
                   </TabsTrigger>
                   <TabsTrigger value="eligible" className="gap-2">
                     <TrendingUp className="h-4 w-4" />
-                    Elegíveis
+                    {t('tabs.eligible')}
                     {eligibleItems.filter(i => !i.is_planted).length > 0 && (
                       <Badge variant="secondary" className="ml-1">
                         {eligibleItems.filter(i => !i.is_planted).length}
@@ -256,14 +258,14 @@ export default function Send() {
                   </TabsTrigger>
                   <TabsTrigger value="aplus" className="gap-2">
                     <Star className="h-4 w-4" />
-                    Curva A+
+                    {t('tabs.curve_aplus')}
                   </TabsTrigger>
                 </TabsList>
 
                 <div className="relative w-64 hidden sm:block">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
-                    placeholder="Buscar anúncio..."
+                    placeholder={t('search')}
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="pl-9"
@@ -276,12 +278,12 @@ export default function Send() {
                 {filteredPlantedItems.length === 0 ? (
                   <Card className="p-8 text-center">
                     <div className="text-4xl mb-4">🌱</div>
-                    <h3 className="font-semibold text-lg mb-2">Seu jardim está vazio</h3>
+                    <h3 className="font-semibold text-lg mb-2">{t('garden.empty_title')}</h3>
                     <p className="text-muted-foreground mb-4">
-                      Plante seus primeiros anúncios Curva A para começar a cultivar
+                      {t('garden.empty_desc')}
                     </p>
                     <Button onClick={() => setActiveTab('eligible')}>
-                      Ver anúncios elegíveis
+                      {t('garden.view_eligible')}
                     </Button>
                   </Card>
                 ) : (
@@ -303,10 +305,9 @@ export default function Send() {
                 {filteredEligibleItems.length === 0 ? (
                   <Card className="p-8 text-center">
                     <div className="text-4xl mb-4">📊</div>
-                    <h3 className="font-semibold text-lg mb-2">Nenhum anúncio elegível</h3>
+                    <h3 className="font-semibold text-lg mb-2">{t('eligible.empty_title')}</h3>
                     <p className="text-muted-foreground">
-                      Apenas anúncios Curva A (80% do faturamento) podem ser plantados.
-                      Execute a análise ABC primeiro.
+                      {t('eligible.empty_desc')}
                     </p>
                   </Card>
                 ) : (
@@ -328,10 +329,9 @@ export default function Send() {
               <TabsContent value="aplus" className="mt-0">
                 <Card className="mb-4">
                   <CardHeader className="pb-3">
-                    <CardTitle className="text-sm">O que é Curva A+?</CardTitle>
+                    <CardTitle className="text-sm">{t('aplus.what_is')}</CardTitle>
                     <CardDescription>
-                      Anúncios que vendem consistentemente em vários períodos consecutivos,
-                      demonstrando estabilidade e não dependendo apenas de sazonalidade.
+                      {t('aplus.description')}
                     </CardDescription>
                   </CardHeader>
                 </Card>
@@ -339,10 +339,9 @@ export default function Send() {
                 {aplusCandidates.length === 0 ? (
                   <Card className="p-8 text-center">
                     <div className="text-4xl mb-4">⭐</div>
-                    <h3 className="font-semibold text-lg mb-2">Nenhum candidato A+ ainda</h3>
+                    <h3 className="font-semibold text-lg mb-2">{t('aplus.empty_title')}</h3>
                     <p className="text-muted-foreground">
-                      Anúncios são promovidos a A+ automaticamente quando vendem
-                      consistentemente por 3+ períodos consecutivos.
+                      {t('aplus.empty_desc')}
                     </p>
                   </Card>
                 ) : (
@@ -356,20 +355,20 @@ export default function Send() {
                                 {candidate.item_title || candidate.item_id}
                               </h4>
                               <p className="text-xs text-muted-foreground">
-                                {candidate.consecutive_periods} períodos consecutivos
+                                {t('aplus.consecutive_periods', { count: candidate.consecutive_periods })}
                               </p>
                             </div>
                             <Badge>A+</Badge>
                           </div>
                           <div className="grid grid-cols-2 gap-2 text-sm">
                             <div>
-                              <p className="text-muted-foreground text-xs">Receita total</p>
+                              <p className="text-muted-foreground text-xs">{t('aplus.total_revenue')}</p>
                               <p className="font-medium text-success">
                                 R$ {candidate.total_revenue.toLocaleString('pt-BR')}
                               </p>
                             </div>
                             <div>
-                              <p className="text-muted-foreground text-xs">Estabilidade</p>
+                              <p className="text-muted-foreground text-xs">{t('aplus.stability')}</p>
                               <p className="font-medium">
                                 {candidate.stability_score.toFixed(0)}/100
                               </p>
@@ -390,16 +389,15 @@ export default function Send() {
       <AlertDialog open={!!itemToRemove} onOpenChange={() => setItemToRemove(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remover do Send?</AlertDialogTitle>
+            <AlertDialogTitle>{t('remove_dialog.title')}</AlertDialogTitle>
             <AlertDialogDescription>
-              O anúncio será removido do seu jardim e a semente será devolvida ao seu saldo.
-              O histórico será mantido, mas o ciclo atual será encerrado.
+              {t('remove_dialog.description')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel>{t('remove_dialog.cancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={handleRemove}>
-              Remover
+              {t('remove_dialog.confirm')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

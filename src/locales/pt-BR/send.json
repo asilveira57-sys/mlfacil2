@@ -1,0 +1,79 @@
+{
+  "title": "Send",
+  "subtitle": "Cultive seus melhores anúncios",
+  "refresh": "Atualizar",
+  "data_updated": "Dados atualizados",
+  "planted_success": "{{title}} foi plantado!",
+  "removed_success": "Anúncio removido do Send",
+  "garden": {
+    "title": "Seu Jardim de Anúncios",
+    "subtitle": "O espaço onde você cultiva os anúncios que sustentam seu negócio",
+    "healthy": "Saudáveis",
+    "needs_attention": "Precisam atenção",
+    "planted": "Plantados",
+    "free_seeds": "Sementes livres",
+    "empty_title": "Seu jardim está vazio",
+    "empty_desc": "Plante seus primeiros anúncios Curva A para começar a cultivar",
+    "view_eligible": "Ver anúncios elegíveis"
+  },
+  "tabs": {
+    "my_garden": "Meu Jardim",
+    "eligible": "Elegíveis",
+    "curve_aplus": "Curva A+"
+  },
+  "search": "Buscar anúncio...",
+  "eligible": {
+    "empty_title": "Nenhum anúncio elegível",
+    "empty_desc": "Apenas anúncios Curva A (80% do faturamento) podem ser plantados. Execute a análise ABC primeiro."
+  },
+  "aplus": {
+    "what_is": "O que é Curva A+?",
+    "description": "Anúncios que vendem consistentemente em vários períodos consecutivos, demonstrando estabilidade e não dependendo apenas de sazonalidade.",
+    "empty_title": "Nenhum candidato A+ ainda",
+    "empty_desc": "Anúncios são promovidos a A+ automaticamente quando vendem consistentemente por 3+ períodos consecutivos.",
+    "consecutive_periods": "{{count}} períodos consecutivos",
+    "total_revenue": "Receita total",
+    "stability": "Estabilidade"
+  },
+  "how_it_works": {
+    "title": "Como funciona",
+    "rule_1": "Apenas anúncios <strong>Curva A</strong> ou <strong>A+</strong> podem ser plantados",
+    "rule_2": "Cada semente permite cultivar 1 anúncio",
+    "rule_3": "Métricas detalhadas só rodam para anúncios no Send",
+    "rule_4": "Cuide dos seus anúncios para vê-los crescer"
+  },
+  "remove_dialog": {
+    "title": "Remover do Send?",
+    "description": "O anúncio será removido do seu jardim e a semente será devolvida ao seu saldo. O histórico será mantido, mas o ciclo atual será encerrado.",
+    "cancel": "Cancelar",
+    "confirm": "Remover"
+  },
+  "seeds": {
+    "title": "Suas Sementes",
+    "plan": "Plano",
+    "buy_more": "Comprar mais",
+    "available": "Disponíveis",
+    "in_use": "Em uso",
+    "total": "Total",
+    "usage": "Uso de sementes",
+    "empty_warning": "Sem sementes disponíveis. Compre mais ou remova um anúncio.",
+    "low_warning": "Poucas sementes restantes. Considere comprar mais.",
+    "cultivating": "{{count}} anúncios cultivando",
+    "limit": "Limite: 100"
+  },
+  "plant_stages": {
+    "seed": "Semente",
+    "sprout": "Broto",
+    "growing": "Crescendo",
+    "mature": "Maduro",
+    "fruiting": "Frutificando",
+    "days_planted": "{{count}} dias plantado",
+    "days_to_next": "{{count}}d para {{stage}}"
+  },
+  "health_status": {
+    "healthy": "Saudável",
+    "stagnant": "Estagnado",
+    "weakening": "Enfraquecendo",
+    "dormant": "Dormante"
+  }
+}
