@@ -38,6 +38,11 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
   Building2,
   Plus,
   Store,
@@ -50,7 +55,11 @@ import {
   RefreshCw,
   FileText,
   Link2,
-  ChevronRight,
+  ChevronDown,
+  Key,
+  Package,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -79,6 +88,12 @@ interface Company {
   created_at: string;
 }
 
+interface ErpConfig {
+  company_id: string;
+  erp_provider: 'none' | 'olist' | 'bling';
+  erp_api_token: string | null;
+}
+
 interface BillingData {
   nomeFantasia: string | null;
   razaoSocial: string | null;
@@ -88,6 +103,7 @@ interface BillingData {
 const SettingsCompanies = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [accounts, setAccounts] = useState<MarketplaceAccount[]>([]);
+  const [erpConfigs, setErpConfigs] = useState<Record<string, ErpConfig>>({});
   const [loading, setLoading] = useState(true);
   const [showNewCompanyDialog, setShowNewCompanyDialog] = useState(false);
   const [newCompanyName, setNewCompanyName] = useState("");
@@ -101,6 +117,9 @@ const SettingsCompanies = () => {
   const [accountToLink, setAccountToLink] = useState<MarketplaceAccount | null>(null);
   const [selectedCompanyForLink, setSelectedCompanyForLink] = useState<string>("");
   const [connectingForCompany, setConnectingForCompany] = useState<string | null>(null);
+  const [erpOpenStates, setErpOpenStates] = useState<Record<string, boolean>>({});
+  const [showTokenStates, setShowTokenStates] = useState<Record<string, boolean>>({});
+  const [savingErpId, setSavingErpId] = useState<string | null>(null);
   
   const { activeAccountId, setActiveAccount, refreshAccounts: refreshActiveAccountContext } = useActiveAccount();
 
@@ -142,6 +161,27 @@ const SettingsCompanies = () => {
           razaoSocial: billingResult.razao_social,
           personType: billingResult.person_type as "pf" | "pj" | null,
         });
+      }
+
+      // Fetch ERP configurations for all companies
+      if (companiesData && companiesData.length > 0) {
+        const companyIds = companiesData.map((c: { id: string }) => c.id);
+        const { data: erpData } = await supabase
+          .from("erp_integrations")
+          .select("company_id, provider, api_key")
+          .in("company_id", companyIds);
+
+        const erpMap: Record<string, ErpConfig> = {};
+        (companiesData || []).forEach((company: { id: string }) => {
+          const erpRecord = erpData?.find(e => e.company_id === company.id);
+          const provider = erpRecord?.provider as 'olist' | 'bling' | undefined;
+          erpMap[company.id] = {
+            company_id: company.id,
+            erp_provider: provider && ['olist', 'bling'].includes(provider) ? provider : 'none',
+            erp_api_token: erpRecord?.api_key || null,
+          };
+        });
+        setErpConfigs(erpMap);
       }
 
       setCompanies((companiesData || []) as Company[]);
@@ -253,6 +293,13 @@ const SettingsCompanies = () => {
   const handleLinkAccountToCompany = async () => {
     if (!accountToLink || !selectedCompanyForLink) return;
 
+    // Check if company already has an account
+    const existingAccountsForCompany = accounts.filter(a => a.company_id === selectedCompanyForLink);
+    if (existingAccountsForCompany.length > 0) {
+      toast.error("Esta empresa já possui uma conta ML vinculada. Limite: 1 conta por empresa.");
+      return;
+    }
+
     setSaving(true);
     try {
       const { error } = await supabase
@@ -321,6 +368,66 @@ const SettingsCompanies = () => {
     } catch (err) {
       console.error("[SettingsCompanies] Error setting active:", err);
       toast.error("Erro ao definir conta ativa");
+    }
+  };
+
+  const handleErpChange = (companyId: string, provider: 'none' | 'olist' | 'bling') => {
+    setErpConfigs(prev => ({
+      ...prev,
+      [companyId]: {
+        ...prev[companyId],
+        company_id: companyId,
+        erp_provider: provider,
+      }
+    }));
+  };
+
+  const handleErpTokenChange = (companyId: string, token: string) => {
+    setErpConfigs(prev => ({
+      ...prev,
+      [companyId]: {
+        ...prev[companyId],
+        company_id: companyId,
+        erp_api_token: token,
+      }
+    }));
+  };
+
+  const handleSaveErpConfig = async (companyId: string) => {
+    const config = erpConfigs[companyId];
+    if (!config) return;
+
+    setSavingErpId(companyId);
+    try {
+      if (config.erp_provider === 'none') {
+        // Delete existing ERP config if any
+        await supabase
+          .from("erp_integrations")
+          .delete()
+          .eq("company_id", companyId);
+      } else {
+        // Upsert ERP config
+        const { error } = await supabase
+          .from("erp_integrations")
+          .upsert({
+            company_id: companyId,
+            provider: config.erp_provider,
+            api_key: config.erp_api_token,
+            status: 'active',
+            updated_at: new Date().toISOString(),
+          }, {
+            onConflict: 'company_id,provider',
+          });
+
+        if (error) throw error;
+      }
+
+      toast.success("Configuração ERP salva!");
+    } catch (err) {
+      console.error("[SettingsCompanies] Error saving ERP config:", err);
+      toast.error("Erro ao salvar configuração ERP");
+    } finally {
+      setSavingErpId(null);
     }
   };
 
@@ -471,6 +578,85 @@ const SettingsCompanies = () => {
     );
   };
 
+  const renderErpSection = (companyId: string) => {
+    const config = erpConfigs[companyId] || { company_id: companyId, erp_provider: 'none', erp_api_token: null };
+    const isOpen = erpOpenStates[companyId] || false;
+    const showToken = showTokenStates[companyId] || false;
+
+    return (
+      <Collapsible
+        open={isOpen}
+        onOpenChange={(open) => setErpOpenStates(prev => ({ ...prev, [companyId]: open }))}
+        className="mt-3 border-t pt-3"
+      >
+        <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground w-full">
+          <Package className="h-4 w-4" />
+          <span>Integração ERP</span>
+          {config.erp_provider !== 'none' && (
+            <Badge variant="secondary" className="text-xs ml-2">
+              {config.erp_provider === 'olist' ? 'Olist' : 'Bling'}
+            </Badge>
+          )}
+          <ChevronDown className={`h-4 w-4 ml-auto transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-3 space-y-3">
+          <div className="space-y-2">
+            <Label>Sistema ERP</Label>
+            <Select
+              value={config.erp_provider}
+              onValueChange={(v) => handleErpChange(companyId, v as 'none' | 'olist' | 'bling')}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione o ERP" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Nenhum</SelectItem>
+                <SelectItem value="olist">Olist</SelectItem>
+                <SelectItem value="bling">Bling</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {config.erp_provider !== 'none' && (
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <Key className="h-4 w-4" />
+                API Token do {config.erp_provider === 'olist' ? 'Olist' : 'Bling'}
+              </Label>
+              <div className="relative">
+                <Input
+                  type={showToken ? "text" : "password"}
+                  value={config.erp_api_token || ''}
+                  onChange={(e) => handleErpTokenChange(companyId, e.target.value)}
+                  placeholder="Cole seu API Token aqui"
+                  className="pr-10"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 top-0 h-full px-3"
+                  onClick={() => setShowTokenStates(prev => ({ ...prev, [companyId]: !showToken }))}
+                >
+                  {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <Button
+            size="sm"
+            onClick={() => handleSaveErpConfig(companyId)}
+            disabled={savingErpId === companyId}
+          >
+            {savingErpId === companyId && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+            Salvar Integração
+          </Button>
+        </CollapsibleContent>
+      </Collapsible>
+    );
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -486,7 +672,7 @@ const SettingsCompanies = () => {
         <div>
           <h3 className="text-lg font-medium">Empresas e Contas</h3>
           <p className="text-sm text-muted-foreground">
-            Organize suas contas do Mercado Livre por empresa
+            Organize suas contas do Mercado Livre por empresa (1 conta ML por empresa)
           </p>
         </div>
         <div className="flex gap-2">
@@ -572,6 +758,7 @@ const SettingsCompanies = () => {
         <Accordion type="multiple" defaultValue={companies.map(c => c.id)} className="space-y-3">
           {companies.map((company) => {
             const companyAccounts = accountsByCompany[company.id] || [];
+            const hasAccount = companyAccounts.length > 0;
             
             return (
               <AccordionItem
@@ -589,7 +776,7 @@ const SettingsCompanies = () => {
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <span>{company.billing_type === "PF" ? "Pessoa Física" : "Pessoa Jurídica"}</span>
                         <span>•</span>
-                        <span>{companyAccounts.length} conta{companyAccounts.length !== 1 ? 's' : ''} ML</span>
+                        <span>{hasAccount ? '1 conta ML' : 'Sem conta ML'}</span>
                       </div>
                     </div>
                   </div>
@@ -597,31 +784,34 @@ const SettingsCompanies = () => {
                 <AccordionContent className="pb-4">
                   <div className="space-y-3 pl-2 border-l-2 border-muted ml-5">
                     {/* ML Accounts under this company */}
-                    {companyAccounts.length > 0 ? (
+                    {hasAccount ? (
                       <div className="space-y-2 pl-4">
                         {companyAccounts.map(account => renderAccountCard(account))}
                       </div>
                     ) : (
-                      <p className="text-sm text-muted-foreground pl-4 py-2">
-                        Nenhuma conta vinculada a esta empresa
-                      </p>
+                      <div className="pl-4 py-2">
+                        <p className="text-sm text-muted-foreground mb-3">
+                          Nenhuma conta vinculada a esta empresa
+                        </p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleConnectAccount(company.id)}
+                          disabled={saving}
+                        >
+                          {saving && connectingForCompany === company.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          ) : (
+                            <Plus className="h-4 w-4 mr-2" />
+                          )}
+                          Conectar conta ML a esta empresa
+                        </Button>
+                      </div>
                     )}
                     
-                    {/* Connect new account button */}
-                    <div className="pl-4 pt-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleConnectAccount(company.id)}
-                        disabled={saving}
-                      >
-                        {saving && connectingForCompany === company.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                        ) : (
-                          <Plus className="h-4 w-4 mr-2" />
-                        )}
-                        Conectar conta ML a esta empresa
-                      </Button>
+                    {/* ERP Integration Section */}
+                    <div className="pl-4">
+                      {renderErpSection(company.id)}
                     </div>
                   </div>
                 </AccordionContent>
@@ -702,6 +892,8 @@ const SettingsCompanies = () => {
             <DialogDescription>
               Selecione a empresa para vincular a conta{" "}
               <strong>{accountToLink?.nickname || accountToLink?.ml_user_id}</strong>
+              <br />
+              <span className="text-xs text-amber-600">Limite: 1 conta ML por empresa</span>
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
@@ -714,7 +906,13 @@ const SettingsCompanies = () => {
                 <SelectValue placeholder="Selecione uma empresa" />
               </SelectTrigger>
               <SelectContent>
-                {companies.map(company => (
+                {companies
+                  .filter(company => {
+                    // Only show companies without an account
+                    const existingAccounts = accounts.filter(a => a.company_id === company.id);
+                    return existingAccounts.length === 0;
+                  })
+                  .map(company => (
                   <SelectItem key={company.id} value={company.id}>
                     <div className="flex items-center gap-2">
                       <Building2 className="h-4 w-4" />
@@ -724,6 +922,11 @@ const SettingsCompanies = () => {
                 ))}
               </SelectContent>
             </Select>
+            {companies.filter(c => !accounts.some(a => a.company_id === c.id)).length === 0 && (
+              <p className="text-xs text-muted-foreground mt-2">
+                Todas as empresas já possuem uma conta vinculada. Crie uma nova empresa.
+              </p>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowLinkDialog(false)}>

@@ -1,11 +1,10 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { User, Receipt, Building2, Plug, CreditCard, Palette, Users, Globe } from "lucide-react";
+import { User, Receipt, Building2, CreditCard, Palette, Users, Globe } from "lucide-react";
 import SettingsProfile from "@/components/settings/SettingsProfile";
 import SettingsBilling from "@/components/settings/SettingsBilling";
 import SettingsCompanies from "@/components/settings/SettingsCompanies";
-import SettingsIntegrations from "@/components/settings/SettingsIntegrations";
 import SettingsSubscription from "@/components/settings/SettingsSubscription";
 import SettingsCustomization from "@/components/settings/SettingsCustomization";
 import { CollaboratorsCard } from "@/components/settings/collaborators";
@@ -24,7 +23,6 @@ const Settings = () => {
     { id: "customization", label: t('nav:customization'), icon: Palette },
     { id: "billing", label: t('nav:billing'), icon: Receipt },
     { id: "companies", label: t('nav:companies'), icon: Building2 },
-    { id: "integrations", label: t('nav:integrations'), icon: Plug },
     { id: "subscription", label: t('nav:subscription'), icon: CreditCard },
   ], [t]);
 
@@ -35,7 +33,7 @@ const Settings = () => {
     >
       <div className="container mx-auto py-6 px-4 max-w-6xl">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4 lg:grid-cols-8 h-auto p-1 bg-muted/50">
+          <TabsList className="grid w-full grid-cols-4 lg:grid-cols-7 h-auto p-1 bg-muted/50">
             {tabs.map((tab) => (
               <TabsTrigger
                 key={tab.id}
@@ -70,10 +68,6 @@ const Settings = () => {
 
           <TabsContent value="companies" className="mt-6">
             <SettingsCompanies />
-          </TabsContent>
-
-          <TabsContent value="integrations" className="mt-6">
-            <SettingsIntegrations />
           </TabsContent>
 
           <TabsContent value="subscription" className="mt-6">
