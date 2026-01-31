@@ -1,6 +1,6 @@
 // Edge Function ISOLADA: clone-anti-catalog-execute
 // Cria anúncio NORMAL (fora de catálogo) seguindo regras Anti-Catálogo v3
-// NÃO depende de nenhuma outra edge function de clonagem
+// SEMPRE retorna HTTP 200 com success:true/false para evitar "non-2xx"
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
@@ -14,7 +14,6 @@ const corsHeaders = {
 // REGRAS ANTI-CATÁLOGO v3
 // ============================================
 
-// Campos que NUNCA podem ser enviados no POST /items (exceto family_name via retry)
 const FORBIDDEN_BODY_FIELDS = new Set([
   "catalog_listing",
   "catalog_product_id",
@@ -22,41 +21,56 @@ const FORBIDDEN_BODY_FIELDS = new Set([
   "parent_item_id",
 ]);
 
-// Atributos que NUNCA podem ser enviados (forçam catálogo)
 const FORBIDDEN_ATTRIBUTES = new Set([
-  "GTIN",
-  "EAN",
-  "UPC",
-  "ISBN",
-  "MPN",
-  "PART_NUMBER",
-  "ALPHANUMERIC_MODEL",
-  "MANUFACTURER_CODE",
-  "SKU",
-  "SELLER_SKU",
+  "GTIN", "EAN", "UPC", "ISBN", "MPN",
+  "PART_NUMBER", "ALPHANUMERIC_MODEL",
+  "MANUFACTURER_CODE", "SKU", "SELLER_SKU",
 ]);
 
-// Atributos duplicados (já existem como campos raiz)
 const DUPLICATE_ATTRIBUTES = new Set([
   "ITEM_CONDITION",
-  "PACKAGE_HEIGHT",
-  "PACKAGE_WIDTH",
-  "PACKAGE_LENGTH",
-  "PACKAGE_WEIGHT",
+  "PACKAGE_HEIGHT", "PACKAGE_WIDTH", "PACKAGE_LENGTH", "PACKAGE_WEIGHT",
 ]);
 
 // ============================================
-// MAPEAMENTO ESTÁTICO DE FAMILY_NAME POR CATEGORIA
+// MAPEAMENTO ESTÁTICO DE FAMILY_NAME
 // ============================================
-const FAMILY_NAME_BY_CATEGORY: Record<string, string> = {
+const CATEGORY_FAMILY_NAME: Record<string, string> = {
   "MLB1684": "Etiquetas impressas",
   "MLB1499": "Produto de papelaria",
   "MLB1430": "Suprimentos de impressão",
   "MLB1132": "Acessórios para escritório",
+  "MLB5672": "Impressoras",
+  "MLB1744": "Livros",
 };
 
-// Cache dinâmico de categorias que exigem family_name (persistido em memória)
-const familyNameRequiredCache = new Map<string, boolean>();
+// ============================================
+// SISTEMA DE LOGGING
+// ============================================
+interface LogEntry {
+  ts: string;
+  step: string;
+  data: Record<string, any>;
+}
+
+function createLogger() {
+  const logs: LogEntry[] = [];
+  
+  return {
+    add(step: string, data: Record<string, any>) {
+      const entry: LogEntry = {
+        ts: new Date().toISOString(),
+        step,
+        data,
+      };
+      logs.push(entry);
+      console.log(`[${entry.ts}] ${step}:`, JSON.stringify(data));
+    },
+    getLogs() {
+      return logs;
+    }
+  };
+}
 
 // ============================================
 // FUNÇÕES AUXILIARES
@@ -72,13 +86,9 @@ function filterSafeAttributes(attributes: any[]): any[] {
   return attributes.filter((attr) => isAttributeSafe(attr.id));
 }
 
-/**
- * Verifica se o erro da API é do tipo "body.required_fields" contendo um campo específico
- */
 function isRequiredFieldsError(apiError: any, fieldName: string): boolean {
   if (!apiError) return false;
 
-  // Verifica em cause/causes
   const causes = apiError.cause || apiError.causes || [];
   for (const c of causes) {
     if (c.code === "body.required_fields" || c.code === "item.required_fields") {
@@ -89,35 +99,19 @@ function isRequiredFieldsError(apiError: any, fieldName: string): boolean {
     }
   }
 
-  // Verifica na mensagem
-  const message = apiError.message || apiError.error || "";
-  if (message.toLowerCase().includes(fieldName.toLowerCase())) {
-    // Verifica se parece ser um erro de campo obrigatório
-    if (message.includes("required") || message.includes("obrigatório")) {
-      return true;
-    }
+  const message = (apiError.message || apiError.error || "").toLowerCase();
+  if (message.includes(fieldName.toLowerCase()) && 
+      (message.includes("required") || message.includes("obrigatório"))) {
+    return true;
   }
 
   return false;
 }
 
-/**
- * Busca o family_name para uma categoria
- * 1. Primeiro verifica mapeamento estático
- * 2. Se não encontrar, consulta API de categorias do ML
- */
-async function getFamilyName(
+async function fetchFamilyNameFromAPI(
   categoryId: string,
   accessToken: string
-): Promise<{ value: string | null; source: "static_mapping" | "api_category" | "title_fallback" | null }> {
-  // 1. Verificar mapeamento estático
-  const staticValue = FAMILY_NAME_BY_CATEGORY[categoryId];
-  if (staticValue) {
-    console.log(`[ANTI-CATALOG-V3] family_name from static mapping: "${staticValue}"`);
-    return { value: staticValue, source: "static_mapping" };
-  }
-
-  // 2. Consultar API de categorias com timeout de 5 segundos
+): Promise<string | null> {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -133,349 +127,295 @@ async function getFamilyName(
 
     if (response.ok) {
       const data = await response.json();
-      
-      // Tentar extrair family_name de diferentes locais
-      const familyName = 
-        data?.settings?.catalog_family_name ||
-        data?.family_name ||
-        data?.name;
-      
-      if (familyName) {
-        console.log(`[ANTI-CATALOG-V3] family_name from API: "${familyName}"`);
-        return { value: familyName, source: "api_category" };
-      }
+      return data?.settings?.catalog_family_name || 
+             data?.family_name || 
+             data?.name || 
+             null;
     }
   } catch (error: any) {
-    console.warn(`[ANTI-CATALOG-V3] Failed to fetch category: ${error.message}`);
+    console.warn(`[ANTI-CATALOG] Failed to fetch category: ${error.message}`);
   }
-
-  return { value: null, source: null };
-}
-
-/**
- * Deriva um family_name de fallback baseado no título
- */
-function deriveFamilyNameFromTitle(title: string): string {
-  if (title) {
-    const words = title.split(/\s+/).slice(0, 4).join(" ");
-    if (words.length > 0) return words;
-  }
-  return "Produto";
+  return null;
 }
 
 // ============================================
 // INTERFACE DE RESULTADO
 // ============================================
-interface CreateItemResult {
+interface CreateResult {
   success: boolean;
   item_id?: string;
   permalink?: string;
   error?: string;
   error_code?: string;
-  api_status?: number;
-  api_error?: any;
-  retry_info: {
-    attempted: boolean;
-    retry_count: number;
-    field_added?: string;
-    success_on_retry?: boolean;
-  };
   diagnostic: {
-    payload_keys_sent: string[];
-    attributes_ids_sent: string[];
-    removed_fields: string[];
+    retry_performed: boolean;
     family_name_included: boolean;
-    family_name_source: "static_mapping" | "api_category" | "title_fallback" | null;
+    family_name_source: "static_mapping" | "api_category" | "fallback" | null;
     family_name_value: string | null;
+    api_status_attempt_1: number | null;
+    api_status_attempt_2: number | null;
+    payload_keys_sent_attempt_1: string[];
+    payload_keys_sent_attempt_2: string[];
   };
-  // Novos campos para debug detalhado
-  execution_logs: string[];
-  last_payload_sent: Record<string, any>;
-  last_api_response: any;
+  debug: {
+    logs: LogEntry[];
+    last_payload_sent: Record<string, any>;
+    last_api_response: any;
+  };
 }
 
 // ============================================
-// FUNÇÃO PRINCIPAL DE CRIAÇÃO COM RETRY
+// FUNÇÃO PRINCIPAL DE CRIAÇÃO (2 tentativas máximo)
 // ============================================
-async function createItemWithFamilyNameRetry(
-  itemPayload: Record<string, any>,
+async function createItemAntiCatalog(
+  basePayload: Record<string, any>,
   categoryId: string,
-  accessToken: string,
-  title: string
-): Promise<CreateItemResult> {
+  accessToken: string
+): Promise<CreateResult> {
+  const logger = createLogger();
   const CREATE_ENDPOINT = "https://api.mercadolibre.com/items";
   
-  // ============================================
-  // SISTEMA DE LOGGING
-  // ============================================
-  const executionLogs: string[] = [];
-  let lastPayloadSent: Record<string, any> = {};
-  let lastApiResponse: any = null;
-
-  function addLog(message: string, data?: any) {
-    const timestamp = new Date().toISOString();
-    const logEntry = data 
-      ? `[${timestamp}] ${message} ${JSON.stringify(data)}`
-      : `[${timestamp}] ${message}`;
-    executionLogs.push(logEntry);
-    console.log(logEntry);
-  }
-
-  // Resultado inicial
-  const result: CreateItemResult = {
+  // Resultado
+  const result: CreateResult = {
     success: false,
-    retry_info: {
-      attempted: false,
-      retry_count: 0,
-      success_on_retry: false,
-    },
     diagnostic: {
-      payload_keys_sent: Object.keys(itemPayload),
-      attributes_ids_sent: (itemPayload.attributes || []).map((a: any) => a.id),
-      removed_fields: [...FORBIDDEN_BODY_FIELDS],
+      retry_performed: false,
       family_name_included: false,
       family_name_source: null,
       family_name_value: null,
+      api_status_attempt_1: null,
+      api_status_attempt_2: null,
+      payload_keys_sent_attempt_1: [],
+      payload_keys_sent_attempt_2: [],
     },
-    execution_logs: [],
-    last_payload_sent: {},
-    last_api_response: null,
+    debug: {
+      logs: [],
+      last_payload_sent: {},
+      last_api_response: null,
+    },
   };
 
   // ============================================
-  // VERIFICAR SE CATEGORIA EXIGE family_name (PREVENTIVO)
+  // TENTATIVA 1: Sem family_name
   // ============================================
-  // Prioridade 1: Mapeamento estático (SEMPRE inclui para categorias conhecidas)
-  // Prioridade 2: Cache dinâmico (categorias que falharam antes)
-  const staticFamilyName = FAMILY_NAME_BY_CATEGORY[categoryId];
-  const cachedRequirement = familyNameRequiredCache.get(categoryId);
+  const payload1 = { ...basePayload };
+  // Garantir que family_name NÃO está no primeiro payload (anti-catálogo)
+  delete payload1.family_name;
   
-  if (staticFamilyName) {
-    addLog('📦 [MERCADOLIVRE] Categoria com family_name OBRIGATÓRIO (mapeamento estático)', { 
-      categoryId, 
-      family_name: staticFamilyName 
-    });
-    itemPayload.family_name = staticFamilyName;
-    result.diagnostic.family_name_included = true;
-    result.diagnostic.family_name_source = "static_mapping";
-    result.diagnostic.family_name_value = staticFamilyName;
-    result.diagnostic.payload_keys_sent = Object.keys(itemPayload);
-  } else if (cachedRequirement) {
-    addLog('📦 [MERCADOLIVRE] Categoria conhecida por exigir family_name (cache)', { categoryId });
-    const familyNameData = await getFamilyName(categoryId, accessToken);
-    const familyNameValue = familyNameData.value || deriveFamilyNameFromTitle(title);
-    itemPayload.family_name = familyNameValue;
-    result.diagnostic.family_name_included = true;
-    result.diagnostic.family_name_source = familyNameData.source || "title_fallback";
-    result.diagnostic.family_name_value = familyNameValue;
-    result.diagnostic.payload_keys_sent = Object.keys(itemPayload);
-  }
-
-  // ============================================
-  // PRIMEIRA TENTATIVA
-  // ============================================
-  addLog('🚀 [MERCADOLIVRE] Tentativa 1 - Payload inicial', {
-    category_id: itemPayload.category_id,
-    title: itemPayload.title?.substring(0, 50),
-    price: itemPayload.price,
-    family_name: itemPayload.family_name || null,
-    has_family_name: !!itemPayload.family_name,
-    payload_keys: Object.keys(itemPayload),
-    attributes_ids: (itemPayload.attributes || []).map((a: any) => a.id),
-    attributes_count: itemPayload.attributes?.length || 0
+  logger.add("attempt_1_payload", {
+    category_id: categoryId,
+    title: payload1.title?.substring(0, 50),
+    price: payload1.price,
+    has_family_name: false,
+    payload_keys: Object.keys(payload1),
+    attributes_ids: (payload1.attributes || []).map((a: any) => a.id),
   });
 
-  // Guardar payload enviado
-  lastPayloadSent = { ...itemPayload };
+  result.diagnostic.payload_keys_sent_attempt_1 = Object.keys(payload1);
+  result.debug.last_payload_sent = payload1;
 
-  let createResponse = await fetch(CREATE_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify(itemPayload),
-  });
+  let response1: Response;
+  let data1: any;
 
-  let createData = await createResponse.json();
-  lastApiResponse = createData;
-  result.retry_info.retry_count = 1;
-
-  addLog('📡 [MERCADOLIVRE] Resposta da tentativa 1', {
-    status: createResponse.status,
-    ok: createResponse.ok,
-    has_id: !!createData?.id,
-    error: createData?.error,
-    message: createData?.message
-  });
-
-  // Se sucesso na primeira tentativa
-  if (createResponse.ok) {
-    addLog('✅ [MERCADOLIVRE] Anúncio criado com sucesso na tentativa 1', {
-      item_id: createData.id,
-      permalink: createData.permalink
-    });
-    
-    result.success = true;
-    result.item_id = createData.id;
-    result.permalink = createData.permalink;
-    result.execution_logs = executionLogs;
-    result.last_payload_sent = lastPayloadSent;
-    result.last_api_response = lastApiResponse;
-    return result;
-  }
-
-  // Log detalhado do erro
-  addLog('❌ [MERCADOLIVRE] Erro na tentativa 1', {
-    status: createResponse.status,
-    error_code: createData?.error,
-    message: createData?.message,
-    cause: createData?.cause,
-    full_error: createData
-  });
-
-  // ============================================
-  // VERIFICAR SE PRECISA DE RETRY POR family_name
-  // ============================================
-  if (isRequiredFieldsError(createData, "family_name") && !result.diagnostic.family_name_included) {
-    addLog('🔄 [MERCADOLIVRE] Detectado erro required_fields para family_name, iniciando retry...');
-    
-    result.retry_info.attempted = true;
-    result.retry_info.field_added = "family_name";
-
-    // Salvar no cache para próximas criações
-    familyNameRequiredCache.set(categoryId, true);
-
-    // Buscar family_name
-    const familyNameData = await getFamilyName(categoryId, accessToken);
-    let familyNameValue: string;
-    let familyNameSource: "static_mapping" | "api_category" | "title_fallback";
-
-    if (familyNameData.value) {
-      familyNameValue = familyNameData.value;
-      familyNameSource = familyNameData.source!;
-    } else {
-      // Fallback: usar primeiras palavras do título
-      familyNameValue = deriveFamilyNameFromTitle(title);
-      familyNameSource = "title_fallback";
-    }
-
-    addLog('📋 [MERCADOLIVRE] family_name obtido', {
-      category_id: categoryId,
-      family_name: familyNameValue,
-      source: familyNameSource
-    });
-
-    // Atualizar diagnóstico
-    result.diagnostic.family_name_included = true;
-    result.diagnostic.family_name_source = familyNameSource;
-    result.diagnostic.family_name_value = familyNameValue;
-
-    // Criar payload de retry COM family_name no nível raiz
-    const retryPayload: Record<string, any> = {
-      ...itemPayload,
-      family_name: familyNameValue,
-    };
-
-    result.diagnostic.payload_keys_sent = Object.keys(retryPayload);
-
-    // ============================================
-    // SEGUNDA TENTATIVA (RETRY)
-    // ============================================
-    addLog('🚀 [MERCADOLIVRE] Tentativa 2 - Payload COM family_name', {
-      category_id: retryPayload.category_id,
-      family_name: retryPayload.family_name,
-      title: retryPayload.title?.substring(0, 50),
-      payload_keys: Object.keys(retryPayload),
-      attributes_ids: (retryPayload.attributes || []).map((a: any) => a.id)
-    });
-
-    // Guardar payload enviado
-    lastPayloadSent = { ...retryPayload };
-
-    createResponse = await fetch(CREATE_ENDPOINT, {
+  try {
+    response1 = await fetch(CREATE_ENDPOINT, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify(retryPayload),
+      body: JSON.stringify(payload1),
     });
-
-    createData = await createResponse.json();
-    lastApiResponse = createData;
-    result.retry_info.retry_count = 2;
-
-    addLog('📡 [MERCADOLIVRE] Resposta da tentativa 2', {
-      status: createResponse.status,
-      ok: createResponse.ok,
-      has_id: !!createData?.id,
-      error: createData?.error,
-      message: createData?.message
-    });
-
-    if (createResponse.ok) {
-      addLog('✅ [MERCADOLIVRE] Anúncio criado com sucesso no retry', {
-        item_id: createData.id,
-        retry_count: 2,
-        family_name_used: familyNameValue
-      });
-      
-      result.success = true;
-      result.item_id = createData.id;
-      result.permalink = createData.permalink;
-      result.retry_info.success_on_retry = true;
-      result.execution_logs = executionLogs;
-      result.last_payload_sent = lastPayloadSent;
-      result.last_api_response = lastApiResponse;
-      return result;
-    }
-
-    // Log detalhado do erro no retry
-    addLog('❌ [MERCADOLIVRE] Erro na tentativa 2 (retry)', {
-      status: createResponse.status,
-      error_code: createData?.error,
-      message: createData?.message,
-      cause: createData?.cause,
-      full_error: createData
-    });
+    data1 = await response1.json();
+  } catch (err: any) {
+    logger.add("attempt_1_network_error", { error: err.message });
+    result.error = `Erro de rede: ${err.message}`;
+    result.error_code = "NETWORK_ERROR";
+    result.debug.logs = logger.getLogs();
+    return result;
   }
 
-  // ============================================
-  // TRATAR ERRO FINAL
-  // ============================================
-  const errorMessage = createData?.message || createData?.error || "Erro desconhecido";
-  const errorCause = createData?.cause || [];
+  result.diagnostic.api_status_attempt_1 = response1.status;
+  result.debug.last_api_response = data1;
 
-  let errorCode = "CREATE_FAILED";
-  if (errorCause.some((c: any) => c.code?.includes("title"))) {
-    errorCode = "TITLE_BLOCKED_BY_CATALOG";
-  } else if (createResponse.status === 401) {
-    errorCode = "AUTH_EXPIRED";
-  } else if (createResponse.status === 403) {
-    errorCode = "ACCESS_DENIED";
-  }
-
-  addLog('🛑 [MERCADOLIVRE] Erro final', {
-    error_code: errorCode,
-    message: errorMessage,
-    api_status: createResponse.status,
-    retry_count: result.retry_info.retry_count
+  logger.add("attempt_1_response", {
+    status: response1.status,
+    ok: response1.ok,
+    has_id: !!data1?.id,
+    error: data1?.error,
+    message: data1?.message,
+    cause: data1?.cause,
   });
 
-  result.error = errorMessage;
-  result.error_code = errorCode;
-  result.api_status = createResponse.status;
-  result.api_error = createData;
-  result.execution_logs = executionLogs;
-  result.last_payload_sent = lastPayloadSent;
-  result.last_api_response = lastApiResponse;
+  // SUCESSO na tentativa 1
+  if (response1.ok && data1?.id) {
+    logger.add("success", {
+      item_id: data1.id,
+      attempt: 1,
+    });
+    result.success = true;
+    result.item_id = data1.id;
+    result.permalink = data1.permalink;
+    result.debug.logs = logger.getLogs();
+    return result;
+  }
 
+  // ============================================
+  // VERIFICAR SE PRECISA RETRY POR family_name
+  // ============================================
+  const needsFamilyName = isRequiredFieldsError(data1, "family_name");
+  
+  logger.add("attempt_1_error_analysis", {
+    needs_family_name: needsFamilyName,
+    full_error: data1,
+  });
+
+  if (!needsFamilyName) {
+    // Erro diferente de family_name - retorna erro
+    logger.add("final_error", {
+      reason: "Erro não relacionado a family_name",
+      api_status: response1.status,
+    });
+    result.error = data1?.message || data1?.error || "Erro desconhecido";
+    result.error_code = response1.status === 401 ? "AUTH_EXPIRED" : 
+                        response1.status === 403 ? "ACCESS_DENIED" : "CREATE_FAILED";
+    result.debug.logs = logger.getLogs();
+    return result;
+  }
+
+  // ============================================
+  // BUSCAR family_name
+  // ============================================
+  logger.add("family_name_lookup_start", { category_id: categoryId });
+
+  let familyNameValue: string;
+  let familyNameSource: "static_mapping" | "api_category" | "fallback";
+
+  // 1. Tentar mapeamento estático
+  const staticFamilyName = CATEGORY_FAMILY_NAME[categoryId];
+  if (staticFamilyName) {
+    familyNameValue = staticFamilyName;
+    familyNameSource = "static_mapping";
+    logger.add("family_name_found", {
+      source: "static_mapping",
+      value: familyNameValue,
+    });
+  } else {
+    // 2. Tentar API de categorias
+    const apiFamilyName = await fetchFamilyNameFromAPI(categoryId, accessToken);
+    if (apiFamilyName) {
+      familyNameValue = apiFamilyName;
+      familyNameSource = "api_category";
+      logger.add("family_name_found", {
+        source: "api_category",
+        value: familyNameValue,
+      });
+    } else {
+      // 3. Fallback seguro
+      familyNameValue = "Produto";
+      familyNameSource = "fallback";
+      logger.add("family_name_found", {
+        source: "fallback",
+        value: familyNameValue,
+      });
+    }
+  }
+
+  // Atualizar diagnóstico
+  result.diagnostic.family_name_value = familyNameValue;
+  result.diagnostic.family_name_source = familyNameSource;
+
+  // ============================================
+  // TENTATIVA 2: Com family_name NO NÍVEL RAIZ
+  // ============================================
+  result.diagnostic.retry_performed = true;
+
+  // IMPORTANTE: Criar NOVO payload com family_name
+  const payload2: Record<string, any> = {
+    ...basePayload,
+    family_name: familyNameValue, // <- NO NÍVEL RAIZ
+  };
+  // Garantir que NÃO está em attributes
+  delete payload2.family_name_in_attributes; // safety
+
+  logger.add("attempt_2_payload", {
+    category_id: categoryId,
+    title: payload2.title?.substring(0, 50),
+    price: payload2.price,
+    family_name: payload2.family_name, // <- EXPLÍCITO
+    has_family_name: true,
+    payload_keys: Object.keys(payload2),
+    attributes_ids: (payload2.attributes || []).map((a: any) => a.id),
+    full_payload: JSON.stringify(payload2),
+  });
+
+  result.diagnostic.payload_keys_sent_attempt_2 = Object.keys(payload2);
+  result.diagnostic.family_name_included = true;
+  result.debug.last_payload_sent = payload2;
+
+  let response2: Response;
+  let data2: any;
+
+  try {
+    response2 = await fetch(CREATE_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(payload2),
+    });
+    data2 = await response2.json();
+  } catch (err: any) {
+    logger.add("attempt_2_network_error", { error: err.message });
+    result.error = `Erro de rede no retry: ${err.message}`;
+    result.error_code = "NETWORK_ERROR";
+    result.debug.logs = logger.getLogs();
+    result.debug.last_api_response = null;
+    return result;
+  }
+
+  result.diagnostic.api_status_attempt_2 = response2.status;
+  result.debug.last_api_response = data2;
+
+  logger.add("attempt_2_response", {
+    status: response2.status,
+    ok: response2.ok,
+    has_id: !!data2?.id,
+    error: data2?.error,
+    message: data2?.message,
+    cause: data2?.cause,
+  });
+
+  // SUCESSO na tentativa 2
+  if (response2.ok && data2?.id) {
+    logger.add("success", {
+      item_id: data2.id,
+      attempt: 2,
+      family_name_used: familyNameValue,
+    });
+    result.success = true;
+    result.item_id = data2.id;
+    result.permalink = data2.permalink;
+    result.debug.logs = logger.getLogs();
+    return result;
+  }
+
+  // FALHA na tentativa 2
+  logger.add("attempt_2_final_error", {
+    api_status: response2.status,
+    full_error: data2,
+  });
+
+  result.error = data2?.message || data2?.error || "Erro desconhecido no retry";
+  result.error_code = response2.status === 401 ? "AUTH_EXPIRED" : 
+                      response2.status === 403 ? "ACCESS_DENIED" : "CREATE_FAILED";
+  result.debug.logs = logger.getLogs();
   return result;
 }
 
 // ============================================
-// HANDLER PRINCIPAL
+// HANDLER PRINCIPAL - SEMPRE RETORNA 200
 // ============================================
 
 Deno.serve(async (req) => {
@@ -487,61 +427,66 @@ Deno.serve(async (req) => {
   const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase = createClient(supabaseUrl, supabaseKey);
 
-  // Log de início da requisição
-  console.log('🔵 [ANTI-CATALOG-V3] Nova requisição recebida');
+  // Sempre retornar 200 para o front conseguir ler o erro
+  const respond = (data: any) => {
+    return new Response(
+      JSON.stringify(data),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  };
+
+  const logger = createLogger();
 
   try {
+    logger.add("request_received", { method: req.method });
+
     // Autenticação
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
-      console.log('❌ [ANTI-CATALOG-V3] Sem header de autorização');
-      return new Response(
-        JSON.stringify({ success: false, error: "Não autorizado", execution_logs: ['Sem header de autorização'] }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return respond({
+        success: false,
+        error: "Não autorizado",
+        error_code: "UNAUTHORIZED",
+        debug: { logs: logger.getLogs() },
+      });
     }
 
     const token = authHeader.replace("Bearer ", "");
     const { data: userData, error: userError } = await supabase.auth.getUser(token);
     if (userError || !userData.user) {
-      console.log('❌ [ANTI-CATALOG-V3] Token inválido:', userError?.message);
-      return new Response(
-        JSON.stringify({ success: false, error: "Token inválido", execution_logs: [`Token inválido: ${userError?.message}`] }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      logger.add("auth_error", { error: userError?.message });
+      return respond({
+        success: false,
+        error: "Token inválido",
+        error_code: "INVALID_TOKEN",
+        debug: { logs: logger.getLogs() },
+      });
     }
 
     const userId = userData.user.id;
-    console.log('✅ [ANTI-CATALOG-V3] Usuário autenticado:', userId);
+    logger.add("user_authenticated", { userId });
 
     // Parse body
     const body = await req.json();
-    const {
-      ml_account_id,
-      source_item_id,
-      category_id,
-      currency_id,
-      payload,
-    } = body;
+    const { ml_account_id, source_item_id, category_id, currency_id, payload } = body;
 
-    console.log('📦 [ANTI-CATALOG-V3] Dados recebidos:', {
+    logger.add("request_body", {
       ml_account_id,
       source_item_id,
       category_id,
-      has_payload: !!payload
+      has_payload: !!payload,
     });
 
     if (!ml_account_id || !payload) {
-      console.log('❌ [ANTI-CATALOG-V3] Parâmetros faltando');
-      return new Response(
-        JSON.stringify({ success: false, error: "Parâmetros obrigatórios faltando", execution_logs: ['ml_account_id ou payload faltando'] }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return respond({
+        success: false,
+        error: "Parâmetros obrigatórios faltando",
+        error_code: "MISSING_PARAMS",
+        debug: { logs: logger.getLogs() },
+      });
     }
 
-    // Buscar token ML
-    console.log("[ANTI-CATALOG-V3] Looking up ML account:", ml_account_id, "for user:", userId);
-    
+    // Buscar conta ML
     const { data: account, error: accError } = await supabase
       .from("ml_accounts")
       .select("id, ml_user_id, access_token, refresh_token, token_expires_at, connection_status")
@@ -549,60 +494,49 @@ Deno.serve(async (req) => {
       .eq("user_id", userId)
       .single();
 
-    console.log("[ANTI-CATALOG-V3] Account lookup result:", { 
-      found: !!account, 
+    logger.add("account_lookup", {
+      found: !!account,
       error: accError?.message,
       hasToken: !!account?.access_token,
-      status: account?.connection_status 
+      status: account?.connection_status,
     });
 
     if (accError || !account) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: "Conta ML não encontrada para este usuário",
-          error_code: "ACCOUNT_NOT_FOUND",
-          debug: { ml_account_id, userId, dbError: accError?.message },
-          execution_logs: [`Conta não encontrada: ${accError?.message}`]
-        }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return respond({
+        success: false,
+        error: "Conta ML não encontrada",
+        error_code: "ACCOUNT_NOT_FOUND",
+        debug: { logs: logger.getLogs(), db_error: accError?.message },
+      });
     }
 
     if (!account.access_token) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: "Conta ML não possui token de acesso. Por favor, reconecte a conta.",
-          error_code: "NO_ACCESS_TOKEN",
-          execution_logs: ['Conta sem access_token']
-        }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return respond({
+        success: false,
+        error: "Conta ML sem token. Reconecte a conta.",
+        error_code: "NO_ACCESS_TOKEN",
+        debug: { logs: logger.getLogs() },
+      });
     }
 
-    // Verificar se o token está expirado e tentar refresh
+    // Verificar expiração e refresh
     let accessToken = account.access_token;
     const expiresAt = account.token_expires_at ? new Date(account.token_expires_at) : null;
     const now = new Date();
     const fiveMinutesFromNow = new Date(now.getTime() + 5 * 60 * 1000);
 
     if (expiresAt && expiresAt < fiveMinutesFromNow) {
-      console.log("[ANTI-CATALOG-V3] Token expired or expiring soon, attempting refresh...");
-      
+      logger.add("token_refresh_needed", { expires_at: expiresAt.toISOString() });
+
       if (!account.refresh_token) {
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: "Token expirado e não há refresh token. Por favor, reconecte a conta.",
-            error_code: "AUTH_EXPIRED",
-            execution_logs: ['Token expirado sem refresh_token']
-          }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return respond({
+          success: false,
+          error: "Token expirado. Reconecte a conta.",
+          error_code: "AUTH_EXPIRED",
+          debug: { logs: logger.getLogs() },
+        });
       }
 
-      // Tentar refresh do token
       const ML_APP_ID = Deno.env.get("ML_APP_ID") || "";
       const ML_SECRET_KEY = Deno.env.get("ML_SECRET_KEY") || "";
 
@@ -620,9 +554,8 @@ Deno.serve(async (req) => {
 
         if (!tokenResponse.ok) {
           const errorText = await tokenResponse.text();
-          console.error("[ANTI-CATALOG-V3] Token refresh failed:", tokenResponse.status, errorText);
-          
-          // Marcar conta como revogada
+          logger.add("token_refresh_failed", { status: tokenResponse.status, error: errorText });
+
           await supabase
             .from("ml_accounts")
             .update({
@@ -634,22 +567,18 @@ Deno.serve(async (req) => {
             })
             .eq("id", ml_account_id);
 
-          return new Response(
-            JSON.stringify({
-              success: false,
-              error: "Token expirado e refresh falhou. Por favor, reconecte a conta.",
-              error_code: "AUTH_EXPIRED",
-              execution_logs: [`Refresh falhou: ${tokenResponse.status} - ${errorText}`]
-            }),
-            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
+          return respond({
+            success: false,
+            error: "Token expirado. Reconecte a conta.",
+            error_code: "AUTH_EXPIRED",
+            debug: { logs: logger.getLogs() },
+          });
         }
 
         const tokenData = await tokenResponse.json();
         const newExpiresAt = new Date();
         newExpiresAt.setSeconds(newExpiresAt.getSeconds() + tokenData.expires_in);
 
-        // Atualizar tokens no banco
         await supabase
           .from("ml_accounts")
           .update({
@@ -659,67 +588,48 @@ Deno.serve(async (req) => {
             connection_status: "connected",
             is_active: true,
             last_token_refresh_at: now.toISOString(),
-            last_api_ok_at: now.toISOString(),
             updated_at: now.toISOString(),
           })
           .eq("id", ml_account_id);
 
         accessToken = tokenData.access_token;
-        console.log("[ANTI-CATALOG-V3] Token refreshed successfully");
+        logger.add("token_refreshed", { new_expires_at: newExpiresAt.toISOString() });
       } catch (refreshError: any) {
-        console.error("[ANTI-CATALOG-V3] Token refresh error:", refreshError);
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: "Erro ao renovar token. Por favor, reconecte a conta.",
-            error_code: "REFRESH_ERROR",
-            execution_logs: [`Erro no refresh: ${refreshError.message}`]
-          }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        logger.add("token_refresh_error", { error: refreshError.message });
+        return respond({
+          success: false,
+          error: "Erro ao renovar token.",
+          error_code: "REFRESH_ERROR",
+          debug: { logs: logger.getLogs() },
+        });
       }
     }
 
     // ============================================
     // MONTAR PAYLOAD ANTI-CATÁLOGO
     // ============================================
-    console.log('🔧 [ANTI-CATALOG-V3] Montando payload anti-catálogo');
+    logger.add("building_payload", { category_id });
 
-    // Filtrar atributos seguros
     const safeAttributes = filterSafeAttributes(payload.attributes || []);
 
-    // Montar dimensões de envio
+    // Dimensões de envio
     const sellerPackageAttrs: any[] = [];
     if (payload.package_height > 0) {
-      sellerPackageAttrs.push({
-        id: "SELLER_PACKAGE_HEIGHT",
-        value_name: String(payload.package_height),
-      });
+      sellerPackageAttrs.push({ id: "SELLER_PACKAGE_HEIGHT", value_name: String(payload.package_height) });
     }
     if (payload.package_width > 0) {
-      sellerPackageAttrs.push({
-        id: "SELLER_PACKAGE_WIDTH",
-        value_name: String(payload.package_width),
-      });
+      sellerPackageAttrs.push({ id: "SELLER_PACKAGE_WIDTH", value_name: String(payload.package_width) });
     }
     if (payload.package_length > 0) {
-      sellerPackageAttrs.push({
-        id: "SELLER_PACKAGE_LENGTH",
-        value_name: String(payload.package_length),
-      });
+      sellerPackageAttrs.push({ id: "SELLER_PACKAGE_LENGTH", value_name: String(payload.package_length) });
     }
     if (payload.package_weight > 0) {
-      sellerPackageAttrs.push({
-        id: "SELLER_PACKAGE_WEIGHT",
-        value_name: String(payload.package_weight),
-      });
+      sellerPackageAttrs.push({ id: "SELLER_PACKAGE_WEIGHT", value_name: String(payload.package_weight) });
     }
 
-    // Combinar atributos
     const finalAttributes = [...safeAttributes, ...sellerPackageAttrs];
 
-    // Payload base (SEM campos proibidos, SEM family_name inicial)
-    const itemPayload: Record<string, any> = {
+    const basePayload: Record<string, any> = {
       title: payload.title,
       category_id: category_id,
       price: payload.price,
@@ -731,60 +641,55 @@ Deno.serve(async (req) => {
       attributes: finalAttributes,
     };
 
-    // Adicionar descrição se existir
     if (payload.description) {
-      itemPayload.description = { plain_text: payload.description };
+      basePayload.description = { plain_text: payload.description };
     }
 
-    // Remover qualquer campo proibido que possa ter vazado
+    // Remover campos proibidos
     for (const field of FORBIDDEN_BODY_FIELDS) {
-      delete itemPayload[field];
+      delete basePayload[field];
     }
 
-    console.log('📋 [ANTI-CATALOG-V3] Payload montado:', {
-      title: itemPayload.title?.substring(0, 50),
-      category_id: itemPayload.category_id,
-      price: itemPayload.price,
+    logger.add("payload_ready", {
+      title: basePayload.title?.substring(0, 50),
+      category_id: basePayload.category_id,
+      price: basePayload.price,
       attributes_count: finalAttributes.length,
-      safe_attributes_count: safeAttributes.length,
-      seller_package_attrs_count: sellerPackageAttrs.length
     });
 
     // ============================================
-    // EXECUTAR CRIAÇÃO COM RETRY AUTOMÁTICO
+    // EXECUTAR CRIAÇÃO
     // ============================================
-    const createResult = await createItemWithFamilyNameRetry(
-      itemPayload,
+    const createResult = await createItemAntiCatalog(
+      basePayload,
       category_id,
-      accessToken,
-      payload.title
+      accessToken
     );
 
-    console.log('🏁 [ANTI-CATALOG-V3] Resultado final:', {
+    logger.add("create_result", {
       success: createResult.success,
       item_id: createResult.item_id,
       error_code: createResult.error_code,
-      retry_count: createResult.retry_info.retry_count,
-      logs_count: createResult.execution_logs.length
+      retry_performed: createResult.diagnostic.retry_performed,
+      family_name_included: createResult.diagnostic.family_name_included,
     });
 
-    // Retornar resultado
-    return new Response(
-      JSON.stringify(createResult),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    // Mesclar logs
+    createResult.debug.logs = [...logger.getLogs(), ...createResult.debug.logs];
+
+    return respond(createResult);
 
   } catch (error: any) {
-    console.error("[ANTI-CATALOG-V3] Unexpected error:", error);
+    logger.add("unexpected_error", { 
+      message: error.message, 
+      stack: error.stack 
+    });
 
-    return new Response(
-      JSON.stringify({
-        success: false,
-        error: error.message || "Erro interno",
-        error_code: "INTERNAL_ERROR",
-        execution_logs: [`Erro interno: ${error.message}`, error.stack || '']
-      }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return respond({
+      success: false,
+      error: error.message || "Erro interno",
+      error_code: "INTERNAL_ERROR",
+      debug: { logs: logger.getLogs() },
+    });
   }
 });
