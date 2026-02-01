@@ -10196,26 +10196,38 @@ export type Database = {
         Row: {
           active_workspace_id: string | null
           created_at: string
+          hour_format: string | null
           language: string | null
           tasks_enabled: boolean
+          timezone: string | null
           updated_at: string
           user_id: string
+          widgets_enabled: Json | null
+          widgets_layout: Json | null
         }
         Insert: {
           active_workspace_id?: string | null
           created_at?: string
+          hour_format?: string | null
           language?: string | null
           tasks_enabled?: boolean
+          timezone?: string | null
           updated_at?: string
           user_id: string
+          widgets_enabled?: Json | null
+          widgets_layout?: Json | null
         }
         Update: {
           active_workspace_id?: string | null
           created_at?: string
+          hour_format?: string | null
           language?: string | null
           tasks_enabled?: boolean
+          timezone?: string | null
           updated_at?: string
           user_id?: string
+          widgets_enabled?: Json | null
+          widgets_layout?: Json | null
         }
         Relationships: [
           {
@@ -10391,6 +10403,50 @@ export type Database = {
             foreignKeyName: "workspace_members_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workspace_preferences: {
+        Row: {
+          city: string | null
+          country: string | null
+          created_at: string
+          default_language: string | null
+          id: string
+          state: string | null
+          updated_at: string
+          weather_update_interval: number | null
+          workspace_id: string
+        }
+        Insert: {
+          city?: string | null
+          country?: string | null
+          created_at?: string
+          default_language?: string | null
+          id?: string
+          state?: string | null
+          updated_at?: string
+          weather_update_interval?: number | null
+          workspace_id: string
+        }
+        Update: {
+          city?: string | null
+          country?: string | null
+          created_at?: string
+          default_language?: string | null
+          id?: string
+          state?: string | null
+          updated_at?: string
+          weather_update_interval?: number | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_preferences_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: true
             referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
