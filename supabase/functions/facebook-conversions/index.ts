@@ -111,6 +111,24 @@ function buildCustomData(customData: any): Record<string, any> | undefined {
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
+// Extract client IP from request headers
+function getClientIp(req: Request): string | undefined {
+  // Try various headers that might contain the real IP
+  const forwardedFor = req.headers.get('x-forwarded-for');
+  if (forwardedFor) {
+    // x-forwarded-for can contain multiple IPs, the first one is the client
+    return forwardedFor.split(',')[0].trim();
+  }
+  
+  const realIp = req.headers.get('x-real-ip');
+  if (realIp) return realIp;
+  
+  const cfConnectingIp = req.headers.get('cf-connecting-ip');
+  if (cfConnectingIp) return cfConnectingIp;
+  
+  return undefined;
+}
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -148,6 +166,9 @@ serve(async (req) => {
 
     console.log('[FB CAPI] Processing event:', event.eventName);
 
+    // Extract client IP from request headers (server-side)
+    const clientIp = getClientIp(req);
+
     // Build ServerEvent data structure matching Facebook SDK
     const serverEvent: Record<string, any> = {
       event_name: event.eventName,
@@ -165,15 +186,31 @@ serve(async (req) => {
       serverEvent.event_id = event.eventId;
     }
 
-    // Build UserData matching SDK format
-    if (event.userData) {
-      serverEvent.user_data = await buildUserData(event.userData);
-    }
+    // Build UserData matching SDK format, enriching with server-side IP
+    const enrichedUserData = {
+      ...event.userData,
+      clientIpAddress: event.userData?.clientIpAddress || clientIp,
+    };
+    
+    serverEvent.user_data = await buildUserData(enrichedUserData);
 
     // Build CustomData matching SDK format
     const customData = buildCustomData(event.customData);
     if (customData) {
       serverEvent.custom_data = customData;
+    }
+
+    // Validate minimum user data requirements for Facebook CAPI
+    const userData = serverEvent.user_data || {};
+    const hasMinimumData = 
+      userData.em?.length > 0 || 
+      userData.ph?.length > 0 || 
+      userData.external_id?.length > 0 ||
+      (userData.client_ip_address && userData.client_user_agent) ||
+      (userData.fbp || userData.fbc);
+
+    if (!hasMinimumData) {
+      console.warn('[FB CAPI] Insufficient user data for reliable matching, but proceeding anyway');
     }
 
     console.log('[FB CAPI] ServerEvent payload:', JSON.stringify(serverEvent, null, 2));

@@ -2170,6 +2170,60 @@ export type Database = {
           },
         ]
       }
+      category_attribute_requirements: {
+        Row: {
+          allowed_units: Json | null
+          attribute_id: string
+          category_id: string
+          default_unit: string | null
+          fetched_at: string | null
+          hierarchy: string | null
+          id: string
+          name: string | null
+          relevance: number | null
+          required_level: string | null
+          site_id: string | null
+          tags: Json | null
+          tooltip: string | null
+          value_type: string | null
+          values: Json | null
+        }
+        Insert: {
+          allowed_units?: Json | null
+          attribute_id: string
+          category_id: string
+          default_unit?: string | null
+          fetched_at?: string | null
+          hierarchy?: string | null
+          id?: string
+          name?: string | null
+          relevance?: number | null
+          required_level?: string | null
+          site_id?: string | null
+          tags?: Json | null
+          tooltip?: string | null
+          value_type?: string | null
+          values?: Json | null
+        }
+        Update: {
+          allowed_units?: Json | null
+          attribute_id?: string
+          category_id?: string
+          default_unit?: string | null
+          fetched_at?: string | null
+          hierarchy?: string | null
+          id?: string
+          name?: string | null
+          relevance?: number | null
+          required_level?: string | null
+          site_id?: string | null
+          tags?: Json | null
+          tooltip?: string | null
+          value_type?: string | null
+          values?: Json | null
+        }
+        Relationships: []
+      }
       category_tree_cache: {
         Row: {
           children_count: number | null
@@ -3836,6 +3890,263 @@ export type Database = {
         }
         Relationships: []
       }
+      learned_listing_attributes: {
+        Row: {
+          attribute_id: string
+          created_at: string | null
+          id: string
+          is_required: boolean | null
+          is_valid: boolean | null
+          learned_listing_id: string
+          name: string | null
+          notes: string | null
+          scope: string | null
+          unit: string | null
+          value_id: string | null
+          value_name: string | null
+          value_struct: Json | null
+          variation_id: string | null
+        }
+        Insert: {
+          attribute_id: string
+          created_at?: string | null
+          id?: string
+          is_required?: boolean | null
+          is_valid?: boolean | null
+          learned_listing_id: string
+          name?: string | null
+          notes?: string | null
+          scope?: string | null
+          unit?: string | null
+          value_id?: string | null
+          value_name?: string | null
+          value_struct?: Json | null
+          variation_id?: string | null
+        }
+        Update: {
+          attribute_id?: string
+          created_at?: string | null
+          id?: string
+          is_required?: boolean | null
+          is_valid?: boolean | null
+          learned_listing_id?: string
+          name?: string | null
+          notes?: string | null
+          scope?: string | null
+          unit?: string | null
+          value_id?: string | null
+          value_name?: string | null
+          value_struct?: Json | null
+          variation_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "learned_listing_attributes_learned_listing_id_fkey"
+            columns: ["learned_listing_id"]
+            isOneToOne: false
+            referencedRelation: "learned_listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      learned_listing_pictures: {
+        Row: {
+          created_at: string | null
+          id: string
+          is_cover: boolean | null
+          learned_listing_id: string
+          max_size: string | null
+          secure_url: string | null
+          sort_order: number | null
+          source_picture_id: string | null
+          source_url: string
+          storage_url: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          is_cover?: boolean | null
+          learned_listing_id: string
+          max_size?: string | null
+          secure_url?: string | null
+          sort_order?: number | null
+          source_picture_id?: string | null
+          source_url: string
+          storage_url?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          is_cover?: boolean | null
+          learned_listing_id?: string
+          max_size?: string | null
+          secure_url?: string | null
+          sort_order?: number | null
+          source_picture_id?: string | null
+          source_url?: string
+          storage_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "learned_listing_pictures_learned_listing_id_fkey"
+            columns: ["learned_listing_id"]
+            isOneToOne: false
+            referencedRelation: "learned_listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      learned_listing_variations: {
+        Row: {
+          attributes: Json | null
+          available_quantity: number | null
+          catalog_product_id: string | null
+          created_at: string | null
+          id: string
+          learned_listing_id: string
+          picture_ids: Json | null
+          price: number | null
+          sold_quantity: number | null
+          source_variation_id: string | null
+        }
+        Insert: {
+          attributes?: Json | null
+          available_quantity?: number | null
+          catalog_product_id?: string | null
+          created_at?: string | null
+          id?: string
+          learned_listing_id: string
+          picture_ids?: Json | null
+          price?: number | null
+          sold_quantity?: number | null
+          source_variation_id?: string | null
+        }
+        Update: {
+          attributes?: Json | null
+          available_quantity?: number | null
+          catalog_product_id?: string | null
+          created_at?: string | null
+          id?: string
+          learned_listing_id?: string
+          picture_ids?: Json | null
+          price?: number | null
+          sold_quantity?: number | null
+          source_variation_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "learned_listing_variations_learned_listing_id_fkey"
+            columns: ["learned_listing_id"]
+            isOneToOne: false
+            referencedRelation: "learned_listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      learned_listings: {
+        Row: {
+          available_quantity: number | null
+          catalog_product_id: string | null
+          category_id: string | null
+          category_name: string | null
+          condition: string | null
+          created_at: string | null
+          currency_id: string | null
+          id: string
+          imported_at: string | null
+          imported_by: string | null
+          is_catalog_listing: boolean | null
+          listing_type_id: string | null
+          original_price: number | null
+          permalink: string | null
+          price: number | null
+          raw_payload: Json | null
+          seller_id: string | null
+          seller_nickname: string | null
+          shipping_free: boolean | null
+          shipping_mode: string | null
+          sold_quantity: number | null
+          source: string
+          source_item_id: string
+          source_url: string | null
+          status: string | null
+          thumbnail: string | null
+          title: string | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          available_quantity?: number | null
+          catalog_product_id?: string | null
+          category_id?: string | null
+          category_name?: string | null
+          condition?: string | null
+          created_at?: string | null
+          currency_id?: string | null
+          id?: string
+          imported_at?: string | null
+          imported_by?: string | null
+          is_catalog_listing?: boolean | null
+          listing_type_id?: string | null
+          original_price?: number | null
+          permalink?: string | null
+          price?: number | null
+          raw_payload?: Json | null
+          seller_id?: string | null
+          seller_nickname?: string | null
+          shipping_free?: boolean | null
+          shipping_mode?: string | null
+          sold_quantity?: number | null
+          source?: string
+          source_item_id: string
+          source_url?: string | null
+          status?: string | null
+          thumbnail?: string | null
+          title?: string | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          available_quantity?: number | null
+          catalog_product_id?: string | null
+          category_id?: string | null
+          category_name?: string | null
+          condition?: string | null
+          created_at?: string | null
+          currency_id?: string | null
+          id?: string
+          imported_at?: string | null
+          imported_by?: string | null
+          is_catalog_listing?: boolean | null
+          listing_type_id?: string | null
+          original_price?: number | null
+          permalink?: string | null
+          price?: number | null
+          raw_payload?: Json | null
+          seller_id?: string | null
+          seller_nickname?: string | null
+          shipping_free?: boolean | null
+          shipping_mode?: string | null
+          sold_quantity?: number | null
+          source?: string
+          source_item_id?: string
+          source_url?: string | null
+          status?: string | null
+          thumbnail?: string | null
+          title?: string | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "learned_listings_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       listing_events: {
         Row: {
           blocks_affected: string[] | null
@@ -5176,6 +5487,95 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ml_publication_jobs: {
+        Row: {
+          action: string
+          created_at: string | null
+          created_by: string | null
+          error_code: string | null
+          error_details: Json | null
+          error_message: string | null
+          finished_at: string | null
+          id: string
+          ml_account_id: string | null
+          ml_item_id: string | null
+          product_record_id: string
+          request_summary: Json | null
+          response_summary: Json | null
+          retry_count: number | null
+          started_at: string | null
+          status: string | null
+          workspace_id: string
+        }
+        Insert: {
+          action: string
+          created_at?: string | null
+          created_by?: string | null
+          error_code?: string | null
+          error_details?: Json | null
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          ml_account_id?: string | null
+          ml_item_id?: string | null
+          product_record_id: string
+          request_summary?: Json | null
+          response_summary?: Json | null
+          retry_count?: number | null
+          started_at?: string | null
+          status?: string | null
+          workspace_id: string
+        }
+        Update: {
+          action?: string
+          created_at?: string | null
+          created_by?: string | null
+          error_code?: string | null
+          error_details?: Json | null
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          ml_account_id?: string | null
+          ml_item_id?: string | null
+          product_record_id?: string
+          request_summary?: Json | null
+          response_summary?: Json | null
+          retry_count?: number | null
+          started_at?: string | null
+          status?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ml_publication_jobs_ml_account_id_fkey"
+            columns: ["ml_account_id"]
+            isOneToOne: false
+            referencedRelation: "ml_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ml_publication_jobs_ml_account_id_fkey"
+            columns: ["ml_account_id"]
+            isOneToOne: false
+            referencedRelation: "unified_marketplace_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ml_publication_jobs_product_record_id_fkey"
+            columns: ["product_record_id"]
+            isOneToOne: false
+            referencedRelation: "product_records"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ml_publication_jobs_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
@@ -6687,6 +7087,134 @@ export type Database = {
           },
         ]
       }
+      product_assets: {
+        Row: {
+          asset_type: string | null
+          created_at: string | null
+          file_size: number | null
+          hash: string | null
+          height: number | null
+          id: string
+          is_cover: boolean | null
+          ml_picture_id: string | null
+          product_record_id: string
+          sort_order: number | null
+          source: string | null
+          source_url: string | null
+          storage_url: string | null
+          variant_id: string | null
+          width: number | null
+        }
+        Insert: {
+          asset_type?: string | null
+          created_at?: string | null
+          file_size?: number | null
+          hash?: string | null
+          height?: number | null
+          id?: string
+          is_cover?: boolean | null
+          ml_picture_id?: string | null
+          product_record_id: string
+          sort_order?: number | null
+          source?: string | null
+          source_url?: string | null
+          storage_url?: string | null
+          variant_id?: string | null
+          width?: number | null
+        }
+        Update: {
+          asset_type?: string | null
+          created_at?: string | null
+          file_size?: number | null
+          hash?: string | null
+          height?: number | null
+          id?: string
+          is_cover?: boolean | null
+          ml_picture_id?: string | null
+          product_record_id?: string
+          sort_order?: number | null
+          source?: string | null
+          source_url?: string | null
+          storage_url?: string | null
+          variant_id?: string | null
+          width?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_assets_product_record_id_fkey"
+            columns: ["product_record_id"]
+            isOneToOne: false
+            referencedRelation: "product_records"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_assets_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "product_variants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_attribute_map: {
+        Row: {
+          attribute_id: string
+          created_at: string | null
+          filled_by: string | null
+          id: string
+          name: string | null
+          product_record_id: string
+          required_level: string | null
+          unit: string | null
+          updated_at: string | null
+          validation_message: string | null
+          validation_status: string | null
+          value_id: string | null
+          value_name: string | null
+          value_struct: Json | null
+        }
+        Insert: {
+          attribute_id: string
+          created_at?: string | null
+          filled_by?: string | null
+          id?: string
+          name?: string | null
+          product_record_id: string
+          required_level?: string | null
+          unit?: string | null
+          updated_at?: string | null
+          validation_message?: string | null
+          validation_status?: string | null
+          value_id?: string | null
+          value_name?: string | null
+          value_struct?: Json | null
+        }
+        Update: {
+          attribute_id?: string
+          created_at?: string | null
+          filled_by?: string | null
+          id?: string
+          name?: string | null
+          product_record_id?: string
+          required_level?: string | null
+          unit?: string | null
+          updated_at?: string | null
+          validation_message?: string | null
+          validation_status?: string | null
+          value_id?: string | null
+          value_name?: string | null
+          value_struct?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_attribute_map_product_record_id_fkey"
+            columns: ["product_record_id"]
+            isOneToOne: false
+            referencedRelation: "product_records"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       product_cost_catalog: {
         Row: {
           cost_currency: string
@@ -6776,6 +7304,152 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      product_records: {
+        Row: {
+          condition: string | null
+          created_at: string | null
+          created_by: string | null
+          default_currency: string | null
+          default_price: number | null
+          description: string | null
+          id: string
+          listing_type_id: string | null
+          name_internal: string
+          published_at: string | null
+          published_item_id: string | null
+          source_learned_listing_id: string | null
+          status: string | null
+          target_category_id: string | null
+          target_category_name: string | null
+          target_site: string | null
+          updated_at: string | null
+          validation_issues: Json | null
+          validation_score: number | null
+          video_id: string | null
+          warranty: string | null
+          workspace_id: string
+        }
+        Insert: {
+          condition?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          default_currency?: string | null
+          default_price?: number | null
+          description?: string | null
+          id?: string
+          listing_type_id?: string | null
+          name_internal: string
+          published_at?: string | null
+          published_item_id?: string | null
+          source_learned_listing_id?: string | null
+          status?: string | null
+          target_category_id?: string | null
+          target_category_name?: string | null
+          target_site?: string | null
+          updated_at?: string | null
+          validation_issues?: Json | null
+          validation_score?: number | null
+          video_id?: string | null
+          warranty?: string | null
+          workspace_id: string
+        }
+        Update: {
+          condition?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          default_currency?: string | null
+          default_price?: number | null
+          description?: string | null
+          id?: string
+          listing_type_id?: string | null
+          name_internal?: string
+          published_at?: string | null
+          published_item_id?: string | null
+          source_learned_listing_id?: string | null
+          status?: string | null
+          target_category_id?: string | null
+          target_category_name?: string | null
+          target_site?: string | null
+          updated_at?: string | null
+          validation_issues?: Json | null
+          validation_score?: number | null
+          video_id?: string | null
+          warranty?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_records_source_learned_listing_id_fkey"
+            columns: ["source_learned_listing_id"]
+            isOneToOne: false
+            referencedRelation: "learned_listings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_records_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_variants: {
+        Row: {
+          available_quantity: number | null
+          created_at: string | null
+          gtin: string | null
+          id: string
+          picture_ids: Json | null
+          price: number | null
+          product_record_id: string
+          seller_custom_field: string | null
+          sku_internal: string | null
+          source_variation_id: string | null
+          status: string | null
+          updated_at: string | null
+          variant_attributes: Json | null
+        }
+        Insert: {
+          available_quantity?: number | null
+          created_at?: string | null
+          gtin?: string | null
+          id?: string
+          picture_ids?: Json | null
+          price?: number | null
+          product_record_id: string
+          seller_custom_field?: string | null
+          sku_internal?: string | null
+          source_variation_id?: string | null
+          status?: string | null
+          updated_at?: string | null
+          variant_attributes?: Json | null
+        }
+        Update: {
+          available_quantity?: number | null
+          created_at?: string | null
+          gtin?: string | null
+          id?: string
+          picture_ids?: Json | null
+          price?: number | null
+          product_record_id?: string
+          seller_custom_field?: string | null
+          sku_internal?: string | null
+          source_variation_id?: string | null
+          status?: string | null
+          updated_at?: string | null
+          variant_attributes?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_variants_product_record_id_fkey"
+            columns: ["product_record_id"]
+            isOneToOne: false
+            referencedRelation: "product_records"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profiles: {
         Row: {
