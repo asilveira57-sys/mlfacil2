@@ -12,6 +12,7 @@ import { useRefreshPolicy } from "@/contexts/RefreshPolicyContext";
 import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { FloatingSupportButton } from "@/components/support/FloatingSupportButton";
 
 // Context for page-level header customization
 interface PageHeaderContextType {
@@ -126,6 +127,7 @@ export function AppShellLayout() {
               <Outlet />
             </main>
           </SidebarInset>
+          <FloatingSupportButton />
         </div>
       </SidebarProvider>
     </PageHeaderContext.Provider>
