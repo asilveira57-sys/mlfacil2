@@ -12,6 +12,7 @@ import ptBRSettings from '@/locales/pt-BR/settings.json';
 import ptBRDashboard from '@/locales/pt-BR/dashboard.json';
 import ptBRSend from '@/locales/pt-BR/send.json';
 import ptBRShipping from '@/locales/pt-BR/shipping.json';
+import ptBRUtilities from '@/locales/pt-BR/utilities.json';
 
 import enCommon from '@/locales/en/common.json';
 import enNav from '@/locales/en/nav.json';
@@ -22,6 +23,7 @@ import enSettings from '@/locales/en/settings.json';
 import enDashboard from '@/locales/en/dashboard.json';
 import enSend from '@/locales/en/send.json';
 import enShipping from '@/locales/en/shipping.json';
+import enUtilities from '@/locales/en/utilities.json';
 
 import esCommon from '@/locales/es/common.json';
 import esNav from '@/locales/es/nav.json';
@@ -32,6 +34,7 @@ import esSettings from '@/locales/es/settings.json';
 import esDashboard from '@/locales/es/dashboard.json';
 import esSend from '@/locales/es/send.json';
 import esShipping from '@/locales/es/shipping.json';
+import esUtilities from '@/locales/es/utilities.json';
 
 export const SUPPORTED_LANGUAGES = ['pt-BR', 'en', 'es'] as const;
 export type SupportedLanguage = typeof SUPPORTED_LANGUAGES[number];
@@ -53,6 +56,7 @@ const resources = {
     dashboard: ptBRDashboard,
     send: ptBRSend,
     shipping: ptBRShipping,
+    utilities: ptBRUtilities,
   },
   en: {
     common: enCommon,
@@ -64,6 +68,7 @@ const resources = {
     dashboard: enDashboard,
     send: enSend,
     shipping: enShipping,
+    utilities: enUtilities,
   },
   es: {
     common: esCommon,
@@ -75,6 +80,7 @@ const resources = {
     dashboard: esDashboard,
     send: esSend,
     shipping: esShipping,
+    utilities: esUtilities,
   },
 };
 
@@ -91,7 +97,7 @@ i18n
     resources,
     fallbackLng: 'pt-BR',
     defaultNS: 'common',
-    ns: ['common', 'nav', 'auth', 'errors', 'actions', 'settings', 'dashboard', 'send', 'shipping'],
+    ns: ['common', 'nav', 'auth', 'errors', 'actions', 'settings', 'dashboard', 'send', 'shipping', 'utilities'],
     
     detection: {
       order: detectionOrder,

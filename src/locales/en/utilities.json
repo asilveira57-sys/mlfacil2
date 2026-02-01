@@ -1,0 +1,73 @@
+{
+  "title": "Utilities",
+  "description": "Daily operational tools",
+  
+  "clock": {
+    "title": "Clock",
+    "description": "Current time and date",
+    "time": "Time",
+    "date": "Date",
+    "timezone": "Timezone",
+    "format_12h": "12 hours (AM/PM)",
+    "format_24h": "24 hours"
+  },
+  
+  "weather": {
+    "title": "Weather",
+    "description": "Current weather conditions",
+    "feels_like": "Feels like",
+    "humidity": "Humidity",
+    "wind": "Wind",
+    "condition": "Condition",
+    "update": "Update",
+    "last_update": "Last update",
+    "city": "City",
+    "state": "State",
+    "country": "Country",
+    "update_interval": "Update interval",
+    "minutes": "minutes",
+    "loading": "Loading weather...",
+    "error": "Error loading weather",
+    "conditions": {
+      "clear": "Clear sky",
+      "clouds": "Cloudy",
+      "rain": "Rain",
+      "drizzle": "Drizzle",
+      "thunderstorm": "Thunderstorm",
+      "snow": "Snow",
+      "mist": "Mist",
+      "fog": "Fog",
+      "haze": "Haze"
+    }
+  },
+  
+  "calculator": {
+    "title": "Calculator",
+    "description": "Simple calculator",
+    "clear": "Clear",
+    "clear_all": "Clear all",
+    "backspace": "Backspace",
+    "equals": "Equals",
+    "history": "History",
+    "no_history": "No history"
+  },
+  
+  "settings": {
+    "title": "Utilities Settings",
+    "show_in_header": "Show in header",
+    "show_in_dashboard": "Show in dashboard",
+    "widgets_enabled": "Enabled widgets",
+    "save_success": "Preferences saved successfully",
+    "clock_settings": "Clock Settings",
+    "weather_settings": "Weather Settings",
+    "calculator_settings": "Calculator Settings"
+  },
+  
+  "widgets": {
+    "hide": "Hide",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "move": "Move",
+    "configure": "Configure"
+  }
+}

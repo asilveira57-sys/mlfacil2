@@ -4,6 +4,8 @@ import { AppSidebar } from "./AppSidebar";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { Separator } from "@/components/ui/separator";
 import { NotificationBell } from "@/components/notifications";
+import { HeaderUtilities } from "@/components/utilities";
+import { LanguageSwitcher } from "./LanguageSwitcher";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 
 interface DashboardLayoutProps {
@@ -39,6 +41,9 @@ export function DashboardLayout({
               </div>
             )}
             <div className="flex items-center gap-2 ml-auto">
+              <HeaderUtilities />
+              <Separator orientation="vertical" className="h-6 hidden sm:block" />
+              <LanguageSwitcher variant="icon" className="hidden sm:flex" />
               <NotificationBell sellerId={sellerId} />
               <AccountSwitcher />
               {headerContent}
