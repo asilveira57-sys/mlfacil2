@@ -143,3 +143,6 @@ verify_jwt = false
 
 [functions.clone-anti-catalog-execute]
 verify_jwt = false
+
+[functions.pricing-engine]
+verify_jwt = false
