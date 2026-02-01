@@ -3788,6 +3788,54 @@ export type Database = {
           },
         ]
       }
+      knowledge_base_articles: {
+        Row: {
+          category: string
+          content: string
+          created_at: string
+          helpful_count: number | null
+          id: string
+          is_published: boolean | null
+          not_helpful_count: number | null
+          slug: string
+          summary: string | null
+          tags: string[] | null
+          title: string
+          updated_at: string
+          view_count: number | null
+        }
+        Insert: {
+          category: string
+          content: string
+          created_at?: string
+          helpful_count?: number | null
+          id?: string
+          is_published?: boolean | null
+          not_helpful_count?: number | null
+          slug: string
+          summary?: string | null
+          tags?: string[] | null
+          title: string
+          updated_at?: string
+          view_count?: number | null
+        }
+        Update: {
+          category?: string
+          content?: string
+          created_at?: string
+          helpful_count?: number | null
+          id?: string
+          is_published?: boolean | null
+          not_helpful_count?: number | null
+          slug?: string
+          summary?: string | null
+          tags?: string[] | null
+          title?: string
+          updated_at?: string
+          view_count?: number | null
+        }
+        Relationships: []
+      }
       listing_events: {
         Row: {
           blocks_affected: string[] | null
@@ -8047,6 +8095,262 @@ export type Database = {
           },
         ]
       }
+      support_ai_messages: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          role: string
+          session_id: string
+          sources: Json | null
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          role: string
+          session_id: string
+          sources?: Json | null
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          role?: string
+          session_id?: string
+          sources?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "support_ai_messages_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "support_ai_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      support_ai_sessions: {
+        Row: {
+          created_at: string
+          id: string
+          updated_at: string
+          user_id: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          updated_at?: string
+          user_id: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          updated_at?: string
+          user_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "support_ai_sessions_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      support_attachments: {
+        Row: {
+          created_at: string
+          file_name: string
+          file_size: number | null
+          file_type: string
+          id: string
+          is_screenshot: boolean | null
+          message_id: string | null
+          storage_path: string
+          ticket_id: string
+        }
+        Insert: {
+          created_at?: string
+          file_name: string
+          file_size?: number | null
+          file_type: string
+          id?: string
+          is_screenshot?: boolean | null
+          message_id?: string | null
+          storage_path: string
+          ticket_id: string
+        }
+        Update: {
+          created_at?: string
+          file_name?: string
+          file_size?: number | null
+          file_type?: string
+          id?: string
+          is_screenshot?: boolean | null
+          message_id?: string | null
+          storage_path?: string
+          ticket_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "support_attachments_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "support_messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "support_attachments_ticket_id_fkey"
+            columns: ["ticket_id"]
+            isOneToOne: false
+            referencedRelation: "support_tickets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      support_messages: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          is_internal: boolean | null
+          sender_type: string
+          ticket_id: string
+          user_id: string | null
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          is_internal?: boolean | null
+          sender_type: string
+          ticket_id: string
+          user_id?: string | null
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          is_internal?: boolean | null
+          sender_type?: string
+          ticket_id?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "support_messages_ticket_id_fkey"
+            columns: ["ticket_id"]
+            isOneToOne: false
+            referencedRelation: "support_tickets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      support_ticket_logs: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          new_value: Json | null
+          old_value: Json | null
+          ticket_id: string
+          user_id: string | null
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          id?: string
+          new_value?: Json | null
+          old_value?: Json | null
+          ticket_id: string
+          user_id?: string | null
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          new_value?: Json | null
+          old_value?: Json | null
+          ticket_id?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "support_ticket_logs_ticket_id_fkey"
+            columns: ["ticket_id"]
+            isOneToOne: false
+            referencedRelation: "support_tickets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      support_tickets: {
+        Row: {
+          category: Database["public"]["Enums"]["support_ticket_category"]
+          closed_at: string | null
+          created_at: string
+          current_module: string | null
+          current_route: string | null
+          description: string
+          id: string
+          metadata: Json | null
+          priority: Database["public"]["Enums"]["support_ticket_priority"]
+          resolved_at: string | null
+          status: Database["public"]["Enums"]["support_ticket_status"]
+          subject: string
+          updated_at: string
+          user_id: string
+          workspace_id: string
+        }
+        Insert: {
+          category?: Database["public"]["Enums"]["support_ticket_category"]
+          closed_at?: string | null
+          created_at?: string
+          current_module?: string | null
+          current_route?: string | null
+          description: string
+          id?: string
+          metadata?: Json | null
+          priority?: Database["public"]["Enums"]["support_ticket_priority"]
+          resolved_at?: string | null
+          status?: Database["public"]["Enums"]["support_ticket_status"]
+          subject: string
+          updated_at?: string
+          user_id: string
+          workspace_id: string
+        }
+        Update: {
+          category?: Database["public"]["Enums"]["support_ticket_category"]
+          closed_at?: string | null
+          created_at?: string
+          current_module?: string | null
+          current_route?: string | null
+          description?: string
+          id?: string
+          metadata?: Json | null
+          priority?: Database["public"]["Enums"]["support_ticket_priority"]
+          resolved_at?: string | null
+          status?: Database["public"]["Enums"]["support_ticket_status"]
+          subject?: string
+          updated_at?: string
+          user_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "support_tickets_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sync_jobs: {
         Row: {
           completed_at: string | null
@@ -9565,6 +9869,20 @@ export type Database = {
         | "page_2"
         | "page_3_plus"
         | "not_found"
+      support_ticket_category:
+        | "bug"
+        | "question"
+        | "suggestion"
+        | "financial"
+        | "integration"
+        | "other"
+      support_ticket_priority: "low" | "medium" | "high" | "urgent"
+      support_ticket_status:
+        | "open"
+        | "in_progress"
+        | "waiting_response"
+        | "resolved"
+        | "closed"
       task_priority: "low" | "medium" | "high" | "urgent"
       task_status: "todo" | "doing" | "blocked" | "done"
       trial_status: "none" | "active" | "expired"
@@ -9746,6 +10064,22 @@ export const Constants = {
         "page_2",
         "page_3_plus",
         "not_found",
+      ],
+      support_ticket_category: [
+        "bug",
+        "question",
+        "suggestion",
+        "financial",
+        "integration",
+        "other",
+      ],
+      support_ticket_priority: ["low", "medium", "high", "urgent"],
+      support_ticket_status: [
+        "open",
+        "in_progress",
+        "waiting_response",
+        "resolved",
+        "closed",
       ],
       task_priority: ["low", "medium", "high", "urgent"],
       task_status: ["todo", "doing", "blocked", "done"],
