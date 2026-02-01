@@ -5,7 +5,7 @@ import { User, Receipt, Building2, CreditCard, Palette, Users, Globe } from "luc
 import SettingsProfile from "@/components/settings/SettingsProfile";
 import SettingsBilling from "@/components/settings/SettingsBilling";
 import SettingsCompanies from "@/components/settings/SettingsCompanies";
-import SettingsSubscription from "@/components/settings/SettingsSubscription";
+import SettingsPlan from "@/components/settings/SettingsPlan";
 import SettingsCustomization from "@/components/settings/SettingsCustomization";
 import { CollaboratorsCard } from "@/components/settings/collaborators";
 import { PageContainer } from "@/components/layout/PageContainer";
@@ -71,7 +71,7 @@ const Settings = () => {
           </TabsContent>
 
           <TabsContent value="subscription" className="mt-6">
-            <SettingsSubscription />
+            <SettingsPlan />
           </TabsContent>
         </Tabs>
       </div>
