@@ -6292,6 +6292,401 @@ export type Database = {
         }
         Relationships: []
       }
+      pricing_simulation_events: {
+        Row: {
+          actor_user_id: string
+          created_at: string
+          event_payload: Json | null
+          event_type: Database["public"]["Enums"]["pricing_event_type"]
+          id: string
+          margin_at_event: number | null
+          profit_at_event: number | null
+          simulation_id: string
+          workspace_id: string
+        }
+        Insert: {
+          actor_user_id: string
+          created_at?: string
+          event_payload?: Json | null
+          event_type: Database["public"]["Enums"]["pricing_event_type"]
+          id?: string
+          margin_at_event?: number | null
+          profit_at_event?: number | null
+          simulation_id: string
+          workspace_id: string
+        }
+        Update: {
+          actor_user_id?: string
+          created_at?: string
+          event_payload?: Json | null
+          event_type?: Database["public"]["Enums"]["pricing_event_type"]
+          id?: string
+          margin_at_event?: number | null
+          profit_at_event?: number | null
+          simulation_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pricing_simulation_events_simulation_id_fkey"
+            columns: ["simulation_id"]
+            isOneToOne: false
+            referencedRelation: "pricing_simulations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pricing_simulation_events_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pricing_simulation_inputs: {
+        Row: {
+          channel_params: Json | null
+          cost_extra: number
+          cost_packaging: number
+          cost_product: number
+          cost_source: string | null
+          created_at: string
+          dimensions_source: string | null
+          discount_percent: number
+          discount_value: number
+          fee_fixed: number
+          fee_mode: string
+          fee_percent: number
+          fee_ruleset_id: string | null
+          freight_profile: string | null
+          freight_ruleset_id: string | null
+          height_cm: number | null
+          id: string
+          length_cm: number | null
+          listing_type: string
+          logistic_type: string | null
+          shipping_charged_to_customer: number
+          shipping_cost_estimated: number
+          shipping_mode: string
+          simulation_id: string
+          tax_mode: string
+          tax_percent: number
+          version: number
+          weight_kg: number | null
+          width_cm: number | null
+        }
+        Insert: {
+          channel_params?: Json | null
+          cost_extra?: number
+          cost_packaging?: number
+          cost_product?: number
+          cost_source?: string | null
+          created_at?: string
+          dimensions_source?: string | null
+          discount_percent?: number
+          discount_value?: number
+          fee_fixed?: number
+          fee_mode?: string
+          fee_percent?: number
+          fee_ruleset_id?: string | null
+          freight_profile?: string | null
+          freight_ruleset_id?: string | null
+          height_cm?: number | null
+          id?: string
+          length_cm?: number | null
+          listing_type?: string
+          logistic_type?: string | null
+          shipping_charged_to_customer?: number
+          shipping_cost_estimated?: number
+          shipping_mode?: string
+          simulation_id: string
+          tax_mode?: string
+          tax_percent?: number
+          version?: number
+          weight_kg?: number | null
+          width_cm?: number | null
+        }
+        Update: {
+          channel_params?: Json | null
+          cost_extra?: number
+          cost_packaging?: number
+          cost_product?: number
+          cost_source?: string | null
+          created_at?: string
+          dimensions_source?: string | null
+          discount_percent?: number
+          discount_value?: number
+          fee_fixed?: number
+          fee_mode?: string
+          fee_percent?: number
+          fee_ruleset_id?: string | null
+          freight_profile?: string | null
+          freight_ruleset_id?: string | null
+          height_cm?: number | null
+          id?: string
+          length_cm?: number | null
+          listing_type?: string
+          logistic_type?: string | null
+          shipping_charged_to_customer?: number
+          shipping_cost_estimated?: number
+          shipping_mode?: string
+          simulation_id?: string
+          tax_mode?: string
+          tax_percent?: number
+          version?: number
+          weight_kg?: number | null
+          width_cm?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pricing_simulation_inputs_fee_ruleset_id_fkey"
+            columns: ["fee_ruleset_id"]
+            isOneToOne: false
+            referencedRelation: "marketplace_fee_rules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pricing_simulation_inputs_freight_ruleset_id_fkey"
+            columns: ["freight_ruleset_id"]
+            isOneToOne: false
+            referencedRelation: "freight_rulesets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pricing_simulation_inputs_simulation_id_fkey"
+            columns: ["simulation_id"]
+            isOneToOne: false
+            referencedRelation: "pricing_simulations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pricing_simulation_results: {
+        Row: {
+          breakeven_price: number
+          cost_breakdown: Json | null
+          created_at: string
+          fees_breakdown: Json | null
+          flags: Json | null
+          gross_revenue: number
+          id: string
+          inputs_id: string
+          margin_after_shipping: number
+          margin_percent: number
+          marketplace_fees_total: number
+          markup_percent: number
+          min_price_for_target: number | null
+          net_revenue: number
+          profit_total: number
+          profit_value: number
+          simulation_id: string
+          taxes_total: number
+          total_cost: number
+          validation_message: string | null
+          validation_passed: boolean | null
+          validation_rule_id: string | null
+          version: number
+        }
+        Insert: {
+          breakeven_price?: number
+          cost_breakdown?: Json | null
+          created_at?: string
+          fees_breakdown?: Json | null
+          flags?: Json | null
+          gross_revenue?: number
+          id?: string
+          inputs_id: string
+          margin_after_shipping?: number
+          margin_percent?: number
+          marketplace_fees_total?: number
+          markup_percent?: number
+          min_price_for_target?: number | null
+          net_revenue?: number
+          profit_total?: number
+          profit_value?: number
+          simulation_id: string
+          taxes_total?: number
+          total_cost?: number
+          validation_message?: string | null
+          validation_passed?: boolean | null
+          validation_rule_id?: string | null
+          version?: number
+        }
+        Update: {
+          breakeven_price?: number
+          cost_breakdown?: Json | null
+          created_at?: string
+          fees_breakdown?: Json | null
+          flags?: Json | null
+          gross_revenue?: number
+          id?: string
+          inputs_id?: string
+          margin_after_shipping?: number
+          margin_percent?: number
+          marketplace_fees_total?: number
+          markup_percent?: number
+          min_price_for_target?: number | null
+          net_revenue?: number
+          profit_total?: number
+          profit_value?: number
+          simulation_id?: string
+          taxes_total?: number
+          total_cost?: number
+          validation_message?: string | null
+          validation_passed?: boolean | null
+          validation_rule_id?: string | null
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pricing_simulation_results_inputs_id_fkey"
+            columns: ["inputs_id"]
+            isOneToOne: false
+            referencedRelation: "pricing_simulation_inputs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pricing_simulation_results_simulation_id_fkey"
+            columns: ["simulation_id"]
+            isOneToOne: false
+            referencedRelation: "pricing_simulations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pricing_simulations: {
+        Row: {
+          created_at: string
+          created_by_user_id: string
+          currency: string
+          id: string
+          marketplace: string
+          notes: string | null
+          product_key: string | null
+          product_ref_id: string | null
+          product_ref_type: Database["public"]["Enums"]["pricing_product_ref_type"]
+          quantity: number
+          sale_price: number | null
+          status: Database["public"]["Enums"]["pricing_simulation_status"]
+          target_margin: number | null
+          title: string | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by_user_id: string
+          currency?: string
+          id?: string
+          marketplace?: string
+          notes?: string | null
+          product_key?: string | null
+          product_ref_id?: string | null
+          product_ref_type?: Database["public"]["Enums"]["pricing_product_ref_type"]
+          quantity?: number
+          sale_price?: number | null
+          status?: Database["public"]["Enums"]["pricing_simulation_status"]
+          target_margin?: number | null
+          title?: string | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by_user_id?: string
+          currency?: string
+          id?: string
+          marketplace?: string
+          notes?: string | null
+          product_key?: string | null
+          product_ref_id?: string | null
+          product_ref_type?: Database["public"]["Enums"]["pricing_product_ref_type"]
+          quantity?: number
+          sale_price?: number | null
+          status?: Database["public"]["Enums"]["pricing_simulation_status"]
+          target_margin?: number | null
+          title?: string | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pricing_simulations_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pricing_validation_rules: {
+        Row: {
+          allow_negative_margin: boolean
+          allow_zero_cost: boolean
+          category_id: string | null
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          marketplace: string | null
+          min_margin_percent: number
+          min_profit_value: number | null
+          name: string
+          priority: number
+          require_dimensions: boolean
+          scope: string
+          updated_at: string
+          warning_margin_percent: number
+          workspace_id: string
+        }
+        Insert: {
+          allow_negative_margin?: boolean
+          allow_zero_cost?: boolean
+          category_id?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          marketplace?: string | null
+          min_margin_percent?: number
+          min_profit_value?: number | null
+          name: string
+          priority?: number
+          require_dimensions?: boolean
+          scope?: string
+          updated_at?: string
+          warning_margin_percent?: number
+          workspace_id: string
+        }
+        Update: {
+          allow_negative_margin?: boolean
+          allow_zero_cost?: boolean
+          category_id?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          marketplace?: string | null
+          min_margin_percent?: number
+          min_profit_value?: number | null
+          name?: string
+          priority?: number
+          require_dimensions?: boolean
+          scope?: string
+          updated_at?: string
+          warning_margin_percent?: number
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pricing_validation_rules_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       product_cost_catalog: {
         Row: {
           cost_currency: string
@@ -9853,6 +10248,15 @@ export type Database = {
         | "venda_confirmada"
         | "pedido_enviado"
         | "pedido_entregue"
+      pricing_event_type:
+        | "created"
+        | "recalculated"
+        | "saved"
+        | "approved"
+        | "duplicated"
+        | "archived"
+      pricing_product_ref_type: "listing" | "variant" | "manual"
+      pricing_simulation_status: "draft" | "saved" | "approved" | "archived"
       qa_question_status:
         | "pending"
         | "answered"
@@ -10047,6 +10451,16 @@ export const Constants = {
         "pedido_enviado",
         "pedido_entregue",
       ],
+      pricing_event_type: [
+        "created",
+        "recalculated",
+        "saved",
+        "approved",
+        "duplicated",
+        "archived",
+      ],
+      pricing_product_ref_type: ["listing", "variant", "manual"],
+      pricing_simulation_status: ["draft", "saved", "approved", "archived"],
       qa_question_status: [
         "pending",
         "answered",
