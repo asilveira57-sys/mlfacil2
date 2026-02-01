@@ -1,0 +1,73 @@
+{
+  "title": "Utilidades",
+  "description": "Ferramentas operacionais do dia a dia",
+  
+  "clock": {
+    "title": "Relógio",
+    "description": "Horário e data atual",
+    "time": "Hora",
+    "date": "Data",
+    "timezone": "Fuso horário",
+    "format_12h": "12 horas (AM/PM)",
+    "format_24h": "24 horas"
+  },
+  
+  "weather": {
+    "title": "Clima",
+    "description": "Condições climáticas atuais",
+    "feels_like": "Sensação térmica",
+    "humidity": "Umidade",
+    "wind": "Vento",
+    "condition": "Condição",
+    "update": "Atualizar",
+    "last_update": "Última atualização",
+    "city": "Cidade",
+    "state": "Estado",
+    "country": "País",
+    "update_interval": "Intervalo de atualização",
+    "minutes": "minutos",
+    "loading": "Carregando clima...",
+    "error": "Erro ao carregar clima",
+    "conditions": {
+      "clear": "Céu limpo",
+      "clouds": "Nublado",
+      "rain": "Chuva",
+      "drizzle": "Garoa",
+      "thunderstorm": "Tempestade",
+      "snow": "Neve",
+      "mist": "Névoa",
+      "fog": "Neblina",
+      "haze": "Neblina seca"
+    }
+  },
+  
+  "calculator": {
+    "title": "Calculadora",
+    "description": "Calculadora simples",
+    "clear": "Limpar",
+    "clear_all": "Limpar tudo",
+    "backspace": "Apagar",
+    "equals": "Igual",
+    "history": "Histórico",
+    "no_history": "Sem histórico"
+  },
+  
+  "settings": {
+    "title": "Configurações de Utilidades",
+    "show_in_header": "Exibir no cabeçalho",
+    "show_in_dashboard": "Exibir no dashboard",
+    "widgets_enabled": "Widgets habilitados",
+    "save_success": "Preferências salvas com sucesso",
+    "clock_settings": "Configurações do Relógio",
+    "weather_settings": "Configurações do Clima",
+    "calculator_settings": "Configurações da Calculadora"
+  },
+  
+  "widgets": {
+    "hide": "Ocultar",
+    "pin": "Fixar",
+    "unpin": "Desafixar",
+    "move": "Mover",
+    "configure": "Configurar"
+  }
+}
