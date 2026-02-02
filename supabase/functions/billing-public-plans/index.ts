@@ -14,7 +14,6 @@ interface PlanPrice {
   amount_cents: number;
   currency: string;
   badge_text: string | null;
-  label_sub: string | null;
   ui_order: number;
 }
 
@@ -26,11 +25,6 @@ interface Plan {
   features: string[];
   category: string;
   prices: PlanPrice[];
-}
-
-interface BillingSettings {
-  campaigns?: { annual_enabled?: boolean };
-  ui_copy?: { one_time_note?: string; subscription_note?: string };
 }
 
 serve(async (req) => {
@@ -47,12 +41,13 @@ serve(async (req) => {
     
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-    // Fetch published plans with prices
+    // Fetch published plans with prices using correct column names
     const { data: viewData, error: viewError } = await supabase
       .from("public_plans_v1")
       .select("*")
-      .order("category")
-      .order("ui_order");
+      .eq("visible", true)
+      .order("plan_sort_order")
+      .order("price_sort_order");
 
     if (viewError) {
       console.error("[billing-public-plans] Error fetching plans:", viewError);
@@ -61,19 +56,12 @@ serve(async (req) => {
 
     console.log(`[billing-public-plans] Fetched ${viewData?.length || 0} price entries`);
 
-    // Fetch settings
-    const { data: settingsData, error: settingsError } = await supabase
-      .from("billing_settings")
-      .select("key, value");
-
-    if (settingsError) {
-      console.error("[billing-public-plans] Error fetching settings:", settingsError);
-    }
-
-    const settings: BillingSettings = {};
-    settingsData?.forEach((s: { key: string; value: unknown }) => {
-      settings[s.key as keyof BillingSettings] = s.value as BillingSettings[keyof BillingSettings];
-    });
+    // Fetch trial policy
+    const { data: trialData } = await supabase
+      .from("trial_policy")
+      .select("*")
+      .eq("is_active", true)
+      .single();
 
     // Group by plan
     const plansMap = new Map<string, Plan>();
@@ -83,47 +71,48 @@ serve(async (req) => {
       slug: string;
       name: string;
       description: string | null;
-      features: string[];
+      features: unknown;
       category: string;
       price_id: string;
       mode: string;
       period: string;
-      amount_cents: number;
+      price_cents: number;
       currency: string;
       badge_text: string | null;
-      label_sub: string | null;
-      ui_order: number;
+      price_sort_order: number;
+      is_campaign: boolean;
     }) => {
       if (!plansMap.has(row.slug)) {
+        // Parse features - ensure they're strings
+        let features: string[] = [];
+        if (Array.isArray(row.features)) {
+          features = row.features.map((f: unknown) => String(f));
+        }
+        
         plansMap.set(row.slug, {
           id: row.plan_id,
           slug: row.slug,
           name: row.name,
           description: row.description,
-          features: row.features || [],
+          features,
           category: row.category,
           prices: [],
         });
       }
 
       const plan = plansMap.get(row.slug)!;
-      
-      // Filter out annual_campaign if not enabled
-      const annualEnabled = settings.campaigns?.annual_enabled ?? false;
-      if (row.period === "annual_campaign" && !annualEnabled) {
-        return;
-      }
 
-      plan.prices.push({
-        id: row.price_id,
-        mode: row.mode,
-        period: row.period,
-        amount_cents: row.amount_cents,
-        currency: row.currency,
-        badge_text: row.badge_text,
-        label_sub: row.label_sub,
-        ui_order: row.ui_order,
-      });
+      if (row.price_id) {
+        plan.prices.push({
+          id: row.price_id,
+          mode: row.mode,
+          period: row.period,
+          amount_cents: row.price_cents,
+          currency: row.currency || "BRL",
+          badge_text: row.badge_text,
+          ui_order: row.price_sort_order || 0,
+        });
+      }
     });
 
     // Convert to array and sort
@@ -142,9 +131,14 @@ serve(async (req) => {
       JSON.stringify({
         plans,
         settings: {
-          annual_enabled: settings.campaigns?.annual_enabled ?? false,
-          ui_copy: settings.ui_copy ?? {},
+          annual_enabled: false,
+          ui_copy: {},
         },
+        trial_policy: trialData ? {
+          trial_days: trialData.trial_days,
+          requires_card: trialData.requires_card,
+          one_trial_per_account: trialData.one_trial_per_account,
+        } : null,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
