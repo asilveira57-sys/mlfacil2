@@ -242,11 +242,17 @@ serve(async (req) => {
         .eq('id', mlAccount.id);
     }
 
-    // Fetch item from ML API
-    console.log(`[learn-listing] Fetching item ${itemId} from ML API...`);
-    const itemResponse = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
-      headers: { 'Authorization': `Bearer ${accessToken}` },
-    });
+    // Fetch item from ML API - try public endpoint first, then with auth
+    console.log(`[learn-listing] Fetching item ${itemId} from ML API (public)...`);
+    let itemResponse = await fetch(`https://api.mercadolibre.com/items/${itemId}`);
+    
+    // If public fetch fails, try with auth token
+    if (!itemResponse.ok && itemResponse.status === 403) {
+      console.log(`[learn-listing] Public fetch returned 403, trying with auth token...`);
+      itemResponse = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+      });
+    }
 
     if (!itemResponse.ok) {
       const status = itemResponse.status;
@@ -254,6 +260,12 @@ serve(async (req) => {
         return new Response(
           JSON.stringify({ error: 'Anúncio não encontrado' }),
           { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      if (status === 403) {
+        return new Response(
+          JSON.stringify({ error: 'Sem permissão para acessar este anúncio. Verifique se o anúncio está ativo e público.' }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
       throw new Error(`Erro ao buscar anúncio: ${status}`);
