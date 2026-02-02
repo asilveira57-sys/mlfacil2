@@ -9849,6 +9849,36 @@ export type Database = {
         }
         Relationships: []
       }
+      trial_policy: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          one_trial_per_account: boolean
+          requires_card: boolean
+          trial_days: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          one_trial_per_account?: boolean
+          requires_card?: boolean
+          trial_days?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          one_trial_per_account?: boolean
+          requires_card?: boolean
+          trial_days?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       ui_theme_presets: {
         Row: {
           created_at: string
@@ -10649,10 +10679,12 @@ export type Database = {
           features: Json | null
           is_campaign: boolean | null
           mode: string | null
+          mode_order: number | null
           mp_checkout_url: string | null
           mp_preapproval_plan_id: string | null
           name: string | null
           period: string | null
+          period_order: number | null
           plan_id: string | null
           plan_sort_order: number | null
           price_cents: number | null
