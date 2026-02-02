@@ -18,6 +18,7 @@ import {
   ArrowRight,
   MessageSquareText,
   History,
+  BookOpen,
 } from "lucide-react";
 
 interface Module {
@@ -123,7 +124,24 @@ const modules: Module[] = [
     borderColor: "border-indigo-500/20 hover:border-indigo-500/40",
   },
   {
+    titleKey: "dashboard:modules.products",
+    descriptionKey: "dashboard:modules.products_desc",
+    icon: BookOpen,
+    route: "/produtos",
+    color: "text-teal-500",
+    bgColor: "bg-teal-500/10",
+    borderColor: "border-teal-500/20 hover:border-teal-500/40",
+    badge: "Novo",
+  },
+  {
     titleKey: "dashboard:modules.labels",
+    descriptionKey: "dashboard:modules.labels_desc",
+    icon: Package,
+    route: "/shipping-labels",
+    color: "text-blue-500",
+    bgColor: "bg-blue-500/10",
+    borderColor: "border-blue-500/20 hover:border-blue-500/40",
+  },
     descriptionKey: "dashboard:modules.labels_desc",
     icon: Package,
     route: "/shipping-labels",

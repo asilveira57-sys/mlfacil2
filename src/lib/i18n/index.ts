@@ -13,6 +13,7 @@ import ptBRDashboard from '@/locales/pt-BR/dashboard.json';
 import ptBRSend from '@/locales/pt-BR/send.json';
 import ptBRShipping from '@/locales/pt-BR/shipping.json';
 import ptBRUtilities from '@/locales/pt-BR/utilities.json';
+import ptBRProducts from '@/locales/pt-BR/products.json';
 
 import enCommon from '@/locales/en/common.json';
 import enNav from '@/locales/en/nav.json';
@@ -24,6 +25,7 @@ import enDashboard from '@/locales/en/dashboard.json';
 import enSend from '@/locales/en/send.json';
 import enShipping from '@/locales/en/shipping.json';
 import enUtilities from '@/locales/en/utilities.json';
+import enProducts from '@/locales/en/products.json';
 
 import esCommon from '@/locales/es/common.json';
 import esNav from '@/locales/es/nav.json';
@@ -35,6 +37,7 @@ import esDashboard from '@/locales/es/dashboard.json';
 import esSend from '@/locales/es/send.json';
 import esShipping from '@/locales/es/shipping.json';
 import esUtilities from '@/locales/es/utilities.json';
+import esProducts from '@/locales/es/products.json';
 
 export const SUPPORTED_LANGUAGES = ['pt-BR', 'en', 'es'] as const;
 export type SupportedLanguage = typeof SUPPORTED_LANGUAGES[number];
@@ -57,6 +60,7 @@ const resources = {
     send: ptBRSend,
     shipping: ptBRShipping,
     utilities: ptBRUtilities,
+    products: ptBRProducts,
   },
   en: {
     common: enCommon,
@@ -69,6 +73,7 @@ const resources = {
     send: enSend,
     shipping: enShipping,
     utilities: enUtilities,
+    products: enProducts,
   },
   es: {
     common: esCommon,
@@ -81,6 +86,7 @@ const resources = {
     send: esSend,
     shipping: esShipping,
     utilities: esUtilities,
+    products: esProducts,
   },
 };
 
@@ -97,7 +103,7 @@ i18n
     resources,
     fallbackLng: 'pt-BR',
     defaultNS: 'common',
-    ns: ['common', 'nav', 'auth', 'errors', 'actions', 'settings', 'dashboard', 'send', 'shipping', 'utilities'],
+    ns: ['common', 'nav', 'auth', 'errors', 'actions', 'settings', 'dashboard', 'send', 'shipping', 'utilities', 'products'],
     
     detection: {
       order: detectionOrder,

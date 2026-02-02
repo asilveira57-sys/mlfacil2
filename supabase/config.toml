@@ -146,3 +146,15 @@ verify_jwt = false
 
 [functions.pricing-engine]
 verify_jwt = false
+
+[functions.learn-listing]
+verify_jwt = false
+
+[functions.create-product-record]
+verify_jwt = false
+
+[functions.validate-product-record]
+verify_jwt = false
+
+[functions.publish-to-ml]
+verify_jwt = false
