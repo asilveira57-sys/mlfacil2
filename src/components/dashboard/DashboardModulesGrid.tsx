@@ -142,13 +142,6 @@ const modules: Module[] = [
     bgColor: "bg-blue-500/10",
     borderColor: "border-blue-500/20 hover:border-blue-500/40",
   },
-    descriptionKey: "dashboard:modules.labels_desc",
-    icon: Package,
-    route: "/shipping-labels",
-    color: "text-blue-500",
-    bgColor: "bg-blue-500/10",
-    borderColor: "border-blue-500/20 hover:border-blue-500/40",
-  },
   {
     titleKey: "dashboard:modules.zpl_converter",
     descriptionKey: "dashboard:modules.zpl_converter_desc",
