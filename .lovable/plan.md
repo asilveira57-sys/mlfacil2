@@ -1,212 +1,154 @@
 
-# Plan: Fix Scroll, Navigation, Missing Plan, and Multi-language Issues
+# Plan: Fix Missing 6th Plan and Multi-language for Plans Page
 
-## Summary of Issues Identified
+## Issues Identified
 
-Based on the user's screenshots and exploration of the codebase, there are 4 distinct issues to address:
+### Issue 1: Missing 6th Plan ("Acima de 3000 vendas")
 
-1. **Scroll Position Issue**: When navigating to `/planos` or clicking "Comparar Planos", the page starts at the footer instead of the top
-2. **Missing 6th Plan**: The "Consult-nos" plan for sellers with 3000+ monthly sales is missing from the grid
-3. **Header Navigation Links Not Working**: On `/planos`, menu items like "Recursos", "Como funciona", "Integrações", "Suporte" are not clickable because they use anchor links (`#recursos`) which only work on the landing page
-4. **Multi-language Not Working**: The LanguageSwitcher component is present, but the landing page content uses `SiteContentContext` (database-driven) instead of the i18n translation system, so language changes don't affect the displayed content
-
----
-
-## Task 1: Fix Scroll Position on Navigation
-
-**Problem**: React Router preserves scroll position when navigating between pages, causing users to land at the bottom of `/planos`.
-
-**Solution**: Create a `ScrollToTop` component that resets scroll on route changes.
-
-**Files to create/modify**:
-- Create `src/components/ScrollToTop.tsx`
-- Modify `src/App.tsx` to include the component inside `BrowserRouter`
-
-```text
-+---------------------------+
-| BrowserRouter             |
-|  +---------------------+  |
-|  | ScrollToTop         |  |  <-- New component
-|  +---------------------+  |
-|  | Routes              |  |
-|  +---------------------+  |
-+---------------------------+
-```
-
----
-
-## Task 2: Add "Consult-nos" (6th Plan)
-
-**Problem**: The database has 5 volume plans (up to 3000 sales) but no plan for high-volume sellers (3000+).
-
-**Database change required**:
-- Insert a new plan in the `plans` table with `sort_order: 6`, category `volume`, slug `acima-3000-vendas`
-- This plan will NOT have prices (it's a "contact us" type)
-
-**Frontend changes**:
-- Modify `TierPlanCard.tsx` to handle plans without prices (show "Falar com vendas" instead of price)
-- Modify `Planos.tsx` to show a special card for consultation-based plans
-
----
-
-## Task 3: Fix Header Navigation on /planos
-
-**Problem**: The `LandingHeader` uses anchor links (`#recursos`, `#como-funciona`) which work on the landing page but not on `/planos` because those sections don't exist on that page.
-
-**Solution**: Modify navigation logic to:
-1. If on landing page (`/`) and clicking anchor link: scroll to section
-2. If on any other page and clicking anchor link: navigate to landing page with anchor (e.g., `/#recursos`)
-
-**File to modify**:
-- `src/components/landing/LandingHeader.tsx`
-
----
-
-## Task 4: Implement Multi-language for Landing/Planos
-
-**Problem**: The landing page and plans page use `SiteContentContext` which fetches content from the `site_content` database table. This content is Portuguese-only. The i18n system exists but only has translation files for internal app components, not for landing content.
-
-**Solution** (Two-phase approach):
-
-**Phase 1 (Recommended - Quick Fix)**:
-Create translation files for landing content and use the `useTranslation` hook instead of `getText` from SiteContentContext.
-
-**Files to create**:
-- `src/locales/pt-BR/landing.json`
-- `src/locales/en/landing.json`  
-- `src/locales/es/landing.json`
-
-**Files to modify**:
-- `src/lib/i18n/index.ts` - Add `landing` namespace
-- All landing components (`LandingHeader`, `LandingHero`, `LandingBenefits`, etc.) - Replace `getText()` with `t()` from i18n
-- `src/pages/Planos.tsx` - Use i18n for static strings
-
----
-
-## Technical Implementation Details
-
-### 1. ScrollToTop Component
+**Root Cause**: The `useTierPlans` hook uses this query:
 ```typescript
-// src/components/ScrollToTop.tsx
-import { useEffect } from "react";
-import { useLocation } from "react-router-dom";
-
-export const ScrollToTop = () => {
-  const { pathname } = useLocation();
-
-  useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
-  }, [pathname]);
-
-  return null;
-};
+supabase.from('public_plans_v1').select('*').eq('visible', true)
 ```
 
-### 2. Database Migration for 6th Plan
-```sql
--- Insert consultation plan for 3000+ sales
-INSERT INTO plans (id, slug, name, category, sort_order, description)
-VALUES (
-  gen_random_uuid(),
-  'acima-3000-vendas',
-  'Acima de 3000 vendas',
-  'volume',
-  6,
-  'Plano sob consulta para operações enterprise'
-);
-```
+The "Acima de 3000 vendas" plan exists in the database but has NO associated prices. In the `public_plans_v1` view, the `visible` column comes from the `plan_prices` table via a LEFT JOIN. Since there are no prices, `visible` is `null`, not `true`, so the plan gets filtered out.
 
-### 3. Navigation Fix Logic
+**Solution**: Modify the query in `useTierPlans.ts` to use a filter that accepts both `visible = true` OR `visible IS NULL` (for consultation plans without prices).
+
+### Issue 2: Multi-language Not Working for Plans Page
+
+**Root Cause**: The `Planos.tsx` page has many hardcoded Portuguese strings that should use the i18n translation system:
+- "Planos e Preços" (line 142)
+- "Escolha o plano ideal para o seu negócio." (line 145)
+- "Planos baseados no volume mensal de vendas" (line 171)
+- "Pagamento Antecipado" (line 190)
+- "Assinatura Recorrente" (line 199)
+- "Mensal", "Trimestral", "Semestral" (lines 218-220)
+- "Precisa de mais?" (line 271)
+- And many more...
+
+Additionally, plan names and descriptions come from the database (`plan.name`, `plan.description`), which are stored in Portuguese only.
+
+**Solution**: 
+1. Update `Planos.tsx` to use `useTranslation` hook for all static UI strings
+2. For dynamic plan content (names, features), create translation keys in the i18n files and use them as fallbacks when database content doesn't have a translation
+
+---
+
+## Technical Implementation
+
+### Task 1: Fix Query to Include Consultation Plans
+
+**File**: `src/hooks/useTierPlans.ts`
+
+Change the query filter from:
 ```typescript
-// Updated handleNavClick in LandingHeader
-const handleNavClick = (href: string) => {
-  setMobileMenuOpen(false);
-  if (href.startsWith("#")) {
-    // If we're on the landing page, scroll to section
-    if (window.location.pathname === "/" || window.location.pathname === "/home") {
-      const element = document.querySelector(href);
-      if (element) {
-        element.scrollIntoView({ behavior: "smooth" });
-      }
-    } else {
-      // Navigate to landing page with hash
-      navigate(`/${href}`);
-    }
-  } else {
-    navigate(href);
-  }
-};
+.eq('visible', true)
 ```
 
-### 4. i18n Landing Namespace Structure
+To use an OR filter that accepts visible=true OR visible IS NULL:
+```typescript
+.or('visible.eq.true,visible.is.null')
+```
+
+This will include plans without prices (like "Acima de 3000 vendas").
+
+---
+
+### Task 2: Add i18n to Planos.tsx
+
+**File**: `src/pages/Planos.tsx`
+
+Add `useTranslation` hook and replace all hardcoded Portuguese strings:
+
+| Current Text | Translation Key |
+|-------------|-----------------|
+| "Planos e Preços" | `planos.title` |
+| "Escolha o plano ideal para o seu negócio." | `planos.subtitle` |
+| "Teste grátis por X dias, sem cartão." | `planos.trial_info` |
+| "Planos baseados no volume mensal de vendas" | `planos.volume_title` |
+| "A cobrança considera a média mensal..." | `planos.volume_subtitle` |
+| "Pagamento Antecipado" | `planos.mode_prepaid` |
+| "Assinatura Recorrente" | `planos.mode_recurring` |
+| "Mensal" | `planos.period_monthly` |
+| "Trimestral" | `planos.period_quarterly` |
+| "Semestral" | `planos.period_semiannual` |
+| "Precisa de mais?" | `planos.enterprise_title` |
+| "Plano personalizado para alto volume" | `planos.enterprise_subtitle` |
+| "Falar com especialista" | `planos.enterprise_cta` |
+| "Pronto para começar?" | `planos.ready_title` |
+| "Voltar ao início" | `planos.back_home` |
+
+---
+
+### Task 3: Add Plan-Specific Translations to Locale Files
+
+**Files**: `src/locales/[pt-BR|en|es]/landing.json`
+
+Add translations for plan names, descriptions, and features. Since plans come from the database in Portuguese, we'll create i18n keys that map to each plan slug:
+
 ```json
-// Example: src/locales/en/landing.json
 {
-  "header": {
-    "resources": "Resources",
-    "how_it_works": "How it Works",
-    "integrations": "Integrations",
-    "plans": "Plans",
-    "blog": "Blog",
-    "support": "Support",
-    "login": "Sign In",
-    "create_account": "Create Account"
+  "plan_names": {
+    "ate-50-vendas": "Up to 50 sales",
+    "51-300-vendas": "51 to 300 sales",
+    "301-700-vendas": "301 to 700 sales",
+    "701-1500-vendas": "701 to 1500 sales",
+    "1501-3000-vendas": "1501 to 3000 sales",
+    "acima-3000-vendas": "Over 3000 sales"
   },
-  "hero": {
-    "badge": "Complete platform for Mercado Livre sellers",
-    "title": "Smart management to scale your sales",
-    "subtitle": "Centralize operations, monitor performance and make data-driven decisions."
+  "plan_descriptions": {
+    "ate-50-vendas": "Ideal for beginners",
+    "51-300-vendas": "For growing sellers",
+    ...
+  },
+  "plan_features": {
+    "dashboard_completo": "Complete dashboard",
+    "sincronizacao_automatica": "Automatic sync",
+    "relatorios_basicos": "Basic reports",
+    ...
   }
-  // ... more translations
 }
 ```
 
 ---
 
-## Files to Create
-| File | Purpose |
-|------|---------|
-| `src/components/ScrollToTop.tsx` | Scroll reset on navigation |
-| `src/locales/pt-BR/landing.json` | Portuguese landing translations |
-| `src/locales/en/landing.json` | English landing translations |
-| `src/locales/es/landing.json` | Spanish landing translations |
+### Task 4: Update TierPlanCard to Use Translations
+
+**File**: `src/components/pricing/TierPlanCard.tsx`
+
+Modify the component to:
+1. Use translated plan names based on `plan.slug`
+2. Use translated plan descriptions
+3. Use translated features (map each feature to a translation key)
+
+---
 
 ## Files to Modify
+
 | File | Changes |
 |------|---------|
-| `src/App.tsx` | Add ScrollToTop component |
-| `src/lib/i18n/index.ts` | Add `landing` namespace |
-| `src/components/landing/LandingHeader.tsx` | Fix navigation + use i18n |
-| `src/components/landing/LandingHero.tsx` | Use i18n instead of SiteContent |
-| `src/components/landing/LandingBenefits.tsx` | Use i18n |
-| `src/components/landing/LandingModules.tsx` | Use i18n |
-| `src/components/landing/LandingHowItWorks.tsx` | Use i18n |
-| `src/components/landing/LandingIntegrations.tsx` | Use i18n |
-| `src/components/landing/LandingDemo.tsx` | Use i18n |
-| `src/components/landing/LandingPricing.tsx` | Use i18n |
-| `src/components/landing/LandingTestimonials.tsx` | Use i18n |
-| `src/components/landing/LandingFAQ.tsx` | Use i18n |
-| `src/components/landing/LandingCTA.tsx` | Use i18n |
-| `src/components/landing/LandingFooter.tsx` | Use i18n |
-| `src/pages/Planos.tsx` | Use i18n + add consultation plan card |
-| `src/components/pricing/TierPlanCard.tsx` | Handle plans without prices |
-
-## Database Changes
-- Insert 1 new row in `plans` table for "Acima de 3000 vendas" consultation plan
+| `src/hooks/useTierPlans.ts` | Change visible filter to include null values |
+| `src/pages/Planos.tsx` | Add useTranslation, replace all hardcoded strings |
+| `src/components/pricing/TierPlanCard.tsx` | Use translated plan names/descriptions/features |
+| `src/locales/pt-BR/landing.json` | Add plan_names, plan_descriptions, plan_features |
+| `src/locales/en/landing.json` | Add plan_names, plan_descriptions, plan_features |
+| `src/locales/es/landing.json` | Add plan_names, plan_descriptions, plan_features |
 
 ---
 
 ## Order of Implementation
 
-1. **ScrollToTop** (quick fix, immediate user impact)
-2. **Navigation Links Fix** (quick fix, improves UX)
-3. **Add 6th Plan to Database** (requires migration)
-4. **Multi-language for Landing** (larger task, requires creating 3 translation files + updating ~12 components)
+1. **Fix useTierPlans query** - Quick fix to show 6th plan
+2. **Update Planos.tsx with i18n** - Replace hardcoded strings
+3. **Add plan translations to locale files** - Plan names/descriptions/features
+4. **Update TierPlanCard** - Use translated content
 
 ---
 
-## Notes
+## Expected Outcome
 
-- The `SiteContentContext` will be kept for admin-editable content (like images and CMS-managed text), but static UI strings will use i18n
-- The 6th plan will show "Falar com vendas" button that links to a contact page or WhatsApp (user to define later)
-- All translation keys will mirror the structure in `siteDefaultTexts.ts` for easy migration
+After implementation:
+- All 6 volume plans will appear on the /planos page, including "Acima de 3000 vendas"
+- The 6th plan will show "Consulte-nos" (or translated equivalent) instead of a price
+- All UI text on the plans page will respond to language changes
+- Plan names, descriptions, and features will be translated when switching languages
