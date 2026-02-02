@@ -248,6 +248,34 @@
     "faq_title": "Preguntas sobre los planes",
     "ready_title": "¿Listo para comenzar?",
     "ready_subtitle": "Prueba gratis por {{days}} días. Cancela cuando quieras.",
-    "back_home": "Volver al inicio"
+    "back_home": "Volver al inicio",
+    "per_month": "/mes",
+    "most_popular": "Más popular",
+    "plan_names": {
+      "ate-50-vendas": "Hasta 50 ventas",
+      "51-300-vendas": "51 a 300 ventas",
+      "301-700-vendas": "301 a 700 ventas",
+      "701-1500-vendas": "701 a 1500 ventas",
+      "1501-3000-vendas": "1501 a 3000 ventas",
+      "acima-3000-vendas": "Más de 3000 ventas"
+    },
+    "plan_descriptions": {
+      "ate-50-vendas": "Ideal para principiantes",
+      "51-300-vendas": "Para vendedores en crecimiento",
+      "301-700-vendas": "Para negocios consolidados",
+      "701-1500-vendas": "Para operaciones medianas",
+      "1501-3000-vendas": "Para alto volumen de ventas",
+      "acima-3000-vendas": "Para operaciones enterprise"
+    },
+    "plan_features": {
+      "dashboard_completo": "Dashboard completo",
+      "sincronizacao_automatica": "Sincronización automática",
+      "relatorios_basicos": "Informes básicos",
+      "suporte_email": "Soporte por email",
+      "multicontas": "Soporte multi-cuentas",
+      "relatorios_avancados": "Informes avanzados",
+      "suporte_prioritario": "Soporte prioritario",
+      "automacoes": "Automatizaciones inteligentes"
+    }
   }
 }
