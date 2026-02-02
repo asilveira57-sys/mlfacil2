@@ -32,9 +32,13 @@ export function ImportListingForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!url.trim()) return;
-    
-    await importMutation.mutateAsync(url);
-    setUrl('');
+
+    try {
+      await importMutation.mutateAsync(url);
+      setUrl('');
+    } catch {
+      // Errors are handled by the mutation's onError toast.
+    }
   };
 
   return (

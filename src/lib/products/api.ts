@@ -161,13 +161,125 @@ export interface PublicationJob {
 
 // ===== API Functions =====
 
+function extractMeliItemIdFromUrl(input: string): string | null {
+  if (!input?.trim()) return null;
+  const trimmed = input.trim();
+
+  const pdpMatch = trimmed.match(/pdp_filters=item_id[:%3A]+(MLB\d{8,})/i);
+  if (pdpMatch) return pdpMatch[1].toUpperCase();
+
+  const itemIdMatch = trimmed.match(/item_id[=:](MLB\d{8,})/i);
+  if (itemIdMatch) return itemIdMatch[1].toUpperCase();
+
+  const pathMatch = trimmed.match(/\/(MLB\d{8,})/i);
+  if (pathMatch) return pathMatch[1].toUpperCase();
+
+  const queryMatch = trimmed.match(/[?&]id=(MLB\d{8,})/i);
+  if (queryMatch) return queryMatch[1].toUpperCase();
+
+  const anyMlbMatch = trimmed.match(/(?:^|[^A-Z])(MLB\d{8,})(?:[^0-9]|$)/i);
+  if (anyMlbMatch) return anyMlbMatch[1].toUpperCase();
+
+  return null;
+}
+
+async function safeFetchJson(url: string) {
+  const res = await fetch(url);
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`Mercado Livre ${res.status} (${url})`);
+  }
+  return text ? JSON.parse(text) : null;
+}
+
+async function fetchMeliBundle(itemId: string) {
+  const item = await safeFetchJson(`https://api.mercadolibre.com/items/${itemId}`);
+
+  let categoryData: any = null;
+  let categoryAttributes: any[] = [];
+  let description = '';
+  let sellerNickname = '';
+
+  try {
+    categoryData = await safeFetchJson(`https://api.mercadolibre.com/categories/${item.category_id}`);
+  } catch {
+    // optional
+  }
+
+  try {
+    categoryAttributes = await safeFetchJson(`https://api.mercadolibre.com/categories/${item.category_id}/attributes`);
+  } catch {
+    // optional
+  }
+
+  try {
+    const desc = await safeFetchJson(`https://api.mercadolibre.com/items/${itemId}/description`);
+    description = desc?.plain_text || desc?.text || '';
+  } catch {
+    // optional
+  }
+
+  try {
+    const seller = await safeFetchJson(`https://api.mercadolibre.com/users/${item.seller_id}`);
+    sellerNickname = seller?.nickname || '';
+  } catch {
+    // optional
+  }
+
+  return { item, categoryData, categoryAttributes, description, sellerNickname };
+}
+
+async function importListingDirect(url: string, workspaceId: string) {
+  const itemId = extractMeliItemIdFromUrl(url);
+  if (!itemId) {
+    throw new Error('Não foi possível extrair o ID do anúncio da URL fornecida');
+  }
+
+  const bundle = await fetchMeliBundle(itemId);
+
+  const { data, error } = await supabase.functions.invoke('learn-listing-save', {
+    body: {
+      workspaceId,
+      url,
+      itemId,
+      itemData: bundle.item,
+      categoryData: bundle.categoryData,
+      categoryAttributes: bundle.categoryAttributes,
+      description: bundle.description,
+      sellerNickname: bundle.sellerNickname,
+    },
+  });
+
+  if (error) throw error;
+  if (!data?.success) throw new Error(data?.error || 'Falha ao salvar anúncio (modo direto)');
+  return data;
+}
+
 export async function importListingFromUrl(url: string, workspaceId: string) {
+  // 1) Try via backend (preferred)
   const { data, error } = await supabase.functions.invoke('learn-listing', {
     body: { url, workspaceId },
   });
 
-  if (error) throw error;
-  return data;
+  // If the backend fetch was blocked (403), fallback to direct browser fetch + save.
+  if (error) {
+    const status = (error as any)?.context?.status;
+    const msg = String((error as any)?.message || error);
+    if (status === 403 || /\b403\b/.test(msg)) {
+      return importListingDirect(url, workspaceId);
+    }
+    throw error;
+  }
+
+  // Some backends may return structured errors but with 200.
+  if (data?.success === true) return data;
+
+  const apiStatus = data?.api_status;
+  if (apiStatus === 403) {
+    return importListingDirect(url, workspaceId);
+  }
+
+  throw new Error(data?.error || 'Falha ao importar anúncio');
 }
 
 export async function getLearnedListings(workspaceId: string): Promise<LearnedListing[]> {
