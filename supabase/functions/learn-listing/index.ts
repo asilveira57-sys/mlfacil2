@@ -13,25 +13,54 @@ function extractItemId(input: string): string | null {
   if (!input?.trim()) return null;
   const trimmed = input.trim();
   
-  // Priority patterns for MLB extraction
-  const patterns = [
-    /item_id[=:]?(MLB\d{8,})/i,
-    /pdp_filters=item_id[=:]?(MLB\d{8,})/i,
-    /\/(MLB\d{8,})/i,
-    /[?&]id=(MLB\d{8,})/i,
-    /(?<!MLBU?)(MLB\d{8,})/i,
-    // Fallback for other regions
-    /(ML[A-Z]{1,2}\d{8,})/i,
-  ];
+  // Priority 1: Extract from pdp_filters=item_id:MLB... (most common in catalog URLs)
+  const pdpMatch = trimmed.match(/pdp_filters=item_id[:%3A]+(MLB\d{8,})/i);
+  if (pdpMatch) {
+    console.log('[learn-listing] Extracted from pdp_filters:', pdpMatch[1]);
+    return pdpMatch[1].toUpperCase();
+  }
   
-  for (const pattern of patterns) {
-    const match = trimmed.match(pattern);
-    if (match) {
-      const id = (match[1] || match[0]).replace(/-/g, '').toUpperCase();
-      if (/^ML[A-Z]{0,2}\d+$/.test(id)) {
-        return id;
-      }
-    }
+  // Priority 2: Extract from item_id= or item_id: parameter
+  const itemIdMatch = trimmed.match(/item_id[=:](MLB\d{8,})/i);
+  if (itemIdMatch) {
+    console.log('[learn-listing] Extracted from item_id param:', itemIdMatch[1]);
+    return itemIdMatch[1].toUpperCase();
+  }
+  
+  // Priority 3: Direct MLB ID in path (e.g., /MLB123456789)
+  const pathMatch = trimmed.match(/\/(MLB\d{8,})/i);
+  if (pathMatch) {
+    console.log('[learn-listing] Extracted from path:', pathMatch[1]);
+    return pathMatch[1].toUpperCase();
+  }
+  
+  // Priority 4: Query param id=MLB...
+  const queryMatch = trimmed.match(/[?&]id=(MLB\d{8,})/i);
+  if (queryMatch) {
+    console.log('[learn-listing] Extracted from query:', queryMatch[1]);
+    return queryMatch[1].toUpperCase();
+  }
+  
+  // Priority 5: Any MLB ID that's not MLBU/MLBP (catalog IDs)
+  const anyMlbMatch = trimmed.match(/(?:^|[^A-Z])(MLB\d{8,})(?:[^0-9]|$)/i);
+  if (anyMlbMatch) {
+    console.log('[learn-listing] Extracted MLB ID:', anyMlbMatch[1]);
+    return anyMlbMatch[1].toUpperCase();
+  }
+  
+  // Fallback: If only MLBU/MLBP found, we can't resolve without API
+  // Log warning but return null - need to inform user
+  const catalogMatch = trimmed.match(/(MLB[UP]\d+)/i);
+  if (catalogMatch) {
+    console.warn('[learn-listing] Only catalog ID found (MLBU/MLBP), cannot import directly:', catalogMatch[1]);
+    return null;
+  }
+  
+  // Fallback for other regions (MLA, MLM, etc)
+  const regionMatch = trimmed.match(/(ML[A-Z]\d{8,})/i);
+  if (regionMatch) {
+    console.log('[learn-listing] Extracted regional ID:', regionMatch[1]);
+    return regionMatch[1].toUpperCase();
   }
   
   return null;
@@ -142,8 +171,14 @@ serve(async (req) => {
     // Extract item ID from URL
     const itemId = extractItemId(url);
     if (!itemId) {
+      // Check if it's a catalog-only URL
+      const hasCatalogId = /MLB[UP]\d+/i.test(url);
+      const errorMsg = hasCatalogId
+        ? 'Esta URL contém apenas um ID de catálogo (MLBU/MLBP). Cole o link de um anúncio específico com o parâmetro item_id.'
+        : 'Não foi possível extrair o ID do anúncio da URL fornecida';
+      
       return new Response(
-        JSON.stringify({ error: 'Não foi possível extrair o ID do anúncio da URL fornecida' }),
+        JSON.stringify({ error: errorMsg }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
