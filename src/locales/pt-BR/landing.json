@@ -1,0 +1,253 @@
+{
+  "header": {
+    "logo_name": "ML Fácil",
+    "menu_recursos": "Recursos",
+    "menu_como_funciona": "Como funciona",
+    "menu_integracoes": "Integrações",
+    "menu_planos": "Planos",
+    "menu_blog": "Blog",
+    "menu_suporte": "Suporte",
+    "btn_entrar": "Entrar",
+    "btn_criar_conta": "Criar conta",
+    "language": "Idioma"
+  },
+  "hero": {
+    "badge": "Plataforma completa para vendedores do Mercado Livre",
+    "title": "Gestão inteligente para escalar suas vendas",
+    "subtitle": "Centralize operações, monitore performance e tome decisões baseadas em dados.",
+    "cta_primary": "Começar teste grátis",
+    "cta_secondary": "Ver demonstração",
+    "trust_mercadopago": "Integrado ao Mercado Pago",
+    "trust_multiconta": "Suporte multi-conta"
+  },
+  "benefits": {
+    "title": "Benefícios que impulsionam seu negócio",
+    "subtitle": "Ferramentas poderosas para otimizar cada aspecto da sua operação no Mercado Livre.",
+    "item1": {
+      "title": "Gestão unificada",
+      "description": "Controle múltiplas contas do Mercado Livre em um único painel centralizado."
+    },
+    "item2": {
+      "title": "Análises em tempo real",
+      "description": "Dashboards com métricas atualizadas para decisões mais assertivas."
+    },
+    "item3": {
+      "title": "Automação inteligente",
+      "description": "Automatize tarefas repetitivas e foque no crescimento do negócio."
+    },
+    "item4": {
+      "title": "Alertas personalizados",
+      "description": "Receba notificações sobre eventos importantes e oportunidades."
+    },
+    "item5": {
+      "title": "Histórico completo",
+      "description": "Acompanhe a evolução dos seus produtos e métricas ao longo do tempo."
+    },
+    "item6": {
+      "title": "Metas e objetivos",
+      "description": "Defina e acompanhe metas de vendas para cada produto ou categoria."
+    }
+  },
+  "modules": {
+    "title": "Módulos para cada necessidade",
+    "subtitle": "Ferramentas especializadas para cobrir todas as áreas da sua operação.",
+    "item1": {
+      "title": "Gestão de Anúncios",
+      "description": "Controle completo dos seus anúncios, preços e estoque em um só lugar."
+    },
+    "item2": {
+      "title": "Análise de Vendas",
+      "description": "Relatórios detalhados de vendas, faturamento e performance."
+    },
+    "item3": {
+      "title": "Gestão de Clientes",
+      "description": "Histórico de compras, avaliações e comunicação com compradores."
+    },
+    "item4": {
+      "title": "Controle de Qualidade",
+      "description": "Monitore a reputação e qualidade do atendimento da sua loja."
+    },
+    "item5": {
+      "title": "Calculadora de Custos",
+      "description": "Calcule custos, taxas e margens de lucro de cada produto."
+    },
+    "item6": {
+      "title": "Relatórios Fiscais",
+      "description": "Gere relatórios para contabilidade e declarações fiscais."
+    }
+  },
+  "howitworks": {
+    "title": "Como funciona",
+    "subtitle": "Comece a usar em 3 passos simples.",
+    "step1": {
+      "title": "Conecte sua conta",
+      "description": "Vincule suas contas do Mercado Livre de forma segura e rápida."
+    },
+    "step2": {
+      "title": "Analise seus dados",
+      "description": "Explore dashboards e relatórios com insights sobre seu negócio."
+    },
+    "step3": {
+      "title": "Escale suas vendas",
+      "description": "Use os insights para tomar decisões e crescer suas vendas."
+    }
+  },
+  "integrations": {
+    "title": "Integrações poderosas",
+    "subtitle": "Conecte-se às principais ferramentas do ecossistema Mercado Livre.",
+    "item1": {
+      "title": "Mercado Pago",
+      "description": "Sincronização automática de pagamentos e taxas."
+    },
+    "item2": {
+      "title": "Notas Fiscais",
+      "description": "Integração com sistemas de emissão de NF-e."
+    },
+    "item3": {
+      "title": "Segurança",
+      "description": "Dados protegidos com criptografia de ponta a ponta."
+    },
+    "item4": {
+      "title": "Multi-usuários",
+      "description": "Gerencie acessos da sua equipe com permissões."
+    },
+    "badge1": "Dados criptografados",
+    "badge2": "LGPD compliant",
+    "badge3": "Backup automático",
+    "badge4": "Uptime 99.9%"
+  },
+  "demo": {
+    "title": "Veja o sistema em ação",
+    "subtitle": "Assista a uma demonstração rápida das principais funcionalidades.",
+    "duration": "Duração: 3 minutos"
+  },
+  "pricing": {
+    "title": "Planos para cada fase do seu negócio",
+    "subtitle": "Escolha o plano ideal e comece a transformar suas operações hoje mesmo.",
+    "trial_badge": "Teste grátis por {{days}} dias",
+    "trial_no_card": ", sem cartão",
+    "view_all": "Comparar todos os planos",
+    "trial_info": "Teste grátis por {{days}} dias. Cancele a qualquer momento."
+  },
+  "testimonials": {
+    "title": "O que nossos clientes dizem",
+    "subtitle": "Histórias reais de vendedores que transformaram seus negócios.",
+    "item1": {
+      "name": "Carlos Silva",
+      "role": "Vendedor Platinum",
+      "content": "Consegui dobrar minhas vendas em 3 meses com as análises de tendências.",
+      "avatar": "CS"
+    },
+    "item2": {
+      "name": "Ana Paula",
+      "role": "Loja de Eletrônicos",
+      "content": "A automação de preços me economiza horas de trabalho toda semana.",
+      "avatar": "AP"
+    },
+    "item3": {
+      "name": "Roberto Mendes",
+      "role": "Multi-loja",
+      "content": "Gerenciar 5 contas ficou muito mais fácil com o painel unificado.",
+      "avatar": "RM"
+    },
+    "stat1": {
+      "value": "500+",
+      "label": "Vendedores ativos"
+    },
+    "stat2": {
+      "value": "R$ 10M+",
+      "label": "GMV gerenciado"
+    },
+    "stat3": {
+      "value": "50K+",
+      "label": "Anúncios monitorados"
+    },
+    "stat4": {
+      "value": "4.9/5",
+      "label": "Avaliação média"
+    }
+  },
+  "faq": {
+    "title": "Perguntas frequentes",
+    "subtitle": "Tire suas dúvidas sobre o sistema.",
+    "item1": {
+      "question": "Como funciona o período de teste?",
+      "answer": "Você tem 14 dias para testar todas as funcionalidades sem compromisso. Não é necessário cartão de crédito."
+    },
+    "item2": {
+      "question": "Posso conectar várias contas do Mercado Livre?",
+      "answer": "Sim! Todos os planos suportam múltiplas contas do Mercado Livre em um único painel."
+    },
+    "item3": {
+      "question": "Meus dados estão seguros?",
+      "answer": "Absolutamente. Usamos criptografia de ponta a ponta e seguimos todas as normas da LGPD."
+    },
+    "item4": {
+      "question": "Posso cancelar a qualquer momento?",
+      "answer": "Sim, você pode cancelar sua assinatura a qualquer momento sem multas ou taxas adicionais."
+    },
+    "item5": {
+      "question": "Vocês oferecem suporte?",
+      "answer": "Sim, oferecemos suporte via chat e email para todos os planos. Planos premium têm suporte prioritário."
+    },
+    "item6": {
+      "question": "Como funciona a cobrança?",
+      "answer": "A cobrança é feita mensalmente via cartão de crédito ou PIX, de acordo com seu plano."
+    }
+  },
+  "cta": {
+    "title": "Pronto para escalar suas vendas?",
+    "subtitle": "Junte-se a centenas de vendedores que já transformaram seus negócios.",
+    "btn_plans": "Ver planos"
+  },
+  "footer": {
+    "logo_name": "ML Fácil",
+    "description": "A plataforma completa para vendedores do Mercado Livre crescerem seus negócios.",
+    "col1": {
+      "title": "Produto",
+      "link1": "Recursos",
+      "link2": "Planos",
+      "link3": "Integrações",
+      "link4": "Blog"
+    },
+    "col2": {
+      "title": "Suporte",
+      "link1": "FAQ",
+      "link2": "Central de Ajuda",
+      "link3": "Contato",
+      "link4": "Status"
+    },
+    "col3": {
+      "title": "Legal",
+      "link1": "Termos de Uso",
+      "link2": "Privacidade",
+      "link3": "Cookies",
+      "link4": "LGPD"
+    },
+    "copyright": "© 2025 ML Fácil. Todos os direitos reservados."
+  },
+  "planos": {
+    "title": "Planos e Preços",
+    "subtitle": "Escolha o plano ideal para o seu negócio.",
+    "trial_info": "Teste grátis por {{days}} dias, sem cartão.",
+    "volume_title": "Planos baseados no volume mensal de vendas",
+    "volume_subtitle": "A cobrança considera a média mensal de vendas dos últimos 30 dias.",
+    "mode_prepaid": "Pagamento Antecipado",
+    "mode_recurring": "Assinatura Recorrente",
+    "prepaid_desc": "Plano avulso • Pagamento único • Sem renovação automática",
+    "recurring_desc": "Cobrança mensal recorrente • Renovação automática • Cancele quando quiser",
+    "period_monthly": "Mensal",
+    "period_quarterly": "Trimestral",
+    "period_semiannual": "Semestral",
+    "enterprise_title": "Precisa de mais?",
+    "enterprise_subtitle": "Plano personalizado para alto volume",
+    "enterprise_cta": "Falar com especialista",
+    "consult_title": "Acima de 3000 vendas",
+    "consult_description": "Para operações enterprise",
+    "consult_cta": "Consulte-nos",
+    "faq_title": "Perguntas sobre os planos",
+    "ready_title": "Pronto para começar?",
+    "ready_subtitle": "Teste grátis por {{days}} dias. Cancele a qualquer momento.",
+    "back_home": "Voltar ao início"
+  }
+}

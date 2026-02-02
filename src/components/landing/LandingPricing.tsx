@@ -1,17 +1,17 @@
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Section, SectionHeader } from "./Section";
 import { TierPlanCard } from "@/components/pricing/TierPlanCard";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useTierPlans, formatPriceBRL, getDefaultPrice } from "@/hooks/useTierPlans";
-import { usePlanCta } from "@/hooks/usePlanCta";
+import { useTierPlans } from "@/hooks/useTierPlans";
 import { ArrowRight, Sparkles } from "lucide-react";
 import type { TierPlan } from "@/hooks/useTierPlans";
 
 export function LandingPricing() {
   const navigate = useNavigate();
+  const { t } = useTranslation('landing');
   const { data, isLoading, error } = useTierPlans();
-  const { getCtaConfig, handleCtaClick } = usePlanCta();
 
   // Get the first 3 volume plans for the landing page
   const displayPlans = data?.volumePlans.slice(0, 3) || [];
@@ -38,8 +38,8 @@ export function LandingPricing() {
     return (
       <Section id="planos">
         <SectionHeader
-          title="Planos para cada fase do seu negócio"
-          subtitle="Escolha o plano ideal e comece a transformar suas operações hoje mesmo."
+          title={t('pricing.title')}
+          subtitle={t('pricing.subtitle')}
         />
         <div className="grid md:grid-cols-3 gap-6 md:gap-8 max-w-5xl mx-auto items-start">
           {[1, 2, 3].map((i) => (
@@ -65,15 +65,15 @@ export function LandingPricing() {
     return (
       <Section id="planos">
         <SectionHeader
-          title="Planos para cada fase do seu negócio"
-          subtitle="Escolha o plano ideal e comece a transformar suas operações hoje mesmo."
+          title={t('pricing.title')}
+          subtitle={t('pricing.subtitle')}
         />
         <div className="text-center py-12">
           <p className="text-muted-foreground mb-4">
             Não foi possível carregar os planos. Tente novamente mais tarde.
           </p>
           <Button variant="outline" onClick={() => navigate('/planos')}>
-            Ver página de planos
+            {t('pricing.view_all')}
           </Button>
         </div>
       </Section>
@@ -83,8 +83,8 @@ export function LandingPricing() {
   return (
     <Section id="planos">
       <SectionHeader
-        title="Planos para cada fase do seu negócio"
-        subtitle="Escolha o plano ideal e comece a transformar suas operações hoje mesmo."
+        title={t('pricing.title')}
+        subtitle={t('pricing.subtitle')}
       />
 
       {/* Trial badge */}
@@ -93,8 +93,8 @@ export function LandingPricing() {
           <div className="inline-flex items-center gap-2 bg-success/10 text-success px-4 py-2 rounded-full border border-success/20">
             <Sparkles className="w-4 h-4" />
             <span className="text-sm font-medium">
-              Teste grátis por {trialPolicy.trial_days} dias
-              {!trialPolicy.requires_card && ', sem cartão'}
+              {t('pricing.trial_badge', { days: trialPolicy.trial_days })}
+              {!trialPolicy.requires_card && t('pricing.trial_no_card')}
             </span>
           </div>
         </div>
@@ -129,18 +129,13 @@ export function LandingPricing() {
           onClick={handleViewAllPlans}
           className="gap-2"
         >
-          Comparar todos os planos
+          {t('pricing.view_all')}
           <ArrowRight className="w-4 h-4" />
         </Button>
       </div>
 
       <p className="text-center text-sm text-muted-foreground mt-6">
-        {trialPolicy && (
-          <>
-            Teste grátis por {trialPolicy.trial_days} dias. 
-            Cancele a qualquer momento.
-          </>
-        )}
+        {trialPolicy && t('pricing.trial_info', { days: trialPolicy.trial_days })}
       </p>
     </Section>
   );

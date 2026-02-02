@@ -14,6 +14,7 @@ import ptBRSend from '@/locales/pt-BR/send.json';
 import ptBRShipping from '@/locales/pt-BR/shipping.json';
 import ptBRUtilities from '@/locales/pt-BR/utilities.json';
 import ptBRProducts from '@/locales/pt-BR/products.json';
+import ptBRLanding from '@/locales/pt-BR/landing.json';
 
 import enCommon from '@/locales/en/common.json';
 import enNav from '@/locales/en/nav.json';
@@ -26,6 +27,7 @@ import enSend from '@/locales/en/send.json';
 import enShipping from '@/locales/en/shipping.json';
 import enUtilities from '@/locales/en/utilities.json';
 import enProducts from '@/locales/en/products.json';
+import enLanding from '@/locales/en/landing.json';
 
 import esCommon from '@/locales/es/common.json';
 import esNav from '@/locales/es/nav.json';
@@ -38,6 +40,7 @@ import esSend from '@/locales/es/send.json';
 import esShipping from '@/locales/es/shipping.json';
 import esUtilities from '@/locales/es/utilities.json';
 import esProducts from '@/locales/es/products.json';
+import esLanding from '@/locales/es/landing.json';
 
 export const SUPPORTED_LANGUAGES = ['pt-BR', 'en', 'es'] as const;
 export type SupportedLanguage = typeof SUPPORTED_LANGUAGES[number];
@@ -61,6 +64,7 @@ const resources = {
     shipping: ptBRShipping,
     utilities: ptBRUtilities,
     products: ptBRProducts,
+    landing: ptBRLanding,
   },
   en: {
     common: enCommon,
@@ -74,6 +78,7 @@ const resources = {
     shipping: enShipping,
     utilities: enUtilities,
     products: enProducts,
+    landing: enLanding,
   },
   es: {
     common: esCommon,
@@ -87,6 +92,7 @@ const resources = {
     shipping: esShipping,
     utilities: esUtilities,
     products: esProducts,
+    landing: esLanding,
   },
 };
 
@@ -103,7 +109,7 @@ i18n
     resources,
     fallbackLng: 'pt-BR',
     defaultNS: 'common',
-    ns: ['common', 'nav', 'auth', 'errors', 'actions', 'settings', 'dashboard', 'send', 'shipping', 'utilities', 'products'],
+    ns: ['common', 'nav', 'auth', 'errors', 'actions', 'settings', 'dashboard', 'send', 'shipping', 'utilities', 'products', 'landing'],
     
     detection: {
       order: detectionOrder,

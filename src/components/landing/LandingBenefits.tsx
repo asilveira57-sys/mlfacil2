@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Section, SectionHeader } from "./Section";
 import { 
   Boxes, 
@@ -7,49 +8,48 @@ import {
   History, 
   Target 
 } from "lucide-react";
-import { useSiteContentContext } from "@/contexts/SiteContentContext";
 
 export function LandingBenefits() {
-  const { getText } = useSiteContentContext();
+  const { t } = useTranslation('landing');
 
   const benefits = [
     {
       icon: Boxes,
-      titleKey: 'home.benefits.item1.title',
-      descriptionKey: 'home.benefits.item1.description'
+      title: t('benefits.item1.title'),
+      description: t('benefits.item1.description')
     },
     {
       icon: LineChart,
-      titleKey: 'home.benefits.item2.title',
-      descriptionKey: 'home.benefits.item2.description'
+      title: t('benefits.item2.title'),
+      description: t('benefits.item2.description')
     },
     {
       icon: Zap,
-      titleKey: 'home.benefits.item3.title',
-      descriptionKey: 'home.benefits.item3.description'
+      title: t('benefits.item3.title'),
+      description: t('benefits.item3.description')
     },
     {
       icon: BellRing,
-      titleKey: 'home.benefits.item4.title',
-      descriptionKey: 'home.benefits.item4.description'
+      title: t('benefits.item4.title'),
+      description: t('benefits.item4.description')
     },
     {
       icon: History,
-      titleKey: 'home.benefits.item5.title',
-      descriptionKey: 'home.benefits.item5.description'
+      title: t('benefits.item5.title'),
+      description: t('benefits.item5.description')
     },
     {
       icon: Target,
-      titleKey: 'home.benefits.item6.title',
-      descriptionKey: 'home.benefits.item6.description'
+      title: t('benefits.item6.title'),
+      description: t('benefits.item6.description')
     }
   ];
 
   return (
     <Section id="beneficios" variant="muted">
       <SectionHeader
-        title={getText('home.benefits.title')}
-        subtitle={getText('home.benefits.subtitle')}
+        title={t('benefits.title')}
+        subtitle={t('benefits.subtitle')}
       />
 
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
@@ -63,10 +63,10 @@ export function LandingBenefits() {
             </div>
             <div>
               <h3 className="font-semibold text-foreground mb-1">
-                {getText(benefit.titleKey)}
+                {benefit.title}
               </h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                {getText(benefit.descriptionKey)}
+                {benefit.description}
               </p>
             </div>
           </div>

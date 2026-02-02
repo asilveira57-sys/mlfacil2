@@ -12,6 +12,7 @@ import { RouteChangeCleanup } from "@/components/layout/RouteChangeCleanup";
 import { AppShellLayout } from "@/components/layout/AppShellLayout";
 import { OnboardingWizard } from "@/components/onboarding";
 import { TrialExpiredPaywall, ModuleAccessGuard } from "@/components/access";
+import { ScrollToTop } from "@/components/ScrollToTop";
 import { SeoHead } from "@/components/seo/SeoHead";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
@@ -111,6 +112,7 @@ const App = () => {
               <Toaster />
               <Sonner />
               <BrowserRouter>
+              <ScrollToTop />
               <FacebookTrackingProvider>
               <RouteChangeCleanup />
               <SeoHead />

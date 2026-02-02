@@ -1,12 +1,13 @@
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, Play, Shield, Users, Zap, BarChart3 } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { ArrowRight, Play, Shield, Users, Zap } from "lucide-react";
 import { useSiteContentContext } from "@/contexts/SiteContentContext";
-import { EditableText } from "@/components/admin/EditableText";
 import { EditableImage } from "@/components/admin/EditableImage";
 
 export function LandingHero() {
   const navigate = useNavigate();
+  const { t } = useTranslation('landing');
   const { getText } = useSiteContentContext();
 
   const dashboardImageUrl = getText('home.hero.dashboard_image');
@@ -25,18 +26,18 @@ export function LandingHero() {
           <div className="flex justify-center mb-6">
             <div className="inline-flex items-center gap-2 bg-primary/10 text-primary px-4 py-2 rounded-full text-sm font-medium">
               <Zap className="w-4 h-4" />
-              <EditableText contentKey="home.hero.badge" as="span" />
+              <span>{t('hero.badge')}</span>
             </div>
           </div>
 
           {/* Headline */}
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-center text-foreground mb-6 leading-tight">
-            <EditableText contentKey="home.hero.title" as="span" />
+            {t('hero.title')}
           </h1>
 
           {/* Subheadline */}
           <p className="text-lg md:text-xl text-muted-foreground text-center max-w-3xl mx-auto mb-10">
-            <EditableText contentKey="home.hero.subtitle" as="span" multiline />
+            {t('hero.subtitle')}
           </p>
 
           {/* CTAs */}
@@ -46,7 +47,7 @@ export function LandingHero() {
               className="text-base px-8 py-6 gap-2"
               onClick={() => navigate("/auth")}
             >
-              {getText('home.hero.cta_primary')}
+              {t('hero.cta_primary')}
               <ArrowRight className="w-5 h-5" />
             </Button>
             <Button
@@ -59,7 +60,7 @@ export function LandingHero() {
               }}
             >
               <Play className="w-5 h-5" />
-              {getText('home.hero.cta_secondary')}
+              {t('hero.cta_secondary')}
             </Button>
           </div>
 
@@ -67,11 +68,11 @@ export function LandingHero() {
           <div className="flex flex-wrap items-center justify-center gap-6 md:gap-10">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Shield className="w-5 h-5 text-success" />
-              <EditableText contentKey="home.hero.trust_mercadopago" as="span" />
+              <span>{t('hero.trust_mercadopago')}</span>
             </div>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Users className="w-5 h-5 text-primary" />
-              <EditableText contentKey="home.hero.trust_multiconta" as="span" />
+              <span>{t('hero.trust_multiconta')}</span>
             </div>
           </div>
 
@@ -103,7 +104,7 @@ export function LandingHero() {
                       </div>
                       <div className="flex-1 flex justify-center">
                         <div className="bg-muted px-4 py-1 rounded-md text-xs text-muted-foreground">
-                          dashboard.mlanalyzerpro.com
+                          dashboard.mlfacil.com
                         </div>
                       </div>
                     </div>
