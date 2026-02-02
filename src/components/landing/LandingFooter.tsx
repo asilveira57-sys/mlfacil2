@@ -1,39 +1,48 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { BarChart3 } from "lucide-react";
 import { useSiteContentContext } from "@/contexts/SiteContentContext";
-import { EditableText } from "@/components/admin/EditableText";
 import { EditableImage } from "@/components/admin/EditableImage";
 import { EditableSocialLinks } from "@/components/admin/EditableSocialLinks";
 
 export function LandingFooter() {
+  const { t } = useTranslation('landing');
   const { getText } = useSiteContentContext();
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const footerLinks = {
     produto: [
-      { labelKey: 'home.footer.col1.link1', href: "#recursos" },
-      { labelKey: 'home.footer.col1.link2', href: "#planos" },
-      { labelKey: 'home.footer.col1.link3', href: "#integracoes" },
-      { labelKey: 'home.footer.col1.link4', href: "/blog" }
+      { label: t('footer.col1.link1'), href: "#recursos" },
+      { label: t('footer.col1.link2'), href: "#planos" },
+      { label: t('footer.col1.link3'), href: "#integracoes" },
+      { label: t('footer.col1.link4'), href: "/blog" }
     ],
     suporte: [
-      { labelKey: 'home.footer.col2.link1', href: "#faq" },
-      { labelKey: 'home.footer.col2.link2', href: "#" },
-      { labelKey: 'home.footer.col2.link3', href: "#" },
-      { labelKey: 'home.footer.col2.link4', href: "#faq" }
+      { label: t('footer.col2.link1'), href: "#faq" },
+      { label: t('footer.col2.link2'), href: "#" },
+      { label: t('footer.col2.link3'), href: "#" },
+      { label: t('footer.col2.link4'), href: "#faq" }
     ],
     legal: [
-      { labelKey: 'home.footer.col3.link1', href: "#" },
-      { labelKey: 'home.footer.col3.link2', href: "#" },
-      { labelKey: 'home.footer.col3.link3', href: "#" },
-      { labelKey: 'home.footer.col3.link4', href: "#" }
+      { label: t('footer.col3.link1'), href: "#" },
+      { label: t('footer.col3.link2'), href: "#" },
+      { label: t('footer.col3.link3'), href: "#" },
+      { label: t('footer.col3.link4'), href: "#" }
     ]
   };
 
   const handleLinkClick = (href: string) => {
     if (href.startsWith("#")) {
-      const element = document.querySelector(href);
-      if (element) {
-        element.scrollIntoView({ behavior: "smooth" });
+      const isOnLandingPage = location.pathname === "/" || location.pathname === "/home";
+      
+      if (isOnLandingPage) {
+        const element = document.querySelector(href);
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth" });
+        }
+      } else {
+        navigate(`/${href}`);
       }
     }
   };
@@ -59,28 +68,21 @@ export function LandingFooter() {
                   <BarChart3 className="w-6 h-6 text-primary-foreground" />
                 </div>
               )}
-              <EditableText 
-                contentKey="home.footer.logo_name" 
-                as="span"
-                className="text-lg font-bold text-foreground"
-              />
+              <span className="text-lg font-bold text-foreground">
+                {t('footer.logo_name')}
+              </span>
             </Link>
-            <EditableText 
-              contentKey="home.footer.description" 
-              as="p"
-              className="text-sm text-muted-foreground mb-6"
-              multiline
-            />
+            <p className="text-sm text-muted-foreground mb-6">
+              {t('footer.description')}
+            </p>
             <EditableSocialLinks />
           </div>
 
           {/* Produto column */}
           <div>
-            <EditableText 
-              contentKey="home.footer.col1.title" 
-              as="h4"
-              className="font-semibold text-foreground mb-4"
-            />
+            <h4 className="font-semibold text-foreground mb-4">
+              {t('footer.col1.title')}
+            </h4>
             <ul className="space-y-3">
               {footerLinks.produto.map((link, index) => (
                 <li key={index}>
@@ -89,14 +91,14 @@ export function LandingFooter() {
                       onClick={() => handleLinkClick(link.href)}
                       className="text-sm text-muted-foreground hover:text-foreground transition-colors"
                     >
-                      <EditableText contentKey={link.labelKey} as="span" />
+                      {link.label}
                     </button>
                   ) : (
                     <Link
                       to={link.href}
                       className="text-sm text-muted-foreground hover:text-foreground transition-colors"
                     >
-                      <EditableText contentKey={link.labelKey} as="span" />
+                      {link.label}
                     </Link>
                   )}
                 </li>
@@ -106,11 +108,9 @@ export function LandingFooter() {
 
           {/* Suporte column */}
           <div>
-            <EditableText 
-              contentKey="home.footer.col2.title" 
-              as="h4"
-              className="font-semibold text-foreground mb-4"
-            />
+            <h4 className="font-semibold text-foreground mb-4">
+              {t('footer.col2.title')}
+            </h4>
             <ul className="space-y-3">
               {footerLinks.suporte.map((link, index) => (
                 <li key={index}>
@@ -119,14 +119,14 @@ export function LandingFooter() {
                       onClick={() => handleLinkClick(link.href)}
                       className="text-sm text-muted-foreground hover:text-foreground transition-colors"
                     >
-                      <EditableText contentKey={link.labelKey} as="span" />
+                      {link.label}
                     </button>
                   ) : (
                     <Link
                       to={link.href}
                       className="text-sm text-muted-foreground hover:text-foreground transition-colors"
                     >
-                      <EditableText contentKey={link.labelKey} as="span" />
+                      {link.label}
                     </Link>
                   )}
                 </li>
@@ -136,11 +136,9 @@ export function LandingFooter() {
 
           {/* Legal column */}
           <div>
-            <EditableText 
-              contentKey="home.footer.col3.title" 
-              as="h4"
-              className="font-semibold text-foreground mb-4"
-            />
+            <h4 className="font-semibold text-foreground mb-4">
+              {t('footer.col3.title')}
+            </h4>
             <ul className="space-y-3">
               {footerLinks.legal.map((link, index) => (
                 <li key={index}>
@@ -148,7 +146,7 @@ export function LandingFooter() {
                     to={link.href}
                     className="text-sm text-muted-foreground hover:text-foreground transition-colors"
                   >
-                    <EditableText contentKey={link.labelKey} as="span" />
+                    {link.label}
                   </Link>
                 </li>
               ))}
@@ -158,11 +156,9 @@ export function LandingFooter() {
 
         {/* Bottom bar */}
         <div className="pt-8 border-t border-border text-center">
-          <EditableText 
-            contentKey="home.footer.copyright" 
-            as="p"
-            className="text-sm text-muted-foreground"
-          />
+          <p className="text-sm text-muted-foreground">
+            {t('footer.copyright')}
+          </p>
         </div>
       </div>
     </footer>

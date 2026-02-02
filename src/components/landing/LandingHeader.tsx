@@ -1,33 +1,45 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { BarChart3, Menu } from "lucide-react";
-import { useSiteContentContext } from "@/contexts/SiteContentContext";
-import { EditableText } from "@/components/admin/EditableText";
 import { EditableImage } from "@/components/admin/EditableImage";
 import { LanguageSwitcher } from "@/components/layout/LanguageSwitcher";
+import { useSiteContentContext } from "@/contexts/SiteContentContext";
 
 export function LandingHeader() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { t } = useTranslation('landing');
   const { getText } = useSiteContentContext();
 
   const navItems = [
-    { label: getText('home.header.menu_recursos'), href: "#recursos" },
-    { label: getText('home.header.menu_como_funciona'), href: "#como-funciona" },
-    { label: getText('home.header.menu_integracoes'), href: "#integracoes" },
-    { label: getText('home.header.menu_planos'), href: "#planos" },
-    { label: getText('home.header.menu_blog'), href: "/blog" },
-    { label: getText('home.header.menu_suporte'), href: "#faq" },
+    { label: t('header.menu_recursos'), href: "#recursos" },
+    { label: t('header.menu_como_funciona'), href: "#como-funciona" },
+    { label: t('header.menu_integracoes'), href: "#integracoes" },
+    { label: t('header.menu_planos'), href: "#planos" },
+    { label: t('header.menu_blog'), href: "/blog" },
+    { label: t('header.menu_suporte'), href: "#faq" },
   ];
 
   const handleNavClick = (href: string) => {
     setMobileMenuOpen(false);
+    
     if (href.startsWith("#")) {
-      const element = document.querySelector(href);
-      if (element) {
-        element.scrollIntoView({ behavior: "smooth" });
+      // Check if we're on the landing page
+      const isOnLandingPage = location.pathname === "/" || location.pathname === "/home";
+      
+      if (isOnLandingPage) {
+        // On landing page: just scroll to section
+        const element = document.querySelector(href);
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth" });
+        }
+      } else {
+        // On other pages: navigate to landing page with hash
+        navigate(`/${href}`);
       }
     } else {
       navigate(href);
@@ -54,11 +66,9 @@ export function LandingHeader() {
                 <BarChart3 className="w-6 h-6 text-primary-foreground" />
               </div>
             )}
-            <EditableText 
-              contentKey="home.header.logo_name" 
-              as="span"
-              className="text-xl font-bold text-foreground hidden sm:block"
-            />
+            <span className="text-xl font-bold text-foreground hidden sm:block">
+              {t('header.logo_name')}
+            </span>
           </Link>
 
           {/* Desktop Navigation */}
@@ -81,10 +91,10 @@ export function LandingHeader() {
               variant="ghost" 
               onClick={() => navigate("/auth")}
             >
-              {getText('home.header.btn_entrar')}
+              {t('header.btn_entrar')}
             </Button>
             <Button onClick={() => navigate("/auth")}>
-              {getText('home.header.btn_criar_conta')}
+              {t('header.btn_criar_conta')}
             </Button>
           </div>
 
@@ -110,19 +120,19 @@ export function LandingHeader() {
                 </nav>
                 <div className="flex flex-col gap-3 pt-4 border-t">
                   <div className="flex items-center justify-between px-4 py-2 text-sm text-muted-foreground">
-                    <span>Idioma</span>
+                    <span>{t('header.language')}</span>
                     <LanguageSwitcher variant="full" />
                   </div>
                   <Button 
                     variant="outline" 
                     onClick={() => { navigate("/auth"); setMobileMenuOpen(false); }}
                   >
-                    {getText('home.header.btn_entrar')}
+                    {t('header.btn_entrar')}
                   </Button>
                   <Button 
                     onClick={() => { navigate("/auth"); setMobileMenuOpen(false); }}
                   >
-                    {getText('home.header.btn_criar_conta')}
+                    {t('header.btn_criar_conta')}
                   </Button>
                 </div>
               </div>

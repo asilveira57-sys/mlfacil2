@@ -1,43 +1,43 @@
+import { useTranslation } from "react-i18next";
 import { Section, SectionHeader } from "./Section";
 import { Star, Quote } from "lucide-react";
-import { useSiteContentContext } from "@/contexts/SiteContentContext";
 
 export function LandingTestimonials() {
-  const { getText } = useSiteContentContext();
+  const { t } = useTranslation('landing');
 
   const testimonials = [
     {
-      name: getText('home.testimonials.item1.name'),
-      role: getText('home.testimonials.item1.role'),
-      content: getText('home.testimonials.item1.content'),
-      avatar: getText('home.testimonials.item1.avatar')
+      name: t('testimonials.item1.name'),
+      role: t('testimonials.item1.role'),
+      content: t('testimonials.item1.content'),
+      avatar: t('testimonials.item1.avatar')
     },
     {
-      name: getText('home.testimonials.item2.name'),
-      role: getText('home.testimonials.item2.role'),
-      content: getText('home.testimonials.item2.content'),
-      avatar: getText('home.testimonials.item2.avatar')
+      name: t('testimonials.item2.name'),
+      role: t('testimonials.item2.role'),
+      content: t('testimonials.item2.content'),
+      avatar: t('testimonials.item2.avatar')
     },
     {
-      name: getText('home.testimonials.item3.name'),
-      role: getText('home.testimonials.item3.role'),
-      content: getText('home.testimonials.item3.content'),
-      avatar: getText('home.testimonials.item3.avatar')
+      name: t('testimonials.item3.name'),
+      role: t('testimonials.item3.role'),
+      content: t('testimonials.item3.content'),
+      avatar: t('testimonials.item3.avatar')
     }
   ];
 
   const stats = [
-    { value: getText('home.testimonials.stat1.value'), label: getText('home.testimonials.stat1.label') },
-    { value: getText('home.testimonials.stat2.value'), label: getText('home.testimonials.stat2.label') },
-    { value: getText('home.testimonials.stat3.value'), label: getText('home.testimonials.stat3.label') },
-    { value: getText('home.testimonials.stat4.value'), label: getText('home.testimonials.stat4.label') }
+    { value: t('testimonials.stat1.value'), label: t('testimonials.stat1.label') },
+    { value: t('testimonials.stat2.value'), label: t('testimonials.stat2.label') },
+    { value: t('testimonials.stat3.value'), label: t('testimonials.stat3.label') },
+    { value: t('testimonials.stat4.value'), label: t('testimonials.stat4.label') }
   ];
 
   return (
     <Section id="depoimentos" variant="muted">
       <SectionHeader
-        title={getText('home.testimonials.title')}
-        subtitle={getText('home.testimonials.subtitle')}
+        title={t('testimonials.title')}
+        subtitle={t('testimonials.subtitle')}
       />
 
       {/* Testimonials grid */}

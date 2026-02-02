@@ -1,0 +1,253 @@
+{
+  "header": {
+    "logo_name": "ML Fácil",
+    "menu_recursos": "Features",
+    "menu_como_funciona": "How it Works",
+    "menu_integracoes": "Integrations",
+    "menu_planos": "Plans",
+    "menu_blog": "Blog",
+    "menu_suporte": "Support",
+    "btn_entrar": "Sign In",
+    "btn_criar_conta": "Create Account",
+    "language": "Language"
+  },
+  "hero": {
+    "badge": "Complete platform for Mercado Libre sellers",
+    "title": "Smart management to scale your sales",
+    "subtitle": "Centralize operations, monitor performance and make data-driven decisions.",
+    "cta_primary": "Start free trial",
+    "cta_secondary": "Watch demo",
+    "trust_mercadopago": "Integrated with Mercado Pago",
+    "trust_multiconta": "Multi-account support"
+  },
+  "benefits": {
+    "title": "Benefits that boost your business",
+    "subtitle": "Powerful tools to optimize every aspect of your Mercado Libre operation.",
+    "item1": {
+      "title": "Unified management",
+      "description": "Control multiple Mercado Libre accounts in a single centralized dashboard."
+    },
+    "item2": {
+      "title": "Real-time analytics",
+      "description": "Dashboards with updated metrics for more assertive decisions."
+    },
+    "item3": {
+      "title": "Smart automation",
+      "description": "Automate repetitive tasks and focus on business growth."
+    },
+    "item4": {
+      "title": "Custom alerts",
+      "description": "Receive notifications about important events and opportunities."
+    },
+    "item5": {
+      "title": "Complete history",
+      "description": "Track the evolution of your products and metrics over time."
+    },
+    "item6": {
+      "title": "Goals and objectives",
+      "description": "Define and track sales goals for each product or category."
+    }
+  },
+  "modules": {
+    "title": "Modules for every need",
+    "subtitle": "Specialized tools to cover all areas of your operation.",
+    "item1": {
+      "title": "Listing Management",
+      "description": "Complete control of your listings, prices and inventory in one place."
+    },
+    "item2": {
+      "title": "Sales Analytics",
+      "description": "Detailed sales, revenue and performance reports."
+    },
+    "item3": {
+      "title": "Customer Management",
+      "description": "Purchase history, reviews and buyer communication."
+    },
+    "item4": {
+      "title": "Quality Control",
+      "description": "Monitor your store's reputation and service quality."
+    },
+    "item5": {
+      "title": "Cost Calculator",
+      "description": "Calculate costs, fees and profit margins for each product."
+    },
+    "item6": {
+      "title": "Tax Reports",
+      "description": "Generate reports for accounting and tax declarations."
+    }
+  },
+  "howitworks": {
+    "title": "How it works",
+    "subtitle": "Get started in 3 simple steps.",
+    "step1": {
+      "title": "Connect your account",
+      "description": "Link your Mercado Libre accounts securely and quickly."
+    },
+    "step2": {
+      "title": "Analyze your data",
+      "description": "Explore dashboards and reports with insights about your business."
+    },
+    "step3": {
+      "title": "Scale your sales",
+      "description": "Use insights to make decisions and grow your sales."
+    }
+  },
+  "integrations": {
+    "title": "Powerful integrations",
+    "subtitle": "Connect to the main tools in the Mercado Libre ecosystem.",
+    "item1": {
+      "title": "Mercado Pago",
+      "description": "Automatic synchronization of payments and fees."
+    },
+    "item2": {
+      "title": "Invoices",
+      "description": "Integration with invoice issuance systems."
+    },
+    "item3": {
+      "title": "Security",
+      "description": "Data protected with end-to-end encryption."
+    },
+    "item4": {
+      "title": "Multi-users",
+      "description": "Manage your team's access with permissions."
+    },
+    "badge1": "Encrypted data",
+    "badge2": "LGPD compliant",
+    "badge3": "Automatic backup",
+    "badge4": "99.9% Uptime"
+  },
+  "demo": {
+    "title": "See the system in action",
+    "subtitle": "Watch a quick demo of the main features.",
+    "duration": "Duration: 3 minutes"
+  },
+  "pricing": {
+    "title": "Plans for every stage of your business",
+    "subtitle": "Choose the ideal plan and start transforming your operations today.",
+    "trial_badge": "Free trial for {{days}} days",
+    "trial_no_card": ", no card required",
+    "view_all": "Compare all plans",
+    "trial_info": "Free trial for {{days}} days. Cancel anytime."
+  },
+  "testimonials": {
+    "title": "What our customers say",
+    "subtitle": "Real stories from sellers who transformed their businesses.",
+    "item1": {
+      "name": "Carlos Silva",
+      "role": "Platinum Seller",
+      "content": "I managed to double my sales in 3 months with the trend analysis.",
+      "avatar": "CS"
+    },
+    "item2": {
+      "name": "Ana Paula",
+      "role": "Electronics Store",
+      "content": "Price automation saves me hours of work every week.",
+      "avatar": "AP"
+    },
+    "item3": {
+      "name": "Roberto Mendes",
+      "role": "Multi-store",
+      "content": "Managing 5 accounts became much easier with the unified dashboard.",
+      "avatar": "RM"
+    },
+    "stat1": {
+      "value": "500+",
+      "label": "Active sellers"
+    },
+    "stat2": {
+      "value": "$2M+",
+      "label": "Managed GMV"
+    },
+    "stat3": {
+      "value": "50K+",
+      "label": "Monitored listings"
+    },
+    "stat4": {
+      "value": "4.9/5",
+      "label": "Average rating"
+    }
+  },
+  "faq": {
+    "title": "Frequently asked questions",
+    "subtitle": "Get your questions answered about the system.",
+    "item1": {
+      "question": "How does the trial period work?",
+      "answer": "You have 14 days to test all features without commitment. No credit card required."
+    },
+    "item2": {
+      "question": "Can I connect multiple Mercado Libre accounts?",
+      "answer": "Yes! All plans support multiple Mercado Libre accounts in a single dashboard."
+    },
+    "item3": {
+      "question": "Is my data secure?",
+      "answer": "Absolutely. We use end-to-end encryption and follow all LGPD regulations."
+    },
+    "item4": {
+      "question": "Can I cancel anytime?",
+      "answer": "Yes, you can cancel your subscription at any time without penalties or additional fees."
+    },
+    "item5": {
+      "question": "Do you offer support?",
+      "answer": "Yes, we offer chat and email support for all plans. Premium plans have priority support."
+    },
+    "item6": {
+      "question": "How does billing work?",
+      "answer": "Billing is done monthly via credit card or PIX, according to your plan."
+    }
+  },
+  "cta": {
+    "title": "Ready to scale your sales?",
+    "subtitle": "Join hundreds of sellers who have already transformed their businesses.",
+    "btn_plans": "View plans"
+  },
+  "footer": {
+    "logo_name": "ML Fácil",
+    "description": "The complete platform for Mercado Libre sellers to grow their businesses.",
+    "col1": {
+      "title": "Product",
+      "link1": "Features",
+      "link2": "Plans",
+      "link3": "Integrations",
+      "link4": "Blog"
+    },
+    "col2": {
+      "title": "Support",
+      "link1": "FAQ",
+      "link2": "Help Center",
+      "link3": "Contact",
+      "link4": "Status"
+    },
+    "col3": {
+      "title": "Legal",
+      "link1": "Terms of Service",
+      "link2": "Privacy",
+      "link3": "Cookies",
+      "link4": "LGPD"
+    },
+    "copyright": "© 2025 ML Fácil. All rights reserved."
+  },
+  "planos": {
+    "title": "Plans and Pricing",
+    "subtitle": "Choose the ideal plan for your business.",
+    "trial_info": "Free trial for {{days}} days, no card required.",
+    "volume_title": "Plans based on monthly sales volume",
+    "volume_subtitle": "Billing considers the average monthly sales over the last 30 days.",
+    "mode_prepaid": "Prepaid",
+    "mode_recurring": "Recurring Subscription",
+    "prepaid_desc": "One-time payment • No automatic renewal",
+    "recurring_desc": "Monthly recurring charge • Automatic renewal • Cancel anytime",
+    "period_monthly": "Monthly",
+    "period_quarterly": "Quarterly",
+    "period_semiannual": "Semiannual",
+    "enterprise_title": "Need more?",
+    "enterprise_subtitle": "Custom plan for high volume",
+    "enterprise_cta": "Talk to specialist",
+    "consult_title": "Over 3000 sales",
+    "consult_description": "For enterprise operations",
+    "consult_cta": "Contact us",
+    "faq_title": "Questions about plans",
+    "ready_title": "Ready to start?",
+    "ready_subtitle": "Free trial for {{days}} days. Cancel anytime.",
+    "back_home": "Back to home"
+  }
+}

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Section, SectionHeader } from "./Section";
 import { 
   CreditCard, 
@@ -6,46 +7,45 @@ import {
   Users,
   Check
 } from "lucide-react";
-import { useSiteContentContext } from "@/contexts/SiteContentContext";
 
 export function LandingIntegrations() {
-  const { getText } = useSiteContentContext();
+  const { t } = useTranslation('landing');
 
   const integrations = [
     {
       icon: CreditCard,
-      title: getText('home.integrations.item1.title'),
-      description: getText('home.integrations.item1.description')
+      title: t('integrations.item1.title'),
+      description: t('integrations.item1.description')
     },
     {
       icon: FileCheck,
-      title: getText('home.integrations.item2.title'),
-      description: getText('home.integrations.item2.description')
+      title: t('integrations.item2.title'),
+      description: t('integrations.item2.description')
     },
     {
       icon: Shield,
-      title: getText('home.integrations.item3.title'),
-      description: getText('home.integrations.item3.description')
+      title: t('integrations.item3.title'),
+      description: t('integrations.item3.description')
     },
     {
       icon: Users,
-      title: getText('home.integrations.item4.title'),
-      description: getText('home.integrations.item4.description')
+      title: t('integrations.item4.title'),
+      description: t('integrations.item4.description')
     }
   ];
 
   const securityBadges = [
-    getText('home.integrations.badge1'),
-    getText('home.integrations.badge2'),
-    getText('home.integrations.badge3'),
-    getText('home.integrations.badge4')
+    t('integrations.badge1'),
+    t('integrations.badge2'),
+    t('integrations.badge3'),
+    t('integrations.badge4')
   ];
 
   return (
     <Section id="integracoes">
       <SectionHeader
-        title={getText('home.integrations.title')}
-        subtitle={getText('home.integrations.subtitle')}
+        title={t('integrations.title')}
+        subtitle={t('integrations.subtitle')}
       />
 
       <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">

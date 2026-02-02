@@ -1,36 +1,36 @@
+import { useTranslation } from "react-i18next";
 import { Section, SectionHeader } from "./Section";
 import { Link2, BarChart3, Rocket } from "lucide-react";
-import { useSiteContentContext } from "@/contexts/SiteContentContext";
 
 export function LandingHowItWorks() {
-  const { getText } = useSiteContentContext();
+  const { t } = useTranslation('landing');
 
   const steps = [
     {
       number: "01",
       icon: Link2,
-      titleKey: 'home.howitworks.step1.title',
-      descriptionKey: 'home.howitworks.step1.description'
+      title: t('howitworks.step1.title'),
+      description: t('howitworks.step1.description')
     },
     {
       number: "02",
       icon: BarChart3,
-      titleKey: 'home.howitworks.step2.title',
-      descriptionKey: 'home.howitworks.step2.description'
+      title: t('howitworks.step2.title'),
+      description: t('howitworks.step2.description')
     },
     {
       number: "03",
       icon: Rocket,
-      titleKey: 'home.howitworks.step3.title',
-      descriptionKey: 'home.howitworks.step3.description'
+      title: t('howitworks.step3.title'),
+      description: t('howitworks.step3.description')
     }
   ];
 
   return (
     <Section id="como-funciona" variant="muted">
       <SectionHeader
-        title={getText('home.howitworks.title')}
-        subtitle={getText('home.howitworks.subtitle')}
+        title={t('howitworks.title')}
+        subtitle={t('howitworks.subtitle')}
       />
 
       <div className="grid md:grid-cols-3 gap-8 md:gap-12">
@@ -52,11 +52,11 @@ export function LandingHowItWorks() {
               </div>
               
               <h3 className="text-lg font-semibold text-foreground mb-2">
-                {getText(step.titleKey)}
+                {step.title}
               </h3>
               
               <p className="text-muted-foreground text-sm max-w-xs">
-                {getText(step.descriptionKey)}
+                {step.description}
               </p>
             </div>
           </div>
