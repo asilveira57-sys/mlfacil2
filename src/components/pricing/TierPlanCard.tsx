@@ -46,6 +46,14 @@ export function TierPlanCard({
     ? plan.features.slice(0, maxFeatures) 
     : plan.features;
 
+  // Get translated plan name and description based on slug
+  const translatedName = t(`planos.plan_names.${plan.slug}`, { defaultValue: '' });
+  const translatedDescription = t(`planos.plan_descriptions.${plan.slug}`, { defaultValue: '' });
+  
+  // Use translated values if available, otherwise fallback to database values
+  const displayName = translatedName || plan.name;
+  const displayDescription = translatedDescription || plan.description;
+
   const handleClick = () => {
     if (isConsultationPlan) {
       // For consultation plans, navigate to contact (WhatsApp or contact page)
@@ -75,7 +83,7 @@ export function TierPlanCard({
         <Badge 
           className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-accent text-accent-foreground text-xs font-medium"
         >
-          Mais popular
+          {t('planos.most_popular')}
         </Badge>
       )}
 
@@ -88,7 +96,7 @@ export function TierPlanCard({
             highlighted ? "text-primary-foreground" : "text-card-foreground"
           )}
         >
-          {plan.name}
+          {displayName}
         </h3>
         <p
           className={cn(
@@ -96,7 +104,7 @@ export function TierPlanCard({
             highlighted ? "text-primary-foreground/80" : "text-muted-foreground"
           )}
         >
-          {plan.description}
+          {displayDescription}
         </p>
       </div>
 
@@ -133,7 +141,7 @@ export function TierPlanCard({
                     highlighted ? "text-primary-foreground/70" : "text-muted-foreground"
                   )}
                 >
-                  /mês
+                  {t('planos.per_month')}
                 </span>
               )}
             </div>

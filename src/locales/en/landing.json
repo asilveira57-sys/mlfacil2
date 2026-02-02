@@ -248,6 +248,34 @@
     "faq_title": "Questions about plans",
     "ready_title": "Ready to start?",
     "ready_subtitle": "Free trial for {{days}} days. Cancel anytime.",
-    "back_home": "Back to home"
+    "back_home": "Back to home",
+    "per_month": "/month",
+    "most_popular": "Most popular",
+    "plan_names": {
+      "ate-50-vendas": "Up to 50 sales",
+      "51-300-vendas": "51 to 300 sales",
+      "301-700-vendas": "301 to 700 sales",
+      "701-1500-vendas": "701 to 1500 sales",
+      "1501-3000-vendas": "1501 to 3000 sales",
+      "acima-3000-vendas": "Over 3000 sales"
+    },
+    "plan_descriptions": {
+      "ate-50-vendas": "Ideal for beginners",
+      "51-300-vendas": "For growing sellers",
+      "301-700-vendas": "For established businesses",
+      "701-1500-vendas": "For medium-sized operations",
+      "1501-3000-vendas": "For high-volume sales",
+      "acima-3000-vendas": "For enterprise operations"
+    },
+    "plan_features": {
+      "dashboard_completo": "Complete dashboard",
+      "sincronizacao_automatica": "Automatic sync",
+      "relatorios_basicos": "Basic reports",
+      "suporte_email": "Email support",
+      "multicontas": "Multi-account support",
+      "relatorios_avancados": "Advanced reports",
+      "suporte_prioritario": "Priority support",
+      "automacoes": "Smart automations"
+    }
   }
 }

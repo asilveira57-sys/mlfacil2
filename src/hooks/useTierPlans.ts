@@ -47,7 +47,7 @@ async function fetchTierPlans(): Promise<TierPlansData> {
     supabase
       .from('public_plans_v1')
       .select('*')
-      .eq('visible', true),
+      .or('visible.eq.true,visible.is.null'),
     supabase
       .from('trial_policy')
       .select('*')

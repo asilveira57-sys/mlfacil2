@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -48,6 +49,7 @@ const mapUrlMode = (urlMode: string | null): PricingMode => {
 const Planos = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { t } = useTranslation('landing');
   const { data, isLoading, error } = useTierPlans();
   const { checkout, loading: checkoutLoading } = useBillingCheckout();
   const { isAuthenticated, trialActive, trialExpired, flags } = useUserAccess();
@@ -78,8 +80,8 @@ const Planos = () => {
 
   // Get mode description text
   const modeDescription = paymentMode === 'avulso'
-    ? 'Plano avulso • Pagamento único • Sem renovação automática'
-    : 'Cobrança mensal recorrente • Renovação automática • Cancele quando quiser';
+    ? t('planos.prepaid_desc')
+    : t('planos.recurring_desc');
 
   // Determine hero CTA based on user state
   const heroCtaConfig = getCtaConfig(paymentMode);
@@ -139,11 +141,11 @@ const Planos = () => {
         <div className="bg-background">
           <div className="text-center max-w-3xl mx-auto px-4 pt-4 pb-6">
             <h1 className="text-xl md:text-2xl font-bold text-foreground mb-2">
-              Planos e Preços
+              {t('planos.title')}
             </h1>
             <p className="text-sm text-muted-foreground mb-4">
-              Escolha o plano ideal para o seu negócio.
-              {trialPolicy && ` Teste grátis por ${trialPolicy.trial_days} dias, sem cartão.`}
+              {t('planos.subtitle')}
+              {trialPolicy && ` ${t('planos.trial_info', { days: trialPolicy.trial_days })}`}
             </p>
             
             {trialPolicy && (
@@ -151,8 +153,8 @@ const Planos = () => {
                 <div className="inline-flex items-center gap-1.5 bg-success/15 text-success px-3 py-1.5 rounded-full border border-success/20">
                   <Sparkles className="w-3.5 h-3.5" />
                   <span className="text-xs font-semibold">
-                    Teste o sistema por {trialPolicy.trial_days} dias
-                    {!trialPolicy.requires_card && ', sem precisar informar cartão.'}
+                    {t('pricing.trial_badge', { days: trialPolicy.trial_days })}
+                    {!trialPolicy.requires_card && t('pricing.trial_no_card')}
                   </span>
                 </div>
                 <span className="text-[11px] text-muted-foreground/70 flex items-center gap-1">
@@ -168,10 +170,10 @@ const Planos = () => {
         <div className="bg-muted/50 pt-6 pb-6">
           <div className="text-center mb-5">
             <h2 className="text-lg md:text-xl font-bold text-foreground mb-2">
-              Planos baseados no volume mensal de vendas
+              {t('planos.volume_title')}
             </h2>
             <p className="text-muted-foreground text-sm">
-              A cobrança considera a média mensal de vendas dos últimos 30 dias.
+              {t('planos.volume_subtitle')}
             </p>
           </div>
 
@@ -187,7 +189,7 @@ const Planos = () => {
                 }`}
               >
                 <CreditCard className="w-3.5 h-3.5" />
-                Pagamento Antecipado
+                {t('planos.mode_prepaid')}
               </button>
               <button
                 onClick={() => setPaymentMode('assinatura')}
@@ -198,7 +200,7 @@ const Planos = () => {
                 }`}
               >
                 <RefreshCw className="w-3.5 h-3.5" />
-                Assinatura Recorrente
+                {t('planos.mode_recurring')}
               </button>
             </div>
           </div>
@@ -215,9 +217,9 @@ const Planos = () => {
             <div className="flex flex-col items-center gap-2 mb-6">
               <Tabs value={billingCycle} onValueChange={(v) => setBillingCycle(v as BillingCycle)}>
                 <TabsList className="grid grid-cols-3 w-auto h-9 bg-background">
-                  <TabsTrigger value="mensal" className="px-4 text-xs">Mensal</TabsTrigger>
-                  <TabsTrigger value="trimestral" className="px-4 text-xs">Trimestral</TabsTrigger>
-                  <TabsTrigger value="semestral" className="px-4 text-xs">Semestral</TabsTrigger>
+                  <TabsTrigger value="mensal" className="px-4 text-xs">{t('planos.period_monthly')}</TabsTrigger>
+                  <TabsTrigger value="trimestral" className="px-4 text-xs">{t('planos.period_quarterly')}</TabsTrigger>
+                  <TabsTrigger value="semestral" className="px-4 text-xs">{t('planos.period_semiannual')}</TabsTrigger>
                 </TabsList>
               </Tabs>
             </div>
@@ -268,15 +270,15 @@ const Planos = () => {
               <CardContent className="flex flex-col sm:flex-row items-center justify-between gap-3 py-3 px-4">
                 <div className="text-center sm:text-left">
                   <span className="font-semibold text-foreground text-sm">
-                    Precisa de mais?
+                    {t('planos.enterprise_title')}
                   </span>
                   <span className="text-xs text-muted-foreground ml-2">
-                    Plano personalizado para alto volume
+                    {t('planos.enterprise_subtitle')}
                   </span>
                 </div>
                 <Button variant="outline" className="gap-1.5 h-8 text-xs" size="sm">
                   <MessageSquare className="w-3.5 h-3.5" />
-                  Falar com especialista
+                  {t('planos.enterprise_cta')}
                 </Button>
               </CardContent>
             </Card>
@@ -358,12 +360,12 @@ const Planos = () => {
             )}
 
             <h2 className="text-base font-bold text-foreground mb-1">
-              Pronto para começar?
+              {t('planos.ready_title')}
             </h2>
             <p className="text-muted-foreground mb-4 text-sm">
               {trialPolicy 
-                ? `Teste grátis por ${trialPolicy.trial_days} dias. Cancele a qualquer momento.`
-                : 'Escolha o plano ideal para o seu negócio.'
+                ? t('planos.ready_subtitle', { days: trialPolicy.trial_days })
+                : t('planos.subtitle')
               }
             </p>
             <div className="flex items-center justify-center gap-3">
@@ -381,7 +383,7 @@ const Planos = () => {
                 className="gap-1.5 h-10 text-sm px-5 bg-background"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
-                Voltar ao início
+                {t('planos.back_home')}
               </Button>
             </div>
           </div>
