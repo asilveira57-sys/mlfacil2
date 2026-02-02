@@ -1,7 +1,8 @@
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Check } from "lucide-react";
+import { Check, MessageSquare } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { TierPlan, PricingMode, BillingCycle } from "@/hooks/useTierPlans";
 import { formatPriceBRL, getPlanPrice } from "@/hooks/useTierPlans";
 import { usePlanCta } from "@/hooks/usePlanCta";
@@ -25,27 +26,36 @@ export function TierPlanCard({
   maxFeatures,
   onSelectPlan,
 }: TierPlanCardProps) {
+  const { t } = useTranslation('landing');
   const { getCtaConfig, handleCtaClick, isLoading } = usePlanCta();
   const price = getPlanPrice(plan, mode, period);
   const ctaConfig = getCtaConfig(mode);
 
-  if (!price) {
+  // Check if this is a consultation plan (no prices)
+  const isConsultationPlan = plan.prices.length === 0;
+
+  if (!isConsultationPlan && !price) {
     // Fallback: try to get any price for display
     const fallbackPrice = plan.prices.find(p => p.mode === mode) || plan.prices[0];
     if (!fallbackPrice) return null;
   }
 
   const displayPrice = price || plan.prices.find(p => p.mode === mode) || plan.prices[0];
-  if (!displayPrice) return null;
 
   const featuresDisplay = maxFeatures 
     ? plan.features.slice(0, maxFeatures) 
     : plan.features;
 
   const handleClick = () => {
-    if (onSelectPlan) {
+    if (isConsultationPlan) {
+      // For consultation plans, navigate to contact (WhatsApp or contact page)
+      window.open('https://wa.me/5511999999999?text=Olá! Tenho interesse no plano para mais de 3000 vendas.', '_blank');
+      return;
+    }
+    
+    if (onSelectPlan && displayPrice) {
       onSelectPlan(plan, displayPrice.id);
-    } else {
+    } else if (displayPrice) {
       handleCtaClick(ctaConfig, displayPrice.id, plan.slug, mode, period);
     }
   };
@@ -92,66 +102,103 @@ export function TierPlanCard({
 
       {/* Price */}
       <div className={cn("mb-4", compact && "mb-3")}>
-        <div className="flex items-baseline gap-1">
-          <span
-            className={cn(
-              "font-bold",
-              compact ? "text-2xl" : "text-4xl",
-              highlighted ? "text-primary-foreground" : "text-foreground"
-            )}
-          >
-            {formatPriceBRL(displayPrice.price_cents)}
-          </span>
-          {mode === 'assinatura' && (
+        {isConsultationPlan ? (
+          <div className="flex items-baseline gap-1">
             <span
               className={cn(
-                "text-sm",
-                highlighted ? "text-primary-foreground/70" : "text-muted-foreground"
+                "font-bold",
+                compact ? "text-xl" : "text-2xl",
+                highlighted ? "text-primary-foreground" : "text-foreground"
               )}
             >
-              /mês
+              {t('planos.consult_cta')}
             </span>
-          )}
-        </div>
-        {displayPrice.badge_text && (
-          <Badge 
-            variant="secondary" 
-            className={cn(
-              "mt-1 text-xs",
-              highlighted && "bg-primary-foreground/20 text-primary-foreground"
+          </div>
+        ) : displayPrice ? (
+          <>
+            <div className="flex items-baseline gap-1">
+              <span
+                className={cn(
+                  "font-bold",
+                  compact ? "text-2xl" : "text-4xl",
+                  highlighted ? "text-primary-foreground" : "text-foreground"
+                )}
+              >
+                {formatPriceBRL(displayPrice.price_cents)}
+              </span>
+              {mode === 'assinatura' && (
+                <span
+                  className={cn(
+                    "text-sm",
+                    highlighted ? "text-primary-foreground/70" : "text-muted-foreground"
+                  )}
+                >
+                  /mês
+                </span>
+              )}
+            </div>
+            {displayPrice.badge_text && (
+              <Badge 
+                variant="secondary" 
+                className={cn(
+                  "mt-1 text-xs",
+                  highlighted && "bg-primary-foreground/20 text-primary-foreground"
+                )}
+              >
+                {displayPrice.badge_text}
+              </Badge>
             )}
-          >
-            {displayPrice.badge_text}
-          </Badge>
-        )}
+          </>
+        ) : null}
       </div>
 
       {/* Features */}
-      <ul className={cn("space-y-2 flex-1", compact ? "mb-4" : "mb-6")}>
-        {featuresDisplay.map((feature, i) => (
-          <li key={i} className="flex items-start gap-2 text-sm">
-            <Check
-              className={cn(
-                "w-4 h-4 flex-shrink-0 mt-0.5",
-                highlighted ? "text-accent" : "text-success"
-              )}
-            />
-            <span className={highlighted ? "text-primary-foreground" : "text-card-foreground"}>
-              {feature}
-            </span>
-          </li>
-        ))}
-      </ul>
+      {featuresDisplay.length > 0 && (
+        <ul className={cn("space-y-2 flex-1", compact ? "mb-4" : "mb-6")}>
+          {featuresDisplay.map((feature, i) => (
+            <li key={i} className="flex items-start gap-2 text-sm">
+              <Check
+                className={cn(
+                  "w-4 h-4 flex-shrink-0 mt-0.5",
+                  highlighted ? "text-accent" : "text-success"
+                )}
+              />
+              <span className={highlighted ? "text-primary-foreground" : "text-card-foreground"}>
+                {feature}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Placeholder for plans without features */}
+      {featuresDisplay.length === 0 && (
+        <div className={cn("flex-1", compact ? "mb-4" : "mb-6")}>
+          <p className={cn(
+            "text-sm",
+            highlighted ? "text-primary-foreground/70" : "text-muted-foreground"
+          )}>
+            {t('planos.consult_description')}
+          </p>
+        </div>
+      )}
 
       {/* CTA Button */}
       <Button
         onClick={handleClick}
-        disabled={isLoading}
-        variant={highlighted ? "secondary" : ctaConfig.variant}
+        disabled={!isConsultationPlan && isLoading}
+        variant={highlighted ? "secondary" : isConsultationPlan ? "outline" : ctaConfig.variant}
         size={compact ? "default" : "lg"}
-        className="w-full"
+        className={cn("w-full", isConsultationPlan && "gap-2")}
       >
-        {ctaConfig.label}
+        {isConsultationPlan ? (
+          <>
+            <MessageSquare className="w-4 h-4" />
+            {t('planos.consult_cta')}
+          </>
+        ) : (
+          ctaConfig.label
+        )}
       </Button>
     </div>
   );
