@@ -17,6 +17,7 @@ import ptBRUtilities from '@/locales/pt-BR/utilities.json';
 import ptBRProducts from '@/locales/pt-BR/products.json';
 import ptBRLanding from '@/locales/pt-BR/landing.json';
 import ptBRSales from '@/locales/pt-BR/sales.json';
+import ptBRTools from '@/locales/pt-BR/tools.json';
 
 import enCommon from '@/locales/en/common.json';
 import enNav from '@/locales/en/nav.json';
@@ -32,6 +33,7 @@ import enUtilities from '@/locales/en/utilities.json';
 import enProducts from '@/locales/en/products.json';
 import enLanding from '@/locales/en/landing.json';
 import enSales from '@/locales/en/sales.json';
+import enTools from '@/locales/en/tools.json';
 
 import esCommon from '@/locales/es/common.json';
 import esNav from '@/locales/es/nav.json';
@@ -47,6 +49,7 @@ import esUtilities from '@/locales/es/utilities.json';
 import esProducts from '@/locales/es/products.json';
 import esLanding from '@/locales/es/landing.json';
 import esSales from '@/locales/es/sales.json';
+import esTools from '@/locales/es/tools.json';
 
 export const SUPPORTED_LANGUAGES = ['pt-BR', 'en', 'es'] as const;
 export type SupportedLanguage = typeof SUPPORTED_LANGUAGES[number];
@@ -73,6 +76,7 @@ const resources = {
     products: ptBRProducts,
     landing: ptBRLanding,
     sales: ptBRSales,
+    tools: ptBRTools,
   },
   en: {
     common: enCommon,
@@ -89,6 +93,7 @@ const resources = {
     products: enProducts,
     landing: enLanding,
     sales: enSales,
+    tools: enTools,
   },
   es: {
     common: esCommon,
@@ -105,6 +110,7 @@ const resources = {
     products: esProducts,
     landing: esLanding,
     sales: esSales,
+    tools: esTools,
   },
 };
 
@@ -121,7 +127,7 @@ i18n
     resources,
     fallbackLng: 'pt-BR',
     defaultNS: 'common',
-    ns: ['common', 'nav', 'auth', 'errors', 'actions', 'settings', 'dashboard', 'home', 'seed', 'shipping', 'utilities', 'products', 'landing', 'sales'],
+    ns: ['common', 'nav', 'auth', 'errors', 'actions', 'settings', 'dashboard', 'home', 'seed', 'shipping', 'utilities', 'products', 'landing', 'sales', 'tools'],
     
     detection: {
       order: detectionOrder,

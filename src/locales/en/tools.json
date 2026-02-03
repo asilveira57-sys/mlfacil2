@@ -1,0 +1,64 @@
+{
+  "menu_title": "Tools",
+  "zpl": {
+    "title": "ZPL Label Viewer",
+    "subtitle": "Render and download ZPL labels for free",
+    "input_placeholder": "Paste your ZPL code here...",
+    "btn_render": "Render",
+    "btn_download": "Download image",
+    "btn_clear": "Clear",
+    "label_width": "Width (mm)",
+    "label_height": "Height (mm)",
+    "label_dpmm": "Density (dpmm)",
+    "rendering": "Rendering...",
+    "error_empty": "Enter ZPL code before rendering",
+    "error_render": "Error rendering label. Check ZPL code.",
+    "success_render": "Label rendered successfully!",
+    "disclaimer": "Free tool for visualization. Advanced features like batch conversion and history are available in MKTP Fácil.",
+    "sample_code": "^XA\n^FO50,50^ADN,36,20^FDHello World^FS\n^FO50,100^BY3^BCN,100,Y,N,N^FD123456789^FS\n^XZ"
+  },
+  "trends": {
+    "title": "Market Trends",
+    "subtitle": "See what's trending on Mercado Libre",
+    "filter_category": "Category",
+    "filter_all": "All",
+    "sort_by": "Sort by",
+    "sort_popularity": "Popularity",
+    "sort_relevance": "Relevance",
+    "sort_name": "Name",
+    "popularity_label": "Popularity",
+    "no_results": "No trends found for this category",
+    "disclaimer": "Simplified version. Complete analysis, history and market intelligence are available in MKTP Fácil."
+  },
+  "pricing": {
+    "title": "Pricing Simulator",
+    "subtitle": "Calculate margin and profit for your products",
+    "sale_price": "Sale price",
+    "product_cost": "Product cost",
+    "marketplace_fee": "Marketplace fee (%)",
+    "shipping_cost": "Shipping cost",
+    "packaging_cost": "Packaging cost",
+    "other_costs": "Other expenses",
+    "result_profit": "Net profit",
+    "result_margin": "Profit margin",
+    "result_breakeven": "Break-even point",
+    "result_total_cost": "Total cost",
+    "result_fees": "Marketplace fees",
+    "positive_margin": "Healthy margin",
+    "negative_margin": "Negative margin",
+    "warning_margin": "Low margin",
+    "btn_calculate": "Calculate",
+    "btn_reset": "Reset",
+    "disclaimer": "Basic simulation. Save scenarios, compare results and integrate real data in MKTP Fácil."
+  },
+  "promo": {
+    "title": "Want more features?",
+    "description": "Access complete analysis, history and automations in MKTP Fácil.",
+    "cta": "Learn more"
+  },
+  "nav": {
+    "zpl": "ZPL Label",
+    "trends": "Trends",
+    "pricing": "Pricing"
+  }
+}
