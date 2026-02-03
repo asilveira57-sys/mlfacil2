@@ -1,21 +1,21 @@
 import { cn } from "@/lib/utils";
-import { GROWTH_STAGE_CONFIG, HEALTH_STATUS_CONFIG, SendGrowthStage, SendHealthStatus } from "@/types/send";
+import { GROWTH_STAGE_CONFIG, HEALTH_STATUS_CONFIG, SeedGrowthStage, SeedHealthStatus } from "@/types/seed";
 
-interface SendPlantVisualizationProps {
-  growthStage: SendGrowthStage;
-  healthStatus: SendHealthStatus;
+interface SeedPlantVisualizationProps {
+  growthStage: SeedGrowthStage;
+  healthStatus: SeedHealthStatus;
   daysPlanted: number;
   size?: 'xs' | 'sm' | 'md' | 'lg';
   showLabel?: boolean;
 }
 
-export function SendPlantVisualization({
+export function SeedPlantVisualization({
   growthStage,
   healthStatus,
   daysPlanted,
   size = 'md',
   showLabel = true,
-}: SendPlantVisualizationProps) {
+}: SeedPlantVisualizationProps) {
   const stageConfig = GROWTH_STAGE_CONFIG[growthStage];
   const healthConfig = HEALTH_STATUS_CONFIG[healthStatus];
 

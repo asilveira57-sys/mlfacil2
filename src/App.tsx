@@ -40,7 +40,7 @@ import Admin from "./pages/Admin";
 import AdTimelineRadar from "./pages/AdTimelineRadar";
 import AdTimelineDetail from "./pages/AdTimelineDetail";
 import AdActionsCenter from "./pages/AdActionsCenter";
-import Send from "./pages/Send";
+import Seed from "./pages/Seed";
 import FreightManagement from "./pages/FreightManagement";
 import ProductsPage from "./pages/ProductsPage";
 import ProductDetailPage from "./pages/ProductDetailPage";
@@ -155,10 +155,10 @@ const App = () => {
                   <Route path="/anuncios/linha-do-tempo" element={<AdTimelineRadar />} />
                   <Route path="/anuncios/linha-do-tempo/:itemId" element={<AdTimelineDetail />} />
                   <Route path="/anuncios/acoes" element={<AdActionsCenter />} />
-                  {/* Send routes */}
-                  <Route path="/send" element={<Send />} />
-                  <Route path="/send/:itemId" element={<Send />} />
-                  <Route path="/send/sementes" element={<Send />} />
+                  {/* Seed routes */}
+                  <Route path="/seed" element={<Seed />} />
+                  <Route path="/seed/:itemId" element={<Seed />} />
+                  <Route path="/seed/sementes" element={<Seed />} />
                   <Route path="/frete" element={<FreightManagement />} />
                   {/* Products module */}
                   <Route path="/produtos" element={<ProductsPage />} />

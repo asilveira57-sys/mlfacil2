@@ -71,7 +71,7 @@ const mainNavItems: NavItem[] = [
   { titleKey: "nav:dashboard", url: "/dashboard", icon: LayoutDashboard, moduleId: "dashboard", moduleKey: "dashboard" },
   { titleKey: "nav:sales", url: "/shipping-labels", icon: Package, moduleId: "etiquetas", moduleKey: "etiquetas" },
   { titleKey: "nav:tasks", url: "/tarefas", icon: ListChecks, moduleId: "tarefas", moduleKey: "tarefas" },
-  { titleKey: "nav:send", url: "/send", icon: Sprout, moduleId: "send", moduleKey: "send" },
+  { titleKey: "nav:seed", url: "/seed", icon: Sprout, moduleId: "seed", moduleKey: "seed" },
   { titleKey: "nav:promotions", url: "/promocoes", icon: Tag, moduleId: "promocoes", moduleKey: "promocoes" },
   { titleKey: "nav:ads", url: "/publicidade", icon: Megaphone, moduleId: "publicidade", moduleKey: "mercado_ads" },
   { titleKey: "nav:timeline", url: "/anuncios/linha-do-tempo", icon: History, moduleId: "linha-do-tempo", moduleKey: "linha_do_tempo" },

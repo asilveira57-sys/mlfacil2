@@ -10,7 +10,7 @@ import ptBRErrors from '@/locales/pt-BR/errors.json';
 import ptBRActions from '@/locales/pt-BR/actions.json';
 import ptBRSettings from '@/locales/pt-BR/settings.json';
 import ptBRDashboard from '@/locales/pt-BR/dashboard.json';
-import ptBRSend from '@/locales/pt-BR/send.json';
+import ptBRSeed from '@/locales/pt-BR/seed.json';
 import ptBRShipping from '@/locales/pt-BR/shipping.json';
 import ptBRUtilities from '@/locales/pt-BR/utilities.json';
 import ptBRProducts from '@/locales/pt-BR/products.json';
@@ -23,7 +23,7 @@ import enErrors from '@/locales/en/errors.json';
 import enActions from '@/locales/en/actions.json';
 import enSettings from '@/locales/en/settings.json';
 import enDashboard from '@/locales/en/dashboard.json';
-import enSend from '@/locales/en/send.json';
+import enSeed from '@/locales/en/seed.json';
 import enShipping from '@/locales/en/shipping.json';
 import enUtilities from '@/locales/en/utilities.json';
 import enProducts from '@/locales/en/products.json';
@@ -36,7 +36,7 @@ import esErrors from '@/locales/es/errors.json';
 import esActions from '@/locales/es/actions.json';
 import esSettings from '@/locales/es/settings.json';
 import esDashboard from '@/locales/es/dashboard.json';
-import esSend from '@/locales/es/send.json';
+import esSeed from '@/locales/es/seed.json';
 import esShipping from '@/locales/es/shipping.json';
 import esUtilities from '@/locales/es/utilities.json';
 import esProducts from '@/locales/es/products.json';
@@ -60,7 +60,7 @@ const resources = {
     actions: ptBRActions,
     settings: ptBRSettings,
     dashboard: ptBRDashboard,
-    send: ptBRSend,
+    seed: ptBRSeed,
     shipping: ptBRShipping,
     utilities: ptBRUtilities,
     products: ptBRProducts,
@@ -74,7 +74,7 @@ const resources = {
     actions: enActions,
     settings: enSettings,
     dashboard: enDashboard,
-    send: enSend,
+    seed: enSeed,
     shipping: enShipping,
     utilities: enUtilities,
     products: enProducts,
@@ -88,7 +88,7 @@ const resources = {
     actions: esActions,
     settings: esSettings,
     dashboard: esDashboard,
-    send: esSend,
+    seed: esSeed,
     shipping: esShipping,
     utilities: esUtilities,
     products: esProducts,
@@ -109,7 +109,7 @@ i18n
     resources,
     fallbackLng: 'pt-BR',
     defaultNS: 'common',
-    ns: ['common', 'nav', 'auth', 'errors', 'actions', 'settings', 'dashboard', 'send', 'shipping', 'utilities', 'products', 'landing'],
+    ns: ['common', 'nav', 'auth', 'errors', 'actions', 'settings', 'dashboard', 'seed', 'shipping', 'utilities', 'products', 'landing'],
     
     detection: {
       order: detectionOrder,

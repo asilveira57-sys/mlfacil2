@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Sprout, Package, TrendingUp, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-interface SendSeedBalanceCardProps {
+interface SeedBalanceCardProps {
   availableSeeds: number;
   totalSeeds: number;
   usedSeeds: number;
@@ -13,15 +13,15 @@ interface SendSeedBalanceCardProps {
   onBuySeeds?: () => void;
 }
 
-export function SendSeedBalanceCard({
+export function SeedBalanceCard({
   availableSeeds,
   totalSeeds,
   usedSeeds,
   plantedCount,
   planTier,
   onBuySeeds,
-}: SendSeedBalanceCardProps) {
-  const { t } = useTranslation('send');
+}: SeedBalanceCardProps) {
+  const { t } = useTranslation('seed');
   const usagePercent = totalSeeds > 0 ? (usedSeeds / totalSeeds) * 100 : 0;
   const isLow = availableSeeds <= 2;
   const isEmpty = availableSeeds === 0;

@@ -17,10 +17,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { 
   HEALTH_STATUS_CONFIG, 
   GROWTH_STAGE_CONFIG,
-  SendPlantedItem,
-  SendMetricsSnapshot,
-  SendItemHistory
-} from "@/types/send";
+  SeedPlantedItem,
+  SeedMetricsSnapshot,
+  SeedItemHistory
+} from "@/types/seed";
 import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -42,7 +42,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-interface SendItemDetailDrawerProps {
+interface SeedItemDetailDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   itemId: string | null;
@@ -51,9 +51,9 @@ interface SendItemDetailDrawerProps {
 }
 
 interface ItemData {
-  planted: SendPlantedItem | null;
-  metrics: SendMetricsSnapshot | null;
-  history: SendItemHistory[];
+  planted: SeedPlantedItem | null;
+  metrics: SeedMetricsSnapshot | null;
+  history: SeedItemHistory[];
   listing: {
     title: string;
     thumbnail: string;
@@ -65,13 +65,13 @@ interface ItemData {
   } | null;
 }
 
-export function SendItemDetailDrawer({ 
+export function SeedItemDetailDrawer({ 
   open, 
   onOpenChange, 
   itemId, 
   sellerId,
   onRemove 
-}: SendItemDetailDrawerProps) {
+}: SeedItemDetailDrawerProps) {
   const [activeTab, setActiveTab] = useState("performance");
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<ItemData>({

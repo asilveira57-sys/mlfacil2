@@ -1,20 +1,20 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { SendPlantVisualization } from "./SendPlantVisualization";
-import { HEALTH_STATUS_CONFIG, PlantedItemWithMetrics } from "@/types/send";
+import { SeedPlantVisualization } from "./SeedPlantVisualization";
+import { HEALTH_STATUS_CONFIG, PlantedItemWithMetrics } from "@/types/seed";
 import { Eye, Trash2, TrendingUp, TrendingDown, Minus, ImageOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
-interface SendPlantedItemCardProps {
+interface SeedPlantedItemCardProps {
   item: PlantedItemWithMetrics;
   onView: (itemId: string) => void;
   onRemove: (itemId: string) => void;
 }
 
-export function SendPlantedItemCard({ item, onView, onRemove }: SendPlantedItemCardProps) {
+export function SeedPlantedItemCard({ item, onView, onRemove }: SeedPlantedItemCardProps) {
   const healthConfig = HEALTH_STATUS_CONFIG[item.health_status];
   const metrics = item.latestMetrics;
 
@@ -59,7 +59,7 @@ export function SendPlantedItemCard({ item, onView, onRemove }: SendPlantedItemC
               )}
             </div>
             {/* Mini plant */}
-            <SendPlantVisualization
+            <SeedPlantVisualization
               growthStage={item.growth_stage}
               healthStatus={item.health_status}
               daysPlanted={item.days_planted}

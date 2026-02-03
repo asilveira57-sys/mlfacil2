@@ -1,10 +1,10 @@
-// Types for the Send module (Strategic Ad Cultivation)
+// Types for the Seed module (Strategic Ad Cultivation)
 
-export type SendHealthStatus = 'healthy' | 'stagnant' | 'weakening' | 'dormant';
-export type SendGrowthStage = 'seed' | 'sprout' | 'growing' | 'mature' | 'fruiting';
-export type SendPositionTier = 'top_page_1' | 'page_1' | 'page_2' | 'page_3_plus' | 'not_found';
+export type SeedHealthStatus = 'healthy' | 'stagnant' | 'weakening' | 'dormant';
+export type SeedGrowthStage = 'seed' | 'sprout' | 'growing' | 'mature' | 'fruiting';
+export type SeedPositionTier = 'top_page_1' | 'page_1' | 'page_2' | 'page_3_plus' | 'not_found';
 
-export interface SendSeedBalance {
+export interface SeedBalance {
   id: string;
   user_id: string;
   seller_id: string;
@@ -16,7 +16,7 @@ export interface SendSeedBalance {
   updated_at: string;
 }
 
-export interface SendPlantedItem {
+export interface SeedPlantedItem {
   id: string;
   user_id: string;
   seller_id: string;
@@ -24,8 +24,8 @@ export interface SendPlantedItem {
   item_title: string | null;
   item_thumbnail: string | null;
   planted_at: string;
-  health_status: SendHealthStatus;
-  growth_stage: SendGrowthStage;
+  health_status: SeedHealthStatus;
+  growth_stage: SeedGrowthStage;
   days_planted: number;
   abc_class: string;
   is_a_plus: boolean;
@@ -35,7 +35,7 @@ export interface SendPlantedItem {
   updated_at: string;
 }
 
-export interface SendMetricsSnapshot {
+export interface SeedMetricsSnapshot {
   id: string;
   planted_item_id: string;
   user_id: string;
@@ -51,7 +51,7 @@ export interface SendMetricsSnapshot {
   visit_trend: number | null;
   conversion_rate: number | null;
   conversion_trend: number | null;
-  position_tier: SendPositionTier | null;
+  position_tier: SeedPositionTier | null;
   position_checked_at: string | null;
   search_keyword: string | null;
   maturity_score: number | null;
@@ -59,7 +59,7 @@ export interface SendMetricsSnapshot {
   created_at: string;
 }
 
-export interface SendItemHistory {
+export interface SeedItemHistory {
   id: string;
   user_id: string;
   seller_id: string;
@@ -69,7 +69,7 @@ export interface SendItemHistory {
   occurred_at: string;
 }
 
-export interface SendAplusCandidate {
+export interface SeedAplusCandidate {
   id: string;
   user_id: string;
   seller_id: string;
@@ -85,7 +85,7 @@ export interface SendAplusCandidate {
   updated_at: string;
 }
 
-export interface SendSeedPurchase {
+export interface SeedPurchase {
   id: string;
   user_id: string;
   seller_id: string;
@@ -100,8 +100,8 @@ export interface SendSeedPurchase {
 }
 
 // UI helper types
-export interface PlantedItemWithMetrics extends SendPlantedItem {
-  latestMetrics: SendMetricsSnapshot | null;
+export interface PlantedItemWithMetrics extends SeedPlantedItem {
+  latestMetrics: SeedMetricsSnapshot | null;
   historyCount: number;
 }
 
@@ -116,7 +116,7 @@ export interface EligibleItem {
 }
 
 // Growth stage visual config
-export const GROWTH_STAGE_CONFIG: Record<SendGrowthStage, {
+export const GROWTH_STAGE_CONFIG: Record<SeedGrowthStage, {
   label: string;
   emoji: string;
   description: string;
@@ -155,7 +155,7 @@ export const GROWTH_STAGE_CONFIG: Record<SendGrowthStage, {
 };
 
 // Health status visual config
-export const HEALTH_STATUS_CONFIG: Record<SendHealthStatus, {
+export const HEALTH_STATUS_CONFIG: Record<SeedHealthStatus, {
   label: string;
   color: string;
   bgColor: string;
@@ -188,7 +188,7 @@ export const HEALTH_STATUS_CONFIG: Record<SendHealthStatus, {
 };
 
 // Position tier visual config
-export const POSITION_TIER_CONFIG: Record<SendPositionTier, {
+export const POSITION_TIER_CONFIG: Record<SeedPositionTier, {
   label: string;
   color: string;
   icon: string;
