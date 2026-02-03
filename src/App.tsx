@@ -17,6 +17,7 @@ import { SeoHead } from "@/components/seo/SeoHead";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
+import Home from "./pages/Home";
 import ShippingLabels from "./pages/ShippingLabels";
 import LabelHeaderSettings from "./pages/LabelHeaderSettings";
 import ZPLConverter from "./pages/ZPLConverter";
@@ -131,6 +132,7 @@ const App = () => {
 
                 {/* Dashboard routes (with persistent shell) */}
                 <Route element={<AppShellLayout />}>
+                  <Route path="/inicio" element={<Home />} />
                   <Route path="/dashboard" element={<Dashboard />} />
                   <Route path="/shipping-labels" element={<ShippingLabels />} />
                   <Route path="/shipping-labels/header-settings" element={<LabelHeaderSettings />} />

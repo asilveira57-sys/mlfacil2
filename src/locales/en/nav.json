@@ -1,4 +1,5 @@
 {
+  "home": "Home",
   "dashboard": "Dashboard",
   "sales": "Sales",
   "shipping_labels": "Shipping Labels",
@@ -27,6 +28,7 @@
   "post_sale": "Post-Sale",
   "questions": "Questions",
   "tasks": "Tasks",
+  "seed": "Seed",
   "notifications": "Notifications",
   "settings": "Settings",
   "integrations": "Integrations",
@@ -39,7 +41,6 @@
   "management": "Management",
   "analytics": "Analytics",
   "promotions": "Promotions",
-  "send": "Send",
   "market": "Market",
   "reports": "Reports",
   "coming_soon": "Coming soon",
