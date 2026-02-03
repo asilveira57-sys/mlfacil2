@@ -1,142 +1,112 @@
 
-## Diagnóstico (com evidência do seu ambiente)
+## Diagnóstico do Problema
 
-O sistema **não está travado para puxar pedidos**. Os pedidos depois de 27/01 existem no banco e chegam até **03/02** para a conta **66043362 (ADECONEXVV)**.
+O sistema de Q&A **salva a resposta apenas no banco de dados local**, mas **nunca envia para a API do Mercado Livre**. Por isso:
 
-O que está “travado” é a **tela de Etiquetas de Envio** parecer parada em 27/01 porque ela **só mostra pedidos que já têm o envio (shipment) sincronizado no cache**.
+1. A pergunta aparece como "Respondida" no seu app
+2. A pergunta continua "Em aberto" no Mercado Livre
+3. Ao sincronizar novamente, aparecem duplicadas (uma respondida local, outra pendente do ML)
 
-### O que encontrei (fatos objetivos)
-- **Pedidos (orders) estão atualizados**: há pedidos em `meli_orders_cache` até **2026-02-03 20:09:06+00**.
-- **Envios (shipments) estão incompletos**:
-  - `meli_shipments_cache` tem **1332** registros, mas ainda existem **4060** pedidos com `shipment_id` sem registro correspondente no cache.
-  - Só nos últimos 30 dias, faltam **309** envios para a conta (isso explica por que não aparece nada recente na lista).
-- Na sua tela (imagem), o “Todos 953” bate com um sintoma clássico: **consulta limitada a ~1000 linhas** no backend + ausência de paginação/ordenação adequada no fluxo que coleta `shipment_ids`.
+### Evidência no código
 
-## Causa raiz (por que parou exatamente em 27/01)
+No arquivo `src/hooks/useQA.ts` (função `useCreateResponse`, linhas 122-193):
+- Salva a resposta na tabela `qa_responses` com `is_sent: false`
+- Atualiza o status da pergunta para `answered`
+- **Não faz nenhuma chamada à API do Mercado Livre**
 
-Existem **dois bugs de arquitetura** no `useShippingLabels.ts` que juntos produzem exatamente esse “congelamento”:
-
-1) **Limite padrão de 1000 linhas nas consultas**
-   - No pipeline de sync, após disparar `ml-sync-orders`, o código faz:
-     - `select('order_id, shipment_id')` em `meli_orders_cache` **sem paginação** e **sem order**.
-   - Em ambientes com muitos pedidos, isso retorna só o “primeiro bloco” (geralmente ~1000 linhas), que tende a ficar preso em uma faixa antiga (no seu caso, ~27/01).
-   - Resultado: o app **nem chega a pedir** os shipments mais novos para sincronizar.
-
-2) **O pipeline de etiquetas não espera o job de pedidos terminar**
-   - O código dispara `ml-sync-orders` e só dá um `sleep(1500)` antes de buscar shipment_ids.
-   - Isso faz o pipeline coletar shipment_ids **antes** dos pedidos recentes terminarem de cair no cache, reforçando o “travamento” na mesma data.
-
-Concluindo: o sync “não deu erro” porque de fato ele conclui jobs, mas ele **trabalha sempre no subconjunto errado** (primeiras ~1000 linhas/antigas) e não completa o backfill dos envios recentes.
+A tabela `qa_responses` já tem campos preparados (`is_sent`, `sent_at`, `ml_response_id`, `send_error`) que nunca são utilizados.
 
 ---
 
-## Solução definitiva (para parar o desperdício de crédito)
+## Solução
 
-### Objetivo
-Garantir que a tela de Etiquetas:
-1) **Nunca mais pareça “travada” em uma data antiga**
-2) Sempre sincronize **envios recentes** de forma previsível
-3) Tenha **diagnóstico visível** (sem tentativa e erro)
+### 1. Criar Edge Function `ml-answer-question`
 
-### Entregas (em ordem)
+Nova função que faz o POST para a API do Mercado Livre:
 
-#### 1) Corrigir o pipeline de sync das Etiquetas (frontend)
-Alterar `startSyncPipeline` para:
+- Endpoint ML: `POST https://api.mercadolibre.com/answers`
+- Payload: `{ "question_id": 123456, "text": "Sua resposta aqui" }`
+- Atualiza `qa_responses` com `is_sent = true`, `sent_at`, `ml_response_id`
+- Em caso de erro, registra em `send_error` e mantém `is_sent = false`
 
-1. **Esperar o job de pedidos finalizar** (se `ml-sync-orders` retornar `job_id`)
-   - Poll em `sync_jobs` até `done`/`error` (timeout razoável).
-   - Só então seguir para shipments/invoices.
+### 2. Alterar o fluxo de envio no `useCreateResponse`
 
-2. **Buscar pedidos “certos” para sincronizar shipments**
-   - Em vez de `select('order_id, shipment_id')` sem ordem:
-     - aplicar `order('created_at_meli', { ascending: false })`
-     - aplicar filtro de período (no mínimo “últimos 30 dias” quando período = Todos, ou o período selecionado)
-     - **paginar** usando `.range()` em blocos (ex.: 0-999, 1000-1999...) até cobrir o período/limite de segurança.
+Modificar a mutation para:
 
-3. **Calcular missing shipments corretamente (sem corte de 500)**
-   - Hoje existe `allShipmentIds.slice(0, 500)` que distorce a detecção.
-   - Trocar por verificação em batches (ex.: 200 por vez) acumulando `existingSet`.
+1. Salvar a resposta localmente (como rascunho temporário)
+2. Chamar a Edge Function `ml-answer-question`
+3. Se sucesso: atualizar `is_sent = true` e status da pergunta para `answered`
+4. Se erro: manter status `pending`, mostrar erro específico ao usuário
 
-4. **Sincronizar shipments em lotes com controle de ritmo**
-   - Manter batches (ex.: 200 ids por invoke) + pequenos delays.
-   - Mostrar progresso real em `syncProgress` (ex.: “Sincronizando envios 2/6”).
+### 3. Adicionar tratamento de erros específicos
 
-5. **Invoices também em batches**
-   - `ml-sync-invoices` deve receber `order_ids` em lotes (para não explodir payload/tempo).
+Possíveis erros da API do ML que precisam ser tratados:
 
-Resultado esperado: em 1 clique o sistema sincroniza os ~309 shipments faltantes dos últimos 30 dias e a lista deixa de parar em 27/01.
+- **Token expirado**: Auto-refresh e retry
+- **Pergunta já respondida**: Sincronizar novamente para obter a resposta existente
+- **Pergunta deletada pelo comprador**: Marcar como `archived`
+- **Conteúdo bloqueado pelo ML**: Mostrar motivo específico
 
-#### 2) Parar de “esconder” pedidos quando shipment ainda não existe (UX anti-travamento)
-Hoje a tabela faz:
-- “se não tem shipment no cache, não mostra a linha”.
+### 4. Atualizar a UI com feedback adequado
 
-Vou alterar para:
-- mostrar pedidos recentes mesmo sem shipment (com estado “Sincronizando envio…” / “Envio pendente de cache”),
-- e um botão contextual “Sincronizar envios deste período”.
-
-Isso evita a sensação de travamento e reduz prompts repetidos.
-
-#### 3) Corrigir a contagem “Todos 953” para não depender de consulta truncada
-O bloco `shipping-orders-all` hoje também consulta grande volume sem paginação e faz `.in('shipment_id', shipmentIds)` sem batching.
-Ajuste:
-- counts baseados no **mesmo universo paginado** (período selecionado), com batching.
-- Se o período “Todos” for muito grande, aplicar uma regra clara:
-  - “Todos (últimos 30 dias)” por padrão para performance,
-  - e o usuário usa o filtro de período/custom para expandir com intenção.
-
-#### 4) Automação no backend para não depender do navegador (opcional, mas recomendado para “definitivo”)
-Hoje você automatizou pedidos (nightly/hourly), mas **shipments e invoices ainda dependem muito do frontend**.
-Proposta:
-- Criar jobs automáticos:
-  - `shipments-hourly-sync` (últimas 48h)
-  - `shipments-nightly-sync` (últimos 30 dias)
-  - (opcional) `invoices-hourly-sync` / `invoices-nightly-sync`
-- Eles rodam com lock no `sync_scheduler`, refresh de token, batching e rate-limit.
-- A tela de Etiquetas vira somente “leitura + ações”, não o motor de sincronização.
-
-Isso evita o cenário de “tentei 4 vezes e nada muda”.
-
-#### 5) Painel de diagnóstico (para acabar com tentativa e erro)
-Adicionar no topo das Etiquetas:
-- “Último pedido no cache: DD/MM HH:mm”
-- “Shipments faltantes (30d): X”
-- “Última execução de envios: há Y min”
-- Botão “Reparar envios (30 dias)”
-
-Assim, quando algo falhar, fica óbvio o que falta (orders vs shipments vs invoices).
+- Mostrar spinner durante o envio real ao ML
+- Em caso de erro, mostrar mensagem específica (não apenas "Erro")
+- Botão "Tentar novamente" para respostas com falha
 
 ---
 
-## Critérios de aceite (sem subjetividade)
-1) Na tela `/shipping-labels`, com período “Todos”:
-   - aparece pedido com data **> 27/01** (ex.: 03/02).
-2) `missing_30d` (shipments faltantes nos últimos 30 dias) cai de ~309 para **próximo de 0** após um sync.
-3) O botão de sync não “conclui” antes de o job de pedidos terminar (pipeline sequencial e rastreável).
-4) Mesmo que shipments ainda não estejam no cache, os pedidos recentes **aparecem** com status de “pendente” (sem sensação de travamento).
+## Arquivos a serem modificados/criados
+
+| Arquivo | Ação |
+|---------|------|
+| `supabase/functions/ml-answer-question/index.ts` | Criar - Edge Function para enviar resposta ao ML |
+| `src/hooks/useQA.ts` | Modificar - Chamar a Edge Function ao enviar |
+| `src/components/qa/QaResponseEditor.tsx` | Modificar - Melhorar feedback de erro/sucesso |
 
 ---
 
-## Riscos e como vamos evitar
-- **Timeout / payload grande**: resolvido com paginação + batches.
-- **Rate limit da API**: resolvido com delays e batches pequenos (já há padrão no projeto).
-- **Dados históricos enormes**: por padrão trabalharemos em “recente” (30d/48h) e só expande com filtro custom.
+## Detalhes Técnicos
+
+### Edge Function `ml-answer-question`
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│  Frontend chama ml-answer-question                              │
+│  ↓                                                              │
+│  1. Valida autenticação do usuário                              │
+│  2. Busca access_token do ML para o seller_id                   │
+│  3. Refresh token se necessário                                 │
+│  4. POST https://api.mercadolibre.com/answers                   │
+│     Body: { "question_id": ml_question_id, "text": resposta }   │
+│  5. Se sucesso: retorna { success: true, ml_response_id }       │
+│  6. Se erro: retorna { success: false, error_code, message }    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Fluxo atualizado do `useCreateResponse`
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│  Usuário clica "Enviar"                                         │
+│  ↓                                                              │
+│  1. Insere resposta em qa_responses (is_draft=false, is_sent=0) │
+│  2. Chama ml-answer-question                                    │
+│  3. Se ML retornar sucesso:                                     │
+│     - Atualiza qa_responses: is_sent=true, ml_response_id       │
+│     - Atualiza qa_questions: status=answered                    │
+│     - Toast: "Resposta enviada com sucesso"                     │
+│  4. Se ML retornar erro:                                        │
+│     - Atualiza qa_responses: send_error = mensagem              │
+│     - Mantém qa_questions: status=pending                       │
+│     - Toast: "Erro ao enviar: [motivo específico]"              │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## Plano de execução (passo a passo)
-1) Ajustar `useShippingLabels.ts`:
-   - esperar `ml-sync-orders` concluir
-   - coletar `shipment_ids` via query ordenada + paginada
-   - detectar missing shipments via batches
-   - invocar `ml-sync-shipments` em batches
-   - invocar `ml-sync-invoices` em batches
-   - preencher `syncProgress` e estados para feedback
-2) Alterar a renderização da tabela para **não ocultar** pedidos sem shipment cache (mostrar placeholder)
-3) Refatorar `shipping-orders-all` (counts) para:
-   - usar universo paginado/batch
-   - evitar `.in(...)` gigante sem batching
-4) (Recomendado) Criar jobs automáticos para shipments/invoices com lock no `sync_scheduler` (sem depender do navegador)
-5) Teste E2E:
-   - abrir Etiquetas, rodar sync 1 vez, verificar datas > 27/01 e missing_30d ~ 0
+## Critérios de Aceite
 
-Se você aprovar, eu implemento em uma rodada só e já deixo a tela com diagnóstico para você não precisar “gastar crédito no escuro” de novo.
+1. Ao clicar "Enviar", a resposta é postada no Mercado Livre (verificável abrindo a pergunta no ML)
+2. O campo `is_sent` em `qa_responses` reflete corretamente se foi enviado ao ML
+3. Se o ML rejeitar a resposta, o usuário vê o motivo específico
+4. Após envio bem-sucedido, a pergunta não reaparece como "pendente" na próxima sincronização
