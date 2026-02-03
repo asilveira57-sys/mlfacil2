@@ -5,7 +5,7 @@ import { useToast } from '@/hooks/use-toast';
 import { toZonedTime, fromZonedTime } from 'date-fns-tz';
 import { startOfDay, endOfDay, subDays, subHours } from 'date-fns';
 
-export type FinalStatus = 'pronta' | 'aguardando_nf' | 'reimprimir' | 'full' | 'enviado' | 'outros' | 'all';
+export type FinalStatus = 'pronta' | 'aguardando_nf' | 'reimprimir' | 'full' | 'enviado' | 'outros' | 'pendente_sync' | 'all';
 export type PeriodFilter = 'all' | 'today' | '7d' | '15d' | '30d' | 'custom';
 export type SyncPhase = 'idle' | 'orders' | 'shipments' | 'invoices' | 'done';
 export type SortField = 'created_at_meli' | 'buyer_nickname' | 'final_status';
@@ -99,6 +99,13 @@ export interface DateRange {
   to: Date | null;
 }
 
+export interface DiagnosticInfo {
+  lastOrderDate: string | null;
+  missingShipments30d: number;
+  lastShipmentSyncAt: string | null;
+  totalOrders30d: number;
+}
+
 interface UseShippingLabelsOptions {
   sellerId: string | null;
 }
@@ -113,8 +120,14 @@ const INITIAL_GENERATION_PROGRESS: GenerationProgress = {
 };
 
 const PAGE_SIZE = 30;
-// Limit total orders fetched to prevent UI freeze on large datasets
-const MAX_ORDERS_FETCH = 500;
+// For sync operations: limit per batch query to avoid timeouts
+const SYNC_QUERY_BATCH = 1000;
+// Batch size for shipment sync requests to edge function
+const SHIPMENT_SYNC_BATCH = 200;
+// Batch size for invoice sync requests
+const INVOICE_SYNC_BATCH = 300;
+// Max poll attempts (2 min timeout)
+const MAX_POLL_ATTEMPTS = 60;
 
 // Helper to get auth headers
 async function getAuthHeaders(): Promise<{ Authorization: string } | null> {
@@ -138,17 +151,45 @@ const STATUS_PRIORITY: Record<string, number> = {
   pronta: 1,
   aguardando_nf: 2,
   reimprimir: 3,
-  full: 4,
-  enviado: 5,
-  outros: 6,
+  pendente_sync: 4,
+  full: 5,
+  enviado: 6,
+  outros: 7,
 };
+
+/**
+ * Fetch all rows using pagination to bypass Supabase's 1000 row limit
+ */
+async function fetchAllRowsPaginated<T>(
+  queryFn: (offset: number, limit: number) => Promise<{ data: T[] | null; error: Error | null }>,
+  batchSize: number = SYNC_QUERY_BATCH
+): Promise<T[]> {
+  const allRows: T[] = [];
+  let offset = 0;
+  
+  while (true) {
+    const { data, error } = await queryFn(offset, batchSize);
+    
+    if (error) {
+      console.error('Pagination query error:', error);
+      break;
+    }
+    
+    if (!data || data.length === 0) break;
+    
+    if (data.length < batchSize) break; // Last page
+    offset += batchSize;
+  }
+  
+  return allRows;
+}
 
 export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   
   const [statusFilter, setStatusFilter] = useState<FinalStatus>('all');
-  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('all'); // Default: sem filtro
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('30d'); // Default: 30 days for performance
   const [customDateRange, setCustomDateRange] = useState<DateRange>({ from: null, to: null });
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('created_at_meli');
@@ -160,6 +201,12 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const [syncProgress, setSyncProgress] = useState<string>('');
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [generationProgress, setGenerationProgress] = useState<GenerationProgress>(INITIAL_GENERATION_PROGRESS);
+  const [diagnosticInfo, setDiagnosticInfo] = useState<DiagnosticInfo>({
+    lastOrderDate: null,
+    missingShipments30d: 0,
+    lastShipmentSyncAt: null,
+    totalOrders30d: 0,
+  });
   const syncAbortRef = useRef(false);
   const lastSyncTimeRef = useRef<number>(0);
   const hasAutoSyncedRef = useRef(false);
@@ -180,8 +227,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     
     switch (periodFilter) {
       case 'all':
-        // No date filter
-        return { dateFrom: null, dateTo: null };
+        // For "all", default to last 30 days for performance
+        dateFrom = startOfDay(subDays(nowBrasilia, 30));
+        dateTo = endOfDay(nowBrasilia);
+        break;
       case 'today':
         // Últimas 24 horas (rolling window)
         dateFrom = subHours(now, 24);
@@ -218,6 +267,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   }, [periodFilter, customDateRange]);
 
   // FAST LOAD: Query local cache with joins - with pagination
+  // IMPORTANT: Now shows orders even without shipment cache (pendente_sync status)
   const { data: ordersData, isLoading, refetch } = useQuery({
     queryKey: ['shipping-orders', sellerId, statusFilter, periodFilter, customDateRange, currentPage, searchQuery, sortField, sortDirection],
     queryFn: async () => {
@@ -225,16 +275,15 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
       const { dateFrom, dateTo } = getDateRange();
 
-      // Build base query - exclude cancelled and limit to prevent UI freeze
+      // Build base query - exclude cancelled, order by recent first
       let query = supabase
         .from('meli_orders_cache')
         .select('*', { count: 'exact' })
         .eq('seller_id', sellerId)
         .not('order_status', 'in', `(${COMPLETED_ORDER_STATUSES.join(',')})`)
-        .order('created_at_meli', { ascending: false })
-        .limit(MAX_ORDERS_FETCH);
+        .order('created_at_meli', { ascending: false });
 
-      // Apply date filters if set
+      // Apply date filters
       if (dateFrom) {
         query = query.gte('created_at_meli', dateFrom);
       }
@@ -303,50 +352,59 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         invoicesData.map(i => [i.order_id as string, i])
       );
 
-      // Step 4: Build combined view - include ALL orders for "Todos" filter
+      // Step 4: Build combined view - INCLUDE orders even without shipment cache
       const combinedOrders: ShippingOrder[] = ordersRaw
         .map(order => {
           const shipment = order.shipment_id ? shipmentsMap.get(order.shipment_id) : null;
           const invoice = invoicesMap.get(order.order_id);
 
-          // Skip orders without shipment
-          if (!shipment || !order.shipment_id) return null;
-
-          const logisticType = shipment.logistic_type as string | null;
-          const labelAvailable = (shipment?.label_available as boolean | null) ?? false;
-          const substatus = shipment?.shipment_substatus as string | null;
-          const shipmentStatus = shipment?.shipment_status as string | null;
-
-          // Calculate final_status for ALL orders
+          // Calculate final_status
           let finalStatus: string;
+          let selectable = false;
 
-          // FULL logistics - ML handles these
-          if (logisticType && FULL_LOGISTIC_TYPES.includes(logisticType)) {
-            finalStatus = 'full';
-          }
-          // Already shipped/delivered
-          else if (shipmentStatus && COMPLETED_SHIPMENT_STATUSES.includes(shipmentStatus)) {
-            finalStatus = 'enviado';
-          }
-          // Already printed - can reprint
-          else if (substatus === 'printed') {
-            finalStatus = 'reimprimir';
-          }
-          // Waiting for NF emission at ML
-          else if (substatus === 'invoice_pending') {
-            finalStatus = 'aguardando_nf';
-          }
-          // Ready to print (NF already emitted)
-          else if (substatus === 'ready_to_print' && labelAvailable) {
-            finalStatus = 'pronta';
-          }
-          // Other statuses (in_hub, packed, etc.)
-          else {
+          // If no shipment data in cache yet, show as pending sync
+          if (!shipment && order.shipment_id) {
+            finalStatus = 'pendente_sync';
+            selectable = false;
+          } else if (!order.shipment_id) {
+            // No shipment ID at all - other status
             finalStatus = 'outros';
+            selectable = false;
+          } else {
+            const logisticType = shipment?.logistic_type as string | null;
+            const labelAvailable = (shipment?.label_available as boolean | null) ?? false;
+            const substatus = shipment?.shipment_substatus as string | null;
+            const shipmentStatus = shipment?.shipment_status as string | null;
+
+            // FULL logistics - ML handles these
+            if (logisticType && FULL_LOGISTIC_TYPES.includes(logisticType)) {
+              finalStatus = 'full';
+            }
+            // Already shipped/delivered
+            else if (shipmentStatus && COMPLETED_SHIPMENT_STATUSES.includes(shipmentStatus)) {
+              finalStatus = 'enviado';
+            }
+            // Already printed - can reprint
+            else if (substatus === 'printed') {
+              finalStatus = 'reimprimir';
+              selectable = true;
+            }
+            // Waiting for NF emission at ML
+            else if (substatus === 'invoice_pending') {
+              finalStatus = 'aguardando_nf';
+            }
+            // Ready to print (NF already emitted)
+            else if (substatus === 'ready_to_print' && labelAvailable) {
+              finalStatus = 'pronta';
+              selectable = true;
+            }
+            // Other statuses (in_hub, packed, etc.)
+            else {
+              finalStatus = 'outros';
+            }
           }
 
-          // Selectable for bulk printing: pronta (new) or reimprimir (reprint)
-          const selectable = finalStatus === 'pronta' || finalStatus === 'reimprimir';
+          const logisticType = shipment?.logistic_type as string | null ?? null;
 
           return {
             id: order.id,
@@ -362,7 +420,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
             shipment_status: (shipment?.shipment_status as string | null) ?? null,
             shipment_substatus: (shipment?.shipment_substatus as string | null) ?? null,
             tracking_number: (shipment?.tracking_number as string | null) ?? null,
-            label_available: labelAvailable,
+            label_available: (shipment?.label_available as boolean | null) ?? false,
             receiver_name: (shipment?.receiver_name as string | null) ?? null,
             shipment_sync_at: (shipment?.last_sync_at as string | null) ?? null,
             invoice_status: (invoice?.invoice_status as string | null) ?? 'pendente',
@@ -372,26 +430,26 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
             invoice_sync_at: (invoice?.last_sync_at as string | null) ?? null,
             final_status: finalStatus,
             selectable,
-            logistic_type: logisticType ?? null,
+            logistic_type: logisticType,
           };
-        })
-        .filter((o): o is ShippingOrder => o !== null);
+        });
 
       // Group by shipment_id to handle shopping cart orders (multiple orders = one shipment)
       // Keep the one with higher priority status
       const groupedByShipment = new Map<string, ShippingOrder>();
       combinedOrders.forEach(order => {
-        if (!order.shipment_id) return;
+        // For orders without shipment_id, use order_id as key
+        const key = order.shipment_id || order.order_id;
         
-        const existing = groupedByShipment.get(order.shipment_id);
+        const existing = groupedByShipment.get(key);
         if (!existing) {
-          groupedByShipment.set(order.shipment_id, order);
+          groupedByShipment.set(key, order);
         } else {
           // Keep the one with higher priority (lower number = higher priority)
           const existingPriority = STATUS_PRIORITY[existing.final_status || ''] || 99;
           const newPriority = STATUS_PRIORITY[order.final_status || ''] || 99;
           if (newPriority < existingPriority) {
-            groupedByShipment.set(order.shipment_id, order);
+            groupedByShipment.set(key, order);
           }
         }
       });
@@ -498,37 +556,114 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
   const orderItems = orderItemsData ?? new Map<string, OrderItemSummary[]>();
 
+  // === DIAGNOSTIC INFO ===
+  const updateDiagnosticInfo = useCallback(async () => {
+    if (!sellerId) return;
+    
+    try {
+      const now = new Date();
+      const thirtyDaysAgo = subDays(now, 30).toISOString();
+
+      // Get last order date
+      const { data: lastOrder } = await supabase
+        .from('meli_orders_cache')
+        .select('created_at_meli')
+        .eq('seller_id', sellerId)
+        .order('created_at_meli', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      // Get orders in last 30 days with shipment_id
+      const { data: recentOrders } = await supabase
+        .from('meli_orders_cache')
+        .select('shipment_id')
+        .eq('seller_id', sellerId)
+        .gte('created_at_meli', thirtyDaysAgo)
+        .not('shipment_id', 'is', null);
+
+      const recentShipmentIds = [...new Set((recentOrders || []).map(o => o.shipment_id).filter(Boolean))] as string[];
+
+      // Check how many are in shipments cache (batch query)
+      let existingCount = 0;
+      const BATCH_SIZE = 200;
+      for (let i = 0; i < recentShipmentIds.length; i += BATCH_SIZE) {
+        const batch = recentShipmentIds.slice(i, i + BATCH_SIZE);
+        const { count } = await supabase
+          .from('meli_shipments_cache')
+          .select('shipment_id', { count: 'exact', head: true })
+          .eq('seller_id', sellerId)
+          .in('shipment_id', batch);
+        existingCount += count || 0;
+      }
+
+      const missingCount = recentShipmentIds.length - existingCount;
+
+      // Get last shipment sync
+      const { data: lastShipmentSync } = await supabase
+        .from('sync_jobs')
+        .select('created_at')
+        .eq('seller_id', sellerId)
+        .eq('job_type', 'shipments')
+        .eq('status', 'done')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      setDiagnosticInfo({
+        lastOrderDate: lastOrder?.created_at_meli || null,
+        missingShipments30d: Math.max(0, missingCount),
+        lastShipmentSyncAt: lastShipmentSync?.created_at || null,
+        totalOrders30d: recentOrders?.length || 0,
+      });
+    } catch (err) {
+      console.error('Error updating diagnostic info:', err);
+    }
+  }, [sellerId]);
+
+  // Update diagnostics on mount and after sync
+  useEffect(() => {
+    if (sellerId) {
+      updateDiagnosticInfo();
+    }
+  }, [sellerId, updateDiagnosticInfo]);
+
   // === SYNC PIPELINE (background, silent by default) ===
 
-  // Poll for sync job completion (silent mode - no UI updates)
-  const pollSyncJobs = useCallback(async (jobIds: string[], silent: boolean) => {
-    const maxAttempts = 60; // 2 minutes max
+  // Wait for a specific job to complete
+  const waitForJob = useCallback(async (jobId: string, silent: boolean): Promise<boolean> => {
     let attempts = 0;
     
-    while (attempts < maxAttempts) {
-      await sleep(2000); // Poll every 2 seconds
+    while (attempts < MAX_POLL_ATTEMPTS) {
+      await sleep(2000);
       attempts++;
       
-      const { data: jobs } = await supabase
+      const { data: job } = await supabase
         .from('sync_jobs')
-        .select('id, status, job_type, processed_records, total_records')
-        .in('id', jobIds);
+        .select('status, processed_records, total_records')
+        .eq('id', jobId)
+        .maybeSingle();
       
-      if (!jobs) continue;
+      if (!job) continue;
       
-      const allDone = jobs.every(j => j.status === 'done' || j.status === 'error');
+      if (job.status === 'done') {
+        console.log(`Job ${jobId} completed: ${job.processed_records}/${job.total_records}`);
+        return true;
+      }
       
-      if (allDone) {
-        console.log('All sync jobs completed (silent:', silent, ')');
-        break;
+      if (job.status === 'error') {
+        console.error(`Job ${jobId} failed`);
+        return false;
+      }
+      
+      // Update progress
+      if (!silent && job.total_records && job.processed_records) {
+        setSyncProgress(`${job.processed_records}/${job.total_records}`);
       }
     }
     
-    // Refresh UI after all jobs complete
-    await refetch();
-    queryClient.invalidateQueries({ queryKey: ['shipping-orders'] });
-    queryClient.invalidateQueries({ queryKey: ['shipping-orders-all'] });
-  }, [refetch, queryClient]);
+    console.warn(`Job ${jobId} timed out after ${MAX_POLL_ATTEMPTS * 2} seconds`);
+    return false;
+  }, []);
 
   // Core sync pipeline - silent mode available
   const startSyncPipeline = useCallback(async (silent = false) => {
@@ -546,6 +681,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     if (!silent) {
       setIsSyncing(true);
       setSyncPhase('orders');
+      setSyncProgress('Sincronizando pedidos...');
     }
 
     const headers = await getAuthHeaders();
@@ -553,115 +689,153 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       if (!silent) {
         setIsSyncing(false);
         setSyncPhase('idle');
+        setSyncProgress('');
       }
       return;
     }
 
-    const jobIds: string[] = [];
-
     try {
-      // Phase 1: Start orders sync
+      // === PHASE 1: Sync Orders and WAIT for completion ===
       const { dateFrom, dateTo } = getDateRange();
       const ordersResponse = await supabase.functions.invoke('ml-sync-orders', {
         headers,
         body: {
           seller_id: sellerId,
-          date_from: dateFrom || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+          date_from: dateFrom || subDays(new Date(), 30).toISOString(),
           date_to: dateTo || new Date().toISOString(),
         },
       });
 
       if (ordersResponse.data?.job_id) {
-        jobIds.push(ordersResponse.data.job_id);
+        if (!silent) setSyncProgress('Aguardando pedidos...');
+        await waitForJob(ordersResponse.data.job_id, silent);
       }
 
-      // Wait a bit for orders to start populating
-      await sleep(1500);
-
-      // Refresh UI with whatever data exists
+      // Refresh UI with new orders
       await refetch();
 
-      // Get shipment IDs from orders cache for next phase
-      const { data: ordersWithShipments } = await supabase
-        .from('meli_orders_cache')
-        .select('order_id, shipment_id')
-        .eq('seller_id', sellerId)
-        .not('order_status', 'in', `(cancelled)`);
-
-      const orderIds = (ordersWithShipments || []).map(o => o.order_id);
-      const allShipmentIds = [...new Set((ordersWithShipments || []).map(o => o.shipment_id).filter(Boolean))] as string[];
-
+      // === PHASE 2: Collect shipment_ids using ORDERED + PAGINATED query ===
       if (!silent) {
         setSyncPhase('shipments');
+        setSyncProgress('Verificando envios...');
       }
 
-      // Phase 2: Start shipments sync - ONLY for missing shipments
-      if (allShipmentIds.length > 0) {
-        // Find which shipments are already cached
-        const { data: existingShipments } = await supabase
+      // Use paginated fetch to get ALL orders (bypass 1000 limit)
+      type OrderWithShipment = { order_id: string; shipment_id: string | null; created_at_meli: string | null };
+      
+      const allOrders = await fetchAllRowsPaginated<OrderWithShipment>(
+        async (offset, limit) => {
+          const { data, error } = await supabase
+            .from('meli_orders_cache')
+            .select('order_id, shipment_id, created_at_meli')
+            .eq('seller_id', sellerId)
+            .not('order_status', 'in', `(cancelled)`)
+            .gte('created_at_meli', dateFrom || subDays(new Date(), 30).toISOString())
+            .order('created_at_meli', { ascending: false })
+            .range(offset, offset + limit - 1);
+          return { data: data as OrderWithShipment[] | null, error };
+        }
+      );
+
+      const orderIds = allOrders.map(o => o.order_id);
+      const allShipmentIds = [...new Set(allOrders.map(o => o.shipment_id).filter(Boolean))] as string[];
+
+      console.log(`Fetched ${allOrders.length} orders with ${allShipmentIds.length} unique shipment IDs`);
+
+      // === PHASE 3: Find MISSING shipments using batched verification ===
+      const existingShipmentSet = new Set<string>();
+      const VERIFY_BATCH = 200;
+      
+      for (let i = 0; i < allShipmentIds.length; i += VERIFY_BATCH) {
+        const batch = allShipmentIds.slice(i, i + VERIFY_BATCH);
+        const { data: existing } = await supabase
           .from('meli_shipments_cache')
           .select('shipment_id')
           .eq('seller_id', sellerId)
-          .in('shipment_id', allShipmentIds.slice(0, 500)); // Limit query size
+          .in('shipment_id', batch);
         
-        const existingSet = new Set((existingShipments || []).map(s => s.shipment_id));
-        const missingShipmentIds = allShipmentIds.filter(id => !existingSet.has(id));
-        
-        console.log(`Shipments: ${allShipmentIds.length} total, ${missingShipmentIds.length} missing`);
-        
-        if (missingShipmentIds.length > 0) {
-          // Batch to avoid edge function timeout - max 200 per request
-          const SHIPMENT_BATCH = 200;
-          for (let i = 0; i < missingShipmentIds.length; i += SHIPMENT_BATCH) {
-            const batch = missingShipmentIds.slice(i, i + SHIPMENT_BATCH);
-            const shipmentsResponse = await supabase.functions.invoke('ml-sync-shipments', {
-              headers,
-              body: { seller_id: sellerId, shipment_ids: batch },
-            });
-            if (shipmentsResponse.data?.job_id) {
-              jobIds.push(shipmentsResponse.data.job_id);
-            }
-            // Small delay between batches
-            if (i + SHIPMENT_BATCH < missingShipmentIds.length) {
-              await sleep(500);
-            }
-          }
-        }
+        (existing || []).forEach(s => existingShipmentSet.add(s.shipment_id));
       }
 
-      if (!silent) {
-        setSyncPhase('invoices');
-      }
+      const missingShipmentIds = allShipmentIds.filter(id => !existingShipmentSet.has(id));
+      console.log(`Shipments: ${allShipmentIds.length} total, ${existingShipmentSet.size} cached, ${missingShipmentIds.length} missing`);
 
-      // Phase 3: Start invoices sync
-      if (orderIds.length > 0) {
-        const invoicesResponse = await supabase.functions.invoke('ml-sync-invoices', {
-          headers,
-          body: { seller_id: sellerId, order_ids: orderIds },
-        });
-        if (invoicesResponse.data?.job_id) {
-          jobIds.push(invoicesResponse.data.job_id);
-        }
-      }
-
-      // Poll for completion in background
-      if (jobIds.length > 0) {
-        pollSyncJobs(jobIds, silent).then(() => {
-          setLastSyncAt(new Date().toISOString());
+      // === PHASE 4: Sync MISSING shipments in batches with progress ===
+      if (missingShipmentIds.length > 0) {
+        const totalBatches = Math.ceil(missingShipmentIds.length / SHIPMENT_SYNC_BATCH);
+        
+        for (let i = 0; i < missingShipmentIds.length; i += SHIPMENT_SYNC_BATCH) {
+          const batchNum = Math.floor(i / SHIPMENT_SYNC_BATCH) + 1;
+          const batch = missingShipmentIds.slice(i, i + SHIPMENT_SYNC_BATCH);
           
           if (!silent) {
-            setSyncPhase('done');
-            setTimeout(() => {
-              setIsSyncing(false);
-              setSyncPhase('idle');
-            }, 1000);
+            setSyncProgress(`Envios ${batchNum}/${totalBatches} (${batch.length} itens)`);
           }
-        });
-      } else {
-        if (!silent) {
+          
+          const shipmentsResponse = await supabase.functions.invoke('ml-sync-shipments', {
+            headers,
+            body: { seller_id: sellerId, shipment_ids: batch },
+          });
+          
+          if (shipmentsResponse.data?.job_id) {
+            await waitForJob(shipmentsResponse.data.job_id, silent);
+          }
+          
+          // Small delay between batches
+          if (i + SHIPMENT_SYNC_BATCH < missingShipmentIds.length) {
+            await sleep(500);
+          }
+        }
+      }
+
+      // === PHASE 5: Sync invoices in batches ===
+      if (!silent) {
+        setSyncPhase('invoices');
+        setSyncProgress('Sincronizando notas fiscais...');
+      }
+
+      if (orderIds.length > 0) {
+        const totalInvoiceBatches = Math.ceil(orderIds.length / INVOICE_SYNC_BATCH);
+        
+        for (let i = 0; i < orderIds.length; i += INVOICE_SYNC_BATCH) {
+          const batchNum = Math.floor(i / INVOICE_SYNC_BATCH) + 1;
+          const batch = orderIds.slice(i, i + INVOICE_SYNC_BATCH);
+          
+          if (!silent && totalInvoiceBatches > 1) {
+            setSyncProgress(`NFs ${batchNum}/${totalInvoiceBatches}`);
+          }
+          
+          const invoicesResponse = await supabase.functions.invoke('ml-sync-invoices', {
+            headers,
+            body: { seller_id: sellerId, order_ids: batch },
+          });
+          
+          if (invoicesResponse.data?.job_id) {
+            await waitForJob(invoicesResponse.data.job_id, silent);
+          }
+          
+          // Small delay between batches
+          if (i + INVOICE_SYNC_BATCH < orderIds.length) {
+            await sleep(300);
+          }
+        }
+      }
+
+      // === PHASE 6: Complete ===
+      setLastSyncAt(new Date().toISOString());
+      await refetch();
+      queryClient.invalidateQueries({ queryKey: ['shipping-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['shipping-orders-all'] });
+      await updateDiagnosticInfo();
+
+      if (!silent) {
+        setSyncPhase('done');
+        setSyncProgress('Concluído!');
+        setTimeout(() => {
           setIsSyncing(false);
           setSyncPhase('idle');
-        }
+          setSyncProgress('');
+        }, 1500);
       }
 
     } catch (error) {
@@ -674,9 +848,122 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         });
         setIsSyncing(false);
         setSyncPhase('idle');
+        setSyncProgress('');
       }
     }
-  }, [isSyncing, sellerId, getDateRange, refetch, queryClient, toast, pollSyncJobs]);
+  }, [isSyncing, sellerId, getDateRange, refetch, queryClient, toast, waitForJob, updateDiagnosticInfo]);
+
+  // Repair sync: force sync of all missing shipments (last 30 days)
+  const repairSync = useCallback(async () => {
+    if (isSyncing) return;
+    
+    setIsSyncing(true);
+    setSyncPhase('shipments');
+    setSyncProgress('Reparando envios faltantes...');
+    
+    const headers = await getAuthHeaders();
+    if (!headers || !sellerId) {
+      setIsSyncing(false);
+      setSyncPhase('idle');
+      setSyncProgress('');
+      return;
+    }
+
+    try {
+      const thirtyDaysAgo = subDays(new Date(), 30).toISOString();
+      
+      // Get all orders with shipment_id from last 30 days
+      type OrderWithShipment = { shipment_id: string | null };
+      const allOrders = await fetchAllRowsPaginated<OrderWithShipment>(
+        async (offset, limit) => {
+          const { data, error } = await supabase
+            .from('meli_orders_cache')
+            .select('shipment_id')
+            .eq('seller_id', sellerId)
+            .gte('created_at_meli', thirtyDaysAgo)
+            .not('shipment_id', 'is', null)
+            .order('created_at_meli', { ascending: false })
+            .range(offset, offset + limit - 1);
+          return { data: data as OrderWithShipment[] | null, error };
+        }
+      );
+
+      const allShipmentIds = [...new Set(allOrders.map(o => o.shipment_id).filter(Boolean))] as string[];
+
+      // Find missing
+      const existingSet = new Set<string>();
+      const BATCH = 200;
+      for (let i = 0; i < allShipmentIds.length; i += BATCH) {
+        const batch = allShipmentIds.slice(i, i + BATCH);
+        const { data } = await supabase
+          .from('meli_shipments_cache')
+          .select('shipment_id')
+          .eq('seller_id', sellerId)
+          .in('shipment_id', batch);
+        (data || []).forEach(s => existingSet.add(s.shipment_id));
+      }
+
+      const missing = allShipmentIds.filter(id => !existingSet.has(id));
+      console.log(`Repair: ${missing.length} shipments missing`);
+
+      if (missing.length === 0) {
+        toast({ title: 'Tudo sincronizado!', description: 'Nenhum envio faltando.' });
+        setIsSyncing(false);
+        setSyncPhase('idle');
+        setSyncProgress('');
+        return;
+      }
+
+      // Sync all missing
+      const totalBatches = Math.ceil(missing.length / SHIPMENT_SYNC_BATCH);
+      for (let i = 0; i < missing.length; i += SHIPMENT_SYNC_BATCH) {
+        const batchNum = Math.floor(i / SHIPMENT_SYNC_BATCH) + 1;
+        const batch = missing.slice(i, i + SHIPMENT_SYNC_BATCH);
+        
+        setSyncProgress(`Reparando ${batchNum}/${totalBatches} (${batch.length} envios)`);
+        
+        const resp = await supabase.functions.invoke('ml-sync-shipments', {
+          headers,
+          body: { seller_id: sellerId, shipment_ids: batch },
+        });
+        
+        if (resp.data?.job_id) {
+          await waitForJob(resp.data.job_id, false);
+        }
+        
+        if (i + SHIPMENT_SYNC_BATCH < missing.length) {
+          await sleep(500);
+        }
+      }
+
+      setLastSyncAt(new Date().toISOString());
+      await refetch();
+      await updateDiagnosticInfo();
+      
+      toast({
+        title: 'Reparo concluído!',
+        description: `${missing.length} envios sincronizados.`,
+      });
+
+      setSyncPhase('done');
+      setSyncProgress('');
+      setTimeout(() => {
+        setIsSyncing(false);
+        setSyncPhase('idle');
+      }, 1000);
+
+    } catch (error) {
+      console.error('Repair error:', error);
+      toast({
+        title: 'Erro no reparo',
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
+        variant: 'destructive',
+      });
+      setIsSyncing(false);
+      setSyncPhase('idle');
+      setSyncProgress('');
+    }
+  }, [isSyncing, sellerId, refetch, toast, waitForJob, updateDiagnosticInfo]);
 
   // Generate labels mutation with batch support
   const generateLabelsMutation = useMutation({
@@ -846,7 +1133,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   }, [startSyncPipeline]);
 
   // Calculate status counts from the current orders (already deduped)
-  // We need a separate query for counts that doesn't apply statusFilter
+  // FIXED: Use batched queries to avoid truncation
   const { data: allOrdersForCounts = [] } = useQuery({
     queryKey: ['shipping-orders-all', sellerId, periodFilter, customDateRange],
     queryFn: async () => {
@@ -854,78 +1141,103 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
       const { dateFrom, dateTo } = getDateRange();
 
-      // Get all orders for counting - exclude cancelled
-      let query = supabase
-        .from('meli_orders_cache')
-        .select('order_id, shipment_id')
-        .eq('seller_id', sellerId)
-        .not('order_status', 'in', `(${COMPLETED_ORDER_STATUSES.join(',')})`);
+      // Get orders using pagination to avoid 1000 limit
+      type OrderBasic = { order_id: string; shipment_id: string | null };
+      const ordersData = await fetchAllRowsPaginated<OrderBasic>(
+        async (offset, limit) => {
+          let q = supabase
+            .from('meli_orders_cache')
+            .select('order_id, shipment_id')
+            .eq('seller_id', sellerId)
+            .not('order_status', 'in', `(${COMPLETED_ORDER_STATUSES.join(',')})`);
+          
+          if (dateFrom) q = q.gte('created_at_meli', dateFrom);
+          if (dateTo) q = q.lte('created_at_meli', dateTo);
+          
+          const { data, error } = await q
+            .order('created_at_meli', { ascending: false })
+            .range(offset, offset + limit - 1);
+          
+          return { data: data as OrderBasic[] | null, error };
+        }
+      );
 
-      if (dateFrom) {
-        query = query.gte('created_at_meli', dateFrom);
-      }
-      if (dateTo) {
-        query = query.lte('created_at_meli', dateTo);
-      }
-
-      const { data: ordersData } = await query;
-
-      if (!ordersData || ordersData.length === 0) return [];
+      if (ordersData.length === 0) return [];
 
       const shipmentIds = ordersData.map(o => o.shipment_id).filter(Boolean) as string[];
 
-      const shipmentsResult = shipmentIds.length > 0
-        ? await supabase.from('meli_shipments_cache').select('shipment_id, label_available, shipment_status, shipment_substatus, logistic_type').eq('seller_id', sellerId).in('shipment_id', shipmentIds)
-        : { data: [] };
-
-      const shipmentsMap = new Map((shipmentsResult.data || []).map(s => [s.shipment_id, s]));
+      // Fetch shipments in batches
+      const shipmentsMap = new Map<string, {
+        shipment_id: string;
+        label_available: boolean | null;
+        shipment_status: string | null;
+        shipment_substatus: string | null;
+        logistic_type: string | null;
+      }>();
+      
+      const BATCH_SIZE = 200;
+      for (let i = 0; i < shipmentIds.length; i += BATCH_SIZE) {
+        const batch = shipmentIds.slice(i, i + BATCH_SIZE);
+        const { data } = await supabase
+          .from('meli_shipments_cache')
+          .select('shipment_id, label_available, shipment_status, shipment_substatus, logistic_type')
+          .eq('seller_id', sellerId)
+          .in('shipment_id', batch);
+        
+        (data || []).forEach(s => shipmentsMap.set(s.shipment_id, s));
+      }
 
       // Build list with deduplication by shipment_id and priority
       const groupedByShipment = new Map<string, { finalStatus: string; priority: number }>();
       
       ordersData.forEach(o => {
         const shipment = o.shipment_id ? shipmentsMap.get(o.shipment_id) : null;
-        
-        // Skip if no shipment
-        if (!shipment || !o.shipment_id) return;
-
-        const substatus = shipment.shipment_substatus;
-        const labelAvailable = shipment.label_available ?? false;
-        const logisticType = shipment.logistic_type;
-        const shipmentStatus = shipment.shipment_status;
+        const key = o.shipment_id || o.order_id;
 
         let finalStatus: string;
 
-        // FULL logistics
-        if (logisticType && FULL_LOGISTIC_TYPES.includes(logisticType)) {
-          finalStatus = 'full';
-        }
-        // Already shipped/delivered
-        else if (shipmentStatus && COMPLETED_SHIPMENT_STATUSES.includes(shipmentStatus)) {
-          finalStatus = 'enviado';
-        }
-        // Already printed
-        else if (substatus === 'printed') {
-          finalStatus = 'reimprimir';
-        }
-        // Invoice pending
-        else if (substatus === 'invoice_pending') {
-          finalStatus = 'aguardando_nf';
-        }
-        // Ready to print
-        else if (substatus === 'ready_to_print' && labelAvailable) {
-          finalStatus = 'pronta';
-        }
-        // Other
-        else {
+        // If order has shipment_id but not in cache yet
+        if (o.shipment_id && !shipment) {
+          finalStatus = 'pendente_sync';
+        } else if (!o.shipment_id) {
           finalStatus = 'outros';
+        } else {
+          const substatus = shipment!.shipment_substatus;
+          const labelAvailable = shipment!.label_available ?? false;
+          const logisticType = shipment!.logistic_type;
+          const shipmentStatus = shipment!.shipment_status;
+
+          // FULL logistics
+          if (logisticType && FULL_LOGISTIC_TYPES.includes(logisticType)) {
+            finalStatus = 'full';
+          }
+          // Already shipped/delivered
+          else if (shipmentStatus && COMPLETED_SHIPMENT_STATUSES.includes(shipmentStatus)) {
+            finalStatus = 'enviado';
+          }
+          // Already printed
+          else if (substatus === 'printed') {
+            finalStatus = 'reimprimir';
+          }
+          // Invoice pending
+          else if (substatus === 'invoice_pending') {
+            finalStatus = 'aguardando_nf';
+          }
+          // Ready to print
+          else if (substatus === 'ready_to_print' && labelAvailable) {
+            finalStatus = 'pronta';
+          }
+          // Other
+          else {
+            finalStatus = 'outros';
+          }
         }
 
         const priority = STATUS_PRIORITY[finalStatus] || 99;
-        const existing = groupedByShipment.get(o.shipment_id);
+        const existing = groupedByShipment.get(key);
         
         if (!existing || priority < existing.priority) {
-          groupedByShipment.set(o.shipment_id, { finalStatus, priority });
+          groupedByShipment.set(key, { finalStatus, priority });
         }
       });
 
@@ -1031,11 +1343,13 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     syncPhase,
     syncProgress,
     sync,
+    repairSync,
     lastSyncAt,
     statusCounts,
     generateLabels: generateLabelsMutation.mutate,
     isGenerating: generateLabelsMutation.isPending,
     generationProgress,
     orderItems,
+    diagnosticInfo,
   };
 }
