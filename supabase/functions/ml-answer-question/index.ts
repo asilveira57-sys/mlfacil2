@@ -86,16 +86,10 @@ serve(async (req) => {
     }
 
     const mlQuestionId = parseInt(question.ml_question_id, 10);
-    log(`ML Question ID: ${mlQuestionId}`);
+    log(`ML Question ID: ${mlQuestionId}, current status: ${question.status}`);
 
-    // Check if already answered
-    if (question.status === "answered") {
-      log("Question already answered locally");
-      return new Response(
-        JSON.stringify({ success: false, error: "Esta pergunta já foi respondida", error_code: "ALREADY_ANSWERED" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    // Note: We no longer block on "answered" status locally because it might be stale.
+    // The ML API is the source of truth and will return an error if already answered.
 
     // Get ML credentials
     const { data: mlAccount, error: accountError } = await supabase
