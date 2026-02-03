@@ -9459,6 +9459,48 @@ export type Database = {
         }
         Relationships: []
       }
+      sync_scheduler: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          id: string
+          job_name: string
+          last_run_at: string | null
+          lock_expires_at: string | null
+          locked_by: string | null
+          next_run_at: string | null
+          stats: Json | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          job_name: string
+          last_run_at?: string | null
+          lock_expires_at?: string | null
+          locked_by?: string | null
+          next_run_at?: string | null
+          stats?: Json | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          job_name?: string
+          last_run_at?: string | null
+          lock_expires_at?: string | null
+          locked_by?: string | null
+          next_run_at?: string | null
+          stats?: Json | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       system_events: {
         Row: {
           account_id: string | null

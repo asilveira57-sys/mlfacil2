@@ -158,3 +158,9 @@ verify_jwt = false
 
 [functions.publish-to-ml]
 verify_jwt = false
+
+[functions.orders-nightly-sync]
+verify_jwt = false
+
+[functions.orders-hourly-sync]
+verify_jwt = false
