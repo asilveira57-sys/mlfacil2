@@ -54,35 +54,59 @@ serve(async (req) => {
 
     console.log('Authenticated user:', user.id);
 
-    // Parse request body for date filters
+    // Parse request body for date filters and optional seller_id
     let dateFrom: string | null = null;
     let dateTo: string | null = null;
+    let requestedSellerId: string | null = null;
     
     if (req.method === 'POST') {
       try {
         const body = await req.json();
         dateFrom = body.date_from || null;
         dateTo = body.date_to || null;
-        console.log('Date filters:', { dateFrom, dateTo });
+        requestedSellerId = body.seller_id || null;
+        console.log('Request params:', { dateFrom, dateTo, requestedSellerId });
       } catch {
         // No body or invalid JSON, use defaults
       }
     }
 
-    // Get user's ML account (pega a conta ativa mais recente)
-    const { data: accounts, error: accountError } = await supabaseAdmin
-      .from('ml_accounts')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('is_active', true)
-      .order('updated_at', { ascending: false })
-      .limit(1);
+    // Get user's ML account
+    // If seller_id is provided, use that specific account; otherwise get most recently updated
+    let mlAccount = null;
+    
+    if (requestedSellerId) {
+      // Get specific account by seller_id
+      const { data: specificAccount, error: specificError } = await supabaseAdmin
+        .from('ml_accounts')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('ml_user_id', requestedSellerId)
+        .eq('is_active', true)
+        .maybeSingle();
+      
+      if (specificError) {
+        console.error('Error fetching specific ML account:', specificError);
+      }
+      mlAccount = specificAccount;
+    }
+    
+    // Fallback: get most recently updated account
+    if (!mlAccount) {
+      const { data: accounts, error: accountError } = await supabaseAdmin
+        .from('ml_accounts')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .order('updated_at', { ascending: false })
+        .limit(1);
 
-    const mlAccount = accounts?.[0] ?? null;
-
-    if (accountError) {
-      console.error('Error fetching ML account:', accountError);
-      throw new Error('Failed to fetch ML account');
+      if (accountError) {
+        console.error('Error fetching ML account:', accountError);
+        throw new Error('Failed to fetch ML account');
+      }
+      
+      mlAccount = accounts?.[0] ?? null;
     }
 
     if (!mlAccount) {
