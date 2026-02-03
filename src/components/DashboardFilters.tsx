@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import {
@@ -15,7 +16,7 @@ import {
 } from "@/components/ui/select";
 import { CalendarIcon, X } from "lucide-react";
 import { format, startOfMonth, endOfMonth, parse, subDays, startOfDay } from "date-fns";
-import { ptBR } from "date-fns/locale";
+import { ptBR, enUS, es } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 
 interface AvailableMonth {
@@ -36,18 +37,12 @@ interface DashboardFiltersProps {
 
 type QuickPeriod = "today" | "7d" | "15d" | "30d" | null;
 
-const PERIOD_OPTIONS: { value: QuickPeriod; label: string; days: number }[] = [
-  { value: "today", label: "Hoje", days: 0 },
-  { value: "7d", label: "7 dias", days: 7 },
-  { value: "15d", label: "15 dias", days: 15 },
-  { value: "30d", label: "30 dias", days: 30 },
-];
-
 export function DashboardFilters({
   availableMonths,
   onFilterChange,
   isLoading,
 }: DashboardFiltersProps) {
+  const { t, i18n } = useTranslation('sales');
   const [selectedMonth, setSelectedMonth] = useState<string>("");
   const [selectedPeriod, setSelectedPeriod] = useState<QuickPeriod>("30d");
   const [customRange, setCustomRange] = useState<{
@@ -55,6 +50,23 @@ export function DashboardFilters({
     to: Date | undefined;
   }>({ from: undefined, to: undefined });
   const [isCustomRangeOpen, setIsCustomRangeOpen] = useState(false);
+
+  // Get the appropriate locale for date-fns
+  const dateLocale = useMemo(() => {
+    switch (i18n.language) {
+      case 'en': return enUS;
+      case 'es': return es;
+      default: return ptBR;
+    }
+  }, [i18n.language]);
+
+  // Memoized period options with translations
+  const PERIOD_OPTIONS = useMemo(() => [
+    { value: "today" as QuickPeriod, label: t('filters.today'), days: 0 },
+    { value: "7d" as QuickPeriod, label: t('filters.7d'), days: 7 },
+    { value: "15d" as QuickPeriod, label: t('filters.15d'), days: 15 },
+    { value: "30d" as QuickPeriod, label: t('filters.30d'), days: 30 },
+  ], [t]);
 
   // Sort months descending and format labels properly
   const sortedMonths = useMemo(() => {
@@ -64,9 +76,9 @@ export function DashboardFilters({
       .sort((a, b) => b.key.localeCompare(a.key))
       .map((m) => ({
         key: m.key,
-        label: format(parse(m.key, "yyyy-MM", new Date()), "MMMM yyyy", { locale: ptBR }),
+        label: format(parse(m.key, "yyyy-MM", new Date()), "MMMM yyyy", { locale: dateLocale }),
       }));
-  }, [availableMonths]);
+  }, [availableMonths, dateLocale]);
 
   const handleQuickPeriod = (period: QuickPeriod) => {
     if (!period) return;
@@ -142,7 +154,7 @@ export function DashboardFilters({
   const hasActiveFilter = selectedMonth || customRange.from || (selectedPeriod && selectedPeriod !== "30d");
 
   const displayValue = useMemo(() => {
-    if (selectedMonth === "all") return "Todos os meses";
+    if (selectedMonth === "all") return t('filters.select_month');
     if (selectedMonth) {
       const month = sortedMonths.find((m) => m.key === selectedMonth);
       return month?.label || selectedMonth;
@@ -150,8 +162,8 @@ export function DashboardFilters({
     if (customRange.from && customRange.to) {
       return `${format(customRange.from, "dd/MM/yy")} - ${format(customRange.to, "dd/MM/yy")}`;
     }
-    return "Selecionar mês";
-  }, [selectedMonth, customRange, sortedMonths]);
+    return t('filters.select_month');
+  }, [selectedMonth, customRange, sortedMonths, t]);
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
@@ -178,18 +190,17 @@ export function DashboardFilters({
         disabled={isLoading}
       >
         <SelectTrigger className="w-[160px] h-8">
-          <SelectValue placeholder="Selecionar mês">
+          <SelectValue placeholder={t('filters.select_month')}>
             {displayValue}
           </SelectValue>
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="all">Todos os meses</SelectItem>
           {sortedMonths.map((month) => (
             <SelectItem key={month.key} value={month.key}>
               {month.label}
             </SelectItem>
           ))}
-          <SelectItem value="custom">Período personalizado...</SelectItem>
+          <SelectItem value="custom">{t('filters.custom')}</SelectItem>
         </SelectContent>
       </Select>
 
@@ -209,17 +220,14 @@ export function DashboardFilters({
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="end">
           <div className="p-3 border-b">
-            <p className="text-sm font-medium">Selecione o período</p>
-            <p className="text-xs text-muted-foreground">
-              Clique para selecionar início e fim
-            </p>
+            <p className="text-sm font-medium">{t('filters.custom')}</p>
           </div>
           <Calendar
             mode="range"
             selected={{ from: customRange.from, to: customRange.to }}
             onSelect={(range) => setCustomRange({ from: range?.from, to: range?.to })}
             numberOfMonths={2}
-            locale={ptBR}
+            locale={dateLocale}
             className="p-3 pointer-events-auto"
           />
           <div className="p-3 border-t flex justify-end gap-2">
@@ -228,14 +236,14 @@ export function DashboardFilters({
               size="sm"
               onClick={() => setIsCustomRangeOpen(false)}
             >
-              Cancelar
+              {t('common:cancel', { defaultValue: 'Cancel' })}
             </Button>
             <Button
               size="sm"
               onClick={handleCustomRangeSelect}
               disabled={!customRange.from || !customRange.to}
             >
-              Aplicar
+              {t('common:apply', { defaultValue: 'Apply' })}
             </Button>
           </div>
         </PopoverContent>

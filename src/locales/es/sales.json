@@ -1,0 +1,56 @@
+{
+  "title": "Dashboard de Ventas",
+  "account": "Cuenta: {{nickname}}",
+  "syncing": "Sincronizando...",
+  "refresh": "Actualizar",
+  "retry": "Reintentar",
+  "no_account": "Cuenta no conectada",
+  "no_account_desc": "Conecta tu cuenta de Mercado Libre para ver el Dashboard de Ventas",
+  "error_loading": "Error al cargar",
+  "session_expired": "Sesión expirada. Inicia sesión nuevamente.",
+  "error_default": "Error al cargar datos de ventas",
+  "data_updated": "Datos actualizados",
+  "sync_complete": "Sincronización en segundo plano completada",
+  "metrics": {
+    "revenue_period": "Ingresos Período",
+    "orders_period": "Pedidos Período",
+    "ticket_period": "Ticket Promedio",
+    "period_selected": "período seleccionado",
+    "vs_prev_period": "vs período ant.",
+    "revenue_today": "Ingresos Hoy",
+    "revenue_7d": "Ingresos 7 Días",
+    "revenue_30d": "Ingresos 30 Días",
+    "ticket_30d": "Ticket Promedio",
+    "last_30d": "últimos 30 días",
+    "vs_yesterday": "vs ayer",
+    "vs_7d": "vs 7d ant.",
+    "vs_30d": "vs 30d ant.",
+    "cancelled": "Cancelados",
+    "orders_count": "{{count}} pedidos"
+  },
+  "charts": {
+    "daily_title": "Ventas de los Últimos 30 Días",
+    "annual_title": "Ventas Anuales (12 meses)",
+    "cancelled_title": "Cancelaciones/Devoluciones Anuales",
+    "revenue": "Ingresos",
+    "orders": "Pedidos",
+    "no_data": "Sin datos para mostrar"
+  },
+  "top_products": {
+    "title": "Top Productos por Ingresos",
+    "product": "Producto",
+    "sold": "Vendidos"
+  },
+  "filters": {
+    "today": "Hoy",
+    "7d": "7 días",
+    "15d": "15 días",
+    "30d": "30 días",
+    "select_month": "Seleccionar mes",
+    "custom": "Período personalizado"
+  },
+  "cache": {
+    "using_cache": "Usando datos en caché",
+    "last_update": "Última actualización: {{time}}"
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "title": "Sales Dashboard",
+  "account": "Account: {{nickname}}",
+  "syncing": "Syncing...",
+  "refresh": "Refresh",
+  "retry": "Try again",
+  "no_account": "Account not connected",
+  "no_account_desc": "Connect your Mercado Libre account to view the Sales Dashboard",
+  "error_loading": "Loading error",
+  "session_expired": "Session expired. Please log in again.",
+  "error_default": "Error loading sales data",
+  "data_updated": "Data updated",
+  "sync_complete": "Background sync completed",
+  "metrics": {
+    "revenue_period": "Period Revenue",
+    "orders_period": "Period Orders",
+    "ticket_period": "Average Ticket",
+    "period_selected": "selected period",
+    "vs_prev_period": "vs previous period",
+    "revenue_today": "Today's Revenue",
+    "revenue_7d": "7-Day Revenue",
+    "revenue_30d": "30-Day Revenue",
+    "ticket_30d": "Average Ticket",
+    "last_30d": "last 30 days",
+    "vs_yesterday": "vs yesterday",
+    "vs_7d": "vs prev 7d",
+    "vs_30d": "vs prev 30d",
+    "cancelled": "Cancelled",
+    "orders_count": "{{count}} orders"
+  },
+  "charts": {
+    "daily_title": "Sales in the Last 30 Days",
+    "annual_title": "Annual Sales (12 months)",
+    "cancelled_title": "Annual Cancellations/Returns",
+    "revenue": "Revenue",
+    "orders": "Orders",
+    "no_data": "No data to display"
+  },
+  "top_products": {
+    "title": "Top Products by Revenue",
+    "product": "Product",
+    "sold": "Sold"
+  },
+  "filters": {
+    "today": "Today",
+    "7d": "7 days",
+    "15d": "15 days",
+    "30d": "30 days",
+    "select_month": "Select month",
+    "custom": "Custom period"
+  },
+  "cache": {
+    "using_cache": "Using cached data",
+    "last_update": "Last update: {{time}}"
+  }
+}
