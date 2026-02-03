@@ -12,10 +12,10 @@ interface TrendsLiteFiltersProps {
   subcategories: string[];
   selectedCategory: string;
   selectedSubcategory: string;
-  sortBy: 'popularity' | 'relevance' | 'growth' | 'name';
+  sortBy: 'popularity' | 'growth';
   onCategoryChange: (category: string) => void;
   onSubcategoryChange: (subcategory: string) => void;
-  onSortChange: (sort: 'popularity' | 'relevance' | 'growth' | 'name') => void;
+  onSortChange: (sort: 'popularity' | 'growth') => void;
 }
 
 export function TrendsLiteFilters({
@@ -70,15 +70,13 @@ export function TrendsLiteFilters({
       
       {/* Sort options */}
       <div className="flex-1 min-w-[150px]">
-        <Select value={sortBy} onValueChange={(v) => onSortChange(v as 'popularity' | 'relevance' | 'growth' | 'name')}>
+        <Select value={sortBy} onValueChange={(v) => onSortChange(v as 'popularity' | 'growth')}>
           <SelectTrigger>
             <SelectValue placeholder={t('trends.sort_by')} />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="popularity">{t('trends.sort_popularity')}</SelectItem>
-            <SelectItem value="relevance">{t('trends.sort_relevance')}</SelectItem>
             <SelectItem value="growth">{t('trends.sort_growth')}</SelectItem>
-            <SelectItem value="name">{t('trends.sort_name')}</SelectItem>
           </SelectContent>
         </Select>
       </div>
