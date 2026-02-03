@@ -19,16 +19,26 @@
   },
   "trends": {
     "title": "Tendencias del Mercado",
-    "subtitle": "Mira lo que está en tendencia en Mercado Libre",
+    "subtitle": "Mira lo que está en tendencia en Mercado Libre. Datos informativos para orientar tu lectura del mercado.",
     "filter_category": "Categoría",
+    "filter_subcategory": "Subcategoría",
     "filter_all": "Todas",
+    "filter_all_subcategories": "Todas las subcategorías",
     "sort_by": "Ordenar por",
     "sort_popularity": "Popularidad",
     "sort_relevance": "Relevancia",
+    "sort_growth": "Crecimiento",
     "sort_name": "Nombre",
     "popularity_label": "Popularidad",
+    "products_title": "Productos Destacados",
+    "keywords_title": "Búsquedas en Alta",
+    "keywords_subtitle": "Lo que las personas están buscando ahora",
+    "trend_up": "En alza",
+    "trend_down": "En caída",
+    "trend_stable": "Estable",
     "no_results": "No se encontraron tendencias para esta categoría",
-    "disclaimer": "Versión simplificada. Análisis completos, historial e inteligencia de mercado están disponibles en MKTP Fácil."
+    "no_keywords": "No se encontraron palabras clave para esta categoría",
+    "disclaimer": "Los datos presentados son informativos y representan una visión general del mercado. Análisis completos, historial e inteligencia de mercado están disponibles en MKTP Fácil."
   },
   "pricing": {
     "title": "Simulador de Precificación",

@@ -19,16 +19,26 @@
   },
   "trends": {
     "title": "Market Trends",
-    "subtitle": "See what's trending on Mercado Libre",
+    "subtitle": "See what's trending on Mercado Libre. Informational data to guide your market reading.",
     "filter_category": "Category",
+    "filter_subcategory": "Subcategory",
     "filter_all": "All",
+    "filter_all_subcategories": "All subcategories",
     "sort_by": "Sort by",
     "sort_popularity": "Popularity",
     "sort_relevance": "Relevance",
+    "sort_growth": "Growth",
     "sort_name": "Name",
     "popularity_label": "Popularity",
+    "products_title": "Featured Products",
+    "keywords_title": "Trending Searches",
+    "keywords_subtitle": "What people are searching for now",
+    "trend_up": "Rising",
+    "trend_down": "Falling",
+    "trend_stable": "Stable",
     "no_results": "No trends found for this category",
-    "disclaimer": "Simplified version. Complete analysis, history and market intelligence are available in MKTP Fácil."
+    "no_keywords": "No keywords found for this category",
+    "disclaimer": "Data presented is informational and represents a general market overview. Complete analysis, history, and market intelligence are available in MKTP Fácil."
   },
   "pricing": {
     "title": "Pricing Simulator",
