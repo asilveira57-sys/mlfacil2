@@ -113,6 +113,8 @@ const INITIAL_GENERATION_PROGRESS: GenerationProgress = {
 };
 
 const PAGE_SIZE = 30;
+// Limit total orders fetched to prevent UI freeze on large datasets
+const MAX_ORDERS_FETCH = 500;
 
 // Helper to get auth headers
 async function getAuthHeaders(): Promise<{ Authorization: string } | null> {
@@ -223,13 +225,14 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
       const { dateFrom, dateTo } = getDateRange();
 
-      // Build base query - exclude cancelled
+      // Build base query - exclude cancelled and limit to prevent UI freeze
       let query = supabase
         .from('meli_orders_cache')
         .select('*', { count: 'exact' })
         .eq('seller_id', sellerId)
         .not('order_status', 'in', `(${COMPLETED_ORDER_STATUSES.join(',')})`)
-        .order('created_at_meli', { ascending: false });
+        .order('created_at_meli', { ascending: false })
+        .limit(MAX_ORDERS_FETCH);
 
       // Apply date filters if set
       if (dateFrom) {
@@ -256,29 +259,48 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         .filter(Boolean) as string[];
       const orderIds = ordersRaw.map(o => o.order_id);
 
-      // Step 3: Parallel fetch shipments and invoices from cache
-      const [shipmentsResult, invoicesResult] = await Promise.all([
-        shipmentIds.length > 0
-          ? supabase
-              .from('meli_shipments_cache')
-              .select('*')
-              .eq('seller_id', sellerId)
-              .in('shipment_id', shipmentIds)
-          : Promise.resolve({ data: [], error: null }),
-        orderIds.length > 0
-          ? supabase
-              .from('meli_invoices_cache')
-              .select('*')
-              .eq('seller_id', sellerId)
-              .in('order_id', orderIds)
-          : Promise.resolve({ data: [], error: null }),
-      ]);
+      // Step 3: Fetch shipments and invoices in batches to avoid URL length limits
+      const BATCH_SIZE = 100;
+      
+      // Fetch shipments in batches
+      const shipmentsData: Array<Record<string, unknown>> = [];
+      for (let i = 0; i < shipmentIds.length; i += BATCH_SIZE) {
+        const batchIds = shipmentIds.slice(i, i + BATCH_SIZE);
+        const { data, error } = await supabase
+          .from('meli_shipments_cache')
+          .select('*')
+          .eq('seller_id', sellerId)
+          .in('shipment_id', batchIds);
+        
+        if (error) {
+          console.error('Error fetching shipments:', error);
+          continue;
+        }
+        if (data) shipmentsData.push(...data);
+      }
+
+      // Fetch invoices in batches
+      const invoicesData: Array<Record<string, unknown>> = [];
+      for (let i = 0; i < orderIds.length; i += BATCH_SIZE) {
+        const batchIds = orderIds.slice(i, i + BATCH_SIZE);
+        const { data, error } = await supabase
+          .from('meli_invoices_cache')
+          .select('*')
+          .eq('seller_id', sellerId)
+          .in('order_id', batchIds);
+        
+        if (error) {
+          console.error('Error fetching invoices:', error);
+          continue;
+        }
+        if (data) invoicesData.push(...data);
+      }
 
       const shipmentsMap = new Map(
-        (shipmentsResult.data || []).map(s => [s.shipment_id, s])
+        shipmentsData.map(s => [s.shipment_id as string, s])
       );
       const invoicesMap = new Map(
-        (invoicesResult.data || []).map(i => [i.order_id, i])
+        invoicesData.map(i => [i.order_id as string, i])
       );
 
       // Step 4: Build combined view - include ALL orders for "Todos" filter
@@ -290,10 +312,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
           // Skip orders without shipment
           if (!shipment || !order.shipment_id) return null;
 
-          const logisticType = shipment.logistic_type;
-          const labelAvailable = shipment?.label_available ?? false;
-          const substatus = shipment?.shipment_substatus;
-          const shipmentStatus = shipment?.shipment_status;
+          const logisticType = shipment.logistic_type as string | null;
+          const labelAvailable = (shipment?.label_available as boolean | null) ?? false;
+          const substatus = shipment?.shipment_substatus as string | null;
+          const shipmentStatus = shipment?.shipment_status as string | null;
 
           // Calculate final_status for ALL orders
           let finalStatus: string;
@@ -337,17 +359,17 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
             buyer_nickname: order.buyer_nickname,
             total_amount: order.total_amount,
             order_sync_at: order.last_sync_at,
-            shipment_status: shipment?.shipment_status ?? null,
-            shipment_substatus: shipment?.shipment_substatus ?? null,
-            tracking_number: shipment?.tracking_number ?? null,
+            shipment_status: (shipment?.shipment_status as string | null) ?? null,
+            shipment_substatus: (shipment?.shipment_substatus as string | null) ?? null,
+            tracking_number: (shipment?.tracking_number as string | null) ?? null,
             label_available: labelAvailable,
-            receiver_name: shipment?.receiver_name ?? null,
-            shipment_sync_at: shipment?.last_sync_at ?? null,
-            invoice_status: invoice?.invoice_status ?? 'pendente',
-            invoice_number: invoice?.invoice_number ?? null,
-            invoice_key: invoice?.invoice_key ?? null,
-            issued_at: invoice?.issued_at ?? null,
-            invoice_sync_at: invoice?.last_sync_at ?? null,
+            receiver_name: (shipment?.receiver_name as string | null) ?? null,
+            shipment_sync_at: (shipment?.last_sync_at as string | null) ?? null,
+            invoice_status: (invoice?.invoice_status as string | null) ?? 'pendente',
+            invoice_number: (invoice?.invoice_number as string | null) ?? null,
+            invoice_key: (invoice?.invoice_key as string | null) ?? null,
+            issued_at: (invoice?.issued_at as string | null) ?? null,
+            invoice_sync_at: (invoice?.last_sync_at as string | null) ?? null,
             final_status: finalStatus,
             selectable,
             logistic_type: logisticType ?? null,
