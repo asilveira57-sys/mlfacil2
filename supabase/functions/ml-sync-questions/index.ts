@@ -113,30 +113,43 @@ serve(async (req) => {
       }
     }
 
-    // Fetch questions from ML API - get all recent questions (no status filter to get all)
-    const questionsUrl = `https://api.mercadolibre.com/questions/search?seller_id=${seller_id}&limit=${limit}&sort_fields=date_created&sort_types=DESC`;
+    // Fetch UNANSWERED questions first (priority) then recent answered
+    const allQuestions: MeliQuestion[] = [];
     
-    console.log(`[ml-sync-questions] Fetching from: ${questionsUrl}`);
-
-    const questionsResponse = await fetch(questionsUrl, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
+    // 1. Fetch unanswered questions (most important)
+    const unansweredUrl = `https://api.mercadolibre.com/questions/search?seller_id=${seller_id}&status=UNANSWERED&limit=50&sort_fields=date_created&sort_types=DESC`;
+    console.log(`[ml-sync-questions] Fetching unanswered: ${unansweredUrl}`);
+    
+    const unansweredResponse = await fetch(unansweredUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
-
-    if (!questionsResponse.ok) {
-      const errorText = await questionsResponse.text();
-      console.error(`ML API error: ${questionsResponse.status} - ${errorText}`);
-      return new Response(
-        JSON.stringify({ success: false, error: `ML API error: ${questionsResponse.status}` }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    
+    if (unansweredResponse.ok) {
+      const unansweredData = await unansweredResponse.json();
+      const unanswered = unansweredData.questions || [];
+      console.log(`[ml-sync-questions] Found ${unanswered.length} unanswered questions`);
+      allQuestions.push(...unanswered);
+    } else {
+      console.error(`ML API error for unanswered: ${unansweredResponse.status}`);
     }
-
-    const questionsData = await questionsResponse.json();
-    const questions: MeliQuestion[] = questionsData.questions || [];
-
-    console.log(`[ml-sync-questions] Found ${questions.length} questions`);
+    
+    // 2. Also fetch recent answered (for context/history)
+    const answeredUrl = `https://api.mercadolibre.com/questions/search?seller_id=${seller_id}&status=ANSWERED&limit=50&sort_fields=date_created&sort_types=DESC`;
+    console.log(`[ml-sync-questions] Fetching answered: ${answeredUrl}`);
+    
+    const answeredResponse = await fetch(answeredUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    
+    if (answeredResponse.ok) {
+      const answeredData = await answeredResponse.json();
+      const answered = answeredData.questions || [];
+      console.log(`[ml-sync-questions] Found ${answered.length} answered questions`);
+      allQuestions.push(...answered);
+    }
+    
+    const questions = allQuestions;
+    console.log(`[ml-sync-questions] Total questions to sync: ${questions.length}`);
 
     if (questions.length === 0) {
       return new Response(
