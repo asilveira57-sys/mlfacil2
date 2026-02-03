@@ -67,7 +67,7 @@ serve(async (req) => {
       );
     }
 
-    const { seller_id, status = "UNANSWERED", limit = 50 } = await req.json();
+    const { seller_id, limit = 100 } = await req.json();
 
     if (!seller_id) {
       return new Response(
@@ -76,7 +76,7 @@ serve(async (req) => {
       );
     }
 
-    console.log(`[ml-sync-questions] Starting sync for seller ${seller_id}, status=${status}`);
+    console.log(`[ml-sync-questions] Starting sync for seller ${seller_id}`);
 
     // Get ML credentials
     const { data: mlAccount, error: accountError } = await supabase
@@ -113,8 +113,8 @@ serve(async (req) => {
       }
     }
 
-    // Fetch questions from ML API
-    const questionsUrl = `https://api.mercadolibre.com/questions/search?seller_id=${seller_id}&status=${status}&limit=${limit}&sort_fields=date_created&sort_types=DESC`;
+    // Fetch questions from ML API - get all recent questions (no status filter to get all)
+    const questionsUrl = `https://api.mercadolibre.com/questions/search?seller_id=${seller_id}&limit=${limit}&sort_fields=date_created&sort_types=DESC`;
     
     console.log(`[ml-sync-questions] Fetching from: ${questionsUrl}`);
 
