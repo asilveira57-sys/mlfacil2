@@ -7,8 +7,8 @@ const WATCHDOG_INTERVAL_MS = 60000;
 const STALE_THRESHOLD_MS = 15 * 60 * 1000;
 // Cooldown between sync actions
 const COOLDOWN_MS = 60000;
-// Only sync last 7 days for quick updates
-const SYNC_DAYS = 7;
+// Sync last 14 days for better coverage (increased from 7)
+const SYNC_DAYS = 14;
 
 interface OrdersSyncState {
   lastSyncAt: string | null;

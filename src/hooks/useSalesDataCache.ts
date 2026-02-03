@@ -6,9 +6,9 @@ interface CacheEntry<T> {
   filterDate: string | null;
 }
 
-// TTL based on data age
-const HISTORICAL_TTL = 24 * 60 * 60 * 1000; // 24 hours for old data
-const RECENT_TTL = 5 * 60 * 1000; // 5 minutes for recent data (last 7 days)
+// TTL based on data age - reduced for fresher data
+const HISTORICAL_TTL = 6 * 60 * 60 * 1000; // 6 hours for old data (reduced from 24h)
+const RECENT_TTL = 3 * 60 * 1000; // 3 minutes for recent data (reduced from 5min)
 const RECENT_DAYS_THRESHOLD = 7; // Days to consider as "recent"
 
 /**

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { format } from "date-fns";
 import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
@@ -9,6 +9,7 @@ import { AnnualSalesChart } from "./AnnualSalesChart";
 import { TopProductsTable } from "./TopProductsTable";
 import { DashboardFilters } from "./DashboardFilters";
 import { OnboardingSync } from "./OnboardingSync";
+import { SyncStatusIndicator } from "./sales/SyncStatusIndicator";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +23,9 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useSalesDataCache } from "@/hooks/useSalesDataCache";
+
+// Auto-refresh interval when dashboard is visible (5 minutes)
+const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 interface DailySale {
   date: string;
@@ -288,10 +292,57 @@ export function SalesDashboard() {
     }
   }, [dateFilter, isFirstLoad, toast, activeSellerId, t, getCached, setCached, shouldRefreshRecent]);
 
+  // Auto-refresh reference
+  const autoRefreshRef = useRef<NodeJS.Timeout | null>(null);
+
   // Fetch data on mount and when activeSellerId changes
   useEffect(() => {
     fetchSalesData();
   }, [activeSellerId]); // Re-fetch when seller changes
+
+  // Auto-refresh every 5 minutes when dashboard is visible
+  useEffect(() => {
+    const setupAutoRefresh = () => {
+      // Clear existing interval
+      if (autoRefreshRef.current) {
+        clearInterval(autoRefreshRef.current);
+      }
+
+      // Only auto-refresh if we have a seller ID and document is visible
+      if (activeSellerId && document.visibilityState === 'visible') {
+        autoRefreshRef.current = setInterval(() => {
+          console.log('[SalesDashboard] Auto-refreshing data...');
+          fetchSalesData(undefined, true);
+        }, AUTO_REFRESH_INTERVAL_MS);
+      }
+    };
+
+    setupAutoRefresh();
+
+    // Handle visibility changes
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // Refresh immediately when becoming visible
+        fetchSalesData(undefined, false);
+        setupAutoRefresh();
+      } else {
+        // Clear interval when hidden
+        if (autoRefreshRef.current) {
+          clearInterval(autoRefreshRef.current);
+          autoRefreshRef.current = null;
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (autoRefreshRef.current) {
+        clearInterval(autoRefreshRef.current);
+      }
+    };
+  }, [activeSellerId, fetchSalesData]);
 
   // Helper to wait for a job to complete
   const waitForJobCompletion = useCallback(async (jobId: string): Promise<boolean> => {
@@ -523,12 +574,7 @@ export function SalesDashboard() {
               </p>
             )}
           </div>
-          {isBackgroundSyncing && (
-            <div className="flex items-center gap-1.5 px-2 py-1 bg-muted rounded-md text-xs text-muted-foreground">
-              <RefreshCw className="w-3 h-3 animate-spin" />
-              <span>{t('syncing')}</span>
-            </div>
-          )}
+          <SyncStatusIndicator isBackgroundSyncing={isBackgroundSyncing} />
         </div>
         <div className="flex items-center gap-2">
           <DashboardFilters
