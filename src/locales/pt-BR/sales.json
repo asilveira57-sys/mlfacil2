@@ -1,0 +1,56 @@
+{
+  "title": "Dashboard de Vendas",
+  "account": "Conta: {{nickname}}",
+  "syncing": "Sincronizando...",
+  "refresh": "Atualizar",
+  "retry": "Tentar novamente",
+  "no_account": "Conta não conectada",
+  "no_account_desc": "Conecte sua conta do Mercado Livre para ver o Dashboard de Vendas",
+  "error_loading": "Erro ao carregar",
+  "session_expired": "Sessão expirada. Faça login novamente.",
+  "error_default": "Erro ao carregar dados de vendas",
+  "data_updated": "Dados atualizados",
+  "sync_complete": "Sincronização em background concluída",
+  "metrics": {
+    "revenue_period": "Receita Período",
+    "orders_period": "Pedidos Período",
+    "ticket_period": "Ticket Médio",
+    "period_selected": "período selecionado",
+    "vs_prev_period": "vs período ant.",
+    "revenue_today": "Receita Hoje",
+    "revenue_7d": "Receita 7 Dias",
+    "revenue_30d": "Receita 30 Dias",
+    "ticket_30d": "Ticket Médio",
+    "last_30d": "últimos 30 dias",
+    "vs_yesterday": "vs ontem",
+    "vs_7d": "vs 7d ant.",
+    "vs_30d": "vs 30d ant.",
+    "cancelled": "Cancelados",
+    "orders_count": "{{count}} pedidos"
+  },
+  "charts": {
+    "daily_title": "Vendas nos Últimos 30 Dias",
+    "annual_title": "Vendas Anuais (12 meses)",
+    "cancelled_title": "Cancelamentos/Devoluções Anuais",
+    "revenue": "Receita",
+    "orders": "Pedidos",
+    "no_data": "Sem dados para exibir"
+  },
+  "top_products": {
+    "title": "Top Produtos por Receita",
+    "product": "Produto",
+    "sold": "Vendidos"
+  },
+  "filters": {
+    "today": "Hoje",
+    "7d": "7 dias",
+    "15d": "15 dias",
+    "30d": "30 dias",
+    "select_month": "Selecionar mês",
+    "custom": "Período personalizado"
+  },
+  "cache": {
+    "using_cache": "Usando dados em cache",
+    "last_update": "Última atualização: {{time}}"
+  }
+}

@@ -1,4 +1,5 @@
 import { Card } from "@/components/ui/card";
+import { useTranslation } from "react-i18next";
 import {
   Table,
   TableBody,
@@ -9,6 +10,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Package } from "lucide-react";
+import { useMemo } from "react";
 
 interface Product {
   id: string;
@@ -22,14 +24,19 @@ interface TopProductsTableProps {
   isLoading?: boolean;
 }
 
-const formatCurrency = (value: number) => {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  }).format(value);
-};
-
 export function TopProductsTable({ products, isLoading }: TopProductsTableProps) {
+  const { t, i18n } = useTranslation('sales');
+
+  const formatCurrency = useMemo(() => {
+    const locale = i18n.language === 'en' ? 'en-US' : i18n.language === 'es' ? 'es-AR' : 'pt-BR';
+    return (value: number) => {
+      return new Intl.NumberFormat(locale, {
+        style: "currency",
+        currency: "BRL",
+      }).format(value);
+    };
+  }, [i18n.language]);
+
   if (isLoading) {
     return (
       <Card className="p-6">
@@ -43,10 +50,10 @@ export function TopProductsTable({ products, isLoading }: TopProductsTableProps)
   if (!products.length) {
     return (
       <Card className="p-6">
-        <h3 className="text-lg font-semibold mb-4">Top Produtos</h3>
+        <h3 className="text-lg font-semibold mb-4">{t('top_products.title')}</h3>
         <div className="h-[200px] flex flex-col items-center justify-center text-muted-foreground">
           <Package className="w-12 h-12 mb-4 opacity-50" />
-          <p>Nenhuma venda registrada</p>
+          <p>{t('charts.no_data')}</p>
         </div>
       </Card>
     );
@@ -54,15 +61,15 @@ export function TopProductsTable({ products, isLoading }: TopProductsTableProps)
 
   return (
     <Card className="p-6">
-      <h3 className="text-lg font-semibold mb-4">Top Produtos por Receita</h3>
+      <h3 className="text-lg font-semibold mb-4">{t('top_products.title')}</h3>
       <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-[50px]">#</TableHead>
-              <TableHead>Produto</TableHead>
-              <TableHead className="text-center">Vendidos</TableHead>
-              <TableHead className="text-right">Receita</TableHead>
+              <TableHead>{t('top_products.product')}</TableHead>
+              <TableHead className="text-center">{t('top_products.sold')}</TableHead>
+              <TableHead className="text-right">{t('charts.revenue')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

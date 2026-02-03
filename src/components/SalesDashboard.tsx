@@ -1,5 +1,6 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { format } from "date-fns";
+import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
 import { useActiveSellerId } from "@/contexts/ActiveAccountContext";
 import { SalesMetricsCard } from "./SalesMetricsCard";
@@ -20,6 +21,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useSalesDataCache } from "@/hooks/useSalesDataCache";
 
 interface DailySale {
   date: string;
@@ -128,15 +130,6 @@ const getInitial30DayFilter = (): DateFilter => {
   };
 };
 
-const formatCurrency = (value: number) => {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(value);
-};
-
 // Calculate percentage change between current and previous period
 const calcTrend = (current: number, previous: number): number | undefined => {
   if (previous === 0) {
@@ -146,6 +139,7 @@ const calcTrend = (current: number, previous: number): number | undefined => {
 };
 
 export function SalesDashboard() {
+  const { t, i18n } = useTranslation('sales');
   const [salesData, setSalesData] = useState<SalesData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -154,6 +148,9 @@ export function SalesDashboard() {
 
   // Use global active seller ID from context (source of truth)
   const activeSellerId = useActiveSellerId();
+
+  // Smart cache for sales data
+  const { getCached, setCached, shouldRefreshRecent, getRecentDaysToRefresh } = useSalesDataCache();
 
   // Sync state for onboarding
   const [isSyncing, setIsSyncing] = useState(false);
@@ -165,11 +162,40 @@ export function SalesDashboard() {
   // Background sync indicator
   const [isBackgroundSyncing, setIsBackgroundSyncing] = useState(false);
 
-  const fetchSalesData = useCallback(async (filters?: DateFilter, attempt = 0): Promise<void> => {
+  // Memoized currency formatter based on language
+  const formatCurrency = useMemo(() => {
+    const locale = i18n.language === 'en' ? 'en-US' : i18n.language === 'es' ? 'es-AR' : 'pt-BR';
+    return (value: number) => {
+      return new Intl.NumberFormat(locale, {
+        style: "currency",
+        currency: "BRL",
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      }).format(value);
+    };
+  }, [i18n.language]);
+
+  const fetchSalesData = useCallback(async (filters?: DateFilter, forceRefresh = false, attempt = 0): Promise<void> => {
     setIsLoading(true);
     if (attempt === 0) setError(null);
 
     const currentFilters = filters || dateFilter;
+    const cacheKey = `${activeSellerId}_${currentFilters.dateFrom}_${currentFilters.dateTo}`;
+
+    // Check cache first (unless force refresh)
+    if (!forceRefresh) {
+      const cached = getCached<SalesData>(cacheKey);
+      if (cached) {
+        setSalesData(cached);
+        setIsLoading(false);
+        
+        // If historical data (older than 7 days), don't refetch
+        if (!shouldRefreshRecent(currentFilters.dateTo)) {
+          return;
+        }
+        // Otherwise, continue to background refresh recent days
+      }
+    }
 
     try {
       let { data: { session } } = await supabase.auth.getSession();
@@ -177,9 +203,9 @@ export function SalesDashboard() {
       if (!session) {
         if (attempt < 2) {
           await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
-          return fetchSalesData(currentFilters, attempt + 1);
+          return fetchSalesData(currentFilters, forceRefresh, attempt + 1);
         }
-        setError("Sessão expirada. Faça login novamente.");
+        setError(t('session_expired'));
         setIsLoading(false);
         return;
       }
@@ -200,9 +226,9 @@ export function SalesDashboard() {
         if (refreshError || !refreshData.session) {
           if (attempt < 2) {
             await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
-            return fetchSalesData(currentFilters, attempt + 1);
+            return fetchSalesData(currentFilters, forceRefresh, attempt + 1);
           }
-          setError("Sessão expirada. Faça login novamente.");
+          setError(t('session_expired'));
           setIsLoading(false);
           return;
         }
@@ -232,6 +258,8 @@ export function SalesDashboard() {
         throw new Error(response.data.error);
       }
 
+      // Cache the response
+      setCached(cacheKey, response.data, currentFilters.dateTo);
       setSalesData(response.data);
 
       // Check if this is a new account that needs onboarding sync
@@ -246,19 +274,19 @@ export function SalesDashboard() {
       console.error("Error fetching sales data:", err);
       if (attempt < 2) {
         await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
-        return fetchSalesData(currentFilters, attempt + 1);
+        return fetchSalesData(currentFilters, forceRefresh, attempt + 1);
       }
-      const errorMsg = err?.message || "Erro ao carregar dados de vendas";
+      const errorMsg = err?.message || t('error_default');
       setError(errorMsg);
       toast({
-        title: "Erro",
-        description: "Não foi possível carregar os dados de vendas",
+        title: t('error_loading'),
+        description: t('error_default'),
         variant: "destructive",
       });
     } finally {
       setIsLoading(false);
     }
-  }, [dateFilter, isFirstLoad, toast, activeSellerId]);
+  }, [dateFilter, isFirstLoad, toast, activeSellerId, t, getCached, setCached, shouldRefreshRecent]);
 
   // Fetch data on mount and when activeSellerId changes
   useEffect(() => {
@@ -338,7 +366,7 @@ export function SalesDashboard() {
       console.log("[Progressive Sync] Phase 1 complete - showing dashboard");
       setShowOnboarding(false);
       setIsSyncing(false);
-      fetchSalesData();
+      fetchSalesData(undefined, true);
 
       // PHASE 2: Sync 30 days (background, updates UI)
       console.log("[Progressive Sync] Phase 2: Last 30 days");
@@ -356,7 +384,7 @@ export function SalesDashboard() {
       if (phase2Response.data?.job_id) {
         await waitForJobCompletion(phase2Response.data.job_id);
         console.log("[Progressive Sync] Phase 2 complete - refreshing data");
-        fetchSalesData(); // Update with more data
+        fetchSalesData(undefined, true); // Update with more data
       }
 
       // PHASE 3: Sync 1 full year (silent background)
@@ -375,7 +403,7 @@ export function SalesDashboard() {
       if (phase3Response.data?.job_id) {
         await waitForJobCompletion(phase3Response.data.job_id);
         console.log("[Progressive Sync] Phase 3 complete - full year synced");
-        fetchSalesData(); // Full data available
+        fetchSalesData(undefined, true); // Full data available
       }
 
       // PHASE 4: Sync billing data (real costs from ML)
@@ -408,10 +436,6 @@ export function SalesDashboard() {
     fetchSalesData(filter);
   };
 
-  // REMOVED: Auth state listener that was causing refetch on TOKEN_REFRESHED
-  // Data fetching is now handled by the initial useEffect and explicit refresh actions
-  // This prevents the "flicker" on tab switch when token is silently refreshed
-
   // Listen for background sync events
   useEffect(() => {
     const handleSyncStart = () => {
@@ -421,10 +445,10 @@ export function SalesDashboard() {
     const handleSyncComplete = (event: CustomEvent) => {
       // Refresh data when background sync completes
       if (event.detail?.sellerId === activeSellerId || !activeSellerId) {
-        fetchSalesData();
+        fetchSalesData(undefined, true);
         toast({
-          title: "Dados atualizados",
-          description: "Sincronização em background concluída",
+          title: t('data_updated'),
+          description: t('sync_complete'),
         });
       }
       setIsBackgroundSyncing(false);
@@ -437,7 +461,7 @@ export function SalesDashboard() {
       window.removeEventListener("orders_sync_start", handleSyncStart as EventListener);
       window.removeEventListener("orders_sync_complete", handleSyncComplete as EventListener);
     };
-  }, [activeSellerId, toast, fetchSalesData]);
+  }, [activeSellerId, toast, fetchSalesData, t]);
 
   // Show onboarding sync screen
   if (showOnboarding) {
@@ -461,9 +485,9 @@ export function SalesDashboard() {
     return (
       <Card className="p-8 text-center">
         <AlertCircle className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-        <h3 className="text-xl font-semibold mb-2">Conta não conectada</h3>
+        <h3 className="text-xl font-semibold mb-2">{t('no_account')}</h3>
         <p className="text-muted-foreground mb-4">
-          Conecte sua conta do Mercado Livre para ver o Dashboard de Vendas
+          {t('no_account_desc')}
         </p>
       </Card>
     );
@@ -473,11 +497,11 @@ export function SalesDashboard() {
     return (
       <Card className="p-8 text-center">
         <AlertCircle className="w-12 h-12 mx-auto mb-4 text-destructive" />
-        <h3 className="text-xl font-semibold mb-2">Erro ao carregar</h3>
+        <h3 className="text-xl font-semibold mb-2">{t('error_loading')}</h3>
         <p className="text-muted-foreground mb-4">{error}</p>
-        <Button onClick={() => fetchSalesData()} variant="outline">
+        <Button onClick={() => fetchSalesData(undefined, true)} variant="outline">
           <RefreshCw className="w-4 h-4 mr-2" />
-          Tentar novamente
+          {t('retry')}
         </Button>
       </Card>
     );
@@ -492,17 +516,17 @@ export function SalesDashboard() {
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center gap-3">
           <div>
-            <h3 className="text-2xl font-bold text-foreground">Dashboard de Vendas</h3>
+            <h3 className="text-2xl font-bold text-foreground">{t('title')}</h3>
             {salesData?.seller && (
               <p className="text-muted-foreground">
-                Conta: {salesData.seller.nickname || salesData.seller.email}
+                {t('account', { nickname: salesData.seller.nickname || salesData.seller.email })}
               </p>
             )}
           </div>
           {isBackgroundSyncing && (
             <div className="flex items-center gap-1.5 px-2 py-1 bg-muted rounded-md text-xs text-muted-foreground">
               <RefreshCw className="w-3 h-3 animate-spin" />
-              <span>Sincronizando...</span>
+              <span>{t('syncing')}</span>
             </div>
           )}
         </div>
@@ -515,7 +539,7 @@ export function SalesDashboard() {
           <Button
             variant="outline"
             size="icon"
-            onClick={() => fetchSalesData()}
+            onClick={() => fetchSalesData(undefined, true)}
             disabled={isLoading}
           >
             <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
@@ -529,60 +553,60 @@ export function SalesDashboard() {
         {hasDateFilter ? (
           <>
             <SalesMetricsCard
-              title="Receita Período"
+              title={t('metrics.revenue_period')}
               value={isLoading ? "..." : formatCurrency(metrics?.revenuePeriod || 0)}
-              subtitle={`${metrics?.ordersPeriod || 0} pedidos`}
+              subtitle={t('metrics.orders_count', { count: metrics?.ordersPeriod || 0 })}
               icon={<DollarSign className="w-6 h-6 text-primary" />}
               trend={calcTrend(metrics?.revenuePeriod || 0, metrics?.revenuePrevPeriod || 0)}
-              trendLabel="vs período ant."
+              trendLabel={t('metrics.vs_prev_period')}
             />
             <SalesMetricsCard
-              title="Pedidos Período"
+              title={t('metrics.orders_period')}
               value={isLoading ? "..." : (metrics?.ordersPeriod || 0).toString()}
               subtitle={formatCurrency(metrics?.revenuePeriod || 0)}
               icon={<ShoppingCart className="w-6 h-6 text-primary" />}
               trend={calcTrend(metrics?.ordersPeriod || 0, metrics?.ordersPrevPeriod || 0)}
-              trendLabel="vs período ant."
+              trendLabel={t('metrics.vs_prev_period')}
             />
             <SalesMetricsCard
-              title="Ticket Médio"
+              title={t('metrics.ticket_period')}
               value={isLoading ? "..." : formatCurrency(metrics?.averageTicketPeriod || 0)}
-              subtitle="período selecionado"
+              subtitle={t('metrics.period_selected')}
               icon={<Package className="w-6 h-6 text-primary" />}
               trend={calcTrend(metrics?.averageTicketPeriod || 0, metrics?.averageTicketPrevPeriod || 0)}
-              trendLabel="vs período ant."
+              trendLabel={t('metrics.vs_prev_period')}
             />
           </>
         ) : (
           <>
             <SalesMetricsCard
-              title="Receita Hoje"
+              title={t('metrics.revenue_today')}
               value={isLoading ? "..." : formatCurrency(metrics?.revenueToday || 0)}
-              subtitle={`${metrics?.ordersToday || 0} pedidos`}
+              subtitle={t('metrics.orders_count', { count: metrics?.ordersToday || 0 })}
               icon={<DollarSign className="w-6 h-6 text-primary" />}
               trend={calcTrend(metrics?.revenueToday || 0, metrics?.revenueYesterday || 0)}
-              trendLabel="vs ontem"
+              trendLabel={t('metrics.vs_yesterday')}
             />
             <SalesMetricsCard
-              title="Receita 7 Dias"
+              title={t('metrics.revenue_7d')}
               value={isLoading ? "..." : formatCurrency(metrics?.revenue7d || 0)}
-              subtitle={`${metrics?.orders7d || 0} pedidos`}
+              subtitle={t('metrics.orders_count', { count: metrics?.orders7d || 0 })}
               icon={<TrendingUp className="w-6 h-6 text-primary" />}
               trend={calcTrend(metrics?.revenue7d || 0, metrics?.revenuePrev7d || 0)}
-              trendLabel="vs 7d ant."
+              trendLabel={t('metrics.vs_7d')}
             />
             <SalesMetricsCard
-              title="Receita 30 Dias"
+              title={t('metrics.revenue_30d')}
               value={isLoading ? "..." : formatCurrency(metrics?.revenue30d || 0)}
-              subtitle={`${metrics?.orders30d || 0} pedidos`}
+              subtitle={t('metrics.orders_count', { count: metrics?.orders30d || 0 })}
               icon={<ShoppingCart className="w-6 h-6 text-primary" />}
               trend={calcTrend(metrics?.revenue30d || 0, metrics?.revenuePrev30d || 0)}
-              trendLabel="vs 30d ant."
+              trendLabel={t('metrics.vs_30d')}
             />
             <SalesMetricsCard
-              title="Ticket Médio"
+              title={t('metrics.ticket_30d')}
               value={isLoading ? "..." : formatCurrency(metrics?.averageTicket30d || 0)}
-              subtitle="últimos 30 dias"
+              subtitle={t('metrics.last_30d')}
               icon={<Package className="w-6 h-6 text-primary" />}
             />
           </>
@@ -590,11 +614,11 @@ export function SalesDashboard() {
 
         {/* Cancelled/Refunded Card - Always visible */}
         <SalesMetricsCard
-          title="Cancelados"
+          title={t('metrics.cancelled')}
           value={isLoading ? "..." : formatCurrency(
             hasDateFilter ? (metrics?.cancelledRevenuePeriod || 0) : (metrics?.cancelledRevenue || 0)
           )}
-          subtitle={`${hasDateFilter ? (metrics?.cancelledOrdersPeriod || 0) : (metrics?.cancelledOrders || 0)} pedidos`}
+          subtitle={t('metrics.orders_count', { count: hasDateFilter ? (metrics?.cancelledOrdersPeriod || 0) : (metrics?.cancelledOrders || 0) })}
           icon={<XCircle className="w-6 h-6 text-destructive" />}
         />
       </div>
@@ -610,13 +634,13 @@ export function SalesDashboard() {
           <AnnualSalesChart
             data={salesData?.monthlySales || []}
             isLoading={isLoading}
-            title="Vendas Anuais (12 meses)"
+            title={t('charts.annual_title')}
             colorScheme="primary"
           />
           <AnnualSalesChart
             data={salesData?.monthlyCancelled || []}
             isLoading={isLoading}
-            title="Cancelamentos/Devoluções Anuais"
+            title={t('charts.cancelled_title')}
             colorScheme="destructive"
           />
         </div>

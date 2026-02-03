@@ -1,4 +1,5 @@
 import { Card } from "@/components/ui/card";
+import { useTranslation } from "react-i18next";
 import {
   AreaChart,
   Area,
@@ -11,6 +12,7 @@ import {
   Bar,
 } from "recharts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useMemo } from "react";
 
 interface DailySale {
   date: string;
@@ -23,21 +25,29 @@ interface SalesChartProps {
   isLoading?: boolean;
 }
 
-const formatCurrency = (value: number) => {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(value);
-};
-
-const formatDate = (dateStr: string) => {
-  const date = new Date(dateStr + 'T00:00:00');
-  return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
-};
-
 export function SalesChart({ data, isLoading }: SalesChartProps) {
+  const { t, i18n } = useTranslation('sales');
+
+  const formatCurrency = useMemo(() => {
+    const locale = i18n.language === 'en' ? 'en-US' : i18n.language === 'es' ? 'es-AR' : 'pt-BR';
+    return (value: number) => {
+      return new Intl.NumberFormat(locale, {
+        style: "currency",
+        currency: "BRL",
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      }).format(value);
+    };
+  }, [i18n.language]);
+
+  const formatDate = useMemo(() => {
+    const locale = i18n.language === 'en' ? 'en-US' : i18n.language === 'es' ? 'es-ES' : 'pt-BR';
+    return (dateStr: string) => {
+      const date = new Date(dateStr + 'T00:00:00');
+      return date.toLocaleDateString(locale, { day: "2-digit", month: "short" });
+    };
+  }, [i18n.language]);
+
   if (isLoading) {
     return (
       <Card className="p-6">
@@ -57,10 +67,10 @@ export function SalesChart({ data, isLoading }: SalesChartProps) {
     <Card className="p-6">
       <Tabs defaultValue="revenue" className="space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold">Vendas nos Últimos 30 Dias</h3>
+          <h3 className="text-lg font-semibold">{t('charts.daily_title')}</h3>
           <TabsList>
-            <TabsTrigger value="revenue">Receita</TabsTrigger>
-            <TabsTrigger value="orders">Pedidos</TabsTrigger>
+            <TabsTrigger value="revenue">{t('charts.revenue')}</TabsTrigger>
+            <TabsTrigger value="orders">{t('charts.orders')}</TabsTrigger>
           </TabsList>
         </div>
 
@@ -91,8 +101,8 @@ export function SalesChart({ data, isLoading }: SalesChartProps) {
                   borderColor: "hsl(var(--border))",
                   borderRadius: "8px",
                 }}
-                formatter={(value: number) => [formatCurrency(value), "Receita"]}
-                labelFormatter={(label) => `Data: ${label}`}
+                formatter={(value: number) => [formatCurrency(value), t('charts.revenue')]}
+                labelFormatter={(label) => `${label}`}
               />
               <Area
                 type="monotone"
@@ -124,8 +134,8 @@ export function SalesChart({ data, isLoading }: SalesChartProps) {
                   borderColor: "hsl(var(--border))",
                   borderRadius: "8px",
                 }}
-                formatter={(value: number) => [value, "Pedidos"]}
-                labelFormatter={(label) => `Data: ${label}`}
+                formatter={(value: number) => [value, t('charts.orders')]}
+                labelFormatter={(label) => `${label}`}
               />
               <Bar
                 dataKey="orders"
