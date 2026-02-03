@@ -164,3 +164,9 @@ verify_jwt = false
 
 [functions.orders-hourly-sync]
 verify_jwt = false
+
+[functions.ml-answer-question]
+verify_jwt = false
+
+[functions.ml-sync-questions]
+verify_jwt = false

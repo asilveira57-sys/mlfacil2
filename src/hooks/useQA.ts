@@ -119,6 +119,14 @@ export function usePendingQuestionsCount(sellerId: string | null) {
 // RESPONSE MUTATIONS
 // =============================================
 
+export interface CreateResponseResult {
+  success: boolean;
+  responseId?: string;
+  mlResponseId?: string;
+  error?: string;
+  errorCode?: string;
+}
+
 export function useCreateResponse() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -132,10 +140,11 @@ export function useCreateResponse() {
       ai_original_text?: string;
       is_draft?: boolean;
       seller_id: string;
-    }) => {
+    }): Promise<CreateResponseResult> => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
+      // 1. First, save the response locally (as draft temporarily if not draft)
       const insertData = {
         user_id: user.id,
         question_id: data.question_id,
@@ -156,31 +165,105 @@ export function useCreateResponse() {
 
       if (error) throw error;
 
-      // Update question status
-      if (!data.is_draft) {
-        await supabase
-          .from('qa_questions')
-          .update({ status: 'answered', answered_at: new Date().toISOString() } as never)
-          .eq('id', data.question_id);
-      } else {
+      // If it's a draft, just update question status and return
+      if (data.is_draft) {
         await supabase
           .from('qa_questions')
           .update({ status: 'draft' } as never)
           .eq('id', data.question_id);
+
+        return { success: true, responseId: response.id };
       }
 
-      return response;
+      // 2. For non-drafts, send to Mercado Livre API
+      const mlResult = await supabase.functions.invoke('ml-answer-question', {
+        body: {
+          question_id: data.question_id,
+          response_text: data.response_text,
+          seller_id: data.seller_id,
+        },
+      });
+
+      if (mlResult.error) {
+        // Edge function call failed completely
+        await supabase
+          .from('qa_responses')
+          .update({ send_error: mlResult.error.message } as never)
+          .eq('id', response.id);
+
+        return {
+          success: false,
+          responseId: response.id,
+          error: 'Erro de conexão ao enviar resposta',
+          errorCode: 'CONNECTION_ERROR',
+        };
+      }
+
+      const mlData = mlResult.data;
+
+      if (!mlData.success) {
+        // ML API returned an error
+        await supabase
+          .from('qa_responses')
+          .update({ send_error: mlData.error } as never)
+          .eq('id', response.id);
+
+        return {
+          success: false,
+          responseId: response.id,
+          error: mlData.error || 'Erro ao enviar para o Mercado Livre',
+          errorCode: mlData.error_code || 'ML_ERROR',
+        };
+      }
+
+      // 3. Success! Update response with ML data
+      await supabase
+        .from('qa_responses')
+        .update({
+          is_sent: true,
+          sent_at: mlData.sent_at || new Date().toISOString(),
+          ml_response_id: mlData.ml_response_id,
+          send_error: null,
+        } as never)
+        .eq('id', response.id);
+
+      // 4. Update question status to answered
+      await supabase
+        .from('qa_questions')
+        .update({ 
+          status: 'answered', 
+          answered_at: new Date().toISOString() 
+        } as never)
+        .eq('id', data.question_id);
+
+      return {
+        success: true,
+        responseId: response.id,
+        mlResponseId: mlData.ml_response_id,
+      };
     },
-    onSuccess: (_, variables) => {
+    onSuccess: (result, variables) => {
       queryClient.invalidateQueries({ queryKey: ['qa-questions'] });
       queryClient.invalidateQueries({ queryKey: ['qa-responses', variables.question_id] });
       queryClient.invalidateQueries({ queryKey: ['qa-pending-count'] });
-      toast({
-        title: variables.is_draft ? 'Rascunho salvo' : 'Resposta enviada',
-        description: variables.is_draft 
-          ? 'A resposta foi salva como rascunho'
-          : 'A resposta foi enviada com sucesso',
-      });
+      
+      if (variables.is_draft) {
+        toast({
+          title: 'Rascunho salvo',
+          description: 'A resposta foi salva como rascunho',
+        });
+      } else if (result.success) {
+        toast({
+          title: 'Resposta enviada',
+          description: 'A resposta foi enviada ao Mercado Livre com sucesso',
+        });
+      } else {
+        toast({
+          title: 'Erro ao enviar',
+          description: result.error || 'Não foi possível enviar ao Mercado Livre',
+          variant: 'destructive',
+        });
+      }
     },
     onError: (error) => {
       toast({

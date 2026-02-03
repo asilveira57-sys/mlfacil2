@@ -162,7 +162,7 @@ export function QaResponseEditor({
       return;
     }
 
-    await createResponse.mutateAsync({
+    const sendResult = await createResponse.mutateAsync({
       question_id: question.id,
       response_text: content,
       source: usedLibraryId ? "library" : aiOriginalText ? (content === aiOriginalText ? "ai_suggested" : "ai_edited") : "manual",
@@ -176,7 +176,10 @@ export function QaResponseEditor({
       await updateStatus.mutateAsync({ questionId: question.id, category });
     }
 
-    setContent("");
+    // Only clear content if successfully sent to ML
+    if (sendResult.success) {
+      setContent("");
+    }
   };
 
   const handleSnooze = (hours: number) => {
