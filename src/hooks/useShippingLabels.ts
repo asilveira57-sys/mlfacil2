@@ -581,7 +581,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       // Refresh UI with whatever data exists
       await refetch();
 
-      // Get shipment IDs from cache for next phase
+      // Get shipment IDs from orders cache for next phase
       const { data: ordersWithShipments } = await supabase
         .from('meli_orders_cache')
         .select('order_id, shipment_id')
@@ -589,20 +589,43 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         .not('order_status', 'in', `(cancelled)`);
 
       const orderIds = (ordersWithShipments || []).map(o => o.order_id);
-      const shipmentIds = [...new Set((ordersWithShipments || []).map(o => o.shipment_id).filter(Boolean))] as string[];
+      const allShipmentIds = [...new Set((ordersWithShipments || []).map(o => o.shipment_id).filter(Boolean))] as string[];
 
       if (!silent) {
         setSyncPhase('shipments');
       }
 
-      // Phase 2: Start shipments sync
-      if (shipmentIds.length > 0) {
-        const shipmentsResponse = await supabase.functions.invoke('ml-sync-shipments', {
-          headers,
-          body: { seller_id: sellerId, shipment_ids: shipmentIds },
-        });
-        if (shipmentsResponse.data?.job_id) {
-          jobIds.push(shipmentsResponse.data.job_id);
+      // Phase 2: Start shipments sync - ONLY for missing shipments
+      if (allShipmentIds.length > 0) {
+        // Find which shipments are already cached
+        const { data: existingShipments } = await supabase
+          .from('meli_shipments_cache')
+          .select('shipment_id')
+          .eq('seller_id', sellerId)
+          .in('shipment_id', allShipmentIds.slice(0, 500)); // Limit query size
+        
+        const existingSet = new Set((existingShipments || []).map(s => s.shipment_id));
+        const missingShipmentIds = allShipmentIds.filter(id => !existingSet.has(id));
+        
+        console.log(`Shipments: ${allShipmentIds.length} total, ${missingShipmentIds.length} missing`);
+        
+        if (missingShipmentIds.length > 0) {
+          // Batch to avoid edge function timeout - max 200 per request
+          const SHIPMENT_BATCH = 200;
+          for (let i = 0; i < missingShipmentIds.length; i += SHIPMENT_BATCH) {
+            const batch = missingShipmentIds.slice(i, i + SHIPMENT_BATCH);
+            const shipmentsResponse = await supabase.functions.invoke('ml-sync-shipments', {
+              headers,
+              body: { seller_id: sellerId, shipment_ids: batch },
+            });
+            if (shipmentsResponse.data?.job_id) {
+              jobIds.push(shipmentsResponse.data.job_id);
+            }
+            // Small delay between batches
+            if (i + SHIPMENT_BATCH < missingShipmentIds.length) {
+              await sleep(500);
+            }
+          }
         }
       }
 
