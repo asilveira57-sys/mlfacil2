@@ -17,6 +17,7 @@ export function LandingHeader() {
 
   const navItems = [
     { label: t('header.menu_recursos'), href: "#recursos" },
+    { label: t('header.menu_ferramentas'), href: "/ferramentas/zpl" },
     { label: t('header.menu_como_funciona'), href: "#como-funciona" },
     { label: t('header.menu_integracoes'), href: "#integracoes" },
     { label: t('header.menu_planos'), href: "#planos" },

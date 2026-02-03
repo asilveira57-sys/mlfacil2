@@ -1,0 +1,64 @@
+{
+  "menu_title": "Ferramentas",
+  "zpl": {
+    "title": "Visualizador de Etiquetas ZPL",
+    "subtitle": "Renderize e baixe etiquetas ZPL gratuitamente",
+    "input_placeholder": "Cole seu código ZPL aqui...",
+    "btn_render": "Renderizar",
+    "btn_download": "Baixar imagem",
+    "btn_clear": "Limpar",
+    "label_width": "Largura (mm)",
+    "label_height": "Altura (mm)",
+    "label_dpmm": "Densidade (dpmm)",
+    "rendering": "Renderizando...",
+    "error_empty": "Insira o código ZPL antes de renderizar",
+    "error_render": "Erro ao renderizar etiqueta. Verifique o código ZPL.",
+    "success_render": "Etiqueta renderizada com sucesso!",
+    "disclaimer": "Ferramenta gratuita para visualização. Recursos avançados como conversão em lote e histórico estão disponíveis no MKTP Fácil.",
+    "sample_code": "^XA\n^FO50,50^ADN,36,20^FDHello World^FS\n^FO50,100^BY3^BCN,100,Y,N,N^FD123456789^FS\n^XZ"
+  },
+  "trends": {
+    "title": "Tendências do Mercado",
+    "subtitle": "Veja o que está em alta no Mercado Livre",
+    "filter_category": "Categoria",
+    "filter_all": "Todas",
+    "sort_by": "Ordenar por",
+    "sort_popularity": "Popularidade",
+    "sort_relevance": "Relevância",
+    "sort_name": "Nome",
+    "popularity_label": "Popularidade",
+    "no_results": "Nenhuma tendência encontrada para esta categoria",
+    "disclaimer": "Versão simplificada. Análises completas, histórico e inteligência de mercado estão disponíveis no MKTP Fácil."
+  },
+  "pricing": {
+    "title": "Simulador de Precificação",
+    "subtitle": "Calcule margem e lucro dos seus produtos",
+    "sale_price": "Preço de venda",
+    "product_cost": "Custo do produto",
+    "marketplace_fee": "Taxa do marketplace (%)",
+    "shipping_cost": "Custo de frete",
+    "packaging_cost": "Custo de embalagem",
+    "other_costs": "Outras despesas",
+    "result_profit": "Lucro líquido",
+    "result_margin": "Margem de lucro",
+    "result_breakeven": "Ponto de equilíbrio",
+    "result_total_cost": "Custo total",
+    "result_fees": "Taxas do marketplace",
+    "positive_margin": "Margem saudável",
+    "negative_margin": "Margem negativa",
+    "warning_margin": "Margem baixa",
+    "btn_calculate": "Calcular",
+    "btn_reset": "Limpar",
+    "disclaimer": "Simulação básica. Salve cenários, compare resultados e integre dados reais no MKTP Fácil."
+  },
+  "promo": {
+    "title": "Quer mais recursos?",
+    "description": "Acesse análises completas, histórico e automações no MKTP Fácil.",
+    "cta": "Conhecer o sistema"
+  },
+  "nav": {
+    "zpl": "Etiqueta ZPL",
+    "trends": "Tendências",
+    "pricing": "Precificação"
+  }
+}
