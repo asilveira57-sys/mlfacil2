@@ -16,16 +16,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useSend } from "@/hooks/useSend";
+import { useSeed } from "@/hooks/useSeed";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { 
-  SendSeedBalanceCard, 
-  SendPlantedItemCard, 
-  SendEligibleItemCard,
-  SendItemDetailDrawer
-} from "@/components/send";
-import { EligibleItem } from "@/types/send";
+  SeedBalanceCard, 
+  SeedPlantedItemCard, 
+  SeedEligibleItemCard,
+  SeedItemDetailDrawer
+} from "@/components/seed";
+import { EligibleItem } from "@/types/seed";
 import { 
   Sprout, 
   Search, 
@@ -39,8 +39,8 @@ import {
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 
-export default function Send() {
-  const { t } = useTranslation('send');
+export default function Seed() {
+  const { t } = useTranslation('seed');
   const navigate = useNavigate();
   const { sellerId } = useActiveAccount();
   const {
@@ -57,7 +57,7 @@ export default function Send() {
     plantItem,
     removeItem,
     refreshData,
-  } = useSend();
+  } = useSeed();
 
   const [activeTab, setActiveTab] = useState("garden");
   const [searchTerm, setSearchTerm] = useState("");
@@ -209,13 +209,13 @@ export default function Send() {
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Sidebar - Seed balance */}
           <div className="lg:col-span-1 space-y-4">
-            <SendSeedBalanceCard
+            <SeedBalanceCard
               availableSeeds={availableSeeds}
               totalSeeds={totalSeeds}
               usedSeeds={usedSeeds}
               plantedCount={plantedCount}
               planTier={seedBalance?.plan_tier || 'basic'}
-              onBuySeeds={() => navigate('/send/sementes')}
+              onBuySeeds={() => navigate('/seed/sementes')}
             />
 
             {/* Info card */}
@@ -289,7 +289,7 @@ export default function Send() {
                 ) : (
                   <div className="grid gap-4 sm:grid-cols-2">
                     {filteredPlantedItems.map((item) => (
-                      <SendPlantedItemCard
+                      <SeedPlantedItemCard
                         key={item.id}
                         item={item}
                         onView={handleViewDetails}
@@ -313,7 +313,7 @@ export default function Send() {
                 ) : (
                   <div className="grid gap-4 sm:grid-cols-2">
                     {filteredEligibleItems.map((item) => (
-                      <SendEligibleItemCard
+                      <SeedEligibleItemCard
                         key={item.item_id}
                         item={item}
                         onPlant={handlePlant}
@@ -404,7 +404,7 @@ export default function Send() {
       </AlertDialog>
 
       {/* Item detail drawer */}
-      <SendItemDetailDrawer
+      <SeedItemDetailDrawer
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
         itemId={selectedItemId}

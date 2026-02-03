@@ -2,20 +2,20 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import type { 
-  SendSeedBalance, 
-  SendPlantedItem, 
-  SendMetricsSnapshot,
-  SendAplusCandidate,
+  SeedBalance, 
+  SeedPlantedItem, 
+  SeedMetricsSnapshot,
+  SeedAplusCandidate,
   PlantedItemWithMetrics,
   EligibleItem 
-} from '@/types/send';
+} from '@/types/seed';
 
 // In-memory cache for listings data
 const listingsCache = new Map<string, { title: string; thumbnail: string; sku: string }>();
 
-interface UseSendResult {
+interface UseSeedResult {
   // Seed balance
-  seedBalance: SendSeedBalance | null;
+  seedBalance: SeedBalance | null;
   availableSeeds: number;
   totalSeeds: number;
   usedSeeds: number;
@@ -26,7 +26,7 @@ interface UseSendResult {
   
   // Eligible items (Curve A/A+)
   eligibleItems: EligibleItem[];
-  aplusCandidates: SendAplusCandidate[];
+  aplusCandidates: SeedAplusCandidate[];
   
   // State
   loading: boolean;
@@ -45,12 +45,12 @@ function extractMlbId(productKey: string): string | null {
   return match ? match[1] : null;
 }
 
-export function useSend(): UseSendResult {
+export function useSeed(): UseSeedResult {
   const { sellerId } = useActiveAccount();
-  const [seedBalance, setSeedBalance] = useState<SendSeedBalance | null>(null);
+  const [seedBalance, setSeedBalance] = useState<SeedBalance | null>(null);
   const [plantedItems, setPlantedItems] = useState<PlantedItemWithMetrics[]>([]);
   const [eligibleItems, setEligibleItems] = useState<EligibleItem[]>([]);
-  const [aplusCandidates, setAplusCandidates] = useState<SendAplusCandidate[]>([]);
+  const [aplusCandidates, setAplusCandidates] = useState<SeedAplusCandidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -58,7 +58,7 @@ export function useSend(): UseSendResult {
   const lastFetchRef = useRef<{ sellerId: string; timestamp: number } | null>(null);
   const CACHE_TTL = 60000; // 1 minute cache
 
-  // Fetch all Send data
+  // Fetch all Seed data
   const fetchData = useCallback(async () => {
     if (!sellerId) {
       setLoading(false);
@@ -109,7 +109,7 @@ export function useSend(): UseSendResult {
         balanceData = newBalance;
       }
 
-      setSeedBalance(balanceData as SendSeedBalance);
+      setSeedBalance(balanceData as SeedBalance);
 
       // Parallel fetch: planted items, A+ candidates, ABC data
       const [plantedRes, aplusRes, abcRes] = await Promise.all([
@@ -142,7 +142,7 @@ export function useSend(): UseSendResult {
       const aplusData = aplusRes.data || [];
       const abcData = abcRes.data || [];
 
-      setAplusCandidates(aplusData as SendAplusCandidate[]);
+      setAplusCandidates(aplusData as SeedAplusCandidate[]);
 
       // Collect all item IDs we need to hydrate
       const allProductKeys = abcData.map(abc => abc.product_key);
@@ -296,7 +296,7 @@ export function useSend(): UseSendResult {
           // Hydrate from cache if stored values are missing
           item_title: item.item_title || listing?.title || item.item_id,
           item_thumbnail: item.item_thumbnail || listing?.thumbnail || null,
-          latestMetrics: metricsMap.get(item.id) as SendMetricsSnapshot | null,
+          latestMetrics: metricsMap.get(item.id) as SeedMetricsSnapshot | null,
           historyCount: historyMap.get(item.id) || 0,
         });
       }
@@ -341,8 +341,8 @@ export function useSend(): UseSendResult {
       lastFetchRef.current = { sellerId, timestamp: now };
 
     } catch (err) {
-      console.error('[useSend] Error:', err);
-      setError(err instanceof Error ? err.message : 'Erro ao carregar dados do Send');
+      console.error('[useSeed] Error:', err);
+      setError(err instanceof Error ? err.message : 'Erro ao carregar dados do Seed');
     } finally {
       setLoading(false);
     }
@@ -418,13 +418,13 @@ export function useSend(): UseSendResult {
       await fetchData();
       return true;
     } catch (err) {
-      console.error('[useSend] plantItem error:', err);
+      console.error('[useSeed] plantItem error:', err);
       setError(err instanceof Error ? err.message : 'Erro ao plantar item');
       return false;
     }
   }, [sellerId, seedBalance, fetchData]);
 
-  // Remove an item from Send
+  // Remove an item from Seed
   const removeItem = useCallback(async (itemId: string): Promise<boolean> => {
     if (!sellerId || !seedBalance) return false;
 
@@ -469,7 +469,7 @@ export function useSend(): UseSendResult {
       await fetchData();
       return true;
     } catch (err) {
-      console.error('[useSend] removeItem error:', err);
+      console.error('[useSeed] removeItem error:', err);
       setError(err instanceof Error ? err.message : 'Erro ao remover item');
       return false;
     }

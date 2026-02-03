@@ -1,18 +1,18 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { EligibleItem } from "@/types/send";
+import { EligibleItem } from "@/types/seed";
 import { Plus, Check, Eye, ImageOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-interface SendEligibleItemCardProps {
+interface SeedEligibleItemCardProps {
   item: EligibleItem;
   onPlant: (item: EligibleItem) => void;
   onViewDetails: (itemId: string) => void;
   disabled?: boolean;
 }
 
-export function SendEligibleItemCard({ item, onPlant, onViewDetails, disabled }: SendEligibleItemCardProps) {
+export function SeedEligibleItemCard({ item, onPlant, onViewDetails, disabled }: SeedEligibleItemCardProps) {
   const isAPlus = item.abc_class === 'A+';
 
   // Extract MLB ID for display
