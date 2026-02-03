@@ -146,9 +146,9 @@ export function SeedItemDetailDrawer({
         }
 
         setData({
-          planted: plantedRes.data as SendPlantedItem | null,
-          metrics: metricsData as SendMetricsSnapshot | null,
-          history: (historyRes.data || []) as SendItemHistory[],
+          planted: plantedRes.data as SeedPlantedItem | null,
+          metrics: metricsData as SeedMetricsSnapshot | null,
+          history: (historyRes.data || []) as SeedItemHistory[],
           listing: listingRes.data || null
         });
       } catch (err) {
@@ -190,7 +190,7 @@ export function SeedItemDetailDrawer({
         .order('occurred_at', { ascending: false })
         .limit(50);
 
-      setData(prev => ({ ...prev, history: (historyData || []) as SendItemHistory[] }));
+      setData(prev => ({ ...prev, history: (historyData || []) as SeedItemHistory[] }));
     } catch (err) {
       toast.error("Erro ao salvar nota");
     } finally {
