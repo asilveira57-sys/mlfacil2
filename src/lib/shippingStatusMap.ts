@@ -254,6 +254,13 @@ export const FINAL_STATUS_MAP: Record<string, FinalStatusInfo> = {
     badgeVariant: 'outline',
     className: 'text-yellow-600 border-yellow-600',
   },
+  pendente_sync: {
+    label: 'Sincronizando...',
+    description: 'O envio está sendo sincronizado. Aguarde ou clique em Atualizar.',
+    severity: 'muted',
+    badgeVariant: 'outline',
+    className: 'text-blue-500 border-blue-500 animate-pulse',
+  },
   full: {
     label: 'FULL',
     description: 'Enviado pelo fulfillment do Mercado Livre.',

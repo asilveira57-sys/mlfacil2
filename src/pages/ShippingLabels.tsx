@@ -10,6 +10,7 @@ import { ShippingTable } from '@/components/shipping/ShippingTable';
 import { ShippingPagination } from '@/components/shipping/ShippingPagination';
 import { BulkActionsBar } from '@/components/shipping/BulkActionsBar';
 import { OrderDetailsDrawer } from '@/components/shipping/OrderDetailsDrawer';
+import { DiagnosticPanel } from '@/components/shipping/DiagnosticPanel';
 import { useToast } from '@/hooks/use-toast';
 import { PageContainer } from '@/components/layout/PageContainer';
 
@@ -63,6 +64,8 @@ export default function ShippingLabels() {
     sortDirection,
     toggleSort,
     orderItems,
+    repairSync,
+    diagnosticInfo,
   } = useShippingLabels({ sellerId: mlAccount?.ml_user_id || null });
 
   useEffect(() => {
@@ -151,6 +154,13 @@ export default function ShippingLabels() {
     >
       {/* Main Content */}
       <main className="container mx-auto px-4 py-6 space-y-6">
+        {/* Diagnostic Panel */}
+        <DiagnosticPanel
+          diagnosticInfo={diagnosticInfo}
+          isSyncing={isSyncing}
+          onRepair={repairSync}
+        />
+
         {/* Filters */}
         <ShippingFilters
           statusFilter={statusFilter}
