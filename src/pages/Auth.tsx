@@ -19,11 +19,15 @@ const Auth = () => {
       }
     });
 
-    // Listen for auth state changes - only react to actual sign-in events
+    // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      // CRITICAL: Only navigate on explicit SIGNED_IN, not TOKEN_REFRESHED or other events
+      // Redirect to dashboard on sign in
       if (event === "SIGNED_IN" && session) {
         navigate("/dashboard");
+      }
+      // Redirect to home page on sign out
+      if (event === "SIGNED_OUT") {
+        navigate("/");
       }
     });
 
