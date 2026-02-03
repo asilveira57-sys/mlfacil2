@@ -1,154 +1,257 @@
 
-# Plan: Fix Missing 6th Plan and Multi-language for Plans Page
 
-## Issues Identified
+# Plano: Ferramentas Públicas Gratuitas (Front-End)
 
-### Issue 1: Missing 6th Plan ("Acima de 3000 vendas")
+## Objetivo
 
-**Root Cause**: The `useTierPlans` hook uses this query:
-```typescript
-supabase.from('public_plans_v1').select('*').eq('visible', true)
-```
-
-The "Acima de 3000 vendas" plan exists in the database but has NO associated prices. In the `public_plans_v1` view, the `visible` column comes from the `plan_prices` table via a LEFT JOIN. Since there are no prices, `visible` is `null`, not `true`, so the plan gets filtered out.
-
-**Solution**: Modify the query in `useTierPlans.ts` to use a filter that accepts both `visible = true` OR `visible IS NULL` (for consultation plans without prices).
-
-### Issue 2: Multi-language Not Working for Plans Page
-
-**Root Cause**: The `Planos.tsx` page has many hardcoded Portuguese strings that should use the i18n translation system:
-- "Planos e Preços" (line 142)
-- "Escolha o plano ideal para o seu negócio." (line 145)
-- "Planos baseados no volume mensal de vendas" (line 171)
-- "Pagamento Antecipado" (line 190)
-- "Assinatura Recorrente" (line 199)
-- "Mensal", "Trimestral", "Semestral" (lines 218-220)
-- "Precisa de mais?" (line 271)
-- And many more...
-
-Additionally, plan names and descriptions come from the database (`plan.name`, `plan.description`), which are stored in Portuguese only.
-
-**Solution**: 
-1. Update `Planos.tsx` to use `useTranslation` hook for all static UI strings
-2. For dynamic plan content (names, features), create translation keys in the i18n files and use them as fallbacks when database content doesn't have a translation
+Criar 3 páginas públicas isoladas no front-end, acessíveis sem login, organizadas sob um menu "Ferramentas" no header público. Essas ferramentas são demonstrativas e não compartilham código com módulos pagos.
 
 ---
 
-## Technical Implementation
+## Arquitetura de Isolamento
 
-### Task 1: Fix Query to Include Consultation Plans
-
-**File**: `src/hooks/useTierPlans.ts`
-
-Change the query filter from:
-```typescript
-.eq('visible', true)
+```text
+src/
+├── pages/
+│   └── tools/                          # Novo diretório isolado
+│       ├── ToolsLayout.tsx             # Layout com header/footer público
+│       ├── ZplViewerTool.tsx           # Visualizador ZPL (API Labelary)
+│       ├── TrendsLiteTool.tsx          # Tendências simplificada
+│       └── PricingSimulatorTool.tsx    # Simulador de precificação
+├── components/
+│   └── tools/                          # Componentes exclusivos (não reutilizam módulos pagos)
+│       ├── ZplCodeEditor.tsx           # Editor de código ZPL
+│       ├── ZplPreviewCard.tsx          # Card de preview da etiqueta
+│       ├── TrendsLiteCard.tsx          # Card de tendência simplificado
+│       ├── TrendsLiteFilters.tsx       # Filtros básicos
+│       ├── PricingInputForm.tsx        # Formulário de custos/taxas
+│       ├── PricingResultDisplay.tsx    # Exibição de resultado
+│       ├── ToolsPromoCard.tsx          # Card promocional do sistema completo
+│       └── index.ts                    # Barrel export
+└── locales/
+    ├── pt-BR/tools.json                # Traduções PT-BR
+    ├── en/tools.json                   # Traduções EN
+    └── es/tools.json                   # Traduções ES
 ```
-
-To use an OR filter that accepts visible=true OR visible IS NULL:
-```typescript
-.or('visible.eq.true,visible.is.null')
-```
-
-This will include plans without prices (like "Acima de 3000 vendas").
 
 ---
 
-### Task 2: Add i18n to Planos.tsx
+## Rotas Públicas (Sem Autenticação)
 
-**File**: `src/pages/Planos.tsx`
+| Rota | Página | Descrição |
+|------|--------|-----------|
+| `/ferramentas/zpl` | ZplViewerTool | Visualizador de etiquetas ZPL |
+| `/ferramentas/tendencias` | TrendsLiteTool | Tendências versão lite |
+| `/ferramentas/precificacao` | PricingSimulatorTool | Simulador de preços |
 
-Add `useTranslation` hook and replace all hardcoded Portuguese strings:
-
-| Current Text | Translation Key |
-|-------------|-----------------|
-| "Planos e Preços" | `planos.title` |
-| "Escolha o plano ideal para o seu negócio." | `planos.subtitle` |
-| "Teste grátis por X dias, sem cartão." | `planos.trial_info` |
-| "Planos baseados no volume mensal de vendas" | `planos.volume_title` |
-| "A cobrança considera a média mensal..." | `planos.volume_subtitle` |
-| "Pagamento Antecipado" | `planos.mode_prepaid` |
-| "Assinatura Recorrente" | `planos.mode_recurring` |
-| "Mensal" | `planos.period_monthly` |
-| "Trimestral" | `planos.period_quarterly` |
-| "Semestral" | `planos.period_semiannual` |
-| "Precisa de mais?" | `planos.enterprise_title` |
-| "Plano personalizado para alto volume" | `planos.enterprise_subtitle` |
-| "Falar com especialista" | `planos.enterprise_cta` |
-| "Pronto para começar?" | `planos.ready_title` |
-| "Voltar ao início" | `planos.back_home` |
+Todas as rotas ficam **fora** do `AppShellLayout` (sem sidebar), usando o mesmo padrão de `/planos` e `/blog`.
 
 ---
 
-### Task 3: Add Plan-Specific Translations to Locale Files
+## Modificações no Header Público
 
-**Files**: `src/locales/[pt-BR|en|es]/landing.json`
+Adicionar novo item "Ferramentas" no menu do `LandingHeader.tsx`:
 
-Add translations for plan names, descriptions, and features. Since plans come from the database in Portuguese, we'll create i18n keys that map to each plan slug:
+```typescript
+const navItems = [
+  { label: t('header.menu_recursos'), href: "#recursos" },
+  { label: t('header.menu_ferramentas'), href: "/ferramentas/zpl" }, // NOVO
+  // ... resto do menu
+];
+```
+
+---
+
+## Detalhamento por Ferramenta
+
+### 1. Etiqueta ZPL (Visualizador)
+
+**Funcionalidades:**
+- Campo de texto (textarea) para inserção de código ZPL
+- Botão "Renderizar" que chama a API Labelary
+- Preview da imagem PNG gerada
+- Botão de download da imagem
+- Aviso institucional sobre recursos avançados
+
+**API Labelary (externa, sem backend):**
+```text
+POST https://api.labelary.com/v1/printers/8dpmm/labels/{width}x{height}/0/
+Content-Type: application/x-www-form-urlencoded
+Accept: image/png
+Body: [código ZPL]
+```
+
+**Características:**
+- 100% client-side (fetch direto do navegador)
+- Sem persistência
+- Dimensões default: 105mm x 150mm (padrão ML)
+
+### 2. Tendências (Versão Lite)
+
+**Funcionalidades:**
+- Lista estática de 10-20 termos/produtos em destaque
+- Filtro simples por categoria (dropdown)
+- Ordenação por relevância ou popularidade
+- Dados hardcoded ou JSON estático (sem API interna)
+
+**Dados estáticos (exemplo):**
+```typescript
+const TRENDS_DATA = [
+  { term: "Fone Bluetooth", category: "Eletrônicos", popularity: 95 },
+  { term: "Capinha iPhone 15", category: "Acessórios", popularity: 88 },
+  // ...
+];
+```
+
+**Características:**
+- Sem histórico ou personalização
+- Sem cruzamento de dados reais
+- Card promocional para módulo completo
+
+### 3. Precificação (Simulador)
+
+**Funcionalidades:**
+- Campos de entrada:
+  - Preço de venda
+  - Custo do produto
+  - Taxa do marketplace (%)
+  - Custo de frete
+  - Custo de embalagem
+  - Outras despesas
+- Cálculo automático em tempo real:
+  - Lucro líquido
+  - Margem de lucro (%)
+  - Ponto de equilíbrio
+- Exibição visual clara dos resultados
+
+**Fórmulas (in-memory):**
+```typescript
+const taxas = precoVenda * (taxaMarketplace / 100);
+const custoTotal = custoProduto + custoFrete + custoEmbalagem + outrasDespesas;
+const lucro = precoVenda - taxas - custoTotal;
+const margem = (lucro / precoVenda) * 100;
+```
+
+**Características:**
+- Cálculo 100% no navegador
+- Sem salvamento
+- Sem associação com contas
+
+---
+
+## Layout Compartilhado (ToolsLayout)
+
+Página wrapper que usa header/footer público:
+
+```typescript
+export function ToolsLayout({ children }) {
+  return (
+    <div className="min-h-screen bg-background">
+      <LandingHeader />
+      <main className="pt-20 pb-16">
+        {children}
+      </main>
+      <LandingFooter />
+    </div>
+  );
+}
+```
+
+---
+
+## Traduções (i18n)
+
+Novo namespace `tools` com suporte a pt-BR, en, es:
 
 ```json
 {
-  "plan_names": {
-    "ate-50-vendas": "Up to 50 sales",
-    "51-300-vendas": "51 to 300 sales",
-    "301-700-vendas": "301 to 700 sales",
-    "701-1500-vendas": "701 to 1500 sales",
-    "1501-3000-vendas": "1501 to 3000 sales",
-    "acima-3000-vendas": "Over 3000 sales"
+  "menu_title": "Ferramentas",
+  "zpl": {
+    "title": "Visualizador de Etiquetas ZPL",
+    "subtitle": "Renderize e baixe etiquetas ZPL gratuitamente",
+    "input_placeholder": "Cole seu código ZPL aqui...",
+    "btn_render": "Renderizar",
+    "btn_download": "Baixar imagem",
+    "disclaimer": "Ferramenta gratuita para visualização. Recursos avançados como conversão em lote e histórico estão disponíveis no MKTP Fácil."
   },
-  "plan_descriptions": {
-    "ate-50-vendas": "Ideal for beginners",
-    "51-300-vendas": "For growing sellers",
-    ...
+  "trends": {
+    "title": "Tendências do Mercado",
+    "subtitle": "Veja o que está em alta no Mercado Livre",
+    "filter_category": "Categoria",
+    "filter_all": "Todas",
+    "sort_popularity": "Popularidade",
+    "sort_relevance": "Relevância",
+    "disclaimer": "Versão simplificada. Análises completas, histórico e inteligência de mercado estão disponíveis no MKTP Fácil."
   },
-  "plan_features": {
-    "dashboard_completo": "Complete dashboard",
-    "sincronizacao_automatica": "Automatic sync",
-    "relatorios_basicos": "Basic reports",
-    ...
+  "pricing": {
+    "title": "Simulador de Precificação",
+    "subtitle": "Calcule margem e lucro dos seus produtos",
+    "sale_price": "Preço de venda",
+    "product_cost": "Custo do produto",
+    "marketplace_fee": "Taxa do marketplace (%)",
+    "shipping_cost": "Custo de frete",
+    "packaging_cost": "Custo de embalagem",
+    "other_costs": "Outras despesas",
+    "result_profit": "Lucro líquido",
+    "result_margin": "Margem de lucro",
+    "disclaimer": "Simulação básica. Salve cenários, compare resultados e integre dados reais no MKTP Fácil."
+  },
+  "promo": {
+    "title": "Quer mais recursos?",
+    "description": "Acesse análises completas, histórico e automações no MKTP Fácil.",
+    "cta": "Conhecer o sistema"
   }
 }
 ```
 
 ---
 
-### Task 4: Update TierPlanCard to Use Translations
+## Modificações em Arquivos Existentes
 
-**File**: `src/components/pricing/TierPlanCard.tsx`
-
-Modify the component to:
-1. Use translated plan names based on `plan.slug`
-2. Use translated plan descriptions
-3. Use translated features (map each feature to a translation key)
-
----
-
-## Files to Modify
-
-| File | Changes |
-|------|---------|
-| `src/hooks/useTierPlans.ts` | Change visible filter to include null values |
-| `src/pages/Planos.tsx` | Add useTranslation, replace all hardcoded strings |
-| `src/components/pricing/TierPlanCard.tsx` | Use translated plan names/descriptions/features |
-| `src/locales/pt-BR/landing.json` | Add plan_names, plan_descriptions, plan_features |
-| `src/locales/en/landing.json` | Add plan_names, plan_descriptions, plan_features |
-| `src/locales/es/landing.json` | Add plan_names, plan_descriptions, plan_features |
+| Arquivo | Alteração |
+|---------|-----------|
+| `src/App.tsx` | Adicionar 3 rotas públicas (`/ferramentas/*`) |
+| `src/components/landing/LandingHeader.tsx` | Adicionar item "Ferramentas" no menu |
+| `src/lib/i18n/index.ts` | Registrar namespace `tools` |
+| `src/locales/*/landing.json` | Adicionar `header.menu_ferramentas` |
 
 ---
 
-## Order of Implementation
+## Regras Críticas de Implementação
 
-1. **Fix useTierPlans query** - Quick fix to show 6th plan
-2. **Update Planos.tsx with i18n** - Replace hardcoded strings
-3. **Add plan translations to locale files** - Plan names/descriptions/features
-4. **Update TierPlanCard** - Use translated content
+1. **Isolamento total**: Nenhum import de hooks, componentes ou serviços dos módulos pagos
+2. **Sem autenticação**: Páginas acessíveis sem sessão ativa
+3. **Sem persistência**: Nenhum dado salvo em banco ou localStorage
+4. **Sem APIs internas**: Apenas chamadas externas (Labelary) ou dados estáticos
+5. **Componentes novos**: Criar componentes em `src/components/tools/` sem reutilizar de outros diretórios
 
 ---
 
-## Expected Outcome
+## Ordem de Implementação
 
-After implementation:
-- All 6 volume plans will appear on the /planos page, including "Acima de 3000 vendas"
-- The 6th plan will show "Consulte-nos" (or translated equivalent) instead of a price
-- All UI text on the plans page will respond to language changes
-- Plan names, descriptions, and features will be translated when switching languages
+1. **Fase 1 - Estrutura Base**
+   - Criar traduções (`tools.json` em 3 idiomas)
+   - Registrar namespace no i18n
+   - Criar `ToolsLayout.tsx`
+   - Adicionar item no menu do header
+
+2. **Fase 2 - Visualizador ZPL**
+   - Criar componentes `ZplCodeEditor` e `ZplPreviewCard`
+   - Implementar página `ZplViewerTool.tsx`
+   - Integrar com API Labelary
+
+3. **Fase 3 - Tendências Lite**
+   - Criar dados estáticos de tendências
+   - Criar componentes `TrendsLiteCard` e `TrendsLiteFilters`
+   - Implementar página `TrendsLiteTool.tsx`
+
+4. **Fase 4 - Simulador de Precificação**
+   - Criar componentes `PricingInputForm` e `PricingResultDisplay`
+   - Implementar página `PricingSimulatorTool.tsx`
+   - Lógica de cálculo in-memory
+
+5. **Fase 5 - Finalização**
+   - Registrar rotas no App.tsx
+   - Testar navegação e traduções
+   - Adicionar card promocional em cada página
+
