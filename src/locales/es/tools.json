@@ -26,13 +26,15 @@
     "filter_all_subcategories": "Todas las subcategorías",
     "sort_by": "Ordenar por",
     "sort_popularity": "Popularidad",
-    "sort_relevance": "Relevancia",
     "sort_growth": "Crecimiento",
-    "sort_name": "Nombre",
     "popularity_label": "Popularidad",
-    "products_title": "Productos Destacados",
+    "products_title": "Top Productos Destacados",
+    "products_subtitle": "Productos con mayor visibilidad en la categoría",
     "keywords_title": "Búsquedas en Alta",
     "keywords_subtitle": "Lo que las personas están buscando ahora",
+    "related_title": "Búsquedas Relacionadas",
+    "related_subtitle": "Cómo el consumidor expande su intención de búsqueda",
+    "related_to": "Relacionado con",
     "trend_up": "En alza",
     "trend_down": "En caída",
     "trend_stable": "Estable",
@@ -61,6 +63,18 @@
     "btn_reset": "Limpiar",
     "disclaimer": "Simulación básica. Guarda escenarios, compara resultados e integra datos reales en MKTP Fácil."
   },
+  "commissions": {
+    "title": "Comisiones Mercado Libre",
+    "subtitle": "Consulta las comisiones oficiales por categoría de Mercado Libre",
+    "filter_category": "Categoría",
+    "filter_all": "Todas las categorías",
+    "refresh": "Actualizar",
+    "last_updated": "Última actualización",
+    "listing_type": "Tipo de anuncio",
+    "fee_label": "Comisión",
+    "no_results": "Selecciona una categoría para ver las comisiones",
+    "disclaimer": "Las comisiones mostradas reflejan las reglas actuales de Mercado Libre y pueden ser modificadas por la plataforma en cualquier momento."
+  },
   "promo": {
     "title": "¿Quieres más funciones?",
     "description": "Accede a análisis completos, historial y automatizaciones en MKTP Fácil.",
@@ -69,6 +83,7 @@
   "nav": {
     "zpl": "Etiqueta ZPL",
     "trends": "Tendencias",
-    "pricing": "Precificación"
+    "pricing": "Precificación",
+    "commissions": "Comisiones"
   }
 }

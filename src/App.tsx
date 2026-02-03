@@ -46,7 +46,7 @@ import FreightManagement from "./pages/FreightManagement";
 import ProductsPage from "./pages/ProductsPage";
 import ProductDetailPage from "./pages/ProductDetailPage";
 import NotFound from "./pages/NotFound";
-import { ZplViewerTool, TrendsLiteTool, PricingSimulatorTool } from "./pages/tools";
+import { ZplViewerTool, TrendsLiteTool, PricingSimulatorTool, CommissionsTool } from "./pages/tools";
 import { AdminRoute } from "./components/auth/AdminRoute";
 
 // NOTE: GlobalWatchdogs removed to prevent background activity storms on tab focus.
@@ -135,6 +135,7 @@ const App = () => {
                 <Route path="/ferramentas/zpl" element={<ZplViewerTool />} />
                 <Route path="/ferramentas/tendencias" element={<TrendsLiteTool />} />
                 <Route path="/ferramentas/precificacao" element={<PricingSimulatorTool />} />
+                <Route path="/ferramentas/comissoes" element={<CommissionsTool />} />
 
                 {/* Dashboard routes (with persistent shell) */}
                 <Route element={<AppShellLayout />}>
