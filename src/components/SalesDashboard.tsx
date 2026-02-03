@@ -258,7 +258,12 @@ export function SalesDashboard() {
     } finally {
       setIsLoading(false);
     }
-  }, [dateFilter, isFirstLoad, toast]);
+  }, [dateFilter, isFirstLoad, toast, activeSellerId]);
+
+  // Fetch data on mount and when activeSellerId changes
+  useEffect(() => {
+    fetchSalesData();
+  }, [activeSellerId]); // Re-fetch when seller changes
 
   // Helper to wait for a job to complete
   const waitForJobCompletion = useCallback(async (jobId: string): Promise<boolean> => {
