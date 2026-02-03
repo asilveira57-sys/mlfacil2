@@ -1,257 +1,200 @@
 
+# Plano: Atualização Constante de Vendas com Sincronização Automática
 
-# Plano: Ferramentas Públicas Gratuitas (Front-End)
+## Diagnóstico do Problema
 
-## Objetivo
+Após análise completa do sistema, identifiquei os seguintes pontos:
 
-Criar 3 páginas públicas isoladas no front-end, acessíveis sem login, organizadas sob um menu "Ferramentas" no header público. Essas ferramentas são demonstrativas e não compartilham código com módulos pagos.
+1. **Dados existem no banco** - Todas as datas de janeiro têm pedidos registrados (1-18 pedidos/dia)
+2. **Sincronização é manual/reativa** - O watchdog (`useOrdersSyncWatchdog`) só sincroniza quando:
+   - Usuário está logado e usando o dashboard
+   - Dados ficam "stale" (>15 minutos sem sync)
+   - Só busca os últimos 7 dias
+3. **Sem job automático** - Não existe cron/scheduler para sincronizar pedidos automaticamente
+4. **Cache muito agressivo** - TTL de 24h para dados históricos pode mostrar dados desatualizados
 
----
-
-## Arquitetura de Isolamento
+## Arquitetura Proposta
 
 ```text
-src/
-├── pages/
-│   └── tools/                          # Novo diretório isolado
-│       ├── ToolsLayout.tsx             # Layout com header/footer público
-│       ├── ZplViewerTool.tsx           # Visualizador ZPL (API Labelary)
-│       ├── TrendsLiteTool.tsx          # Tendências simplificada
-│       └── PricingSimulatorTool.tsx    # Simulador de precificação
-├── components/
-│   └── tools/                          # Componentes exclusivos (não reutilizam módulos pagos)
-│       ├── ZplCodeEditor.tsx           # Editor de código ZPL
-│       ├── ZplPreviewCard.tsx          # Card de preview da etiqueta
-│       ├── TrendsLiteCard.tsx          # Card de tendência simplificado
-│       ├── TrendsLiteFilters.tsx       # Filtros básicos
-│       ├── PricingInputForm.tsx        # Formulário de custos/taxas
-│       ├── PricingResultDisplay.tsx    # Exibição de resultado
-│       ├── ToolsPromoCard.tsx          # Card promocional do sistema completo
-│       └── index.ts                    # Barrel export
-└── locales/
-    ├── pt-BR/tools.json                # Traduções PT-BR
-    ├── en/tools.json                   # Traduções EN
-    └── es/tools.json                   # Traduções ES
+┌─────────────────────────────────────────────────────────────────────┐
+│                    CAMADAS DE SINCRONIZAÇÃO                         │
+├─────────────────────────────────────────────────────────────────────┤
+│  1. NIGHTLY JOB (02:00 BRT)                                        │
+│     └── Sincroniza últimos 30 dias para TODAS as contas ativas     │
+│                                                                     │
+│  2. HOURLY JOB (cada hora)                                         │
+│     └── Sincroniza últimos 2 dias para contas ativas (delta sync)  │
+│                                                                     │
+│  3. WATCHDOG (15min quando app aberto)                             │
+│     └── Mantém comportamento atual para tempo real                 │
+│                                                                     │
+│  4. MANUAL REFRESH                                                  │
+│     └── Botão de atualizar força sync imediato                     │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
----
+## Componentes a Implementar
 
-## Rotas Públicas (Sem Autenticação)
+### 1. Nova Edge Function: `orders-nightly-sync`
 
-| Rota | Página | Descrição |
-|------|--------|-----------|
-| `/ferramentas/zpl` | ZplViewerTool | Visualizador de etiquetas ZPL |
-| `/ferramentas/tendencias` | TrendsLiteTool | Tendências versão lite |
-| `/ferramentas/precificacao` | PricingSimulatorTool | Simulador de preços |
+**Propósito**: Job automático que roda diariamente às 02:00 (BRT)
 
-Todas as rotas ficam **fora** do `AppShellLayout` (sem sidebar), usando o mesmo padrão de `/planos` e `/blog`.
+**Funcionalidades**:
+- Buscar todas as contas ML ativas
+- Para cada conta, sincronizar últimos 30 dias
+- Usar locking para evitar execuções paralelas
+- Rate limiting para respeitar limites da API do ML
+- Logging detalhado para auditoria
 
----
-
-## Modificações no Header Público
-
-Adicionar novo item "Ferramentas" no menu do `LandingHeader.tsx`:
-
+**Estrutura**:
 ```typescript
-const navItems = [
-  { label: t('header.menu_recursos'), href: "#recursos" },
-  { label: t('header.menu_ferramentas'), href: "/ferramentas/zpl" }, // NOVO
-  // ... resto do menu
-];
+// supabase/functions/orders-nightly-sync/index.ts
+- Lock global com TTL de 60 minutos
+- Iteração por todas as contas ativas
+- Token refresh automático antes de cada sync
+- Batch de 50 pedidos por página
+- Delay de 100-500ms entre requisições API
+- Checkpoint a cada 100 pedidos processados
 ```
 
----
+### 2. Nova Edge Function: `orders-hourly-sync`
 
-## Detalhamento por Ferramenta
+**Propósito**: Sincronização incremental a cada hora
 
-### 1. Etiqueta ZPL (Visualizador)
+**Funcionalidades**:
+- Sincroniza apenas últimas 48 horas (delta sync)
+- Mais leve que o nightly
+- Garante que novos pedidos apareçam rapidamente
 
-**Funcionalidades:**
-- Campo de texto (textarea) para inserção de código ZPL
-- Botão "Renderizar" que chama a API Labelary
-- Preview da imagem PNG gerada
-- Botão de download da imagem
-- Aviso institucional sobre recursos avançados
+### 3. Tabela de Controle: `sync_scheduler`
 
-**API Labelary (externa, sem backend):**
+Nova tabela para controlar execuções de jobs:
+
+```sql
+CREATE TABLE sync_scheduler (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_name TEXT NOT NULL UNIQUE,
+  last_run_at TIMESTAMP WITH TIME ZONE,
+  next_run_at TIMESTAMP WITH TIME ZONE,
+  status TEXT DEFAULT 'idle',
+  lock_expires_at TIMESTAMP WITH TIME ZONE,
+  stats JSONB DEFAULT '{}'::JSONB
+);
+```
+
+### 4. Melhorias no Frontend
+
+**SalesDashboard.tsx**:
+- Indicador visual de última sincronização
+- Auto-refresh a cada 5 minutos quando tela aberta
+- Badge "Dados atualizados há X minutos"
+
+**useOrdersSyncWatchdog.ts**:
+- Aumentar período de sync de 7 para 14 dias
+- Verificar último sync do nightly job
+- Não duplicar sync se nightly rodou recentemente
+
+## Fluxo de Sincronização
+
 ```text
-POST https://api.labelary.com/v1/printers/8dpmm/labels/{width}x{height}/0/
-Content-Type: application/x-www-form-urlencoded
-Accept: image/png
-Body: [código ZPL]
+NIGHTLY (02:00 BRT)
+    │
+    ├── Para cada conta ativa:
+    │   ├── Verificar token (refresh se necessário)
+    │   ├── Buscar pedidos dos últimos 30 dias
+    │   ├── Upsert em meli_orders_cache
+    │   ├── Upsert em meli_order_items_cache
+    │   └── Atualizar sync_scheduler
+    │
+    └── Disparar billing sync após orders
+
+HOURLY (a cada hora)
+    │
+    ├── Para contas com vendas recentes:
+    │   └── Sincronizar últimas 48 horas
+    │
+    └── Mais leve, complementa o nightly
+
+WATCHDOG (quando app aberto)
+    │
+    └── Se último sync > 15 min:
+        └── Sincronizar últimos 7 dias
 ```
-
-**Características:**
-- 100% client-side (fetch direto do navegador)
-- Sem persistência
-- Dimensões default: 105mm x 150mm (padrão ML)
-
-### 2. Tendências (Versão Lite)
-
-**Funcionalidades:**
-- Lista estática de 10-20 termos/produtos em destaque
-- Filtro simples por categoria (dropdown)
-- Ordenação por relevância ou popularidade
-- Dados hardcoded ou JSON estático (sem API interna)
-
-**Dados estáticos (exemplo):**
-```typescript
-const TRENDS_DATA = [
-  { term: "Fone Bluetooth", category: "Eletrônicos", popularity: 95 },
-  { term: "Capinha iPhone 15", category: "Acessórios", popularity: 88 },
-  // ...
-];
-```
-
-**Características:**
-- Sem histórico ou personalização
-- Sem cruzamento de dados reais
-- Card promocional para módulo completo
-
-### 3. Precificação (Simulador)
-
-**Funcionalidades:**
-- Campos de entrada:
-  - Preço de venda
-  - Custo do produto
-  - Taxa do marketplace (%)
-  - Custo de frete
-  - Custo de embalagem
-  - Outras despesas
-- Cálculo automático em tempo real:
-  - Lucro líquido
-  - Margem de lucro (%)
-  - Ponto de equilíbrio
-- Exibição visual clara dos resultados
-
-**Fórmulas (in-memory):**
-```typescript
-const taxas = precoVenda * (taxaMarketplace / 100);
-const custoTotal = custoProduto + custoFrete + custoEmbalagem + outrasDespesas;
-const lucro = precoVenda - taxas - custoTotal;
-const margem = (lucro / precoVenda) * 100;
-```
-
-**Características:**
-- Cálculo 100% no navegador
-- Sem salvamento
-- Sem associação com contas
-
----
-
-## Layout Compartilhado (ToolsLayout)
-
-Página wrapper que usa header/footer público:
-
-```typescript
-export function ToolsLayout({ children }) {
-  return (
-    <div className="min-h-screen bg-background">
-      <LandingHeader />
-      <main className="pt-20 pb-16">
-        {children}
-      </main>
-      <LandingFooter />
-    </div>
-  );
-}
-```
-
----
-
-## Traduções (i18n)
-
-Novo namespace `tools` com suporte a pt-BR, en, es:
-
-```json
-{
-  "menu_title": "Ferramentas",
-  "zpl": {
-    "title": "Visualizador de Etiquetas ZPL",
-    "subtitle": "Renderize e baixe etiquetas ZPL gratuitamente",
-    "input_placeholder": "Cole seu código ZPL aqui...",
-    "btn_render": "Renderizar",
-    "btn_download": "Baixar imagem",
-    "disclaimer": "Ferramenta gratuita para visualização. Recursos avançados como conversão em lote e histórico estão disponíveis no MKTP Fácil."
-  },
-  "trends": {
-    "title": "Tendências do Mercado",
-    "subtitle": "Veja o que está em alta no Mercado Livre",
-    "filter_category": "Categoria",
-    "filter_all": "Todas",
-    "sort_popularity": "Popularidade",
-    "sort_relevance": "Relevância",
-    "disclaimer": "Versão simplificada. Análises completas, histórico e inteligência de mercado estão disponíveis no MKTP Fácil."
-  },
-  "pricing": {
-    "title": "Simulador de Precificação",
-    "subtitle": "Calcule margem e lucro dos seus produtos",
-    "sale_price": "Preço de venda",
-    "product_cost": "Custo do produto",
-    "marketplace_fee": "Taxa do marketplace (%)",
-    "shipping_cost": "Custo de frete",
-    "packaging_cost": "Custo de embalagem",
-    "other_costs": "Outras despesas",
-    "result_profit": "Lucro líquido",
-    "result_margin": "Margem de lucro",
-    "disclaimer": "Simulação básica. Salve cenários, compare resultados e integre dados reais no MKTP Fácil."
-  },
-  "promo": {
-    "title": "Quer mais recursos?",
-    "description": "Acesse análises completas, histórico e automações no MKTP Fácil.",
-    "cta": "Conhecer o sistema"
-  }
-}
-```
-
----
 
 ## Modificações em Arquivos Existentes
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `src/App.tsx` | Adicionar 3 rotas públicas (`/ferramentas/*`) |
-| `src/components/landing/LandingHeader.tsx` | Adicionar item "Ferramentas" no menu |
-| `src/lib/i18n/index.ts` | Registrar namespace `tools` |
-| `src/locales/*/landing.json` | Adicionar `header.menu_ferramentas` |
+| `useOrdersSyncWatchdog.ts` | Verificar sync_scheduler antes de disparar |
+| `SalesDashboard.tsx` | Mostrar timestamp da última atualização |
+| `useSalesDataCache.ts` | Reduzir TTL histórico de 24h para 6h |
+| `src/components/SalesDashboard.tsx` | Auto-refresh a cada 5 min |
 
----
+## Novos Arquivos
 
-## Regras Críticas de Implementação
+| Arquivo | Propósito |
+|---------|-----------|
+| `supabase/functions/orders-nightly-sync/index.ts` | Job noturno |
+| `supabase/functions/orders-hourly-sync/index.ts` | Job horário |
+| `supabase/migrations/xxx_sync_scheduler.sql` | Tabela de controle |
 
-1. **Isolamento total**: Nenhum import de hooks, componentes ou serviços dos módulos pagos
-2. **Sem autenticação**: Páginas acessíveis sem sessão ativa
-3. **Sem persistência**: Nenhum dado salvo em banco ou localStorage
-4. **Sem APIs internas**: Apenas chamadas externas (Labelary) ou dados estáticos
-5. **Componentes novos**: Criar componentes em `src/components/tools/` sem reutilizar de outros diretórios
+## Configuração de Cron (Supabase Dashboard)
 
----
+Para ativar os jobs automáticos, será necessário configurar via pg_cron ou webhooks externos:
+
+```sql
+-- Nightly sync às 02:00 BRT (05:00 UTC)
+SELECT cron.schedule(
+  'orders-nightly-sync',
+  '0 5 * * *',
+  $$SELECT net.http_post(
+    url := 'https://rfckrbqwdsejicjlxqdv.supabase.co/functions/v1/orders-nightly-sync',
+    headers := '{"Authorization": "Bearer SERVICE_ROLE_KEY"}'::JSONB
+  )$$
+);
+
+-- Hourly sync (a cada hora)
+SELECT cron.schedule(
+  'orders-hourly-sync',
+  '30 * * * *',
+  $$SELECT net.http_post(
+    url := 'https://rfckrbqwdsejicjlxqdv.supabase.co/functions/v1/orders-hourly-sync',
+    headers := '{"Authorization": "Bearer SERVICE_ROLE_KEY"}'::JSONB
+  )$$
+);
+```
+
+## Regras de Rate Limiting (API Mercado Livre)
+
+- **Limite**: ~18.000 requisições/hora por app
+- **Estratégia**: Delay de 500ms entre requisições
+- **Fallback**: Se rate limited, aguardar 60s e retry
+- **Prioridade**: Contas com mais vendas primeiro
 
 ## Ordem de Implementação
 
-1. **Fase 1 - Estrutura Base**
-   - Criar traduções (`tools.json` em 3 idiomas)
-   - Registrar namespace no i18n
-   - Criar `ToolsLayout.tsx`
-   - Adicionar item no menu do header
+1. **Fase 1 - Infraestrutura**
+   - Criar tabela `sync_scheduler`
+   - Criar migration para RLS
 
-2. **Fase 2 - Visualizador ZPL**
-   - Criar componentes `ZplCodeEditor` e `ZplPreviewCard`
-   - Implementar página `ZplViewerTool.tsx`
-   - Integrar com API Labelary
+2. **Fase 2 - Edge Functions**
+   - Implementar `orders-nightly-sync`
+   - Implementar `orders-hourly-sync`
+   - Registrar em config.toml
 
-3. **Fase 3 - Tendências Lite**
-   - Criar dados estáticos de tendências
-   - Criar componentes `TrendsLiteCard` e `TrendsLiteFilters`
-   - Implementar página `TrendsLiteTool.tsx`
+3. **Fase 3 - Frontend**
+   - Atualizar `useOrdersSyncWatchdog`
+   - Adicionar indicador de última sync
+   - Implementar auto-refresh
 
-4. **Fase 4 - Simulador de Precificação**
-   - Criar componentes `PricingInputForm` e `PricingResultDisplay`
-   - Implementar página `PricingSimulatorTool.tsx`
-   - Lógica de cálculo in-memory
+4. **Fase 4 - Configuração**
+   - Documentar setup de pg_cron
+   - Testar execução manual das functions
 
-5. **Fase 5 - Finalização**
-   - Registrar rotas no App.tsx
-   - Testar navegação e traduções
-   - Adicionar card promocional em cada página
+## Benefícios
 
+- **Dados sempre atualizados**: Nightly garante 30 dias sincronizados
+- **Novos pedidos rápidos**: Hourly pega vendas recentes em até 1h
+- **Menos dependência do usuário**: Sistema atualiza sozinho
+- **Respeito à API**: Rate limiting controlado centralmente
+- **Auditoria**: Tabela de scheduler registra todas as execuções
