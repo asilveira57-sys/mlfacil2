@@ -1,5 +1,6 @@
 {
-  "dashboard": "Dashboard",
+  "home": "Início",
+  "dashboard": "Painel de Controle",
   "sales": "Vendas",
   "shipping_labels": "Etiquetas de Envio",
   "radiography": "Radiografia",
@@ -27,6 +28,7 @@
   "post_sale": "Pós-Venda",
   "questions": "Perguntas",
   "tasks": "Tarefas",
+  "seed": "Seed",
   "notifications": "Notificações",
   "settings": "Configurações",
   "integrations": "Integrações",
@@ -39,7 +41,6 @@
   "management": "Gestão",
   "analytics": "Análises",
   "promotions": "Promoções",
-  "send": "Send",
   "market": "Mercado",
   "reports": "Relatórios",
   "coming_soon": "Em breve",

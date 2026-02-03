@@ -68,7 +68,8 @@ interface NavItem {
 // IDs devem coincidir com system_modules.id no banco de dados
 // moduleKey é usado para controle de acesso de colaboradores
 const mainNavItems: NavItem[] = [
-  { titleKey: "nav:dashboard", url: "/dashboard", icon: LayoutDashboard, moduleId: "dashboard", moduleKey: "dashboard" },
+  { titleKey: "nav:home", url: "/inicio", icon: LayoutDashboard, moduleId: "inicio", moduleKey: "inicio" },
+  { titleKey: "nav:dashboard", url: "/dashboard", icon: BarChart3, moduleId: "dashboard", moduleKey: "dashboard" },
   { titleKey: "nav:sales", url: "/shipping-labels", icon: Package, moduleId: "etiquetas", moduleKey: "etiquetas" },
   { titleKey: "nav:tasks", url: "/tarefas", icon: ListChecks, moduleId: "tarefas", moduleKey: "tarefas" },
   { titleKey: "nav:seed", url: "/seed", icon: Sprout, moduleId: "seed", moduleKey: "seed" },
