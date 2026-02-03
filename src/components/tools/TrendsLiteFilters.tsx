@@ -9,23 +9,30 @@ import {
 
 interface TrendsLiteFiltersProps {
   categories: string[];
+  subcategories: string[];
   selectedCategory: string;
-  sortBy: 'popularity' | 'relevance' | 'name';
+  selectedSubcategory: string;
+  sortBy: 'popularity' | 'relevance' | 'growth' | 'name';
   onCategoryChange: (category: string) => void;
-  onSortChange: (sort: 'popularity' | 'relevance' | 'name') => void;
+  onSubcategoryChange: (subcategory: string) => void;
+  onSortChange: (sort: 'popularity' | 'relevance' | 'growth' | 'name') => void;
 }
 
 export function TrendsLiteFilters({
   categories,
+  subcategories,
   selectedCategory,
+  selectedSubcategory,
   sortBy,
   onCategoryChange,
+  onSubcategoryChange,
   onSortChange,
 }: TrendsLiteFiltersProps) {
   const { t } = useTranslation('tools');
 
   return (
     <div className="flex flex-col sm:flex-row gap-3">
+      {/* Category filter */}
       <div className="flex-1 min-w-[150px]">
         <Select value={selectedCategory} onValueChange={onCategoryChange}>
           <SelectTrigger>
@@ -41,14 +48,36 @@ export function TrendsLiteFilters({
           </SelectContent>
         </Select>
       </div>
+      
+      {/* Subcategory filter - only shown when a category is selected */}
+      {subcategories.length > 0 && (
+        <div className="flex-1 min-w-[150px]">
+          <Select value={selectedSubcategory} onValueChange={onSubcategoryChange}>
+            <SelectTrigger>
+              <SelectValue placeholder={t('trends.filter_subcategory')} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t('trends.filter_all_subcategories')}</SelectItem>
+              {subcategories.map((subcategory) => (
+                <SelectItem key={subcategory} value={subcategory}>
+                  {subcategory}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+      
+      {/* Sort options */}
       <div className="flex-1 min-w-[150px]">
-        <Select value={sortBy} onValueChange={(v) => onSortChange(v as 'popularity' | 'relevance' | 'name')}>
+        <Select value={sortBy} onValueChange={(v) => onSortChange(v as 'popularity' | 'relevance' | 'growth' | 'name')}>
           <SelectTrigger>
             <SelectValue placeholder={t('trends.sort_by')} />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="popularity">{t('trends.sort_popularity')}</SelectItem>
             <SelectItem value="relevance">{t('trends.sort_relevance')}</SelectItem>
+            <SelectItem value="growth">{t('trends.sort_growth')}</SelectItem>
             <SelectItem value="name">{t('trends.sort_name')}</SelectItem>
           </SelectContent>
         </Select>

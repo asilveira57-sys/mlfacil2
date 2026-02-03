@@ -4,5 +4,6 @@ export { ZplCodeEditor } from './ZplCodeEditor';
 export { ZplPreviewCard } from './ZplPreviewCard';
 export { TrendsLiteFilters } from './TrendsLiteFilters';
 export { TrendsLiteCard } from './TrendsLiteCard';
+export { KeywordsSection } from './KeywordsSection';
 export { PricingInputForm } from './PricingInputForm';
 export { PricingResultDisplay } from './PricingResultDisplay';
