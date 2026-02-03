@@ -188,6 +188,7 @@ export function SalesDashboard() {
       let response = await supabase.functions.invoke("ml-sales-data", {
         headers: { Authorization: `Bearer ${session.access_token}` },
         body: {
+          seller_id: activeSellerId,
           date_from: currentFilters.dateFrom,
           date_to: currentFilters.dateTo,
         },
@@ -210,6 +211,7 @@ export function SalesDashboard() {
         response = await supabase.functions.invoke("ml-sales-data", {
           headers: { Authorization: `Bearer ${session.access_token}` },
           body: {
+            seller_id: activeSellerId,
             date_from: currentFilters.dateFrom,
             date_to: currentFilters.dateTo,
           },
