@@ -6761,6 +6761,57 @@ export type Database = {
           },
         ]
       }
+      post_sale_messages_sync_state: {
+        Row: {
+          created_at: string
+          cursor_created_at_meli: string | null
+          cursor_order_id: string | null
+          id: string
+          last_error_code: string | null
+          last_error_message: string | null
+          last_heartbeat_at: string | null
+          last_success_at: string | null
+          processed_orders: number | null
+          seller_id: string
+          status: string
+          synced_conversations: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          cursor_created_at_meli?: string | null
+          cursor_order_id?: string | null
+          id?: string
+          last_error_code?: string | null
+          last_error_message?: string | null
+          last_heartbeat_at?: string | null
+          last_success_at?: string | null
+          processed_orders?: number | null
+          seller_id: string
+          status?: string
+          synced_conversations?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          cursor_created_at_meli?: string | null
+          cursor_order_id?: string | null
+          id?: string
+          last_error_code?: string | null
+          last_error_message?: string | null
+          last_heartbeat_at?: string | null
+          last_success_at?: string | null
+          processed_orders?: number | null
+          seller_id?: string
+          status?: string
+          synced_conversations?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       post_sale_template_scopes: {
         Row: {
           created_at: string
