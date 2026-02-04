@@ -315,6 +315,46 @@ function isListingTypeError(apiError: any): boolean {
 // REGRA OFICIAL DE RESOLUÇÃO DE CATÁLOGO
 // ============================================================================
 
+// ============================================================================
+// DETECÇÃO DE VENDEDOR USER PRODUCTS (modelo novo do Mercado Livre)
+// Vendedores com tag "user_product_seller" NÃO podem enviar campo "title"
+// Em vez disso, devem usar "family_name" como título
+// ============================================================================
+interface UserProductDetection {
+  isUserProduct: boolean;
+  tags: string[];
+  sellerId: string | null;
+}
+
+async function checkUserProductSeller(accessToken: string): Promise<UserProductDetection> {
+  try {
+    const response = await fetch("https://api.mercadolibre.com/users/me", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    
+    if (!response.ok) {
+      console.warn("[ad-action-execute] Failed to fetch user info for UP detection");
+      return { isUserProduct: false, tags: [], sellerId: null };
+    }
+    
+    const userData = await response.json();
+    const tags = userData.tags || [];
+    const isUP = tags.includes("user_product_seller");
+    
+    console.log(`[ad-action-execute] User ${userData.id} tags: [${tags.join(", ")}]`);
+    console.log(`[ad-action-execute] is_user_product_seller: ${isUP}`);
+    
+    return { 
+      isUserProduct: isUP, 
+      tags, 
+      sellerId: userData.id?.toString() 
+    };
+  } catch (err) {
+    console.error("[ad-action-execute] Error detecting UP seller:", err);
+    return { isUserProduct: false, tags: [], sellerId: null };
+  }
+}
+
 function isCatalogId(id: string): boolean {
   return /^MLBU/i.test((id || "").trim());
 }
@@ -1477,6 +1517,17 @@ async function executeCloneAction(
   console.log(`[ad-action-execute] catalog_product_id: ${itemData.catalog_product_id || "(none)"}`);
 
   // =========================================================================
+  // DETECÇÃO DE VENDEDOR USER PRODUCTS
+  // Vendedores com tag "user_product_seller" NÃO podem enviar "title"
+  // =========================================================================
+  const upDetection = await checkUserProductSeller(currentAccessToken);
+  const isUserProductModel = upDetection.isUserProduct;
+
+  console.log(`[ad-action-execute] === USER PRODUCT MODEL DETECTION ===`);
+  console.log(`[ad-action-execute] is_user_product_seller: ${isUserProductModel}`);
+  console.log(`[ad-action-execute] seller_tags: [${upDetection.tags.join(", ") || "(none)"}]`);
+
+  // =========================================================================
   // ETAPA 2: Descobrir atributos obrigatórios da categoria
   // =========================================================================
   let categoryAttributes: CategoryAttribute[] = [];
@@ -1646,10 +1697,13 @@ async function executeCloneAction(
   // =========================================================================
   // BUILD PAYLOAD - v3 Anti-catálogo
   // REMOVIDO: catalog_listing, catalog_product_id, product_id
-  // family_name: só adicionar se cache indicar ou via retry
+  // USER PRODUCTS: NÃO enviar "title", usar "family_name" como título
   // =========================================================================
+  const finalTitle = checklist?.final_title || checklist?.override_title || itemData.title;
+  
   let newItem: any = {
-    title: checklist?.final_title || checklist?.override_title || itemData.title,
+    // title: SÓ enviar se NÃO for vendedor User Products
+    ...(isUserProductModel ? {} : { title: finalTitle }),
     category_id: categoryId,
     currency_id: itemData.currency_id || "BRL",
     listing_type_id: listingTypeToUse,
@@ -1659,8 +1713,13 @@ async function executeCloneAction(
     attributes: filteredAttributes.length > 0 ? filteredAttributes : undefined,
   };
 
-  // Adicionar family_name se veio do preflight (cache)
-  if (fillResult.bodyLevelFields.family_name) {
+  // Para vendedor User Products, family_name é OBRIGATÓRIO (substitui title)
+  if (isUserProductModel) {
+    newItem.family_name = finalTitle;
+    console.log(`[ad-action-execute] USER PRODUCTS MODE: Using family_name instead of title`);
+    console.log(`[ad-action-execute] family_name = "${newItem.family_name}"`);
+  } else if (fillResult.bodyLevelFields.family_name) {
+    // Adicionar family_name se veio do preflight (cache) para vendedor tradicional
     newItem.family_name = fillResult.bodyLevelFields.family_name;
     console.log(`[ad-action-execute] family_name added from preflight: "${newItem.family_name}"`);
   }
@@ -1712,14 +1771,19 @@ async function executeCloneAction(
   const antiCatalogDiagnostic = {
     include_gtin: includeGtin,
     include_sku: includeSku,
+    is_user_product_seller: isUserProductModel,
+    title_sent: !isUserProductModel,
+    family_name_used_as_title: isUserProductModel,
     attributes_removed: [...removedNotModifiable, ...removedCatalogForcing, ...removedAttributes],
     attributes_ids_sent: (newItem.attributes || []).map((a: any) => a.id),
     payload_keys_sent: Object.keys(newItem),
     removed_fields: ["catalog_listing", "catalog_product_id", "product_id"],
     family_name_included: !!newItem.family_name,
-    family_name_source: fillResult.bodyLevelFields.family_name 
-      ? (preflightBodyFields.includes("family_name") ? "cache:categoria" : "retry") 
-      : null,
+    family_name_source: isUserProductModel 
+      ? "user_product_seller" 
+      : (fillResult.bodyLevelFields.family_name 
+          ? (preflightBodyFields.includes("family_name") ? "cache:categoria" : "retry") 
+          : null),
   };
   
   console.log(`[ad-action-execute] === ANTI-CATALOG v3 DIAGNOSTIC ===`);
