@@ -1,112 +1,101 @@
 
-## Diagnóstico do Problema
+# Plano: Corrigir Módulo de Custos - Sincronização de Conta Ativa
 
-O sistema de Q&A **salva a resposta apenas no banco de dados local**, mas **nunca envia para a API do Mercado Livre**. Por isso:
+## Diagnóstico Confirmado
 
-1. A pergunta aparece como "Respondida" no seu app
-2. A pergunta continua "Em aberto" no Mercado Livre
-3. Ao sincronizar novamente, aparecem duplicadas (uma respondida local, outra pendente do ML)
+O módulo de Custos está apresentando "Nenhum pedido encontrado" porque está usando o `seller_id` errado. O problema tem duas causas:
 
-### Evidência no código
+### Causa 1: Página Custos.tsx não usa o ActiveAccountContext
+A página tem um **dropdown local independente** que carrega contas de `ml_accounts` sem ordem definida. Quando o Supabase retorna MLFACIL_CONSULTORIA (1667452966) como primeira na lista, essa conta é automaticamente selecionada.
 
-No arquivo `src/hooks/useQA.ts` (função `useCreateResponse`, linhas 122-193):
-- Salva a resposta na tabela `qa_responses` com `is_sent: false`
-- Atualiza o status da pergunta para `answered`
-- **Não faz nenhuma chamada à API do Mercado Livre**
+```
+Linha 48: setSelectedSellerId(accounts[0].ml_user_id);  // Ordem indefinida!
+```
 
-A tabela `qa_responses` já tem campos preparados (`is_sent`, `sent_at`, `ml_response_id`, `send_error`) que nunca são utilizados.
+### Causa 2: MLFACIL_CONSULTORIA não tem pedidos sincronizados
+Essa conta foi criada em 31/01/2026 e **nunca teve seus pedidos sincronizados**:
+- `meli_orders_cache` → 0 registros para seller_id 1667452966
+- `order_cost_breakdown_cache` → 0 registros
+- Quando o cost-engine tenta calcular, encontra 0 pedidos
 
----
-
-## Solução
-
-### 1. Criar Edge Function `ml-answer-question`
-
-Nova função que faz o POST para a API do Mercado Livre:
-
-- Endpoint ML: `POST https://api.mercadolibre.com/answers`
-- Payload: `{ "question_id": 123456, "text": "Sua resposta aqui" }`
-- Atualiza `qa_responses` com `is_sent = true`, `sent_at`, `ml_response_id`
-- Em caso de erro, registra em `send_error` e mantém `is_sent = false`
-
-### 2. Alterar o fluxo de envio no `useCreateResponse`
-
-Modificar a mutation para:
-
-1. Salvar a resposta localmente (como rascunho temporário)
-2. Chamar a Edge Function `ml-answer-question`
-3. Se sucesso: atualizar `is_sent = true` e status da pergunta para `answered`
-4. Se erro: manter status `pending`, mostrar erro específico ao usuário
-
-### 3. Adicionar tratamento de erros específicos
-
-Possíveis erros da API do ML que precisam ser tratados:
-
-- **Token expirado**: Auto-refresh e retry
-- **Pergunta já respondida**: Sincronizar novamente para obter a resposta existente
-- **Pergunta deletada pelo comprador**: Marcar como `archived`
-- **Conteúdo bloqueado pelo ML**: Mostrar motivo específico
-
-### 4. Atualizar a UI com feedback adequado
-
-- Mostrar spinner durante o envio real ao ML
-- Em caso de erro, mostrar mensagem específica (não apenas "Erro")
-- Botão "Tentar novamente" para respostas com falha
+### Evidência nos logs:
+```
+[cost-engine] Starting calculation for seller 1667452966, period 30 days
+[cost-engine] Found 0 orders to process
+[cost-engine] Found 0 orders with real billing data
+[cost-engine] Calculation completed: 0 orders processed
+```
 
 ---
 
-## Arquivos a serem modificados/criados
+## Solução Proposta
 
-| Arquivo | Ação |
-|---------|------|
-| `supabase/functions/ml-answer-question/index.ts` | Criar - Edge Function para enviar resposta ao ML |
-| `src/hooks/useQA.ts` | Modificar - Chamar a Edge Function ao enviar |
-| `src/components/qa/QaResponseEditor.tsx` | Modificar - Melhorar feedback de erro/sucesso |
+### 1. Integrar Custos.tsx com ActiveAccountContext
+
+Modificar a página para usar o contexto global de conta ativa ao invés do dropdown local independente. Isso garante que:
+- O módulo de custos use a mesma conta que está selecionada no header
+- A troca de conta seja sincronizada em todo o sistema
+- A ordem das contas seja consistente
+
+**Mudanças:**
+- Importar `useActiveAccount` do contexto global
+- Substituir o estado local `selectedSellerId` pelo `sellerId` do contexto
+- Usar `setActiveAccount` para alternar contas
+- Remover a query duplicada de `ml_accounts`
+
+### 2. Disparar recálculo de custos após sincronização de pedidos
+
+Atualmente os custos só são recalculados quando o usuário clica "Recalcular". Mas os pedidos já foram sincronizados até 03/02/2026, enquanto os custos pararam em 28/01/2026.
+
+**Mudança:** No hook de sincronização, após completar a sync de pedidos, disparar automaticamente o recálculo de custos.
+
+### 3. Garantir ordem consistente na listagem de contas
+
+Se a página precisar manter um dropdown local (para casos específicos), adicionar `ORDER BY created_at ASC` na query para que a conta mais antiga (ADECONEXVV) seja sempre a primeira.
+
+---
+
+## Arquivos a serem modificados
+
+| Arquivo | Mudança |
+|---------|---------|
+| `src/pages/Custos.tsx` | Integrar com `ActiveAccountContext` |
+| `src/components/custos/CostOrders.tsx` | Verificar se usa o sellerId correto |
+| `src/components/custos/CostCatalog.tsx` | Verificar consistência |
+| `src/components/custos/CostSettings.tsx` | Verificar consistência |
+| `src/components/custos/CostAbcProfit.tsx` | Verificar consistência |
 
 ---
 
 ## Detalhes Técnicos
 
-### Edge Function `ml-answer-question`
+### Antes (Custos.tsx - problemático):
+```typescript
+const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null);
 
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│  Frontend chama ml-answer-question                              │
-│  ↓                                                              │
-│  1. Valida autenticação do usuário                              │
-│  2. Busca access_token do ML para o seller_id                   │
-│  3. Refresh token se necessário                                 │
-│  4. POST https://api.mercadolibre.com/answers                   │
-│     Body: { "question_id": ml_question_id, "text": resposta }   │
-│  5. Se sucesso: retorna { success: true, ml_response_id }       │
-│  6. Se erro: retorna { success: false, error_code, message }    │
-└─────────────────────────────────────────────────────────────────┘
+const { data: accounts } = await supabase
+  .from('ml_accounts')
+  .select('id, ml_user_id, nickname')
+  .eq('is_active', true);  // Ordem indefinida!
+
+setSelectedSellerId(accounts[0].ml_user_id);  // Pode pegar conta errada
 ```
 
-### Fluxo atualizado do `useCreateResponse`
+### Depois (Custos.tsx - corrigido):
+```typescript
+import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│  Usuário clica "Enviar"                                         │
-│  ↓                                                              │
-│  1. Insere resposta em qa_responses (is_draft=false, is_sent=0) │
-│  2. Chama ml-answer-question                                    │
-│  3. Se ML retornar sucesso:                                     │
-│     - Atualiza qa_responses: is_sent=true, ml_response_id       │
-│     - Atualiza qa_questions: status=answered                    │
-│     - Toast: "Resposta enviada com sucesso"                     │
-│  4. Se ML retornar erro:                                        │
-│     - Atualiza qa_responses: send_error = mensagem              │
-│     - Mantém qa_questions: status=pending                       │
-│     - Toast: "Erro ao enviar: [motivo específico]"              │
-└─────────────────────────────────────────────────────────────────┘
+const { sellerId, activeAccount, accounts, setActiveAccount } = useActiveAccount();
+
+// sellerId já vem do contexto global, sincronizado com o header
+// Se precisar mudar, usa setActiveAccount(accountId) que atualiza globalmente
 ```
 
 ---
 
 ## Critérios de Aceite
 
-1. Ao clicar "Enviar", a resposta é postada no Mercado Livre (verificável abrindo a pergunta no ML)
-2. O campo `is_sent` em `qa_responses` reflete corretamente se foi enviado ao ML
-3. Se o ML rejeitar a resposta, o usuário vê o motivo específico
-4. Após envio bem-sucedido, a pergunta não reaparece como "pendente" na próxima sincronização
+1. Ao entrar no módulo de Custos, a conta exibida no dropdown corresponde à conta ativa no header
+2. Ao trocar conta no módulo de Custos, o header também atualiza (e vice-versa)
+3. A conta ADECONEXVV (que tem pedidos) é exibida corretamente com seus dados
+4. Clicar em "Recalcular" processa os pedidos da conta correta e exibe os resultados
