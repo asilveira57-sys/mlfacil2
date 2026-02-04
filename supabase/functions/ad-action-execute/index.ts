@@ -18,6 +18,8 @@ interface ExecuteActionRequest {
 interface CategoryAttributeCache {
   attributes: CategoryAttribute[];
   requiredIds: string[];
+  conditionalRequiredIds: string[];
+  requiredIfApplicableIds: string[];
   requiredWithAllowedValues: Map<string, Array<{ id: string; name: string }>>;
   fetchedAt: number;
 }
@@ -26,8 +28,23 @@ interface CategoryAttribute {
   id: string;
   name: string;
   value_type: string;
-  tags?: { required?: boolean; catalog_required?: boolean };
+  tags?: { 
+    required?: boolean; 
+    catalog_required?: boolean;
+    conditional_required?: boolean;
+    required_if_applicable?: boolean;
+  };
   values?: Array<{ id: string; name: string }>;
+  allowed_units?: Array<{ id: string; name: string }>;
+}
+
+// Informações detalhadas de atributos para bloqueio inteligente
+interface AttributeRequirementInfo {
+  id: string;
+  name: string;
+  value_type: string;
+  requirement_type: 'required' | 'conditional_required' | 'required_if_applicable';
+  allowed_values?: Array<{ id: string; name: string }>;
   allowed_units?: Array<{ id: string; name: string }>;
 }
 
@@ -440,6 +457,8 @@ async function resolveCatalogItemFallback(
 interface CategoryRequiredInfo {
   attributes: CategoryAttribute[];
   requiredIds: string[];
+  conditionalRequiredIds: string[];
+  requiredIfApplicableIds: string[];
   requiredWithAllowedValues: Map<string, Array<{ id: string; name: string }>>;
 }
 
@@ -454,6 +473,8 @@ async function fetchCategoryRequiredAttributes(
     return { 
       attributes: cached.attributes, 
       requiredIds: cached.requiredIds,
+      conditionalRequiredIds: cached.conditionalRequiredIds,
+      requiredIfApplicableIds: cached.requiredIfApplicableIds,
       requiredWithAllowedValues: cached.requiredWithAllowedValues,
     };
   }
@@ -468,36 +489,71 @@ async function fetchCategoryRequiredAttributes(
 
   if (!response.ok) {
     console.warn(`[ad-action-execute] Failed to fetch category attributes: ${response.status}`);
-    return { attributes: [], requiredIds: [], requiredWithAllowedValues: new Map() };
+    return { 
+      attributes: [], 
+      requiredIds: [], 
+      conditionalRequiredIds: [],
+      requiredIfApplicableIds: [],
+      requiredWithAllowedValues: new Map() 
+    };
   }
 
   const allAttributes: CategoryAttribute[] = await response.json();
   
-  // Filtrar obrigatórios e mapear valores permitidos
+  // Filtrar obrigatórios por tipo e mapear valores permitidos
   const requiredIds: string[] = [];
+  const conditionalRequiredIds: string[] = [];
+  const requiredIfApplicableIds: string[] = [];
   const requiredWithAllowedValues = new Map<string, Array<{ id: string; name: string }>>();
 
   for (const attr of allAttributes) {
-    if (attr.tags?.required === true || attr.tags?.catalog_required === true) {
+    const tags = attr.tags || {};
+    
+    // required ou catalog_required = obrigatório sempre
+    if (tags.required === true || tags.catalog_required === true) {
       requiredIds.push(attr.id);
+      if (attr.values && attr.values.length > 0) {
+        requiredWithAllowedValues.set(attr.id, attr.values);
+      }
+    }
+    // conditional_required = obrigatório sob certas condições
+    else if ((tags as any).conditional_required === true) {
+      conditionalRequiredIds.push(attr.id);
+      if (attr.values && attr.values.length > 0) {
+        requiredWithAllowedValues.set(attr.id, attr.values);
+      }
+    }
+    // required_if_applicable = obrigatório se aplicável ao produto
+    else if ((tags as any).required_if_applicable === true) {
+      requiredIfApplicableIds.push(attr.id);
       if (attr.values && attr.values.length > 0) {
         requiredWithAllowedValues.set(attr.id, attr.values);
       }
     }
   }
 
-  console.log(`[ad-action-execute] Category ${categoryId}: found ${allAttributes.length} total, ${requiredIds.length} required`);
-  console.log(`[ad-action-execute] Required IDs: ${requiredIds.join(", ") || "(none)"}`);
+  console.log(`[ad-action-execute] Category ${categoryId}: found ${allAttributes.length} total attrs`);
+  console.log(`[ad-action-execute]   - required: ${requiredIds.length} [${requiredIds.join(", ") || "(none)"}]`);
+  console.log(`[ad-action-execute]   - conditional_required: ${conditionalRequiredIds.length} [${conditionalRequiredIds.join(", ") || "(none)"}]`);
+  console.log(`[ad-action-execute]   - required_if_applicable: ${requiredIfApplicableIds.length} [${requiredIfApplicableIds.join(", ") || "(none)"}]`);
 
   // Guardar em cache
   categoryAttributesCache.set(categoryId, {
     attributes: allAttributes,
     requiredIds,
+    conditionalRequiredIds,
+    requiredIfApplicableIds,
     requiredWithAllowedValues,
     fetchedAt: Date.now(),
   });
 
-  return { attributes: allAttributes, requiredIds, requiredWithAllowedValues };
+  return { 
+    attributes: allAttributes, 
+    requiredIds,
+    conditionalRequiredIds,
+    requiredIfApplicableIds,
+    requiredWithAllowedValues 
+  };
 }
 
 // ============================================================================
@@ -1495,31 +1551,65 @@ async function executeCloneAction(
       console.log(`[ad-action-execute] Catalog resolved to item: ${resolvedItemId}`);
     }
 
-    // Fetch real item (MLB) - PUBLIC FIRST, AUTH FALLBACK
-    // Itens de concorrentes devem ser buscados SEM token, senão retorna 403
-    console.log(`[ad-action-execute] Fetching item data (public first): ${resolvedItemId}`);
-    let getResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}`);
+    // =========================================================================
+    // FETCH REAL ITEM - PUBLIC FIRST, AUTH FALLBACK
+    // REGRA: Tentar SEM token primeiro (concorrentes), depois COM token (próprios)
+    // =========================================================================
+    console.log(`[ad-action-execute] === ITEM FETCH (PUBLIC FIRST) ===`);
+    console.log(`[ad-action-execute] item_id: ${resolvedItemId}`);
+    
+    let getResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}`, {
+      headers: { Accept: "application/json" },
+    });
+    let fetchMethod = "public";
 
-    // Se falhar com 403 no público, tentar com auth (pode ser item próprio com restrição)
+    console.log(`[ad-action-execute] Public fetch status: ${getResponse.status}`);
+
+    // Se público retornou 403, tentar com auth (item próprio com restrição)
     if (!getResponse.ok && getResponse.status === 403) {
-      console.log(`[ad-action-execute] Public fetch returned 403, trying with auth token...`);
+      console.log(`[ad-action-execute] Public fetch returned 403, retrying WITH auth token...`);
       getResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}`, {
-        headers: { Authorization: `Bearer ${currentAccessToken}` },
+        headers: { 
+          Authorization: `Bearer ${currentAccessToken}`,
+          Accept: "application/json",
+        },
       });
+      fetchMethod = "authenticated";
+      console.log(`[ad-action-execute] Authenticated fetch status: ${getResponse.status}`);
     }
 
+    // ERRO FINAL: Nem público nem autenticado funcionou
     if (!getResponse.ok) {
       const errBody = await getResponse.text().catch(() => "");
+      let errorCode = "FETCH_FAILED";
+      let userMessage = `Falha ao buscar item ${resolvedItemId}`;
+      
+      if (getResponse.status === 404) {
+        errorCode = "ITEM_NOT_FOUND";
+        userMessage = `Item ${resolvedItemId} não encontrado no Mercado Livre`;
+      } else if (getResponse.status === 403) {
+        errorCode = fetchMethod === "authenticated" 
+          ? "FETCH_FAILED_ACCESS_DENIED_AUTHENTICATED"
+          : "FETCH_FAILED_ACCESS_DENIED_PUBLIC";
+        userMessage = `Acesso negado ao item ${resolvedItemId}. O vendedor pode ter restringido acesso ou o item foi removido.`;
+      }
+      
+      console.error(`[ad-action-execute] FETCH FAILED: ${errorCode} (status=${getResponse.status}, method=${fetchMethod})`);
+      
       return {
         success: false,
-        error: getResponse.status === 404 ? "NOT_FOUND" : "FETCH_FAILED",
-        message: `Falha ao buscar item ${resolvedItemId}`,
+        error: errorCode,
+        message: userMessage,
         api_status: getResponse.status,
         api_error: errBody,
+        fetch_method: fetchMethod,
       };
     }
 
     itemData = await getResponse.json();
+    console.log(`[ad-action-execute] Item fetched successfully via ${fetchMethod}`);
+    console.log(`[ad-action-execute] Item title: "${itemData.title?.substring(0, 50)}..."`);
+    console.log(`[ad-action-execute] Item category: ${itemData.category_id}`);
   }
 
   // =========================================================================
@@ -1602,12 +1692,72 @@ async function executeCloneAction(
   console.log(`[ad-action-execute] bodyFieldsFromCache: ${preflightBodyFields.join(", ") || "(none)"}`);
 
   if (fillResult.missing.length > 0) {
+    // =========================================================================
+    // BLOQUEIO INTELIGENTE - Retornar detalhes dos atributos faltantes
+    // NÃO chamar POST /items - retornar com informações úteis para o usuário
+    // =========================================================================
+    console.log(`[ad-action-execute] === BLOCKED: MISSING REQUIRED ATTRIBUTES ===`);
+    console.log(`[ad-action-execute] Missing: ${fillResult.missing.join(", ")}`);
+    
+    // Construir informações detalhadas de cada atributo faltante
+    const missingAttributesDetails: AttributeRequirementInfo[] = [];
+    const catAttrById = new Map<string, CategoryAttribute>();
+    for (const attr of categoryAttributes) {
+      catAttrById.set(attr.id, attr);
+    }
+    
+    for (const missingId of fillResult.missing) {
+      const catAttr = catAttrById.get(missingId);
+      
+      // Determinar tipo de obrigatoriedade
+      let requirementType: 'required' | 'conditional_required' | 'required_if_applicable' = 'required';
+      if (catAttr?.tags) {
+        if ((catAttr.tags as any).conditional_required) {
+          requirementType = 'conditional_required';
+        } else if ((catAttr.tags as any).required_if_applicable) {
+          requirementType = 'required_if_applicable';
+        }
+      }
+      
+      const detail: AttributeRequirementInfo = {
+        id: missingId,
+        name: catAttr?.name || missingId,
+        value_type: catAttr?.value_type || 'string',
+        requirement_type: requirementType,
+      };
+      
+      // Adicionar valores permitidos se existirem
+      if (catAttr?.values && catAttr.values.length > 0) {
+        detail.allowed_values = catAttr.values.slice(0, 10); // Limitar a 10 para não sobrecarregar
+      }
+      if (catAttr?.allowed_units && catAttr.allowed_units.length > 0) {
+        detail.allowed_units = catAttr.allowed_units;
+      }
+      
+      missingAttributesDetails.push(detail);
+      console.log(`[ad-action-execute]   - ${missingId} (${detail.name}): type=${detail.value_type}, req_type=${requirementType}`);
+    }
+    
     return {
       success: false,
-      error: "MISSING_REQUIRED_ATTRIBUTES",
-      message: `Campos obrigatórios faltando: ${fillResult.missing.join(", ")}`,
+      error: "BLOCKED_MISSING_REQUIRED_ATTRIBUTES",
+      message: `Clone bloqueado: ${fillResult.missing.length} atributo(s) obrigatório(s) faltando. Preencha antes de publicar.`,
       missing_required_attributes: fillResult.missing,
+      missing_attributes_details: missingAttributesDetails,
       category_id: categoryId,
+      source_item_id: resolvedItemId,
+      source_snapshot: {
+        item_id: resolvedItemId,
+        category_id: categoryId,
+        title: itemData.title,
+        price: itemData.price,
+        available_quantity: itemData.available_quantity,
+        listing_type_id: itemData.listing_type_id,
+        condition: itemData.condition,
+        pictures_count: (itemData.pictures || []).length,
+        attributes_count: (itemData.attributes || []).length,
+      },
+      user_guidance: `Para publicar este clone, você precisa fornecer os seguintes campos obrigatórios: ${fillResult.missing.join(", ")}. Verifique os detalhes em 'missing_attributes_details' para saber os valores aceitos.`,
     };
   }
 
