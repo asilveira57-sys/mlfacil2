@@ -38,6 +38,19 @@ serve(async (req) => {
       });
     }
 
+    // Decode JWT to get user_id
+    const token = authHeader.replace("Bearer ", "");
+    let userId: string;
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      userId = payload.sub;
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid authorization token" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { workspace_id, ml_account_id, item_id } = await req.json() as RecalculateRequest;
 
     if (!workspace_id) {
@@ -47,14 +60,15 @@ serve(async (req) => {
       });
     }
 
-    console.log(`[ad-timeline-recalculate] Starting for workspace=${workspace_id}, account=${ml_account_id || 'all'}, item=${item_id || 'all'}`);
+    console.log(`[ad-timeline-recalculate] Starting for workspace=${workspace_id}, user=${userId}, account=${ml_account_id || 'all'}, item=${item_id || 'all'}`);
 
     // Resolve marketplace account mapping.
-    // meli_* cache tables store seller_id (text), while ad_timeline_* tables use ml_account_id (uuid).
+    // meli_* cache tables store seller_id (text) with user_id (the authenticated user's UUID).
+    // ad_timeline_* tables use ml_account_id (uuid from ml_accounts) and workspace_id.
     const { data: accounts, error: accountsError } = await supabase
       .from("unified_marketplace_accounts")
       .select("id, seller_id")
-      .eq("user_id", workspace_id);
+      .eq("user_id", userId);
 
     if (accountsError) {
       console.error(`[ad-timeline-recalculate] Error fetching accounts:`, accountsError);
@@ -117,10 +131,11 @@ serve(async (req) => {
 
     // Build query for sales data from meli_order_items_cache
     // Using created_at_meli as the sale date (when the order was created on ML)
+    // Note: meli_* cache tables use the authenticated user_id, not workspace_id
     let salesQuery = supabase
       .from("meli_order_items_cache")
       .select("item_id, created_at_meli, seller_id")
-      .eq("user_id", workspace_id)
+      .eq("user_id", userId)
       .not("created_at_meli", "is", null)
       .order("created_at_meli", { ascending: true });
 
@@ -247,11 +262,12 @@ serve(async (req) => {
     }
 
     // Also handle items with NO sales from listings cache
+    // Note: meli_* cache tables use the authenticated user_id, not workspace_id
     if (!item_id) {
       let listingsQuery = supabase
         .from("meli_listings_cache")
         .select("item_id, seller_id")
-        .eq("user_id", workspace_id);
+        .eq("user_id", userId);
 
       if (sellerIdFilter) {
         listingsQuery = listingsQuery.eq("seller_id", sellerIdFilter);
