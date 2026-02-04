@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,13 +15,25 @@ import { CostAbcProfit } from '@/components/custos/CostAbcProfit';
 import { CostOrderDiagnostic } from '@/components/custos/CostOrderDiagnostic';
 import { PageContainer } from "@/components/layout/PageContainer";
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
+import { useCostSyncWatchdog } from '@/hooks/useCostSyncWatchdog';
+import { useCostWatchdogPreferences } from '@/hooks/useCostWatchdogPreferences';
+import { useCostDataPolling } from '@/hooks/useCostDataPolling';
 
 export default function Custos() {
   const navigate = useNavigate();
   const { sellerId, activeAccount, accounts, setActiveAccount, loading: accountsLoading, initialized } = useActiveAccount();
   const [activeTab, setActiveTab] = useState('resumo');
   const [isCalculating, setIsCalculating] = useState(false);
-  const [summary, setSummary] = useState<any>(null);
+  
+  // Watchdog integration
+  const { enabled: watchdogEnabled } = useCostWatchdogPreferences();
+  useCostSyncWatchdog(sellerId, watchdogEnabled);
+  
+  // Auto-polling for summary data
+  const { summary, loading: summaryLoading, refresh: refreshSummary } = useCostDataPolling({
+    sellerId,
+    enabled: activeTab === 'resumo',
+  });
 
   // Redirect to auth if not logged in
   useEffect(() => {
@@ -34,32 +46,12 @@ export default function Custos() {
     checkAuth();
   }, [navigate]);
 
+  // Refresh summary when tab becomes active
   useEffect(() => {
-    if (sellerId) {
-      loadSummary();
+    if (activeTab === 'resumo' && sellerId) {
+      refreshSummary();
     }
-  }, [sellerId]);
-
-  const loadSummary = async () => {
-    if (!sellerId) return;
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/summary?seller_id=${sellerId}&period_days=30`,
-        { headers: { Authorization: `Bearer ${session.access_token}` } }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        setSummary(data);
-      }
-    } catch (error) {
-      console.error('Error loading summary:', error);
-    }
-  };
+  }, [activeTab, sellerId, refreshSummary]);
 
   const handleCalculate = async () => {
     if (!sellerId) return;
@@ -84,7 +76,7 @@ export default function Custos() {
       if (response.ok) {
         toast.success('Cálculo iniciado em background');
         setTimeout(() => {
-          loadSummary();
+          refreshSummary();
           setIsCalculating(false);
         }, 5000);
       }
@@ -160,7 +152,7 @@ export default function Custos() {
                 </CardHeader>
                 <CardContent>
                   <p className="text-2xl font-bold">
-                    {summary?.summary?.total_revenue ? formatCurrency(summary.summary.total_revenue) : 'R$ 0,00'}
+                    {summary?.total_revenue ? formatCurrency(summary.total_revenue) : 'R$ 0,00'}
                   </p>
                 </CardContent>
               </Card>
@@ -170,7 +162,7 @@ export default function Custos() {
                 </CardHeader>
                 <CardContent>
                   <p className="text-2xl font-bold text-destructive">
-                    {summary?.summary?.total_cost ? formatCurrency(summary.summary.total_cost) : 'R$ 0,00'}
+                    {summary?.total_cost ? formatCurrency(summary.total_cost) : 'R$ 0,00'}
                   </p>
                 </CardContent>
               </Card>
@@ -179,8 +171,8 @@ export default function Custos() {
                   <CardTitle className="text-sm text-muted-foreground">Lucro Total</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className={`text-2xl font-bold ${(summary?.summary?.total_profit || 0) >= 0 ? 'text-green-600' : 'text-destructive'}`}>
-                    {summary?.summary?.total_profit ? formatCurrency(summary.summary.total_profit) : 'R$ 0,00'}
+                  <p className={`text-2xl font-bold ${(summary?.total_profit || 0) >= 0 ? 'text-green-500' : 'text-destructive'}`}>
+                    {summary?.total_profit ? formatCurrency(summary.total_profit) : 'R$ 0,00'}
                   </p>
                 </CardContent>
               </Card>
@@ -190,31 +182,31 @@ export default function Custos() {
                 </CardHeader>
                 <CardContent>
                   <p className="text-2xl font-bold">
-                    {summary?.summary?.avg_margin ? `${summary.summary.avg_margin.toFixed(1)}%` : '0%'}
+                    {summary?.avg_margin ? `${summary.avg_margin.toFixed(1)}%` : '0%'}
                   </p>
-                  {summary?.summary?.incomplete_percent > 0 && (
-                    <p className="text-xs text-amber-600 mt-1">
-                      {summary.summary.incomplete_percent.toFixed(0)}% pedidos sem custo
+                  {(summary?.incomplete_percent || 0) > 0 && (
+                    <p className="text-xs text-warning mt-1">
+                      {summary?.incomplete_percent?.toFixed(0)}% pedidos sem custo
                     </p>
                   )}
                 </CardContent>
               </Card>
-              <Card className="border-amber-200 dark:border-amber-800 bg-amber-50/30 dark:bg-amber-900/10">
+              <Card className="border-warning/30 bg-warning/5">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm text-amber-700 dark:text-amber-400">Cancelados (30d)</CardTitle>
+                  <CardTitle className="text-sm text-warning">Cancelados (30d)</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-2xl font-bold text-amber-600">
-                    {summary?.summary?.cancelled_count || 0}
+                  <p className="text-2xl font-bold text-warning">
+                    {summary?.cancelled_count || 0}
                   </p>
-                  <p className="text-xs text-amber-600 mt-1">
-                    VGV: {summary?.summary?.cancelled_vgv ? formatCurrency(summary.summary.cancelled_vgv) : 'R$ 0,00'}
+                  <p className="text-xs text-warning mt-1">
+                    VGV: {summary?.cancelled_vgv ? formatCurrency(summary.cancelled_vgv) : 'R$ 0,00'}
                   </p>
                 </CardContent>
               </Card>
             </div>
 
-            {!summary?.summary?.order_count && (
+            {!summary?.order_count && (
               <Card>
                 <CardContent className="py-8 text-center">
                   <Calculator className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
