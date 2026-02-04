@@ -14,60 +14,41 @@ import { CostOrders } from '@/components/custos/CostOrders';
 import { CostAbcProfit } from '@/components/custos/CostAbcProfit';
 import { CostOrderDiagnostic } from '@/components/custos/CostOrderDiagnostic';
 import { PageContainer } from "@/components/layout/PageContainer";
-
-interface MlAccount {
-  id: string;
-  ml_user_id: string;
-  nickname: string | null;
-}
+import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 
 export default function Custos() {
   const navigate = useNavigate();
-  const [mlAccounts, setMlAccounts] = useState<MlAccount[]>([]);
-  const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null);
+  const { sellerId, activeAccount, accounts, setActiveAccount, loading: accountsLoading, initialized } = useActiveAccount();
   const [activeTab, setActiveTab] = useState('resumo');
-  const [isLoading, setIsLoading] = useState(true);
   const [isCalculating, setIsCalculating] = useState(false);
   const [summary, setSummary] = useState<any>(null);
 
+  // Redirect to auth if not logged in
   useEffect(() => {
     const checkAuth = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         navigate('/auth');
-        return;
       }
-
-      const { data: accounts } = await supabase
-        .from('ml_accounts')
-        .select('id, ml_user_id, nickname')
-        .eq('is_active', true);
-
-      if (accounts && accounts.length > 0) {
-        setMlAccounts(accounts);
-        setSelectedSellerId(accounts[0].ml_user_id);
-      }
-      setIsLoading(false);
     };
-
     checkAuth();
   }, [navigate]);
 
   useEffect(() => {
-    if (selectedSellerId) {
+    if (sellerId) {
       loadSummary();
     }
-  }, [selectedSellerId]);
+  }, [sellerId]);
 
   const loadSummary = async () => {
-    if (!selectedSellerId) return;
+    if (!sellerId) return;
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/summary?seller_id=${selectedSellerId}&period_days=30`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/summary?seller_id=${sellerId}&period_days=30`,
         { headers: { Authorization: `Bearer ${session.access_token}` } }
       );
 
@@ -81,7 +62,7 @@ export default function Custos() {
   };
 
   const handleCalculate = async () => {
-    if (!selectedSellerId) return;
+    if (!sellerId) return;
 
     setIsCalculating(true);
     try {
@@ -96,7 +77,7 @@ export default function Custos() {
             Authorization: `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ seller_id: selectedSellerId, period_days: 30 }),
+          body: JSON.stringify({ seller_id: sellerId, period_days: 30 }),
         }
       );
 
@@ -113,7 +94,8 @@ export default function Custos() {
     }
   };
 
-  if (isLoading) {
+  // Loading state while accounts are being fetched
+  if (!initialized || accountsLoading) {
     return (
       <PageContainer title="Módulo de Custos">
         <div className="p-6">
@@ -124,24 +106,29 @@ export default function Custos() {
     );
   }
 
+  // Handle account switching using global context
+  const handleAccountChange = async (accountId: string) => {
+    await setActiveAccount(accountId);
+  };
+
   const formatCurrency = (value: number) => 
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 
   const headerContent = (
     <div className="flex items-center gap-4">
-      <Select value={selectedSellerId || ''} onValueChange={setSelectedSellerId}>
+      <Select value={activeAccount?.id || ''} onValueChange={handleAccountChange}>
         <SelectTrigger className="w-48">
           <SelectValue placeholder="Selecione a conta" />
         </SelectTrigger>
         <SelectContent>
-          {mlAccounts.map(acc => (
-            <SelectItem key={acc.id} value={acc.ml_user_id}>
-              {acc.nickname || acc.ml_user_id}
+          {accounts.map(acc => (
+            <SelectItem key={acc.id} value={acc.id}>
+              {acc.nickname || acc.sellerId}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
-      <Button onClick={handleCalculate} disabled={isCalculating}>
+      <Button onClick={handleCalculate} disabled={isCalculating || !sellerId}>
         <RefreshCw className={`h-4 w-4 mr-2 ${isCalculating ? 'animate-spin' : ''}`} />
         {isCalculating ? 'Calculando...' : 'Recalcular'}
       </Button>
@@ -244,23 +231,23 @@ export default function Custos() {
           </TabsContent>
 
           <TabsContent value="catalogo">
-            <CostCatalog sellerId={selectedSellerId || ''} />
+            <CostCatalog sellerId={sellerId || ''} />
           </TabsContent>
 
           <TabsContent value="pedidos">
-            <CostOrders sellerId={selectedSellerId || ''} />
+            <CostOrders sellerId={sellerId || ''} />
           </TabsContent>
 
           <TabsContent value="abc">
-            <CostAbcProfit sellerId={selectedSellerId || ''} />
+            <CostAbcProfit sellerId={sellerId || ''} />
           </TabsContent>
 
           <TabsContent value="diagnostico">
-            <CostOrderDiagnostic sellerId={selectedSellerId || ''} />
+            <CostOrderDiagnostic sellerId={sellerId || ''} />
           </TabsContent>
 
           <TabsContent value="config">
-            <CostSettings sellerId={selectedSellerId || ''} />
+            <CostSettings sellerId={sellerId || ''} />
           </TabsContent>
         </Tabs>
       </main>
