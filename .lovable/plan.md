@@ -1,63 +1,106 @@
 
-# Plano: Corrigir exibição da Linha do Tempo
+# Plano: Corrigir Carregamento de Dados de Vendas na Linha do Tempo
 
 ## Diagnóstico
 
-Após análise técnica detalhada, identifiquei que o problema **não é limite ou erro de API do Mercado Livre**. 
+O problema **não é erro ou limite de API do Mercado Livre**. A causa raiz foi identificada como um **limite de paginação do banco de dados**.
 
-O recálculo foi bem-sucedido e inseriu 774 registros na tabela `ad_timeline_stats` com:
-- `workspace_id = 433a4292-92c0-4ced-9c29-f1199f990d9a` (seu user_id)
-- `ml_account_id = 997e5eb2-8abd-4a08-9c17-977acbce7cc1` (conta ADECONEXVV)
+### Dados Identificados:
+- **6.694 vendas** existem no cache (`meli_order_items_cache`)
+- **442 itens únicos** têm vendas registradas
+- **Limite padrão do Supabase**: 1.000 linhas por query
 
-Porém as **políticas de segurança (RLS)** da tabela estão bloqueando a leitura.
-
-## Causa Raiz
-
-As políticas RLS atuais validam acesso assim:
-```sql
-workspace_id IN (
-  SELECT w.id 
-  FROM workspaces w JOIN workspace_members wm ON ...
-  WHERE wm.user_id = auth.uid()
-)
+### Problema:
+A Edge Function `ad-timeline-recalculate` executa uma query sem especificar limite:
+```javascript
+let salesQuery = supabase
+  .from("meli_order_items_cache")
+  .select("item_id, created_at_meli, seller_id")
+  .eq("user_id", userId)
+  // ... SEM LIMITE EXPLÍCITO
 ```
 
-Mas o sistema está usando `user_id` como `workspace_id` diretamente. Como não existe um registro `workspaces` com `id = seu_user_id`, a política bloqueia a leitura.
+O Supabase aplica automaticamente o limite de 1.000 linhas. Como a query ordena por `created_at_meli ASC` (vendas mais antigas primeiro), apenas as primeiras 1.000 vendas são processadas, cobrindo apenas **198 itens**.
 
-## Correção Proposta
+**Resultado**: 
+- 198 itens → `120D` (vendas antigas processadas)
+- 576 itens → `NO_SALES` (incluindo 244 itens que têm vendas, mas não foram processadas)
 
-Atualizar as políticas RLS para o padrão híbrido que suporta ambos os casos:
+## Solução
+
+Implementar **paginação** para buscar todas as 6.694+ vendas do cache antes de processá-las.
+
+## Alterações Necessárias
+
+### 1. Edge Function `ad-timeline-recalculate`
+
+Adicionar lógica de paginação para buscar todos os registros:
 
 ```text
-workspace_id = auth.uid() 
-OR 
-workspace_id IN (SELECT ... FROM workspace_members WHERE user_id = auth.uid())
+Arquivo: supabase/functions/ad-timeline-recalculate/index.ts
+
+Modificações:
+1. Criar função helper de paginação que busca em lotes de 1000
+2. Substituir a query única por loop de paginação
+3. Agregar todos os resultados antes de processar
 ```
 
-Isso permitirá:
-1. Acesso direto quando `workspace_id = user_id` (caso atual)
-2. Acesso via membership em workspaces compartilhados (caso futuro)
+---
 
-## Alterações
+## Detalhes Técnicos
 
-### 1. Migração SQL (criação)
-Arquivo: Nova migração para ajustar políticas
+### Lógica de Paginação
 
-- DROP das 3 políticas atuais (SELECT, INSERT, UPDATE)
-- CREATE de novas políticas com condição híbrida
+```text
+Pseudo-código:
 
-### 2. Arquivos de Código
-Nenhuma alteração necessária no frontend ou Edge Function. A lógica atual está correta.
+const PAGE_SIZE = 1000;
+let allSalesData = [];
+let offset = 0;
+let hasMore = true;
+
+while (hasMore) {
+  const { data, error } = await supabase
+    .from("meli_order_items_cache")
+    .select("item_id, created_at_meli, seller_id")
+    .eq("user_id", userId)
+    .eq("seller_id", sellerIdFilter)
+    .not("created_at_meli", "is", null)
+    .order("created_at_meli", { ascending: true })
+    .range(offset, offset + PAGE_SIZE - 1);
+  
+  if (error) throw error;
+  
+  allSalesData = allSalesData.concat(data || []);
+  hasMore = (data?.length || 0) === PAGE_SIZE;
+  offset += PAGE_SIZE;
+}
+
+// Processar allSalesData com todos os registros
+```
+
+### Pontos de Atenção
+- **Limite de memória**: Com 7.000+ registros, manter arrays em memória é seguro (< 1MB)
+- **Timeout**: Cada página adiciona ~100-200ms, mas ainda dentro do limite de 30s
+- **Retro-compatibilidade**: Sem alteração na interface da função
 
 ## Resultado Esperado
 
-Após aplicar a migração:
-- Os 774 anúncios serão exibidos na tabela
-- Os cards de status (120D: 198, NO_SALES: 576) mostrarão as contagens corretas
-- Futuras sincronizações funcionarão normalmente
+Após a correção:
+- **442 itens** com vendas serão corretamente processados
+- Buckets serão recalculados com dados precisos:
+  - `OK`: Itens vendendo normalmente
+  - `30D/60D/90D/120D`: Itens sem venda nos respectivos períodos
+  - `NO_SALES`: Apenas os ~325 itens que realmente nunca venderam
+
+## Arquivos a Modificar
+
+| Arquivo | Tipo de Alteração |
+|---------|-------------------|
+| `supabase/functions/ad-timeline-recalculate/index.ts` | Adicionar paginação na busca de vendas |
 
 ## Impacto
 
-- Baixo risco: apenas ajuste de políticas de segurança
-- Sem downtime: a migração é atômica
-- Dados preservados: nenhum dado será alterado ou perdido
+- **Baixo risco**: Apenas melhoria na consulta, sem alteração de schema
+- **Performance**: Adiciona ~1-2 segundos ao recálculo total (aceitável)
+- **Sem downtime**: Alteração transparente para usuários
