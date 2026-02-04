@@ -1495,11 +1495,18 @@ async function executeCloneAction(
       console.log(`[ad-action-execute] Catalog resolved to item: ${resolvedItemId}`);
     }
 
-    // Fetch real item (MLB)
-    console.log(`[ad-action-execute] Fetching item data: ${resolvedItemId}`);
-    const getResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}`, {
-      headers: { Authorization: `Bearer ${currentAccessToken}` },
-    });
+    // Fetch real item (MLB) - PUBLIC FIRST, AUTH FALLBACK
+    // Itens de concorrentes devem ser buscados SEM token, senão retorna 403
+    console.log(`[ad-action-execute] Fetching item data (public first): ${resolvedItemId}`);
+    let getResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}`);
+
+    // Se falhar com 403 no público, tentar com auth (pode ser item próprio com restrição)
+    if (!getResponse.ok && getResponse.status === 403) {
+      console.log(`[ad-action-execute] Public fetch returned 403, trying with auth token...`);
+      getResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}`, {
+        headers: { Authorization: `Bearer ${currentAccessToken}` },
+      });
+    }
 
     if (!getResponse.ok) {
       const errBody = await getResponse.text().catch(() => "");
