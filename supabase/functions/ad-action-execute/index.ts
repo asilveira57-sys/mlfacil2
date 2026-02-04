@@ -1498,13 +1498,18 @@ async function executeCloneAction(
   
   // Variáveis de diagnóstico de fetch (escopo global da função)
   let fetchAttempts: Array<{
-    method: "public" | "authenticated";
+    method: "public" | "authenticated" | "batch_public" | "batch_authenticated";
     status: number;
     endpoint: string;
     body_excerpt: string;
     timestamp: string;
   }> = [];
-  let fetchMethodFinal: "public" | "authenticated" | "snapshot" = "snapshot";
+  let fetchMethodFinal: "public" | "authenticated" | "batch_public" | "batch_authenticated" | "none" = "none";
+  
+  // PolicyAgent detection variables
+  let isPolicyAgentBlock = false;
+  let policyCode: string | null = null;
+  let blockedBy: string | null = null;
 
   console.log(`[ad-action-execute] Clone requested for ID: ${itemId}`);
   console.log(`[ad-action-execute] ID type analysis: isRegularItemId=${isRegularItemId(itemId)}, isCatalogId=${isCatalogId(itemId)}`);
@@ -1562,21 +1567,26 @@ async function executeCloneAction(
     }
 
     // =========================================================================
-    // FETCH REAL ITEM - PUBLIC FIRST, AUTH FALLBACK (estratégia obrigatória)
+    // FETCH REAL ITEM - PUBLIC FIRST, AUTH FALLBACK, BATCH FALLBACK
     // REGRA FIXA: 
     //   1. Tentar SEM token primeiro (público)
-    //   2. Se 403, tentar COM token (autenticado)
-    //   3. Registrar TODAS as tentativas no fetch_attempts[]
+    //   2. Se 403, detectar PolicyAgent e tentar COM token (autenticado)
+    //   3. Se PolicyAgent detectado, tentar endpoint batch
+    //   4. Registrar TODAS as tentativas no fetch_attempts[]
     // =========================================================================
-    console.log(`[ad-action-execute] === ITEM FETCH (PUBLIC FIRST STRATEGY) ===`);
+    console.log(`[ad-action-execute] === ITEM FETCH (PUBLIC FIRST + BATCH FALLBACK) ===`);
     console.log(`[ad-action-execute] item_id: ${resolvedItemId}`);
     
-    // Usar as variáveis do escopo externo (fetchAttempts, fetchMethodFinal)
     const fetchEndpoint = `/items/${resolvedItemId}`;
+    const batchEndpoint = `/items?ids=${resolvedItemId}`;
     let publicResponse: Response | null = null;
     let authenticatedResponse: Response | null = null;
+    let batchPublicResponse: Response | null = null;
+    let batchAuthenticatedResponse: Response | null = null;
     let publicBody: string = "";
     let authenticatedBody: string = "";
+    let batchPublicBody: string = "";
+    let batchAuthenticatedBody: string = "";
     
     // =========================================================================
     // ETAPA 1: Fetch PÚBLICO (sem Authorization)
@@ -1586,7 +1596,6 @@ async function executeCloneAction(
       headers: { Accept: "application/json" },
     });
     
-    // Ler body como texto para registro
     publicBody = await publicResponse.text().catch(() => "");
     
     fetchAttempts.push({
@@ -1600,7 +1609,26 @@ async function executeCloneAction(
     console.log(`[ad-action-execute] [STEP 1] Public fetch status: ${publicResponse.status}`);
     
     // =========================================================================
-    // DECISÃO: Se público = 200, usar e NÃO tentar autenticado
+    // DETECTAR PolicyAgent no body do 403
+    // =========================================================================
+    if (publicResponse.status === 403) {
+      // Verificar se é bloqueio por PolicyAgent
+      if (publicBody.includes('"blocked_by":"PolicyAgent"') || 
+          publicBody.includes("PA_UNAUTHORIZED_RESULT_FROM_POLICIES")) {
+        isPolicyAgentBlock = true;
+        blockedBy = "PolicyAgent";
+        
+        // Extrair policy_code se existir
+        if (publicBody.includes("PA_UNAUTHORIZED_RESULT_FROM_POLICIES")) {
+          policyCode = "PA_UNAUTHORIZED_RESULT_FROM_POLICIES";
+        }
+        
+        console.log(`[ad-action-execute] [STEP 1] PolicyAgent DETECTED: blocked_by=${blockedBy}, policy_code=${policyCode}`);
+      }
+    }
+    
+    // =========================================================================
+    // DECISÃO: Se público = 200, usar e NÃO tentar outros métodos
     // =========================================================================
     if (publicResponse.ok) {
       console.log(`[ad-action-execute] [STEP 1] Public fetch SUCCESS - using public data`);
@@ -1632,32 +1660,163 @@ async function executeCloneAction(
       
       console.log(`[ad-action-execute] [STEP 2] Authenticated fetch status: ${authenticatedResponse.status}`);
       
+      // Verificar PolicyAgent também no authenticated
+      if (authenticatedResponse.status === 403 && !isPolicyAgentBlock) {
+        if (authenticatedBody.includes('"blocked_by":"PolicyAgent"') || 
+            authenticatedBody.includes("PA_UNAUTHORIZED_RESULT_FROM_POLICIES")) {
+          isPolicyAgentBlock = true;
+          blockedBy = "PolicyAgent";
+          if (authenticatedBody.includes("PA_UNAUTHORIZED_RESULT_FROM_POLICIES")) {
+            policyCode = "PA_UNAUTHORIZED_RESULT_FROM_POLICIES";
+          }
+          console.log(`[ad-action-execute] [STEP 2] PolicyAgent DETECTED in authenticated response`);
+        }
+      }
+      
       if (authenticatedResponse.ok) {
         console.log(`[ad-action-execute] [STEP 2] Authenticated fetch SUCCESS`);
         fetchMethodFinal = "authenticated";
         itemData = JSON.parse(authenticatedBody);
+      } 
+      // =========================================================================
+      // ETAPA 3: Se PolicyAgent detectado e ambos falharam, tentar BATCH
+      // =========================================================================
+      else if (isPolicyAgentBlock) {
+        console.log(`[ad-action-execute] [STEP 3] PolicyAgent block detected - trying batch endpoint...`);
+        
+        // 3a) Batch público primeiro
+        console.log(`[ad-action-execute] [STEP 3a] Batch public fetch...`);
+        batchPublicResponse = await fetch(`https://api.mercadolibre.com/items?ids=${resolvedItemId}`, {
+          headers: { Accept: "application/json" },
+        });
+        
+        batchPublicBody = await batchPublicResponse.text().catch(() => "");
+        
+        fetchAttempts.push({
+          method: "batch_public",
+          status: batchPublicResponse.status,
+          endpoint: batchEndpoint,
+          body_excerpt: batchPublicBody.substring(0, 300),
+          timestamp: new Date().toISOString(),
+        });
+        
+        console.log(`[ad-action-execute] [STEP 3a] Batch public status: ${batchPublicResponse.status}`);
+        
+        // Tentar extrair item do batch response
+        let batchItemData: any = null;
+        if (batchPublicResponse.ok) {
+          try {
+            const batchArray = JSON.parse(batchPublicBody);
+            if (Array.isArray(batchArray) && batchArray.length > 0) {
+              const batchResult = batchArray[0];
+              // Batch retorna { code: 200, body: {...} } ou { code: 403, ... }
+              if (batchResult.code === 200 && batchResult.body) {
+                batchItemData = batchResult.body;
+                console.log(`[ad-action-execute] [STEP 3a] Batch public SUCCESS - extracted item from batch`);
+              } else {
+                console.log(`[ad-action-execute] [STEP 3a] Batch public returned code ${batchResult.code} for item`);
+              }
+            }
+          } catch (e) {
+            console.error(`[ad-action-execute] [STEP 3a] Failed to parse batch response: ${e}`);
+          }
+        }
+        
+        if (batchItemData) {
+          fetchMethodFinal = "batch_public";
+          itemData = batchItemData;
+        } else {
+          // 3b) Batch autenticado como último recurso
+          console.log(`[ad-action-execute] [STEP 3b] Batch authenticated fetch...`);
+          batchAuthenticatedResponse = await fetch(`https://api.mercadolibre.com/items?ids=${resolvedItemId}`, {
+            headers: { 
+              Authorization: `Bearer ${currentAccessToken}`,
+              Accept: "application/json",
+            },
+          });
+          
+          batchAuthenticatedBody = await batchAuthenticatedResponse.text().catch(() => "");
+          
+          fetchAttempts.push({
+            method: "batch_authenticated",
+            status: batchAuthenticatedResponse.status,
+            endpoint: batchEndpoint,
+            body_excerpt: batchAuthenticatedBody.substring(0, 300),
+            timestamp: new Date().toISOString(),
+          });
+          
+          console.log(`[ad-action-execute] [STEP 3b] Batch authenticated status: ${batchAuthenticatedResponse.status}`);
+          
+          if (batchAuthenticatedResponse.ok) {
+            try {
+              const batchArray = JSON.parse(batchAuthenticatedBody);
+              if (Array.isArray(batchArray) && batchArray.length > 0) {
+                const batchResult = batchArray[0];
+                if (batchResult.code === 200 && batchResult.body) {
+                  batchItemData = batchResult.body;
+                  console.log(`[ad-action-execute] [STEP 3b] Batch authenticated SUCCESS`);
+                }
+              }
+            } catch (e) {
+              console.error(`[ad-action-execute] [STEP 3b] Failed to parse batch response: ${e}`);
+            }
+          }
+          
+          if (batchItemData) {
+            fetchMethodFinal = "batch_authenticated";
+            itemData = batchItemData;
+          } else {
+            // TODAS TENTATIVAS FALHARAM - Bloqueio por PolicyAgent confirmado
+            console.error(`[ad-action-execute] FETCH FAILED: All attempts failed (PolicyAgent block)`);
+            
+            return {
+              success: false,
+              error: "BLOCKED_BY_POLICY_AGENT",
+              message: `O item ${resolvedItemId} está bloqueado por políticas do Mercado Livre (PolicyAgent). Este bloqueio impede a visualização e clonagem do anúncio.`,
+              reason: "BLOCKED_BY_POLICY_AGENT",
+              api_status: 403,
+              api_error: publicBody,
+              fetch_method: "none",
+              fetch_attempts: fetchAttempts,
+              diagnostic: {
+                public_status: publicResponse.status,
+                authenticated_status: authenticatedResponse?.status,
+                batch_public_status: batchPublicResponse?.status,
+                batch_authenticated_status: batchAuthenticatedResponse?.status,
+                blocked_by: blockedBy,
+                policy_code: policyCode,
+                conclusion: "Bloqueio por PolicyAgent confirmado - todas as 4 tentativas falharam",
+              },
+              source_snapshot: null,
+            };
+          }
+        }
       } else {
-        // AMBAS FALHARAM - erro real de acesso
+        // AMBAS FALHARAM sem PolicyAgent - erro real de acesso
         console.error(`[ad-action-execute] FETCH FAILED: Both public and authenticated failed`);
         
         return {
           success: false,
           error: "FETCH_FAILED_BOTH",
           message: `Acesso negado ao item ${resolvedItemId}. O item pode estar restrito pelo vendedor ou ter sido removido.`,
+          reason: "FETCH_FAILED_BOTH",
           api_status: authenticatedResponse.status,
           api_error: authenticatedBody,
-          fetch_method: fetchMethodFinal,
+          fetch_method: "none",
           fetch_attempts: fetchAttempts,
           diagnostic: {
             public_status: publicResponse.status,
             authenticated_status: authenticatedResponse.status,
+            blocked_by: blockedBy,
+            policy_code: policyCode,
             conclusion: "Ambas tentativas (pública e autenticada) falharam com erro de acesso",
           },
+          source_snapshot: null,
         };
       }
     }
     // =========================================================================
-    // ETAPA 3: Se público = 404, item não existe
+    // ETAPA 404: Item não existe
     // =========================================================================
     else if (publicResponse.status === 404) {
       console.error(`[ad-action-execute] FETCH FAILED: Item not found (404)`);
@@ -1666,14 +1825,16 @@ async function executeCloneAction(
         success: false,
         error: "ITEM_NOT_FOUND",
         message: `Item ${resolvedItemId} não encontrado no Mercado Livre`,
+        reason: "ITEM_NOT_FOUND",
         api_status: 404,
         api_error: publicBody,
-        fetch_method: "public",
+        fetch_method: "none",
         fetch_attempts: fetchAttempts,
+        source_snapshot: null,
       };
     }
     // =========================================================================
-    // ETAPA 4: Outro erro no público (não 403, não 404)
+    // Outro erro no público (não 403, não 404)
     // =========================================================================
     else {
       console.error(`[ad-action-execute] FETCH FAILED: Public fetch error (status=${publicResponse.status})`);
@@ -1682,10 +1843,12 @@ async function executeCloneAction(
         success: false,
         error: "FETCH_FAILED_PUBLIC",
         message: `Falha ao buscar item ${resolvedItemId} (status ${publicResponse.status})`,
+        reason: "FETCH_FAILED_PUBLIC",
         api_status: publicResponse.status,
         api_error: publicBody,
-        fetch_method: "public",
+        fetch_method: "none",
         fetch_attempts: fetchAttempts,
+        source_snapshot: null,
       };
     }
     
