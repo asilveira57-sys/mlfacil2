@@ -6526,6 +6526,39 @@ export type Database = {
           },
         ]
       }
+      post_sale_blocked_patterns: {
+        Row: {
+          category: string
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          pattern: string
+          pattern_type: string
+          updated_at: string
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          pattern: string
+          pattern_type?: string
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          pattern?: string
+          pattern_type?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       post_sale_messages: {
         Row: {
           block_details: Json | null
