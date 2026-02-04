@@ -302,8 +302,60 @@ export function ActionDetailsDialog({
               </div>
             )}
 
+            {/* PolicyAgent Block Display */}
+            {isFailed && result?.error === 'BLOCKED_BY_POLICY_AGENT' && (
+              <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-4 space-y-3">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-5 w-5 text-orange-600 mt-0.5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-orange-700 dark:text-orange-400">
+                      Bloqueado por PolicyAgent
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Este anúncio não pode ser lido via API do Mercado Livre por política interna.
+                      O vendedor ou categoria bloqueia a consulta externa.
+                    </p>
+                    {result?.diagnostic?.policy_code && (
+                      <p className="text-xs text-muted-foreground mt-1 font-mono">
+                        Código: {result.diagnostic.policy_code}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => {
+                      // Reset link para tentar outro item
+                      setLink('');
+                      setLinkError(null);
+                      toast.info('Cole o link de outro anúncio');
+                    }}
+                  >
+                    <RotateCcw className="h-3 w-3 mr-1" />
+                    Tentar outro item
+                  </Button>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => {
+                      // Criar rascunho baseado em modelo (formulário vazio)
+                      handleDuplicate();
+                    }}
+                    disabled={isLoading}
+                  >
+                    <FilePlus className="h-3 w-3 mr-1" />
+                    Criar do modelo
+                  </Button>
+                </div>
+              </div>
+            )}
+
             {/* Catalog Info Display (for failed catalog clones) */}
-            {isFailed && result?.is_catalog && (
+            {isFailed && result?.is_catalog && result?.error !== 'BLOCKED_BY_POLICY_AGENT' && (
               <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
                 <div className="flex items-start gap-2">
                   <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />

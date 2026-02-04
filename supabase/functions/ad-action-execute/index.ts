@@ -1702,23 +1702,66 @@ async function executeCloneAction(
         
         console.log(`[ad-action-execute] [STEP 3a] Batch public status: ${batchPublicResponse.status}`);
         
-        // Tentar extrair item do batch response
+        // =========================================================================
+        // VALIDAÇÃO RIGOROSA DO BATCH RESPONSE
+        // Critérios obrigatórios:
+        //   1. Array com pelo menos 1 elemento
+        //   2. Elemento com code === 200
+        //   3. body.id === resolvedItemId (match exato)
+        //   4. body contém campos essenciais (category_id, title, pictures)
+        // =========================================================================
         let batchItemData: any = null;
-        if (batchPublicResponse.ok) {
+        
+        const validateBatchItem = (batchBody: string, itemIdExpected: string): { valid: boolean; data: any; reason?: string } => {
           try {
-            const batchArray = JSON.parse(batchPublicBody);
-            if (Array.isArray(batchArray) && batchArray.length > 0) {
-              const batchResult = batchArray[0];
-              // Batch retorna { code: 200, body: {...} } ou { code: 403, ... }
-              if (batchResult.code === 200 && batchResult.body) {
-                batchItemData = batchResult.body;
-                console.log(`[ad-action-execute] [STEP 3a] Batch public SUCCESS - extracted item from batch`);
-              } else {
-                console.log(`[ad-action-execute] [STEP 3a] Batch public returned code ${batchResult.code} for item`);
-              }
+            const batchArray = JSON.parse(batchBody);
+            
+            if (!Array.isArray(batchArray) || batchArray.length === 0) {
+              return { valid: false, data: null, reason: "response_not_array_or_empty" };
             }
+            
+            // Procurar o item correto no array (pode ter múltiplos se batch com vários IDs)
+            const matchingResult = batchArray.find((r: any) => {
+              if (r.code !== 200) return false;
+              if (!r.body) return false;
+              if (r.body.id !== itemIdExpected) return false;
+              return true;
+            });
+            
+            if (!matchingResult) {
+              // Verificar se existe no array mas com code != 200
+              const failedResult = batchArray.find((r: any) => r.body?.id === itemIdExpected || batchArray[0]);
+              const failedCode = failedResult?.code || "unknown";
+              return { valid: false, data: null, reason: `item_code_not_200:${failedCode}` };
+            }
+            
+            const body = matchingResult.body;
+            
+            // Verificar campos essenciais
+            if (!body.category_id) {
+              return { valid: false, data: null, reason: "missing_category_id" };
+            }
+            if (!body.title) {
+              return { valid: false, data: null, reason: "missing_title" };
+            }
+            if (!body.pictures || !Array.isArray(body.pictures)) {
+              return { valid: false, data: null, reason: "missing_pictures" };
+            }
+            
+            return { valid: true, data: body };
           } catch (e) {
-            console.error(`[ad-action-execute] [STEP 3a] Failed to parse batch response: ${e}`);
+            return { valid: false, data: null, reason: `parse_error:${e}` };
+          }
+        };
+        
+        if (batchPublicResponse.ok) {
+          const validation = validateBatchItem(batchPublicBody, resolvedItemId);
+          
+          if (validation.valid) {
+            batchItemData = validation.data;
+            console.log(`[ad-action-execute] [STEP 3a] Batch public SUCCESS - item validated: id=${batchItemData.id}, category=${batchItemData.category_id}`);
+          } else {
+            console.log(`[ad-action-execute] [STEP 3a] Batch public INVALID: ${validation.reason}`);
           }
         }
         
@@ -1748,17 +1791,13 @@ async function executeCloneAction(
           console.log(`[ad-action-execute] [STEP 3b] Batch authenticated status: ${batchAuthenticatedResponse.status}`);
           
           if (batchAuthenticatedResponse.ok) {
-            try {
-              const batchArray = JSON.parse(batchAuthenticatedBody);
-              if (Array.isArray(batchArray) && batchArray.length > 0) {
-                const batchResult = batchArray[0];
-                if (batchResult.code === 200 && batchResult.body) {
-                  batchItemData = batchResult.body;
-                  console.log(`[ad-action-execute] [STEP 3b] Batch authenticated SUCCESS`);
-                }
-              }
-            } catch (e) {
-              console.error(`[ad-action-execute] [STEP 3b] Failed to parse batch response: ${e}`);
+            const validation = validateBatchItem(batchAuthenticatedBody, resolvedItemId);
+            
+            if (validation.valid) {
+              batchItemData = validation.data;
+              console.log(`[ad-action-execute] [STEP 3b] Batch authenticated SUCCESS - item validated`);
+            } else {
+              console.log(`[ad-action-execute] [STEP 3b] Batch authenticated INVALID: ${validation.reason}`);
             }
           }
           
@@ -1767,13 +1806,15 @@ async function executeCloneAction(
             itemData = batchItemData;
           } else {
             // TODAS TENTATIVAS FALHARAM - Bloqueio por PolicyAgent confirmado
-            console.error(`[ad-action-execute] FETCH FAILED: All attempts failed (PolicyAgent block)`);
+            console.error(`[ad-action-execute] FETCH FAILED: All 4 attempts failed (PolicyAgent block confirmed)`);
             
             return {
               success: false,
               error: "BLOCKED_BY_POLICY_AGENT",
-              message: `O item ${resolvedItemId} está bloqueado por políticas do Mercado Livre (PolicyAgent). Este bloqueio impede a visualização e clonagem do anúncio.`,
+              action_status: "FAILED",
               reason: "BLOCKED_BY_POLICY_AGENT",
+              message: "Este anúncio não pode ser lido via API do Mercado Livre por política interna (PolicyAgent). O vendedor ou categoria bloqueia a consulta externa.",
+              user_guidance: "Você pode criar um anúncio baseado em modelo (preenchimento manual) ou tentar clonar outro item.",
               api_status: 403,
               api_error: publicBody,
               fetch_method: "none",
@@ -1785,9 +1826,11 @@ async function executeCloneAction(
                 batch_authenticated_status: batchAuthenticatedResponse?.status,
                 blocked_by: blockedBy,
                 policy_code: policyCode,
-                conclusion: "Bloqueio por PolicyAgent confirmado - todas as 4 tentativas falharam",
+                conclusion: "Bloqueio por PolicyAgent confirmado - todas as 4 tentativas falharam (public, authenticated, batch_public, batch_authenticated)",
               },
               source_snapshot: null,
+              recoverable: true,
+              recovery_options: ["create_from_template", "try_another_item"],
             };
           }
         }
