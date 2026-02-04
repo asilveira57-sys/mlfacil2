@@ -843,25 +843,53 @@ function extractMissingFieldsFromApiError(apiError: any): {
   if (apiError.cause && Array.isArray(apiError.cause)) {
     for (const cause of apiError.cause) {
       if (cause.code === "body.required_fields") {
-        // Campos body-level
-        const refs = cause.references || [];
-        for (const ref of refs) {
-          if (typeof ref === "string") {
-            bodyFields.push(ref);
+        // PRIMEIRO: Extrair campos do conteúdo da message (ex: "[family_name]")
+        // Isso é mais confiável que references[] que às vezes só contém "body"
+        if (cause.message) {
+          const match = cause.message.match(/\[([^\]]+)\]/);
+          if (match) {
+            const fields = match[1].split(",").map((f: string) => f.trim().toLowerCase());
+            for (const field of fields) {
+              if (field && field !== "body" && !bodyFields.includes(field)) {
+                bodyFields.push(field);
+              }
+            }
+          }
+        }
+        
+        // FALLBACK: references[] - mas ignorar "body" genérico
+        if (bodyFields.length === 0) {
+          const refs = cause.references || [];
+          for (const ref of refs) {
+            if (typeof ref === "string" && ref.toLowerCase() !== "body") {
+              bodyFields.push(ref.toLowerCase());
+            }
           }
         }
       } else if (cause.code === "item.attributes.missing_required") {
-        // Atributos
-        const refs = cause.references || [];
-        for (const ref of refs) {
-          if (typeof ref === "string") {
-            attributeFields.push(ref);
+        // Atributos - extrair da message primeiro
+        if (cause.message) {
+          const match = cause.message.match(/\[([^\]]+)\]/);
+          if (match) {
+            const fields = match[1].split(",").map((f: string) => f.trim());
+            attributeFields.push(...fields);
+          }
+        }
+        
+        // Fallback para references
+        if (attributeFields.length === 0) {
+          const refs = cause.references || [];
+          for (const ref of refs) {
+            if (typeof ref === "string") {
+              attributeFields.push(ref);
+            }
           }
         }
       }
     }
   }
 
+  console.log(`[ad-action-execute] Extracted missing fields - body: [${bodyFields.join(", ")}], attributes: [${attributeFields.join(", ")}]`);
   return { bodyFields, attributeFields };
 }
 
