@@ -3,3 +3,7 @@ export { PostSaleTemplatesList } from "./PostSaleTemplatesList";
 export { PostSaleTemplateEditor } from "./PostSaleTemplateEditor";
 export { PostSaleHistory } from "./PostSaleHistory";
 export { PostSaleAutomation } from "./PostSaleAutomation";
+export { PostSaleConversationsTab } from "./PostSaleConversationsTab";
+export { PostSaleInbox } from "./PostSaleInbox";
+export { PostSaleConversation } from "./PostSaleConversation";
+export { PostSaleReplyEditor } from "./PostSaleReplyEditor";
