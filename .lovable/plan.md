@@ -1,75 +1,82 @@
 
-# Plano: Corrigir Erro de UUID na Clonagem de Anúncios
+# Plano: Corrigir Violação de RLS na Criação de Ações
 
 ## Diagnóstico
 
-O erro `"invalid input syntax for type uuid: '66043362'"` ocorre porque:
+O erro `"new row violates row-level security policy for table 'ad_lifecycle_actions'"` ocorre porque:
 
-1. A página `AdTimelineRadar.tsx` obtém o `sellerId` do contexto `useActiveAccount()` (linha 149)
-2. Este `sellerId` é o **ID numérico** do vendedor no Mercado Livre (ex: "66043362")
-3. Ao criar uma ação de clonagem, o código passa este ID numérico diretamente para o campo `ml_account_id` da tabela `ad_lifecycle_actions`
-4. A tabela `ad_lifecycle_actions` exige um **UUID** (ex: "997e5eb2-8abd-4a08-9c17-977acbce7cc1")
+| Variável | Valor Atual (incorreto) | Valor Esperado (correto) |
+|----------|-------------------------|--------------------------|
+| `workspaceId` | User ID: `433a4292-...` | Workspace ID: `1a86ab83-df87-43b0-...` |
 
-## Fluxo Atual (com bug)
+### Causa Raiz
 
-```text
-useActiveAccount() → sellerId = "66043362" (numérico)
-                          ↓
-handleConfirmAction() → createActionMutation({ mlAccountId: "66043362" })
-                          ↓
-useCreateAction() → INSERT ml_account_id = "66043362" ← ERRO!
+A página `AdTimelineRadar.tsx` (linha 150) usa:
+```javascript
+const workspaceId = useCurrentUserId();
 ```
 
-## Fluxo Corrigido
+Mas `useCurrentUserId()` retorna o **ID do usuário autenticado**, não o ID do workspace.
 
-```text
-useActiveAccount() → sellerId = "66043362" (numérico)
-                          ↓
-handleConfirmAction() → createActionMutation({ mlAccountId: "66043362" })
-                          ↓
-useCreateAction() → resolveMlAccountUuid("66043362") → UUID
-                          ↓
-                   INSERT ml_account_id = "997e5eb2-..." ← OK!
+### Política RLS em `ad_lifecycle_actions`
+
+A tabela exige que o `workspace_id` do novo registro pertença a um workspace onde o usuário é membro:
+
+```sql
+-- INSERT policy:
+WITH CHECK (
+  workspace_id IN (
+    SELECT w.id FROM workspaces w
+    JOIN workspace_members wm ON wm.workspace_id = w.id
+    WHERE wm.user_id = auth.uid()
+  )
+)
 ```
+
+Como `useCurrentUserId()` retorna `433a4292-...` (user_id) em vez de `1a86ab83-...` (workspace_id real), a política falha.
 
 ---
 
-## Alteração Necessária
+## Solução
 
-### Arquivo: `src/hooks/useAdTimeline.ts`
+Substituir `useCurrentUserId()` por `useWorkspace().currentWorkspace?.id` nas páginas do módulo Linha do Tempo.
 
-Modificar a função `useCreateAction` para:
-1. Chamar `resolveMlAccountUuid(mlAccountId)` antes do insert
-2. Usar o UUID resolvido no campo `ml_account_id`
+---
 
-**Código atual (linhas 306-322):**
+## Alterações Necessárias
+
+### 1. `src/pages/AdTimelineRadar.tsx`
+
+**Antes (linha 150):**
 ```javascript
-const { data, error } = await supabase
-  .from('ad_lifecycle_actions')
-  .insert([{
-    workspace_id: workspaceId,
-    ml_account_id: mlAccountId,  // ← BUG: ID numérico
-    item_id: itemId,
-    ...
-  }])
+import { useCurrentUserId } from "@/hooks/useCurrentUserId";
+// ...
+const workspaceId = useCurrentUserId();
 ```
 
-**Código corrigido:**
+**Depois:**
 ```javascript
-// Resolver seller_id numérico para UUID
-const mlAccountUuid = await resolveMlAccountUuid(mlAccountId);
-if (!mlAccountUuid) {
-  throw new Error('Conta do Mercado Livre não encontrada');
-}
+import { useWorkspace } from "@/hooks/useWorkspace";
+// ...
+const { currentWorkspace } = useWorkspace();
+const workspaceId = currentWorkspace?.id || null;
+```
 
-const { data, error } = await supabase
-  .from('ad_lifecycle_actions')
-  .insert([{
-    workspace_id: workspaceId,
-    ml_account_id: mlAccountUuid,  // ← CORRETO: UUID
-    item_id: itemId,
-    ...
-  }])
+### 2. `src/pages/AdTimelineDetail.tsx`
+
+**Antes (linha 36):**
+```javascript
+import { useCurrentUserId } from "@/hooks/useCurrentUserId";
+// ...
+const workspaceId = useCurrentUserId();
+```
+
+**Depois:**
+```javascript
+import { useWorkspace } from "@/hooks/useWorkspace";
+// ...
+const { currentWorkspace } = useWorkspace();
+const workspaceId = currentWorkspace?.id || null;
 ```
 
 ---
@@ -78,19 +85,20 @@ const { data, error } = await supabase
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `src/hooks/useAdTimeline.ts` | Adicionar resolução de UUID em `useCreateAction` |
+| `src/pages/AdTimelineRadar.tsx` | Trocar `useCurrentUserId` por `useWorkspace` |
+| `src/pages/AdTimelineDetail.tsx` | Trocar `useCurrentUserId` por `useWorkspace` |
 
 ---
 
 ## Impacto
 
-- **Baixo risco**: Apenas uma linha de código + validação
-- **Sem alteração de schema**: A tabela já espera UUID
-- **Consistência**: Segue o mesmo padrão usado em `useAdTimelineStats` e `useAdTimelineBucketCounts`
+- **Baixo risco**: Apenas alteração de qual hook é usado
+- **Sem alteração de schema ou RLS**: As políticas já estão corretas
+- **Consistência**: Segue o mesmo padrão usado em outras páginas (`Tarefas.tsx`, `SupportTicketList.tsx`)
 
 ## Resultado Esperado
 
 Após a correção:
-- Clonagem de anúncios funcionará corretamente
-- O rascunho será criado com o UUID correto no campo `ml_account_id`
-- Compatibilidade com políticas RLS mantida
+- Criar rascunhos de ações funcionará corretamente
+- O `workspace_id` correto será usado em todas as operações
+- A política RLS será satisfeita
