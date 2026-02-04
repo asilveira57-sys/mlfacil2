@@ -80,19 +80,42 @@ export function CloneListingDialog({
       const user = authData?.user;
       if (!user) throw new Error('Não autenticado');
 
-      // Fetch the ml_account_id for this seller using dynamic approach to avoid type issues
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sb = supabase as any;
-      const accountResult = await sb
+      // Resolve the correct workspace ID (NOT user.id)
+      let resolvedWorkspaceId: string | null = null;
+      
+      // 1) Try user_preferences.active_workspace_id
+      const { data: prefs } = await supabase
+        .from('user_preferences')
+        .select('active_workspace_id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if ((prefs as any)?.active_workspace_id) {
+        resolvedWorkspaceId = (prefs as any).active_workspace_id;
+      } else {
+        // 2) Fallback: first workspace membership
+        const { data: member } = await supabase
+          .from('workspace_members')
+          .select('workspace_id')
+          .eq('user_id', user.id)
+          .limit(1)
+          .maybeSingle();
+        
+        resolvedWorkspaceId = (member as any)?.workspace_id || null;
+      }
+
+      if (!resolvedWorkspaceId) {
+        throw new Error('Workspace não encontrado');
+      }
+
+      // Fetch the ml_account_id for this seller (by ml_user_id which is the seller_id)
+      const { data: mlAccount } = await supabase
         .from('ml_accounts')
         .select('id')
-        .eq('seller_id', sellerId)
-        .eq('user_id', user.id)
-        .limit(1);
+        .eq('ml_user_id', sellerId)
+        .maybeSingle();
 
-      const mlAccountId = accountResult.data?.[0]?.id;
-
-      if (!mlAccountId) {
+      if (!mlAccount?.id) {
         throw new Error('Conta do Mercado Livre não encontrada');
       }
 
@@ -114,8 +137,8 @@ export function CloneListingDialog({
       const insertResult = await supabase
         .from('ad_lifecycle_actions')
         .insert([{
-          workspace_id: user.id,
-          ml_account_id: mlAccountId,
+          workspace_id: resolvedWorkspaceId,
+          ml_account_id: mlAccount.id,
           item_id: sellerListingId,
           action_type: 'CLONE',
           action_status: 'DRAFT',

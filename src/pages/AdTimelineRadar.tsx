@@ -55,7 +55,7 @@ import {
   useCreateAction,
 } from "@/hooks/useAdTimeline";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
-import { useWorkspace } from "@/hooks/useWorkspace";
+import { useCurrentWorkspaceId } from "@/hooks/useCurrentWorkspaceId";
 import type { StatusBucket, ActionType, CloneChecklist, AdTimelineStats } from "@/types/ad-timeline";
 
 const bucketLabels: Record<StatusBucket | 'ALL', string> = {
@@ -147,8 +147,7 @@ function SortableHeader({
 export default function AdTimelineRadar() {
   const navigate = useNavigate();
   const { sellerId } = useActiveAccount();
-  const { currentWorkspace } = useWorkspace();
-  const workspaceId = currentWorkspace?.id || null;
+  const { data: workspaceId } = useCurrentWorkspaceId();
   const mlAccountId = sellerId || undefined;
 
   const [statusFilter, setStatusFilter] = useState<StatusBucket | 'ALL'>('ALL');

@@ -284,6 +284,30 @@ export function useRecalculateTimeline() {
   });
 }
 
+// Helper to resolve the active workspace ID for the current user
+async function resolveActiveWorkspaceId(userId: string): Promise<string | null> {
+  // 1) Try user_preferences.active_workspace_id
+  const { data: prefs } = await supabase
+    .from('user_preferences')
+    .select('active_workspace_id')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if ((prefs as any)?.active_workspace_id) {
+    return (prefs as any).active_workspace_id as string;
+  }
+
+  // 2) Fallback: first workspace membership
+  const { data: member } = await supabase
+    .from('workspace_members')
+    .select('workspace_id')
+    .eq('user_id', userId)
+    .limit(1)
+    .maybeSingle();
+
+  return (member as any)?.workspace_id as string | null;
+}
+
 export function useCreateAction() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -305,6 +329,14 @@ export function useCreateAction() {
       checklist?: CloneChecklist;
     }) => {
       const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Não autenticado');
+
+      // ROBUST: Always resolve the correct workspace for the user
+      // This prevents RLS errors when UI passes incorrect workspaceId (e.g., user.id)
+      const resolvedWorkspaceId = await resolveActiveWorkspaceId(user.id);
+      if (!resolvedWorkspaceId) {
+        throw new Error('Workspace não encontrado. Verifique se você pertence a um workspace.');
+      }
 
       // Resolver seller_id numérico para UUID
       const mlAccountUuid = await resolveMlAccountUuid(mlAccountId);
@@ -315,14 +347,14 @@ export function useCreateAction() {
       const { data, error } = await supabase
         .from('ad_lifecycle_actions')
         .insert([{
-          workspace_id: workspaceId,
+          workspace_id: resolvedWorkspaceId,
           ml_account_id: mlAccountUuid,
           item_id: itemId,
           action_type: actionType,
           action_status: 'DRAFT',
           reason: reason || `SEM_VENDA`,
           checklist: (checklist || {}) as Record<string, any>,
-          created_by: user?.id,
+          created_by: user.id,
         }])
         .select()
         .single();
