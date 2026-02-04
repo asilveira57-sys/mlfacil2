@@ -33,6 +33,18 @@ const DUPLICATE_ATTRIBUTES = new Set([
 ]);
 
 // ============================================
+// TRUNCAR FAMILY_NAME PARA 60 CARACTERES (limite do Mercado Livre)
+// ============================================
+function truncateFamilyName(value: string): string {
+  const MAX_LENGTH = 60;
+  if (!value) return value;
+  if (value.length <= MAX_LENGTH) return value;
+  const truncated = value.substring(0, MAX_LENGTH).trim();
+  console.log(`[ANTI-CATALOG] family_name truncated: ${value.length} → ${truncated.length} chars`);
+  return truncated;
+}
+
+// ============================================
 // MAPEAMENTO ESTÁTICO DE FAMILY_NAME
 // ============================================
 const CATEGORY_FAMILY_NAME: Record<string, string> = {
@@ -338,10 +350,10 @@ async function createItemAntiCatalog(
   // ============================================
   result.diagnostic.retry_performed = true;
 
-  // IMPORTANTE: Criar NOVO payload com family_name
+  // IMPORTANTE: Criar NOVO payload com family_name (truncado para 60 chars)
   const payload2: Record<string, any> = {
     ...basePayload,
-    family_name: familyNameValue, // <- NO NÍVEL RAIZ
+    family_name: truncateFamilyName(familyNameValue), // <- NO NÍVEL RAIZ, max 60 chars
   };
   // Garantir que NÃO está em attributes
   delete payload2.family_name_in_attributes; // safety

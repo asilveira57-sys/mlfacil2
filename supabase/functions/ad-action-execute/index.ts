@@ -326,6 +326,18 @@ interface UserProductDetection {
   sellerId: string | null;
 }
 
+// ============================================================================
+// TRUNCAR FAMILY_NAME PARA 60 CARACTERES (limite do Mercado Livre)
+// ============================================================================
+function truncateFamilyName(value: string): string {
+  const MAX_LENGTH = 60;
+  if (!value) return value;
+  if (value.length <= MAX_LENGTH) return value;
+  const truncated = value.substring(0, MAX_LENGTH).trim();
+  console.log(`[ad-action-execute] family_name truncated: ${value.length} → ${truncated.length} chars`);
+  return truncated;
+}
+
 async function checkUserProductSeller(accessToken: string): Promise<UserProductDetection> {
   try {
     const response = await fetch("https://api.mercadolibre.com/users/me", {
@@ -1714,13 +1726,14 @@ async function executeCloneAction(
   };
 
   // Para vendedor User Products, family_name é OBRIGATÓRIO (substitui title)
+  // IMPORTANTE: Limite de 60 caracteres para family_name
   if (isUserProductModel) {
-    newItem.family_name = finalTitle;
+    newItem.family_name = truncateFamilyName(finalTitle);
     console.log(`[ad-action-execute] USER PRODUCTS MODE: Using family_name instead of title`);
     console.log(`[ad-action-execute] family_name = "${newItem.family_name}"`);
   } else if (fillResult.bodyLevelFields.family_name) {
     // Adicionar family_name se veio do preflight (cache) para vendedor tradicional
-    newItem.family_name = fillResult.bodyLevelFields.family_name;
+    newItem.family_name = truncateFamilyName(fillResult.bodyLevelFields.family_name);
     console.log(`[ad-action-execute] family_name added from preflight: "${newItem.family_name}"`);
   }
 
