@@ -1,306 +1,158 @@
 
-# Plano: Módulo de Mensagens Pós-Venda com Inbox de Conversas
+## Diagnóstico (por que está dando 500 e “comendo créditos”)
+1) **O erro não é (ainda) bloqueio da API do Mercado Livre**.  
+   Pelos logs do backend, o `ml-sync-messages` falha antes de chamar a API do ML, ao tentar ler o cache de pedidos:
+   - `column meli_orders_cache.buyer_id does not exist`
 
-## Objetivo
-Implementar um sistema completo para visualizar e responder mensagens de compradores após a venda, similar ao módulo de Perguntas (Q&A), permitindo que o vendedor gerencie toda a comunicação pós-venda diretamente pelo painel.
+2) **A query do `ml-sync-messages` está pedindo colunas que não existem no seu cache** (`meli_orders_cache`):  
+   Hoje o `ml-sync-messages` tenta buscar:
+   - `buyer_id` (não existe)
+   - `item_title` (não existe)
+   - `item_thumbnail` (não existe)
+   E por isso a consulta retorna erro, e a função devolve `500`.
 
-## Visão Geral
+3) Isso “come créditos” porque **cada clique em “Sincronizar Mensagens” executa uma função no backend**, que está falhando imediatamente. Ou seja: muitas tentativas = muitos créditos desperdiçados.
 
-```text
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        PÁGINA /mensagens (Redesenhada)                       │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  [Abas: Conversas | Templates | Automação]                                  │
-│                                                                             │
-│  ┌─────────────┐ ┌────────────────────────────┐ ┌───────────────────────┐  │
-│  │   INBOX     │ │    ÁREA DE CONVERSA        │ │   PAINEL LATERAL      │  │
-│  │             │ │                            │ │                       │  │
-│  │ • Pedido 1  │ │  📦 Produto: XYZ           │ │  📋 Detalhes Pedido   │  │
-│  │   Felipe    │ │  Comprador: Felipe         │ │  - Status: Enviado    │  │
-│  │   "Olá..."  │ │                            │ │  - Data: 04/02        │  │
-│  │             │ │  ┌───────────────────────┐ │ │  - Código: 46401..    │  │
-│  │ • Pedido 2  │ │  │ 👤 Comprador (14:30)  │ │ │                       │  │
-│  │   Bianca    │ │  │ "Olá, quando chega?"  │ │ │  📚 Respostas Rápidas │  │
-│  │   "Recebi"  │ │  └───────────────────────┘ │ │  • Prazo de entrega   │  │
-│  │             │ │  ┌───────────────────────┐ │ │  • Rastreamento       │  │
-│  │             │ │  │ 🏪 Vendedor (14:45)   │ │ │  • Instruções de uso  │  │
-│  │             │ │  │ "Será entregue..."    │ │ │                       │  │
-│  │             │ │  └───────────────────────┘ │ │                       │  │
-│  │             │ │                            │ │                       │  │
-│  │             │ │  ┌────────────────────────┐│ │                       │  │
-│  │             │ │  │ Digite sua resposta...││ │                       │  │
-│  │             │ │  │                    [▸] ││ │                       │  │
-│  │             │ │  └────────────────────────┘│ │                       │  │
-│  └─────────────┘ └────────────────────────────┘ └───────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+4) Há ainda um risco adicional: **você tem mais de uma conta ML ativa**. O módulo hoje pega `mlAccounts[0]` (primeira da lista), que pode não ser a conta certa. Mesmo depois de corrigir o erro 500, isso pode resultar em “nenhuma conversa encontrada” por estar sincronizando o seller errado.
 
 ---
 
-## Parte 1: Backend - Edge Functions
-
-### 1.1 Nova Edge Function: `ml-sync-messages`
-**Objetivo**: Sincronizar conversas do Mercado Livre para o banco local
-
-**Funcionalidades**:
-- Buscar pedidos recentes (últimos 15 dias) da tabela `meli_orders_cache`
-- Para cada pedido, consultar mensagens via API do ML:
-  - `GET /messages/packs/{order_id}/sellers/{seller_id}`
-- Armazenar conversas na nova tabela `post_sale_conversations`
-- Armazenar mensagens individuais em `post_sale_conversation_messages`
-- Identificar conversas com mensagens não lidas
-- Suporte a sincronização incremental (apenas novas mensagens)
-
-**Fluxo**:
-```text
-1. Recebe seller_id
-2. Busca pedidos dos últimos 15 dias (pagos/enviados)
-3. Para cada pedido:
-   a. Chama API: /messages/packs/{order_id}/sellers/{seller_id}
-   b. Extrai status da conversa (active/blocked/etc)
-   c. Extrai todas as mensagens
-   d. Upsert no banco local
-4. Retorna estatísticas (total sincronizado, não lidas)
-```
-
-### 1.2 Nova Edge Function: `ml-send-message`
-**Objetivo**: Enviar mensagem para comprador via API do ML
-
-**Funcionalidades**:
-- Validar conteúdo contra `post_sale_blocked_patterns` (já existe)
-- Enviar via `POST /messages/packs/{order_id}/sellers/{seller_id}?tag=post_sale`
-- Registrar mensagem enviada no banco
-- Tratar erros específicos da API (conversa bloqueada, pedido cancelado, etc.)
-
-**Payload para ML**:
-```json
-{
-  "from": { "user_id": "seller_id" },
-  "to": { "user_id": "buyer_id" },
-  "text": "Mensagem do vendedor (máx 350 caracteres)"
-}
-```
+## Objetivo do ajuste
+- **Parar o erro 500 imediatamente** (corrigir a query do cache).
+- **Garantir que dá para identificar o buyer_id** mesmo sem `buyer_id` no cache (inferir pelo histórico de mensagens retornado pela API).
+- **Evitar bloqueios e erros de API** em contas com muitos pedidos (sincronização “resumível”/paginada, com estado no banco e limites de tempo/quantidade por execução).
+- **Reduzir desperdício de créditos** (cooldown, evitar concorrência, não rodar sync idêntico repetidamente).
 
 ---
 
-## Parte 2: Banco de Dados
+## Plano de correção (implementação)
 
-### 2.1 Nova Tabela: `post_sale_conversations`
-Armazena o cabeçalho de cada conversa (1 por pedido)
+### Fase A — Hotfix para parar o 500 agora (sem depender de “API do ML”)
+1) **Ajustar a query do cache de pedidos no `ml-sync-messages`**
+   - Trocar o `.select()` para apenas colunas que realmente existem em `meli_orders_cache`:
+     - `order_id, buyer_name, buyer_nickname, shipment_id, created_at_meli, order_status`
+   - Remover `buyer_id, item_title, item_thumbnail` desse select (porque não existem na tabela).
 
-```text
-Colunas:
-- id (UUID, PK)
-- user_id (UUID, FK auth.users)
-- seller_id (TEXT)
-- order_id (TEXT) - ID do pedido/pack
-- buyer_id (TEXT)
-- buyer_name (TEXT)
-- item_title (TEXT) - Título do produto principal
-- item_thumbnail (TEXT)
-- shipment_id (TEXT)
-- conversation_status (TEXT) - active, blocked, etc.
-- unread_count (INT) - Mensagens não lidas pelo vendedor
-- last_message_date (TIMESTAMPTZ)
-- last_message_text (TEXT) - Preview da última mensagem
-- last_message_from (TEXT) - 'buyer' ou 'seller'
-- seller_max_chars (INT, default 350)
-- created_at / updated_at
+2) **Enriquecer “item_title” e “item_thumbnail” via `meli_order_items_cache` (opcional, mas recomendado)**
+   - Buscar itens em lote:
+     - `from("meli_order_items_cache").select("order_id,title,thumbnail").in("order_id", orderIds)`
+   - Escolher o “primeiro item” por `order_id` como título/thumbnail da conversa.
+   - Se não houver item, manter `null`.
 
-Índices:
-- seller_id, order_id (UNIQUE)
-- seller_id, unread_count > 0 (para filtro rápido)
-- last_message_date (para ordenação)
-```
+3) **Inferir `buyer_id` sem depender do cache**
+   - Como a API de mensagens retorna `from.user_id` e `to.user_id`, dá para determinar o comprador assim:
+     - `sellerUserId = Number(seller_id)`
+     - `buyer_id = primeiro user_id encontrado nas mensagens que seja diferente do sellerUserId`
+   - Unread count:
+     - contar mensagens onde `from.user_id !== sellerUserId` e `message_date.read` está vazio.
+   - `last_message_from`:
+     - se `lastMessage.from.user_id === sellerUserId` => `"seller"` senão `"buyer"`.
 
-### 2.2 Nova Tabela: `post_sale_conversation_messages`
-Armazena cada mensagem individual
+4) **Evitar que erros “de banco” virem 500 genérico**
+   - Alterar respostas de erro “operacionais” (ex.: falha de query, falta de dados) para retornar **HTTP 200 com `{ success:false, error_code, error, execution_logs }`**.
+   - Benefício: o frontend consegue mostrar o motivo real e não gera a mensagem genérica “non-2xx status code”.
 
-```text
-Colunas:
-- id (UUID, PK)
-- conversation_id (UUID, FK)
-- ml_message_id (TEXT, UNIQUE)
-- from_user_id (TEXT)
-- from_type (TEXT) - 'buyer' ou 'seller'
-- message_text (TEXT)
-- message_status (TEXT) - available, moderated, etc.
-- moderation_status (TEXT) - clean, rejected, pending
-- moderation_reason (TEXT)
-- has_attachments (BOOLEAN)
-- attachments (JSONB) - Array de anexos
-- message_date (TIMESTAMPTZ)
-- read_at (TIMESTAMPTZ)
-- created_at
-```
-
-### 2.3 RLS Policies
-- Usuários só acessam conversas onde são donos (user_id = auth.uid())
-- Políticas para SELECT, INSERT, UPDATE
+Resultado esperado após a Fase A:
+- Clicar em “Sincronizar Mensagens” não dá mais 500 por schema mismatch.
+- Se existir histórico na API do ML, as conversas começam a aparecer.
 
 ---
 
-## Parte 3: Frontend - Componentes
+### Fase B — Reduzir consumo de créditos e evitar bloqueio/rate limit da API (resumable sync)
+Mesmo com a Fase A, contas com muitos pedidos podem:
+- estourar tempo de execução
+- sofrer throttling (429) ou intermitências
+- exigir várias execuções
 
-### 3.1 Novo Componente: `PostSaleInbox`
-Lista de conversas com:
-- Filtros: Não lidas, Todas, Por status do pedido
-- Busca por nome do comprador ou número do pedido
-- Indicador visual de mensagens não lidas
-- Preview da última mensagem
-- Ordenação por data da última mensagem
+Para resolver “sem bloqueio ou erro de API”, implementar sincronização **resumível**:
 
-### 3.2 Novo Componente: `PostSaleConversation`
-Área de visualização da conversa:
-- Timeline de mensagens (estilo chat)
-- Diferenciação visual entre mensagens do vendedor e comprador
-- Indicador de mensagens moderadas/bloqueadas
-- Exibição de anexos (imagens, PDFs)
+1) **Criar uma tabela de estado de sincronização** (ex.: `post_sale_messages_sync_state`)
+   Campos sugeridos:
+   - `user_id`, `seller_id`
+   - `status`: `idle | running | paused | done | error`
+   - `cursor_created_at_meli` e `cursor_order_id` (paginação “keyset”)
+   - `processed_orders`, `synced_conversations`, `last_heartbeat_at`
+   - `last_success_at`, `last_error_code`, `last_error_message`
+   - Índice por `(user_id, seller_id)`
 
-### 3.3 Novo Componente: `PostSaleReplyEditor`
-Editor de resposta:
-- Campo de texto com contador de caracteres (máx 350)
-- Validação em tempo real contra padrões bloqueados
-- Botão de respostas rápidas (da biblioteca)
-- Sugestão por IA (opcional)
-- Botão de enviar
+2) **Modificar `ml-sync-messages` para processar “lotes” com limite de tempo**
+   - Definir limites:
+     - `MAX_RUNTIME_MS` (ex.: 45–50s)
+     - `MAX_ORDERS_PER_RUN` (ex.: 50–150, ajustável)
+   - Loop:
+     - buscar um lote do cache usando cursor (`created_at_meli` + `order_id`) para continuar de onde parou
+     - para cada pedido: chamar API de mensagens e upsert
+     - parar quando atingir tempo/quantidade
+   - A cada lote, atualizar `sync_state` com heartbeat e cursor
+   - Resposta:
+     - `{ success:true, status:"paused" | "done", has_more, processed_in_run, total_processed, ... }`
 
-### 3.4 Novo Componente: `PostSaleConversationDetails`
-Painel lateral com:
-- Informações do pedido (número, status, data)
-- Informações do comprador
-- Link para rastreamento
-- Histórico de envios
+3) **Tratar rate limit / bloqueio (429/403) com backoff e pausa**
+   - Se 429: pausar a execução, salvar status `paused_rate_limit`, instruir o frontend a aguardar alguns segundos e continuar.
+   - Se 403: salvar status `error` com mensagem clara (pode indicar restrição de permissão/WAF), e evitar ficar tentando em loop.
 
----
+4) **Bloquear concorrência para não gastar créditos**
+   - Se `sync_state.status === "running"` e `last_heartbeat_at` recente, retornar imediatamente:
+     - `{ success:true, status:"running", message:"Sincronização já em andamento" }`
+   - Isso evita o usuário clicar várias vezes e disparar várias execuções simultâneas.
 
-## Parte 4: Hooks e Estado
-
-### 4.1 Novos Hooks
-```text
-usePostSaleConversations(filters)
-  - Lista conversas com paginação
-  - Filtros: unread, status, search
-
-usePostSaleConversation(conversationId)
-  - Detalhes de uma conversa + mensagens
-
-useSendPostSaleMessage()
-  - Mutation para enviar mensagem
-
-useSyncPostSaleMessages()
-  - Trigger para sincronização manual
-
-useMarkConversationRead()
-  - Marcar conversa como lida
-```
+5) **Cooldown anti-spam**
+   - Se `last_success_at` foi há menos de X segundos e `force_full_sync=false`, retornar sucesso sem rodar tudo de novo.
 
 ---
 
-## Parte 5: Fluxo de Sincronização
+### Fase C — Ajustes no Frontend para reduzir erro “genérico” e tentativas desnecessárias
+1) **Trocar `supabase.functions.invoke` direto pelo wrapper padrão do projeto**
+   - Usar `invokeEdgeFunction()` de `src/lib/edgeFunctionClient.ts` no `useSyncPostSaleMessages`.
+   - Benefício: mensagens mais claras, melhor parsing e padronização de erro.
 
-### 5.1 Sincronização Inicial
-1. Usuário acessa `/mensagens` > aba "Conversas"
-2. Sistema verifica se há conversas sincronizadas
-3. Se não houver ou última sync > 15 min, dispara `ml-sync-messages`
-4. Exibe loading enquanto sincroniza
-5. Popula inbox com conversas
+2) **UI de progresso e “Continuar sincronização”**
+   - Quando o backend responder `status: "paused"`, frontend pode:
+     - continuar automaticamente (com delay) até `done`, ou
+     - mostrar botão “Continuar”
+   - Mostrar progresso:
+     - “Processados X pedidos, sincronizadas Y conversas…”
 
-### 5.2 Sincronização Manual
-- Botão "Atualizar" no header (igual Q&A)
-- Dispara edge function e atualiza lista
-
-### 5.3 Sincronização ao Enviar
-- Após enviar mensagem com sucesso, atualiza conversa local
-- Não precisa resincronizar tudo
-
----
-
-## Parte 6: Validação de Conteúdo
-
-Reutiliza a infraestrutura existente:
-- Tabela `post_sale_blocked_patterns` (já criada com 21 padrões)
-- Edge Function `post-sale-messages?action=validate` (já existe)
-- Validação antes do envio
+3) **Selecionar conta ML quando houver mais de uma**
+   - Na aba Conversas, incluir um seletor de conta (dropdown).
+   - Persistir a última escolhida (localStorage) para não voltar ao “primeiro item da lista”.
+   - Isso evita sincronizar seller errado e achar que “não veio mensagem”.
 
 ---
 
-## Detalhes Técnicos
-
-### API do Mercado Livre Utilizada
-```text
-GET /messages/packs/{pack_id}/sellers/{seller_id}
-- Retorna histórico de mensagens
-- Inclui status da conversa
-- Limite de caracteres do vendedor
-
-POST /messages/packs/{pack_id}/sellers/{seller_id}?tag=post_sale
-- Envia nova mensagem
-- Limite: 350 caracteres
-- Caracteres permitidos: ISO-8859-1 + emojis específicos
-```
-
-### Tratamento de Erros
-- Conversa bloqueada pelo comprador
-- Pedido cancelado (só permite responder se houver conversa prévia)
-- Moderação rejeitada (conteúdo impróprio)
-- Token expirado (refresh automático)
+## Como vamos validar (teste end-to-end)
+1) Testar o sync com uma conta que tenha pedidos no cache:
+   - confirmar que não há mais erro de coluna inexistente
+2) Confirmar criação de conversas e mensagens nas tabelas:
+   - conversas ordenadas por `last_message_date`
+   - mensagens exibidas no chat
+3) Enviar uma resposta e confirmar:
+   - API do ML aceita
+   - mensagem aparece no histórico local
+4) Simular volume maior:
+   - verificar se o estado “paused/done” funciona sem timeout e sem flood de requisições
+5) Verificar UX:
+   - erros aparecem legíveis (não só “non-2xx status code”)
+   - botão de sync não permite spam/conflitos
 
 ---
 
-## Arquivos a Criar/Modificar
+## Entregáveis (o que será alterado)
+- Backend function `ml-sync-messages`:
+  - corrigir select do cache
+  - inferir buyer_id
+  - (opcional) enriquecer item via `meli_order_items_cache`
+  - passar a retornar 200 com `success:false` em erros operacionais
+  - adicionar modo resumível + tabela de estado (Fase B)
 
-### Novos Arquivos
-```text
-supabase/functions/ml-sync-messages/index.ts
-supabase/functions/ml-send-message/index.ts
-src/types/post-sale-conversation.ts
-src/hooks/usePostSaleConversations.ts
-src/components/post-sale/PostSaleInbox.tsx
-src/components/post-sale/PostSaleConversation.tsx
-src/components/post-sale/PostSaleReplyEditor.tsx
-src/components/post-sale/PostSaleConversationDetails.tsx
-src/components/post-sale/PostSaleConversationsTab.tsx
-```
-
-### Arquivos a Modificar
-```text
-src/pages/MensagensPosVenda.tsx - Adicionar aba de Conversas
-src/components/post-sale/index.ts - Exportar novos componentes
-```
-
-### Migrações SQL
-```text
-1. Criar tabela post_sale_conversations
-2. Criar tabela post_sale_conversation_messages
-3. Adicionar RLS policies
-4. Adicionar índices de performance
-```
+- Frontend:
+  - atualizar `useSyncPostSaleMessages` para `invokeEdgeFunction`
+  - adicionar seletor de conta na tela
+  - adicionar fluxo de progresso/continuar sincronização
 
 ---
 
-## Ordem de Implementação
-
-1. **Fase 1 - Infraestrutura**
-   - Criar tabelas no banco
-   - Criar edge function `ml-sync-messages`
-   - Testar sincronização
-
-2. **Fase 2 - Visualização**
-   - Criar tipos TypeScript
-   - Criar hooks de leitura
-   - Implementar PostSaleInbox
-   - Implementar PostSaleConversation
-   - Integrar na página
-
-3. **Fase 3 - Resposta**
-   - Criar edge function `ml-send-message`
-   - Implementar PostSaleReplyEditor
-   - Validação de conteúdo
-   - Teste end-to-end
-
-4. **Fase 4 - Refinamentos**
-   - Marcação de lidas
-   - Filtros avançados
-   - Indicadores visuais
-   - Respostas rápidas
+## Priorização sugerida (para parar o prejuízo de créditos rapidamente)
+1) **Fase A (hotfix)**: corrigir colunas e inferir buyer_id (para parar 500 agora).
+2) **Fase C (mensagem de erro decente + seletor de conta)**: evita tentativas inúteis.
+3) **Fase B (resumable sync + rate limit handling)**: garante estabilidade em contas grandes e reduz risco de bloqueio/timeouts.
