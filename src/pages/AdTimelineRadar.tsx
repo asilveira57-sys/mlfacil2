@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { Card, CardContent } from "@/components/ui/card";
@@ -39,6 +39,11 @@ import {
   AlertTriangle,
   Search,
   Filter,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -63,10 +68,85 @@ const bucketLabels: Record<StatusBucket | 'ALL', string> = {
   NO_SALES: 'Sem vendas',
 };
 
+type SortColumn = 'last_sale_at' | 'days_since_last_sale' | 'avg_gap_hours' | 'sales_count_30d' | 'sales_count_60d' | 'sales_count_90d' | 'status' | 'available_quantity';
+type SortDirection = 'asc' | 'desc';
+
+const ITEMS_PER_PAGE = 30;
+
+// ML Status badge component
+function MlStatusBadge({ status }: { status?: string }) {
+  const config: Record<string, { label: string; className: string }> = {
+    active: { label: 'Ativo', className: 'bg-green-500/10 text-green-600 border-green-500/20' },
+    paused: { label: 'Pausado', className: 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20' },
+    under_review: { label: 'Em análise', className: 'bg-blue-500/10 text-blue-600 border-blue-500/20' },
+    closed: { label: 'Fechado', className: 'bg-red-500/10 text-red-600 border-red-500/20' },
+    inactive: { label: 'Inativo', className: 'bg-gray-500/10 text-gray-600 border-gray-500/20' },
+  };
+  
+  const cfg = config[status || ''] || { label: '—', className: 'bg-muted text-muted-foreground' };
+  
+  return (
+    <Badge variant="outline" className={`font-medium ${cfg.className}`}>
+      {cfg.label}
+    </Badge>
+  );
+}
+
+// Stock badge component
+function StockBadge({ quantity }: { quantity?: number }) {
+  if (quantity === undefined || quantity === null) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  
+  if (quantity === 0) {
+    return (
+      <Badge variant="outline" className="bg-red-500/10 text-red-600 border-red-500/20 font-medium">
+        Sem estoque
+      </Badge>
+    );
+  }
+  
+  return <span className="font-medium">{quantity}</span>;
+}
+
+// Sortable header component
+function SortableHeader({ 
+  column, 
+  label, 
+  currentSort, 
+  currentDirection, 
+  onSort,
+  className = ""
+}: { 
+  column: SortColumn; 
+  label: string; 
+  currentSort: SortColumn | null;
+  currentDirection: SortDirection;
+  onSort: (column: SortColumn) => void;
+  className?: string;
+}) {
+  const isActive = currentSort === column;
+  
+  return (
+    <TableHead 
+      className={`cursor-pointer select-none hover:bg-muted/50 transition-colors ${className}`}
+      onClick={() => onSort(column)}
+    >
+      <div className="flex items-center gap-1 justify-center">
+        <span>{label}</span>
+        {isActive ? (
+          currentDirection === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+        ) : (
+          <ArrowUpDown className="h-3 w-3 text-muted-foreground/50" />
+        )}
+      </div>
+    </TableHead>
+  );
+}
+
 export default function AdTimelineRadar() {
   const navigate = useNavigate();
   const { sellerId } = useActiveAccount();
-  // Use centralized hook instead of direct Supabase call
   const workspaceId = useCurrentUserId();
   const mlAccountId = sellerId || undefined;
 
@@ -75,6 +155,13 @@ export default function AdTimelineRadar() {
   const [actionDrawerOpen, setActionDrawerOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<AdTimelineStats | null>(null);
   const [actionType, setActionType] = useState<ActionType>('END');
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  
+  // Sorting state
+  const [sortColumn, setSortColumn] = useState<SortColumn | null>('days_since_last_sale');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
   const { data: stats, isLoading: statsLoading } = useAdTimelineStats(workspaceId, {
     ml_account_id: mlAccountId,
@@ -116,20 +203,79 @@ export default function AdTimelineRadar() {
     setActionDrawerOpen(false);
     setSelectedItem(null);
   };
+  
+  const handleSort = (column: SortColumn) => {
+    if (sortColumn === column) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(column);
+      setSortDirection('desc');
+    }
+    setCurrentPage(1); // Reset to first page when sorting
+  };
 
-  const filteredStats = stats?.filter(s => {
-    if (!searchTerm) return true;
-    const term = searchTerm.toLowerCase();
-    return (
-      s.item_id.toLowerCase().includes(term) ||
-      s.title?.toLowerCase().includes(term)
-    );
-  });
+  // Filter, sort and paginate data
+  const { paginatedStats, totalPages, totalItems } = useMemo(() => {
+    let filtered = stats?.filter(s => {
+      if (!searchTerm) return true;
+      const term = searchTerm.toLowerCase();
+      return (
+        s.item_id.toLowerCase().includes(term) ||
+        s.title?.toLowerCase().includes(term)
+      );
+    }) || [];
+    
+    // Sort
+    if (sortColumn) {
+      filtered = [...filtered].sort((a, b) => {
+        let aVal: any = a[sortColumn];
+        let bVal: any = b[sortColumn];
+        
+        // Handle nulls
+        if (aVal === null || aVal === undefined) aVal = sortDirection === 'asc' ? Infinity : -Infinity;
+        if (bVal === null || bVal === undefined) bVal = sortDirection === 'asc' ? Infinity : -Infinity;
+        
+        // Handle dates
+        if (sortColumn === 'last_sale_at') {
+          aVal = aVal === Infinity || aVal === -Infinity ? aVal : new Date(aVal).getTime();
+          bVal = bVal === Infinity || bVal === -Infinity ? bVal : new Date(bVal).getTime();
+        }
+        
+        if (sortDirection === 'asc') {
+          return aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
+        } else {
+          return aVal > bVal ? -1 : aVal < bVal ? 1 : 0;
+        }
+      });
+    }
+    
+    const totalItems = filtered.length;
+    const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    const paginatedStats = filtered.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+    
+    return { paginatedStats, totalPages, totalItems };
+  }, [stats, searchTerm, sortColumn, sortDirection, currentPage]);
+
+  // Reset page when filter changes
+  const handleStatusFilterChange = (value: StatusBucket | 'ALL') => {
+    setStatusFilter(value);
+    setCurrentPage(1);
+  };
+  
+  const handleSearchChange = (value: string) => {
+    setSearchTerm(value);
+    setCurrentPage(1);
+  };
 
   const formatGap = (hours: number | null) => {
     if (hours === null) return "—";
-    return `${Math.round(hours)}h`;
+    if (hours < 24) return `${Math.round(hours)}h`;
+    return `${(hours / 24).toFixed(1)}d`;
   };
+
+  const startItem = (currentPage - 1) * ITEMS_PER_PAGE + 1;
+  const endItem = Math.min(currentPage * ITEMS_PER_PAGE, totalItems);
 
   return (
     <PageContainer
@@ -152,7 +298,7 @@ export default function AdTimelineRadar() {
             <>
               <Card 
                 className={`cursor-pointer transition-colors ${statusFilter === '30D' ? 'ring-2 ring-warning' : 'hover:bg-muted/50'}`}
-                onClick={() => setStatusFilter(statusFilter === '30D' ? 'ALL' : '30D')}
+                onClick={() => handleStatusFilterChange(statusFilter === '30D' ? 'ALL' : '30D')}
               >
                 <CardContent className="p-4">
                   <div className="text-2xl font-bold text-warning">{bucketCounts?.['30D'] || 0}</div>
@@ -161,7 +307,7 @@ export default function AdTimelineRadar() {
               </Card>
               <Card 
                 className={`cursor-pointer transition-colors ${statusFilter === '60D' ? 'ring-2 ring-destructive/70' : 'hover:bg-muted/50'}`}
-                onClick={() => setStatusFilter(statusFilter === '60D' ? 'ALL' : '60D')}
+                onClick={() => handleStatusFilterChange(statusFilter === '60D' ? 'ALL' : '60D')}
               >
                 <CardContent className="p-4">
                   <div className="text-2xl font-bold text-destructive/80">{bucketCounts?.['60D'] || 0}</div>
@@ -170,7 +316,7 @@ export default function AdTimelineRadar() {
               </Card>
               <Card 
                 className={`cursor-pointer transition-colors ${statusFilter === '90D' ? 'ring-2 ring-destructive' : 'hover:bg-muted/50'}`}
-                onClick={() => setStatusFilter(statusFilter === '90D' ? 'ALL' : '90D')}
+                onClick={() => handleStatusFilterChange(statusFilter === '90D' ? 'ALL' : '90D')}
               >
                 <CardContent className="p-4">
                   <div className="text-2xl font-bold text-destructive">{bucketCounts?.['90D'] || 0}</div>
@@ -179,7 +325,7 @@ export default function AdTimelineRadar() {
               </Card>
               <Card 
                 className={`cursor-pointer transition-colors ${statusFilter === '120D' ? 'ring-2 ring-destructive' : 'hover:bg-muted/50'}`}
-                onClick={() => setStatusFilter(statusFilter === '120D' ? 'ALL' : '120D')}
+                onClick={() => handleStatusFilterChange(statusFilter === '120D' ? 'ALL' : '120D')}
               >
                 <CardContent className="p-4">
                   <div className="text-2xl font-bold text-destructive">{bucketCounts?.['120D'] || 0}</div>
@@ -188,7 +334,7 @@ export default function AdTimelineRadar() {
               </Card>
               <Card 
                 className={`cursor-pointer transition-colors ${statusFilter === 'NO_SALES' ? 'ring-2 ring-muted-foreground' : 'hover:bg-muted/50'}`}
-                onClick={() => setStatusFilter(statusFilter === 'NO_SALES' ? 'ALL' : 'NO_SALES')}
+                onClick={() => handleStatusFilterChange(statusFilter === 'NO_SALES' ? 'ALL' : 'NO_SALES')}
               >
                 <CardContent className="p-4">
                   <div className="text-2xl font-bold text-muted-foreground">{bucketCounts?.NO_SALES || 0}</div>
@@ -197,7 +343,7 @@ export default function AdTimelineRadar() {
               </Card>
               <Card 
                 className={`cursor-pointer transition-colors ${statusFilter === 'OK' ? 'ring-2 ring-success' : 'hover:bg-muted/50'}`}
-                onClick={() => setStatusFilter(statusFilter === 'OK' ? 'ALL' : 'OK')}
+                onClick={() => handleStatusFilterChange(statusFilter === 'OK' ? 'ALL' : 'OK')}
               >
                 <CardContent className="p-4">
                   <div className="text-2xl font-bold text-success">{bucketCounts?.OK || 0}</div>
@@ -216,11 +362,11 @@ export default function AdTimelineRadar() {
               <Input
                 placeholder="Buscar por ID ou título..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => handleSearchChange(e.target.value)}
                 className="pl-9 w-64"
               />
             </div>
-            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusBucket | 'ALL')}>
+            <Select value={statusFilter} onValueChange={(v) => handleStatusFilterChange(v as StatusBucket | 'ALL')}>
               <SelectTrigger className="w-40">
                 <Filter className="h-4 w-4 mr-2" />
                 <SelectValue />
@@ -257,12 +403,62 @@ export default function AdTimelineRadar() {
                   <TableHead className="w-[80px]">Imagem</TableHead>
                   <TableHead>Anúncio</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead className="text-center">Última Venda</TableHead>
-                  <TableHead className="text-center">Dias s/ Venda</TableHead>
-                  <TableHead className="text-center">Média Gap</TableHead>
-                  <TableHead className="text-center">30d</TableHead>
-                  <TableHead className="text-center">60d</TableHead>
-                  <TableHead className="text-center">90d</TableHead>
+                  <SortableHeader 
+                    column="status" 
+                    label="Status ML" 
+                    currentSort={sortColumn} 
+                    currentDirection={sortDirection} 
+                    onSort={handleSort}
+                  />
+                  <SortableHeader 
+                    column="available_quantity" 
+                    label="Estoque" 
+                    currentSort={sortColumn} 
+                    currentDirection={sortDirection} 
+                    onSort={handleSort}
+                  />
+                  <SortableHeader 
+                    column="last_sale_at" 
+                    label="Última Venda" 
+                    currentSort={sortColumn} 
+                    currentDirection={sortDirection} 
+                    onSort={handleSort}
+                  />
+                  <SortableHeader 
+                    column="days_since_last_sale" 
+                    label="Dias s/ Venda" 
+                    currentSort={sortColumn} 
+                    currentDirection={sortDirection} 
+                    onSort={handleSort}
+                  />
+                  <SortableHeader 
+                    column="avg_gap_hours" 
+                    label="Média Gap" 
+                    currentSort={sortColumn} 
+                    currentDirection={sortDirection} 
+                    onSort={handleSort}
+                  />
+                  <SortableHeader 
+                    column="sales_count_30d" 
+                    label="30d" 
+                    currentSort={sortColumn} 
+                    currentDirection={sortDirection} 
+                    onSort={handleSort}
+                  />
+                  <SortableHeader 
+                    column="sales_count_60d" 
+                    label="60d" 
+                    currentSort={sortColumn} 
+                    currentDirection={sortDirection} 
+                    onSort={handleSort}
+                  />
+                  <SortableHeader 
+                    column="sales_count_90d" 
+                    label="90d" 
+                    currentSort={sortColumn} 
+                    currentDirection={sortDirection} 
+                    onSort={handleSort}
+                  />
                   <TableHead className="w-[50px]"></TableHead>
                 </TableRow>
               </TableHeader>
@@ -273,6 +469,8 @@ export default function AdTimelineRadar() {
                       <TableCell><Skeleton className="h-12 w-12 rounded" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-40" /></TableCell>
                       <TableCell><Skeleton className="h-6 w-16" /></TableCell>
+                      <TableCell><Skeleton className="h-6 w-16" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-12 mx-auto" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-20 mx-auto" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-12 mx-auto" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-12 mx-auto" /></TableCell>
@@ -282,9 +480,9 @@ export default function AdTimelineRadar() {
                       <TableCell><Skeleton className="h-8 w-8" /></TableCell>
                     </TableRow>
                   ))
-                ) : filteredStats?.length === 0 ? (
+                ) : paginatedStats?.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-12">
+                    <TableCell colSpan={12} className="text-center py-12">
                       <div className="flex flex-col items-center gap-2 text-muted-foreground">
                         <AlertTriangle className="h-8 w-8" />
                         <p>Nenhum anúncio encontrado</p>
@@ -292,7 +490,7 @@ export default function AdTimelineRadar() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredStats?.map((item) => (
+                  paginatedStats?.map((item) => (
                     <TableRow key={item.id} className="cursor-pointer hover:bg-muted/50">
                       <TableCell>
                         {item.thumbnail ? (
@@ -312,6 +510,12 @@ export default function AdTimelineRadar() {
                       </TableCell>
                       <TableCell>
                         <StatusBucketBadge bucket={item.status_bucket as StatusBucket} />
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <MlStatusBadge status={item.status} />
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <StockBadge quantity={item.available_quantity} />
                       </TableCell>
                       <TableCell className="text-center text-sm">
                         {item.last_sale_at ? format(new Date(item.last_sale_at), "dd/MM/yy", { locale: ptBR }) : "—"}
@@ -351,6 +555,38 @@ export default function AdTimelineRadar() {
                 )}
               </TableBody>
             </Table>
+            
+            {/* Pagination Controls */}
+            {!statsLoading && totalItems > 0 && (
+              <div className="flex items-center justify-between px-4 py-3 border-t">
+                <div className="text-sm text-muted-foreground">
+                  Mostrando {startItem}-{endItem} de {totalItems} anúncios
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    Anterior
+                  </Button>
+                  <div className="text-sm font-medium px-2">
+                    Página {currentPage} de {totalPages}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                    disabled={currentPage === totalPages}
+                  >
+                    Próximo
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

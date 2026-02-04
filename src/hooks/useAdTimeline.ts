@@ -15,6 +15,7 @@ import type {
 } from '@/types/ad-timeline';
 
 const BUCKET_ORDER: StatusBucket[] = ['120D', '90D', '60D', '30D', 'NO_SALES', 'OK'];
+const PAGE_SIZE = 1000;
 
 // Helper to resolve ml_user_id (numeric seller ID) to ml_accounts.id (UUID)
 async function resolveMlAccountUuid(mlUserId: string | undefined): Promise<string | null> {
@@ -38,39 +39,57 @@ export function useAdTimelineStats(workspaceId: string | null, filters: Timeline
       // Resolve ml_user_id (e.g. "66043362") to the actual UUID in ml_accounts
       const mlAccountUuid = await resolveMlAccountUuid(filters.ml_account_id);
 
-      let query = supabase
-        .from('ad_timeline_stats')
-        .select('*')
-        .eq('workspace_id', workspaceId)
-        .order('days_since_last_sale', { ascending: false, nullsFirst: true });
+      // Fetch all stats with pagination (no limit)
+      let allStatsData: any[] = [];
+      let offset = 0;
+      let hasMore = true;
 
-      if (mlAccountUuid) {
-        query = query.eq('ml_account_id', mlAccountUuid);
+      while (hasMore) {
+        let query = supabase
+          .from('ad_timeline_stats')
+          .select('*')
+          .eq('workspace_id', workspaceId)
+          .order('days_since_last_sale', { ascending: false, nullsFirst: true });
+        
+        if (mlAccountUuid) {
+          query = query.eq('ml_account_id', mlAccountUuid);
+        }
+        
+        const { data, error } = await query.range(offset, offset + PAGE_SIZE - 1);
+        
+        if (error) {
+          console.error('[useAdTimelineStats] Error:', error);
+          throw error;
+        }
+        
+        allStatsData = allStatsData.concat(data || []);
+        hasMore = (data?.length || 0) === PAGE_SIZE;
+        offset += PAGE_SIZE;
       }
 
-      const { data, error } = await query.limit(500);
-
-      if (error) {
-        console.error('[useAdTimelineStats] Error:', error);
-        throw error;
-      }
-
-      // Enrich with listing data
-      const itemIds = data?.map(s => s.item_id) || [];
+      // Enrich with listing data (also paginated)
+      const itemIds = allStatsData.map(s => s.item_id);
       if (itemIds.length > 0) {
-        const { data: listings } = await supabase
-          .from('meli_listings_cache')
-          .select('item_id, title, thumbnail, price, status')
-          .in('item_id', itemIds);
+        // Fetch listings in batches to avoid query size limits
+        const listingMap = new Map<string, any>();
+        const batchSize = 500;
+        for (let i = 0; i < itemIds.length; i += batchSize) {
+          const batchIds = itemIds.slice(i, i + batchSize);
+          const { data: listings } = await supabase
+            .from('meli_listings_cache')
+            .select('item_id, title, thumbnail, price, status, available_quantity')
+            .in('item_id', batchIds);
+          
+          listings?.forEach(l => listingMap.set(l.item_id, l));
+        }
 
-        const listingMap = new Map(listings?.map(l => [l.item_id, l]) || []);
-        return data?.map(stat => ({
+        return allStatsData.map(stat => ({
           ...stat,
           ...listingMap.get(stat.item_id),
         })) as AdTimelineStats[];
       }
 
-      return (data || []) as AdTimelineStats[];
+      return allStatsData as AdTimelineStats[];
     },
     enabled: !!workspaceId,
     staleTime: 5 * 60 * 1000, // 5 minutes
@@ -175,21 +194,33 @@ export function useAdLifecycleActions(workspaceId: string | null, statusFilter?:
     queryFn: async () => {
       if (!workspaceId) return [];
 
-      let query = supabase
-        .from('ad_lifecycle_actions')
-        .select('*')
-        .eq('workspace_id', workspaceId)
-        .order('updated_at', { ascending: false });
+      // Fetch all actions with pagination (no limit)
+      let allActionsData: any[] = [];
+      let offset = 0;
+      let hasMore = true;
 
-      if (statusFilter) {
-        const statuses = statusFilter.split(',');
-        query = query.in('action_status', statuses);
+      while (hasMore) {
+        let query = supabase
+          .from('ad_lifecycle_actions')
+          .select('*')
+          .eq('workspace_id', workspaceId)
+          .order('updated_at', { ascending: false });
+        
+        if (statusFilter) {
+          const statuses = statusFilter.split(',');
+          query = query.in('action_status', statuses);
+        }
+        
+        const { data, error } = await query.range(offset, offset + PAGE_SIZE - 1);
+        
+        if (error) throw error;
+        
+        allActionsData = allActionsData.concat(data || []);
+        hasMore = (data?.length || 0) === PAGE_SIZE;
+        offset += PAGE_SIZE;
       }
 
-      const { data, error } = await query.limit(200);
-
-      if (error) throw error;
-      return (data || []) as AdLifecycleAction[];
+      return allActionsData as AdLifecycleAction[];
     },
     enabled: !!workspaceId,
     // Static Mode: No auto-refresh on window focus

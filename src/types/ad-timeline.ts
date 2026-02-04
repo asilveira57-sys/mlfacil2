@@ -27,6 +27,7 @@ export interface AdTimelineStats {
   thumbnail?: string;
   price?: number;
   status?: string;
+  available_quantity?: number;
 }
 
 export interface AdTimelineEvent {
