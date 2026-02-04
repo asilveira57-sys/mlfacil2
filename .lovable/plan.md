@@ -1,102 +1,90 @@
 
-# Plano: Truncar `family_name` para 60 Caracteres
+
+# Plano: Corrigir Erro 403 ao Buscar Item de Outro Vendedor
 
 ## Diagnóstico
 
-O Mercado Livre tem um limite rígido de **60 caracteres** para o campo `family_name`:
+O erro `FETCH_FAILED` com status 403 `access_denied` ocorre porque:
 
+1. O sistema está tentando clonar um anúncio de **outro vendedor** (concorrente)
+2. A busca do item está usando **token de autenticação** na chamada `GET /items/{id}`
+3. Quando você envia um token para acessar um item que **não é seu**, o Mercado Livre retorna 403
+
+### Evidência:
 ```json
 {
-  "code": "item.family_name.length_invalid",
-  "message": "Family Name length is over of 60 character"
+  "error": "FETCH_FAILED",
+  "api_error": "{\"message\":\"Access to the requested resource is forbidden\",\"error\":\"access_denied\",\"status\":403}"
 }
 ```
 
-### Valor Atual (67 caracteres):
-```
-"Etiqueta Selo Frágil Fragile 108x150 - 500 Etiquetas Cor Vermelho"
-```
-
-### Valor Truncado (60 caracteres):
-```
-"Etiqueta Selo Frágil Fragile 108x150 - 500 Etiquetas Cor Ver"
+### Código Problemático (linha 1500-1502):
+```typescript
+const getResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}`, {
+  headers: { Authorization: `Bearer ${currentAccessToken}` }, // ← SEMPRE envia token
+});
 ```
 
 ---
 
 ## Solução
 
-Adicionar truncamento automático em todos os pontos onde `family_name` é atribuído.
+Aplicar o padrão **"public first, auth fallback"** que já existe em outras edge functions do projeto:
+
+1. **Tentar primeiro SEM autenticação** (endpoint público)
+2. **Se falhar com 403, tentar COM autenticação** (para itens próprios)
 
 ---
 
 ## Alterações
 
-### 1. `supabase/functions/ad-action-execute/index.ts`
+### Arquivo: `supabase/functions/ad-action-execute/index.ts`
 
-**Adicionar helper de truncamento:**
+**Substituir linhas 1498-1515:**
+
 ```typescript
-function truncateFamilyName(value: string): string {
-  const MAX_LENGTH = 60;
-  if (!value) return value;
-  if (value.length <= MAX_LENGTH) return value;
-  return value.substring(0, MAX_LENGTH).trim();
+// Fetch real item (MLB) - PUBLIC FIRST, AUTH FALLBACK
+console.log(`[ad-action-execute] Fetching item data (public): ${resolvedItemId}`);
+let getResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}`);
+
+// Se falhar com 403 no público, tentar com auth (pode ser item próprio com restrição)
+if (!getResponse.ok && getResponse.status === 403) {
+  console.log(`[ad-action-execute] Public fetch returned 403, trying with auth token...`);
+  getResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}`, {
+    headers: { Authorization: `Bearer ${currentAccessToken}` },
+  });
 }
-```
 
-**Linha ~1718 (atribuição para User Products):**
-```typescript
-// ANTES:
-newItem.family_name = finalTitle;
-
-// DEPOIS:
-newItem.family_name = truncateFamilyName(finalTitle);
-console.log(`[ad-action-execute] family_name truncated: ${finalTitle.length} → ${newItem.family_name.length} chars`);
-```
-
-**Linha ~1723 (atribuição via preflight):**
-```typescript
-// ANTES:
-newItem.family_name = fillResult.bodyLevelFields.family_name;
-
-// DEPOIS:
-newItem.family_name = truncateFamilyName(fillResult.bodyLevelFields.family_name);
-```
-
-**Linhas ~870-890 (retry logic com family_name):**
-Verificar e truncar também no retry quando `family_name` é injetado.
-
----
-
-### 2. `supabase/functions/clone-anti-catalog-execute/index.ts`
-
-**Adicionar helper de truncamento (igual):**
-```typescript
-function truncateFamilyName(value: string): string {
-  const MAX_LENGTH = 60;
-  if (!value) return value;
-  if (value.length <= MAX_LENGTH) return value;
-  return value.substring(0, MAX_LENGTH).trim();
+if (!getResponse.ok) {
+  const errBody = await getResponse.text().catch(() => "");
+  return {
+    success: false,
+    error: getResponse.status === 404 ? "NOT_FOUND" : "FETCH_FAILED",
+    message: `Falha ao buscar item ${resolvedItemId}`,
+    api_status: getResponse.status,
+    api_error: errBody,
+  };
 }
-```
 
-**Linhas ~305-310 (tentativa 2 com family_name):**
-```typescript
-// ANTES:
-const payload2 = { ...basePayload, family_name: familyNameValue };
-
-// DEPOIS:
-const payload2 = { ...basePayload, family_name: truncateFamilyName(familyNameValue) };
+itemData = await getResponse.json();
 ```
 
 ---
 
-## Arquivos a Modificar
+## Fluxo Corrigido
 
-| Arquivo | Alteração |
-|---------|-----------|
-| `supabase/functions/ad-action-execute/index.ts` | Adicionar `truncateFamilyName()` e aplicar em 3 pontos |
-| `supabase/functions/clone-anti-catalog-execute/index.ts` | Adicionar `truncateFamilyName()` e aplicar no retry |
+```text
+Clone de item MLB6225626056
+    ↓
+[1] GET /items/MLB6225626056 (SEM auth)
+    ↓
+    200 OK → Sucesso, usar dados públicos
+    ↓
+[2] Se 403 → GET /items/MLB6225626056 (COM auth)
+    ↓
+    200 OK → Item próprio, usar dados
+    403 → Erro real (item restrito)
+```
 
 ---
 
@@ -104,15 +92,33 @@ const payload2 = { ...basePayload, family_name: truncateFamilyName(familyNameVal
 
 | Aspecto | Avaliação |
 |---------|-----------|
-| Risco | Muito baixo - apenas trunca string |
-| Performance | Nenhum impacto |
-| UX | O título pode ficar cortado, mas o anúncio será criado com sucesso |
+| Risco | Muito baixo - padrão já usado em outras funções |
+| Performance | Igual ou melhor (menos headers enviados no caso comum) |
+| Compatibilidade | Total - funciona para itens próprios e de concorrentes |
+
+---
+
+## Referência de Implementação Existente
+
+O arquivo `supabase/functions/learn-listing/index.ts` (linhas 245-254) já usa esse padrão:
+
+```typescript
+// Fetch item from ML API - try public endpoint first, then with auth
+let itemResponse = await fetch(`https://api.mercadolibre.com/items/${itemId}`);
+
+// If public fetch fails, try with auth token
+if (!itemResponse.ok && itemResponse.status === 403) {
+  itemResponse = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
+    headers: { 'Authorization': `Bearer ${accessToken}` },
+  });
+}
+```
 
 ---
 
 ## Resultado Esperado
 
 Após a correção:
-- Títulos com mais de 60 caracteres serão automaticamente truncados
-- O erro `item.family_name.length_invalid` será eliminado
-- Clone V2 funcionará para todos os anúncios
+- Clonagem de anúncios de **concorrentes** → funciona (endpoint público)
+- Clonagem de anúncios **próprios** → funciona (fallback com auth)
+- O erro `FETCH_FAILED 403 access_denied` será eliminado
