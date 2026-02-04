@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { invokeEdgeFunction, getUserFriendlyError } from "@/lib/edgeFunctionClient";
 import type {
   PostSaleConversation,
   PostSaleConversationMessage,
@@ -104,7 +105,7 @@ export function usePostSaleConversation(conversationId: string | null) {
   });
 }
 
-// Sync messages from Mercado Livre
+// Sync messages from Mercado Livre - using standardized edge function client
 export function useSyncPostSaleMessages() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -117,20 +118,33 @@ export function useSyncPostSaleMessages() {
       sellerId: string;
       daysBack?: number;
     }): Promise<SyncMessagesResult> => {
-      const { data, error } = await supabase.functions.invoke("ml-sync-messages", {
+      const result = await invokeEdgeFunction<SyncMessagesResult>("ml-sync-messages", {
         body: { seller_id: sellerId, days_back: daysBack },
       });
 
-      if (error) throw error;
-      return data as SyncMessagesResult;
+      if (!result.success) {
+        // Return structured error for UI handling
+        return {
+          success: false,
+          error: getUserFriendlyError(result.errorCode, result.error || "Erro ao sincronizar"),
+        };
+      }
+
+      return result.data || { success: true, synced: 0 };
     },
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["post-sale-conversations", variables.sellerId] });
-      
+
       if (data.success) {
         toast({
           title: "Sincronização concluída",
           description: `${data.synced || 0} conversas sincronizadas, ${data.unread || 0} não lidas`,
+        });
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Erro ao sincronizar",
+          description: data.error || "Não foi possível sincronizar as mensagens",
         });
       }
     },

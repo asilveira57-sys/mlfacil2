@@ -55,12 +55,32 @@ interface MeliConversationResponse {
 
 interface OrderInfo {
   order_id: string;
-  pack_id: string | null;
-  buyer_id: string;
   buyer_name: string | null;
+  buyer_nickname: string | null;
+  shipment_id: string | null;
   item_title: string | null;
   item_thumbnail: string | null;
-  shipment_id: string | null;
+}
+
+// Helper: Return 200 with success:false for operational errors (avoids 500)
+function errorResponse(
+  error: string,
+  errorCode: string,
+  executionLogs: string[],
+  statusCode = 200
+) {
+  return new Response(
+    JSON.stringify({
+      success: false,
+      error,
+      error_code: errorCode,
+      execution_logs: executionLogs,
+    }),
+    {
+      status: statusCode,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    }
+  );
 }
 
 serve(async (req) => {
@@ -82,10 +102,7 @@ serve(async (req) => {
     // Get authorization header
     const authHeader = req.headers.get("authorization");
     if (!authHeader) {
-      return new Response(
-        JSON.stringify({ success: false, error: "Not authenticated" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return errorResponse("Not authenticated", "AUTH_REQUIRED", executionLogs, 401);
     }
 
     // Get user from token
@@ -94,10 +111,7 @@ serve(async (req) => {
     );
 
     if (userError || !user) {
-      return new Response(
-        JSON.stringify({ success: false, error: "Invalid token" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return errorResponse("Invalid token", "INVALID_TOKEN", executionLogs, 401);
     }
 
     log(`User authenticated: ${user.id}`);
@@ -105,10 +119,7 @@ serve(async (req) => {
     const { seller_id, days_back = 15, force_full_sync = false } = await req.json();
 
     if (!seller_id) {
-      return new Response(
-        JSON.stringify({ success: false, error: "seller_id is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return errorResponse("seller_id is required", "MISSING_SELLER_ID", executionLogs, 400);
     }
 
     log(`Starting sync for seller ${seller_id}, last ${days_back} days`);
@@ -123,13 +134,15 @@ serve(async (req) => {
 
     if (accountError || !mlAccount?.access_token) {
       log(`ML account not found: ${accountError?.message}`);
-      return new Response(
-        JSON.stringify({ success: false, error: "ML account not found or token missing" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      return errorResponse(
+        "ML account not found or token missing",
+        "NO_ML_ACCOUNT",
+        executionLogs
       );
     }
 
     let accessToken = mlAccount.access_token;
+    const sellerUserId = Number(seller_id);
 
     // Check if token is expired and refresh if needed
     const tokenExpiresAt = new Date(mlAccount.token_expires_at);
@@ -151,20 +164,14 @@ serve(async (req) => {
           accessToken = refreshData.access_token;
           log("Token refreshed successfully");
         } else {
-          return new Response(
-            JSON.stringify({ success: false, error: "Token refresh failed" }),
-            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
+          return errorResponse("Token refresh failed", "TOKEN_REFRESH_FAILED", executionLogs);
         }
       } else {
-        return new Response(
-          JSON.stringify({ success: false, error: "Token refresh failed" }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return errorResponse("Token refresh failed", "TOKEN_REFRESH_FAILED", executionLogs);
       }
     }
 
-    // Get recent orders from cache to find conversations
+    // Get recent orders from cache - ONLY columns that exist!
     const dateThreshold = new Date();
     dateThreshold.setDate(dateThreshold.getDate() - days_back);
 
@@ -172,11 +179,10 @@ serve(async (req) => {
       .from("meli_orders_cache")
       .select(`
         order_id,
-        buyer_id,
         buyer_name,
+        buyer_nickname,
         shipment_id,
-        item_title,
-        item_thumbnail
+        created_at_meli
       `)
       .eq("seller_id", seller_id)
       .gte("created_at_meli", dateThreshold.toISOString())
@@ -185,9 +191,10 @@ serve(async (req) => {
 
     if (ordersError) {
       log(`Error fetching orders: ${ordersError.message}`);
-      return new Response(
-        JSON.stringify({ success: false, error: "Failed to fetch orders" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      return errorResponse(
+        `Failed to fetch orders: ${ordersError.message}`,
+        "DB_QUERY_ERROR",
+        executionLogs
       );
     }
 
@@ -195,29 +202,47 @@ serve(async (req) => {
 
     if (!recentOrders || recentOrders.length === 0) {
       return new Response(
-        JSON.stringify({ success: true, synced: 0, message: "No recent orders found" }),
+        JSON.stringify({ success: true, synced: 0, message: "No recent orders found", execution_logs: executionLogs }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Dedupe by order_id (pack_id not available in cache)
+    // Extract unique order IDs
+    const orderIds = [...new Set(recentOrders.map((o) => o.order_id))];
+
+    // Fetch item data from meli_order_items_cache to enrich conversations
+    const { data: orderItems } = await supabase
+      .from("meli_order_items_cache")
+      .select("order_id, title, thumbnail")
+      .in("order_id", orderIds);
+
+    // Map first item per order for title/thumbnail
+    const itemsByOrder = new Map<string, { title: string | null; thumbnail: string | null }>();
+    for (const item of orderItems || []) {
+      if (!itemsByOrder.has(item.order_id)) {
+        itemsByOrder.set(item.order_id, { title: item.title, thumbnail: item.thumbnail });
+      }
+    }
+
+    log(`Fetched items for ${itemsByOrder.size} orders`);
+
+    // Build orders map (dedupe by order_id)
     const ordersMap = new Map<string, OrderInfo>();
     for (const order of recentOrders) {
-      const key = order.order_id;
-      if (!ordersMap.has(key)) {
-        ordersMap.set(key, {
+      if (!ordersMap.has(order.order_id)) {
+        const itemData = itemsByOrder.get(order.order_id);
+        ordersMap.set(order.order_id, {
           order_id: order.order_id,
-          pack_id: null,
-          buyer_id: order.buyer_id,
           buyer_name: order.buyer_name,
-          item_title: order.item_title,
-          item_thumbnail: order.item_thumbnail,
+          buyer_nickname: order.buyer_nickname,
           shipment_id: order.shipment_id,
+          item_title: itemData?.title || null,
+          item_thumbnail: itemData?.thumbnail || null,
         });
       }
     }
 
-    log(`Processing ${ordersMap.size} unique orders/packs`);
+    log(`Processing ${ordersMap.size} unique orders`);
 
     let totalSynced = 0;
     let totalUnread = 0;
@@ -225,14 +250,11 @@ serve(async (req) => {
     const conversationsToUpsert: unknown[] = [];
     const messagesToUpsert: unknown[] = [];
 
-    // Process each order/pack
-    for (const [packOrOrderId, orderInfo] of ordersMap.entries()) {
+    // Process each order
+    for (const [orderId, orderInfo] of ordersMap.entries()) {
       try {
-        // Use pack_id if available, otherwise use order_id
-        const packId = orderInfo.pack_id || orderInfo.order_id;
-        
-        // Fetch messages from ML API
-        const messagesUrl = `https://api.mercadolibre.com/messages/packs/${packId}/sellers/${seller_id}?tag=post_sale`;
+        // Fetch messages from ML API using order_id as pack_id
+        const messagesUrl = `https://api.mercadolibre.com/messages/packs/${orderId}/sellers/${seller_id}?tag=post_sale`;
         log(`Fetching messages: ${messagesUrl}`);
 
         const response = await fetch(messagesUrl, {
@@ -241,30 +263,57 @@ serve(async (req) => {
 
         if (!response.ok) {
           const errorText = await response.text();
-          log(`ML API error for pack ${packId}: ${response.status} - ${errorText}`);
-          
+          log(`ML API error for order ${orderId}: ${response.status} - ${errorText}`);
+
           // Skip 404 errors (no conversation exists)
           if (response.status === 404) {
             continue;
           }
-          
+
+          // Handle rate limit
+          if (response.status === 429) {
+            log("Rate limit hit, stopping sync");
+            break;
+          }
+
           totalErrors++;
           continue;
         }
 
         const conversationData: MeliConversationResponse = await response.json();
-        
+
         if (!conversationData.messages || conversationData.messages.length === 0) {
-          log(`No messages found for pack ${packId}`);
+          log(`No messages found for order ${orderId}`);
           continue;
         }
 
-        log(`Found ${conversationData.messages.length} messages for pack ${packId}`);
+        log(`Found ${conversationData.messages.length} messages for order ${orderId}`);
+
+        // Infer buyer_id from messages (first user_id that's not the seller)
+        let buyerId: string | null = null;
+        let buyerName: string | null = orderInfo.buyer_name;
+        for (const msg of conversationData.messages) {
+          if (msg.from.user_id !== sellerUserId) {
+            buyerId = String(msg.from.user_id);
+            if (!buyerName && msg.from.name) {
+              buyerName = msg.from.name;
+            }
+            break;
+          }
+          if (msg.to.user_id !== sellerUserId) {
+            buyerId = String(msg.to.user_id);
+            break;
+          }
+        }
+
+        if (!buyerId) {
+          log(`Could not infer buyer_id for order ${orderId}, skipping`);
+          continue;
+        }
 
         // Count unread messages (from buyer, no read date)
-        const unreadCount = conversationData.messages.filter(m => 
-          String(m.from.user_id) === orderInfo.buyer_id && 
-          !m.message_date.read
+        const unreadCount = conversationData.messages.filter(
+          (m) => m.from.user_id !== sellerUserId && !m.message_date.read
         ).length;
 
         // Get the last message
@@ -273,14 +322,17 @@ serve(async (req) => {
         );
         const lastMessage = sortedMessages[0];
 
+        // Determine last_message_from
+        const lastMessageFrom = lastMessage?.from.user_id === sellerUserId ? "seller" : "buyer";
+
         // Prepare conversation record
         const conversationRecord = {
           user_id: user.id,
           seller_id: seller_id,
           order_id: orderInfo.order_id,
-          pack_id: orderInfo.pack_id,
-          buyer_id: orderInfo.buyer_id,
-          buyer_name: orderInfo.buyer_name || lastMessage?.from?.name || "Comprador",
+          pack_id: null,
+          buyer_id: buyerId,
+          buyer_name: buyerName || orderInfo.buyer_nickname || "Comprador",
           item_title: orderInfo.item_title,
           item_thumbnail: orderInfo.item_thumbnail,
           shipment_id: orderInfo.shipment_id,
@@ -288,7 +340,7 @@ serve(async (req) => {
           unread_count: unreadCount,
           last_message_date: lastMessage?.message_date?.created,
           last_message_text: lastMessage?.text?.substring(0, 200) || null,
-          last_message_from: String(lastMessage?.from?.user_id) === orderInfo.buyer_id ? "buyer" : "seller",
+          last_message_from: lastMessageFrom,
           seller_max_chars: conversationData.seller_max_chars || 350,
           updated_at: new Date().toISOString(),
         };
@@ -297,10 +349,11 @@ serve(async (req) => {
 
         // Prepare message records
         for (const msg of conversationData.messages) {
+          const fromType = msg.from.user_id === sellerUserId ? "seller" : "buyer";
           messagesToUpsert.push({
             ml_message_id: msg.id,
             from_user_id: String(msg.from.user_id),
-            from_type: String(msg.from.user_id) === orderInfo.buyer_id ? "buyer" : "seller",
+            from_type: fromType,
             message_text: msg.text,
             message_status: msg.status,
             moderation_status: msg.moderation_status || "clean",
@@ -309,7 +362,6 @@ serve(async (req) => {
             attachments: msg.attachments || [],
             message_date: msg.message_date.created,
             read_at: msg.message_date.read,
-            // conversation_id will be set after upserting conversations
             _order_id: orderInfo.order_id, // temp field for linking
           });
         }
@@ -318,10 +370,9 @@ serve(async (req) => {
         totalUnread += unreadCount;
 
         // Add small delay to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 100));
-
+        await new Promise((resolve) => setTimeout(resolve, 100));
       } catch (err) {
-        log(`Error processing pack ${packOrOrderId}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        log(`Error processing order ${orderId}: ${err instanceof Error ? err.message : "Unknown error"}`);
         totalErrors++;
       }
     }
@@ -329,7 +380,7 @@ serve(async (req) => {
     // Upsert conversations
     if (conversationsToUpsert.length > 0) {
       log(`Upserting ${conversationsToUpsert.length} conversations`);
-      
+
       const { error: convError } = await supabase
         .from("post_sale_conversations")
         .upsert(conversationsToUpsert as never[], {
@@ -343,7 +394,6 @@ serve(async (req) => {
     }
 
     // Get conversation IDs for message linking
-    const orderIds = [...ordersMap.keys()].map(k => ordersMap.get(k)!.order_id);
     const { data: savedConversations } = await supabase
       .from("post_sale_conversations")
       .select("id, order_id")
@@ -360,7 +410,7 @@ serve(async (req) => {
       .map((msg: any) => {
         const convId = conversationIdMap.get(msg._order_id);
         if (!convId) return null;
-        
+
         const { _order_id, ...messageData } = msg;
         return {
           ...messageData,
@@ -371,7 +421,7 @@ serve(async (req) => {
 
     if (linkedMessages.length > 0) {
       log(`Upserting ${linkedMessages.length} messages`);
-      
+
       const { error: msgError } = await supabase
         .from("post_sale_conversation_messages")
         .upsert(linkedMessages as never[], {
@@ -396,19 +446,20 @@ serve(async (req) => {
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
-
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
     console.error("Error in ml-sync-messages:", error);
     executionLogs.push(`Fatal error: ${errorMessage}`);
 
+    // Return 200 with success:false for operational errors
     return new Response(
       JSON.stringify({
         success: false,
         error: errorMessage,
+        error_code: "INTERNAL_ERROR",
         execution_logs: executionLogs,
       }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });
