@@ -172,7 +172,6 @@ serve(async (req) => {
       .from("meli_orders_cache")
       .select(`
         order_id,
-        pack_id,
         buyer_id,
         buyer_name,
         shipment_id,
@@ -201,14 +200,14 @@ serve(async (req) => {
       );
     }
 
-    // Dedupe by pack_id or order_id
+    // Dedupe by order_id (pack_id not available in cache)
     const ordersMap = new Map<string, OrderInfo>();
     for (const order of recentOrders) {
-      const key = order.pack_id || order.order_id;
+      const key = order.order_id;
       if (!ordersMap.has(key)) {
         ordersMap.set(key, {
           order_id: order.order_id,
-          pack_id: order.pack_id,
+          pack_id: null,
           buyer_id: order.buyer_id,
           buyer_name: order.buyer_name,
           item_title: order.item_title,
