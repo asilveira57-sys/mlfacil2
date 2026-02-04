@@ -132,32 +132,56 @@ serve(async (req) => {
     // Build query for sales data from meli_order_items_cache
     // Using created_at_meli as the sale date (when the order was created on ML)
     // Note: meli_* cache tables use the authenticated user_id, not workspace_id
-    let salesQuery = supabase
-      .from("meli_order_items_cache")
-      .select("item_id, created_at_meli, seller_id")
-      .eq("user_id", userId)
-      .not("created_at_meli", "is", null)
-      .order("created_at_meli", { ascending: true });
+    // IMPORTANT: Use pagination to avoid Supabase's 1000 row default limit
+    const PAGE_SIZE = 1000;
+    let allSalesData: { item_id: string; created_at_meli: string; seller_id: string }[] = [];
+    let offset = 0;
+    let hasMore = true;
 
-    if (sellerIdFilter) {
-      salesQuery = salesQuery.eq("seller_id", sellerIdFilter);
-    }
-    if (item_id) {
-      salesQuery = salesQuery.eq("item_id", item_id);
+    console.log(`[ad-timeline-recalculate] Fetching sales data with pagination (page size: ${PAGE_SIZE})`);
+
+    while (hasMore) {
+      let salesQuery = supabase
+        .from("meli_order_items_cache")
+        .select("item_id, created_at_meli, seller_id")
+        .eq("user_id", userId)
+        .not("created_at_meli", "is", null)
+        .order("created_at_meli", { ascending: true });
+
+      if (sellerIdFilter) {
+        salesQuery = salesQuery.eq("seller_id", sellerIdFilter);
+      }
+      if (item_id) {
+        salesQuery = salesQuery.eq("item_id", item_id);
+      }
+
+      // Apply pagination
+      salesQuery = salesQuery.range(offset, offset + PAGE_SIZE - 1);
+
+      const { data: pageData, error: pageError } = await salesQuery;
+
+      if (pageError) {
+        console.error(`[ad-timeline-recalculate] Error fetching sales page at offset ${offset}:`, pageError);
+        return new Response(JSON.stringify({ error: "Failed to fetch sales data", details: pageError }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if (!pageData || pageData.length === 0) {
+        hasMore = false;
+      } else {
+        allSalesData = allSalesData.concat(pageData);
+        hasMore = pageData.length === PAGE_SIZE;
+        offset += PAGE_SIZE;
+        console.log(`[ad-timeline-recalculate] Fetched ${pageData.length} sales (total: ${allSalesData.length}, offset: ${offset})`);
+      }
     }
 
-    const { data: salesData, error: salesError } = await salesQuery;
-
-    if (salesError) {
-      console.error(`[ad-timeline-recalculate] Error fetching sales:`, salesError);
-      return new Response(JSON.stringify({ error: "Failed to fetch sales data", details: salesError }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    console.log(`[ad-timeline-recalculate] Total sales fetched: ${allSalesData.length}`);
 
     // Note: even if there are no sales, we still want to upsert NO_SALES items from listings.
-    const safeSalesData = salesData || [];
+    const safeSalesData = allSalesData;
 
     // Group sales by item_id and seller_id
     const itemSales: Record<string, { seller_id: string; dates: Date[] }> = {};
