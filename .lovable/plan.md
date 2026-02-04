@@ -1,152 +1,306 @@
 
-## Objetivo (o que você pediu)
-Fazer o módulo de **Custos** funcionar de forma **automática e resiliente**:
+# Plano: Módulo de Mensagens Pós-Venda com Inbox de Conversas
 
-- Atualizar vendas/pedidos e custos **sem o cliente clicar em sincronizar**
-- Rodar **na madrugada** (e manter incremental durante o dia, se necessário)
-- **Checar Billing**, puxar **custos reais**, guardar em **cache**
-- Se der erro/timeout/rate limit: **não travar**, **destravar sozinho** e **continuar de onde parou**
+## Objetivo
+Implementar um sistema completo para visualizar e responder mensagens de compradores após a venda, similar ao módulo de Perguntas (Q&A), permitindo que o vendedor gerencie toda a comunicação pós-venda diretamente pelo painel.
 
----
+## Visão Geral
 
-## Diagnóstico (por que está travado agora)
-Hoje existe a tela com “Sincronização Automática”, mas o “automático” não está executando de verdade:
-
-1) **O Step 2 está realmente pausado no backend** e ficou assim desde 28/01  
-- `meli_real_costs_sync_state` para `seller_id=66043362` está `status='paused'`, `processed=200`, `total=791`, com `last_heartbeat_at` em 28/01.
-
-2) **Os pedidos continuam chegando**, mas o cache de custos não acompanha  
-- Existem pedidos pagos recentes (até 04/02), porém o cache `order_cost_breakdown_cache` está atualizado só até 28/01.
-- Ou seja: o pipeline parou no Step 2 e ninguém retomou automaticamente.
-
-3) **O “watchdog” do módulo existe no código**, mas não está conectado/rodando de forma efetiva  
-- Existe o hook `useCostSyncWatchdog`, e a tela `CostSettings` escreve flags em `localStorage` e dispara um evento `cost_watchdog_update`.
-- Porém não há nenhum “listener/montagem global” que realmente consuma isso no app (e há comentário no `App.tsx` indicando que watchdogs globais foram removidos).
-
-Resultado: o Step 2 fica “paused” e a UI mostra como se fosse retomar, mas **nada retoma**.
-
----
-
-## Solução proposta (arquitetura em 2 camadas)
-### Camada A — Automação server-side (madrugada, sem depender do usuário)
-Criar um job noturno no backend que:
-1. Puxa pedidos (já existe nightly/hourly de pedidos, vamos manter)
-2. Sincroniza Billing (taxas)
-3. Calcula custos reais / reprocessa pendências
-4. Se pausar por runtime/rate limit, continua na próxima execução automaticamente
-
-### Camada B — Watchdog in-app (quando o usuário estiver logado)
-Mesmo com job noturno, é útil ter um watchdog leve no app para:
-- Se ficar `paused` durante o dia, ele retoma sozinho
-- A tela de Configurações não fica “travada” esperando alguém clicar
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        PÁGINA /mensagens (Redesenhada)                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  [Abas: Conversas | Templates | Automação]                                  │
+│                                                                             │
+│  ┌─────────────┐ ┌────────────────────────────┐ ┌───────────────────────┐  │
+│  │   INBOX     │ │    ÁREA DE CONVERSA        │ │   PAINEL LATERAL      │  │
+│  │             │ │                            │ │                       │  │
+│  │ • Pedido 1  │ │  📦 Produto: XYZ           │ │  📋 Detalhes Pedido   │  │
+│  │   Felipe    │ │  Comprador: Felipe         │ │  - Status: Enviado    │  │
+│  │   "Olá..."  │ │                            │ │  - Data: 04/02        │  │
+│  │             │ │  ┌───────────────────────┐ │ │  - Código: 46401..    │  │
+│  │ • Pedido 2  │ │  │ 👤 Comprador (14:30)  │ │ │                       │  │
+│  │   Bianca    │ │  │ "Olá, quando chega?"  │ │ │  📚 Respostas Rápidas │  │
+│  │   "Recebi"  │ │  └───────────────────────┘ │ │  • Prazo de entrega   │  │
+│  │             │ │  ┌───────────────────────┐ │ │  • Rastreamento       │  │
+│  │             │ │  │ 🏪 Vendedor (14:45)   │ │ │  • Instruções de uso  │  │
+│  │             │ │  │ "Será entregue..."    │ │ │                       │  │
+│  │             │ │  └───────────────────────┘ │ │                       │  │
+│  │             │ │                            │ │                       │  │
+│  │             │ │  ┌────────────────────────┐│ │                       │  │
+│  │             │ │  │ Digite sua resposta...││ │                       │  │
+│  │             │ │  │                    [▸] ││ │                       │  │
+│  │             │ │  └────────────────────────┘│ │                       │  │
+│  └─────────────┘ └────────────────────────────┘ └───────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## Entregáveis (o que vou implementar)
+## Parte 1: Backend - Edge Functions
 
-### 1) Backend: Job “Costs Nightly Sync” (madrugada)
-**Nova backend function** (ex: `costs-nightly-sync`) com estas características:
-- **Não depende de usuário logado**
-- Protegida por **segredo de cron** (header), para não ser um endpoint público “chamável por qualquer um”
-- Usa lock (tabela `sync_scheduler`) para evitar duas execuções simultâneas
-- Para cada conta ativa:
-  1. **Confere/atualiza token**
-  2. **Sincroniza Billing Details** (escopo “recent” por padrão) com:
-     - paginação
-     - backoff para 429 (rate limit)
-     - persistência de cursor em `meli_billing_details_sync_state`
-  3. **Backfill de breakdown** para pedidos pagos sem registro (`missing_breakdown`)
-     - persistindo progresso em `meli_backfill_sync_state`
-  4. **Real costs incremental** (atualiza `order_cost_breakdown_cache`)
-     - persistindo progresso em `meli_real_costs_sync_state`
-     - retomando automaticamente se estiver `paused`
+### 1.1 Nova Edge Function: `ml-sync-messages`
+**Objetivo**: Sincronizar conversas do Mercado Livre para o banco local
 
-Observação importante: como as funções atuais (`ml-sync-billing-details`, `ml-sync-real-costs`) validam JWT de usuário, o job noturno será implementado como **função dedicada de cron** (para não depender de token de usuário).
+**Funcionalidades**:
+- Buscar pedidos recentes (últimos 15 dias) da tabela `meli_orders_cache`
+- Para cada pedido, consultar mensagens via API do ML:
+  - `GET /messages/packs/{order_id}/sellers/{seller_id}`
+- Armazenar conversas na nova tabela `post_sale_conversations`
+- Armazenar mensagens individuais em `post_sale_conversation_messages`
+- Identificar conversas com mensagens não lidas
+- Suporte a sincronização incremental (apenas novas mensagens)
 
----
+**Fluxo**:
+```text
+1. Recebe seller_id
+2. Busca pedidos dos últimos 15 dias (pagos/enviados)
+3. Para cada pedido:
+   a. Chama API: /messages/packs/{order_id}/sellers/{seller_id}
+   b. Extrai status da conversa (active/blocked/etc)
+   c. Extrai todas as mensagens
+   d. Upsert no banco local
+4. Retorna estatísticas (total sincronizado, não lidas)
+```
 
-### 2) Backend: Agendamento (cron) na madrugada + retomada automática
-Adicionar agendamentos (pg_cron/pg_net) similares aos já existentes:
+### 1.2 Nova Edge Function: `ml-send-message`
+**Objetivo**: Enviar mensagem para comprador via API do ML
 
-- `costs-nightly-sync`: roda todo dia na madrugada (horário alinhado ao seu fuso, mesma lógica do nightly de pedidos)
-- Opcional recomendado: `costs-watchdog-resume` a cada X minutos/hora
-  - Ele não “puxa tudo”, apenas detecta estados `paused/error` e tenta retomar com segurança
-  - Ajuda quando o ML rate-limita e o processo precisa ser retomado depois sem ficar preso
+**Funcionalidades**:
+- Validar conteúdo contra `post_sale_blocked_patterns` (já existe)
+- Enviar via `POST /messages/packs/{order_id}/sellers/{seller_id}?tag=post_sale`
+- Registrar mensagem enviada no banco
+- Tratar erros específicos da API (conversa bloqueada, pedido cancelado, etc.)
 
----
-
-### 3) Frontend: ligar o watchdog de Custos de verdade (sem “tempestade”)
-Implementar um watcher **apenas no módulo /custos**, não global no app inteiro:
-
-- Montar `useCostSyncWatchdog(sellerId, enabled)` dentro do módulo Custos
-- Criar um pequeno hook auxiliar (ex: `useCostWatchdogPreferences`) para:
-  - ler `localStorage.cost_watchdog_enabled`
-  - escutar o evento `cost_watchdog_update`
-  - manter o toggle “Sincronização Automática” realmente refletindo no watchdog
-
-Com isso, quando o Step 2 estiver `paused`, o watchdog:
-- retoma (`continue` / `continue_backfill` / billing sync) com cooldown/debounce (já existe no hook)
-- evita spam de requests (já tem `COOLDOWN_MS`, `WATCHDOG_INTERVAL_MS` e debounce por etapa)
+**Payload para ML**:
+```json
+{
+  "from": { "user_id": "seller_id" },
+  "to": { "user_id": "buyer_id" },
+  "text": "Mensagem do vendedor (máx 350 caracteres)"
+}
+```
 
 ---
 
-### 4) Frontend: atualização automática dos dados na página de Custos (sem precisar clicar)
-Hoje o Resumo/Pedidos carregam “uma vez” e não revalidam por conta própria.
+## Parte 2: Banco de Dados
 
-Vou adicionar uma estratégia leve:
-- Polling suave (ex: 30s–60s) apenas enquanto a rota `/custos` estiver aberta e a aba estiver visível
-- Quando detectar mudança de estado (ex: heartbeat/status mudando), faz refresh do resumo/listagens
+### 2.1 Nova Tabela: `post_sale_conversations`
+Armazena o cabeçalho de cada conversa (1 por pedido)
 
-Isso resolve o “estou na página e não cliquei em nada e não atualiza”.
+```text
+Colunas:
+- id (UUID, PK)
+- user_id (UUID, FK auth.users)
+- seller_id (TEXT)
+- order_id (TEXT) - ID do pedido/pack
+- buyer_id (TEXT)
+- buyer_name (TEXT)
+- item_title (TEXT) - Título do produto principal
+- item_thumbnail (TEXT)
+- shipment_id (TEXT)
+- conversation_status (TEXT) - active, blocked, etc.
+- unread_count (INT) - Mensagens não lidas pelo vendedor
+- last_message_date (TIMESTAMPTZ)
+- last_message_text (TEXT) - Preview da última mensagem
+- last_message_from (TEXT) - 'buyer' ou 'seller'
+- seller_max_chars (INT, default 350)
+- created_at / updated_at
+
+Índices:
+- seller_id, order_id (UNIQUE)
+- seller_id, unread_count > 0 (para filtro rápido)
+- last_message_date (para ordenação)
+```
+
+### 2.2 Nova Tabela: `post_sale_conversation_messages`
+Armazena cada mensagem individual
+
+```text
+Colunas:
+- id (UUID, PK)
+- conversation_id (UUID, FK)
+- ml_message_id (TEXT, UNIQUE)
+- from_user_id (TEXT)
+- from_type (TEXT) - 'buyer' ou 'seller'
+- message_text (TEXT)
+- message_status (TEXT) - available, moderated, etc.
+- moderation_status (TEXT) - clean, rejected, pending
+- moderation_reason (TEXT)
+- has_attachments (BOOLEAN)
+- attachments (JSONB) - Array de anexos
+- message_date (TIMESTAMPTZ)
+- read_at (TIMESTAMPTZ)
+- created_at
+```
+
+### 2.3 RLS Policies
+- Usuários só acessam conversas onde são donos (user_id = auth.uid())
+- Políticas para SELECT, INSERT, UPDATE
 
 ---
 
-## Mudanças em arquivos (alto nível)
+## Parte 3: Frontend - Componentes
 
-### Backend (novos/alterados)
-- `supabase/functions/costs-nightly-sync/index.ts` (novo)
-- SQL (via migração aprovada) para:
-  - inserir registro em `sync_scheduler` para o novo job (se necessário)
-  - criar `cron.schedule(...)` para disparar a função na madrugada e (opcional) um resume job
+### 3.1 Novo Componente: `PostSaleInbox`
+Lista de conversas com:
+- Filtros: Não lidas, Todas, Por status do pedido
+- Busca por nome do comprador ou número do pedido
+- Indicador visual de mensagens não lidas
+- Preview da última mensagem
+- Ordenação por data da última mensagem
 
-### Frontend
-- `src/pages/Custos.tsx` (montar watchdog e refresh leve)
-- `src/components/custos/CostSettings.tsx` (conectar toggle ao watchdog real + garantir que “auto” tem efeito)
-- (Se necessário) `src/hooks/useCostWatchdogPreferences.ts` (novo hook pequeno para ler localStorage/evento)
+### 3.2 Novo Componente: `PostSaleConversation`
+Área de visualização da conversa:
+- Timeline de mensagens (estilo chat)
+- Diferenciação visual entre mensagens do vendedor e comprador
+- Indicador de mensagens moderadas/bloqueadas
+- Exibição de anexos (imagens, PDFs)
 
----
+### 3.3 Novo Componente: `PostSaleReplyEditor`
+Editor de resposta:
+- Campo de texto com contador de caracteres (máx 350)
+- Validação em tempo real contra padrões bloqueados
+- Botão de respostas rápidas (da biblioteca)
+- Sugestão por IA (opcional)
+- Botão de enviar
 
-## Regras de retomada (como “destrava e volta de onde parou”)
-- **Paused por tempo**: continua automaticamente na próxima rodada (in-app ou cron)
-- **Rate limit (429)**: marca `paused` com motivo e tenta novamente depois (cron resume)
-- **Token expirado**: tenta refresh; se inválido, marca conta para reconexão (sem travar o job inteiro)
-- **Backlog grande**: processa em lotes (limite de runtime), salva cursor e continua na próxima execução
-
----
-
-## Critérios de aceite (o que vou considerar “pronto”)
-1. Em `Configurações > Passo 2`, o status não fica preso indefinidamente em `paused` sem retomar
-2. O cache de custos (`order_cost_breakdown_cache`) volta a avançar para datas recentes (ex: após 28/01)
-3. A página `/custos` atualiza o Resumo/Pedidos automaticamente sem clicar em “Sincronizar”
-4. O job noturno roda sozinho e mantém dados atualizados, sem depender do cliente abrir o app
-5. Se houver erro/rate limit, o sistema não “morre”: ele pausa, registra e retoma sozinho
-
----
-
-## Plano de testes (prático)
-- Disparar manualmente a função `costs-nightly-sync` (execução única) e validar:
-  - criação/atualização de estados (`meli_*_sync_state`)
-  - novos registros em `order_cost_breakdown_cache` para datas recentes
-- Abrir `/custos` e confirmar:
-  - Resumo atualiza sozinho após processamento
-  - “Passo 2” sai de travado e progresso continua
-- Simular rate limit (ou esperar ocorrer) e validar:
-  - status vai para paused com mensagem
-  - próxima execução retoma do cursor
+### 3.4 Novo Componente: `PostSaleConversationDetails`
+Painel lateral com:
+- Informações do pedido (número, status, data)
+- Informações do comprador
+- Link para rastreamento
+- Histórico de envios
 
 ---
 
-## Observações/assunções
-- Vou agendar a madrugada seguindo o mesmo padrão dos jobs atuais (que já rodam nesse horário).
-- Billing real pode ter atraso (≈24h), então pedidos muito recentes continuarão “pendentes” até o ML liberar — mas o sistema continuará tentando automaticamente.
+## Parte 4: Hooks e Estado
 
+### 4.1 Novos Hooks
+```text
+usePostSaleConversations(filters)
+  - Lista conversas com paginação
+  - Filtros: unread, status, search
+
+usePostSaleConversation(conversationId)
+  - Detalhes de uma conversa + mensagens
+
+useSendPostSaleMessage()
+  - Mutation para enviar mensagem
+
+useSyncPostSaleMessages()
+  - Trigger para sincronização manual
+
+useMarkConversationRead()
+  - Marcar conversa como lida
+```
+
+---
+
+## Parte 5: Fluxo de Sincronização
+
+### 5.1 Sincronização Inicial
+1. Usuário acessa `/mensagens` > aba "Conversas"
+2. Sistema verifica se há conversas sincronizadas
+3. Se não houver ou última sync > 15 min, dispara `ml-sync-messages`
+4. Exibe loading enquanto sincroniza
+5. Popula inbox com conversas
+
+### 5.2 Sincronização Manual
+- Botão "Atualizar" no header (igual Q&A)
+- Dispara edge function e atualiza lista
+
+### 5.3 Sincronização ao Enviar
+- Após enviar mensagem com sucesso, atualiza conversa local
+- Não precisa resincronizar tudo
+
+---
+
+## Parte 6: Validação de Conteúdo
+
+Reutiliza a infraestrutura existente:
+- Tabela `post_sale_blocked_patterns` (já criada com 21 padrões)
+- Edge Function `post-sale-messages?action=validate` (já existe)
+- Validação antes do envio
+
+---
+
+## Detalhes Técnicos
+
+### API do Mercado Livre Utilizada
+```text
+GET /messages/packs/{pack_id}/sellers/{seller_id}
+- Retorna histórico de mensagens
+- Inclui status da conversa
+- Limite de caracteres do vendedor
+
+POST /messages/packs/{pack_id}/sellers/{seller_id}?tag=post_sale
+- Envia nova mensagem
+- Limite: 350 caracteres
+- Caracteres permitidos: ISO-8859-1 + emojis específicos
+```
+
+### Tratamento de Erros
+- Conversa bloqueada pelo comprador
+- Pedido cancelado (só permite responder se houver conversa prévia)
+- Moderação rejeitada (conteúdo impróprio)
+- Token expirado (refresh automático)
+
+---
+
+## Arquivos a Criar/Modificar
+
+### Novos Arquivos
+```text
+supabase/functions/ml-sync-messages/index.ts
+supabase/functions/ml-send-message/index.ts
+src/types/post-sale-conversation.ts
+src/hooks/usePostSaleConversations.ts
+src/components/post-sale/PostSaleInbox.tsx
+src/components/post-sale/PostSaleConversation.tsx
+src/components/post-sale/PostSaleReplyEditor.tsx
+src/components/post-sale/PostSaleConversationDetails.tsx
+src/components/post-sale/PostSaleConversationsTab.tsx
+```
+
+### Arquivos a Modificar
+```text
+src/pages/MensagensPosVenda.tsx - Adicionar aba de Conversas
+src/components/post-sale/index.ts - Exportar novos componentes
+```
+
+### Migrações SQL
+```text
+1. Criar tabela post_sale_conversations
+2. Criar tabela post_sale_conversation_messages
+3. Adicionar RLS policies
+4. Adicionar índices de performance
+```
+
+---
+
+## Ordem de Implementação
+
+1. **Fase 1 - Infraestrutura**
+   - Criar tabelas no banco
+   - Criar edge function `ml-sync-messages`
+   - Testar sincronização
+
+2. **Fase 2 - Visualização**
+   - Criar tipos TypeScript
+   - Criar hooks de leitura
+   - Implementar PostSaleInbox
+   - Implementar PostSaleConversation
+   - Integrar na página
+
+3. **Fase 3 - Resposta**
+   - Criar edge function `ml-send-message`
+   - Implementar PostSaleReplyEditor
+   - Validação de conteúdo
+   - Teste end-to-end
+
+4. **Fase 4 - Refinamentos**
+   - Marcação de lidas
+   - Filtros avançados
+   - Indicadores visuais
+   - Respostas rápidas
