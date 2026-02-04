@@ -198,34 +198,11 @@ Deno.serve(async (req) => {
           stats.billing_synced++;
         }
 
-        // Step 3: Check backfill state and resume if needed
-        const { data: backfillState } = await supabase
-          .from('meli_backfill_sync_state')
-          .select('*')
-          .eq('seller_id', sellerId)
-          .maybeSingle();
-
-        // Check if there are missing breakdowns
-        const { count: totalPaid } = await supabase
-          .from('meli_orders_cache')
-          .select('*', { count: 'exact', head: true })
-          .eq('seller_id', sellerId)
-          .eq('order_status', 'paid');
-
-        const { count: totalProcessed } = await supabase
-          .from('order_cost_breakdown_cache')
-          .select('*', { count: 'exact', head: true })
-          .eq('seller_id', sellerId);
-
-        const missingBreakdown = (totalPaid || 0) - (totalProcessed || 0);
-
-        if (missingBreakdown > 0 && (!backfillState || backfillState.status !== 'running')) {
-          console.log(`[costs-nightly] Found ${missingBreakdown} orders missing breakdown for ${sellerId}`);
-          await processBackfill(supabase, userId, sellerId);
-          stats.backfill_created++;
-        } else if (backfillState?.status === 'paused') {
-          console.log(`[costs-nightly] Resuming paused backfill for ${sellerId}`);
-          await processBackfill(supabase, userId, sellerId);
+        // Step 3: Always run backfill to check for recent orders without breakdown
+        // This is necessary because count comparisons can be misleading (orders may change status)
+        console.log(`[costs-nightly] Running backfill check for ${sellerId}`);
+        const backfillResult = await processBackfill(supabase, userId, sellerId);
+        if (backfillResult && backfillResult > 0) {
           stats.backfill_created++;
         }
 
@@ -435,8 +412,8 @@ async function processBillingSync(supabase: any, userId: string, sellerId: strin
   }
 }
 
-// Process backfill directly
-async function processBackfill(supabase: any, userId: string, sellerId: string) {
+// Process backfill directly - returns count of backfilled orders
+async function processBackfill(supabase: any, userId: string, sellerId: string): Promise<number> {
   const MAX_BACKFILL = 200;
   
   try {
@@ -451,7 +428,7 @@ async function processBackfill(supabase: any, userId: string, sellerId: string) 
 
     if (!ordersWithoutBreakdown?.length) {
       console.log(`[costs-nightly] No orders to backfill for ${sellerId}`);
-      return;
+      return 0;
     }
 
     // Check which already have breakdown
@@ -467,7 +444,7 @@ async function processBackfill(supabase: any, userId: string, sellerId: string) 
 
     if (missing.length === 0) {
       console.log(`[costs-nightly] All orders already have breakdown for ${sellerId}`);
-      return;
+      return 0;
     }
 
     // Create breakdown records
@@ -505,8 +482,10 @@ async function processBackfill(supabase: any, userId: string, sellerId: string) 
       last_heartbeat_at: new Date().toISOString(),
     }, { onConflict: 'seller_id' });
 
+    return records.length;
   } catch (error) {
     console.error(`[costs-nightly] Backfill error for ${sellerId}:`, error);
+    return 0;
   }
 }
 
