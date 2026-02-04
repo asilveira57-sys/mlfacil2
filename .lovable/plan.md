@@ -1,77 +1,179 @@
 
-Objetivo: eliminar o erro “new row violates row-level security policy for table ad_lifecycle_actions” ao criar rascunhos de ações (Clonar/Republicar/Encerrar) dentro do módulo Linha do Tempo, garantindo que o `workspace_id` usado no INSERT seja sempre um workspace válido do qual o usuário é membro.
+# Plano: Corrigir Erro "title invalid fields" para Vendedores User Products
 
-## 1) Diagnóstico (origem do erro)
-Pelos logs de rede, o INSERT em `ad_lifecycle_actions` está sendo feito com:
-- `workspace_id = 433a4292-...` (que é o **user_id** do usuário autenticado)
-- A política de segurança do banco exige que `workspace_id` esteja em um workspace onde `workspace_members.user_id = auth.uid()`.
-- Como `workspace_id` está vindo como **user_id**, o banco retorna 403/RLS.
+## Diagnóstico
 
-Evidência concreta (request body capturado):
+O erro ocorre porque o vendedor está ativado para o modelo **User Products** (tag `user_product_seller`). Neste modelo:
+
+| Campo | Modelo Antigo | Modelo User Products |
+|-------|---------------|---------------------|
+| `title` | Obrigatório | **Proibido** |
+| `family_name` | Opcional | **Obrigatório** (define o título) |
+
+O Mercado Livre está migrando progressivamente todos os vendedores para este modelo (2024-2025).
+
+### Evidência no erro:
 ```json
 {
-  "workspace_id": "433a4292-...",   // errado (é user_id)
-  "ml_account_id": "997e5eb2-...",  // ok (uuid)
-  "created_by": "433a4292-..."      // ok
+  "error": "The fields [title] are invalid for requested call.",
+  "message": "body.invalid_fields",
+  "retry_info": {
+    "family_name_used": "Etiqueta Selo Frágil Fragile 108x150"
+  },
+  "payload_sent": {
+    "title": "Etiqueta Selo Frágil Fragile 108x150 - 500 Etiquetas Cor Vermelho",
+    "family_name": "Etiqueta Selo Frágil Fragile 108x150"
+  }
 }
 ```
 
-## 2) Correção principal (robustez): resolver workspace dentro da mutation
-Mesmo que a UI passe um `workspaceId` errado por qualquer motivo, o lugar mais seguro para corrigir é na própria mutation que faz o INSERT.
+O sistema está enviando **ambos** `title` e `family_name`, mas para vendedores User Products, apenas `family_name` deve ser enviado.
 
-### 2.1) Ajustar `useCreateAction` (src/hooks/useAdTimeline.ts)
-Implementar uma resolução interna de workspace “ativo” para o usuário:
-1) `user_preferences.active_workspace_id` (prioridade)
-2) fallback: primeiro `workspace_members.workspace_id`
+---
 
-Depois, usar **sempre** esse `workspace_id` resolvido no INSERT, em vez de confiar cegamente no `workspaceId` recebido via parâmetro.
+## Solução
 
-Comportamento esperado:
-- Se a tela mandar `workspaceId` errado (user_id), a mutation ignora/substitui e usa o workspace correto.
-- Se não existir workspace ativo/membership, a mutation falha com erro claro (“Workspace não encontrado/sem acesso”).
+Adicionar detecção da tag `user_product_seller` e ajustar o payload conforme o modelo do vendedor.
 
-## 3) Correção na UI do módulo Linha do Tempo (consistência)
-Hoje o módulo está usando `useWorkspace()` para obter `currentWorkspace?.id`, mas os logs indicam que ainda existem fluxos onde o valor usado acaba sendo o `user.id`. Para padronizar e evitar divergência entre telas/estados:
+### Fluxo Corrigido
 
-### 3.1) Trocar a origem do workspaceId nas páginas do Timeline
-Arquivos:
-- `src/pages/AdTimelineRadar.tsx`
-- `src/pages/AdTimelineDetail.tsx`
+```text
+executeCloneAction()
+    ↓
+[1] Buscar tags do vendedor via GET /users/me
+    ↓
+[2] isUserProductSeller = tags.includes("user_product_seller")
+    ↓
+[3] Se isUserProductSeller:
+    - REMOVER campo "title" do payload
+    - GARANTIR campo "family_name" presente
+    Senão:
+    - Manter fluxo atual (title obrigatório)
+    ↓
+[4] POST /items → Sucesso
+```
 
-Trocar para o hook já existente e padronizado no projeto:
-- `useCurrentWorkspaceId()` (que consulta `user_preferences.active_workspace_id` e faz fallback para `workspace_members`)
+---
 
-Assim, o Timeline passa a depender do mesmo “resolvedor” de workspace que já é o padrão de multi-tenant/RLS do app.
+## Alterações
 
-## 4) Corrigir outros pontos do app que ainda inserem `workspace_id = user.id`
-Na busca do repositório, existem componentes de clonagem/concorrência criando ações com `workspace_id: user.id`, o que também dispara o mesmo erro de RLS quando usados.
+### Arquivo: `supabase/functions/ad-action-execute/index.ts`
 
-Arquivos identificados como problemáticos:
-- `src/components/competitor/CloneListingDialog.tsx` (usa `workspace_id: user.id`)
-- `src/components/competitor/CloneCompetitorDialog.tsx` (usa `workspace_id: userId` e ainda usa `ml_account_id: sellerId` errado como tipo)
+**1. Adicionar função para detectar vendedor User Products:**
+```typescript
+async function isUserProductSeller(accessToken: string): Promise<{
+  isUserProduct: boolean;
+  tags: string[];
+  sellerId: string | null;
+}> {
+  try {
+    const response = await fetch("https://api.mercadolibre.com/users/me", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    
+    if (!response.ok) {
+      console.warn("[ad-action-execute] Failed to fetch user info for UP detection");
+      return { isUserProduct: false, tags: [], sellerId: null };
+    }
+    
+    const userData = await response.json();
+    const tags = userData.tags || [];
+    const isUP = tags.includes("user_product_seller");
+    
+    console.log(`[ad-action-execute] User ${userData.id} tags: [${tags.join(", ")}]`);
+    console.log(`[ad-action-execute] is_user_product_seller: ${isUP}`);
+    
+    return { 
+      isUserProduct: isUP, 
+      tags, 
+      sellerId: userData.id?.toString() 
+    };
+  } catch (err) {
+    console.error("[ad-action-execute] Error detecting UP seller:", err);
+    return { isUserProduct: false, tags: [], sellerId: null };
+  }
+}
+```
 
-Plano para esses componentes:
-- Reutilizar a mesma lógica de resolução de workspace (active_workspace_id → workspace_members fallback)
-- Garantir `ml_account_id` como UUID (buscar `ml_accounts.id` pelo seller/ml_user_id e user_id)
+**2. Chamar detecção antes de montar payload (linha ~1465):**
+```typescript
+// Detectar se vendedor usa modelo User Products
+const upDetection = await isUserProductSeller(currentAccessToken);
+const isUserProductModel = upDetection.isUserProduct;
 
-Isso evita que o erro reapareça em outras áreas (“Concorrência”, “Clonar concorrente”, etc).
+console.log(`[ad-action-execute] === USER PRODUCT MODEL DETECTION ===`);
+console.log(`[ad-action-execute] is_user_product_seller: ${isUserProductModel}`);
+```
 
-## 5) Validação (passo-a-passo)
-Após implementar:
-1) Abrir `/anuncios/linha-do-tempo/:itemId`
-2) Tentar **Clonar** e **Republicar** → deve criar rascunho sem 403
-3) Verificar na Central de Ações (`/anuncios/acoes`) se o rascunho aparece com `action_status = DRAFT`
-4) Confirmar em Network que o POST usa `workspace_id = 1a86ab83-...` (workspace real) e não o `user_id`
-5) Testar também a criação de rascunho a partir do Radar (tabela) e dos dialogs de Concorrência (se aplicável)
+**3. Ajustar construção do payload (linha ~1650-1660):**
+```typescript
+let newItem: any = {
+  // title: SÓ enviar se NÃO for vendedor User Products
+  ...(isUserProductModel ? {} : { title: checklist?.final_title || checklist?.override_title || itemData.title }),
+  category_id: categoryId,
+  currency_id: itemData.currency_id || "BRL",
+  listing_type_id: listingTypeToUse,
+  // ... resto dos campos
+};
 
-## 6) Escopo de mudanças (arquivos)
-- Editar: `src/hooks/useAdTimeline.ts` (harden do `useCreateAction`)
-- Editar: `src/pages/AdTimelineRadar.tsx` (workspaceId via `useCurrentWorkspaceId`)
-- Editar: `src/pages/AdTimelineDetail.tsx` (workspaceId via `useCurrentWorkspaceId`)
-- Editar: `src/components/competitor/CloneListingDialog.tsx` (workspaceId correto)
-- Editar: `src/components/competitor/CloneCompetitorDialog.tsx` (workspaceId + ml_account_id corretos)
+// Para vendedor User Products, family_name é OBRIGATÓRIO
+if (isUserProductModel) {
+  newItem.family_name = checklist?.final_title || itemData.title;
+  console.log(`[ad-action-execute] USER PRODUCTS MODE: Using family_name instead of title`);
+}
+```
 
-## 7) Por que isso resolve definitivamente
-- A causa do erro é sempre a mesma: `workspace_id` inválido para RLS.
-- Resolver dentro da mutation impede regressão mesmo que outra tela passe o ID errado.
-- Padronizar o Timeline com `useCurrentWorkspaceId()` elimina inconsistência de origem do workspace no frontend.
+**4. Atualizar ALLOWED_BODY_FIELDS para incluir family_name dinamicamente:**
+```typescript
+// No sanitizePayload, permitir family_name se for vendedor UP
+function sanitizePayload(payload: any, allowFamilyName: boolean, isUserProductSeller: boolean = false): any {
+  // Se for UP seller, garantir que title seja removido
+  if (isUserProductSeller && payload.title) {
+    console.log(`[ad-action-execute] SANITIZE: Removing title for UP seller`);
+    delete payload.title;
+  }
+  // ... resto da lógica
+}
+```
+
+**5. Atualizar diagnóstico anti-catálogo:**
+```typescript
+const antiCatalogDiagnostic = {
+  // ... campos existentes
+  is_user_product_seller: isUserProductModel,
+  title_sent: !isUserProductModel,
+  family_name_used_as_title: isUserProductModel,
+};
+```
+
+---
+
+## Impacto
+
+| Aspecto | Avaliação |
+|---------|-----------|
+| Risco | Baixo - apenas adiciona lógica condicional |
+| Performance | Mínimo - uma chamada extra a /users/me (já validamos token com ela) |
+| Compatibilidade | Total - vendedores antigos continuam funcionando |
+| Cache | Opcional - pode cachear resultado por ml_account_id |
+
+---
+
+## Otimização Futura
+
+Salvar a flag `is_user_product_seller` na tabela `ml_accounts` para evitar chamada extra:
+
+```sql
+ALTER TABLE ml_accounts ADD COLUMN is_user_product_seller boolean DEFAULT false;
+```
+
+Isso pode ser feito em uma iteração futura após validar que a correção funciona.
+
+---
+
+## Resultado Esperado
+
+Após a correção:
+- Vendedores **User Products**: POST com `family_name`, sem `title` → Sucesso
+- Vendedores **modelo antigo**: POST com `title`, `family_name` opcional → Sucesso
+- O erro `body.invalid_fields [title]` será eliminado
