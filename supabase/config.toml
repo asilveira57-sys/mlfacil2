@@ -170,3 +170,6 @@ verify_jwt = false
 
 [functions.ml-sync-questions]
 verify_jwt = false
+
+[functions.costs-nightly-sync]
+verify_jwt = false
