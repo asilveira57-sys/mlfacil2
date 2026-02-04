@@ -25,15 +25,15 @@ import {
   useCreateAction,
 } from "@/hooks/useAdTimeline";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
-import { useCurrentUserId } from "@/hooks/useCurrentUserId";
+import { useWorkspace } from "@/hooks/useWorkspace";
 import type { StatusBucket, ActionType, CloneChecklist } from "@/types/ad-timeline";
 
 export default function AdTimelineDetail() {
   const { itemId } = useParams<{ itemId: string }>();
   const navigate = useNavigate();
   const { sellerId } = useActiveAccount();
-  // Use centralized hook instead of direct Supabase call
-  const workspaceId = useCurrentUserId();
+  const { currentWorkspace } = useWorkspace();
+  const workspaceId = currentWorkspace?.id || null;
   const mlAccountId = sellerId || undefined;
 
   const [actionDrawerOpen, setActionDrawerOpen] = useState(false);
