@@ -306,11 +306,17 @@ export function useCreateAction() {
     }) => {
       const { data: { user } } = await supabase.auth.getUser();
 
+      // Resolver seller_id numérico para UUID
+      const mlAccountUuid = await resolveMlAccountUuid(mlAccountId);
+      if (!mlAccountUuid) {
+        throw new Error('Conta do Mercado Livre não encontrada');
+      }
+
       const { data, error } = await supabase
         .from('ad_lifecycle_actions')
         .insert([{
           workspace_id: workspaceId,
-          ml_account_id: mlAccountId,
+          ml_account_id: mlAccountUuid,
           item_id: itemId,
           action_type: actionType,
           action_status: 'DRAFT',
