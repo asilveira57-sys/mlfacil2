@@ -1,106 +1,155 @@
 
-# Plano: Corrigir Carregamento de Dados de Vendas na Linha do Tempo
+# Plano: Tornar o Módulo Linha do Tempo Funcional
 
 ## Diagnóstico
 
-O problema **não é erro ou limite de API do Mercado Livre**. A causa raiz foi identificada como um **limite de paginação do banco de dados**.
+Após análise do código, identifiquei as seguintes correções necessárias:
 
-### Dados Identificados:
-- **6.694 vendas** existem no cache (`meli_order_items_cache`)
-- **442 itens únicos** têm vendas registradas
-- **Limite padrão do Supabase**: 1.000 linhas por query
+| Problema | Causa | Solução |
+|----------|-------|---------|
+| Média Gap em horas | Função `formatGap()` exibe em horas | Converter para dias (ex: "5.6d") |
+| Sem paginação | Tabela mostra todos os registros | Implementar paginação com 30 itens por página |
+| Sem filtros de ordenação | Cabeçalhos da tabela são estáticos | Adicionar ordenação clicável em cada coluna |
+| Limite de 1000 registros | `useAdTimelineStats` usa `.limit(500)` | Usar função `fetchAllRows` com paginação |
+| Status do anúncio | Campo `status` buscado mas não exibido | Adicionar coluna com badge de status (ativo/pausado/inativo) |
 
-### Problema:
-A Edge Function `ad-timeline-recalculate` executa uma query sem especificar limite:
-```javascript
-let salesQuery = supabase
-  .from("meli_order_items_cache")
-  .select("item_id, created_at_meli, seller_id")
-  .eq("user_id", userId)
-  // ... SEM LIMITE EXPLÍCITO
-```
-
-O Supabase aplica automaticamente o limite de 1.000 linhas. Como a query ordena por `created_at_meli ASC` (vendas mais antigas primeiro), apenas as primeiras 1.000 vendas são processadas, cobrindo apenas **198 itens**.
-
-**Resultado**: 
-- 198 itens → `120D` (vendas antigas processadas)
-- 576 itens → `NO_SALES` (incluindo 244 itens que têm vendas, mas não foram processadas)
-
-## Solução
-
-Implementar **paginação** para buscar todas as 6.694+ vendas do cache antes de processá-las.
+---
 
 ## Alterações Necessárias
 
-### 1. Edge Function `ad-timeline-recalculate`
-
-Adicionar lógica de paginação para buscar todos os registros:
-
-```text
-Arquivo: supabase/functions/ad-timeline-recalculate/index.ts
+### 1. Hook `useAdTimeline.ts`
+**Arquivo:** `src/hooks/useAdTimeline.ts`
 
 Modificações:
-1. Criar função helper de paginação que busca em lotes de 1000
-2. Substituir a query única por loop de paginação
-3. Agregar todos os resultados antes de processar
-```
+- Remover `.limit(500)` de `useAdTimelineStats`
+- Usar função `fetchAllRows` para buscar todos os registros
+- Remover `.limit(200)` de `useAdLifecycleActions`
+- Adicionar campo `available_quantity` na busca de listings
+
+### 2. Página `AdTimelineRadar.tsx`
+**Arquivo:** `src/pages/AdTimelineRadar.tsx`
+
+Modificações:
+- Adicionar estado de paginação (página atual, itens por página = 30)
+- Adicionar controles de paginação (anterior/próximo, seletor de página)
+- Modificar função `formatGap()` para converter horas em dias
+- Adicionar estado de ordenação (coluna, direção)
+- Tornar cabeçalhos da tabela clicáveis para ordenação
+- Adicionar coluna "Status ML" com badge colorido
+- Adicionar coluna "Estoque"
+
+### 3. Tipos
+**Arquivo:** `src/types/ad-timeline.ts`
+
+Modificações:
+- Adicionar campo `available_quantity?: number` ao tipo `AdTimelineStats`
 
 ---
 
 ## Detalhes Técnicos
 
-### Lógica de Paginação
+### Paginação (30 itens por página)
 
 ```text
-Pseudo-código:
+Estado:
+- currentPage: number (default: 1)
+- itemsPerPage: number (default: 30)
 
-const PAGE_SIZE = 1000;
-let allSalesData = [];
-let offset = 0;
-let hasMore = true;
+Lógica:
+- startIndex = (currentPage - 1) * itemsPerPage
+- endIndex = startIndex + itemsPerPage
+- paginatedItems = filteredStats.slice(startIndex, endIndex)
+- totalPages = Math.ceil(filteredStats.length / itemsPerPage)
 
-while (hasMore) {
-  const { data, error } = await supabase
-    .from("meli_order_items_cache")
-    .select("item_id, created_at_meli, seller_id")
-    .eq("user_id", userId)
-    .eq("seller_id", sellerIdFilter)
-    .not("created_at_meli", "is", null)
-    .order("created_at_meli", { ascending: true })
-    .range(offset, offset + PAGE_SIZE - 1);
-  
-  if (error) throw error;
-  
-  allSalesData = allSalesData.concat(data || []);
-  hasMore = (data?.length || 0) === PAGE_SIZE;
-  offset += PAGE_SIZE;
-}
-
-// Processar allSalesData com todos os registros
+UI:
+- Botões "Anterior" / "Próximo"
+- Indicador "Página X de Y"
+- Contador "Mostrando X-Y de Z anúncios"
 ```
 
-### Pontos de Atenção
-- **Limite de memória**: Com 7.000+ registros, manter arrays em memória é seguro (< 1MB)
-- **Timeout**: Cada página adiciona ~100-200ms, mas ainda dentro do limite de 30s
-- **Retro-compatibilidade**: Sem alteração na interface da função
+### Formatação da Média Gap (Horas → Dias)
 
-## Resultado Esperado
+```text
+Antes: formatGap(1139.5) → "1140h"
+Depois: formatGap(1139.5) → "47.5d"
 
-Após a correção:
-- **442 itens** com vendas serão corretamente processados
-- Buckets serão recalculados com dados precisos:
-  - `OK`: Itens vendendo normalmente
-  - `30D/60D/90D/120D`: Itens sem venda nos respectivos períodos
-  - `NO_SALES`: Apenas os ~325 itens que realmente nunca venderam
+Função:
+- Se hours < 24: exibir em horas ("12h")
+- Se hours >= 24: exibir em dias ("X.Xd")
+```
+
+### Ordenação da Tabela
+
+```text
+Estado:
+- sortColumn: string | null
+- sortDirection: 'asc' | 'desc'
+
+Colunas ordenáveis:
+- Última Venda (last_sale_at)
+- Dias s/ Venda (days_since_last_sale)
+- Média Gap (avg_gap_hours)
+- 30d, 60d, 90d (sales_count_*)
+- Status ML (status)
+- Estoque (available_quantity)
+
+UI:
+- Ícone de seta no cabeçalho clicável
+- Destaque visual na coluna ativa
+```
+
+### Coluna de Status ML
+
+```text
+Mapeamento:
+- "active" → Badge verde "Ativo"
+- "paused" → Badge amarelo "Pausado"
+- "under_review" → Badge azul "Em análise"
+- "closed" → Badge vermelho "Fechado"
+- null/undefined → Badge cinza "—"
+
+Campo estoque:
+- available_quantity → exibir número
+- Se 0 → Badge vermelho "Sem estoque"
+```
+
+### Remoção de Limites
+
+```text
+Antes:
+  query.limit(500) // useAdTimelineStats
+  query.limit(200) // useAdLifecycleActions
+
+Depois:
+  Usar fetchAllRows() com paginação automática
+  Processar todos os registros no cliente
+  Paginar apenas na UI
+```
+
+---
 
 ## Arquivos a Modificar
 
-| Arquivo | Tipo de Alteração |
-|---------|-------------------|
-| `supabase/functions/ad-timeline-recalculate/index.ts` | Adicionar paginação na busca de vendas |
+| Arquivo | Tipo |
+|---------|------|
+| `src/types/ad-timeline.ts` | Adicionar campos |
+| `src/hooks/useAdTimeline.ts` | Remover limites, buscar mais campos |
+| `src/pages/AdTimelineRadar.tsx` | Paginação, ordenação, status |
+
+---
+
+## Resultado Esperado
+
+Após as alterações:
+1. **780 anúncios** disponíveis na tabela (sem limite de 500)
+2. Média Gap exibida em **dias** (ex: "47.5d" ao invés de "1140h")
+3. **30 anúncios por página** com navegação clara
+4. **Ordenação** em qualquer coluna clicando no cabeçalho
+5. **Status do ML** visível (Ativo/Pausado/Em análise)
+6. **Estoque** disponível como coluna adicional
 
 ## Impacto
 
-- **Baixo risco**: Apenas melhoria na consulta, sem alteração de schema
-- **Performance**: Adiciona ~1-2 segundos ao recálculo total (aceitável)
-- **Sem downtime**: Alteração transparente para usuários
+- **Baixo risco**: Alterações apenas no frontend
+- **Sem alteração de schema**: Dados já existem no cache
+- **Performance**: Paginação no cliente é eficiente até ~10.000 registros
