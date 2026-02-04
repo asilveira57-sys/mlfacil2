@@ -1495,10 +1495,20 @@ async function executeCloneAction(
   let itemData = snapshot;
   let resolvedItemId = itemId;
   let catalogInfo: any = null;
+  
+  // Variáveis de diagnóstico de fetch (escopo global da função)
+  let fetchAttempts: Array<{
+    method: "public" | "authenticated";
+    status: number;
+    endpoint: string;
+    body_excerpt: string;
+    timestamp: string;
+  }> = [];
+  let fetchMethodFinal: "public" | "authenticated" | "snapshot" = "snapshot";
 
   console.log(`[ad-action-execute] Clone requested for ID: ${itemId}`);
   console.log(`[ad-action-execute] ID type analysis: isRegularItemId=${isRegularItemId(itemId)}, isCatalogId=${isCatalogId(itemId)}`);
-
+  console.log(`[ad-action-execute] Using snapshot: ${!!snapshot && Object.keys(snapshot || {}).length > 0}`);
   // =========================================================================
   // GUARD DE AUTENTICAÇÃO
   // =========================================================================
@@ -1552,64 +1562,141 @@ async function executeCloneAction(
     }
 
     // =========================================================================
-    // FETCH REAL ITEM - PUBLIC FIRST, AUTH FALLBACK
-    // REGRA: Tentar SEM token primeiro (concorrentes), depois COM token (próprios)
+    // FETCH REAL ITEM - PUBLIC FIRST, AUTH FALLBACK (estratégia obrigatória)
+    // REGRA FIXA: 
+    //   1. Tentar SEM token primeiro (público)
+    //   2. Se 403, tentar COM token (autenticado)
+    //   3. Registrar TODAS as tentativas no fetch_attempts[]
     // =========================================================================
-    console.log(`[ad-action-execute] === ITEM FETCH (PUBLIC FIRST) ===`);
+    console.log(`[ad-action-execute] === ITEM FETCH (PUBLIC FIRST STRATEGY) ===`);
     console.log(`[ad-action-execute] item_id: ${resolvedItemId}`);
     
-    let getResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}`, {
+    // Usar as variáveis do escopo externo (fetchAttempts, fetchMethodFinal)
+    const fetchEndpoint = `/items/${resolvedItemId}`;
+    let publicResponse: Response | null = null;
+    let authenticatedResponse: Response | null = null;
+    let publicBody: string = "";
+    let authenticatedBody: string = "";
+    
+    // =========================================================================
+    // ETAPA 1: Fetch PÚBLICO (sem Authorization)
+    // =========================================================================
+    console.log(`[ad-action-execute] [STEP 1] Public fetch (no auth)...`);
+    publicResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}`, {
       headers: { Accept: "application/json" },
     });
-    let fetchMethod = "public";
-
-    console.log(`[ad-action-execute] Public fetch status: ${getResponse.status}`);
-
-    // Se público retornou 403, tentar com auth (item próprio com restrição)
-    if (!getResponse.ok && getResponse.status === 403) {
-      console.log(`[ad-action-execute] Public fetch returned 403, retrying WITH auth token...`);
-      getResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}`, {
+    
+    // Ler body como texto para registro
+    publicBody = await publicResponse.text().catch(() => "");
+    
+    fetchAttempts.push({
+      method: "public",
+      status: publicResponse.status,
+      endpoint: fetchEndpoint,
+      body_excerpt: publicBody.substring(0, 300),
+      timestamp: new Date().toISOString(),
+    });
+    
+    console.log(`[ad-action-execute] [STEP 1] Public fetch status: ${publicResponse.status}`);
+    
+    // =========================================================================
+    // DECISÃO: Se público = 200, usar e NÃO tentar autenticado
+    // =========================================================================
+    if (publicResponse.ok) {
+      console.log(`[ad-action-execute] [STEP 1] Public fetch SUCCESS - using public data`);
+      fetchMethodFinal = "public";
+      itemData = JSON.parse(publicBody);
+    }
+    // =========================================================================
+    // ETAPA 2: Se público = 403, tentar AUTENTICADO
+    // =========================================================================
+    else if (publicResponse.status === 403) {
+      console.log(`[ad-action-execute] [STEP 2] Public returned 403 - trying authenticated...`);
+      
+      authenticatedResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}`, {
         headers: { 
           Authorization: `Bearer ${currentAccessToken}`,
           Accept: "application/json",
         },
       });
-      fetchMethod = "authenticated";
-      console.log(`[ad-action-execute] Authenticated fetch status: ${getResponse.status}`);
-    }
-
-    // ERRO FINAL: Nem público nem autenticado funcionou
-    if (!getResponse.ok) {
-      const errBody = await getResponse.text().catch(() => "");
-      let errorCode = "FETCH_FAILED";
-      let userMessage = `Falha ao buscar item ${resolvedItemId}`;
       
-      if (getResponse.status === 404) {
-        errorCode = "ITEM_NOT_FOUND";
-        userMessage = `Item ${resolvedItemId} não encontrado no Mercado Livre`;
-      } else if (getResponse.status === 403) {
-        errorCode = fetchMethod === "authenticated" 
-          ? "FETCH_FAILED_ACCESS_DENIED_AUTHENTICATED"
-          : "FETCH_FAILED_ACCESS_DENIED_PUBLIC";
-        userMessage = `Acesso negado ao item ${resolvedItemId}. O vendedor pode ter restringido acesso ou o item foi removido.`;
+      authenticatedBody = await authenticatedResponse.text().catch(() => "");
+      
+      fetchAttempts.push({
+        method: "authenticated",
+        status: authenticatedResponse.status,
+        endpoint: fetchEndpoint,
+        body_excerpt: authenticatedBody.substring(0, 300),
+        timestamp: new Date().toISOString(),
+      });
+      
+      console.log(`[ad-action-execute] [STEP 2] Authenticated fetch status: ${authenticatedResponse.status}`);
+      
+      if (authenticatedResponse.ok) {
+        console.log(`[ad-action-execute] [STEP 2] Authenticated fetch SUCCESS`);
+        fetchMethodFinal = "authenticated";
+        itemData = JSON.parse(authenticatedBody);
+      } else {
+        // AMBAS FALHARAM - erro real de acesso
+        console.error(`[ad-action-execute] FETCH FAILED: Both public and authenticated failed`);
+        
+        return {
+          success: false,
+          error: "FETCH_FAILED_BOTH",
+          message: `Acesso negado ao item ${resolvedItemId}. O item pode estar restrito pelo vendedor ou ter sido removido.`,
+          api_status: authenticatedResponse.status,
+          api_error: authenticatedBody,
+          fetch_method: fetchMethodFinal,
+          fetch_attempts: fetchAttempts,
+          diagnostic: {
+            public_status: publicResponse.status,
+            authenticated_status: authenticatedResponse.status,
+            conclusion: "Ambas tentativas (pública e autenticada) falharam com erro de acesso",
+          },
+        };
       }
-      
-      console.error(`[ad-action-execute] FETCH FAILED: ${errorCode} (status=${getResponse.status}, method=${fetchMethod})`);
+    }
+    // =========================================================================
+    // ETAPA 3: Se público = 404, item não existe
+    // =========================================================================
+    else if (publicResponse.status === 404) {
+      console.error(`[ad-action-execute] FETCH FAILED: Item not found (404)`);
       
       return {
         success: false,
-        error: errorCode,
-        message: userMessage,
-        api_status: getResponse.status,
-        api_error: errBody,
-        fetch_method: fetchMethod,
+        error: "ITEM_NOT_FOUND",
+        message: `Item ${resolvedItemId} não encontrado no Mercado Livre`,
+        api_status: 404,
+        api_error: publicBody,
+        fetch_method: "public",
+        fetch_attempts: fetchAttempts,
       };
     }
-
-    itemData = await getResponse.json();
-    console.log(`[ad-action-execute] Item fetched successfully via ${fetchMethod}`);
-    console.log(`[ad-action-execute] Item title: "${itemData.title?.substring(0, 50)}..."`);
-    console.log(`[ad-action-execute] Item category: ${itemData.category_id}`);
+    // =========================================================================
+    // ETAPA 4: Outro erro no público (não 403, não 404)
+    // =========================================================================
+    else {
+      console.error(`[ad-action-execute] FETCH FAILED: Public fetch error (status=${publicResponse.status})`);
+      
+      return {
+        success: false,
+        error: "FETCH_FAILED_PUBLIC",
+        message: `Falha ao buscar item ${resolvedItemId} (status ${publicResponse.status})`,
+        api_status: publicResponse.status,
+        api_error: publicBody,
+        fetch_method: "public",
+        fetch_attempts: fetchAttempts,
+      };
+    }
+    
+    // =========================================================================
+    // SUCESSO: Registrar fetch bem-sucedido
+    // =========================================================================
+    console.log(`[ad-action-execute] === FETCH SUCCESS ===`);
+    console.log(`[ad-action-execute] fetch_method: ${fetchMethodFinal}`);
+    console.log(`[ad-action-execute] fetch_attempts: ${fetchAttempts.length}`);
+    console.log(`[ad-action-execute] item_title: "${itemData.title?.substring(0, 50)}..."`);
+    console.log(`[ad-action-execute] item_category: ${itemData.category_id}`);
   }
 
   // =========================================================================
@@ -1746,6 +1833,8 @@ async function executeCloneAction(
       missing_attributes_details: missingAttributesDetails,
       category_id: categoryId,
       source_item_id: resolvedItemId,
+      fetch_method: fetchMethodFinal,
+      fetch_attempts: fetchAttempts,
       source_snapshot: {
         item_id: resolvedItemId,
         category_id: categoryId,
@@ -2147,6 +2236,8 @@ async function executeCloneAction(
         ? "O Mercado Livre bloqueou o campo 'título'. Isso indica que a categoria ou produto está forçando catálogo automaticamente. Tente criar diretamente no painel do ML ou use outra categoria."
         : (createData.message || "Erro ao criar anúncio"),
       ...errorDetails,
+      fetch_method: fetchMethodFinal,
+      fetch_attempts: fetchAttempts,
       payload_sent: newItem,
       anti_catalog_diagnostic: {
         ...antiCatalogDiagnostic,
@@ -2168,6 +2259,8 @@ async function executeCloneAction(
     message: "Anúncio criado com sucesso",
     new_item_id: createData.id,
     permalink: createData.permalink,
+    fetch_method: fetchMethodFinal,
+    fetch_attempts: fetchAttempts,
     anti_catalog_diagnostic: {
       ...antiCatalogDiagnostic,
       family_name_included: !!newItem.family_name,
