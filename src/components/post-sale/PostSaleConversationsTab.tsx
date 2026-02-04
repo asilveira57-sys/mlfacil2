@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { MessageSquare, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PostSaleInbox } from "./PostSaleInbox";
 import { PostSaleConversation } from "./PostSaleConversation";
 import { PostSaleReplyEditor } from "./PostSaleReplyEditor";
@@ -12,13 +13,39 @@ import {
   useSendPostSaleMessage,
   useMarkConversationRead,
 } from "@/hooks/usePostSaleConversations";
-import { useMlAccounts } from "@/hooks/useMlAccounts";
+import { useMlAccounts, type MlAccount } from "@/hooks/useMlAccounts";
 import type { ConversationFilters } from "@/types/post-sale-conversation";
+
+const STORAGE_KEY = "post-sale-selected-account";
 
 export function PostSaleConversationsTab() {
   const { data: mlAccounts = [], isLoading: isLoadingAccount } = useMlAccounts();
-  const mlAccount = mlAccounts[0] || null;
-  const sellerId = mlAccount?.ml_user_id || null;
+  
+  // Persist selected account in localStorage
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem(STORAGE_KEY);
+    }
+    return null;
+  });
+
+  // Get the selected account or fallback to first
+  const selectedAccount = mlAccounts.find((a) => a.ml_user_id === selectedAccountId) || mlAccounts[0] || null;
+  const sellerId = selectedAccount?.ml_user_id || null;
+
+  // Update localStorage when selection changes
+  useEffect(() => {
+    if (selectedAccountId) {
+      localStorage.setItem(STORAGE_KEY, selectedAccountId);
+    }
+  }, [selectedAccountId]);
+
+  // Auto-select first account if none selected
+  useEffect(() => {
+    if (!selectedAccountId && mlAccounts.length > 0) {
+      setSelectedAccountId(mlAccounts[0].ml_user_id);
+    }
+  }, [mlAccounts, selectedAccountId]);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filters, setFilters] = useState<ConversationFilters>({});
@@ -73,6 +100,11 @@ export function PostSaleConversationsTab() {
     }
   };
 
+  const handleAccountChange = (value: string) => {
+    setSelectedAccountId(value);
+    setSelectedId(null); // Reset selected conversation
+  };
+
   // Loading state
   if (isLoadingAccount) {
     return (
@@ -83,7 +115,7 @@ export function PostSaleConversationsTab() {
   }
 
   // No account connected
-  if (!sellerId) {
+  if (mlAccounts.length === 0) {
     return (
       <Card className="h-[600px] flex flex-col items-center justify-center p-8 text-center">
         <MessageSquare className="h-12 w-12 text-muted-foreground mb-4" />
@@ -111,20 +143,45 @@ export function PostSaleConversationsTab() {
     );
   }
 
+  // Account selector for multiple accounts
+  const AccountSelector = () => {
+    if (mlAccounts.length <= 1) return null;
+    
+    return (
+      <div className="px-4 py-2 border-b bg-muted/30">
+        <Select value={selectedAccountId || ""} onValueChange={handleAccountChange}>
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder="Selecione uma conta" />
+          </SelectTrigger>
+          <SelectContent>
+            {mlAccounts.map((account) => (
+              <SelectItem key={account.ml_user_id} value={account.ml_user_id}>
+                {account.nickname || account.email || account.ml_user_id}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    );
+  };
+
   return (
     <Card className="h-[600px] overflow-hidden">
       <div className="flex h-full">
         {/* Inbox - Left Panel */}
-        <div className="w-[320px] shrink-0">
-          <PostSaleInbox
-            conversations={conversations}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            onRefresh={handleRefresh}
-            isRefreshing={syncMutation.isPending}
-            filters={filters}
-            onFiltersChange={setFilters}
-          />
+        <div className="w-[320px] shrink-0 flex flex-col">
+          <AccountSelector />
+          <div className="flex-1 overflow-hidden">
+            <PostSaleInbox
+              conversations={conversations}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onRefresh={handleRefresh}
+              isRefreshing={syncMutation.isPending}
+              filters={filters}
+              onFiltersChange={setFilters}
+            />
+          </div>
         </div>
 
         {/* Conversation - Right Panel */}
