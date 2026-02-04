@@ -25,15 +25,14 @@ import {
   useCreateAction,
 } from "@/hooks/useAdTimeline";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
-import { useWorkspace } from "@/hooks/useWorkspace";
+import { useCurrentWorkspaceId } from "@/hooks/useCurrentWorkspaceId";
 import type { StatusBucket, ActionType, CloneChecklist } from "@/types/ad-timeline";
 
 export default function AdTimelineDetail() {
   const { itemId } = useParams<{ itemId: string }>();
   const navigate = useNavigate();
   const { sellerId } = useActiveAccount();
-  const { currentWorkspace } = useWorkspace();
-  const workspaceId = currentWorkspace?.id || null;
+  const { data: workspaceId } = useCurrentWorkspaceId();
   const mlAccountId = sellerId || undefined;
 
   const [actionDrawerOpen, setActionDrawerOpen] = useState(false);

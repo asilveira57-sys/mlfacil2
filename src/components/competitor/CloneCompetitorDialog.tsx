@@ -72,12 +72,51 @@ export function CloneCompetitorDialog({
 
       const userId = session.user.id;
 
+      // Resolve the correct workspace ID (NOT user.id)
+      let resolvedWorkspaceId: string | null = null;
+      
+      // 1) Try user_preferences.active_workspace_id
+      const { data: prefs } = await supabase
+        .from('user_preferences')
+        .select('active_workspace_id')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if ((prefs as any)?.active_workspace_id) {
+        resolvedWorkspaceId = (prefs as any).active_workspace_id;
+      } else {
+        // 2) Fallback: first workspace membership
+        const { data: member } = await supabase
+          .from('workspace_members')
+          .select('workspace_id')
+          .eq('user_id', userId)
+          .limit(1)
+          .maybeSingle();
+        
+        resolvedWorkspaceId = (member as any)?.workspace_id || null;
+      }
+
+      if (!resolvedWorkspaceId) {
+        throw new Error('Workspace não encontrado');
+      }
+
+      // Resolve seller_id (numeric) to ml_accounts.id (UUID)
+      const { data: mlAccount } = await supabase
+        .from('ml_accounts')
+        .select('id')
+        .eq('ml_user_id', sellerId)
+        .maybeSingle();
+
+      if (!mlAccount?.id) {
+        throw new Error('Conta do Mercado Livre não encontrada');
+      }
+
       // Create clone action in ad_lifecycle_actions
       const { error } = await supabase
         .from('ad_lifecycle_actions')
         .insert({
-          workspace_id: userId,
-          ml_account_id: sellerId,
+          workspace_id: resolvedWorkspaceId,
+          ml_account_id: mlAccount.id,
           item_id: competitorItemId,
           action_type: 'CLONE',
           action_status: 'DRAFT',
