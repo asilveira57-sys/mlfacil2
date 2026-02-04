@@ -16,11 +16,27 @@ import type {
 
 const BUCKET_ORDER: StatusBucket[] = ['120D', '90D', '60D', '30D', 'NO_SALES', 'OK'];
 
+// Helper to resolve ml_user_id (numeric seller ID) to ml_accounts.id (UUID)
+async function resolveMlAccountUuid(mlUserId: string | undefined): Promise<string | null> {
+  if (!mlUserId) return null;
+  
+  const { data } = await supabase
+    .from('ml_accounts')
+    .select('id')
+    .eq('ml_user_id', mlUserId)
+    .maybeSingle();
+  
+  return data?.id || null;
+}
+
 export function useAdTimelineStats(workspaceId: string | null, filters: TimelineFilters) {
   return useQuery({
     queryKey: ['ad-timeline-stats', workspaceId, filters],
     queryFn: async () => {
       if (!workspaceId) return [];
+
+      // Resolve ml_user_id (e.g. "66043362") to the actual UUID in ml_accounts
+      const mlAccountUuid = await resolveMlAccountUuid(filters.ml_account_id);
 
       let query = supabase
         .from('ad_timeline_stats')
@@ -28,11 +44,8 @@ export function useAdTimelineStats(workspaceId: string | null, filters: Timeline
         .eq('workspace_id', workspaceId)
         .order('days_since_last_sale', { ascending: false, nullsFirst: true });
 
-      if (filters.ml_account_id) {
-        query = query.eq('ml_account_id', filters.ml_account_id);
-      }
-      if (filters.status_bucket && filters.status_bucket !== 'ALL') {
-        query = query.eq('status_bucket', filters.status_bucket);
+      if (mlAccountUuid) {
+        query = query.eq('ml_account_id', mlAccountUuid);
       }
 
       const { data, error } = await query.limit(500);
@@ -72,13 +85,16 @@ export function useAdTimelineBucketCounts(workspaceId: string | null, mlAccountI
         return { OK: 0, '30D': 0, '60D': 0, '90D': 0, '120D': 0, NO_SALES: 0, total: 0 };
       }
 
+      // Resolve ml_user_id to UUID
+      const mlAccountUuid = await resolveMlAccountUuid(mlAccountId);
+
       let query = supabase
         .from('ad_timeline_stats')
         .select('status_bucket')
         .eq('workspace_id', workspaceId);
 
-      if (mlAccountId) {
-        query = query.eq('ml_account_id', mlAccountId);
+      if (mlAccountUuid) {
+        query = query.eq('ml_account_id', mlAccountUuid);
       }
 
       const { data, error } = await query;
