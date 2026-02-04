@@ -243,12 +243,22 @@ Deno.serve(async (req) => {
           .eq('seller_id', sellerId)
           .eq('fee_ml_source', 'pending');
 
-        if (realCostsState?.status === 'paused' || realCostsState?.status === 'error') {
-          console.log(`[costs-nightly] Resuming paused real costs sync for ${sellerId}`);
+        // Check if stuck (running but no heartbeat for > 5 minutes)
+        const isStuck = realCostsState?.status === 'running' && 
+          realCostsState.last_heartbeat_at && 
+          (Date.now() - new Date(realCostsState.last_heartbeat_at).getTime() > 5 * 60 * 1000);
+
+        if (realCostsState?.status === 'paused' || realCostsState?.status === 'error' || isStuck) {
+          console.log(`[costs-nightly] Resuming ${isStuck ? 'stuck' : realCostsState?.status} real costs sync for ${sellerId}`);
           await processRealCosts(supabase, userId, sellerId, accessToken, 'continue');
           stats.costs_processed++;
         } else if ((pendingBilling || 0) > 0 && (!realCostsState || realCostsState.status === 'idle' || realCostsState.status === 'done')) {
           console.log(`[costs-nightly] Found ${pendingBilling} pending billing orders for ${sellerId}`);
+          await processRealCosts(supabase, userId, sellerId, accessToken, 'reprocess');
+          stats.costs_processed++;
+        } else if ((pendingBilling || 0) > 0) {
+          // Even if status is running, still process pending to make progress
+          console.log(`[costs-nightly] Processing ${pendingBilling} pending billing orders for ${sellerId} (status: ${realCostsState?.status})`);
           await processRealCosts(supabase, userId, sellerId, accessToken, 'reprocess');
           stats.costs_processed++;
         }
