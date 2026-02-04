@@ -6559,6 +6559,128 @@ export type Database = {
         }
         Relationships: []
       }
+      post_sale_conversation_messages: {
+        Row: {
+          attachments: Json | null
+          conversation_id: string
+          created_at: string
+          from_type: string
+          from_user_id: string
+          has_attachments: boolean | null
+          id: string
+          message_date: string
+          message_status: string | null
+          message_text: string | null
+          ml_message_id: string | null
+          moderation_reason: string | null
+          moderation_status: string | null
+          read_at: string | null
+        }
+        Insert: {
+          attachments?: Json | null
+          conversation_id: string
+          created_at?: string
+          from_type: string
+          from_user_id: string
+          has_attachments?: boolean | null
+          id?: string
+          message_date: string
+          message_status?: string | null
+          message_text?: string | null
+          ml_message_id?: string | null
+          moderation_reason?: string | null
+          moderation_status?: string | null
+          read_at?: string | null
+        }
+        Update: {
+          attachments?: Json | null
+          conversation_id?: string
+          created_at?: string
+          from_type?: string
+          from_user_id?: string
+          has_attachments?: boolean | null
+          id?: string
+          message_date?: string
+          message_status?: string | null
+          message_text?: string | null
+          ml_message_id?: string | null
+          moderation_reason?: string | null
+          moderation_status?: string | null
+          read_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "post_sale_conversation_messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "post_sale_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      post_sale_conversations: {
+        Row: {
+          buyer_id: string
+          buyer_name: string | null
+          conversation_status: string
+          created_at: string
+          id: string
+          item_thumbnail: string | null
+          item_title: string | null
+          last_message_date: string | null
+          last_message_from: string | null
+          last_message_text: string | null
+          order_id: string
+          pack_id: string | null
+          seller_id: string
+          seller_max_chars: number | null
+          shipment_id: string | null
+          unread_count: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          buyer_id: string
+          buyer_name?: string | null
+          conversation_status?: string
+          created_at?: string
+          id?: string
+          item_thumbnail?: string | null
+          item_title?: string | null
+          last_message_date?: string | null
+          last_message_from?: string | null
+          last_message_text?: string | null
+          order_id: string
+          pack_id?: string | null
+          seller_id: string
+          seller_max_chars?: number | null
+          shipment_id?: string | null
+          unread_count?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          buyer_id?: string
+          buyer_name?: string | null
+          conversation_status?: string
+          created_at?: string
+          id?: string
+          item_thumbnail?: string | null
+          item_title?: string | null
+          last_message_date?: string | null
+          last_message_from?: string | null
+          last_message_text?: string | null
+          order_id?: string
+          pack_id?: string | null
+          seller_id?: string
+          seller_max_chars?: number | null
+          shipment_id?: string | null
+          unread_count?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       post_sale_messages: {
         Row: {
           block_details: Json | null
