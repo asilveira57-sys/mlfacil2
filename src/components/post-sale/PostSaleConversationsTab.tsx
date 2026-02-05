@@ -128,21 +128,6 @@ export function PostSaleConversationsTab() {
   }
 
   // Empty state with sync option
-  if (!isLoadingConversations && conversations.length === 0 && !syncMutation.isPending) {
-    return (
-      <Card className="h-[600px] flex flex-col items-center justify-center p-8 text-center">
-        <MessageSquare className="h-12 w-12 text-muted-foreground mb-4" />
-        <h3 className="text-lg font-semibold mb-2">Nenhuma conversa encontrada</h3>
-        <p className="text-muted-foreground mb-4">
-          Sincronize as mensagens do Mercado Livre para visualizar as conversas
-        </p>
-        <Button onClick={handleRefresh}>
-          Sincronizar Mensagens
-        </Button>
-      </Card>
-    );
-  }
-
   // Account selector for multiple accounts
   const AccountSelector = () => {
     if (mlAccounts.length <= 1) return null;
@@ -164,6 +149,25 @@ export function PostSaleConversationsTab() {
       </div>
     );
   };
+
+  // Empty state with sync option
+  if (!isLoadingConversations && conversations.length === 0 && !syncMutation.isPending) {
+    return (
+      <Card className="h-[600px] overflow-hidden">
+        <div className="flex h-full flex-col">
+          <AccountSelector />
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+            <MessageSquare className="h-12 w-12 text-muted-foreground mb-4" />
+            <h3 className="text-lg font-semibold mb-2">Nenhuma conversa encontrada</h3>
+            <p className="text-muted-foreground mb-4">
+              Sincronize as mensagens do Mercado Livre para visualizar as conversas
+            </p>
+            <Button onClick={handleRefresh}>Sincronizar Mensagens</Button>
+          </div>
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <Card className="h-[600px] overflow-hidden">
