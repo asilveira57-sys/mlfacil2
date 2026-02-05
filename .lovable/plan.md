@@ -1,175 +1,137 @@
 
-# Plano de Correção: Loops Infinitos e Inconsistências de Sincronização
+# Diagnóstico e Correção: Perguntas, Conta Ativa e Ícone de Atenção
 
-## Diagnóstico Confirmado
+## 3 Problemas Identificados com Causa Raiz
 
-### Problema 1: Loop infinito no Dashboard
-A conta `MLFACIL_CONSULTORIA` (sem vendas) está causando loop infinito porque:
-- RPC retorna `cachedOrdersCount: 0`
-- Código interpreta isso como "conta nova que precisa de onboarding"
-- `startProgressiveSync` é chamado repetidamente
-- Ao final de cada sync, `fetchSalesData(true)` re-verifica a condição
-- Como continua 0 (conta sem vendas), o ciclo recomeça
+### Problema 1: Perguntas nao sincronizam (0 perguntas)
+**Causa raiz:** A funcao `ml-token-refresh` NAO ESTA DEPLOYADA (retorna 404). Alem disso, o `ml-sync-questions` chama essa funcao com `{ seller_id }`, mas ela espera `{ accountId }` (UUID). Resultado: o token nunca e renovado, a API do ML retorna 403, zero perguntas sao importadas.
 
-### Problema 2: Estado `isFirstLoad` não reseta ao trocar conta
-Quando troca de conta via seletor global, o estado `isFirstLoad` não é resetado, causando comportamento inconsistente.
+Evidencia dos logs:
+```
+ML API error for unanswered: 403
+Total questions to sync: 0
+```
 
-### Problema 3: "Sincronizando..." eterno em Vendas
-Pedidos mostram status "pendente_sync" quando `shipment_id` existe mas não há registro em `meli_shipments_cache`. Se a sync não completa, fica travado.
+Tambem: `ml-token-refresh` ainda usa `import from "https://esm.sh/..."` que causa timeout no deploy.
 
-### Problema 4: Dia atual incluído nos filtros
-O filtro de 7/30 dias inclui o dia de hoje, mas você solicitou que exclua o dia atual (dados incompletos).
+### Problema 2: Conta ativa nao e salva entre sessoes
+**Causa raiz:** No `ActiveAccountContext.tsx` linha 218:
+```typescript
+let active = loadedAccounts.find(a => a.id === persistedId && a.status === 'connected');
+```
+Como ambas as contas tem tokens expirados, o `mapMlAccountToUnified` muda o status de `connected` para `attention`. Resultado: a busca por `status === 'connected'` falha, o sistema ignora a conta salva e pega a primeira da lista.
+
+### Problema 3: Icone de exclamacao (Atencao)
+**Causa raiz:** Em `accountUnification.ts` linha 315-319, se o token esta expirado (`token_expires_at < now()`), o status e sobrescrito de `connected` para `attention`. Como o `ml-token-refresh` nunca roda com sucesso (404), os tokens ficam permanentemente expirados e o icone de alerta aparece em todas as contas.
+
+Os 3 problemas sao consequencia da MESMA causa raiz: **a funcao de refresh de token nao esta funcionando**.
 
 ---
 
-## Correções Propostas
+## Correcoes
 
-### Correção 1: Eliminar loop infinito para contas sem vendas
+### Correcao 1: Corrigir e deployar `ml-token-refresh`
 
-**Arquivo:** `src/components/SalesDashboard.tsx`
+**Arquivo:** `supabase/functions/ml-token-refresh/index.ts`
 
-1. Adicionar ref para controlar se já tentou sync para a conta atual
-2. Mudar condição de onboarding para verificar se é conta **genuinamente nova** vs **conta sem vendas**
-3. Não re-executar `fetchSalesData()` dentro de `startProgressiveSync` final para evitar re-trigger
+- Trocar `import { createClient } from "https://esm.sh/@supabase/supabase-js@2"` por `import { createClient } from "npm:@supabase/supabase-js@2"` (resolve timeout no deploy)
+- Manter a logica existente que ja funciona corretamente
 
+### Correcao 2: Corrigir chamada do token refresh em `ml-sync-questions`
+
+**Arquivo:** `supabase/functions/ml-sync-questions/index.ts`
+
+O codigo atual (linhas 128-143):
 ```typescript
-// Antes da função fetchSalesData
-const hasSyncedForSellerRef = useRef<string | null>(null);
+const refreshResponse = await fetch(`${supabaseUrl}/functions/v1/ml-token-refresh`, {
+  body: JSON.stringify({ seller_id }),  // ERRADO - funcao espera { accountId }
+});
+if (refreshData.access_token) {  // ERRADO - funcao retorna { accessToken }
+```
 
-// Na condição de onboarding (linhas 273-278)
-if (
-  isFirstLoad && 
-  debug?.cachedOrdersCount === 0 && 
-  activeSellerId &&
-  hasSyncedForSellerRef.current !== activeSellerId // NOVO: evita re-sync
-) {
-  hasSyncedForSellerRef.current = activeSellerId;
-  setShowOnboarding(true);
-  startProgressiveSync(activeSellerId, session.access_token);
+Corrigir para:
+```typescript
+const refreshResponse = await fetch(`${supabaseUrl}/functions/v1/ml-token-refresh`, {
+  body: JSON.stringify({ accountId: account_id }),  // UUID correto
+});
+if (refreshData.accessToken) {  // Campo correto do response
+  accessToken = refreshData.accessToken;
 }
 ```
 
-### Correção 2: Reset de estados ao trocar conta
+Tambem adicionar log quando o refresh falhar para facilitar debug futuro.
 
-**Arquivo:** `src/components/SalesDashboard.tsx`
+### Correcao 3: Aceitar status `attention` na recuperacao da conta persistida
 
-Adicionar efeito que reseta estados quando `activeSellerId` muda:
+**Arquivo:** `src/contexts/ActiveAccountContext.tsx`
 
+Alterar linha 218 de:
 ```typescript
-// Reset quando troca de conta
-useEffect(() => {
-  setIsFirstLoad(true);
-  setShowOnboarding(false);
-  setIsSyncing(false);
-  setSalesData(null);
-  setError(null);
-  hasSyncedForSellerRef.current = null;
-}, [activeSellerId]);
+let active = loadedAccounts.find(a => a.id === persistedId && a.status === 'connected');
+```
+Para:
+```typescript
+let active = loadedAccounts.find(a => a.id === persistedId && (a.status === 'connected' || a.status === 'attention'));
 ```
 
-### Correção 3: Excluir dia de hoje dos filtros padrão
-
-**Arquivo:** `src/components/SalesDashboard.tsx`
-
-Modificar `getInitial30DayFilter` para usar **ontem** como data final:
-
+E alterar o fallback na linha 222 de:
 ```typescript
-const getInitial30DayFilter = (): DateFilter => {
-  const now = new Date();
-  const spOffset = -3 * 60;
-  const localOffset = now.getTimezoneOffset();
-  const diff = spOffset - localOffset;
-  const spNow = new Date(now.getTime() + diff * 60 * 1000);
-  
-  // Usar ONTEM como data final (dia não fechado)
-  const yesterday = new Date(spNow.getFullYear(), spNow.getMonth(), spNow.getDate() - 1);
-  const thirtyDaysAgo = new Date(yesterday);
-  thirtyDaysAgo.setDate(yesterday.getDate() - 29); // 30 dias antes de ontem
-  
-  return {
-    dateFrom: format(thirtyDaysAgo, 'yyyy-MM-dd'),
-    dateTo: format(yesterday, 'yyyy-MM-dd'),
-  };
-};
+active = loadedAccounts.find(a => a.status === 'connected');
+```
+Para:
+```typescript
+active = loadedAccounts.find(a => a.status === 'connected' || a.status === 'attention');
 ```
 
-### Correção 4: Limitar tentativas de sync em contas sem dados
+Isso garante que a conta escolhida pelo usuario seja mantida mesmo com token expirado (ja que o sistema renova o token automaticamente ao usar).
 
-**Arquivo:** `src/components/SalesDashboard.tsx`
+### Correcao 4: Tratar resposta "0 perguntas" com campo `pending` correto
 
-No final de `startProgressiveSync`, não chamar `fetchSalesData` se não encontrou dados:
+**Arquivo:** `supabase/functions/ml-sync-questions/index.ts`
 
+O retorno antecipado quando nao ha perguntas (linha ~180) nao inclui o campo `pending`, causando "undefined pendente(s)" no toast:
 ```typescript
-// Após todas as phases completarem
-if (syncJob && syncJob.processed_records > 0) {
-  fetchSalesData(undefined, true); // Só atualiza se processou algo
-}
-```
-
-### Correção 5: Invalidar cache de sales ao trocar conta
-
-**Arquivo:** `src/hooks/useAccountChangeInvalidation.ts`
-
-Adicionar invalidação do cache de vendas:
-
-```typescript
-// Dentro do handleAccountChange
-// Limpar cache de sales data
-const cacheHook = useSalesDataCache();
-cacheHook.clearAll(); // Se disponível globalmente
-
-// Ou invalidar via evento
-window.dispatchEvent(new CustomEvent('clear_sales_cache'));
+// Antes:
+return { success: true, synced: 0, message: "No questions to sync" }
+// Depois:
+return { success: true, synced: 0, pending: 0, answered: 0, message: "No questions to sync" }
 ```
 
 ---
 
-## Detalhes Técnicos
+## Resumo dos Arquivos a Modificar
 
-### Fluxo Corrigido
+1. `supabase/functions/ml-token-refresh/index.ts` - Corrigir import esm.sh para npm:
+2. `supabase/functions/ml-sync-questions/index.ts` - Passar `accountId` (UUID) no refresh + corrigir campo de resposta + incluir `pending` no retorno vazio
+3. `src/contexts/ActiveAccountContext.tsx` - Aceitar `attention` ao recuperar conta persistida
+
+## Fluxo Corrigido
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│ Usuário troca conta no seletor global                       │
-├─────────────────────────────────────────────────────────────┤
-│ 1. ActiveAccountContext dispara active_account_changed      │
-│ 2. AccountChangeInvalidator limpa caches React Query        │
-│ 3. SalesDashboard detecta mudança de activeSellerId         │
-│ 4. Reset: isFirstLoad=true, hasSyncedRef=null, salesData=null│
-│ 5. fetchSalesData() é chamado                               │
-│ 6. Se cachedOrdersCount=0 E hasSyncedRef !== seller:        │
-│    → Marca hasSyncedRef = seller                            │
-│    → Inicia onboarding sync UMA VEZ                         │
-│ 7. Sync completa → NÃO chama fetchSalesData novamente       │
-│ 8. Usuário vê Dashboard (com ou sem dados)                  │
-└─────────────────────────────────────────────────────────────┘
+  Usuario abre Perguntas e clica "Atualizar"
+       |
+       v
+  ml-sync-questions recebe (seller_id + account_id)
+       |
+       v
+  Chama ml-token-refresh com { accountId: UUID }
+       |
+       v
+  Token renovado com sucesso -> token_expires_at atualizado
+       |
+       v
+  API ML chamada com token valido -> perguntas retornadas
+       |
+       v
+  Perguntas upserted no banco -> UI atualizada
+       |
+       v
+  connection_status volta para 'connected' -> icone de atencao some
 ```
 
-### Arquivos a Modificar
+## Resultado Esperado
 
-1. `src/components/SalesDashboard.tsx`
-   - Adicionar `hasSyncedForSellerRef`
-   - Reset de estados ao trocar conta
-   - Modificar `getInitial30DayFilter` para excluir hoje
-   - Ajustar condição de onboarding
-   - Ajustar final de `startProgressiveSync`
-
-2. `src/hooks/useAccountChangeInvalidation.ts`
-   - Adicionar invalidação de caches adicionais se necessário
-
-### Critérios de Aceite
-
-- [ ] Dashboard não entra em loop ao selecionar conta sem vendas
-- [ ] Dashboard exibe corretamente "Nenhum dado" para contas sem vendas
-- [ ] Trocar conta reseta o estado e carrega dados da nova conta
-- [ ] Filtros de 7/30 dias excluem o dia atual
-- [ ] Página de Vendas não fica travada em "Sincronizando..." eternamente
-- [ ] Cache é limpo ao trocar de conta
-
-### Riscos e Mitigação
-
-- **Risco:** Contas novas legítimas podem não iniciar sync automático
-  - **Mitigação:** A verificação `hasSyncedRef !== seller` garante que cada conta nova tem UMA tentativa de sync
-
-- **Risco:** Dados de ontem podem parecer "atrasados" para usuários
-  - **Mitigação:** Manter filtro "Hoje" disponível para consulta manual quando necessário
+- Perguntas sincronizam normalmente ao clicar "Atualizar"
+- A conta selecionada e lembrada entre sessoes
+- O icone de atencao desaparece apos o primeiro refresh de token bem-sucedido
+- Toast mostra "X pergunta(s) sincronizada(s). Y pendente(s)." sem "undefined"
