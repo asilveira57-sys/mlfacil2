@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -18,6 +17,7 @@ import {
   Copy,
   ShieldCheck
 } from 'lucide-react';
+import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { CompetitorOverview } from '@/components/competitor/CompetitorOverview';
 import { CompetitorListings } from '@/components/competitor/CompetitorListings';
 import { CompetitorMarketSearch } from '@/components/competitor/CompetitorMarketSearch';
@@ -29,71 +29,25 @@ import { PriceSuggestionsTab } from '@/components/competitor/PriceSuggestionsTab
 import { PageContainer } from '@/components/layout/PageContainer';
 import { AntiCatalogCloneModal } from '@/components/clone-anti-catalog';
 
-interface MlAccount {
-  id: string;
-  ml_user_id: string;
-  nickname: string;
-}
-
 export default function Concorrencia() {
   const navigate = useNavigate();
-  const [accounts, setAccounts] = useState<MlAccount[]>([]);
-  const [selectedSellerId, setSelectedSellerId] = useState<string>('');
-  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
+  
+  // Use global active account from context
+  const { activeAccount, sellerId, accounts, loading: accountLoading, initialized } = useActiveAccount();
+  const selectedAccountId = activeAccount?.id || '';
+  
   const [activeTab, setActiveTab] = useState('tracked');
-  const [loading, setLoading] = useState(true);
   const [antiCatalogModalOpen, setAntiCatalogModalOpen] = useState(false);
 
+  // Redirect if no account
   useEffect(() => {
-    const checkAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        navigate('/auth');
-        return;
-      }
-
-      // Load ML accounts
-      const { data: mlAccounts } = await supabase
-        .from('ml_accounts')
-        .select('id, ml_user_id, nickname')
-        .eq('user_id', session.user.id)
-        .eq('is_active', true);
-
-      if (mlAccounts && mlAccounts.length > 0) {
-        setAccounts(mlAccounts);
-        setSelectedSellerId(mlAccounts[0].ml_user_id);
-        setSelectedAccountId(mlAccounts[0].id);
-      }
-      setLoading(false);
-    };
-
-    checkAuth();
-  }, [navigate]);
-
-  const handleAccountChange = (sellerId: string) => {
-    setSelectedSellerId(sellerId);
-    const account = accounts.find(a => a.ml_user_id === sellerId);
-    if (account) {
-      setSelectedAccountId(account.id);
+    if (!accountLoading && initialized && !activeAccount) {
+      navigate('/dashboard');
     }
-  };
+  }, [accountLoading, initialized, activeAccount, navigate]);
 
   const headerContent = (
     <div className="flex items-center gap-3">
-      {accounts.length > 1 && (
-        <Select value={selectedSellerId} onValueChange={handleAccountChange}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Selecione a conta" />
-          </SelectTrigger>
-          <SelectContent>
-            {accounts.map((acc) => (
-              <SelectItem key={acc.id} value={acc.ml_user_id}>
-                {acc.nickname || acc.ml_user_id}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      )}
       {/* NOVO BOTÃO ISOLADO - Anti-Catálogo v3 */}
       <Button 
         variant="default" 
@@ -112,7 +66,7 @@ export default function Concorrencia() {
     </div>
   );
 
-  if (loading) {
+  if (accountLoading || !initialized) {
     return (
       <PageContainer title="Concorrência" subtitle="Análise de mercado e posicionamento">
         <div className="container mx-auto p-6 space-y-6">
@@ -123,7 +77,7 @@ export default function Concorrencia() {
     );
   }
 
-  if (accounts.length === 0) {
+  if (!activeAccount) {
     return (
       <PageContainer title="Concorrência" subtitle="Análise de mercado e posicionamento">
         <div className="container mx-auto p-6">
@@ -185,35 +139,35 @@ export default function Concorrencia() {
           </TabsList>
 
           <TabsContent value="tracked" className="mt-6">
-            <TrackedCompetitorsTab sellerId={selectedSellerId} />
+            <TrackedCompetitorsTab sellerId={sellerId || ''} />
           </TabsContent>
 
           <TabsContent value="suggestions" className="mt-6">
-            <PriceSuggestionsTab sellerId={selectedSellerId} />
+            <PriceSuggestionsTab sellerId={sellerId || ''} />
           </TabsContent>
 
           <TabsContent value="tracking-alerts" className="mt-6">
-            <TrackingAlertsTab sellerId={selectedSellerId} />
+            <TrackingAlertsTab sellerId={sellerId || ''} />
           </TabsContent>
 
           <TabsContent value="overview" className="mt-6">
-            <CompetitorOverview sellerId={selectedSellerId} />
+            <CompetitorOverview sellerId={sellerId || ''} />
           </TabsContent>
 
           <TabsContent value="listings" className="mt-6">
-            <CompetitorListings sellerId={selectedSellerId} />
+            <CompetitorListings sellerId={sellerId || ''} />
           </TabsContent>
 
           <TabsContent value="search" className="mt-6">
-            <CompetitorMarketSearch sellerId={selectedSellerId} />
+            <CompetitorMarketSearch sellerId={sellerId || ''} />
           </TabsContent>
 
           <TabsContent value="alerts" className="mt-6">
-            <CompetitorAlerts sellerId={selectedSellerId} />
+            <CompetitorAlerts sellerId={sellerId || ''} />
           </TabsContent>
 
           <TabsContent value="settings" className="mt-6">
-            <CompetitorSettings sellerId={selectedSellerId} />
+            <CompetitorSettings sellerId={sellerId || ''} />
           </TabsContent>
         </Tabs>
       </div>

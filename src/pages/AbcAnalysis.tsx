@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { User } from "@supabase/supabase-js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AbcHeader } from "@/components/abc/AbcHeader";
 import { AbcProductsTab } from "@/components/abc/AbcProductsTab";
@@ -10,6 +9,7 @@ import { AbcCitiesTab } from "@/components/abc/AbcCitiesTab";
 import { AbcConfigPanel } from "@/components/abc/AbcConfigPanel";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { Package, Users, MapPin } from "lucide-react";
+import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 
 export interface AbcFilters {
   dateFrom: string | null;
@@ -34,10 +34,10 @@ const DEFAULT_CONFIG: AbcConfig = {
 const AbcAnalysis = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [sellerId, setSellerId] = useState<string | null>(null);
-  const [sellerNickname, setSellerNickname] = useState<string | null>(null);
+  
+  // Use global active account from context
+  const { activeAccount, sellerId, loading: accountLoading, initialized } = useActiveAccount();
+  const sellerNickname = activeAccount?.nickname ?? null;
   
   const [config, setConfig] = useState<AbcConfig>(DEFAULT_CONFIG);
   const [configOpen, setConfigOpen] = useState(false);
@@ -56,22 +56,18 @@ const AbcAnalysis = () => {
     setSearchParams({ tab });
   };
 
-  // Fetch ML account
-  const fetchMlAccount = async (userId: string) => {
-    const { data, error } = await supabase
-      .from("ml_accounts")
-      .select("ml_user_id, nickname")
-      .eq("user_id", userId)
-      .eq("is_active", true)
-      .order("updated_at", { ascending: false })
-      .limit(1);
+  // Fetch ABC config when sellerId changes
+  useEffect(() => {
+    if (!sellerId) return;
+    fetchAbcConfig(sellerId);
+  }, [sellerId]);
 
-    if (!error && data?.[0]) {
-      setSellerId(data[0].ml_user_id);
-      setSellerNickname(data[0].nickname);
-      await fetchAbcConfig(data[0].ml_user_id);
+  // Redirect if no account
+  useEffect(() => {
+    if (!accountLoading && initialized && !activeAccount) {
+      navigate('/dashboard');
     }
-  };
+  }, [accountLoading, initialized, activeAccount, navigate]);
 
   // Fetch ABC config
   const fetchAbcConfig = async (sellerIdParam: string) => {
@@ -92,13 +88,13 @@ const AbcAnalysis = () => {
 
   // Save ABC config
   const saveConfig = async (newConfig: AbcConfig) => {
-    if (!user || !sellerId) return;
+    if (!activeAccount || !sellerId) return;
 
     const { error } = await supabase
       .from("abc_config")
       .upsert(
         {
-          user_id: user.id,
+          user_id: activeAccount.id,
           seller_id: sellerId,
           percent_a: newConfig.percentA,
           percent_b: newConfig.percentB,
@@ -112,38 +108,7 @@ const AbcAnalysis = () => {
     }
   };
 
-  useEffect(() => {
-    // Only react to actual sign-in/out events
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        if (event === 'SIGNED_OUT') {
-          setUser(null);
-          navigate("/auth");
-        } else if (event === 'SIGNED_IN') {
-          setUser(session?.user ?? null);
-          if (session?.user) {
-            fetchMlAccount(session.user.id);
-          }
-        }
-        // Ignore TOKEN_REFRESHED to prevent tab-switch flicker
-      }
-    );
-
-    // Initial session check
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (!session) {
-        navigate("/auth");
-      } else {
-        fetchMlAccount(session.user.id);
-      }
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
-  }, [navigate]);
-
-  if (loading) {
+  if (accountLoading || !initialized) {
     return (
       <PageContainer title="Curva ABC">
         <div className="flex items-center justify-center h-64">

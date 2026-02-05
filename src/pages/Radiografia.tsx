@@ -1,36 +1,19 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Activity, List, Scan, HeartPulse } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { RadiographyOverview } from "@/components/radiography/RadiographyOverview";
 import { RadiographyItemList } from "@/components/radiography/RadiographyItemList";
 import { RadiographyDetailDrawer } from "@/components/radiography/RadiographyDetailDrawer";
 import { PageContainer } from "@/components/layout/PageContainer";
 
 export default function Radiografia() {
-  const [sellerId, setSellerId] = useState<string | null>(null);
+  // Use global active account from context
+  const { sellerId } = useActiveAccount();
+  
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
-
-  useEffect(() => {
-    async function loadSellerId() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data: accounts } = await supabase
-        .from("ml_accounts")
-        .select("ml_user_id")
-        .eq("user_id", user.id)
-        .eq("is_active", true)
-        .limit(1);
-
-      if (accounts?.[0]) {
-        setSellerId(accounts[0].ml_user_id);
-      }
-    }
-    loadSellerId();
-  }, []);
 
   const handleSelectItem = (itemId: string) => {
     setSelectedItemId(itemId);
