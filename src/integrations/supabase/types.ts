@@ -6832,6 +6832,7 @@ export type Database = {
         Row: {
           created_at: string
           cursor_created_at_meli: string | null
+          cursor_offset: number | null
           cursor_order_id: string | null
           id: string
           last_error_code: string | null
@@ -6848,6 +6849,7 @@ export type Database = {
         Insert: {
           created_at?: string
           cursor_created_at_meli?: string | null
+          cursor_offset?: number | null
           cursor_order_id?: string | null
           id?: string
           last_error_code?: string | null
@@ -6864,6 +6866,7 @@ export type Database = {
         Update: {
           created_at?: string
           cursor_created_at_meli?: string | null
+          cursor_offset?: number | null
           cursor_order_id?: string | null
           id?: string
           last_error_code?: string | null
