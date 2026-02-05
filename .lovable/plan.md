@@ -1,175 +1,86 @@
 
+# Correcao: Etiquetas "Sincronizando..." + Filtros Zerados + Nome do Menu
 
-# Correcao: Etiquetas de Envio Travadas em "Sincronizando..." e Filtros Zerados
+## Diagnostico Completo
 
-## Causa Raiz Identificada
+### Problema 1: "Sincronizando..." eternamente e filtros zerados
 
-Ha um **bug critico** na funcao `fetchAllRowsPaginated` no arquivo `src/hooks/useShippingLabels.ts` (linhas 163-185). A funcao busca os dados do banco mas **nunca os adiciona ao array de resultados**:
+A investigacao revelou que **duas funcoes de backend criticas NAO estao deployadas**:
+
+- `ml-sync-shipments` --> retorna **404 (NOT_FOUND)**
+- `ml-sync-invoices` --> retorna **404 (NOT_FOUND)**
+
+Essas funcoes falharam no deploy durante a migracao em massa de `esm.sh` para `npm:`. O pipeline de sincronizacao funciona assim:
 
 ```text
-async function fetchAllRowsPaginated<T>(...): Promise<T[]> {
-  const allRows: T[] = [];        // <-- Array criado vazio
-  let offset = 0;
-  
-  while (true) {
-    const { data, error } = await queryFn(offset, batchSize);
-    
-    if (!data || data.length === 0) break;
-    
-    // BUG: data NUNCA e adicionado ao allRows!
-    // Falta: allRows.push(...data);
-    
-    if (data.length < batchSize) break;  // BUG 2: ultimo lote descartado
-    offset += batchSize;
-  }
-  
-  return allRows;  // <-- Sempre retorna []
-}
+  Fase 1: ml-sync-orders (FUNCIONA - 424 pedidos sincronizados)
+       |
+  Fase 2-3: Coleta shipment_ids e verifica quais faltam (FUNCIONA com fix anterior)
+       |
+  Fase 4: ml-sync-shipments --> 404 NOT FOUND (FALHA SILENCIOSA)
+       |
+  Fase 5: ml-sync-invoices --> 404 NOT FOUND (FALHA SILENCIOSA)
+       |
+  Resultado: Pedidos no cache, mas sem dados de envio
+       --> TODOS mostram "pendente_sync" / "Sincronizando..."
+       --> Filtros "Para imprimir", "Aguardando NF", "Reimprimir" = 0
 ```
 
-### Efeito Cascata desse Bug
+**Evidencia no banco de dados:**
+- Os 22 pedidos de hoje tem shipment_ids (ex: 46411273122, 46410865253...)
+- NENHUM desses shipment_ids existe na tabela `meli_shipments_cache`
+- Os unicos shipments no cache sao de 03/02 (2 dias atras), todos com status "delivered"
 
-A funcao `fetchAllRowsPaginated` e usada em 4 lugares criticos:
+### Problema 2: Nome do menu "Vendas" em vez de "Etiquetas de Envio"
 
-1. **Sync Pipeline Fase 2** (linha 726): Coleta order_ids para buscar shipment_ids
-   - Retorna `[]` --> Nenhum shipment e sincronizado --> Todos os pedidos ficam como "Sincronizando..."
-   
-2. **Sync Pipeline Fase 5** (via orderIds): Coleta order_ids para buscar invoices
-   - Retorna `[]` --> Nenhuma NF e sincronizada
+No sidebar (`AppSidebar.tsx` linha 73), o item do menu usa a chave de traducao `nav:sales` que em pt-BR traduz para "Vendas". Precisa mudar para `nav:shipping_labels` que ja existe e traduz para "Etiquetas de Envio".
 
-3. **Status Counts** (linha 1146): Conta pedidos para os filtros (Para imprimir, Aguardando NF, etc.)
-   - Retorna `[]` --> Todos os contadores mostram 0
+### Problema 3: Filtro padrao deve ser "Hoje"
 
-4. **Repair Sync** (linha 877): Busca shipments faltantes
-   - Retorna `[]` --> Reparo nao funciona
-
-### Por que "sincroniza eternamente"
-
-O sync pipeline executa mas:
-- Fase 1 (sync orders) funciona normalmente (confirmado nos logs: 424 orders synced)
-- Fase 2-5 recebem arrays vazios, terminam instantaneamente
-- Os pedidos no cache tem `shipment_id` mas nao ha dados em `meli_shipments_cache`
-- A UI mostra "pendente_sync" para todos eles
-- O auto-sync tenta novamente a cada visita, mas sempre falha da mesma forma
-
-### Confirmacao: Dashboard de Vendas esta funcionando
-
-Os logs de rede confirmam que `ml-sales-data` retorna HTTP 200 com dados completos (5.261 pedidos, R$ 767K receita total). O erro anterior era transitorio durante o deploy das funcoes.
+No hook `useShippingLabels.ts` (linha 194), o estado inicial do filtro de periodo e `'30d'`. Deve ser alterado para `'today'`.
 
 ---
 
 ## Correcoes
 
-### Correcao 1: Corrigir `fetchAllRowsPaginated` (CRITICA)
+### Correcao 1: Deploy das funcoes de backend (CRITICA)
 
-**Arquivo:** `src/hooks/useShippingLabels.ts` (linhas 163-185)
+**Acao:** Forcar o deploy de `ml-sync-shipments` e `ml-sync-invoices`. Os arquivos ja existem no projeto e ja usam `npm:@supabase/supabase-js@2`. So precisam ser redeployados.
 
-Adicionar `allRows.push(...data)` e corrigir o tratamento do ultimo lote:
+### Correcao 2: Nome do menu - "Vendas" para "Etiquetas de Envio"
 
-```typescript
-async function fetchAllRowsPaginated<T>(
-  queryFn: (offset: number, limit: number) => Promise<{ data: T[] | null; error: Error | null }>,
-  batchSize: number = SYNC_QUERY_BATCH
-): Promise<T[]> {
-  const allRows: T[] = [];
-  let offset = 0;
-  
-  while (true) {
-    const { data, error } = await queryFn(offset, batchSize);
-    
-    if (error) {
-      console.error('Pagination query error:', error);
-      break;
-    }
-    
-    if (!data || data.length === 0) break;
-    
-    allRows.push(...data);  // CORRECAO: Acumular dados no array
-    
-    if (data.length < batchSize) break; // Ultimo lote - dados ja adicionados
-    offset += batchSize;
-  }
-  
-  return allRows;
-}
-```
+**Arquivo:** `src/components/layout/AppSidebar.tsx` (linha 73)
 
-### Correcao 2: Paginacao na Query Principal de Pedidos
+Mudar `titleKey: "nav:sales"` para `titleKey: "nav:shipping_labels"`. A chave `shipping_labels` ja existe em todos os 3 idiomas:
+- pt-BR: "Etiquetas de Envio"
+- es: "Etiquetas de Envio"
+- en: "Shipping Labels"
 
-**Arquivo:** `src/hooks/useShippingLabels.ts` (linhas 279-303)
+### Correcao 3: Filtro padrao "Hoje"
 
-A query principal que carrega pedidos para a UI nao tem paginacao e esta limitada a 1000 registros pelo padrao do banco. Embora o usuario tenha ~394 pedidos em 30 dias agora, isso vai falhar quando o volume crescer. Remover o `{ count: 'exact' }` (que conta ALL rows) e usar paginacao via `.range()`:
+**Arquivo:** `src/hooks/useShippingLabels.ts` (linha 194)
+
+Mudar o estado inicial de `'30d'` para `'today'`:
 
 ```typescript
-// Aplicar range para a pagina atual (server-side pagination)
-const from = (currentPage - 1) * PAGE_SIZE;
-const to = from + PAGE_SIZE - 1;
-
-let query = supabase
-  .from('meli_orders_cache')
-  .select('*', { count: 'exact' })
-  .eq('seller_id', sellerId)
-  .not('order_status', 'in', `(cancelled)`)
-  .order('created_at_meli', { ascending: false })
-  .range(from, to);
+const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('today');
 ```
-
-**Nota**: Este e um refinamento de performance. A correcao da `fetchAllRowsPaginated` ja resolve o problema imediato. A paginacao server-side sera necessaria quando o volume de pedidos crescer acima de 1000.
-
-### Correcao 3: Deploy da funcao `facebook-conversions`
-
-**Arquivo:** `supabase/functions/facebook-conversions/index.ts`
-
-A funcao nao esta deployada (sem logs, retorna 404), causando erros repetidos no console. Nao usa o import do supabase-js (usa apenas `deno.land/std`), entao nao foi parte da migracao anterior. Precisa apenas ser redeployada.
 
 ---
 
 ## Escopo Minimo - Sem Impacto em Outros Modulos
 
-A correcao e cirurgica:
-- **1 linha adicionada** (`allRows.push(...data)`) em uma funcao utilitaria local do hook de etiquetas
-- Nao altera nenhum outro modulo (vendas, custos, perguntas, anuncios, etc.)
-- Nao altera nenhuma Edge Function
-- Nao altera nenhuma tabela ou RLS
-- Apenas corrige o bug que impede dados ja existentes de serem processados
-
-## Fluxo Corrigido
-
-```text
-  Usuario abre /shipping-labels
-       |
-       v
-  Query carrega pedidos do meli_orders_cache (394 pedidos)
-       |
-       v
-  Auto-sync dispara startSyncPipeline()
-       |
-       v
-  Fase 1: ml-sync-orders --> 424 pedidos sincronizados (JA FUNCIONA)
-       |
-       v
-  Fase 2: fetchAllRowsPaginated coleta 394 orders
-       --> Extrai 350+ shipment_ids unicos        [AGORA FUNCIONA]
-       |
-       v
-  Fase 3: Verifica quais shipments faltam no cache
-       |
-       v
-  Fase 4: Sincroniza shipments faltantes em lotes de 200
-       |
-       v
-  Fase 5: Sincroniza invoices em lotes de 300
-       |
-       v
-  Fase 6: Refetch --> Pedidos mostram status correto
-       --> Filtros: "Para imprimir: X", "Aguardando NF: Y"
-```
+- Nenhuma Edge Function sera editada (apenas redeployada)
+- Nenhuma tabela ou RLS sera alterada
+- Apenas 2 arquivos de frontend recebem mudancas minimas (1 linha cada)
+- Dashboard de vendas nao e afetado
+- Perguntas, Pos-venda, e todos os demais modulos permanecem inalterados
 
 ## Resultado Esperado
 
-- Pedidos mostram status correto (Pronta, Aguardando NF, Reimprimir) em vez de "Sincronizando..."
-- Filtros mostram contagens reais em vez de 0
-- Sync completa em vez de ficar "eternamente"
-- Dashboard de vendas continua funcionando normalmente
-- Nenhum outro modulo e impactado
-
+Apos o deploy:
+1. Sync pipeline completa todas as fases (orders, shipments, invoices)
+2. Pedidos de hoje mostram status correto (Pronta, Aguardando NF, Reimprimir)
+3. Filtros exibem contagens reais
+4. Menu mostra "Etiquetas de Envio" em vez de "Vendas"
+5. Pagina abre com filtro "Hoje" por padrao
