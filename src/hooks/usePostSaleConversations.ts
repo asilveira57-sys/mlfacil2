@@ -113,13 +113,19 @@ export function useSyncPostSaleMessages() {
   return useMutation({
     mutationFn: async ({
       sellerId,
+      accountId,
       daysBack = 15,
     }: {
       sellerId: string;
+      accountId?: string; // UUID of ml_accounts - preferred for credential lookup
       daysBack?: number;
     }): Promise<SyncMessagesResult> => {
       const result = await invokeEdgeFunction<SyncMessagesResult>("ml-sync-messages", {
-        body: { seller_id: sellerId, days_back: daysBack },
+        body: { 
+          seller_id: sellerId, 
+          account_id: accountId, // Pass account_id for proper credential lookup
+          days_back: daysBack 
+        },
       });
 
       if (!result.success) {
@@ -138,7 +144,7 @@ export function useSyncPostSaleMessages() {
       if (data.success) {
         toast({
           title: "Sincronização concluída",
-          description: `${data.synced || 0} conversas sincronizadas, ${data.unread || 0} não lidas`,
+          description: `${data.synced || 0} conversas sincronizadas, ${data.unread || 0} não lidas (seller: ${variables.sellerId})`,
         });
       } else {
         toast({
@@ -167,16 +173,19 @@ export function useSendPostSaleMessage() {
     mutationFn: async ({
       conversationId,
       sellerId,
+      accountId,
       text,
     }: {
       conversationId: string;
       sellerId: string;
+      accountId?: string; // UUID of ml_accounts - preferred for credential lookup
       text: string;
     }): Promise<SendMessageResult> => {
       const { data, error } = await supabase.functions.invoke("ml-send-message", {
         body: {
           conversation_id: conversationId,
           seller_id: sellerId,
+          account_id: accountId, // Pass account_id for proper credential lookup
           text,
         },
       });
