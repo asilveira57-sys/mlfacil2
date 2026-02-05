@@ -1,6 +1,6 @@
 // @ts-nocheck - Deno types not available in build context
 // Force clean redeploy v4 - fix Deno.core.runMicrotasks error
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4?target=deno";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 
 const corsHeaders = {

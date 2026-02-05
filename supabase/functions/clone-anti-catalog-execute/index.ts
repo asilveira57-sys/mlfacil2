@@ -2,7 +2,7 @@
 // Cria anúncio NORMAL (fora de catálogo) seguindo regras Anti-Catálogo v3
 // SEMPRE retorna HTTP 200 com success:true/false para evitar "non-2xx"
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
