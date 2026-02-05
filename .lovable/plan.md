@@ -1,86 +1,91 @@
 
-# Correcao: Etiquetas "Sincronizando..." + Filtros Zerados + Nome do Menu
 
-## Diagnostico Completo
+# Correção: Cabeçalho não renderiza nas etiquetas PDF
 
-### Problema 1: "Sincronizando..." eternamente e filtros zerados
+## Causa Raiz
 
-A investigacao revelou que **duas funcoes de backend criticas NAO estao deployadas**:
-
-- `ml-sync-shipments` --> retorna **404 (NOT_FOUND)**
-- `ml-sync-invoices` --> retorna **404 (NOT_FOUND)**
-
-Essas funcoes falharam no deploy durante a migracao em massa de `esm.sh` para `npm:`. O pipeline de sincronizacao funciona assim:
+O erro nos logs é claro:
 
 ```text
-  Fase 1: ml-sync-orders (FUNCIONA - 424 pedidos sincronizados)
-       |
-  Fase 2-3: Coleta shipment_ids e verifica quais faltam (FUNCIONA com fix anterior)
-       |
-  Fase 4: ml-sync-shipments --> 404 NOT FOUND (FALHA SILENCIOSA)
-       |
-  Fase 5: ml-sync-invoices --> 404 NOT FOUND (FALHA SILENCIOSA)
-       |
-  Resultado: Pedidos no cache, mas sem dados de envio
-       --> TODOS mostram "pendente_sync" / "Sincronizando..."
-       --> Filtros "Para imprimir", "Aguardando NF", "Reimprimir" = 0
+Error adding headers to PDF: TypeError: Cannot read properties of undefined (reading 'node')
+    at r.embedPages (pdf-lib.mjs)
+    at addHeadersToPdf (index.ts:194)
 ```
 
-**Evidencia no banco de dados:**
-- Os 22 pedidos de hoje tem shipment_ids (ex: 46411273122, 46410865253...)
-- NENHUM desses shipment_ids existe na tabela `meli_shipments_cache`
-- Os unicos shipments no cache sao de 03/02 (2 dias atras), todos com status "delivered"
+Na função `addHeadersToPdf` (linha 243), o código chama a API do pdf-lib incorretamente:
 
-### Problema 2: Nome do menu "Vendas" em vez de "Etiquetas de Envio"
+```text
+// ERRADO - embedPages espera array de PDFPage, não (PDFDocument, indices)
+const [embeddedPage] = await resultPdf.embedPages(sourcePdf, [i]);
 
-No sidebar (`AppSidebar.tsx` linha 73), o item do menu usa a chave de traducao `nav:sales` que em pt-BR traduz para "Vendas". Precisa mudar para `nav:shipping_labels` que ja existe e traduz para "Etiquetas de Envio".
+// CORRETO - embedPage (singular) recebe um objeto PDFPage
+const embeddedPage = await resultPdf.embedPage(sourcePdf.getPage(i));
+```
 
-### Problema 3: Filtro padrao deve ser "Hoje"
+O `try/catch` no bloco de cabeçalho (linha 761) captura o erro e faz fallback silencioso para etiquetas sem cabeçalho. Por isso as etiquetas são geradas, mas sempre no formato padrão.
 
-No hook `useShippingLabels.ts` (linha 194), o estado inicial do filtro de periodo e `'30d'`. Deve ser alterado para `'today'`.
+## Fluxo do erro
 
----
+```text
+  Usuário seleciona "Com Cabeçalho" (mlfacil_100x175_header)
+       |
+  ML API retorna PDF padrão com sucesso
+       |
+  addHeadersToPdf() é chamada
+       |
+  resultPdf.embedPages(sourcePdf, [i])  --> TypeError: 'node' undefined
+       |
+  catch(headerError) --> "Falling back to labels without headers"
+       |
+  Retorna PDF original SEM cabeçalho
+```
 
-## Correcoes
+## Correções
 
-### Correcao 1: Deploy das funcoes de backend (CRITICA)
+### Correção 1: Corrigir chamada da API pdf-lib (CRÍTICA)
 
-**Acao:** Forcar o deploy de `ml-sync-shipments` e `ml-sync-invoices`. Os arquivos ja existem no projeto e ja usam `npm:@supabase/supabase-js@2`. So precisam ser redeployados.
+**Arquivo:** `supabase/functions/ml-generate-labels/index.ts` (linha 243)
 
-### Correcao 2: Nome do menu - "Vendas" para "Etiquetas de Envio"
-
-**Arquivo:** `src/components/layout/AppSidebar.tsx` (linha 73)
-
-Mudar `titleKey: "nav:sales"` para `titleKey: "nav:shipping_labels"`. A chave `shipping_labels` ja existe em todos os 3 idiomas:
-- pt-BR: "Etiquetas de Envio"
-- es: "Etiquetas de Envio"
-- en: "Shipping Labels"
-
-### Correcao 3: Filtro padrao "Hoje"
-
-**Arquivo:** `src/hooks/useShippingLabels.ts` (linha 194)
-
-Mudar o estado inicial de `'30d'` para `'today'`:
+Trocar `embedPages(sourcePdf, [i])` por `embedPage(sourcePdf.getPage(i))`:
 
 ```typescript
-const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('today');
+// ANTES (errado):
+const [embeddedPage] = await resultPdf.embedPages(sourcePdf, [i]);
+
+// DEPOIS (correto):
+const embeddedPage = await resultPdf.embedPage(sourcePdf.getPage(i));
 ```
+
+### Correção 2: Migrar import de esm.sh para npm:
+
+**Arquivo:** `supabase/functions/ml-generate-labels/index.ts` (linha 4)
+
+O import do pdf-lib usa `esm.sh` que viola o padrão do projeto e pode causar instabilidade:
+
+```typescript
+// ANTES:
+import { PDFDocument, StandardFonts, rgb } from "https://esm.sh/pdf-lib@1.17.1";
+
+// DEPOIS:
+import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
+```
+
+### Correção 3: Redeploy da função
+
+Após as correções, a função `ml-generate-labels` será redeployada automaticamente.
 
 ---
 
-## Escopo Minimo - Sem Impacto em Outros Modulos
+## Escopo Mínimo
 
-- Nenhuma Edge Function sera editada (apenas redeployada)
-- Nenhuma tabela ou RLS sera alterada
-- Apenas 2 arquivos de frontend recebem mudancas minimas (1 linha cada)
-- Dashboard de vendas nao e afetado
-- Perguntas, Pos-venda, e todos os demais modulos permanecem inalterados
+- Apenas 2 linhas alteradas no arquivo da Edge Function
+- Nenhum outro módulo impactado
+- Nenhuma tabela ou RLS alterada
+- Dashboard de vendas, perguntas e demais módulos permanecem inalterados
 
 ## Resultado Esperado
 
-Apos o deploy:
-1. Sync pipeline completa todas as fases (orders, shipments, invoices)
-2. Pedidos de hoje mostram status correto (Pronta, Aguardando NF, Reimprimir)
-3. Filtros exibem contagens reais
-4. Menu mostra "Etiquetas de Envio" em vez de "Vendas"
-5. Pagina abre com filtro "Hoje" por padrao
+- Etiquetas "Com Cabeçalho" renderizam corretamente com nome do cliente, produtos, pedido e observações
+- O log mostrará "Headers added successfully" em vez de "Falling back to labels without headers"
+- Etiquetas "Padrão ML" continuam funcionando normalmente
+
