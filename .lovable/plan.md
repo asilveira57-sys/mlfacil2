@@ -1,109 +1,175 @@
 
-# Correcao Definitiva: Migrar TODAS as Edge Functions de esm.sh para npm:
 
-## Problema Raiz
+# Correcao: Etiquetas de Envio Travadas em "Sincronizando..." e Filtros Zerados
 
-Cada vez que uma funcao e editada e redeployada, o sistema redeploya TODAS as funcoes do projeto. As 62 funcoes que ainda usam `import from "https://esm.sh/@supabase/supabase-js@2"` ficam vulneraveis a falhas de timeout do CDN esm.sh durante o deploy. Isso explica o efeito "consertar uma coisa e quebrar outra": ao corrigir as funcoes de Perguntas, o redeploy fez a funcao `ml-sales-data` (usada pelo Dashboard) falhar no bundling.
+## Causa Raiz Identificada
 
-Apenas 4 funcoes ja foram migradas para `npm:` (qa-engine, ml-token-refresh, ml-answer-question, ml-sync-questions). As outras 62 precisam ser atualizadas.
+Ha um **bug critico** na funcao `fetchAllRowsPaginated` no arquivo `src/hooks/useShippingLabels.ts` (linhas 163-185). A funcao busca os dados do banco mas **nunca os adiciona ao array de resultados**:
 
-## Solucao
-
-Migrar o import `https://esm.sh/@supabase/supabase-js@2` para `npm:@supabase/supabase-js@2` em TODAS as 62 funcoes restantes. A mudanca e de uma unica linha por arquivo, sem alteracao de logica.
-
-Exemplo da mudanca:
+```text
+async function fetchAllRowsPaginated<T>(...): Promise<T[]> {
+  const allRows: T[] = [];        // <-- Array criado vazio
+  let offset = 0;
+  
+  while (true) {
+    const { data, error } = await queryFn(offset, batchSize);
+    
+    if (!data || data.length === 0) break;
+    
+    // BUG: data NUNCA e adicionado ao allRows!
+    // Falta: allRows.push(...data);
+    
+    if (data.length < batchSize) break;  // BUG 2: ultimo lote descartado
+    offset += batchSize;
+  }
+  
+  return allRows;  // <-- Sempre retorna []
+}
 ```
-// ANTES:
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// DEPOIS:
-import { createClient } from "npm:@supabase/supabase-js@2";
+### Efeito Cascata desse Bug
+
+A funcao `fetchAllRowsPaginated` e usada em 4 lugares criticos:
+
+1. **Sync Pipeline Fase 2** (linha 726): Coleta order_ids para buscar shipment_ids
+   - Retorna `[]` --> Nenhum shipment e sincronizado --> Todos os pedidos ficam como "Sincronizando..."
+   
+2. **Sync Pipeline Fase 5** (via orderIds): Coleta order_ids para buscar invoices
+   - Retorna `[]` --> Nenhuma NF e sincronizada
+
+3. **Status Counts** (linha 1146): Conta pedidos para os filtros (Para imprimir, Aguardando NF, etc.)
+   - Retorna `[]` --> Todos os contadores mostram 0
+
+4. **Repair Sync** (linha 877): Busca shipments faltantes
+   - Retorna `[]` --> Reparo nao funciona
+
+### Por que "sincroniza eternamente"
+
+O sync pipeline executa mas:
+- Fase 1 (sync orders) funciona normalmente (confirmado nos logs: 424 orders synced)
+- Fase 2-5 recebem arrays vazios, terminam instantaneamente
+- Os pedidos no cache tem `shipment_id` mas nao ha dados em `meli_shipments_cache`
+- A UI mostra "pendente_sync" para todos eles
+- O auto-sync tenta novamente a cada visita, mas sempre falha da mesma forma
+
+### Confirmacao: Dashboard de Vendas esta funcionando
+
+Os logs de rede confirmam que `ml-sales-data` retorna HTTP 200 com dados completos (5.261 pedidos, R$ 767K receita total). O erro anterior era transitorio durante o deploy das funcoes.
+
+---
+
+## Correcoes
+
+### Correcao 1: Corrigir `fetchAllRowsPaginated` (CRITICA)
+
+**Arquivo:** `src/hooks/useShippingLabels.ts` (linhas 163-185)
+
+Adicionar `allRows.push(...data)` e corrigir o tratamento do ultimo lote:
+
+```typescript
+async function fetchAllRowsPaginated<T>(
+  queryFn: (offset: number, limit: number) => Promise<{ data: T[] | null; error: Error | null }>,
+  batchSize: number = SYNC_QUERY_BATCH
+): Promise<T[]> {
+  const allRows: T[] = [];
+  let offset = 0;
+  
+  while (true) {
+    const { data, error } = await queryFn(offset, batchSize);
+    
+    if (error) {
+      console.error('Pagination query error:', error);
+      break;
+    }
+    
+    if (!data || data.length === 0) break;
+    
+    allRows.push(...data);  // CORRECAO: Acumular dados no array
+    
+    if (data.length < batchSize) break; // Ultimo lote - dados ja adicionados
+    offset += batchSize;
+  }
+  
+  return allRows;
+}
 ```
 
-Casos especiais que precisam de atencao:
-- `pricing-engine` e `trends-sync-categories`: usam versao pinada `@2.49.1` -- manter a versao no npm: specifier
-- `collaborator-invite`, `billing-admin`, etc.: usam `std@0.190.0` -- manter, so mudar o import do supabase
-- `radiography-engine`: usa path complexo `esm.sh/@supabase/supabase-js@2.39.7/dist/module/index.js?target=deno&no-check` -- simplificar para `npm:@supabase/supabase-js@2`
-- `ml-worker-process` e `post-sale-messages`: importam `SupabaseClient` type -- manter no `npm:` import
-- `ml-generate-labels`: tambem importa `pdf-lib` e `zipjs` do esm.sh -- migrar apenas o supabase, manter os outros imports esm.sh (sao pacotes que nao tem npm: equivalente direto no Deno)
+### Correcao 2: Paginacao na Query Principal de Pedidos
 
-## Lista Completa dos 62 Arquivos a Modificar
+**Arquivo:** `src/hooks/useShippingLabels.ts` (linhas 279-303)
 
-1. ad-action-execute
-2. ad-item-snapshot
-3. ad-timeline-recalculate
-4. ads-ai-consultant
-5. ads-connector-sync
-6. ads-rules-engine
-7. ads-sync
-8. automation-processor
-9. billing-admin
-10. billing-checkout
-11. billing-public-plans
-12. blog-generate-article
-13. clone-anti-catalog-execute
-14. collaborator-invite
-15. competitor-engine
-16. competitor-scan
-17. competitor-tracking
-18. cost-engine
-19. costs-nightly-sync
-20. create-listing-capture
-21. create-product-record
-22. erp-sync-orders
-23. erp-test-connection
-24. facebook-conversions (nao usa supabase, mas verificar outros esm.sh)
-25. facebook-get-pixel-id
-26. learn-listing
-27. learn-listing-save
-28. mercadopago-checkout
-29. mercadopago-webhook
-30. ml-auth-url
-31. ml-enrich-neighborhoods
-32. ml-generate-labels
-33. ml-generate-labels-status
-34. ml-get-item
-35. ml-oauth-callback
-36. ml-sales-data
-37. ml-send-message
-38. ml-sync-billing
-39. ml-sync-billing-details
-40. ml-sync-financial
-41. ml-sync-invoices
-42. ml-sync-messages
-43. ml-sync-orders
-44. ml-sync-real-costs
-45. ml-sync-shipments
-46. ml-webhook-ingest
-47. ml-worker-process
-48. mp-sync-price
-49. orders-hourly-sync
-50. orders-nightly-sync
-51. post-sale-messages
-52. pricing-engine
-53. promotions-sync
-54. publish-to-ml
-55. radiography-engine
-56. trends-alerts-engine
-57. trends-api
-58. trends-build-history
-59. trends-collect-public
-60. trends-collect-seller
-61. trends-nightly-public
-62. trends-seller-metrics
-63. trends-sync-categories
-64. validate-product-record
+A query principal que carrega pedidos para a UI nao tem paginacao e esta limitada a 1000 registros pelo padrao do banco. Embora o usuario tenha ~394 pedidos em 30 dias agora, isso vai falhar quando o volume crescer. Remover o `{ count: 'exact' }` (que conta ALL rows) e usar paginacao via `.range()`:
+
+```typescript
+// Aplicar range para a pagina atual (server-side pagination)
+const from = (currentPage - 1) * PAGE_SIZE;
+const to = from + PAGE_SIZE - 1;
+
+let query = supabase
+  .from('meli_orders_cache')
+  .select('*', { count: 'exact' })
+  .eq('seller_id', sellerId)
+  .not('order_status', 'in', `(cancelled)`)
+  .order('created_at_meli', { ascending: false })
+  .range(from, to);
+```
+
+**Nota**: Este e um refinamento de performance. A correcao da `fetchAllRowsPaginated` ja resolve o problema imediato. A paginacao server-side sera necessaria quando o volume de pedidos crescer acima de 1000.
+
+### Correcao 3: Deploy da funcao `facebook-conversions`
+
+**Arquivo:** `supabase/functions/facebook-conversions/index.ts`
+
+A funcao nao esta deployada (sem logs, retorna 404), causando erros repetidos no console. Nao usa o import do supabase-js (usa apenas `deno.land/std`), entao nao foi parte da migracao anterior. Precisa apenas ser redeployada.
+
+---
+
+## Escopo Minimo - Sem Impacto em Outros Modulos
+
+A correcao e cirurgica:
+- **1 linha adicionada** (`allRows.push(...data)`) em uma funcao utilitaria local do hook de etiquetas
+- Nao altera nenhum outro modulo (vendas, custos, perguntas, anuncios, etc.)
+- Nao altera nenhuma Edge Function
+- Nao altera nenhuma tabela ou RLS
+- Apenas corrige o bug que impede dados ja existentes de serem processados
+
+## Fluxo Corrigido
+
+```text
+  Usuario abre /shipping-labels
+       |
+       v
+  Query carrega pedidos do meli_orders_cache (394 pedidos)
+       |
+       v
+  Auto-sync dispara startSyncPipeline()
+       |
+       v
+  Fase 1: ml-sync-orders --> 424 pedidos sincronizados (JA FUNCIONA)
+       |
+       v
+  Fase 2: fetchAllRowsPaginated coleta 394 orders
+       --> Extrai 350+ shipment_ids unicos        [AGORA FUNCIONA]
+       |
+       v
+  Fase 3: Verifica quais shipments faltam no cache
+       |
+       v
+  Fase 4: Sincroniza shipments faltantes em lotes de 200
+       |
+       v
+  Fase 5: Sincroniza invoices em lotes de 300
+       |
+       v
+  Fase 6: Refetch --> Pedidos mostram status correto
+       --> Filtros: "Para imprimir: X", "Aguardando NF: Y"
+```
 
 ## Resultado Esperado
 
-- Dashboard volta a funcionar imediatamente apos o deploy
-- Nenhuma funcao futura quebrara por timeout do CDN esm.sh
-- Editar qualquer funcao no futuro nao causara efeito colateral em outras
+- Pedidos mostram status correto (Pronta, Aguardando NF, Reimprimir) em vez de "Sincronizando..."
+- Filtros mostram contagens reais em vez de 0
+- Sync completa em vez de ficar "eternamente"
+- Dashboard de vendas continua funcionando normalmente
+- Nenhum outro modulo e impactado
 
-## Detalhes Tecnicos
-
-A mudanca de `esm.sh` para `npm:` e segura porque:
-- O Deno suporta nativamente `npm:` specifiers desde v1.28
-- O bundler do Supabase Edge Functions resolve `npm:` localmente, sem depender de CDN externo
-- A API do `@supabase/supabase-js` e identica independente do metodo de importacao
-- As 4 funcoes ja migradas (qa-engine, ml-token-refresh, etc.) confirmam que o padrao funciona
