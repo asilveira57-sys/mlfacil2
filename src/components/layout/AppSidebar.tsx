@@ -70,7 +70,7 @@ interface NavItem {
 const mainNavItems: NavItem[] = [
   { titleKey: "nav:home", url: "/inicio", icon: LayoutDashboard, moduleId: "inicio", moduleKey: "inicio" },
   { titleKey: "nav:dashboard", url: "/dashboard", icon: BarChart3, moduleId: "dashboard", moduleKey: "dashboard" },
-  { titleKey: "nav:sales", url: "/shipping-labels", icon: Package, moduleId: "etiquetas", moduleKey: "etiquetas" },
+  { titleKey: "nav:shipping_labels", url: "/shipping-labels", icon: Package, moduleId: "etiquetas", moduleKey: "etiquetas" },
   { titleKey: "nav:tasks", url: "/tarefas", icon: ListChecks, moduleId: "tarefas", moduleKey: "tarefas" },
   { titleKey: "nav:seed", url: "/seed", icon: Sprout, moduleId: "seed", moduleKey: "seed" },
   { titleKey: "nav:promotions", url: "/promocoes", icon: Tag, moduleId: "promocoes", moduleKey: "promocoes" },

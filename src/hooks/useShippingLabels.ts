@@ -191,7 +191,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const queryClient = useQueryClient();
   
   const [statusFilter, setStatusFilter] = useState<FinalStatus>('all');
-  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('30d'); // Default: 30 days for performance
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('today'); // Default: today for daily label management
   const [customDateRange, setCustomDateRange] = useState<DateRange>({ from: null, to: null });
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('created_at_meli');
