@@ -29,9 +29,15 @@ export function useAccountChangeInvalidation() {
       queryClient.invalidateQueries({ queryKey: ['costs'] });
       queryClient.invalidateQueries({ queryKey: ['questions'] });
       queryClient.invalidateQueries({ queryKey: ['billing'] });
+      queryClient.invalidateQueries({ queryKey: ['sales-data'] });
+      queryClient.invalidateQueries({ queryKey: ['shipping-labels'] });
       
       // Clear specific cached data to prevent showing stale results
       queryClient.removeQueries({ queryKey: ['post-sale-conversations'] });
+      queryClient.removeQueries({ queryKey: ['orders'] });
+      
+      // Dispatch event to clear local sales cache (useSalesDataCache)
+      window.dispatchEvent(new CustomEvent('clear_sales_cache'));
     };
 
     // Listen to the custom event dispatched by ActiveAccountContext
