@@ -35,6 +35,34 @@ interface MeliOrder {
   date_created: string;
 }
 
+function parseMessageText(text: unknown): string | null {
+  if (typeof text === "string") return text;
+  if (text && typeof text === "object") {
+    const t = text as Record<string, unknown>;
+    const plain = t.plain;
+    if (typeof plain === "string") return plain;
+    const value = t.text;
+    if (typeof value === "string") return value;
+  }
+  return null;
+}
+
+function getCreatedAtFromMessage(msg: Record<string, unknown>): string | null {
+  const md = msg.message_date;
+  if (md && typeof md === "object") {
+    const mdo = md as Record<string, unknown>;
+    const created = mdo.created;
+    if (typeof created === "string") return created;
+    const received = mdo.received;
+    if (typeof received === "string") return received;
+    const available = mdo.available;
+    if (typeof available === "string") return available;
+  }
+  const dateCreated = msg.date_created;
+  if (typeof dateCreated === "string") return dateCreated;
+  return null;
+}
+
 function errorResponse(error: string, errorCode: string, executionLogs: string[], statusCode = 200) {
   return new Response(JSON.stringify({ success: false, error, error_code: errorCode, execution_logs: executionLogs }), {
     status: statusCode,
@@ -121,6 +149,36 @@ serve(async (req) => {
 
     const mlHeaders = { Authorization: `Bearer ${accessToken}` };
 
+    // Sanity check: token must match seller_id. If it doesn't, ML may return 0 orders without an explicit error.
+    try {
+      const meResp = await fetchWithRetry("https://api.mercadolibre.com/users/me", { headers: mlHeaders }, log);
+      if (meResp.ok) {
+        const me = (await meResp.json()) as Record<string, unknown>;
+        const meId = typeof me.id === "number" ? me.id : typeof me.id === "string" ? Number(me.id) : null;
+        if (meId && meId !== sellerUserId) {
+          log(`Token user mismatch: token belongs to ${meId} but requested seller_id is ${sellerUserId}`);
+          await supabase.from("post_sale_messages_sync_state").upsert({
+            seller_id,
+            user_id: user.id,
+            status: "error",
+            cursor_offset: 0,
+            last_error_code: "SELLER_TOKEN_MISMATCH",
+            last_error_message: `A conta conectada não corresponde ao seller_id selecionado (token=${meId}, seller_id=${sellerUserId}). Refaça a conexão da conta correta.`,
+            last_heartbeat_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "seller_id,user_id" });
+
+          return errorResponse(
+            `Conta conectada não corresponde ao seller_id selecionado (token=${meId}, seller_id=${sellerUserId}). Refaça a conexão da conta correta.`,
+            "SELLER_TOKEN_MISMATCH",
+            executionLogs
+          );
+        }
+      }
+    } catch {
+      // ignore sanity check failures
+    }
+
     // Get or create sync state
     const { data: syncState } = await supabase
       .from("post_sale_messages_sync_state")
@@ -147,41 +205,83 @@ serve(async (req) => {
     }, { onConflict: "seller_id,user_id" });
 
     // Fetch orders from ML API with offset
-    const dateThreshold = new Date();
-    dateThreshold.setDate(dateThreshold.getDate() - days_back);
-    const dateFrom = dateThreshold.toISOString().split("T")[0];
-    
-    const ordersUrl = `https://api.mercadolibre.com/orders/search?seller=${seller_id}&order.date_created.from=${dateFrom}T00:00:00.000-00:00&sort=date_desc&limit=${batch_size}&offset=${cursorOffset}`;
-    
+    // NOTE: days_back in UI refers to "historical messages" window; using order.date_created.from can return 0
+    // if there were no recent sales. We keep the filter as a first attempt, then fallback to a wider window.
+    const messageThreshold = new Date();
+    messageThreshold.setDate(messageThreshold.getDate() - days_back);
+
+    const buildOrdersUrl = (dateFromISO: string | null) => {
+      const base = `https://api.mercadolibre.com/orders/search?seller=${seller_id}&sort=date_desc&limit=${batch_size}&offset=${cursorOffset}`;
+      if (!dateFromISO) return base;
+      const dateFrom = dateFromISO.split("T")[0];
+      return `${base}&order.date_created.from=${dateFrom}T00:00:00.000-00:00`;
+    };
+
+    const initialDateFrom = new Date(messageThreshold);
+    const initialOrdersUrl = buildOrdersUrl(initialDateFrom.toISOString());
+
     log(`Fetching orders from offset ${cursorOffset}...`);
-    const ordersResponse = await fetchWithRetry(ordersUrl, { headers: mlHeaders }, log);
+    let ordersResponse = await fetchWithRetry(initialOrdersUrl, { headers: mlHeaders }, log);
     
     if (!ordersResponse.ok) {
       const errorText = await ordersResponse.text();
       log(`ML Orders API error: ${ordersResponse.status}`);
       await supabase.from("post_sale_messages_sync_state").update({ 
         status: "error", 
-        error_message: `API ${ordersResponse.status}: ${errorText.substring(0, 200)}`,
+        last_error_code: `ML_ORDERS_${ordersResponse.status}`,
+        last_error_message: `API ${ordersResponse.status}: ${errorText.substring(0, 200)}`,
         updated_at: new Date().toISOString() 
       }).eq("seller_id", seller_id).eq("user_id", user.id);
       return errorResponse(`ML API error: ${ordersResponse.status}`, "ML_API_ERROR", executionLogs);
     }
 
-    const ordersData = await ordersResponse.json();
-    const orders: MeliOrder[] = ordersData.results || [];
-    const totalOrders = ordersData.paging?.total || 0;
+    let ordersData = await ordersResponse.json();
+    let orders: MeliOrder[] = ordersData.results || [];
+    let totalOrders = ordersData.paging?.total || 0;
+
+    // Fallback: widen search window if there were no recent sales but there may be messages on older orders.
+    // This prevents the UI from showing "0 conversas" when there are post-sale conversations in older orders.
+    if (cursorOffset === 0 && totalOrders === 0 && days_back < 365) {
+      const fallbackFrom = new Date();
+      fallbackFrom.setDate(fallbackFrom.getDate() - 365);
+      const fallbackUrl = buildOrdersUrl(fallbackFrom.toISOString());
+      log(`No orders found in last ${days_back} days. Retrying with a wider window (365 days)...`);
+      ordersResponse = await fetchWithRetry(fallbackUrl, { headers: mlHeaders }, log);
+
+      if (!ordersResponse.ok) {
+        const errorText = await ordersResponse.text();
+        log(`ML Orders API error (fallback): ${ordersResponse.status}`);
+        await supabase.from("post_sale_messages_sync_state").update({ 
+          status: "error", 
+          last_error_code: `ML_ORDERS_FALLBACK_${ordersResponse.status}`,
+          last_error_message: `Fallback API ${ordersResponse.status}: ${errorText.substring(0, 200)}`,
+          updated_at: new Date().toISOString() 
+        }).eq("seller_id", seller_id).eq("user_id", user.id);
+        return errorResponse(`ML API error: ${ordersResponse.status}`, "ML_API_ERROR", executionLogs);
+      }
+
+      ordersData = await ordersResponse.json();
+      orders = ordersData.results || [];
+      totalOrders = ordersData.paging?.total || 0;
+    }
     
     log(`Fetched ${orders.length} orders (offset ${cursorOffset}, total ${totalOrders})`);
 
     if (orders.length === 0) {
+      const prevProcessed = (syncState?.processed_orders as number | undefined) || 0;
+      const prevSyncedConversations = (syncState?.synced_conversations as number | undefined) || 0;
       await supabase.from("post_sale_messages_sync_state").update({ 
         status: "done", 
         cursor_offset: 0,
+        processed_orders: prevProcessed,
+        synced_conversations: prevSyncedConversations,
+        last_success_at: new Date().toISOString(),
         updated_at: new Date().toISOString() 
       }).eq("seller_id", seller_id).eq("user_id", user.id);
       
       return new Response(JSON.stringify({ 
         success: true, synced: 0, 
+        unread: 0,
         message: "Sync complete - no more orders to process", 
         execution_logs: executionLogs 
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -194,14 +294,62 @@ serve(async (req) => {
       item_title: string | null; item_thumbnail: string | null; shipment_id: string | null;
     }>();
 
+    // Some ML endpoints do not return pack_id on /orders/search. When pack_id is missing, we fetch
+    // order details for a limited number of orders to resolve pack_id correctly.
+    let orderDetailsFetches = 0;
+    const MAX_ORDER_DETAILS_FETCHES = 12; // keep runtime predictable
+
     for (const order of orders) {
+      // Check time limit while building pack map (order details fetch can be slow)
+      if (Date.now() - startTime > MAX_EXECUTION_MS) {
+        log(`Time limit approaching while building pack map, pausing sync`);
+        break;
+      }
+
       const packId = order.pack_id ? String(order.pack_id) : String(order.id);
-      if (!packOrderMap.has(packId)) {
+      let resolvedPackId = packId;
+      let resolvedPackIdField: string | null = order.pack_id ? String(order.pack_id) : null;
+
+      const hasPackIdField = Object.prototype.hasOwnProperty.call(order as unknown as Record<string, unknown>, "pack_id");
+      if (!hasPackIdField && orderDetailsFetches < MAX_ORDER_DETAILS_FETCHES) {
+        orderDetailsFetches++;
+        try {
+          const detailsUrl = `https://api.mercadolibre.com/orders/${order.id}`;
+          const detailsResp = await fetchWithRetry(detailsUrl, { headers: mlHeaders }, log);
+          if (detailsResp.ok) {
+            const details = (await detailsResp.json()) as Record<string, unknown>;
+            const detailsPack = details.pack_id;
+            if (typeof detailsPack === "number") {
+              resolvedPackId = String(detailsPack);
+              resolvedPackIdField = String(detailsPack);
+            } else {
+              // pack_id null or absent => use order id as pack resource
+              resolvedPackId = String(order.id);
+              resolvedPackIdField = null;
+            }
+
+            // Enrich shipment id if missing
+            const detailsShipping = details.shipping as Record<string, unknown> | undefined;
+            const detailsShippingId = detailsShipping?.id;
+            if (!order.shipping?.id && (typeof detailsShippingId === "number" || typeof detailsShippingId === "string")) {
+              order.shipping = { id: Number(detailsShippingId) };
+            }
+          }
+        } catch (e) {
+          // Keep fallback behavior
+        }
+      } else if (hasPackIdField && (order.pack_id === null || order.pack_id === undefined)) {
+        // Explicitly no pack => use order id
+        resolvedPackId = String(order.id);
+        resolvedPackIdField = null;
+      }
+
+      if (!packOrderMap.has(resolvedPackId)) {
         const buyerName = [order.buyer.first_name, order.buyer.last_name].filter(Boolean).join(" ") || order.buyer.nickname || "Comprador";
         const firstItem = order.order_items?.[0]?.item;
-        packOrderMap.set(packId, {
+        packOrderMap.set(resolvedPackId, {
           order_id: String(order.id),
-          pack_id: order.pack_id ? String(order.pack_id) : null,
+          pack_id: resolvedPackIdField,
           buyer_id: String(order.buyer.id),
           buyer_name: buyerName,
           buyer_nickname: order.buyer.nickname || "",
@@ -217,6 +365,7 @@ serve(async (req) => {
     let totalSynced = 0;
     let totalMessages = 0;
     let totalErrors = 0;
+    let totalUnread = 0;
     const conversationsToUpsert: unknown[] = [];
     const messagesToUpsert: unknown[] = [];
 
@@ -238,26 +387,48 @@ serve(async (req) => {
           continue;
         }
 
-        const conversationData: MeliConversationResponse = await response.json();
-        if (!conversationData.messages?.length) continue;
+        const rawConversation = (await response.json()) as Record<string, unknown>;
+        const rawMessages = Array.isArray(rawConversation.messages) ? (rawConversation.messages as Array<Record<string, unknown>>) : [];
+        if (rawMessages.length === 0) continue;
 
         // Extract buyer info
         let buyerId = orderInfo.buyer_id;
         let buyerName = orderInfo.buyer_name;
-        for (const msg of conversationData.messages) {
-          if (msg.from.user_id !== sellerUserId) {
-            if (!buyerId) buyerId = String(msg.from.user_id);
-            if (buyerName === "Comprador" && msg.from.name) buyerName = msg.from.name;
+        for (const msg of rawMessages) {
+          const from = (msg.from as Record<string, unknown> | undefined) || undefined;
+          const fromUserId = typeof from?.user_id === "number" ? from.user_id : typeof from?.user_id === "string" ? Number(from.user_id) : null;
+          const fromName = typeof from?.name === "string" ? from.name : null;
+          if (fromUserId && fromUserId !== sellerUserId) {
+            if (!buyerId) buyerId = String(fromUserId);
+            if (buyerName === "Comprador" && fromName) buyerName = fromName;
             break;
           }
         }
         if (!buyerId) continue;
 
-        const unreadCount = conversationData.messages.filter(m => m.from.user_id !== sellerUserId && !m.message_date.read).length;
-        const sortedMessages = [...conversationData.messages].sort((a, b) => 
-          new Date(b.message_date.created).getTime() - new Date(a.message_date.created).getTime()
-        );
+        const unreadCount = rawMessages.filter((m) => {
+          const from = (m.from as Record<string, unknown> | undefined) || undefined;
+          const fromUserId = typeof from?.user_id === "number" ? from.user_id : typeof from?.user_id === "string" ? Number(from.user_id) : null;
+          const md = (m.message_date as Record<string, unknown> | undefined) || undefined;
+          const read = md?.read;
+          return fromUserId && fromUserId !== sellerUserId && !read;
+        }).length;
+
+        const sortedMessages = [...rawMessages].sort((a, b) => {
+          const aCreated = getCreatedAtFromMessage(a) || "";
+          const bCreated = getCreatedAtFromMessage(b) || "";
+          return new Date(bCreated).getTime() - new Date(aCreated).getTime();
+        });
         const lastMessage = sortedMessages[0];
+
+        // Only keep conversations with activity inside the requested window (or unread), to avoid importing huge history
+        const lastMessageCreated = getCreatedAtFromMessage(lastMessage);
+        if (lastMessageCreated) {
+          const lastTs = new Date(lastMessageCreated).getTime();
+          if (Number.isFinite(lastTs) && lastTs < messageThreshold.getTime() && unreadCount === 0) {
+            continue;
+          }
+        }
 
         conversationsToUpsert.push({
           user_id: user.id,
@@ -269,34 +440,48 @@ serve(async (req) => {
           item_title: orderInfo.item_title,
           item_thumbnail: orderInfo.item_thumbnail,
           shipment_id: orderInfo.shipment_id,
-          conversation_status: conversationData.conversation_status?.status || "active",
+          conversation_status: ((rawConversation.conversation_status as Record<string, unknown> | undefined)?.status as string) || "active",
           unread_count: unreadCount,
-          last_message_date: lastMessage?.message_date?.created,
-          last_message_text: lastMessage?.text?.substring(0, 200) || null,
-          last_message_from: lastMessage?.from.user_id === sellerUserId ? "seller" : "buyer",
-          seller_max_chars: conversationData.seller_max_chars || 350,
+          last_message_date: getCreatedAtFromMessage(lastMessage),
+          last_message_text: (parseMessageText(lastMessage?.text)?.substring(0, 200)) || null,
+          last_message_from: (() => {
+            const from = (lastMessage?.from as Record<string, unknown> | undefined) || undefined;
+            const fromUserId = typeof from?.user_id === "number" ? from.user_id : typeof from?.user_id === "string" ? Number(from.user_id) : null;
+            return fromUserId === sellerUserId ? "seller" : "buyer";
+          })(),
+          seller_max_chars: (rawConversation.seller_max_chars as number) || (rawConversation.seller_max_message_length as number) || 350,
           updated_at: new Date().toISOString(),
         });
 
-        for (const msg of conversationData.messages) {
+        for (const msg of rawMessages) {
+          const from = (msg.from as Record<string, unknown> | undefined) || undefined;
+          const fromUserId = typeof from?.user_id === "number" ? from.user_id : typeof from?.user_id === "string" ? Number(from.user_id) : null;
+          if (!fromUserId) continue;
           messagesToUpsert.push({
-            ml_message_id: msg.id,
-            from_user_id: String(msg.from.user_id),
-            from_type: msg.from.user_id === sellerUserId ? "seller" : "buyer",
-            message_text: msg.text,
-            message_status: msg.status,
-            moderation_status: msg.moderation_status || "clean",
-            moderation_reason: msg.moderation_reason,
-            has_attachments: (msg.attachments?.length || 0) > 0,
-            attachments: msg.attachments || [],
-            message_date: msg.message_date.created,
-            read_at: msg.message_date.read,
+            ml_message_id: typeof msg.id === "string" ? msg.id : null,
+            from_user_id: String(fromUserId),
+            from_type: fromUserId === sellerUserId ? "seller" : "buyer",
+            message_text: parseMessageText(msg.text),
+            message_status: (msg.status as string) || "available",
+            moderation_status:
+              ((msg.message_moderation as Record<string, unknown> | undefined)?.status as string) ||
+              (msg.moderation_status as string) ||
+              "clean",
+            moderation_reason:
+              ((msg.message_moderation as Record<string, unknown> | undefined)?.reason as string) ||
+              (msg.moderation_reason as string) ||
+              null,
+            has_attachments: Array.isArray(msg.message_attachments) ? (msg.message_attachments as unknown[]).length > 0 : Array.isArray(msg.attachments) ? (msg.attachments as unknown[]).length > 0 : false,
+            attachments: (Array.isArray(msg.message_attachments) ? msg.message_attachments : Array.isArray(msg.attachments) ? msg.attachments : []) as unknown[],
+            message_date: getCreatedAtFromMessage(msg) || new Date().toISOString(),
+            read_at: ((msg.message_date as Record<string, unknown> | undefined)?.read as string) || null,
             _order_id: orderInfo.order_id,
           });
         }
 
         totalSynced++;
-        totalMessages += conversationData.messages.length;
+        totalUnread += unreadCount;
+        totalMessages += rawMessages.length;
         
         // Small delay to avoid rate limits
         await new Promise(r => setTimeout(r, 100));
@@ -351,11 +536,18 @@ serve(async (req) => {
     // Update sync state
     const newOffset = cursorOffset + orders.length;
     const hasMore = newOffset < totalOrders;
+    const prevProcessed = (syncState?.processed_orders as number | undefined) || 0;
+    const prevSyncedConversations = (syncState?.synced_conversations as number | undefined) || 0;
     
     await supabase.from("post_sale_messages_sync_state").update({ 
       status: hasMore ? "paused" : "done",
       cursor_offset: hasMore ? newOffset : 0,
       last_heartbeat_at: new Date().toISOString(),
+      processed_orders: prevProcessed + orders.length,
+      synced_conversations: prevSyncedConversations + totalSynced,
+      last_success_at: new Date().toISOString(),
+      last_error_code: null,
+      last_error_message: null,
       updated_at: new Date().toISOString(),
     }).eq("seller_id", seller_id).eq("user_id", user.id);
 
@@ -364,6 +556,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({
       success: true,
       synced: totalSynced,
+      unread: totalUnread,
       messages_synced: totalMessages,
       errors: totalErrors,
       has_more: hasMore,
