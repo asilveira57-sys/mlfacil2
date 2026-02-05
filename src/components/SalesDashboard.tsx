@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { format } from "date-fns";
 import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
-import { useActiveSellerId } from "@/contexts/ActiveAccountContext";
+import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { SalesMetricsCard } from "./SalesMetricsCard";
 import { SalesChart } from "./SalesChart";
 import { AnnualSalesChart } from "./AnnualSalesChart";
@@ -150,8 +150,9 @@ export function SalesDashboard() {
   const [dateFilter, setDateFilter] = useState<DateFilter>(getInitial30DayFilter);
   const { toast } = useToast();
 
-  // Use global active seller ID from context (source of truth)
-  const activeSellerId = useActiveSellerId();
+  // Use global active account from context (source of truth)
+  const { activeAccount, sellerId: activeSellerId } = useActiveAccount();
+  const activeAccountId = activeAccount?.id ?? null;
 
   // Smart cache for sales data
   const { getCached, setCached, shouldRefreshRecent, getRecentDaysToRefresh } = useSalesDataCache();
@@ -214,10 +215,11 @@ export function SalesDashboard() {
         return;
       }
 
-      // Use the global active seller ID from context
+      // Use the global active account from context
       let response = await supabase.functions.invoke("ml-sales-data", {
         headers: { Authorization: `Bearer ${session.access_token}` },
         body: {
+          account_id: activeAccountId,
           seller_id: activeSellerId,
           date_from: currentFilters.dateFrom,
           date_to: currentFilters.dateTo,
@@ -241,6 +243,7 @@ export function SalesDashboard() {
         response = await supabase.functions.invoke("ml-sales-data", {
           headers: { Authorization: `Bearer ${session.access_token}` },
           body: {
+            account_id: activeAccountId,
             seller_id: activeSellerId,
             date_from: currentFilters.dateFrom,
             date_to: currentFilters.dateTo,

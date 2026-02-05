@@ -3,14 +3,14 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response('ok', { headers: corsHeaders });
   }
 
   try {
@@ -54,10 +54,11 @@ serve(async (req) => {
 
     console.log('Authenticated user:', user.id);
 
-    // Parse request body for date filters and optional seller_id
+    // Parse request body for date filters and optional seller_id/account_id
     let dateFrom: string | null = null;
     let dateTo: string | null = null;
     let requestedSellerId: string | null = null;
+    let requestedAccountId: string | null = null;
     
     if (req.method === 'POST') {
       try {
@@ -65,39 +66,57 @@ serve(async (req) => {
         dateFrom = body.date_from || null;
         dateTo = body.date_to || null;
         requestedSellerId = body.seller_id || null;
-        console.log('Request params:', { dateFrom, dateTo, requestedSellerId });
+        requestedAccountId = body.account_id || null;
+        console.log('Request params:', { dateFrom, dateTo, requestedSellerId, requestedAccountId });
       } catch {
         // No body or invalid JSON, use defaults
       }
     }
 
-    // Get user's ML account
-    // If seller_id is provided, use that specific account; otherwise get most recently updated
+    // Get user's ML account - prioritize account_id, then seller_id, then fallback
     let mlAccount = null;
     
-    if (requestedSellerId) {
-      // Get specific account by seller_id
+    // Priority 1: Get by account_id (UUID) with ownership validation
+    if (requestedAccountId) {
+      const { data: accountById, error: accError } = await supabaseAdmin
+        .from('ml_accounts')
+        .select('*')
+        .eq('id', requestedAccountId)
+        .eq('user_id', user.id)
+        .in('connection_status', ['connected', 'attention'])
+        .maybeSingle();
+      
+      if (accError) {
+        console.error('Error fetching ML account by id:', accError);
+      }
+      mlAccount = accountById;
+      console.log('Account lookup by UUID:', requestedAccountId, '-> found:', !!mlAccount);
+    }
+    
+    // Priority 2: Get by seller_id with ownership validation (no is_active filter)
+    if (!mlAccount && requestedSellerId) {
       const { data: specificAccount, error: specificError } = await supabaseAdmin
         .from('ml_accounts')
         .select('*')
         .eq('user_id', user.id)
         .eq('ml_user_id', requestedSellerId)
-        .eq('is_active', true)
+        .in('connection_status', ['connected', 'attention'])
         .maybeSingle();
       
       if (specificError) {
         console.error('Error fetching specific ML account:', specificError);
       }
       mlAccount = specificAccount;
+      console.log('Account lookup by seller_id:', requestedSellerId, '-> found:', !!mlAccount);
     }
     
-    // Fallback: get most recently updated account
+    // Fallback: get most recently updated connected account
     if (!mlAccount) {
       const { data: accounts, error: accountError } = await supabaseAdmin
         .from('ml_accounts')
         .select('*')
         .eq('user_id', user.id)
-        .eq('is_active', true)
+        .in('connection_status', ['connected', 'attention'])
         .order('updated_at', { ascending: false })
         .limit(1);
 
@@ -107,6 +126,7 @@ serve(async (req) => {
       }
       
       mlAccount = accounts?.[0] ?? null;
+      console.log('Account fallback lookup -> found:', !!mlAccount);
     }
 
     if (!mlAccount) {
