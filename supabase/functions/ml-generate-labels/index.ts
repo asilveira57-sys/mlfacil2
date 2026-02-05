@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { ZipReader, BlobReader, TextWriter } from "https://deno.land/x/zipjs@v2.7.32/index.js";
-import { PDFDocument, StandardFonts, rgb } from "https://esm.sh/pdf-lib@1.17.1";
+import { PDFDocument, StandardFonts, rgb } from "npm:pdf-lib@1.17.1";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -240,7 +240,7 @@ async function addHeadersToPdf(
   console.log(`Adding headers to ${pageCount} pages for ${shipmentIds.length} shipments`);
 
   for (let i = 0; i < pageCount; i++) {
-    const [embeddedPage] = await resultPdf.embedPages(sourcePdf, [i]);
+    const embeddedPage = await resultPdf.embedPage(sourcePdf.getPage(i));
     const { width: origWidth, height: origHeight } = embeddedPage;
     
     const shipmentId = i < shipmentIds.length ? shipmentIds[i] : null;
