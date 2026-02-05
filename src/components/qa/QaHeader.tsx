@@ -8,7 +8,7 @@ import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { useQueryClient } from "@tanstack/react-query";
 
 export function QaHeader() {
-  const { sellerId } = useActiveAccount();
+  const { activeAccount, sellerId } = useActiveAccount();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isSyncing, setIsSyncing] = useState(false);
@@ -23,10 +23,15 @@ export function QaHeader() {
         throw new Error("Não autenticado");
       }
 
-      // Sync unanswered questions
+      // Sync unanswered questions - pass account_id for proper lookup
       const response = await supabase.functions.invoke("ml-sync-questions", {
         headers: { Authorization: `Bearer ${session.access_token}` },
-        body: { seller_id: sellerId, status: "UNANSWERED", limit: 100 },
+        body: { 
+          seller_id: sellerId, 
+          account_id: activeAccount?.id,
+          status: "UNANSWERED", 
+          limit: 100 
+        },
       });
 
       if (response.error) {

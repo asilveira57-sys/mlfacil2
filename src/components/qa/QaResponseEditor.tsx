@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import {
   Send,
   Save,
@@ -11,6 +13,7 @@ import {
   RefreshCw,
   Flag,
   Loader2,
+  MessageCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -45,6 +48,7 @@ import {
   useUpdateQuestionStatus,
   useSnoozeQuestion,
   useIncrementLibraryUsage,
+  useQuestionResponses,
 } from "@/hooks/useQA";
 
 interface QaResponseEditorProps {
@@ -75,6 +79,11 @@ export function QaResponseEditor({
   const incrementUsage = useIncrementLibraryUsage();
   const { validate, isValidating } = useValidateResponse();
   const { suggest, isGenerating } = useAiSuggest();
+  
+  // Fetch existing responses for this question
+  const { data: existingResponses } = useQuestionResponses(question.id);
+  const sentResponse = existingResponses?.find(r => r.is_sent);
+  const isAnswered = question.status === "answered";
 
   // Reset state when question changes
   useEffect(() => {
@@ -237,6 +246,26 @@ export function QaResponseEditor({
           </Alert>
         )}
       </div>
+
+      {/* Show existing answer for answered questions */}
+      {isAnswered && sentResponse && (
+        <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 space-y-2">
+          <div className="flex items-center gap-2">
+            <MessageCircle className="h-4 w-4 text-primary" />
+            <span className="text-sm font-medium text-primary">Resposta enviada</span>
+            {sentResponse.sent_at && (
+              <span className="text-xs text-muted-foreground ml-auto">
+                {format(new Date(sentResponse.sent_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+              </span>
+            )}
+          </div>
+          <p className="text-sm">{sentResponse.response_text}</p>
+        </div>
+      )}
+
+      {/* Show editor only for unanswered questions */}
+      {!isAnswered && (
+        <>
 
       {/* Category Classification */}
       <div className="flex items-center gap-2">
@@ -466,6 +495,8 @@ export function QaResponseEditor({
           </Button>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

@@ -67,7 +67,7 @@ serve(async (req) => {
       );
     }
 
-    const { seller_id, limit = 100 } = await req.json();
+    const { seller_id, account_id, limit = 100 } = await req.json();
 
     if (!seller_id) {
       return new Response(
@@ -76,18 +76,47 @@ serve(async (req) => {
       );
     }
 
-    console.log(`[ml-sync-questions] Starting sync for seller ${seller_id}`);
+    console.log(`[ml-sync-questions] Starting sync for seller ${seller_id}, account ${account_id}`);
 
-    // Get ML credentials
-    const { data: mlAccount, error: accountError } = await supabase
-      .from("ml_accounts")
-      .select("access_token, refresh_token, ml_user_id")
-      .eq("ml_user_id", seller_id)
-      .eq("is_active", true)
-      .maybeSingle();
+    // Get ML credentials - prioritize account_id (UUID), fallback to seller_id
+    let mlAccount = null;
+    
+    // Priority 1: Get by account_id (UUID) with ownership validation
+    if (account_id) {
+      const { data: accountById, error: accError } = await supabase
+        .from("ml_accounts")
+        .select("access_token, refresh_token, ml_user_id")
+        .eq("id", account_id)
+        .eq("user_id", user.id)
+        .in("connection_status", ["connected", "attention"])
+        .maybeSingle();
+      
+      if (accError) {
+        console.error("Error fetching ML account by id:", accError);
+      }
+      mlAccount = accountById;
+      console.log(`[ml-sync-questions] Account lookup by UUID: ${account_id} -> found: ${!!mlAccount}`);
+    }
+    
+    // Priority 2: Get by seller_id with ownership validation
+    if (!mlAccount && seller_id) {
+      const { data: specificAccount, error: specificError } = await supabase
+        .from("ml_accounts")
+        .select("access_token, refresh_token, ml_user_id")
+        .eq("ml_user_id", seller_id)
+        .eq("user_id", user.id)
+        .in("connection_status", ["connected", "attention"])
+        .maybeSingle();
+      
+      if (specificError) {
+        console.error("Error fetching ML account by seller_id:", specificError);
+      }
+      mlAccount = specificAccount;
+      console.log(`[ml-sync-questions] Account lookup by seller_id: ${seller_id} -> found: ${!!mlAccount}`);
+    }
 
-    if (accountError || !mlAccount?.access_token) {
-      console.error("No ML account found:", accountError);
+    if (!mlAccount?.access_token) {
+      console.error("No ML account found or token missing");
       return new Response(
         JSON.stringify({ success: false, error: "ML account not found or token missing" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -297,6 +326,67 @@ serve(async (req) => {
     }
 
     console.log(`[ml-sync-questions] Successfully synced ${questionsToUpsert.length} questions`);
+
+    // Now sync responses for answered questions from ML
+    // First, get the question IDs we just upserted
+    const { data: syncedQuestions } = await supabase
+      .from("qa_questions")
+      .select("id, ml_question_id")
+      .in("ml_question_id", questions.map(q => String(q.id)));
+
+    const questionIdMap = new Map<string, string>();
+    syncedQuestions?.forEach(q => {
+      questionIdMap.set(q.ml_question_id, q.id);
+    });
+
+    // Create responses for answered questions from ML
+    const responsesToUpsert = questions
+      .filter(q => q.answer && q.answer.text)
+      .map(q => {
+        const questionUuid = questionIdMap.get(String(q.id));
+        if (!questionUuid) return null;
+        
+        return {
+          user_id: user.id,
+          seller_id: String(seller_id),
+          question_id: questionUuid,
+          response_text: q.answer!.text,
+          source: "ml_synced" as const,
+          is_draft: false,
+          is_sent: true,
+          sent_at: q.answer!.date_created,
+          created_at: q.answer!.date_created,
+          updated_at: new Date().toISOString(),
+        };
+      })
+      .filter(Boolean);
+
+    if (responsesToUpsert.length > 0) {
+      // Check which responses already exist to avoid duplicates
+      const { data: existingResponses } = await supabase
+        .from("qa_responses")
+        .select("question_id")
+        .in("question_id", responsesToUpsert.map(r => r!.question_id))
+        .eq("is_sent", true);
+
+      const existingQuestionIds = new Set(existingResponses?.map(r => r.question_id) || []);
+      
+      const newResponses = responsesToUpsert.filter(
+        r => r && !existingQuestionIds.has(r.question_id)
+      );
+
+      if (newResponses.length > 0) {
+        const { error: responseError } = await supabase
+          .from("qa_responses")
+          .insert(newResponses as never[]);
+
+        if (responseError) {
+          console.error("Error inserting ML responses:", responseError);
+        } else {
+          console.log(`[ml-sync-questions] Synced ${newResponses.length} ML responses`);
+        }
+      }
+    }
 
     return new Response(
       JSON.stringify({
