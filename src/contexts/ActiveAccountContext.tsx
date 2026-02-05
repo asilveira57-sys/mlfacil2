@@ -215,11 +215,11 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
       const persistedId = await getPersistedActiveAccountId(user.id);
       
       // Find the active account
-      let active = loadedAccounts.find(a => a.id === persistedId && a.status === 'connected');
+      let active = loadedAccounts.find(a => a.id === persistedId && (a.status === 'connected' || a.status === 'attention'));
       
-      // If not found or not connected, use first connected account
+      // If not found or not usable, use first connected/attention account
       if (!active) {
-        active = loadedAccounts.find(a => a.status === 'connected');
+        active = loadedAccounts.find(a => a.status === 'connected' || a.status === 'attention');
       }
       
       // If still not found, use first account
