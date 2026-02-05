@@ -77,7 +77,8 @@ serve(async (req) => {
 
     log(`User authenticated: ${user.id}`);
 
-    const { seller_id, days_back = 30, batch_size = 30 } = await req.json();
+    const { seller_id, days_back = 30, batch_size: rawBatchSize = 30 } = await req.json();
+    const batch_size = Math.min(rawBatchSize, 50); // ML API limit is 50
     if (!seller_id) return errorResponse("seller_id is required", "MISSING_SELLER_ID", executionLogs, 400);
 
     log(`Starting sync for seller ${seller_id}, last ${days_back} days, batch_size ${batch_size}`);
