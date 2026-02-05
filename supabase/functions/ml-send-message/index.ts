@@ -8,7 +8,8 @@ const corsHeaders = {
 
 interface SendMessageRequest {
   conversation_id: string;
-  seller_id: string;
+  seller_id?: string;
+  account_id?: string; // UUID of ml_accounts - preferred
   text: string;
 }
 
@@ -24,6 +25,89 @@ interface ValidationViolation {
   pattern: string;
   description: string;
   match: string;
+}
+
+/**
+ * Get ML account credentials with proper ownership validation.
+ * Prioritizes account_id (UUID) lookup, falls back to seller_id (ml_user_id).
+ * Does NOT filter by is_active - uses connection_status instead.
+ */
+async function getMLAccountCredentials(
+  supabase: any, // Use any to avoid Supabase client type issues
+  userId: string,
+  accountId: string | null,
+  sellerId: string | null,
+  log: (msg: string) => void
+): Promise<{ account: Record<string, unknown> | null; error: string | null }> {
+  // Prefer account_id lookup (UUID from ml_accounts)
+  if (accountId) {
+    log(`Looking up credentials by account_id: ${accountId}`);
+    const { data, error } = await supabase
+      .from("ml_accounts")
+      .select("id, access_token, refresh_token, ml_user_id, token_expires_at, connection_status, user_id")
+      .eq("id", accountId)
+      .eq("user_id", userId) // Ownership validation
+      .maybeSingle();
+
+    if (error) {
+      log(`Account lookup error: ${error.message}`);
+      return { account: null, error: `Database error: ${error.message}` };
+    }
+
+    if (!data) {
+      log(`Account not found or does not belong to user`);
+      return { account: null, error: "Conta não encontrada ou não pertence a este usuário" };
+    }
+
+    const accountData = data as Record<string, unknown>;
+
+    if (!accountData.access_token) {
+      log(`Account has no access token`);
+      return { account: null, error: "Conta sem token de acesso. Reconecte a conta." };
+    }
+
+    if (accountData.connection_status === 'disconnected' || accountData.connection_status === 'revoked') {
+      log(`Account is disconnected: ${accountData.connection_status}`);
+      return { account: null, error: "Conta desconectada. Reconecte no Mercado Livre." };
+    }
+
+    return { account: accountData, error: null };
+  }
+
+  // Fallback: lookup by seller_id (ml_user_id)
+  if (sellerId) {
+    log(`Looking up credentials by seller_id: ${sellerId}`);
+    const { data, error } = await supabase
+      .from("ml_accounts")
+      .select("id, access_token, refresh_token, ml_user_id, token_expires_at, connection_status, user_id")
+      .eq("ml_user_id", sellerId)
+      .eq("user_id", userId) // Ownership validation
+      .in("connection_status", ["connected", "attention"]) // Only valid connections
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      log(`Seller lookup error: ${error.message}`);
+      return { account: null, error: `Database error: ${error.message}` };
+    }
+
+    if (!data) {
+      log(`No valid account found for seller_id ${sellerId}`);
+      return { account: null, error: "Conta do Mercado Livre não encontrada ou desconectada" };
+    }
+
+    const accountData = data as Record<string, unknown>;
+
+    if (!accountData.access_token) {
+      log(`Account has no access token`);
+      return { account: null, error: "Conta sem token de acesso. Reconecte a conta." };
+    }
+
+    return { account: accountData, error: null };
+  }
+
+  return { account: null, error: "account_id ou seller_id é obrigatório" };
 }
 
 serve(async (req) => {
@@ -65,14 +149,25 @@ serve(async (req) => {
 
     log(`User authenticated: ${user.id}`);
 
-    const { conversation_id, seller_id, text }: SendMessageRequest = await req.json();
+    const { conversation_id, seller_id, account_id, text }: SendMessageRequest = await req.json();
 
-    if (!conversation_id || !seller_id || !text) {
+    if (!conversation_id || !text) {
       return new Response(
         JSON.stringify({ 
           success: false, 
-          error: "Missing required fields: conversation_id, seller_id, text", 
+          error: "Missing required fields: conversation_id, text", 
           error_code: "VALIDATION_ERROR" 
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (!seller_id && !account_id) {
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: "account_id ou seller_id é obrigatório", 
+          error_code: "MISSING_IDENTIFIER" 
         }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
@@ -92,7 +187,7 @@ serve(async (req) => {
       );
     }
 
-    log(`Processing message for conversation ${conversation_id}, seller ${seller_id}`);
+    log(`Processing message for conversation ${conversation_id}`);
 
     // Get the conversation
     const { data: conversation, error: convError } = await supabase
@@ -173,30 +268,30 @@ serve(async (req) => {
       );
     }
 
-    // Get ML credentials
-    const { data: mlAccount, error: accountError } = await supabase
-      .from("ml_accounts")
-      .select("access_token, refresh_token, ml_user_id, token_expires_at")
-      .eq("ml_user_id", seller_id)
-      .eq("is_active", true)
-      .maybeSingle();
+    // Get ML credentials using unified lookup
+    const { account: mlAccount, error: credError } = await getMLAccountCredentials(
+      supabase, user.id, account_id || null, seller_id || null, log
+    );
 
-    if (accountError || !mlAccount?.access_token) {
-      log(`ML account not found: ${accountError?.message}`);
+    if (credError || !mlAccount) {
+      log(`ML account error: ${credError}`);
       return new Response(
         JSON.stringify({ 
           success: false, 
-          error: "Conta do Mercado Livre não encontrada ou desconectada", 
+          error: credError || "Conta do Mercado Livre não encontrada ou desconectada", 
           error_code: "ML_ACCOUNT_NOT_FOUND" 
         }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    let accessToken = mlAccount.access_token;
+    const actualSellerId = mlAccount.ml_user_id as string;
+    let accessToken = mlAccount.access_token as string;
+
+    log(`Using account: ${mlAccount.id}, seller_id: ${actualSellerId}`);
 
     // Check if token is expired and refresh if needed
-    const tokenExpiresAt = new Date(mlAccount.token_expires_at);
+    const tokenExpiresAt = new Date(mlAccount.token_expires_at as string);
     const now = new Date();
     if (tokenExpiresAt <= now) {
       log("Token expired, attempting refresh...");
@@ -206,7 +301,7 @@ serve(async (req) => {
           "Content-Type": "application/json",
           Authorization: authHeader,
         },
-        body: JSON.stringify({ seller_id }),
+        body: JSON.stringify({ account_id: mlAccount.id, seller_id: actualSellerId }),
       });
 
       if (refreshResponse.ok) {
@@ -240,11 +335,11 @@ serve(async (req) => {
     const packId = conversation.pack_id || conversation.order_id;
     
     // Send message to ML API
-    const mlUrl = `https://api.mercadolibre.com/messages/packs/${packId}/sellers/${seller_id}?tag=post_sale`;
+    const mlUrl = `https://api.mercadolibre.com/messages/packs/${packId}/sellers/${actualSellerId}?tag=post_sale`;
     log(`Sending message to ML: ${mlUrl}`);
 
     const mlPayload = {
-      from: { user_id: parseInt(seller_id, 10) },
+      from: { user_id: parseInt(actualSellerId, 10) },
       to: { user_id: parseInt(conversation.buyer_id, 10) },
       text: text,
     };
@@ -313,7 +408,7 @@ serve(async (req) => {
     const newMessage = {
       conversation_id: conversation.id,
       ml_message_id: mlData.id,
-      from_user_id: seller_id,
+      from_user_id: actualSellerId,
       from_type: "seller",
       message_text: text,
       message_status: "available",

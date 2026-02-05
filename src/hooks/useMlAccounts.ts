@@ -12,11 +12,21 @@ export interface MlAccount {
   access_token: string;
   refresh_token: string;
   token_expires_at: string;
+  connection_status?: string;
   created_at: string;
   updated_at: string;
 }
 
-export function useMlAccounts() {
+export interface UseMlAccountsOptions {
+  /**
+   * If true, only returns accounts with connection_status in ('connected', 'attention')
+   * Default: false (returns all accounts for the user)
+   */
+  onlyConnected?: boolean;
+}
+
+export function useMlAccounts(options: UseMlAccountsOptions = {}) {
+  const { onlyConnected = false } = options;
   const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -26,16 +36,23 @@ export function useMlAccounts() {
   }, []);
 
   return useQuery({
-    queryKey: ['ml-accounts', userId],
+    queryKey: ['ml-accounts', userId, onlyConnected],
     queryFn: async (): Promise<MlAccount[]> => {
       if (!userId) return [];
       
-      const { data, error } = await supabase
+      let query = supabase
         .from('ml_accounts')
         .select('*')
         .eq('user_id', userId)
-        .eq('is_active', true)
         .order('created_at', { ascending: false });
+
+      // Only filter by connection_status if explicitly requested
+      // Do NOT filter by is_active - that flag is for "enabled/disabled" not "selected"
+      if (onlyConnected) {
+        query = query.in('connection_status', ['connected', 'attention']);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
       return (data || []) as MlAccount[];

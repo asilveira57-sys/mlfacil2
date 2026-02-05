@@ -84,6 +84,90 @@ async function fetchWithRetry(url: string, options: RequestInit, log: (msg: stri
   throw new Error("Max retries exceeded");
 }
 
+/**
+ * Get ML account credentials with proper ownership validation.
+ * Prioritizes account_id (UUID) lookup, falls back to seller_id (ml_user_id).
+ * Does NOT filter by is_active - uses connection_status instead.
+ */
+async function getMLAccountCredentials(
+  supabase: any, // Use any to avoid Supabase client type issues
+  userId: string,
+  accountId: string | null,
+  sellerId: string | null,
+  log: (msg: string) => void
+): Promise<{ account: Record<string, unknown> | null; error: string | null }> {
+  // Prefer account_id lookup (UUID from ml_accounts)
+  if (accountId) {
+    log(`Looking up credentials by account_id: ${accountId}`);
+    const { data, error } = await supabase
+      .from("ml_accounts")
+      .select("id, access_token, refresh_token, ml_user_id, token_expires_at, connection_status, user_id")
+      .eq("id", accountId)
+      .eq("user_id", userId) // Ownership validation
+      .maybeSingle();
+
+    if (error) {
+      log(`Account lookup error: ${error.message}`);
+      return { account: null, error: `Database error: ${error.message}` };
+    }
+
+    if (!data) {
+      log(`Account not found or does not belong to user`);
+      return { account: null, error: "Conta não encontrada ou não pertence a este usuário" };
+    }
+
+    const accountData = data as Record<string, unknown>;
+
+    if (!accountData.access_token) {
+      log(`Account has no access token`);
+      return { account: null, error: "Conta sem token de acesso. Reconecte a conta." };
+    }
+
+    // Check connection status (not is_active)
+    if (accountData.connection_status === 'disconnected' || accountData.connection_status === 'revoked') {
+      log(`Account is disconnected: ${accountData.connection_status}`);
+      return { account: null, error: "Conta desconectada. Reconecte no Mercado Livre." };
+    }
+
+    return { account: accountData, error: null };
+  }
+
+  // Fallback: lookup by seller_id (ml_user_id)
+  if (sellerId) {
+    log(`Looking up credentials by seller_id: ${sellerId}`);
+    const { data, error } = await supabase
+      .from("ml_accounts")
+      .select("id, access_token, refresh_token, ml_user_id, token_expires_at, connection_status, user_id")
+      .eq("ml_user_id", sellerId)
+      .eq("user_id", userId) // Ownership validation
+      .in("connection_status", ["connected", "attention"]) // Only valid connections
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      log(`Seller lookup error: ${error.message}`);
+      return { account: null, error: `Database error: ${error.message}` };
+    }
+
+    if (!data) {
+      log(`No valid account found for seller_id ${sellerId}`);
+      return { account: null, error: "Conta do Mercado Livre não encontrada ou desconectada" };
+    }
+
+    const accountData = data as Record<string, unknown>;
+
+    if (!accountData.access_token) {
+      log(`Account has no access token`);
+      return { account: null, error: "Conta sem token de acesso. Reconecte a conta." };
+    }
+
+    return { account: accountData, error: null };
+  }
+
+  return { account: null, error: "account_id ou seller_id é obrigatório" };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -105,34 +189,39 @@ serve(async (req) => {
 
     log(`User authenticated: ${user.id}`);
 
-    const { seller_id, days_back = 30, batch_size: rawBatchSize = 30 } = await req.json();
+    const { seller_id, account_id, days_back = 30, batch_size: rawBatchSize = 30 } = await req.json();
     const batch_size = Math.min(rawBatchSize, 50); // ML API limit is 50
-    if (!seller_id) return errorResponse("seller_id is required", "MISSING_SELLER_ID", executionLogs, 400);
 
-    log(`Starting sync for seller ${seller_id}, last ${days_back} days, batch_size ${batch_size}`);
-
-    // Get ML credentials
-    const { data: mlAccount, error: accountError } = await supabase
-      .from("ml_accounts")
-      .select("access_token, refresh_token, ml_user_id, token_expires_at")
-      .eq("ml_user_id", seller_id)
-      .eq("is_active", true)
-      .maybeSingle();
-
-    if (accountError || !mlAccount?.access_token) {
-      return errorResponse("ML account not found or token missing", "NO_ML_ACCOUNT", executionLogs);
+    // Validate input - require at least one identifier
+    if (!seller_id && !account_id) {
+      return errorResponse("account_id ou seller_id é obrigatório", "MISSING_IDENTIFIER", executionLogs, 400);
     }
 
-    let accessToken = mlAccount.access_token;
-    const sellerUserId = Number(seller_id);
+    log(`Starting sync with account_id=${account_id || 'N/A'}, seller_id=${seller_id || 'N/A'}, days_back=${days_back}, batch_size=${batch_size}`);
+
+    // Get ML credentials using unified lookup
+    const { account: mlAccount, error: credError } = await getMLAccountCredentials(
+      supabase, user.id, account_id || null, seller_id || null, log
+    );
+
+    if (credError || !mlAccount) {
+      return errorResponse(credError || "Conta não encontrada", "NO_ML_ACCOUNT", executionLogs);
+    }
+
+    // Extract seller_id from account (source of truth)
+    const actualSellerId = mlAccount.ml_user_id as string;
+    const sellerUserId = Number(actualSellerId);
+    let accessToken = mlAccount.access_token as string;
+
+    log(`Using account: ${mlAccount.id}, seller_id: ${actualSellerId}`);
 
     // Check if token is expired
-    if (new Date(mlAccount.token_expires_at) <= new Date()) {
+    if (new Date(mlAccount.token_expires_at as string) <= new Date()) {
       log("Token expired, refreshing...");
       const refreshResponse = await fetch(`${supabaseUrl}/functions/v1/ml-token-refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: authHeader },
-        body: JSON.stringify({ seller_id }),
+        body: JSON.stringify({ account_id: mlAccount.id, seller_id: actualSellerId }),
       });
       if (refreshResponse.ok) {
         const refreshData = await refreshResponse.json();
@@ -149,16 +238,16 @@ serve(async (req) => {
 
     const mlHeaders = { Authorization: `Bearer ${accessToken}` };
 
-    // Sanity check: token must match seller_id. If it doesn't, ML may return 0 orders without an explicit error.
+    // Sanity check: token must match seller_id
     try {
       const meResp = await fetchWithRetry("https://api.mercadolibre.com/users/me", { headers: mlHeaders }, log);
       if (meResp.ok) {
         const me = (await meResp.json()) as Record<string, unknown>;
         const meId = typeof me.id === "number" ? me.id : typeof me.id === "string" ? Number(me.id) : null;
         if (meId && meId !== sellerUserId) {
-          log(`Token user mismatch: token belongs to ${meId} but requested seller_id is ${sellerUserId}`);
+          log(`Token user mismatch: token belongs to ${meId} but account seller_id is ${sellerUserId}`);
           await supabase.from("post_sale_messages_sync_state").upsert({
-            seller_id,
+            seller_id: actualSellerId,
             user_id: user.id,
             status: "error",
             cursor_offset: 0,
@@ -183,7 +272,7 @@ serve(async (req) => {
     const { data: syncState } = await supabase
       .from("post_sale_messages_sync_state")
       .select("*")
-      .eq("seller_id", seller_id)
+      .eq("seller_id", actualSellerId)
       .eq("user_id", user.id)
       .maybeSingle();
 
@@ -196,7 +285,7 @@ serve(async (req) => {
 
     // Upsert sync state as running
     await supabase.from("post_sale_messages_sync_state").upsert({
-      seller_id,
+      seller_id: actualSellerId,
       user_id: user.id,
       status: "running",
       cursor_offset: cursorOffset,
@@ -205,13 +294,11 @@ serve(async (req) => {
     }, { onConflict: "seller_id,user_id" });
 
     // Fetch orders from ML API with offset
-    // NOTE: days_back in UI refers to "historical messages" window; using order.date_created.from can return 0
-    // if there were no recent sales. We keep the filter as a first attempt, then fallback to a wider window.
     const messageThreshold = new Date();
     messageThreshold.setDate(messageThreshold.getDate() - days_back);
 
     const buildOrdersUrl = (dateFromISO: string | null) => {
-      const base = `https://api.mercadolibre.com/orders/search?seller=${seller_id}&sort=date_desc&limit=${batch_size}&offset=${cursorOffset}`;
+      const base = `https://api.mercadolibre.com/orders/search?seller=${actualSellerId}&sort=date_desc&limit=${batch_size}&offset=${cursorOffset}`;
       if (!dateFromISO) return base;
       const dateFrom = dateFromISO.split("T")[0];
       return `${base}&order.date_created.from=${dateFrom}T00:00:00.000-00:00`;
@@ -231,7 +318,7 @@ serve(async (req) => {
         last_error_code: `ML_ORDERS_${ordersResponse.status}`,
         last_error_message: `API ${ordersResponse.status}: ${errorText.substring(0, 200)}`,
         updated_at: new Date().toISOString() 
-      }).eq("seller_id", seller_id).eq("user_id", user.id);
+      }).eq("seller_id", actualSellerId).eq("user_id", user.id);
       return errorResponse(`ML API error: ${ordersResponse.status}`, "ML_API_ERROR", executionLogs);
     }
 
@@ -239,8 +326,7 @@ serve(async (req) => {
     let orders: MeliOrder[] = ordersData.results || [];
     let totalOrders = ordersData.paging?.total || 0;
 
-    // Fallback: widen search window if there were no recent sales but there may be messages on older orders.
-    // This prevents the UI from showing "0 conversas" when there are post-sale conversations in older orders.
+    // Fallback: widen search window if no recent sales
     if (cursorOffset === 0 && totalOrders === 0 && days_back < 365) {
       const fallbackFrom = new Date();
       fallbackFrom.setDate(fallbackFrom.getDate() - 365);
@@ -256,7 +342,7 @@ serve(async (req) => {
           last_error_code: `ML_ORDERS_FALLBACK_${ordersResponse.status}`,
           last_error_message: `Fallback API ${ordersResponse.status}: ${errorText.substring(0, 200)}`,
           updated_at: new Date().toISOString() 
-        }).eq("seller_id", seller_id).eq("user_id", user.id);
+        }).eq("seller_id", actualSellerId).eq("user_id", user.id);
         return errorResponse(`ML API error: ${ordersResponse.status}`, "ML_API_ERROR", executionLogs);
       }
 
@@ -277,7 +363,7 @@ serve(async (req) => {
         synced_conversations: prevSyncedConversations,
         last_success_at: new Date().toISOString(),
         updated_at: new Date().toISOString() 
-      }).eq("seller_id", seller_id).eq("user_id", user.id);
+      }).eq("seller_id", actualSellerId).eq("user_id", user.id);
       
       return new Response(JSON.stringify({ 
         success: true, synced: 0, 
@@ -294,13 +380,10 @@ serve(async (req) => {
       item_title: string | null; item_thumbnail: string | null; shipment_id: string | null;
     }>();
 
-    // Some ML endpoints do not return pack_id on /orders/search. When pack_id is missing, we fetch
-    // order details for a limited number of orders to resolve pack_id correctly.
     let orderDetailsFetches = 0;
-    const MAX_ORDER_DETAILS_FETCHES = 12; // keep runtime predictable
+    const MAX_ORDER_DETAILS_FETCHES = 12;
 
     for (const order of orders) {
-      // Check time limit while building pack map (order details fetch can be slow)
       if (Date.now() - startTime > MAX_EXECUTION_MS) {
         log(`Time limit approaching while building pack map, pausing sync`);
         break;
@@ -323,12 +406,10 @@ serve(async (req) => {
               resolvedPackId = String(detailsPack);
               resolvedPackIdField = String(detailsPack);
             } else {
-              // pack_id null or absent => use order id as pack resource
               resolvedPackId = String(order.id);
               resolvedPackIdField = null;
             }
 
-            // Enrich shipment id if missing
             const detailsShipping = details.shipping as Record<string, unknown> | undefined;
             const detailsShippingId = detailsShipping?.id;
             if (!order.shipping?.id && (typeof detailsShippingId === "number" || typeof detailsShippingId === "string")) {
@@ -339,7 +420,6 @@ serve(async (req) => {
           // Keep fallback behavior
         }
       } else if (hasPackIdField && (order.pack_id === null || order.pack_id === undefined)) {
-        // Explicitly no pack => use order id
         resolvedPackId = String(order.id);
         resolvedPackIdField = null;
       }
@@ -370,14 +450,13 @@ serve(async (req) => {
     const messagesToUpsert: unknown[] = [];
 
     for (const [packId, orderInfo] of packOrderMap.entries()) {
-      // Check time limit
       if (Date.now() - startTime > MAX_EXECUTION_MS) {
         log(`Time limit approaching, pausing sync`);
         break;
       }
 
       try {
-        const messagesUrl = `https://api.mercadolibre.com/messages/packs/${packId}/sellers/${seller_id}?tag=post_sale&mark_as_read=false`;
+        const messagesUrl = `https://api.mercadolibre.com/messages/packs/${packId}/sellers/${actualSellerId}?tag=post_sale&mark_as_read=false`;
         const response = await fetchWithRetry(messagesUrl, { headers: mlHeaders }, log);
 
         if (!response.ok) {
@@ -391,7 +470,6 @@ serve(async (req) => {
         const rawMessages = Array.isArray(rawConversation.messages) ? (rawConversation.messages as Array<Record<string, unknown>>) : [];
         if (rawMessages.length === 0) continue;
 
-        // Extract buyer info
         let buyerId = orderInfo.buyer_id;
         let buyerName = orderInfo.buyer_name;
         for (const msg of rawMessages) {
@@ -421,7 +499,6 @@ serve(async (req) => {
         });
         const lastMessage = sortedMessages[0];
 
-        // Only keep conversations with activity inside the requested window (or unread), to avoid importing huge history
         const lastMessageCreated = getCreatedAtFromMessage(lastMessage);
         if (lastMessageCreated) {
           const lastTs = new Date(lastMessageCreated).getTime();
@@ -432,7 +509,7 @@ serve(async (req) => {
 
         conversationsToUpsert.push({
           user_id: user.id,
-          seller_id,
+          seller_id: actualSellerId,
           order_id: orderInfo.order_id,
           pack_id: orderInfo.pack_id,
           buyer_id: buyerId,
@@ -483,7 +560,6 @@ serve(async (req) => {
         totalUnread += unreadCount;
         totalMessages += rawMessages.length;
         
-        // Small delay to avoid rate limits
         await new Promise(r => setTimeout(r, 100));
       } catch (err) {
         log(`Error pack ${packId}: ${err instanceof Error ? err.message : "Unknown"}`);
@@ -506,7 +582,7 @@ serve(async (req) => {
       const { data: savedConversations } = await supabase
         .from("post_sale_conversations")
         .select("id, order_id")
-        .eq("seller_id", seller_id)
+        .eq("seller_id", actualSellerId)
         .in("order_id", orderIds);
 
       const conversationIdMap = new Map<string, string>();
@@ -549,7 +625,7 @@ serve(async (req) => {
       last_error_code: null,
       last_error_message: null,
       updated_at: new Date().toISOString(),
-    }).eq("seller_id", seller_id).eq("user_id", user.id);
+    }).eq("seller_id", actualSellerId).eq("user_id", user.id);
 
     log(`Sync batch complete: ${totalSynced} conversations, ${totalMessages} messages, ${totalErrors} errors`);
 

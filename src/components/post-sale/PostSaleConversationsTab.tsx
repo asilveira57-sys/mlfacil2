@@ -13,44 +13,27 @@ import {
   useSendPostSaleMessage,
   useMarkConversationRead,
 } from "@/hooks/usePostSaleConversations";
-import { useMlAccounts, type MlAccount } from "@/hooks/useMlAccounts";
+import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import type { ConversationFilters } from "@/types/post-sale-conversation";
 
-const STORAGE_KEY = "post-sale-selected-account";
-
 export function PostSaleConversationsTab() {
-  const { data: mlAccounts = [], isLoading: isLoadingAccount } = useMlAccounts();
-  
-  // Persist selected account in localStorage
-  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem(STORAGE_KEY);
-    }
-    return null;
-  });
+  // Use ActiveAccountContext as single source of truth
+  const { 
+    activeAccount, 
+    accounts, 
+    loading: isLoadingAccount, 
+    initialized,
+    setActiveAccount 
+  } = useActiveAccount();
 
-  // Get the selected account or fallback to first
-  const selectedAccount = mlAccounts.find((a) => a.ml_user_id === selectedAccountId) || mlAccounts[0] || null;
-  const sellerId = selectedAccount?.ml_user_id || null;
-
-  // Update localStorage when selection changes
-  useEffect(() => {
-    if (selectedAccountId) {
-      localStorage.setItem(STORAGE_KEY, selectedAccountId);
-    }
-  }, [selectedAccountId]);
-
-  // Auto-select first account if none selected
-  useEffect(() => {
-    if (!selectedAccountId && mlAccounts.length > 0) {
-      setSelectedAccountId(mlAccounts[0].ml_user_id);
-    }
-  }, [mlAccounts, selectedAccountId]);
+  // Derive sellerId from context
+  const sellerId = activeAccount?.sellerId || null;
+  const accountId = activeAccount?.id || null;
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filters, setFilters] = useState<ConversationFilters>({});
 
-  // Queries
+  // Queries - now using sellerId from context
   const {
     data: conversations = [],
     isLoading: isLoadingConversations,
@@ -74,24 +57,24 @@ export function PostSaleConversationsTab() {
     }
   }, [selectedId, conversationData?.conversation?.unread_count]);
 
-  // Initial sync if no conversations
+  // Reset selected conversation when account changes
   useEffect(() => {
-    if (sellerId && conversations.length === 0 && !isLoadingConversations && !syncMutation.isPending) {
-      // Only auto-sync once on first load if there are no conversations
-    }
-  }, [sellerId, conversations.length, isLoadingConversations]);
+    setSelectedId(null);
+  }, [sellerId]);
 
   const handleRefresh = () => {
-    if (!sellerId) return;
-    syncMutation.mutate({ sellerId });
+    if (!sellerId || !accountId) return;
+    // Pass account_id for proper credential lookup
+    syncMutation.mutate({ sellerId, accountId });
   };
 
   const handleSendMessage = async (text: string) => {
-    if (!selectedId || !sellerId) return;
+    if (!selectedId || !sellerId || !accountId) return;
 
     const result = await sendMutation.mutateAsync({
       conversationId: selectedId,
       sellerId,
+      accountId,
       text,
     });
 
@@ -100,13 +83,16 @@ export function PostSaleConversationsTab() {
     }
   };
 
-  const handleAccountChange = (value: string) => {
-    setSelectedAccountId(value);
-    setSelectedId(null); // Reset selected conversation
+  const handleAccountChange = async (mlUserId: string) => {
+    // Find account by ml_user_id and switch using context
+    const account = accounts.find((a) => a.sellerId === mlUserId);
+    if (account) {
+      await setActiveAccount(account.id);
+    }
   };
 
-  // Loading state
-  if (isLoadingAccount) {
+  // Show loading while context initializes
+  if (!initialized || isLoadingAccount) {
     return (
       <Card className="h-[600px] flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -115,7 +101,7 @@ export function PostSaleConversationsTab() {
   }
 
   // No account connected
-  if (mlAccounts.length === 0) {
+  if (accounts.length === 0) {
     return (
       <Card className="h-[600px] flex flex-col items-center justify-center p-8 text-center">
         <MessageSquare className="h-12 w-12 text-muted-foreground mb-4" />
@@ -127,21 +113,35 @@ export function PostSaleConversationsTab() {
     );
   }
 
-  // Empty state with sync option
-  // Account selector for multiple accounts
+  // Account selector component - shows which account is being used
   const AccountSelector = () => {
-    if (mlAccounts.length <= 1) return null;
+    // Filter to only show connected accounts for selection
+    const connectedAccounts = accounts.filter(
+      a => a.status === 'connected' || a.status === 'attention'
+    );
+    
+    if (connectedAccounts.length <= 1) {
+      // Show current account info even if only one
+      if (activeAccount) {
+        return (
+          <div className="px-4 py-2 border-b bg-muted/30 text-sm text-muted-foreground">
+            Conta: {activeAccount.nickname || activeAccount.email || activeAccount.sellerId}
+          </div>
+        );
+      }
+      return null;
+    }
     
     return (
       <div className="px-4 py-2 border-b bg-muted/30">
-        <Select value={selectedAccountId || ""} onValueChange={handleAccountChange}>
+        <Select value={sellerId || ""} onValueChange={handleAccountChange}>
           <SelectTrigger className="w-full">
             <SelectValue placeholder="Selecione uma conta" />
           </SelectTrigger>
           <SelectContent>
-            {mlAccounts.map((account) => (
-              <SelectItem key={account.ml_user_id} value={account.ml_user_id}>
-                {account.nickname || account.email || account.ml_user_id}
+            {connectedAccounts.map((account) => (
+              <SelectItem key={account.sellerId} value={account.sellerId}>
+                {account.nickname || account.email || account.sellerId}
               </SelectItem>
             ))}
           </SelectContent>
@@ -161,8 +161,15 @@ export function PostSaleConversationsTab() {
             <h3 className="text-lg font-semibold mb-2">Nenhuma conversa encontrada</h3>
             <p className="text-muted-foreground mb-4">
               Sincronize as mensagens do Mercado Livre para visualizar as conversas
+              {sellerId && (
+                <span className="block text-xs mt-1">
+                  Conta: {activeAccount?.nickname || sellerId}
+                </span>
+              )}
             </p>
-            <Button onClick={handleRefresh}>Sincronizar Mensagens</Button>
+            <Button onClick={handleRefresh} disabled={!sellerId}>
+              Sincronizar Mensagens
+            </Button>
           </div>
         </div>
       </Card>
