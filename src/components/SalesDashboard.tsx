@@ -116,6 +116,7 @@ interface DateFilter {
 }
 
 // Helper to get initial 30-day filter in São Paulo timezone
+// IMPORTANT: Uses YESTERDAY as end date - today's data is incomplete
 const getInitial30DayFilter = (): DateFilter => {
   const now = new Date();
   // Approximate São Paulo timezone offset (UTC-3)
@@ -124,13 +125,14 @@ const getInitial30DayFilter = (): DateFilter => {
   const diff = spOffset - localOffset;
   const spNow = new Date(now.getTime() + diff * 60 * 1000);
   
-  const today = new Date(spNow.getFullYear(), spNow.getMonth(), spNow.getDate());
-  const thirtyDaysAgo = new Date(today);
-  thirtyDaysAgo.setDate(today.getDate() - 30);
+  // Use YESTERDAY as end date (today's data is incomplete)
+  const yesterday = new Date(spNow.getFullYear(), spNow.getMonth(), spNow.getDate() - 1);
+  const thirtyDaysAgo = new Date(yesterday);
+  thirtyDaysAgo.setDate(yesterday.getDate() - 29); // 30 days ending yesterday
   
   return {
     dateFrom: format(thirtyDaysAgo, 'yyyy-MM-dd'),
-    dateTo: format(today, 'yyyy-MM-dd'),
+    dateTo: format(yesterday, 'yyyy-MM-dd'),
   };
 };
 
@@ -166,7 +168,9 @@ export function SalesDashboard() {
   
   // Background sync indicator
   const [isBackgroundSyncing, setIsBackgroundSyncing] = useState(false);
-
+  
+  // Ref to track if sync was already attempted for current seller (prevents infinite loop)
+  const hasSyncedForSellerRef = useRef<string | null>(null);
   // Memoized currency formatter based on language
   const formatCurrency = useMemo(() => {
     const locale = i18n.language === 'en' ? 'en-US' : i18n.language === 'es' ? 'es-AR' : 'pt-BR';
@@ -270,8 +274,15 @@ export function SalesDashboard() {
       setSalesData(response.data);
 
       // Check if this is a new account that needs onboarding sync
+      // Only trigger ONCE per seller to prevent infinite loop for accounts with no sales
       const debug = response.data?._debug;
-      if (isFirstLoad && debug?.cachedOrdersCount === 0 && activeSellerId) {
+      if (
+        isFirstLoad && 
+        debug?.cachedOrdersCount === 0 && 
+        activeSellerId &&
+        hasSyncedForSellerRef.current !== activeSellerId
+      ) {
+        hasSyncedForSellerRef.current = activeSellerId;
         setShowOnboarding(true);
         startProgressiveSync(activeSellerId, session.access_token);
       }
@@ -298,8 +309,16 @@ export function SalesDashboard() {
   // Auto-refresh reference
   const autoRefreshRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch data on mount and when activeSellerId changes
+  // Reset states when account changes
   useEffect(() => {
+    setIsFirstLoad(true);
+    setShowOnboarding(false);
+    setIsSyncing(false);
+    setSalesData(null);
+    setError(null);
+    setSyncJob(null);
+    hasSyncedForSellerRef.current = null;
+    // Fetch fresh data for the new account
     fetchSalesData();
   }, [activeSellerId]); // Re-fetch when seller changes
 

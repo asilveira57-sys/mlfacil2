@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useEffect } from 'react';
 
 interface CacheEntry<T> {
   data: T;
@@ -99,6 +99,19 @@ export function useSalesDataCache() {
    */
   const clearAll = useCallback((): void => {
     cache.current.clear();
+  }, []);
+
+  // Listen for clear_sales_cache event from account change
+  useEffect(() => {
+    const handleClearCache = () => {
+      cache.current.clear();
+      if (import.meta.env.DEV) {
+        console.info('[SalesCache] Cleared due to account change');
+      }
+    };
+    
+    window.addEventListener('clear_sales_cache', handleClearCache);
+    return () => window.removeEventListener('clear_sales_cache', handleClearCache);
   }, []);
 
   /**
