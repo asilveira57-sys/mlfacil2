@@ -68,6 +68,12 @@ Deno.serve(async (req) => {
       case 'orders/update-extra':
         result = await updateOrderExtra(supabase, user.id, body);
         break;
+      case 'orders/no-cost':
+        result = await getOrdersNoCost(supabase, user.id, params);
+        break;
+      case 'orders/update-manual-cost':
+        result = await updateManualCost(supabase, user.id, body);
+        break;
       case 'calculate':
         // Start background calculation
         EdgeRuntime.waitUntil(
@@ -170,12 +176,20 @@ async function getCatalog(supabase: any, userId: string, params: Record<string, 
 
   if (!sellerId) throw new Error('seller_id is required');
 
-  // Get unique products from order items cache
-  const { data: items, error: itemsError } = await supabase
+  // Get unique products from order items cache - apply search at SQL level
+  let itemsQuery = supabase
     .from('meli_order_items_cache')
     .select('product_key, item_id, variation_id, sku, title, title_short')
     .eq('seller_id', sellerId)
     .eq('user_id', userId);
+
+  if (search) {
+    itemsQuery = itemsQuery.or(
+      `title.ilike.%${search}%,title_short.ilike.%${search}%,sku.ilike.%${search}%,item_id.ilike.%${search}%,product_key.ilike.%${search}%`
+    );
+  }
+
+  const { data: items, error: itemsError } = await itemsQuery;
 
   if (itemsError) throw itemsError;
 
@@ -220,15 +234,7 @@ async function getCatalog(supabase: any, userId: string, params: Record<string, 
     products = products.filter(p => !p.has_cost);
   }
 
-  if (search) {
-    const searchLower = search.toLowerCase();
-    products = products.filter(p =>
-      p.display_name?.toLowerCase().includes(searchLower) ||
-      p.sku?.toLowerCase().includes(searchLower) ||
-      p.item_id?.toLowerCase().includes(searchLower) ||
-      p.product_key?.toLowerCase().includes(searchLower)
-    );
-  }
+  // Search already applied at SQL level - no JS filter needed
 
   // Sort by display_name
   products.sort((a, b) => (a.display_name || '').localeCompare(b.display_name || ''));
@@ -362,13 +368,13 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
     query = query.eq('status', status);
   }
 
-  // Filter by billing status (fee_ml_source)
-  if (billingFilter === 'billing') {
+  // Default: only show billing + manual (exclude pending/no_charges)
+  if (!billingFilter || billingFilter === 'all') {
+    query = query.in('fee_ml_source', ['billing', 'manual']);
+  } else if (billingFilter === 'billing') {
     query = query.eq('fee_ml_source', 'billing');
-  } else if (billingFilter === 'pending') {
-    query = query.eq('fee_ml_source', 'pending');
-  } else if (billingFilter === 'no_charges') {
-    query = query.eq('fee_ml_source', 'no_charges');
+  } else if (billingFilter === 'manual') {
+    query = query.eq('fee_ml_source', 'manual');
   }
 
   // Filter by e-commerce cost (cost_other)
@@ -385,6 +391,11 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
     query = query.gte('shipping_cost_seller', 300);
   } else if (shippingFilter === 'missing') {
     query = query.or('shipping_cost_seller.is.null,shipping_cost_seller.eq.0');
+  }
+
+  // Search at SQL level using buyer_nickname from breakdown
+  if (search) {
+    query = query.or(`order_id.ilike.%${search}%,shipment_id.ilike.%${search}%,buyer_nickname.ilike.%${search}%`);
   }
 
   const { data: breakdowns, error } = await query;
@@ -407,45 +418,7 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
     );
   }
 
-  // Get order details for search and display - use batching to avoid .in() limit of 1000
-  const orderIds = results.map((r: any) => r.order_id);
-  const orderMap = new Map<string, any>();
-  
-  if (orderIds.length > 0) {
-    const batchSize = 500;
-    for (let i = 0; i < orderIds.length; i += batchSize) {
-      const batch = orderIds.slice(i, i + batchSize);
-      const { data: orders } = await supabase
-        .from('meli_orders_cache')
-        .select('order_id, buyer_nickname, buyer_name, created_at_meli')
-        .eq('seller_id', sellerId)
-        .in('order_id', batch);
-      
-      (orders || []).forEach((o: any) => orderMap.set(o.order_id, o));
-    }
-  }
-
-  // Merge data - preserve existing values if not found in cache
-  results = results.map((r: any) => {
-    const orderInfo = orderMap.get(r.order_id);
-    return {
-      ...r,
-      buyer_nickname: orderInfo?.buyer_nickname ?? r.buyer_nickname,
-      buyer_name: orderInfo?.buyer_name ?? r.buyer_name,
-      created_at_meli: orderInfo?.created_at_meli ?? r.created_at_meli,
-    };
-  });
-
-  // Apply search
-  if (search) {
-    const searchLower = search.toLowerCase();
-    results = results.filter((r: any) =>
-      r.order_id?.includes(search) ||
-      r.shipment_id?.includes(search) ||
-      r.buyer_nickname?.toLowerCase().includes(searchLower) ||
-      r.buyer_name?.toLowerCase().includes(searchLower)
-    );
-  }
+  // buyer_nickname already in breakdown - no secondary query needed
 
   const total = results.length;
   const totalPages = Math.ceil(total / pageSize);
@@ -579,7 +552,7 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
     // Get all paid orders
     const { data: orders, error: ordersError } = await supabase
       .from('meli_orders_cache')
-      .select('order_id, shipment_id, total_amount')
+      .select('order_id, shipment_id, total_amount, buyer_nickname, buyer_name, created_at_meli')
       .eq('seller_id', sellerId)
       .eq('user_id', userId)
       .eq('order_status', 'paid')
@@ -709,8 +682,8 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
         cost_shipping: costShipping,
         cost_other: 0,
         cost_total: costTotal,
-        profit_total: profitNet, // Changed to use NET profit (without shipping impact)
-        margin_percent: marginNet, // Changed to use NET margin (without shipping impact)
+        profit_total: profitNet,
+        margin_percent: marginNet,
         missing_cost_items_count: missingCount,
         status: missingCount > 0 ? 'incompleto' : (billing ? 'ok' : 'pending'),
         // NEW separated fields
@@ -724,6 +697,10 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
         profit_net: profitNet,
         margin_net: marginNet,
         missing_fields: missingFields,
+        // Buyer data for direct lookup (no secondary query)
+        buyer_nickname: order.buyer_nickname || null,
+        buyer_name: order.buyer_name || null,
+        created_at_meli: order.created_at_meli || null,
       });
     }
 
@@ -1175,4 +1152,96 @@ function getMarginAlert(margin: number, quantity: number): string | null {
     if (margin >= 20) return 'cresce_margem_boa';
   }
   return null;
+}
+
+// ================== ORDERS NO COST ==================
+
+async function getOrdersNoCost(supabase: any, userId: string, params: Record<string, string>) {
+  const sellerId = params.seller_id;
+  const periodDays = parseInt(params.period_days || '30');
+  const search = params.search || '';
+  const page = parseInt(params.page || '1');
+  const pageSize = parseInt(params.page_size || '50');
+
+  if (!sellerId) throw new Error('seller_id is required');
+
+  const dateFrom = new Date();
+  dateFrom.setDate(dateFrom.getDate() - periodDays);
+
+  let query = supabase
+    .from('order_cost_breakdown_cache')
+    .select('*')
+    .eq('seller_id', sellerId)
+    .eq('user_id', userId)
+    .in('fee_ml_source', ['pending', 'no_charges'])
+    .gte('created_at_meli', dateFrom.toISOString())
+    .order('created_at_meli', { ascending: false });
+
+  if (search) {
+    query = query.or(`order_id.ilike.%${search}%,shipment_id.ilike.%${search}%,buyer_nickname.ilike.%${search}%`);
+  }
+
+  const { data: orders, error } = await query;
+  if (error) throw error;
+
+  const results = orders || [];
+  const pendingTotal = results.filter((o: any) => o.fee_ml_source === 'pending').length;
+  const noChargesTotal = results.filter((o: any) => o.fee_ml_source === 'no_charges').length;
+
+  const total = results.length;
+  const totalPages = Math.ceil(total / pageSize);
+  const offset = (page - 1) * pageSize;
+  const paginatedResults = results.slice(offset, offset + pageSize);
+
+  return {
+    orders: paginatedResults,
+    total,
+    page,
+    page_size: pageSize,
+    total_pages: totalPages,
+    pending_total: pendingTotal,
+    no_charges_total: noChargesTotal,
+  };
+}
+
+// ================== UPDATE MANUAL COST ==================
+
+async function updateManualCost(supabase: any, userId: string, body: any) {
+  const { seller_id, order_id, commission_cost, shipping_cost, notes } = body;
+  if (!seller_id || !order_id) throw new Error('seller_id and order_id are required');
+
+  const { data: existing } = await supabase
+    .from('order_cost_breakdown_cache')
+    .select('*')
+    .eq('seller_id', seller_id)
+    .eq('order_id', order_id)
+    .maybeSingle();
+
+  if (!existing) throw new Error('Order not found');
+
+  const newCommission = commission_cost ?? existing.commission_cost ?? 0;
+  const newShipping = shipping_cost ?? existing.shipping_cost_seller ?? 0;
+  const costFees = newCommission + (existing.installments_cost || 0);
+  const costTotal = (existing.cost_items_total || 0) + (existing.cost_packaging || 0) + costFees + newShipping + (existing.cost_other || 0);
+  const profitTotal = (existing.revenue_total || 0) - costTotal;
+  const marginPercent = existing.revenue_total > 0 ? (profitTotal / existing.revenue_total) * 100 : 0;
+
+  await supabase
+    .from('order_cost_breakdown_cache')
+    .update({
+      commission_cost: newCommission,
+      shipping_cost_seller: newShipping,
+      cost_fees: costFees,
+      cost_shipping: newShipping,
+      cost_total: costTotal,
+      profit_total: profitTotal,
+      margin_percent: marginPercent,
+      fee_ml_source: 'manual',
+      notes: notes || existing.notes,
+      has_real_financial: true,
+      calculated_at: new Date().toISOString(),
+    })
+    .eq('id', existing.id);
+
+  return { success: true, profit_total: profitTotal, margin_percent: marginPercent };
 }

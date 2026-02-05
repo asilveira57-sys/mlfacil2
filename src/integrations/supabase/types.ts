@@ -6059,6 +6059,8 @@ export type Database = {
       order_cost_breakdown_cache: {
         Row: {
           adjustments: number | null
+          buyer_name: string | null
+          buyer_nickname: string | null
           calculated_at: string
           cancelamentos_reembolsos: number | null
           commission_cost: number | null
@@ -6109,6 +6111,8 @@ export type Database = {
         }
         Insert: {
           adjustments?: number | null
+          buyer_name?: string | null
+          buyer_nickname?: string | null
           calculated_at?: string
           cancelamentos_reembolsos?: number | null
           commission_cost?: number | null
@@ -6159,6 +6163,8 @@ export type Database = {
         }
         Update: {
           adjustments?: number | null
+          buyer_name?: string | null
+          buyer_nickname?: string | null
           calculated_at?: string
           cancelamentos_reembolsos?: number | null
           commission_cost?: number | null

@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Search, AlertCircle, Check, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
+import { getCostCache, setCostCache, checkSellerChange } from '@/hooks/useCostModuleCache';
 
 interface CostCatalogProps {
   sellerId: string;
@@ -39,6 +40,17 @@ export function CostCatalog({ sellerId }: CostCatalogProps) {
   const [saving, setSaving] = useState(false);
 
   const loadCatalog = async () => {
+    checkSellerChange(sellerId);
+    const cacheKey = `catalog:${sellerId}:${search}:${onlyMissing}:${page}`;
+    const cached = getCostCache(cacheKey);
+    if (cached) {
+      setProducts(cached.products || []);
+      setTotalPages(cached.total_pages || 1);
+      setMissingCount(cached.missing_count || 0);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -62,6 +74,7 @@ export function CostCatalog({ sellerId }: CostCatalogProps) {
         setProducts(data.products || []);
         setTotalPages(data.total_pages || 1);
         setMissingCount(data.missing_count || 0);
+        setCostCache(cacheKey, data);
       }
     } catch (error) {
       console.error('Error loading catalog:', error);

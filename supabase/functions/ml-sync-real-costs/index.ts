@@ -332,11 +332,6 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
     // FIX: Consider "has billing" if ANY movement exists, even if fee_ml sums to 0
     const hasBillingMovements = billing && (billing.fee_ml !== 0 || billing.shipping !== 0 || billing.installments !== 0 || billing.adjustments !== 0);
     
-    // FIX: For old orders (>7 days) without billing, assume no charges instead of leaving pending
-    const ORDER_AGE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-    const orderAge = order.created_at_meli ? Date.now() - new Date(order.created_at_meli).getTime() : 0;
-    const isOldOrder = orderAge > ORDER_AGE_THRESHOLD_MS;
-    
     if (hasBillingMovements) {
       feeML = billing.fee_ml;
       feeMLSource = "billing";
@@ -345,12 +340,8 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
       adjustments = billing.adjustments;
       sourceRefs.push("billing:order");
       updatedCount++;
-    } else if (isOldOrder) {
-      // Old order with no billing data - assume no marketplace charges (e.g., pickup, free shipping)
-      feeMLSource = "no_charges";
-      sourceRefs.push("billing:no_charges_assumed");
-      updatedCount++;
     } else {
+      // No billing data yet - keep as pending until billing appears or user enters manually
       feeMLSource = "pending";
       sourceRefs.push("billing:pending");
     }
