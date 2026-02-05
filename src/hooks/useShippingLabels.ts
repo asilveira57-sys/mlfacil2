@@ -177,7 +177,9 @@ async function fetchAllRowsPaginated<T>(
     
     if (!data || data.length === 0) break;
     
-    if (data.length < batchSize) break; // Last page
+    allRows.push(...data); // Accumulate data in array
+    
+    if (data.length < batchSize) break; // Last page - data already added
     offset += batchSize;
   }
   
@@ -276,27 +278,26 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       const { dateFrom, dateTo } = getDateRange();
 
       // Build base query - exclude cancelled, order by recent first
-      let query = supabase
-        .from('meli_orders_cache')
-        .select('*', { count: 'exact' })
-        .eq('seller_id', sellerId)
-        .not('order_status', 'in', `(${COMPLETED_ORDER_STATUSES.join(',')})`)
-        .order('created_at_meli', { ascending: false });
+      // Use fetchAllRowsPaginated to bypass Supabase's 1000 row limit
+      const ordersRaw = await fetchAllRowsPaginated(async (offset, limit) => {
+        let q = supabase
+          .from('meli_orders_cache')
+          .select('*')
+          .eq('seller_id', sellerId)
+          .not('order_status', 'in', `(${COMPLETED_ORDER_STATUSES.join(',')})`)
+          .order('created_at_meli', { ascending: false })
+          .range(offset, offset + limit - 1);
 
-      // Apply date filters
-      if (dateFrom) {
-        query = query.gte('created_at_meli', dateFrom);
-      }
-      if (dateTo) {
-        query = query.lte('created_at_meli', dateTo);
-      }
+        // Apply date filters
+        if (dateFrom) {
+          q = q.gte('created_at_meli', dateFrom);
+        }
+        if (dateTo) {
+          q = q.lte('created_at_meli', dateTo);
+        }
 
-      const { data: ordersRaw, error: ordersError, count } = await query;
-
-      if (ordersError) {
-        console.error('Error fetching orders:', ordersError);
-        throw ordersError;
-      }
+        return q;
+      });
 
       if (!ordersRaw || ordersRaw.length === 0) {
         return { orders: [], totalCount: 0 };
