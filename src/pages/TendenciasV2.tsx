@@ -1,9 +1,9 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
+import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { PageContainer } from '@/components/layout/PageContainer';
 import {
   TrendsFiltersBar,
@@ -147,34 +147,25 @@ export default function TendenciasV2() {
   }, [sellerCategories]);
   
   // ============================================================
-  // INITIALIZATION
+  // INITIALIZATION (from ActiveAccountContext)
   // ============================================================
   
-  // Load accounts on mount
+  const { activeAccount, sellerId, accounts: contextAccounts, loading: accountLoading, initialized } = useActiveAccount();
+  
+  // Sync accounts from context
   useEffect(() => {
-    const loadAccounts = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        navigate('/auth');
-        return;
+    if (!accountLoading && initialized && contextAccounts.length > 0) {
+      setAccounts(contextAccounts.map(acc => ({
+        id: acc.id,
+        ml_user_id: acc.sellerId,
+        nickname: acc.nickname,
+      })));
+      if (!selectedAccountId && sellerId) {
+        setSelectedAccountId(sellerId);
       }
-
-      const { data } = await supabase
-        .from('ml_accounts')
-        .select('id, ml_user_id, nickname')
-        .eq('user_id', session.user.id)
-        .eq('is_active', true);
-
-      if (data && data.length > 0) {
-        setAccounts(data);
-        setSelectedAccountId(data[0].ml_user_id);
-      }
-      
       setIsInitialized(true);
-    };
-    
-    loadAccounts();
-  }, [navigate]);
+    }
+  }, [accountLoading, initialized, contextAccounts, sellerId, selectedAccountId]);
   
   // Auto-select category based on last selection or best seller category
   useEffect(() => {

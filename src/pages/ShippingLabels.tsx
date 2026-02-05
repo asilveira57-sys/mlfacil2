@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Settings } from 'lucide-react';
+import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { useShippingLabels, ShippingOrder, LabelLayout } from '@/hooks/useShippingLabels';
 import { ShippingFilters } from '@/components/shipping/ShippingFilters';
 import { ShippingTable } from '@/components/shipping/ShippingTable';
@@ -14,20 +14,14 @@ import { OrderDetailsDrawer } from '@/components/shipping/OrderDetailsDrawer';
 import { useToast } from '@/hooks/use-toast';
 import { PageContainer } from '@/components/layout/PageContainer';
 
-interface MLAccount {
-  id: string;
-  nickname: string | null;
-  email: string | null;
-  is_active: boolean;
-  ml_user_id: string;
-}
-
 export default function ShippingLabels() {
   const { t } = useTranslation('shipping');
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [loading, setLoading] = useState(true);
-  const [mlAccount, setMlAccount] = useState<MLAccount | null>(null);
+  
+  // Use global active account from context
+  const { activeAccount, sellerId, loading: accountLoading, initialized } = useActiveAccount();
+  
   const [selectedOrder, setSelectedOrder] = useState<ShippingOrder | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -64,51 +58,19 @@ export default function ShippingLabels() {
     sortDirection,
     toggleSort,
     orderItems,
-  } = useShippingLabels({ sellerId: mlAccount?.ml_user_id || null });
+  } = useShippingLabels({ sellerId: sellerId || null });
 
+  // Check if account is available
   useEffect(() => {
-    const checkAuthAndFetchAccount = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session) {
-        navigate('/auth');
-        return;
-      }
-
-      // Fetch ML account
-      const { data, error } = await supabase
-        .from('ml_accounts')
-        .select('id, nickname, email, is_active, ml_user_id')
-        .eq('user_id', session.user.id)
-        .eq('is_active', true)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (error) {
-        console.error('Error fetching ML account:', error);
-        toast({
-          title: 'Erro',
-          description: 'Não foi possível carregar a conta do Mercado Livre.',
-          variant: 'destructive',
-        });
-      } else if (!data) {
-        toast({
-          title: 'Conta não conectada',
-          description: 'Você precisa conectar sua conta do Mercado Livre primeiro.',
-          variant: 'destructive',
-        });
-        navigate('/dashboard');
-        return;
-      } else {
-        setMlAccount(data);
-      }
-
-      setLoading(false);
-    };
-
-    checkAuthAndFetchAccount();
-  }, [navigate, toast]);
+    if (!accountLoading && initialized && !activeAccount) {
+      toast({
+        title: 'Conta não conectada',
+        description: 'Você precisa conectar sua conta do Mercado Livre primeiro.',
+        variant: 'destructive',
+      });
+      navigate('/dashboard');
+    }
+  }, [accountLoading, initialized, activeAccount, navigate, toast]);
 
   const handleViewDetails = (order: ShippingOrder) => {
     setSelectedOrder(order);
@@ -134,7 +96,7 @@ export default function ShippingLabels() {
     </Button>
   );
 
-  if (loading) {
+  if (accountLoading || !initialized) {
     return (
       <PageContainer title={t('title')}>
         <div className="flex items-center justify-center h-64">
@@ -147,7 +109,7 @@ export default function ShippingLabels() {
   return (
     <PageContainer 
       title={t('title')} 
-      subtitle={mlAccount?.nickname || mlAccount?.email || undefined}
+      subtitle={activeAccount?.nickname || activeAccount?.email || undefined}
       headerContent={headerContent}
     >
       {/* Main Content */}

@@ -10,13 +10,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ArrowLeft, GripVertical, Save, RotateCcw, Package, AlertTriangle, CheckCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { HeaderPreferences, OrderData, OrderItem } from '@/lib/buildHeaderLines';
-
-interface MLAccount {
-  id: string;
-  nickname: string | null;
-  email: string | null;
-  ml_user_id: string;
-}
+import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 
 const DEFAULT_PREFERENCES: HeaderPreferences = {
   show_customer: true,
@@ -57,46 +51,34 @@ export default function LabelHeaderSettings() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [mlAccount, setMlAccount] = useState<MLAccount | null>(null);
+  
+  // Use global active account from context
+  const { activeAccount, sellerId, loading: accountLoading, initialized } = useActiveAccount();
+  
   const [preferences, setPreferences] = useState<HeaderPreferences>(DEFAULT_PREFERENCES);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
+  // Redirect if no account
   useEffect(() => {
-    const checkAuthAndFetchAccount = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session) {
-        navigate('/auth');
-        return;
-      }
+    if (!accountLoading && initialized && !activeAccount) {
+      toast({
+        title: 'Conta não conectada',
+        description: 'Você precisa conectar sua conta do Mercado Livre primeiro.',
+        variant: 'destructive',
+      });
+      navigate('/dashboard');
+    }
+  }, [accountLoading, initialized, activeAccount, navigate, toast]);
 
-      // Fetch ML account
-      const { data: accountData, error: accountError } = await supabase
-        .from('ml_accounts')
-        .select('id, nickname, email, ml_user_id')
-        .eq('user_id', session.user.id)
-        .eq('is_active', true)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (accountError || !accountData) {
-        toast({
-          title: 'Conta não conectada',
-          description: 'Você precisa conectar sua conta do Mercado Livre primeiro.',
-          variant: 'destructive',
-        });
-        navigate('/dashboard');
-        return;
-      }
-
-      setMlAccount(accountData);
-
-      // Fetch existing preferences
+  // Fetch preferences when sellerId changes
+  useEffect(() => {
+    if (!sellerId) return;
+    
+    const fetchPreferences = async () => {
       const { data: prefData } = await supabase
         .from('meli_label_header_preferences')
         .select('*')
-        .eq('seller_id', accountData.ml_user_id)
+        .eq('seller_id', sellerId)
         .maybeSingle();
 
       if (prefData) {
@@ -112,12 +94,11 @@ export default function LabelHeaderSettings() {
           font_size: prefData.font_size,
         });
       }
-
       setLoading(false);
     };
 
-    checkAuthAndFetchAccount();
-  }, [navigate, toast]);
+    fetchPreferences();
+  }, [sellerId]);
 
   // Generate preview lines
   const generatePreviewLines = useCallback((): string[] => {
@@ -239,7 +220,7 @@ export default function LabelHeaderSettings() {
   };
 
   const handleSave = async () => {
-    if (!mlAccount) return;
+    if (!sellerId) return;
 
     setSaving(true);
     try {
@@ -249,7 +230,7 @@ export default function LabelHeaderSettings() {
       const { error } = await supabase
         .from('meli_label_header_preferences')
         .upsert({
-          seller_id: mlAccount.ml_user_id,
+          seller_id: sellerId,
           user_id: session.user.id,
           show_customer: preferences.show_customer,
           show_products: preferences.show_products,
