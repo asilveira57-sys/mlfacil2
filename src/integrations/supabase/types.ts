@@ -5491,6 +5491,73 @@ export type Database = {
           },
         ]
       }
+      ml_integrations: {
+        Row: {
+          application_id: string | null
+          created_at: string
+          daily_events_count: number
+          daily_events_reset_at: string | null
+          feature_flags: Json
+          id: string
+          ml_user_id: string
+          plan_id: string | null
+          status: string
+          updated_at: string
+          user_id: string
+          workspace_id: string | null
+        }
+        Insert: {
+          application_id?: string | null
+          created_at?: string
+          daily_events_count?: number
+          daily_events_reset_at?: string | null
+          feature_flags?: Json
+          id?: string
+          ml_user_id: string
+          plan_id?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+          workspace_id?: string | null
+        }
+        Update: {
+          application_id?: string | null
+          created_at?: string
+          daily_events_count?: number
+          daily_events_reset_at?: string | null
+          feature_flags?: Json
+          id?: string
+          ml_user_id?: string
+          plan_id?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+          workspace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ml_integrations_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "plans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ml_integrations_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "public_plans_v1"
+            referencedColumns: ["plan_id"]
+          },
+          {
+            foreignKeyName: "ml_integrations_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ml_publication_jobs: {
         Row: {
           action: string
@@ -10613,6 +10680,101 @@ export type Database = {
           plan_ids?: string[] | null
           valid_from?: string | null
           valid_until?: string | null
+        }
+        Relationships: []
+      }
+      webhook_event_logs: {
+        Row: {
+          created_at: string
+          details: Json | null
+          event_id: string | null
+          id: string
+          level: string
+          message: string
+        }
+        Insert: {
+          created_at?: string
+          details?: Json | null
+          event_id?: string | null
+          id?: string
+          level: string
+          message: string
+        }
+        Update: {
+          created_at?: string
+          details?: Json | null
+          event_id?: string | null
+          id?: string
+          level?: string
+          message?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "webhook_event_logs_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "webhook_events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      webhook_events: {
+        Row: {
+          application_id: string | null
+          attempts: number
+          created_at: string
+          dedupe_key: string
+          error_code: string | null
+          id: string
+          last_error: string | null
+          max_attempts: number
+          ml_user_id: string
+          next_retry_at: string | null
+          payload_raw: Json
+          processed_at: string | null
+          provider: string
+          received_at: string
+          resource: string
+          status: string
+          topic: string
+        }
+        Insert: {
+          application_id?: string | null
+          attempts?: number
+          created_at?: string
+          dedupe_key: string
+          error_code?: string | null
+          id?: string
+          last_error?: string | null
+          max_attempts?: number
+          ml_user_id: string
+          next_retry_at?: string | null
+          payload_raw: Json
+          processed_at?: string | null
+          provider?: string
+          received_at?: string
+          resource: string
+          status?: string
+          topic: string
+        }
+        Update: {
+          application_id?: string | null
+          attempts?: number
+          created_at?: string
+          dedupe_key?: string
+          error_code?: string | null
+          id?: string
+          last_error?: string | null
+          max_attempts?: number
+          ml_user_id?: string
+          next_retry_at?: string | null
+          payload_raw?: Json
+          processed_at?: string | null
+          provider?: string
+          received_at?: string
+          resource?: string
+          status?: string
+          topic?: string
         }
         Relationships: []
       }

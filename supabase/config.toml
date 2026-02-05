@@ -179,3 +179,9 @@ verify_jwt = false
 
 [functions.ml-send-message]
 verify_jwt = false
+
+[functions.ml-webhook-ingest]
+verify_jwt = false
+
+[functions.ml-worker-process]
+verify_jwt = false
