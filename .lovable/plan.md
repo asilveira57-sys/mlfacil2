@@ -1,78 +1,175 @@
-# Plano: Unificação de Conta Ativa
 
-## Status: ✅ CONCLUÍDO (05/02/2026)
+# Plano de Correção: Loops Infinitos e Inconsistências de Sincronização
 
-## Contexto Original
-Existiam dois sistemas diferentes de conta selecionada:
-1. Seletor global (AccountSwitcher) que atualiza ActiveAccountContext
-2. Módulo de Pós-Venda com seletor próprio baseado em useMlAccounts + localStorage
+## Diagnóstico Confirmado
 
-O useMlAccounts filtrava por `is_active = true`, causando inconsistência onde trocar a conta no topo não alterava o seller_id usado pelo módulo de mensagens.
+### Problema 1: Loop infinito no Dashboard
+A conta `MLFACIL_CONSULTORIA` (sem vendas) está causando loop infinito porque:
+- RPC retorna `cachedOrdersCount: 0`
+- Código interpreta isso como "conta nova que precisa de onboarding"
+- `startProgressiveSync` é chamado repetidamente
+- Ao final de cada sync, `fetchSalesData(true)` re-verifica a condição
+- Como continua 0 (conta sem vendas), o ciclo recomeça
 
-## Mudanças Implementadas
+### Problema 2: Estado `isFirstLoad` não reseta ao trocar conta
+Quando troca de conta via seletor global, o estado `isFirstLoad` não é resetado, causando comportamento inconsistente.
 
-### 1. Frontend - PostSaleConversationsTab ✅
-- Removido `useMlAccounts` + localStorage local (`post-sale-selected-account`)
-- Agora usa `useActiveAccount()` como fonte única de verdade
-- `sellerId` deriva de `activeAccount?.sellerId`
-- Seletor de conta agora chama `setActiveAccount()` do contexto
-- Reseta conversa selecionada ao trocar conta
+### Problema 3: "Sincronizando..." eterno em Vendas
+Pedidos mostram status "pendente_sync" quando `shipment_id` existe mas não há registro em `meli_shipments_cache`. Se a sync não completa, fica travado.
 
-### 2. Hook useMlAccounts ✅
-- Removido filtro `is_active = true` (era usado erroneamente como "selecionada")
-- Adicionado parâmetro opcional `onlyConnected` para filtrar por `connection_status`
-- Agora retorna todas as contas do usuário por padrão
+### Problema 4: Dia atual incluído nos filtros
+O filtro de 7/30 dias inclui o dia de hoje, mas você solicitou que exclua o dia atual (dados incompletos).
 
-### 3. Hook usePostSaleConversations ✅
-- Atualizado para aceitar `accountId` (UUID) para lookup de credenciais
-- `useSyncPostSaleMessages` agora passa `account_id` para a edge function
-- `useSendPostSaleMessage` também envia `account_id`
-- Toast de sincronização inclui `seller_id` para debug
+---
 
-### 4. Cache Invalidation ✅
-- Criado `useAccountChangeInvalidation` hook
-- Escuta evento `active_account_changed` (disparado por `setActiveAccount`)
-- Invalida queries: `post-sale-*`, `ads`, `orders`, `costs`, `questions`, `billing`
-- Componente `AccountChangeInvalidator` adicionado no App.tsx
+## Correções Propostas
 
-### 5. Edge Functions ✅
-- **ml-sync-messages**: 
-  - Nova função `getMLAccountCredentials()` com lookup unificado
-  - Prioriza `account_id` (UUID), fallback para `seller_id`
-  - Validação de ownership: `user_id` do JWT
-  - Usa `connection_status` ao invés de `is_active`
-  - Mantém sanity check do token (users/me)
+### Correção 1: Eliminar loop infinito para contas sem vendas
 
-- **ml-send-message**:
-  - Mesma função `getMLAccountCredentials()` 
-  - Aceita `account_id` ou `seller_id`
-  - Validação de ownership implementada
+**Arquivo:** `src/components/SalesDashboard.tsx`
 
-## Arquivos Modificados
-- `src/hooks/useMlAccounts.ts`
-- `src/hooks/usePostSaleConversations.ts`
-- `src/hooks/useAccountChangeInvalidation.ts` (novo)
-- `src/components/post-sale/PostSaleConversationsTab.tsx`
-- `src/components/layout/AccountChangeInvalidator.tsx` (novo)
-- `src/App.tsx`
-- `supabase/functions/ml-sync-messages/index.ts`
-- `supabase/functions/ml-send-message/index.ts`
+1. Adicionar ref para controlar se já tentou sync para a conta atual
+2. Mudar condição de onboarding para verificar se é conta **genuinamente nova** vs **conta sem vendas**
+3. Não re-executar `fetchSalesData()` dentro de `startProgressiveSync` final para evitar re-trigger
 
-## Como Funciona Agora
-1. Usuário seleciona conta no seletor global (topo)
-2. `ActiveAccountContext` atualiza `activeAccount` e dispara evento `active_account_changed`
-3. `AccountChangeInvalidator` limpa caches de React Query
-4. Módulo Pós-Venda lê `sellerId` do contexto
-5. Edge functions buscam credenciais por `account_id` (prioritário) ou `seller_id`
-6. Validação de ownership garante que o token pertence ao usuário autenticado
+```typescript
+// Antes da função fetchSalesData
+const hasSyncedForSellerRef = useRef<string | null>(null);
 
-## Critérios de Aceite ✅
-- [x] Conta do seletor global é usada para listar/sincronizar/enviar mensagens
-- [x] Trocar conta altera dados imediatamente (sem hard refresh)
-- [x] Não existe mais localStorage conflitante
-- [x] Edge functions usam `account_id` preferencialmente
-- [x] Validação de ownership em todas as operações
+// Na condição de onboarding (linhas 273-278)
+if (
+  isFirstLoad && 
+  debug?.cachedOrdersCount === 0 && 
+  activeSellerId &&
+  hasSyncedForSellerRef.current !== activeSellerId // NOVO: evita re-sync
+) {
+  hasSyncedForSellerRef.current = activeSellerId;
+  setShowOnboarding(true);
+  startProgressiveSync(activeSellerId, session.access_token);
+}
+```
 
-## Próximos Passos (Opcional)
-- Aplicar mesmo padrão em outras edge functions: `ml-sync-questions`, `ml-answer-question`, `ml-sync-billing-details`, `ml-sync-real-costs`
-- Higienizar dados: alinhar `is_active` com `connection_status` na tabela `ml_accounts`
+### Correção 2: Reset de estados ao trocar conta
+
+**Arquivo:** `src/components/SalesDashboard.tsx`
+
+Adicionar efeito que reseta estados quando `activeSellerId` muda:
+
+```typescript
+// Reset quando troca de conta
+useEffect(() => {
+  setIsFirstLoad(true);
+  setShowOnboarding(false);
+  setIsSyncing(false);
+  setSalesData(null);
+  setError(null);
+  hasSyncedForSellerRef.current = null;
+}, [activeSellerId]);
+```
+
+### Correção 3: Excluir dia de hoje dos filtros padrão
+
+**Arquivo:** `src/components/SalesDashboard.tsx`
+
+Modificar `getInitial30DayFilter` para usar **ontem** como data final:
+
+```typescript
+const getInitial30DayFilter = (): DateFilter => {
+  const now = new Date();
+  const spOffset = -3 * 60;
+  const localOffset = now.getTimezoneOffset();
+  const diff = spOffset - localOffset;
+  const spNow = new Date(now.getTime() + diff * 60 * 1000);
+  
+  // Usar ONTEM como data final (dia não fechado)
+  const yesterday = new Date(spNow.getFullYear(), spNow.getMonth(), spNow.getDate() - 1);
+  const thirtyDaysAgo = new Date(yesterday);
+  thirtyDaysAgo.setDate(yesterday.getDate() - 29); // 30 dias antes de ontem
+  
+  return {
+    dateFrom: format(thirtyDaysAgo, 'yyyy-MM-dd'),
+    dateTo: format(yesterday, 'yyyy-MM-dd'),
+  };
+};
+```
+
+### Correção 4: Limitar tentativas de sync em contas sem dados
+
+**Arquivo:** `src/components/SalesDashboard.tsx`
+
+No final de `startProgressiveSync`, não chamar `fetchSalesData` se não encontrou dados:
+
+```typescript
+// Após todas as phases completarem
+if (syncJob && syncJob.processed_records > 0) {
+  fetchSalesData(undefined, true); // Só atualiza se processou algo
+}
+```
+
+### Correção 5: Invalidar cache de sales ao trocar conta
+
+**Arquivo:** `src/hooks/useAccountChangeInvalidation.ts`
+
+Adicionar invalidação do cache de vendas:
+
+```typescript
+// Dentro do handleAccountChange
+// Limpar cache de sales data
+const cacheHook = useSalesDataCache();
+cacheHook.clearAll(); // Se disponível globalmente
+
+// Ou invalidar via evento
+window.dispatchEvent(new CustomEvent('clear_sales_cache'));
+```
+
+---
+
+## Detalhes Técnicos
+
+### Fluxo Corrigido
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│ Usuário troca conta no seletor global                       │
+├─────────────────────────────────────────────────────────────┤
+│ 1. ActiveAccountContext dispara active_account_changed      │
+│ 2. AccountChangeInvalidator limpa caches React Query        │
+│ 3. SalesDashboard detecta mudança de activeSellerId         │
+│ 4. Reset: isFirstLoad=true, hasSyncedRef=null, salesData=null│
+│ 5. fetchSalesData() é chamado                               │
+│ 6. Se cachedOrdersCount=0 E hasSyncedRef !== seller:        │
+│    → Marca hasSyncedRef = seller                            │
+│    → Inicia onboarding sync UMA VEZ                         │
+│ 7. Sync completa → NÃO chama fetchSalesData novamente       │
+│ 8. Usuário vê Dashboard (com ou sem dados)                  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Arquivos a Modificar
+
+1. `src/components/SalesDashboard.tsx`
+   - Adicionar `hasSyncedForSellerRef`
+   - Reset de estados ao trocar conta
+   - Modificar `getInitial30DayFilter` para excluir hoje
+   - Ajustar condição de onboarding
+   - Ajustar final de `startProgressiveSync`
+
+2. `src/hooks/useAccountChangeInvalidation.ts`
+   - Adicionar invalidação de caches adicionais se necessário
+
+### Critérios de Aceite
+
+- [ ] Dashboard não entra em loop ao selecionar conta sem vendas
+- [ ] Dashboard exibe corretamente "Nenhum dado" para contas sem vendas
+- [ ] Trocar conta reseta o estado e carrega dados da nova conta
+- [ ] Filtros de 7/30 dias excluem o dia atual
+- [ ] Página de Vendas não fica travada em "Sincronizando..." eternamente
+- [ ] Cache é limpo ao trocar de conta
+
+### Riscos e Mitigação
+
+- **Risco:** Contas novas legítimas podem não iniciar sync automático
+  - **Mitigação:** A verificação `hasSyncedRef !== seller` garante que cada conta nova tem UMA tentativa de sync
+
+- **Risco:** Dados de ontem podem parecer "atrasados" para usuários
+  - **Mitigação:** Manter filtro "Hoje" disponível para consulta manual quando necessário
