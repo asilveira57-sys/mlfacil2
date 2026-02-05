@@ -109,6 +109,7 @@ export default function Perguntas() {
                     question={selectedQuestion}
                     libraryResponses={libraryResponses || []}
                     sellerId={sellerId}
+                    accountId={activeAccount?.id}
                   />
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full text-center">

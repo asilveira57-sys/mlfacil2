@@ -140,6 +140,7 @@ export function useCreateResponse() {
       ai_original_text?: string;
       is_draft?: boolean;
       seller_id: string;
+      account_id?: string;
     }): Promise<CreateResponseResult> => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
@@ -181,6 +182,7 @@ export function useCreateResponse() {
           question_id: data.question_id,
           response_text: data.response_text,
           seller_id: data.seller_id,
+          account_id: data.account_id,
         },
       });
 

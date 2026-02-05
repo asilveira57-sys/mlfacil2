@@ -55,12 +55,14 @@ interface QaResponseEditorProps {
   question: QaQuestion;
   libraryResponses: QaLibraryResponse[];
   sellerId: string;
+  accountId?: string;
 }
 
 export function QaResponseEditor({
   question,
   libraryResponses,
   sellerId,
+  accountId,
 }: QaResponseEditorProps) {
   const [content, setContent] = useState("");
   const [category, setCategory] = useState(question.category || "");
@@ -149,6 +151,7 @@ export function QaResponseEditor({
       ai_original_text: aiOriginalText || undefined,
       is_draft: true,
       seller_id: sellerId,
+      account_id: accountId,
     });
 
     if (category) {
@@ -179,6 +182,7 @@ export function QaResponseEditor({
       ai_original_text: aiOriginalText || undefined,
       is_draft: false,
       seller_id: sellerId,
+      account_id: accountId,
     });
 
     if (category) {
