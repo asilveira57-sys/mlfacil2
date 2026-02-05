@@ -59,7 +59,7 @@ serve(async (req) => {
 
     log(`User authenticated: ${user.id}`);
 
-    const { question_id, response_text, seller_id }: AnswerRequest = await req.json();
+    const { question_id, response_text, seller_id, account_id }: AnswerRequest & { account_id?: string } = await req.json();
 
     if (!question_id || !response_text || !seller_id) {
       return new Response(
@@ -68,14 +68,14 @@ serve(async (req) => {
       );
     }
 
-    log(`Processing answer for question ${question_id}, seller ${seller_id}`);
+    log(`Answering question ${question_id} for seller ${seller_id}, account ${account_id}`);
 
-    // Get the question to retrieve ml_question_id
+    // Get the question from DB
     const { data: question, error: questionError } = await supabase
       .from("qa_questions")
-      .select("ml_question_id, status")
+      .select("*")
       .eq("id", question_id)
-      .single();
+      .maybeSingle();
 
     if (questionError || !question) {
       log(`Question not found: ${questionError?.message}`);
@@ -91,16 +91,35 @@ serve(async (req) => {
     // Note: We no longer block on "answered" status locally because it might be stale.
     // The ML API is the source of truth and will return an error if already answered.
 
-    // Get ML credentials
-    const { data: mlAccount, error: accountError } = await supabase
-      .from("ml_accounts")
-      .select("access_token, refresh_token, ml_user_id, token_expires_at")
-      .eq("ml_user_id", seller_id)
-      .eq("is_active", true)
-      .maybeSingle();
+    // Get ML credentials - prioritize account_id (UUID), fallback to seller_id
+    let mlAccount = null;
+    
+    if (account_id) {
+      const { data: accountById } = await supabase
+        .from("ml_accounts")
+        .select("access_token, refresh_token, ml_user_id, token_expires_at")
+        .eq("id", account_id)
+        .eq("user_id", user.id)
+        .in("connection_status", ["connected", "attention"])
+        .maybeSingle();
+      mlAccount = accountById;
+      log(`Account lookup by UUID: ${account_id} -> found: ${!!mlAccount}`);
+    }
+    
+    if (!mlAccount) {
+      const { data: accountBySeller } = await supabase
+        .from("ml_accounts")
+        .select("access_token, refresh_token, ml_user_id, token_expires_at")
+        .eq("ml_user_id", seller_id)
+        .eq("user_id", user.id)
+        .in("connection_status", ["connected", "attention"])
+        .maybeSingle();
+      mlAccount = accountBySeller;
+      log(`Account lookup by seller_id: ${seller_id} -> found: ${!!mlAccount}`);
+    }
 
-    if (accountError || !mlAccount?.access_token) {
-      log(`ML account not found: ${accountError?.message}`);
+    if (!mlAccount?.access_token) {
+      log("ML account not found");
       return new Response(
         JSON.stringify({ success: false, error: "Conta do Mercado Livre não encontrada ou desconectada", error_code: "ML_ACCOUNT_NOT_FOUND" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }

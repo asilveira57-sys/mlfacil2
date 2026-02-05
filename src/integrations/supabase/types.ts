@@ -11438,7 +11438,12 @@ export type Database = {
         | "draft"
         | "archived"
         | "blocked"
-      qa_response_source: "manual" | "library" | "ai_suggested" | "ai_edited"
+      qa_response_source:
+        | "manual"
+        | "library"
+        | "ai_suggested"
+        | "ai_edited"
+        | "ml_synced"
       qa_risk_level: "low" | "medium" | "high"
       send_growth_stage: "seed" | "sprout" | "growing" | "mature" | "fruiting"
       send_health_status: "healthy" | "stagnant" | "weakening" | "dormant"
@@ -11643,7 +11648,13 @@ export const Constants = {
         "archived",
         "blocked",
       ],
-      qa_response_source: ["manual", "library", "ai_suggested", "ai_edited"],
+      qa_response_source: [
+        "manual",
+        "library",
+        "ai_suggested",
+        "ai_edited",
+        "ml_synced",
+      ],
       qa_risk_level: ["low", "medium", "high"],
       send_growth_stage: ["seed", "sprout", "growing", "mature", "fruiting"],
       send_health_status: ["healthy", "stagnant", "weakening", "dormant"],
