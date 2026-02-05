@@ -132,14 +132,19 @@ serve(async (req) => {
         "Content-Type": "application/json",
         Authorization: authHeader,
       },
-      body: JSON.stringify({ seller_id }),
+      body: JSON.stringify({ accountId: account_id }),
     });
 
     if (refreshResponse.ok) {
       const refreshData = await refreshResponse.json();
-      if (refreshData.access_token) {
-        accessToken = refreshData.access_token;
+      if (refreshData.success && refreshData.accessToken) {
+        accessToken = refreshData.accessToken;
+        console.log(`[ml-sync-questions] Token refreshed successfully`);
+      } else {
+        console.warn(`[ml-sync-questions] Token refresh returned:`, JSON.stringify(refreshData));
       }
+    } else {
+      console.error(`[ml-sync-questions] Token refresh failed with status ${refreshResponse.status}`);
     }
 
     // Fetch UNANSWERED questions first (priority) then recent answered
@@ -182,7 +187,7 @@ serve(async (req) => {
 
     if (questions.length === 0) {
       return new Response(
-        JSON.stringify({ success: true, synced: 0, message: "No questions to sync" }),
+        JSON.stringify({ success: true, synced: 0, pending: 0, answered: 0, message: "No questions to sync" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
