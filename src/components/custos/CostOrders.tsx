@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Search, AlertCircle, TrendingUp, TrendingDown, RefreshCw, CheckCircle2, DollarSign, Save, ArrowUpDown, ArrowUp, ArrowDown, Package } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { getCostCache, setCostCache, checkSellerChange } from '@/hooks/useCostModuleCache';
 
 interface CostOrdersProps {
   sellerId: string;
@@ -63,7 +64,6 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const [profitFilter, setProfitFilter] = useState('all');
   const [ecommerceFilter, setEcommerceFilter] = useState('all');
   const [shippingFilter, setShippingFilter] = useState('all');
-  const [billingFilter, setBillingFilter] = useState('all');
   const [orderStatusFilter, setOrderStatusFilter] = useState('paid');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -72,7 +72,6 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const [selectedOrder, setSelectedOrder] = useState<OrderDetail | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
-  const [reprocessingPending, setReprocessingPending] = useState(false);
   
   // Edit e-commerce cost state
   const [editingCostOther, setEditingCostOther] = useState<number>(0);
@@ -141,6 +140,17 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   };
 
   const loadOrders = async () => {
+    checkSellerChange(sellerId);
+    const cacheKey = `orders:${sellerId}:${periodDays}:${search}:${page}:${statusFilter}:${profitFilter}:${ecommerceFilter}:${shippingFilter}:${orderStatusFilter}`;
+    const cached = getCostCache(cacheKey);
+    if (cached) {
+      setOrders(cached.orders || []);
+      setTotalPages(cached.total_pages || 1);
+      setTotalOrders(cached.total || 0);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -158,7 +168,6 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
       if (profitFilter !== 'all') params.set('profit_type', profitFilter);
       if (ecommerceFilter !== 'all') params.set('ecommerce_cost', ecommerceFilter);
       if (shippingFilter !== 'all') params.set('shipping_filter', shippingFilter);
-      if (billingFilter !== 'all') params.set('billing_filter', billingFilter);
       if (orderStatusFilter !== 'paid') params.set('order_status', orderStatusFilter);
 
       const response = await fetch(
@@ -171,6 +180,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
         setOrders(data.orders || []);
         setTotalPages(data.total_pages || 1);
         setTotalOrders(data.total || 0);
+        setCostCache(cacheKey, data);
       }
     } catch (error) {
       console.error('Error loading orders:', error);
@@ -184,7 +194,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     if (sellerId) {
       loadOrders();
     }
-  }, [sellerId, periodDays, statusFilter, profitFilter, ecommerceFilter, shippingFilter, billingFilter, orderStatusFilter, page]);
+  }, [sellerId, periodDays, statusFilter, profitFilter, ecommerceFilter, shippingFilter, orderStatusFilter, page]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -305,37 +315,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     return (order.cost_other || 0) > 0;
   };
 
-  // Count pending orders specifically by billing status (fee_ml_source)
-  const pendingCount = orders.filter(o => o.fee_ml_source === 'pending').length;
-
-  const handleReprocessPending = async () => {
-    setReprocessingPending(true);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        toast.error('Sessão expirada');
-        return;
-      }
-
-      const { data, error } = await supabase.functions.invoke('ml-sync-real-costs', {
-        body: {
-          seller_id: sellerId,
-          action: 'reprocess_pending',
-          scope_days: parseInt(periodDays),
-        },
-      });
-
-      if (error) throw error;
-
-      toast.success(data.message || `Reprocessados ${data.processed || 0} pedidos pendentes`);
-      loadOrders();
-    } catch (err) {
-      console.error('Error reprocessing pending:', err);
-      toast.error('Erro ao reprocessar pedidos pendentes');
-    } finally {
-      setReprocessingPending(false);
-    }
-  };
+  // Pending orders are now in the "Sem Custo" tab
 
   return (
     <>
@@ -418,17 +398,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
               </SelectContent>
             </Select>
 
-            <Select value={billingFilter} onValueChange={(v) => { setBillingFilter(v); setPage(1); }}>
-              <SelectTrigger className="w-40">
-                <SelectValue placeholder="Taxa" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Taxa: Todas</SelectItem>
-                <SelectItem value="billing">Com taxa real</SelectItem>
-                <SelectItem value="no_charges">Sem taxas (pickup)</SelectItem>
-                <SelectItem value="pending">Pendente</SelectItem>
-              </SelectContent>
-            </Select>
+            {/* Billing filter removed - pending/no_charges are in "Sem Custo" tab */}
 
             <Select value={orderStatusFilter} onValueChange={(v) => { setOrderStatusFilter(v); setPage(1); }}>
               <SelectTrigger className="w-36">
@@ -445,21 +415,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             </Button>
 
-            {pendingCount > 0 && (
-              <Button 
-                variant="secondary" 
-                onClick={handleReprocessPending} 
-                disabled={reprocessingPending || loading}
-                className="gap-2"
-              >
-                {reprocessingPending ? (
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                ) : (
-                  <AlertCircle className="h-4 w-4" />
-                )}
-                Reprocessar Pendentes ({pendingCount})
-              </Button>
-            )}
+            {/* Reprocess pending button moved to "Sem Custo" tab */}
           </div>
 
           {/* Shipping counters */}
