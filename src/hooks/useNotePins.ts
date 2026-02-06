@@ -21,7 +21,6 @@ export function useNotePins({ workspaceId, moduleKey, companyId }: UseNotePinsOp
     queryFn: async () => {
       if (!workspaceId || !moduleKey) return [];
 
-      // Get pins for this module
       let query = supabase
         .from('note_pins')
         .select('*')
@@ -39,7 +38,6 @@ export function useNotePins({ workspaceId, moduleKey, companyId }: UseNotePinsOp
       const typedPins = pins as unknown as NotePin[];
       const noteIds = typedPins.map((p) => p.note_id);
 
-      // Fetch the actual notes
       const { data: notes, error: notesError } = await supabase
         .from('notes')
         .select('*')
@@ -57,17 +55,19 @@ export function useNotePins({ workspaceId, moduleKey, companyId }: UseNotePinsOp
     staleTime: 2 * 60 * 1000,
   });
 
-  // Pin a note
+  // Pin a note — accepts optional moduleKey override
   const pinMutation = useMutation({
-    mutationFn: async ({ noteId, routePath }: { noteId: string; routePath?: string }) => {
+    mutationFn: async ({ noteId, moduleKey: targetModuleKey, routePath }: { noteId: string; moduleKey?: string; routePath?: string }) => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Não autenticado');
+
+      const effectiveModuleKey = targetModuleKey || moduleKey;
 
       const { error } = await supabase.from('note_pins').insert({
         workspace_id: workspaceId!,
         company_id: companyId ?? null,
         note_id: noteId,
-        module_key: moduleKey,
+        module_key: effectiveModuleKey,
         route_path: routePath ?? null,
         created_by_user_id: user.id,
       } as any);
@@ -79,7 +79,7 @@ export function useNotePins({ workspaceId, moduleKey, companyId }: UseNotePinsOp
         workspace_id: workspaceId!,
         note_id: noteId,
         event_type: 'pinned',
-        payload_json: { module_key: moduleKey, company_id: companyId },
+        payload_json: { module_key: effectiveModuleKey, company_id: companyId },
         created_by_user_id: user.id,
       } as any);
     },

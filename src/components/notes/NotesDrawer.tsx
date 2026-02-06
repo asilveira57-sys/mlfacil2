@@ -73,6 +73,8 @@ export function NotesDrawer({ companyId }: NotesDrawerProps) {
 
   // Handle creating a new note
   const handleNewNote = useCallback(async () => {
+    // Clear editing state first to avoid state bleed
+    setEditingNote(null);
     try {
       const note = await createNote({
         company_id: companyId ?? null,
@@ -92,9 +94,7 @@ export function NotesDrawer({ companyId }: NotesDrawerProps) {
   const handleUpdate = useCallback(
     (updates: Partial<Note>) => {
       if (!editingNote) return;
-      // Update local state for responsiveness
       setEditingNote((prev) => (prev ? { ...prev, ...updates } : prev));
-      // Debounced save
       autoSave(editingNote.id, updates);
     },
     [editingNote, autoSave]
@@ -126,18 +126,18 @@ export function NotesDrawer({ companyId }: NotesDrawerProps) {
     [workspaceId, createTask, moduleKey, toast, t]
   );
 
-  // Handle paste image in editor
+  // Handle paste image in editor — returns signed URL
   const handlePasteImage = useCallback(
-    async (data: DataTransfer) => {
-      await uploadFromClipboard(data);
+    async (data: DataTransfer): Promise<string | null> => {
+      return uploadFromClipboard(data);
     },
     [uploadFromClipboard]
   );
 
-  // Handle file upload in editor
+  // Handle file upload in editor — returns signed URL
   const handleUploadImage = useCallback(
-    async (file: File) => {
-      await uploadFile({ file });
+    async (file: File): Promise<string> => {
+      return uploadFile({ file });
     },
     [uploadFile]
   );
@@ -157,11 +157,13 @@ export function NotesDrawer({ companyId }: NotesDrawerProps) {
       <SheetContent side="right" className="w-[380px] sm:w-[420px] p-0 flex flex-col">
         {editingNote ? (
           <NoteEditor
+            key={editingNote.id}
             note={editingNote}
             isPinned={isNotePinned(editingNote.id)}
+            currentModuleKey={moduleKey}
             onBack={() => setEditingNote(null)}
             onUpdate={handleUpdate}
-            onPin={() => pinNote({ noteId: editingNote.id })}
+            onPin={(targetModule) => pinNote({ noteId: editingNote.id, moduleKey: targetModule })}
             onUnpin={() => unpinNote(editingNote.id)}
             onSendToTasks={() => handleSendToTasks(editingNote)}
             onArchive={() => {
