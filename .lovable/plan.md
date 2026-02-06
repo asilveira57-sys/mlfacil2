@@ -1,167 +1,122 @@
 
-# Plano Corretivo: Modulo de Tendencias - 4 Problemas Identificados
+# Plano Corretivo REAL: Modulo de Tendencias
 
-## Diagnostico Detalhado
+## Causa Raiz de TODOS os Problemas
 
-### Problema 1: Filtro de 30 e 90 dias nao funciona
+**Todas as correcoes anteriores foram aplicadas nos ARQUIVOS ERRADOS.**
 
-**Causa raiz:** O filtro de periodo (`selectedPeriod`) so afeta duas coisas:
-1. A query de **elegibilidade** (`useCategoryEligibility`) - que calcula KPIs do seller (pedidos, faturamento, unidades vendidas)
-2. As queries de **performance do seller** (`seller/top-visitados`, `seller/top-vendidos`)
+A rota `/tendencias` renderiza `TendenciasV2.tsx`, NAO `Tendencias.tsx`.
 
-Porem, os dados que o usuario ve na tela principal (Tendencias de Mercado, Keywords, Mais Vendidos) vem de:
-- `trend_snapshots` - snapshot unico sem filtro de periodo
-- `highlights_snapshots` + `highlights_items` - snapshot unico sem filtro de periodo
+```
+src/App.tsx linha 150:
+  <Route path="/tendencias" element={<TendenciasV2 />} />
+```
 
-**O que acontece:** Ao mudar de 7d para 30d ou 90d, os KPIs do seller (339 pedidos, R$37K) ate deveriam mudar, mas estao com cache expirado (calculado em 27/01 com `expires_at: 28/01`). O cache ja venceu e deveria recalcular. As secoes de mercado (Tendencias, Keywords, Best Sellers) nunca vao mudar porque sao snapshots pontuais, nao filtrados por periodo.
+Os arquivos corrigidos anteriormente (`Tendencias.tsx`, `TrendsContext.tsx`, `TrendsHeaderBar.tsx`, `TrendsQuickKpis.tsx`, `BestSellersSection.tsx`, `TrendsCategoryBreadcrumb.tsx`) sao da versao V1 que **NAO e usada**.
 
-**Dados no banco:**
-- `seller_category_eligibility` para `MLB109309`:
-  - `last_7d`: NAO EXISTE
-  - `last_30d`: 320 pedidos, R$33.682 (calculado 26/01, expirado)
-  - `last_90d`: 1.298 pedidos, R$115.298 (calculado 27/01, expirado)
-
-Os KPIs no screenshot mostram "339 pedidos, R$37K" que nao corresponde a nenhum dos dois periodos, indicando dados stale.
-
-### Problema 2: "Mais Vendidos da Categoria" travado (0/5)
-
-**Causa raiz:** O snapshot de highlights para a categoria `MLB109309` (Etiquetas e Rotulos) tem apenas **1 registro**, datado de **24/01/2026** com 8 itens. Porem, o componente `BestSellersSection` dispara um `auto-collect` via `onCollect()` quando esta vazio, que chama a edge function `trends-collect-public`. Se essa funcao falhar ou demorar demais, o componente fica num loop de "Buscando dados..." ou exibe "0/5".
-
-O problema concreto: a funcao `trends-collect-public` provavelmente esta falhando silenciosamente (timeout ou erro da API do ML) ao tentar coletar dados para categorias de nivel mais profundo como `MLB109309`. O snapshot mais recente tem quase 2 semanas.
-
-### Problema 3: Sem navegacao para cima/baixo na categoria
-
-**Situacao atual:** O `SellerCategorySelector` mostra apenas as categorias detectadas do seller (lista plana). O `SubcategoryNavigator` existe mas so e acessado dentro do Collapsible quando o usuario abre "Ver todas as categorias". Nao ha breadcrumb visivel na tela principal nem botoes para subir/descer na arvore.
-
-O breadcrumb (`useCategoryBreadcrumb`) e carregado mas nao e exibido na interface principal. Existe no `TrendsHeaderBar` mas a logica de click (`handleBreadcrumbClick`) e passada ao `SubcategoryNavigator` que esta escondido.
-
-### Problema 4: Troca de empresa quebra o modulo
-
-**Causa raiz:** O `autoLoadAttemptedRef` e resetado no `useEffect` que observa `state.selectedAccountId`, mas o fluxo de reset tem um problema:
-
-1. Ao trocar empresa, `setAccount` muda `selectedAccountId`
-2. O `useEffect` de reset seta `autoLoadAttemptedRef.current = false`
-3. Mas o `useEffect` de auto-load verifica `!state.selectedAccountId || categoriesLoading || autoLoadAttemptedRef.current`
-4. O `autoLoadAttemptedRef` muda para false, mas o `autoLoad.resetForAccount` compara o novo accountId com o anterior e pode nao resetar corretamente se o ref interno esta dessincronizado
-5. Alem disso, o `TrendsContext` NAO limpa dados de mercado ao trocar conta (so limpa ao trocar categoria em `SET_CATEGORY`). O `SET_ACCOUNT` mantem `selectedCategoryId` e dados antigos.
+A versao ativa (V2) usa:
+- `src/pages/TendenciasV2.tsx` (estado local com useState, sem Context)
+- `src/hooks/useTrendsDataCache.ts` (cache proprio)
+- `src/components/trends-v2/TrendsFiltersBar.tsx`
+- `src/components/trends-v2/TrendsOverviewCards.tsx`
+- `src/components/trends-v2/TrendsBestSellersCard.tsx`
+- `src/components/trends-v2/TrendsKeywordsCard.tsx`
+- `src/components/trends-v2/TrendsStatusBanner.tsx`
 
 ---
 
-## Correcoes Propostas
+## Problemas Reais no Codigo V2
 
-### Correcao 1: Filtro de periodo funcional
+### 1. Troca de empresa nao detecta
 
-**Abordagem:** Dividir KPIs em dois grupos:
-- **KPIs do Seller** (respondem ao periodo): Pedidos, Unidades Vendidas, Faturamento, Ticket Medio
-- **KPIs de Mercado** (snapshot): Status da Categoria, Tendencias, Destaques, Interesse de Busca
+No `TendenciasV2.tsx`, `handleAccountChange` limpa a categoria. Mas o useEffect de auto-selecao (linha 171-204) tem a condicao `if (selectedCategoryId) return;` que deveria permitir a re-selecao. O problema e que `sellerCategories` usa `placeholderData` do React Query, entao dados STALE da conta anterior podem ser usados para auto-selecionar uma categoria da conta errada. Alem disso, o useEffect pode executar antes dos novos `sellerCategories` carregarem e cair no fallback (categorias raiz).
 
-O `TrendsQuickKpis` passara a exibir 2 linhas:
-- Linha 1 (4 cards): KPIs de mercado (como esta hoje)
-- Linha 2 (4 cards): KPIs do seller filtrados pelo periodo selecionado
+**Correcao:** Invalidar o cache de `sellerCategories` ao trocar conta. Aguardar `categoriesLoading === false` antes de auto-selecionar. Limpar memoria cache do `useTrendsDataCache` ao trocar conta.
 
-Alem disso, garantir que a elegibilidade recalcule quando o cache estiver expirado, adicionando logica de refresh forcado quando `isExpired: true`.
+### 2. Filtro de periodo nao muda nada
 
-**Mudanca no contexto:** `SET_PERIOD` deve limpar dados do seller e forcar recalculo, similar ao `SET_CATEGORY`.
+O `handlePeriodChange` apenas faz `setSelectedPeriod(period)`. A query de elegibilidade (`useEligibilityCached`) usa `placeholderData: (prev) => prev`, que mostra os dados do periodo ANTERIOR enquanto o novo carrega. O componente `TrendsOverviewCards` nao mostra nenhum indicador de loading durante a transicao (porque `isLoadingEligibility` e `false` com placeholderData).
 
-### Correcao 2: Best Sellers com timeout e fallback
+**Correcao:** Remover `placeholderData` da query de elegibilidade para que o loading state seja visivel. Adicionar o label do periodo nos cards do seller (ex: "Ultimos 30d" vs "Ultimos 90d"). Invalidar o cache de memoria ao trocar periodo.
 
-**Abordagem:**
-- Adicionar timeout de 15 segundos ao auto-collect
-- Se nao houver dados apos coleta, mostrar estado vazio claro (sem loop)
-- Desabilitar auto-collect automatico -- tornar acao manual apenas
-- Mostrar a data do ultimo snapshot ("Dados de 24/01/2026") e botao para atualizar
+### 3. Sem navegacao por categoria (breadcrumb)
 
-### Correcao 3: Breadcrumb de navegacao na categoria
+O V2 usa um `Select` simples com lista plana de categorias do seller + categorias raiz. Nao existe breadcrumb, nao existe navegacao para cima (pai) ou para baixo (subcategorias). O componente `TrendsCategoryBreadcrumb` criado anteriormente existe mas NAO e importado no V2.
 
-**Abordagem:** Adicionar uma barra de breadcrumb visivel abaixo dos filtros:
-- Exibir path completo da categoria selecionada (ex: "Papelaria > Etiquetas e Rotulos > Etiquetas Adesivas")
-- Cada nivel do breadcrumb e clicavel para navegar para cima
-- Botao "Ver subcategorias" ao lado para navegar para baixo
-- Ao clicar num nivel pai, recarrega dados para essa categoria
+**Correcao:** Importar e renderizar `TrendsCategoryBreadcrumb` no `TendenciasV2.tsx`, entre o status banner e os KPIs. O componente ja funciona corretamente - busca o path via API do ML e permite clicar em niveis pai e ver subcategorias. Adaptar para usar os handlers do V2 (`handleCategoryChange`) em vez do TrendsContext.
 
-### Correcao 4: Reset completo ao trocar empresa
+### 4. Mais Vendidos travado (0/5)
 
-**Abordagem:** Adicionar acao `RESET_FOR_ACCOUNT` no reducer que:
-- Limpa `selectedCategoryId`, `selectedSubcategoryId`
-- Limpa todos os dados (market + seller)
-- Reseta flags de UI
-- Reseta capabilities
+O console mostra que o fetch de highlights demora ~16 segundos. O timeout de 12s dispara. Alem disso, o badge "0/5" e o progresso de enrichment (`useCatalogEnrichment`) que fica travado. O problema real e que a API `trends-api/mercado/highlights` e muito lenta para categorias profundas.
 
-No `Tendencias.tsx`, ao detectar mudanca de conta, chamar reset completo e re-trigger auto-load.
+**Correcao:** Usar os items da resposta diretamente (sem enrichment obrigatorio) quando o enrichment falha. Mostrar data do snapshot existente. O timeout de 12s ja existe no V2 - apenas garantir que o fallback funciona corretamente e nao mostra "0/5" infinitamente.
 
 ---
 
 ## Detalhamento Tecnico
 
-### Arquivos modificados
+### Arquivo 1: `src/pages/TendenciasV2.tsx`
 
-| Arquivo | Acao |
-|---------|------|
-| `src/contexts/TrendsContext.tsx` | Adicionar acao `RESET_FOR_ACCOUNT` e `SET_PERIOD` com limpeza de seller data |
-| `src/components/trends/TrendsQuickKpis.tsx` | Separar KPIs de mercado vs seller, adicionar linha de KPIs do seller |
-| `src/components/trends/BestSellersSection.tsx` | Remover auto-collect, adicionar timeout, mostrar data do snapshot |
-| `src/components/trends/TrendsHeaderBar.tsx` | Adicionar breadcrumb visivel e botao de subcategorias |
-| `src/pages/Tendencias.tsx` | Corrigir fluxo de troca de conta com reset completo |
-| `src/hooks/useCategoryEligibility.ts` | Forcar recalculo quando cache expirado |
+Mudancas:
+- Importar e renderizar `TrendsCategoryBreadcrumb` (adaptado para V2)
+- Corrigir `handleAccountChange`: limpar memoria cache, invalidar queries de seller categories
+- Corrigir auto-selecao: aguardar `categoriesLoading === false` e verificar que `sellerCategories` e para a conta certa
+- Corrigir `handlePeriodChange`: limpar eligibility cache de memoria
+- Corrigir bug `unitsSold: eligibility.ordersCount` para usar valor correto
 
-### Arquivos NAO modificados
+### Arquivo 2: `src/hooks/useTrendsDataCache.ts`
 
-- Nenhuma Edge Function alterada
-- Nenhuma migracao SQL
-- Nenhuma RLS alterada
-- Modulos de Custos, Anuncios, Perguntas, Mensagens inalterados
+Mudancas:
+- Adicionar funcao `clearAccountCache()` para limpar cache de memoria ao trocar conta
+- Adicionar funcao `clearEligibilityCache()` para limpar ao trocar periodo
+- Remover `placeholderData` da query de elegibilidade
+- Exportar funcao de limpeza seletiva
 
-### Detalhe da Correcao 1 (Periodo)
+### Arquivo 3: `src/components/trends-v2/TrendsOverviewCards.tsx`
 
-No `TrendsContext.tsx`, a acao `SET_PERIOD` passara a:
-```text
-case 'SET_PERIOD':
-  return {
-    ...state,
-    selectedPeriod: action.period,
-    // Limpar dados do seller para forcar recalculo
-    data: {
-      ...state.data,
-      sellerGoals: null,
-      sellerSubcategories: null,
-    },
-    // Reset capabilities para reavaliar com novo periodo
-    capabilities: {
-      canUseSellerInsights: false,
-      reason: 'NO_CATEGORY',
-    },
-  };
-```
+Mudancas:
+- Adicionar label do periodo nos subtitulos dos seller KPIs (ex: "Ultimos 30 dias")
+- Mostrar skeleton quando eligibility esta loading (em vez de dados stale)
 
-No `useCategoryEligibility`, adicionar logica para forcar recalculo se o cache estiver expirado (atualmente retorna dados expirados sem atualizar).
+### Arquivo 4: `src/components/trends-v2/TrendsBestSellersCard.tsx`
 
-### Detalhe da Correcao 3 (Breadcrumb)
+Mudancas:
+- Quando enrichment falha ou trava, usar items originais (sem enrichment) como fallback
+- Nao mostrar badge "0/5" quando enrichment esta travado por mais de 5 segundos
 
-Adicionar componente `TrendsCategoryBreadcrumb` acima dos KPIs:
-```text
-Mercado Livre > Papelaria > Etiquetas e Rotulos
-[Botao: Ver subcategorias v]
-```
+### Arquivo 5: Criar `src/components/trends-v2/TrendsCategoryBreadcrumbV2.tsx`
 
-Cada item do breadcrumb chama `setCategory(id, name)` ao ser clicado. O botao "Ver subcategorias" abre um dropdown com os filhos da categoria atual.
+Novo componente que:
+- Usa `useCategoryBreadcrumb` (ja existente) para buscar o path
+- Usa `useSubcategories` (ja existente) para mostrar filhos
+- Recebe `onCategoryChange` como prop (sem depender do TrendsContext)
+- Renderiza breadcrumb clicavel + botao "Subcategorias"
 
-### Detalhe da Correcao 4 (Troca de empresa)
+### Limpeza: Remover arquivos V1 nao utilizados
 
-No `Tendencias.tsx`, substituir o `setAccount` simples por:
-```text
-// Ao trocar conta, reset completo
-if (newAccountId !== state.selectedAccountId) {
-  dispatch({ type: 'RESET_FOR_ACCOUNT', accountId: newAccountId });
-  autoLoadAttemptedRef.current = false;
-}
-```
+Arquivos que podem ser removidos (nao sao renderizados por nenhuma rota):
+- `src/pages/Tendencias.tsx`
+- `src/components/trends/TrendsHeaderBar.tsx`
+- `src/components/trends/TrendsQuickKpis.tsx`
+- `src/components/trends/BestSellersSection.tsx`
+- `src/components/trends/TrendsCategoryBreadcrumb.tsx`
+- `src/hooks/useTrendsAutoLoad.ts`
+
+(Nota: a remocao sera feita apenas se nao houver outras referencias. Verificarei antes.)
 
 ---
 
+## Arquivos NAO Modificados
+
+- Nenhuma Edge Function
+- Nenhuma migracao SQL
+- Nenhuma RLS
+- TrendsContext.tsx (V1 - nao usado)
+- Modulos de Custos, Anuncios, Perguntas, etc.
+
 ## Resultado Esperado
 
-- Filtro de 7/30/90 dias atualiza KPIs do seller (pedidos, faturamento) com dados reais recalculados
-- KPIs de mercado (tendencias, keywords) permanecem estaveis pois sao snapshots
-- Best Sellers mostra dados existentes com data do snapshot, sem loop infinito
-- Breadcrumb visivel permite navegar para categorias pai/filha
-- Troca de empresa reseta completamente o modulo e recarrega dados da nova conta
+- Trocar empresa: limpa cache, recarrega categorias da nova conta, auto-seleciona a melhor
+- Trocar periodo: KPIs do seller atualizam visivelmente (com loading), mostrando dados do novo periodo
+- Breadcrumb visivel: permite navegar para categoria pai ou explorar subcategorias
+- Best Sellers: nao trava em "0/5", mostra dados disponiveis ou estado vazio claro
