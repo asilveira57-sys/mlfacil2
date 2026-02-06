@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FloatingSupportButton } from "@/components/support/FloatingSupportButton";
+import { HeaderUtilities } from "@/components/utilities";
 
 // Context for page-level header customization
 interface PageHeaderContextType {
@@ -98,6 +99,8 @@ export function AppShellLayout() {
                 </div>
               )}
               <div className="flex items-center gap-2 ml-auto">
+                <HeaderUtilities />
+                <Separator orientation="vertical" className="h-6 hidden sm:block" />
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
