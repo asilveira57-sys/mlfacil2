@@ -69,5 +69,12 @@
     "unpin": "Desfijar",
     "move": "Mover",
     "configure": "Configurar"
+  },
+
+  "support": {
+    "button_title": "Botón de Soporte Flotante",
+    "button_description": "Configura la visibilidad del botón flotante de soporte que aparece en todas las páginas.",
+    "show_button": "Mostrar botón flotante de soporte",
+    "show_button_hint": "El botón aparece automáticamente al iniciar sesión. Puedes cerrarlo temporalmente en cualquier momento."
   }
 }

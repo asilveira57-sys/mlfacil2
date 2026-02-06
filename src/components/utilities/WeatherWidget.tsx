@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { 
   Cloud, 
+  CloudOff,
   Sun, 
   CloudRain, 
   CloudSnow, 
@@ -122,7 +123,20 @@ export function WeatherWidget({
     }
 
     if (error || !weather) {
-      return null;
+      return (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className={cn('flex items-center gap-1.5 text-sm text-muted-foreground/50 cursor-default', className)}>
+                <CloudOff className="h-4 w-4" />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="text-xs">{t('utilities:weather.unavailable', { defaultValue: 'Clima indisponível' })}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      );
     }
 
     return (

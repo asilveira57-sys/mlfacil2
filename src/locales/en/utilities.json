@@ -69,5 +69,12 @@
     "unpin": "Unpin",
     "move": "Move",
     "configure": "Configure"
+  },
+
+  "support": {
+    "button_title": "Floating Support Button",
+    "button_description": "Configure the visibility of the floating support button that appears on all pages.",
+    "show_button": "Show floating support button",
+    "show_button_hint": "The button appears automatically when you log in. You can temporarily close it at any time."
   }
 }

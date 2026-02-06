@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { User, Receipt, Building2, CreditCard, Palette, Users, Globe, Wrench } from "lucide-react";
+import { User, Receipt, Building2, CreditCard, Palette, Users, Globe, Wrench, Headphones } from "lucide-react";
 import SettingsProfile from "@/components/settings/SettingsProfile";
 import SettingsBilling from "@/components/settings/SettingsBilling";
 import SettingsCompanies from "@/components/settings/SettingsCompanies";
@@ -11,6 +11,7 @@ import { CollaboratorsCard } from "@/components/settings/collaborators";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { SettingsLanguage } from "@/components/settings/SettingsLanguage";
 import { SettingsUtilities } from "@/components/settings/SettingsUtilities";
+import { SettingsSupport } from "@/components/settings/SettingsSupport";
 
 const Settings = () => {
   const { t } = useTranslation();
@@ -23,6 +24,7 @@ const Settings = () => {
     { id: "collaborators", label: t('nav:collaborators'), icon: Users },
     { id: "customization", label: t('nav:customization'), icon: Palette },
     { id: "utilities", label: t('utilities:title', { defaultValue: 'Utilidades' }), icon: Wrench },
+    { id: "support", label: t('nav:support', { defaultValue: 'Suporte' }), icon: Headphones },
     { id: "billing", label: t('nav:billing'), icon: Receipt },
     { id: "companies", label: t('nav:companies'), icon: Building2 },
     { id: "subscription", label: t('nav:subscription'), icon: CreditCard },
@@ -35,7 +37,7 @@ const Settings = () => {
     >
       <div className="container mx-auto py-6 px-4 max-w-6xl">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4 lg:grid-cols-8 h-auto p-1 bg-muted/50">
+          <TabsList className="grid w-full grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 h-auto p-1 bg-muted/50">
             {tabs.map((tab) => (
               <TabsTrigger
                 key={tab.id}
@@ -66,6 +68,10 @@ const Settings = () => {
 
           <TabsContent value="utilities" className="mt-6">
             <SettingsUtilities />
+          </TabsContent>
+
+          <TabsContent value="support" className="mt-6">
+            <SettingsSupport />
           </TabsContent>
 
           <TabsContent value="billing" className="mt-6">
