@@ -69,5 +69,12 @@
     "unpin": "Desafixar",
     "move": "Mover",
     "configure": "Configurar"
+  },
+
+  "support": {
+    "button_title": "Botão de Suporte Flutuante",
+    "button_description": "Configure a visibilidade do botão flutuante de suporte que aparece em todas as páginas.",
+    "show_button": "Exibir botão flutuante de suporte",
+    "show_button_hint": "O botão aparece automaticamente ao fazer login. Você pode fechá-lo temporariamente a qualquer momento."
   }
 }

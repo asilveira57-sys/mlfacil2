@@ -24,6 +24,7 @@ export interface UtilitiesPreferences {
   showClockInHeader: boolean;
   showWeatherInHeader: boolean;
   showCalculatorInHeader: boolean;
+  showSupportButton: boolean;
   weatherCity: string;
   weatherCountry: string;
 }
@@ -45,6 +46,7 @@ const DEFAULT_PREFERENCES: UtilitiesPreferences = {
   showClockInHeader: true,
   showWeatherInHeader: true,
   showCalculatorInHeader: true,
+  showSupportButton: true,
   weatherCity: 'São Paulo',
   weatherCountry: 'BR',
 };
@@ -96,6 +98,7 @@ export function useUtilitiesPreferences() {
             showClockInHeader: widgetsEnabled?.clock ?? true,
             showWeatherInHeader: widgetsEnabled?.weather ?? true,
             showCalculatorInHeader: widgetsEnabled?.calculator ?? true,
+            showSupportButton: widgetsLayout?.showSupportButton ?? true,
             weatherCity: widgetsLayout?.weatherCity || DEFAULT_PREFERENCES.weatherCity,
             weatherCountry: widgetsLayout?.weatherCountry || DEFAULT_PREFERENCES.weatherCountry,
           });
@@ -115,11 +118,12 @@ export function useUtilitiesPreferences() {
 
     const newPreferences = { ...preferences, ...updates };
 
-    // Sync weatherCity/weatherCountry into widgetsLayout
+    // Sync weatherCity/weatherCountry/showSupportButton into widgetsLayout
     const newLayout = {
       ...newPreferences.widgetsLayout,
       weatherCity: updates.weatherCity ?? newPreferences.weatherCity,
       weatherCountry: updates.weatherCountry ?? newPreferences.weatherCountry,
+      showSupportButton: updates.showSupportButton ?? newPreferences.showSupportButton,
     };
     newPreferences.widgetsLayout = newLayout;
     newPreferences.weatherCity = newLayout.weatherCity || DEFAULT_PREFERENCES.weatherCity;

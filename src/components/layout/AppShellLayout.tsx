@@ -14,6 +14,7 @@ import { RefreshCw } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FloatingSupportButton } from "@/components/support/FloatingSupportButton";
 import { HeaderUtilities } from "@/components/utilities";
+import { useUtilitiesPreferences } from "@/hooks/useUtilitiesPreferences";
 
 // Context for page-level header customization
 interface PageHeaderContextType {
@@ -51,6 +52,7 @@ export function AppShellLayout() {
   const { t } = useTranslation();
   const { sellerId } = useActiveAccount();
   const { manualRefresh, isRefreshing } = useRefreshPolicy();
+  const { preferences: utilitiesPrefs } = useUtilitiesPreferences();
   const location = useLocation();
   const [headerState, setHeaderState] = useState({
     title: "",
@@ -130,7 +132,7 @@ export function AppShellLayout() {
               <Outlet />
             </main>
           </SidebarInset>
-          <FloatingSupportButton />
+          <FloatingSupportButton visible={utilitiesPrefs.showSupportButton} />
         </div>
       </SidebarProvider>
     </PageHeaderContext.Provider>
