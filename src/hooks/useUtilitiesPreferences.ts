@@ -12,6 +12,8 @@ export interface WidgetsEnabled {
 export interface WidgetsLayout {
   order: string[];
   positions: Record<string, { x: number; y: number }>;
+  weatherCity?: string;
+  weatherCountry?: string;
 }
 
 export interface UtilitiesPreferences {
@@ -22,6 +24,8 @@ export interface UtilitiesPreferences {
   showClockInHeader: boolean;
   showWeatherInHeader: boolean;
   showCalculatorInHeader: boolean;
+  weatherCity: string;
+  weatherCountry: string;
 }
 
 const DEFAULT_PREFERENCES: UtilitiesPreferences = {
@@ -35,10 +39,14 @@ const DEFAULT_PREFERENCES: UtilitiesPreferences = {
   widgetsLayout: {
     order: ['clock', 'weather', 'calculator'],
     positions: {},
+    weatherCity: 'São Paulo',
+    weatherCountry: 'BR',
   },
   showClockInHeader: true,
   showWeatherInHeader: true,
   showCalculatorInHeader: true,
+  weatherCity: 'São Paulo',
+  weatherCountry: 'BR',
 };
 
 export function useUtilitiesPreferences() {
@@ -77,14 +85,19 @@ export function useUtilitiesPreferences() {
           .maybeSingle();
 
         if (prefs) {
+          const widgetsEnabled = (prefs as any).widgets_enabled || DEFAULT_PREFERENCES.widgetsEnabled;
+          const widgetsLayout = (prefs as any).widgets_layout || DEFAULT_PREFERENCES.widgetsLayout;
+
           setPreferences({
             timezone: (prefs as any).timezone || DEFAULT_PREFERENCES.timezone,
             hourFormat: ((prefs as any).hour_format as '12h' | '24h') || DEFAULT_PREFERENCES.hourFormat,
-            widgetsEnabled: (prefs as any).widgets_enabled || DEFAULT_PREFERENCES.widgetsEnabled,
-            widgetsLayout: (prefs as any).widgets_layout || DEFAULT_PREFERENCES.widgetsLayout,
-            showClockInHeader: (prefs as any).widgets_enabled?.clock ?? true,
-            showWeatherInHeader: (prefs as any).widgets_enabled?.weather ?? true,
-            showCalculatorInHeader: (prefs as any).widgets_enabled?.calculator ?? true,
+            widgetsEnabled,
+            widgetsLayout,
+            showClockInHeader: widgetsEnabled?.clock ?? true,
+            showWeatherInHeader: widgetsEnabled?.weather ?? true,
+            showCalculatorInHeader: widgetsEnabled?.calculator ?? true,
+            weatherCity: widgetsLayout?.weatherCity || DEFAULT_PREFERENCES.weatherCity,
+            weatherCountry: widgetsLayout?.weatherCountry || DEFAULT_PREFERENCES.weatherCountry,
           });
         }
       } catch (error) {
@@ -101,6 +114,17 @@ export function useUtilitiesPreferences() {
     if (!userId) return;
 
     const newPreferences = { ...preferences, ...updates };
+
+    // Sync weatherCity/weatherCountry into widgetsLayout
+    const newLayout = {
+      ...newPreferences.widgetsLayout,
+      weatherCity: updates.weatherCity ?? newPreferences.weatherCity,
+      weatherCountry: updates.weatherCountry ?? newPreferences.weatherCountry,
+    };
+    newPreferences.widgetsLayout = newLayout;
+    newPreferences.weatherCity = newLayout.weatherCity || DEFAULT_PREFERENCES.weatherCity;
+    newPreferences.weatherCountry = newLayout.weatherCountry || DEFAULT_PREFERENCES.weatherCountry;
+
     setPreferences(newPreferences);
 
     try {
@@ -117,7 +141,7 @@ export function useUtilitiesPreferences() {
 
       toast({
         title: t('common:success'),
-        description: t('utilities:settings.save_success'),
+        description: t('utilities:settings.save_success', { defaultValue: 'Preferências salvas com sucesso.' }),
       });
     } catch (error) {
       console.error('[Utilities] Error saving preferences:', error);

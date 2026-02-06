@@ -20,6 +20,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { supabase } from '@/integrations/supabase/client';
 
 interface WeatherData {
   temperature: number;
@@ -27,13 +28,13 @@ interface WeatherData {
   humidity: number;
   windSpeed: number;
   condition: string;
+  conditionDescription?: string;
   city: string;
   lastUpdate: Date;
 }
 
 interface WeatherWidgetProps {
   city?: string;
-  state?: string;
   country?: string;
   updateInterval?: number; // in minutes
   variant?: 'compact' | 'full';
@@ -52,25 +53,9 @@ const WEATHER_ICONS: Record<string, React.ComponentType<{ className?: string }>>
   haze: Cloud,
 };
 
-// Mock weather data - in production, this would call a weather API
-function generateMockWeather(city: string): WeatherData {
-  const conditions = ['clear', 'clouds', 'rain', 'drizzle'];
-  const condition = conditions[Math.floor(Math.random() * conditions.length)];
-  const baseTemp = 18 + Math.floor(Math.random() * 15);
-  
-  return {
-    temperature: baseTemp,
-    feelsLike: baseTemp + Math.floor(Math.random() * 4) - 2,
-    humidity: 40 + Math.floor(Math.random() * 40),
-    windSpeed: Math.floor(Math.random() * 20),
-    condition,
-    city,
-    lastUpdate: new Date(),
-  };
-}
-
 export function WeatherWidget({
   city = 'São Paulo',
+  country = 'BR',
   updateInterval = 30,
   variant = 'compact',
   className,
@@ -85,20 +70,36 @@ export function WeatherWidget({
     setError(null);
     
     try {
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // In production, call actual weather API here
-      // For now, use mock data
-      const data = generateMockWeather(city);
-      setWeather(data);
+      const { data, error: fnError } = await supabase.functions.invoke('weather-api', {
+        body: { city, country },
+      });
+
+      if (fnError) {
+        throw new Error(fnError.message || 'Failed to fetch weather');
+      }
+
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+
+      setWeather({
+        temperature: data.temperature,
+        feelsLike: data.feelsLike,
+        humidity: data.humidity,
+        windSpeed: data.windSpeed,
+        condition: data.condition,
+        conditionDescription: data.conditionDescription,
+        city: data.city,
+        lastUpdate: new Date(),
+      });
     } catch (err) {
-      setError(t('utilities:weather.error'));
-      console.error('[Weather] Error fetching weather:', err);
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setError(message);
+      console.error('[Weather] Error fetching weather:', message);
     } finally {
       setLoading(false);
     }
-  }, [city, t]);
+  }, [city, country]);
 
   useEffect(() => {
     fetchWeather();
@@ -108,9 +109,8 @@ export function WeatherWidget({
   }, [fetchWeather, updateInterval]);
 
   const WeatherIcon = weather ? WEATHER_ICONS[weather.condition] || Cloud : Cloud;
-  const conditionText = weather 
-    ? t(`utilities:weather.conditions.${weather.condition}`, { defaultValue: weather.condition })
-    : '';
+  const conditionText = weather?.conditionDescription
+    || (weather ? t(`utilities:weather.conditions.${weather.condition}`, { defaultValue: weather.condition }) : '');
 
   if (variant === 'compact') {
     if (loading && !weather) {
@@ -137,8 +137,8 @@ export function WeatherWidget({
           <TooltipContent>
             <div className="text-xs">
               <p className="font-medium">{weather.city} • {conditionText}</p>
-              <p>{t('utilities:weather.feels_like')}: {weather.feelsLike}°C</p>
-              <p>{t('utilities:weather.humidity')}: {weather.humidity}%</p>
+              <p>{t('utilities:weather.feels_like', { defaultValue: 'Sensação' })}: {weather.feelsLike}°C</p>
+              <p>{t('utilities:weather.humidity', { defaultValue: 'Umidade' })}: {weather.humidity}%</p>
             </div>
           </TooltipContent>
         </Tooltip>

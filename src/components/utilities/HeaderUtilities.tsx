@@ -1,4 +1,3 @@
-import { useTranslation } from 'react-i18next';
 import { ClockWidget } from './ClockWidget';
 import { WeatherWidget } from './WeatherWidget';
 import { CalculatorWidget } from './CalculatorWidget';
@@ -42,7 +41,11 @@ export function HeaderUtilities({ className }: HeaderUtilitiesProps) {
       )}
       
       {showWeather && (
-        <WeatherWidget variant="compact" />
+        <WeatherWidget
+          variant="compact"
+          city={preferences.weatherCity}
+          country={preferences.weatherCountry}
+        />
       )}
       
       {showWeather && showCalculator && (
