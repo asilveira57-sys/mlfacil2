@@ -1,127 +1,51 @@
 
 
-# Plano: Aba "Utilidades" em Configuracoes + Clima Real via API
+# Correcao: Widgets de Utilidades nao aparecem no header
 
-## Resumo
+## Problema encontrado
 
-Adicionar uma aba "Utilidades" na pagina de Configuracoes com controles completos para cada widget (relogio, clima, calculadora), e substituir os dados mock do clima por dados reais via OpenWeatherMap.
+A aplicacao usa dois layouts, mas apenas o **AppShellLayout** esta ativo (renderiza todas as rotas via `<Outlet />`). O **DashboardLayout** (que continha o `<HeaderUtilities />`) nao e mais utilizado por nenhuma pagina.
 
----
-
-## O que sera feito
-
-### 1. Nova aba "Utilidades" em Configuracoes
-
-Uma nova aba com icone de engrenagem/ferramenta sera adicionada a pagina de Configuracoes, contendo 3 secoes (cards):
-
-**Card Relogio:**
-- Toggle "Exibir no header" (liga/desliga o widget)
-- Seletor de fuso horario (dropdown com os principais fusos)
-- Toggle de formato: 12 horas (AM/PM) ou 24 horas
-
-**Card Clima:**
-- Toggle "Exibir no header" (liga/desliga o widget)
-- Campo de texto para cidade (ex: "Sao Paulo")
-- Campo de texto para pais (ex: "BR")
-
-**Card Calculadora:**
-- Toggle "Exibir no header" (liga/desliga)
-
-Todas as preferencias sao persistidas na tabela `user_preferences` (colunas `widgets_enabled`, `widgets_layout`, `timezone`, `hour_format` que ja existem).
-
-### 2. Edge Function `weather-api`
-
-Nova funcao backend que:
-- Recebe `city` e `country` como parametros
-- Chama a API do OpenWeatherMap (`api.openweathermap.org/data/2.5/weather`)
-- Retorna temperatura, sensacao termica, umidade, vento e condicao
-
-Requer a chave `OPENWEATHERMAP_API_KEY` como secret (gratuita em openweathermap.org).
-
-### 3. WeatherWidget com dados reais
-
-O componente `WeatherWidget` deixara de usar `generateMockWeather()` e passara a chamar a edge function `weather-api`. A cidade vira das preferencias do usuario.
-
-### 4. HeaderUtilities atualizado
-
-Passara a cidade configurada pelo usuario para o `WeatherWidget` em vez do valor fixo "Sao Paulo".
-
----
-
-## Detalhamento Tecnico
-
-### Migracao SQL
-
-Nenhuma necessaria. A cidade do clima sera armazenada dentro do campo JSONB `widgets_layout` que ja existe:
+Ou seja, os widgets (relogio, clima, calculadora) foram adicionados ao layout errado. O `AppShellLayout.tsx` nunca importou nem renderizou o componente `HeaderUtilities`.
 
 ```text
-widgets_layout: {
-  order: ["clock", "weather", "calculator"],
-  positions: {},
-  weatherCity: "São Paulo",    // NOVO
-  weatherCountry: "BR"         // NOVO
-}
+AppShellLayout.tsx (USADO - falta HeaderUtilities)
+  header: SidebarTrigger | Titulo | RefreshButton | LanguageSwitcher | NotificationBell | AccountSwitcher
+
+DashboardLayout.tsx (NAO USADO - tem HeaderUtilities)
+  header: SidebarTrigger | Titulo | HeaderUtilities | LanguageSwitcher | NotificationBell | AccountSwitcher
 ```
 
-### Arquivos criados
+## Solucao
 
-| Arquivo | Descricao |
-|---------|-----------|
-| `src/components/settings/SettingsUtilities.tsx` | Componente da aba com 3 cards de configuracao |
-| `supabase/functions/weather-api/index.ts` | Edge function proxy para OpenWeatherMap |
+Adicionar o `<HeaderUtilities />` ao header do `AppShellLayout.tsx`, posicionando-o antes do botao de refresh (ou logo apos), exatamente como estava planejado no DashboardLayout.
 
-### Arquivos modificados
+## Arquivo modificado
 
 | Arquivo | Mudanca |
 |---------|---------|
-| `src/pages/Settings.tsx` | Adicionar aba "Utilidades" com icone Wrench |
-| `src/hooks/useUtilitiesPreferences.ts` | Adicionar `weatherCity` e `weatherCountry` ao interface e ao load/save |
-| `src/components/utilities/WeatherWidget.tsx` | Substituir mock por chamada a edge function |
-| `src/components/utilities/HeaderUtilities.tsx` | Passar cidade das preferencias ao WeatherWidget |
-| `supabase/config.toml` | Registrar `[functions.weather-api]` |
+| `src/components/layout/AppShellLayout.tsx` | Importar `HeaderUtilities` e renderizar no header, antes do `LanguageSwitcher` |
 
-### Arquivos NAO modificados
+## Detalhe da mudanca
 
-- Nenhuma migracao SQL
-- ClockWidget.tsx (ja funciona corretamente)
-- CalculatorWidget.tsx (ja funciona corretamente)
-- Arquivos de traducao (chaves ja existem nos 3 idiomas)
-- Nenhum outro modulo (Tendencias, Promocoes, ADS, etc.)
+No `AppShellLayout.tsx`:
 
-### Secret necessario
+1. Adicionar import:
+   `import { HeaderUtilities } from "@/components/utilities";`
 
-Sera solicitada a chave `OPENWEATHERMAP_API_KEY`:
-- Obtida gratuitamente em https://openweathermap.org/api (plano Free)
-- Limite: 1.000 chamadas/dia (mais que suficiente)
-- O usuario precisara criar uma conta e gerar a API key
+2. Dentro do `<div className="flex items-center gap-2 ml-auto">`, adicionar `<HeaderUtilities />` e um separador vertical antes dos demais itens (RefreshButton, LanguageSwitcher, etc.)
 
-### Fluxo da Edge Function weather-api
+O resultado no header ficara:
 
 ```text
-Frontend (WeatherWidget)
-  -> supabase.functions.invoke('weather-api', { body: { city, country } })
-    -> Edge Function
-      -> fetch('https://api.openweathermap.org/data/2.5/weather?q={city},{country}&appid={KEY}&units=metric')
-      -> Retorna { temperature, feelsLike, humidity, windSpeed, condition, city }
-    <- Response JSON
-  <- setWeather(data)
+[Sidebar] | Titulo |                    [Relogio | Clima | Calculadora] | [Refresh] | [PT] | [Sino] | [Conta]
 ```
 
-### Detalhe do SettingsUtilities
+## O que NAO sera alterado
 
-O componente seguira o padrao visual do `SettingsLanguage` (Card com header + content), usando:
-- `Switch` para toggles on/off
-- `Select` para timezone e formato de hora
-- `Input` para cidade e pais
-- Salvamento automatico ao alterar qualquer campo (via `updatePreferences`)
-
----
-
-## Resultado Esperado
-
-- Aba "Utilidades" visivel em Configuracoes com todos os controles
-- Relogio respeita timezone e formato escolhidos
-- Clima mostra dados REAIS da cidade configurada
-- Calculadora pode ser ligada/desligada do header
-- Tudo persiste no banco e carrega ao reabrir
+- Nenhum outro arquivo
+- Nenhuma migracao SQL
+- Os componentes de widget ja estao funcionando corretamente
+- A aba de Configuracoes > Utilidades ja esta pronta
+- O DashboardLayout continuara existindo (nao sera removido para evitar quebras)
 
