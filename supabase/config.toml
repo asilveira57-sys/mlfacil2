@@ -111,6 +111,9 @@ verify_jwt = false
 [functions.promotions-sync]
 verify_jwt = false
 
+[functions.promotions-action]
+verify_jwt = false
+
 [functions.trends-sync-categories]
 verify_jwt = false
 

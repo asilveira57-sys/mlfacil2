@@ -30,6 +30,7 @@ interface SyncResult {
   promotions_synced: number;
   items_synced: number;
   events_created: number;
+  expired_marked: number;
   log_id: string | null;
 }
 
@@ -63,12 +64,10 @@ async function safeFetchJson<T>(
     const status = response.status;
     const contentType = response.headers.get('content-type') || '';
     
-    // Handle empty response
     const text = await response.text();
     console.log(`[${context}] Status: ${status}, Content-Type: ${contentType}, Body length: ${text?.length || 0}`);
     
     if (!text || text.trim() === '') {
-      // Empty response with success status = no data (valid for promotions API)
       if (status >= 200 && status < 300) {
         console.log(`[${context}] Empty response with success status - treating as empty array`);
         return { data: null, error: null, status, isEmpty: true };
@@ -76,7 +75,6 @@ async function safeFetchJson<T>(
       return { data: null, error: `Empty response with status ${status}`, status, isEmpty: true };
     }
     
-    // Parse JSON safely
     try {
       const data = JSON.parse(text) as T;
       if (!response.ok) {
@@ -182,6 +180,7 @@ Deno.serve(async (req) => {
       });
     }
 
+    // FIX #2: Use mlAccountId (UUID) for events instead of accountId (text seller_id)
     const mlAccountId = (mlAccount as { id: string }).id;
     console.log(JSON.stringify({
       tag: 'promotions-sync',
@@ -196,7 +195,7 @@ Deno.serve(async (req) => {
     // Fetch existing snapshots for comparison
     const { data: existingSnapshots } = await supabase
       .from('promotion_snapshots')
-      .select('promotion_id, status')
+      .select('promotion_id, status, end_at')
       .eq('workspace_id', workspaceId)
       .eq('account_id', accountId);
 
@@ -219,9 +218,7 @@ Deno.serve(async (req) => {
       existingItemsMap.get(item.promotion_id)!.set(item.item_id, item.item_status);
     }
 
-    // Fetch promotions from ML API with safe JSON handling
-    // Mercado Livre Promotions API (v2)
-    // Docs: /seller-promotions/users/{user_id}?app_version=v2
+    // Fetch promotions from ML API
     const mlUrl = `https://api.mercadolibre.com/seller-promotions/users/${mlAccount.ml_user_id}?app_version=v2`;
     const mlHeaders: Record<string, string> = {
       'Authorization': `Bearer ${(mlAccount as { access_token: string }).access_token}`,
@@ -240,32 +237,27 @@ Deno.serve(async (req) => {
       return errorResponse('TOKEN_EXPIRED', 'Token expirado. Reconecte sua conta do Mercado Livre.', 401);
     }
 
-    // Check for actual API errors (not just empty data)
     if (mlApiError && !isEmpty) {
       console.error(`${logPrefix} ML API error:`, mlApiError);
       await updateSyncLog(supabase, logId, 'error', startTime, { error_message: mlApiError });
       return errorResponse('ML_API_ERROR', mlApiError, 502);
     }
 
-    // Handle empty or null response as "no promotions" (valid scenario)
-    // ML API can return: { results: [...] } or [] or null/empty body
+    // Parse promotions
     let rawPromotions: Record<string, unknown>[] = [];
     
     if (isEmpty) {
       console.log(`${logPrefix} ML API returned empty response - treating as 0 promotions`);
     } else if (mlData) {
       if (Array.isArray(mlData)) {
-        // Direct array response
         rawPromotions = mlData;
       } else if (Array.isArray((mlData as { results?: unknown[] }).results)) {
-        // Wrapped response { results: [...] }
         rawPromotions = (mlData as { results: Record<string, unknown>[] }).results;
       }
     }
 
     console.log(`${logPrefix} ML API returned ${rawPromotions.length} promotions`);
 
-    // Parse promotions (be defensive with schema differences)
     const promotions: Promotion[] = rawPromotions
       .filter((p) => !!(p.id || p.promotion_id))
       .map((p) => {
@@ -275,22 +267,13 @@ Deno.serve(async (req) => {
         const status = ((p.status as string) || (p.state as string) || 'unknown').toString();
         const startDate = (p.start_date as string) || (p.start_at as string) || (p.startDate as string) || null;
         const finishDate = (p.finish_date as string) || (p.end_date as string) || (p.end_at as string) || (p.finishDate as string) || null;
-        return {
-          id,
-          type,
-          name,
-          status,
-          start_date: startDate,
-          finish_date: finishDate,
-          items: [],
-        };
+        return { id, type, name, status, start_date: startDate, finish_date: finishDate, items: [] };
       });
 
-    console.log(`${logPrefix} Fetched ${promotions.length} promotions from ML`);
+    console.log(`${logPrefix} Parsed ${promotions.length} promotions from ML`);
 
     // Fetch items for each promotion
     for (const promo of promotions) {
-      // Docs: /seller-promotions/promotions/{promotion_id}/items?promotion_type=...&app_version=v2
       const itemsUrl = `https://api.mercadolibre.com/seller-promotions/promotions/${promo.id}/items?promotion_type=${encodeURIComponent(promo.type)}&app_version=v2&seller_id=${mlAccount.ml_user_id}`;
       const { data: itemsData, error: itemsError } = await safeFetchJson<{
         results?: Record<string, unknown>[];
@@ -327,6 +310,9 @@ Deno.serve(async (req) => {
     let promotionsSynced = 0;
     let itemsSynced = 0;
 
+    // Track which promo IDs came from the API
+    const apiPromoIds = new Set(promotions.map(p => p.id));
+
     for (const promo of promotions) {
       const promoEndDate = promo.finish_date ? new Date(promo.finish_date) : null;
       const existing = existingMap.get(promo.id);
@@ -345,6 +331,7 @@ Deno.serve(async (req) => {
           status: promo.status,
           start_at: promo.start_date,
           end_at: promo.finish_date,
+          items_count: promo.items?.length || 0, // FIX #1: Update items_count
           updated_at: new Date().toISOString(),
         }, {
           onConflict: 'workspace_id,account_id,promotion_id',
@@ -364,6 +351,11 @@ Deno.serve(async (req) => {
       for (const item of promo.items || []) {
         const previousStatus = existingItemStatuses.get(item.item_id);
 
+        // FIX #1: Calculate discount_percent
+        const discountPercent = (item.original_price && item.deal_price && item.original_price > 0)
+          ? Math.round((1 - item.deal_price / item.original_price) * 100)
+          : null;
+
         // Upsert item snapshot
         const { error: itemError } = await supabase
           .from('promotion_items_snapshots')
@@ -376,6 +368,7 @@ Deno.serve(async (req) => {
             item_status: item.status,
             original_price: item.original_price,
             promo_price: item.deal_price,
+            discount_percent: discountPercent, // FIX #1: Populate discount_percent
             error_reason: item.error,
             updated_at: new Date().toISOString(),
           }, {
@@ -398,11 +391,11 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Generate events based on operational impact
+      // FIX #2: Use mlAccountId (UUID) for all events instead of accountId (text)
       if (ineligibleItems.length > 0) {
         eventsToCreate.push({
           workspace_id: workspaceId,
-          account_id: accountId,
+          account_id: mlAccountId, // UUID, not text seller_id
           event_type: 'promotion.items_ineligible',
           payload: {
             promotion_id: promo.id,
@@ -419,7 +412,7 @@ Deno.serve(async (req) => {
       if (pendingItems.length >= PENDING_THRESHOLD) {
         eventsToCreate.push({
           workspace_id: workspaceId,
-          account_id: accountId,
+          account_id: mlAccountId,
           event_type: 'promotion.items_pending',
           payload: {
             promotion_id: promo.id,
@@ -436,7 +429,7 @@ Deno.serve(async (req) => {
         if (wasNotEndingSoon) {
           eventsToCreate.push({
             workspace_id: workspaceId,
-            account_id: accountId,
+            account_id: mlAccountId,
             event_type: 'promotion.ends_soon',
             payload: {
               promotion_id: promo.id,
@@ -452,7 +445,7 @@ Deno.serve(async (req) => {
       if (promo.status === 'finished' && existing?.status !== 'finished') {
         eventsToCreate.push({
           workspace_id: workspaceId,
-          account_id: accountId,
+          account_id: mlAccountId,
           event_type: 'promotion.finished',
           payload: {
             promotion_id: promo.id,
@@ -466,7 +459,7 @@ Deno.serve(async (req) => {
       if (startedItems.length > 0) {
         eventsToCreate.push({
           workspace_id: workspaceId,
-          account_id: accountId,
+          account_id: mlAccountId,
           event_type: 'promotion.items_started',
           payload: {
             promotion_id: promo.id,
@@ -479,6 +472,48 @@ Deno.serve(async (req) => {
       }
     }
 
+    // FIX #4: Mark expired promotions as finished
+    let expiredMarked = 0;
+    for (const [promoId, existing] of existingMap) {
+      if (!apiPromoIds.has(promoId) && existing.status === 'started') {
+        const endAt = existing.end_at ? new Date(existing.end_at) : null;
+        if (endAt && endAt < now) {
+          console.log(`${logPrefix} Marking expired promotion as finished: ${promoId} (ended ${endAt.toISOString()})`);
+          const { error: updateError } = await supabase
+            .from('promotion_snapshots')
+            .update({ 
+              status: 'finished', 
+              updated_at: new Date().toISOString() 
+            })
+            .eq('workspace_id', workspaceId)
+            .eq('account_id', accountId)
+            .eq('promotion_id', promoId);
+
+          if (updateError) {
+            console.error(`${logPrefix} Failed to mark promotion ${promoId} as finished:`, updateError);
+          } else {
+            expiredMarked++;
+            // Create event for this transition
+            eventsToCreate.push({
+              workspace_id: workspaceId,
+              account_id: mlAccountId,
+              event_type: 'promotion.finished',
+              payload: {
+                promotion_id: promoId,
+                promotion_name: null,
+                reason: 'expired_not_in_api',
+                seller_id: accountId,
+              },
+            });
+          }
+        }
+      }
+    }
+
+    if (expiredMarked > 0) {
+      console.log(`${logPrefix} Marked ${expiredMarked} expired promotions as finished`);
+    }
+
     // Insert events
     if (eventsToCreate.length > 0) {
       const { error: eventsError } = await supabase
@@ -487,6 +522,8 @@ Deno.serve(async (req) => {
 
       if (eventsError) {
         console.error(`${logPrefix} Error inserting events:`, eventsError);
+      } else {
+        console.log(`${logPrefix} Successfully created ${eventsToCreate.length} events`);
       }
     }
 
@@ -504,13 +541,14 @@ Deno.serve(async (req) => {
       route: 'promotions-sync',
       workspace_id: workspaceId,
       seller_id: accountId,
-      ml_account_id: (mlAccount as { id: string }).id,
+      ml_account_id: mlAccountId,
       status: 'success',
       elapsed_ms: elapsed,
       promotions_fetched: promotions.length,
       promotions_synced: promotionsSynced,
       items_synced: itemsSynced,
       events_created: eventsToCreate.length,
+      expired_marked: expiredMarked,
       ts: new Date().toISOString(),
     }));
 
@@ -519,6 +557,7 @@ Deno.serve(async (req) => {
       promotions_synced: promotionsSynced,
       items_synced: itemsSynced,
       events_created: eventsToCreate.length,
+      expired_marked: expiredMarked,
       log_id: logId,
     };
 

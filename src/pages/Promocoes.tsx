@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,6 +8,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Tag,
   RefreshCw,
@@ -26,6 +34,9 @@ import {
   History,
   WifiOff,
   Link2,
+  Search,
+  PlayCircle,
+  Trash2,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
@@ -57,6 +68,17 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 export default function Promocoes() {
   const navigate = useNavigate();
@@ -68,13 +90,24 @@ export default function Promocoes() {
   const [syncErrorCode, setSyncErrorCode] = useState<string | null>(null);
   const { createTask, creating } = usePromotionTasks();
 
+  // Search & filter state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState<string>('all');
+
+  // Adhere/remove action state
+  const [actionLoading, setActionLoading] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<{
+    action: 'adhere' | 'remove';
+    items: { item_id: string; price?: number }[];
+    label: string;
+  } | null>(null);
+
   // Fetch workspace on mount
   useEffect(() => {
     const fetchContext = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Get user's workspace
       const { data: prefs } = await supabase
         .from('user_preferences')
         .select('active_workspace_id')
@@ -102,6 +135,7 @@ export default function Promocoes() {
   const {
     items: selectedItems,
     loading: itemsLoading,
+    refetch: refetchItems,
     pendingItems,
     ineligibleItems,
     startedItems,
@@ -110,11 +144,33 @@ export default function Promocoes() {
   // Sync logs
   const { lastSync, refetch: refetchLogs } = usePromotionSyncLogs(workspaceId, sellerId);
 
+  // Unique promotion types for filter dropdown
+  const promotionTypes = useMemo(() => {
+    const types = new Set(promotions.map(p => p.promotion_type));
+    return Array.from(types).sort();
+  }, [promotions]);
+
+  // Filter promotions by search and type
+  const filterPromotions = (list: PromotionSnapshot[]) => {
+    return list.filter(p => {
+      const matchesSearch = !searchQuery || 
+        (p.promotion_name?.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        p.promotion_id.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesType = typeFilter === 'all' || p.promotion_type === typeFilter;
+      return matchesSearch && matchesType;
+    });
+  };
+
+  const filteredActive = useMemo(() => filterPromotions(activePromotions), [activePromotions, searchQuery, typeFilter]);
+  const filteredEnding = useMemo(() => filterPromotions(endingSoonPromotions), [endingSoonPromotions, searchQuery, typeFilter]);
+  const filteredFinished = useMemo(() => filterPromotions(finishedPromotions), [finishedPromotions, searchQuery, typeFilter]);
+
   // Define result type for sync
   interface SyncResultData {
     promotions_synced?: number;
     items_synced?: number;
     events_created?: number;
+    expired_marked?: number;
     log_id?: string;
   }
 
@@ -134,13 +190,12 @@ export default function Promocoes() {
       setSyncError(result.error);
       setSyncErrorCode(result.errorCode);
       
-      // Special handling for connection/auth errors
       if (result.errorCode === 'TOKEN_EXPIRED' || result.errorCode === 'ML_AUTH_REQUIRED' || result.errorCode === 'NO_CONNECTED_ACCOUNT') {
         toast.error('Reconecte sua conta do Mercado Livre', {
           description: result.error,
           action: {
             label: 'Conectar',
-              onClick: () => navigate('/settings'),
+            onClick: () => navigate('/settings'),
           },
         });
       } else {
@@ -149,9 +204,53 @@ export default function Promocoes() {
       return;
     }
 
-    toast.success(`Sincronizado: ${result.data?.promotions_synced || 0} promoções`);
+    const data = result.data;
+    toast.success(`Sincronizado: ${data?.promotions_synced || 0} promoções, ${data?.items_synced || 0} itens${data?.expired_marked ? `, ${data.expired_marked} expiradas marcadas` : ''}`);
     await refetch();
     await refetchLogs();
+  };
+
+  // Handle adhere/remove action
+  const handlePromotionAction = async (action: 'adhere' | 'remove', items: { item_id: string; price?: number }[]) => {
+    if (!workspaceId || !sellerId || !selectedPromotion) return;
+    setActionLoading(true);
+
+    try {
+      const result = await invokeEdgeFunction<{
+        success_count: number;
+        failed_count: number;
+        results: { item_id: string; success: boolean; error?: string }[];
+      }>('promotions-action', {
+        body: {
+          action,
+          workspace_id: workspaceId,
+          seller_id: sellerId,
+          promotion_id: selectedPromotion.promotion_id,
+          promotion_type: selectedPromotion.promotion_type,
+          items,
+        },
+      });
+
+      if (!result.success) {
+        toast.error(result.error || 'Erro ao executar ação');
+      } else {
+        const data = result.data;
+        if (data?.failed_count && data.failed_count > 0) {
+          toast.warning(`${data.success_count} ok, ${data.failed_count} falharam`);
+        } else {
+          toast.success(`${action === 'adhere' ? 'Aderido' : 'Removido'}: ${data?.success_count || 0} itens`);
+        }
+        // Refresh items and promotions
+        await refetchItems();
+        await refetch();
+      }
+    } catch (err) {
+      toast.error('Erro ao executar ação');
+      console.error('[Promocoes] Action error:', err);
+    } finally {
+      setActionLoading(false);
+      setConfirmAction(null);
+    }
   };
 
   // Handle manual task creation
@@ -205,7 +304,21 @@ export default function Promocoes() {
     );
   }
 
+  // FIX #5: Show loading skeleton when workspace not yet loaded
   if (!workspaceId) {
+    return (
+      <PageContainer title="Promoções" subtitle="Central de Promoções">
+        <div className="p-6">
+          <div className="space-y-4">
+            <Skeleton className="h-10 w-64" />
+            <div className="grid grid-cols-4 gap-4">
+              {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24" />)}
+            </div>
+            <Skeleton className="h-64" />
+          </div>
+        </div>
+      </PageContainer>
+    );
   }
 
   return (
@@ -225,7 +338,6 @@ export default function Promocoes() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {/* Active Account Indicator */}
             {activeAccount && (
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted/50 border">
                 <Store className="h-4 w-4 text-muted-foreground" />
@@ -235,7 +347,6 @@ export default function Promocoes() {
               </div>
             )}
             
-            {/* Last Sync Info */}
             {lastSync && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -279,7 +390,7 @@ export default function Promocoes() {
                   size="sm" 
                   variant="outline" 
                   className="ml-4 gap-1.5"
-                   onClick={() => navigate('/settings')}
+                  onClick={() => navigate('/settings')}
                 >
                   <Link2 className="h-3.5 w-3.5" />
                   Reconectar Conta
@@ -329,6 +440,30 @@ export default function Promocoes() {
           />
         </div>
 
+        {/* Search & Filter - FIX #6 */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="relative flex-1 min-w-[200px] max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Buscar promoção..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <Select value={typeFilter} onValueChange={setTypeFilter}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Tipo" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os tipos</SelectItem>
+              {promotionTypes.map(type => (
+                <SelectItem key={type} value={type}>{type}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         {/* Promotions Tabs */}
         <Card>
           <CardHeader>
@@ -357,33 +492,33 @@ export default function Promocoes() {
                 <TabsList className="mb-4">
                   <TabsTrigger value="active" className="gap-2">
                     <TrendingUp className="h-4 w-4" />
-                    Ativas ({activePromotions.length})
+                    Ativas ({filteredActive.length})
                   </TabsTrigger>
                   <TabsTrigger value="ending" className="gap-2">
                     <Clock className="h-4 w-4" />
-                    Terminando ({endingSoonPromotions.length})
+                    Terminando ({filteredEnding.length})
                   </TabsTrigger>
                   <TabsTrigger value="finished" className="gap-2">
                     <CheckCircle2 className="h-4 w-4" />
-                    Finalizadas ({finishedPromotions.length})
+                    Finalizadas ({filteredFinished.length})
                   </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="active">
                   <PromotionsTable 
-                    promotions={activePromotions} 
+                    promotions={filteredActive} 
                     onSelect={setSelectedPromotion}
                   />
                 </TabsContent>
                 <TabsContent value="ending">
                   <PromotionsTable 
-                    promotions={endingSoonPromotions} 
+                    promotions={filteredEnding} 
                     onSelect={setSelectedPromotion}
                   />
                 </TabsContent>
                 <TabsContent value="finished">
                   <PromotionsTable 
-                    promotions={finishedPromotions} 
+                    promotions={filteredFinished} 
                     onSelect={setSelectedPromotion}
                   />
                 </TabsContent>
@@ -434,7 +569,7 @@ export default function Promocoes() {
                 </div>
                 <div className="p-3 rounded-lg bg-warning/10 text-center">
                   <span className="text-2xl font-bold text-warning">{pendingItems.length}</span>
-                  <span className="block text-xs text-muted-foreground">Pendentes</span>
+                  <span className="block text-xs text-muted-foreground">Candidatos</span>
                 </div>
                 <div className="p-3 rounded-lg bg-destructive/10 text-center">
                   <span className="text-2xl font-bold text-destructive">{ineligibleItems.length}</span>
@@ -442,13 +577,34 @@ export default function Promocoes() {
                 </div>
               </div>
 
-              {/* Task Creation Actions */}
+              {/* Actions Section - FIX #7 */}
               <div className="space-y-3">
                 <Separator />
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Criar Tarefa</span>
+                  <span className="text-sm font-medium">Ações</span>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {/* Adhere all candidates */}
+                  {pendingItems.length > 0 && selectedPromotion?.status === 'started' && (
+                    <Button 
+                      size="sm" 
+                      className="gap-1.5"
+                      onClick={() => setConfirmAction({
+                        action: 'adhere',
+                        items: pendingItems.map(i => ({ 
+                          item_id: i.item_id, 
+                          price: i.promo_price || i.original_price || undefined 
+                        })),
+                        label: `Aderir ${pendingItems.length} itens candidatos à promoção`,
+                      })}
+                      disabled={actionLoading}
+                    >
+                      {actionLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlayCircle className="h-3.5 w-3.5" />}
+                      Aderir {pendingItems.length} Candidatos
+                    </Button>
+                  )}
+                  
+                  {/* Task creation buttons */}
                   {ineligibleItems.length > 0 && (
                     <Button 
                       size="sm" 
@@ -490,9 +646,9 @@ export default function Promocoes() {
 
               <Separator />
 
-              {/* Items Table */}
+              {/* Items Table - show ALL items with scroll */}
               <div>
-                <h4 className="font-medium mb-3">Itens da Promoção</h4>
+                <h4 className="font-medium mb-3">Itens da Promoção ({selectedItems.length})</h4>
                 {itemsLoading ? (
                   <Skeleton className="h-32" />
                 ) : selectedItems.length === 0 ? (
@@ -501,60 +657,129 @@ export default function Promocoes() {
                     <p>Nenhum item encontrado</p>
                   </div>
                 ) : (
-                  <div className="border rounded-lg overflow-hidden">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Item ID</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead className="text-right">Preço</TableHead>
-                          <TableHead className="text-right">Desconto</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {selectedItems.slice(0, 10).map(item => (
-                          <TableRow key={item.id}>
-                            <TableCell className="font-mono text-xs">{item.item_id}</TableCell>
-                            <TableCell>
-                              <ItemStatusBadge status={item.item_status} />
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {item.promo_price ? (
-                                <div>
-                                  <span className="line-through text-muted-foreground text-xs">
-                                    R$ {item.original_price?.toFixed(2)}
-                                  </span>
-                                  <span className="block font-medium text-success">
-                                    R$ {item.promo_price.toFixed(2)}
-                                  </span>
-                                </div>
-                              ) : (
-                                <span>R$ {item.original_price?.toFixed(2) || '-'}</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {item.discount_percent ? (
-                                <Badge variant="outline" className="gap-1">
-                                  <Percent className="h-3 w-3" />
-                                  {item.discount_percent}%
-                                </Badge>
-                              ) : '-'}
-                            </TableCell>
+                  <ScrollArea className="h-[400px]">
+                    <div className="border rounded-lg overflow-hidden">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Item ID</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead className="text-right">Preço</TableHead>
+                            <TableHead className="text-right">Desconto</TableHead>
+                            <TableHead className="text-right">Ação</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                    {selectedItems.length > 10 && (
-                      <div className="p-2 text-center text-sm text-muted-foreground border-t">
-                        +{selectedItems.length - 10} itens adicionais
-                      </div>
-                    )}
-                  </div>
+                        </TableHeader>
+                        <TableBody>
+                          {selectedItems.map(item => (
+                            <TableRow key={item.id}>
+                              <TableCell>
+                                <a 
+                                  href={`https://www.mercadolivre.com.br/p/${item.item_id}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="font-mono text-xs text-primary hover:underline"
+                                >
+                                  {item.item_id}
+                                </a>
+                              </TableCell>
+                              <TableCell>
+                                <ItemStatusBadge status={item.item_status} />
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {item.promo_price ? (
+                                  <div>
+                                    <span className="line-through text-muted-foreground text-xs">
+                                      R$ {item.original_price?.toFixed(2)}
+                                    </span>
+                                    <span className="block font-medium text-success">
+                                      R$ {item.promo_price.toFixed(2)}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span>R$ {item.original_price?.toFixed(2) || '-'}</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {item.discount_percent ? (
+                                  <Badge variant="outline" className="gap-1">
+                                    <Percent className="h-3 w-3" />
+                                    {item.discount_percent}%
+                                  </Badge>
+                                ) : '-'}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {item.item_status === 'candidate' && selectedPromotion?.status === 'started' && (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 gap-1 text-xs"
+                                    onClick={() => setConfirmAction({
+                                      action: 'adhere',
+                                      items: [{ item_id: item.item_id, price: item.promo_price || item.original_price || undefined }],
+                                      label: `Aderir item ${item.item_id} à promoção`,
+                                    })}
+                                    disabled={actionLoading}
+                                  >
+                                    <PlayCircle className="h-3 w-3" />
+                                    Aderir
+                                  </Button>
+                                )}
+                                {item.item_status === 'started' && (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 gap-1 text-xs text-destructive"
+                                    onClick={() => setConfirmAction({
+                                      action: 'remove',
+                                      items: [{ item_id: item.item_id }],
+                                      label: `Remover item ${item.item_id} da promoção`,
+                                    })}
+                                    disabled={actionLoading}
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                    Remover
+                                  </Button>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </ScrollArea>
                 )}
               </div>
             </div>
           </SheetContent>
         </Sheet>
+
+        {/* Confirmation Dialog */}
+        <AlertDialog open={!!confirmAction} onOpenChange={() => setConfirmAction(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {confirmAction?.action === 'adhere' ? 'Aderir Itens' : 'Remover Itens'}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {confirmAction?.label}
+                <br />
+                <span className="text-xs text-muted-foreground mt-1 block">
+                  Esta ação será executada diretamente na API do Mercado Livre.
+                </span>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={actionLoading}>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => confirmAction && handlePromotionAction(confirmAction.action, confirmAction.items)}
+                disabled={actionLoading}
+              >
+                {actionLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Confirmar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </PageContainer>
   );
