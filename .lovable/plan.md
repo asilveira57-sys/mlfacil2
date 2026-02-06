@@ -1,110 +1,198 @@
 
+# Sincronizacao Automatica de Perguntas, Mensagens e Notificacoes
 
-# Correcoes do Widget Bloco de Notas - 6 Problemas
+## Resumo
 
-## Problema 1: Criar nova nota sempre edita a primeira
-
-**Causa raiz:** O `NoteEditor` inicializa o `contentEditable` apenas quando `note.id` muda (useEffect com `[note.id]`), mas o state `title` usa `useState(note.title)` que nao reinicializa quando a nota muda. Alem disso, o `editingNote` no `NotesDrawer` nao limpa o estado do editor corretamente entre notas.
-
-**Solucao:**
-- No `NoteEditor.tsx`, adicionar `key={note.id}` no componente para forcar remontagem quando trocar de nota, ou resetar o state `title` e `editorRef.current.innerHTML` via `useEffect` quando `note.id` mudar.
-- No `NotesDrawer.tsx`, garantir que `setEditingNote(null)` seja chamado antes de criar nova nota, e que `handleNewNote` limpe o editor antes de abrir a nova nota.
-
-**Arquivos:** `NoteEditor.tsx`, `NotesDrawer.tsx`
+Criar uma Edge Function `qa-messages-polling-sync` que roda automaticamente via pg_cron, sincroniza perguntas pendentes e mensagens pos-venda para todas as contas ativas, e cria notificacoes na tabela `app_notifications` com o nome da empresa. O frontend exibira um indicador sutil de auto-sync nos headers dos modulos Q&A e Mensagens Pos-Venda.
 
 ---
 
-## Problema 2: Nao consegue trocar o modulo ao fixar
+## Parte 1 - Edge Function `qa-messages-polling-sync`
 
-**Causa raiz:** O botao "Fixar neste modulo" usa automaticamente o `moduleKey` ativo (da rota). Nao ha opcao de selecionar outro modulo.
+### Arquivo: `supabase/functions/qa-messages-polling-sync/index.ts` (novo)
 
-**Solucao:**
-- Substituir o botao simples de fixar por um `DropdownMenu` ou `Popover` que lista os modulos disponiveis (extraidos do `ROUTE_MODULE_MAP` existente no `useActiveModuleKey.ts`).
-- Exportar a lista de modulos como constante para uso no seletor.
-- O modulo ativo ficara pre-selecionado, mas o usuario pode escolher outro.
-- Atualizar o `pinNote` no `useNotePins` para aceitar um `moduleKey` customizado ao inves de usar sempre o ativo.
+**Fluxo principal:**
 
-**Arquivos:** `NoteEditor.tsx`, `useActiveModuleKey.ts` (exportar lista), `useNotePins.ts` (aceitar moduleKey parametrizado), `NotesDrawer.tsx`, `NoteCard.tsx`
+```text
+[pg_cron] --> [qa-messages-polling-sync]
+                |
+                +--> Validar x-job-key
+                +--> Verificar lock no sync_scheduler
+                +--> Buscar todas ml_accounts ativas (com company JOIN)
+                |
+                +--> Para cada conta:
+                |      +--> Refresh de token (se expirado)
+                |      |
+                |      +--> Sincronizar perguntas
+                |      |      +--> GET /questions/search?status=UNANSWERED
+                |      |      +--> Upsert em qa_questions
+                |      |      +--> Se novas perguntas: INSERT app_notifications
+                |      |         "Verifique a caixa de perguntas, tem algo a responder na (empresa)"
+                |      |
+                |      +--> Sincronizar mensagens pos-venda
+                |             +--> GET /messages/unread (ultimos 7 dias)
+                |             +--> Upsert em post_sale_conversations + messages
+                |             +--> Se novas mensagens nao-lidas: INSERT app_notifications
+                |                "Opa, chegou mensagem para voce na empresa (empresa)"
+                |
+                +--> Atualizar sync_scheduler (stats + last_run_at)
+```
 
----
+**Logica de notificacao:**
+- Antes de sincronizar, busca os `ml_question_id` existentes para perguntas pendentes e os IDs de mensagens existentes
+- Apos upsert, compara: novas perguntas = IDs que nao existiam antes
+- Se ha novas perguntas pendentes, cria UMA notificacao por conta (agrupada), nao uma por pergunta
+- Para mensagens, cria UMA notificacao por conta se ha novas mensagens nao-lidas do comprador
+- A notificacao inclui o nome da empresa (`companies.display_name`) no texto
+- Usa `group_key` para deduplicar: `qa_pending_{seller_id}_{date}` e `post_sale_new_{seller_id}_{date}`
+- Categoria: `qa_pending` para perguntas, `post_sale_blocked` para mensagens (reutiliza categorias existentes)
+- Prioridade: `normal` para mensagens, `high` para perguntas (SLA de 15h)
+- `action_url`: `/perguntas` para perguntas, `/mensagens-pos-venda` para mensagens
 
-## Problema 3: Layout cortado a direita (botao Arquivar nao aparece)
+**Detalhes tecnicos:**
+- Usa `SUPABASE_SERVICE_ROLE_KEY` (bypass de RLS para inserir notificacoes em nome do usuario)
+- Protegido por `x-job-key` com valor de `CRON_JOB_SECRET` ou fallback `default-cron-secret`
+- Lock via `sync_scheduler` com TTL de 10 minutos
+- Controle interno de intervalo: verifica `last_run_at` para respeitar 10min (dia) / 30min (noite)
+- Rate limiting: 200ms entre chamadas API, 500ms entre contas
+- Maximo 50 perguntas UNANSWERED e 20 pedidos (para mensagens) por conta
+- Token refresh direto via ML OAuth (mesmo padrao do `orders-hourly-sync`)
+- Timeout: para apos 50s
 
-**Causa raiz:** A barra de acoes inferior no `NoteEditor.tsx` usa `flex` com botoes que excedem a largura do drawer de 380-420px. Os textos dos botoes "Fixar neste modulo" + "Enviar para tarefas" + "Arquivar" ocupam muito espaco.
-
-**Solucao:**
-- Tornar a barra de acoes inferior responsiva: usar `flex-wrap` ou empilhar os botoes.
-- Usar apenas icones com tooltip quando o espaco for limitado, ou reduzir o tamanho do texto.
-- Alternativa: usar 2 linhas de acoes, ou um layout com `overflow-x-auto`.
-- Centralizar melhor o editor no espaco disponivel.
-
-**Arquivos:** `NoteEditor.tsx`
-
----
-
-## Problema 4: Upload e paste de imagens nao funcionam
-
-**Causa raiz:** Multiplos problemas:
-1. O `uploadFromClipboard` e o `uploadFile` no `useNoteAttachments` fazem upload para o storage e registram no banco, mas **nao inserem a imagem no editor** visualmente. Apos o upload, nada aparece no `contentEditable`.
-2. O `handlePaste` no `NoteEditor` chama `e.preventDefault()` e `onPasteImage(e.clipboardData)` mas o resultado (URL da imagem) nao e inserido no DOM do editor.
-3. O bucket e privado, entao `getPublicUrl` nao funciona - precisa usar `createSignedUrl` para exibir.
-
-**Solucao:**
-- Apos upload bem-sucedido, obter a URL assinada do arquivo e inserir um `<img>` no `contentEditable` usando `document.execCommand('insertHTML')` ou manipulacao direta do DOM.
-- Mudar `getPublicUrl` para `createSignedUrl` (bucket privado).
-- Retornar a URL da imagem dos callbacks `onPasteImage` e `onUploadImage` para que o editor insira no conteudo.
-- Alterar a assinatura dos callbacks para retornar `Promise<string | null>` (URL).
-
-**Arquivos:** `NoteEditor.tsx`, `useNoteAttachments.ts`, `NotesDrawer.tsx`
-
----
-
-## Problema 5: Faltam bullet points numericos (lista ordenada)
-
-**Causa raiz:** O editor so tem botao para `insertUnorderedList` (lista com pontos). Nao tem botao para `insertOrderedList` (lista numerada).
-
-**Solucao:**
-- Adicionar botao `ListOrdered` (icone do Lucide) na toolbar do editor.
-- Usar `document.execCommand('insertOrderedList')` para listas numeradas.
-
-**Arquivos:** `NoteEditor.tsx`
-
----
-
-## Problema 6: Validar vinculacao com empresa
-
-**Causa raiz:** O `ModuleNotesOverlay` no `AppShellLayout.tsx` e renderizado sem `companyId` (`<ModuleNotesOverlay />`), e o `HeaderUtilities` tambem nao recebe `companyId` corretamente do contexto da conta ativa.
-
-**Solucao:**
-- No `AppShellLayout.tsx`, obter o `activeAccountId` do `ActiveAccountContext` e passar como `companyId` para o `ModuleNotesOverlay`.
-- Verificar que o `NotesDrawer` no `HeaderUtilities` tambem recebe o `companyId` - atualmente o `HeaderUtilities` aceita `companyId` como prop mas no `AppShellLayout` nao esta sendo passado.
-- Usar `useActiveAccount()` para obter o `activeAccountId` e propagar como `companyId`.
-
-**Arquivos:** `AppShellLayout.tsx`, `HeaderUtilities.tsx`
+**Busca do nome da empresa:**
+- JOIN `ml_accounts.company_id` -> `companies.display_name`
+- Se nao ha empresa vinculada, usa `ml_accounts.nickname` como fallback
 
 ---
 
-## Resumo de Alteracoes
+## Parte 2 - Ativar Handlers no Worker de Webhooks
 
-| Arquivo | Alteracao |
-|---------|-----------|
-| `src/components/notes/NoteEditor.tsx` | Reset de estado ao trocar nota; seletor de modulo para fixar; layout responsivo da barra de acoes; botao lista ordenada; insercao de imagem no editor |
-| `src/components/notes/NotesDrawer.tsx` | Passar `key={note.id}` ao NoteEditor; adaptar callbacks de imagem para inserir no editor; propagar moduleKey selecionado |
-| `src/hooks/useNoteAttachments.ts` | Retornar URL assinada apos upload; usar `createSignedUrl` ao inves de `getPublicUrl` |
-| `src/hooks/useActiveModuleKey.ts` | Exportar `ROUTE_MODULE_MAP` ou lista de modulos para uso no seletor |
-| `src/hooks/useNotePins.ts` | Aceitar `moduleKey` como parametro no `pinNote` (override do default) |
-| `src/components/notes/NoteCard.tsx` | Adicionar seletor de modulo no menu de pin |
-| `src/components/layout/AppShellLayout.tsx` | Passar `companyId` (da conta ativa) ao `ModuleNotesOverlay` e `HeaderUtilities` |
-| `src/components/utilities/HeaderUtilities.tsx` | Propagar `companyId` recebido como prop |
-| `src/locales/pt-BR/notes.json` | Adicionar chaves para "Lista numerada" e "Selecionar modulo" |
-| `src/locales/en/notes.json` | Adicionar chaves correspondentes |
-| `src/locales/es/notes.json` | Adicionar chaves correspondentes |
+### Arquivo: `supabase/functions/ml-worker-process/index.ts` (editar)
 
-### Detalhes Tecnicos
+Problema atual: O cron job (jobid 11, a cada 5 minutos) chama o worker sem o header `x-internal-key`, resultando em 401. Mesmo se funcionasse, os handlers `processQuestionEvent` e `processMessageEvent` sao placeholders que apenas logam.
 
-- **Reset do editor**: Usar `key={editingNote.id}` no `<NoteEditor>` no `NotesDrawer` para forcar remontagem completa ao trocar de nota, eliminando qualquer estado residual.
-- **Seletor de modulo**: Popover com lista de modulos extraida de `ROUTE_MODULE_MAP`. Pre-seleciona o modulo atual. Ao confirmar, chama `pinNote` com o `moduleKey` escolhido.
-- **Layout responsivo**: Barra inferior usara `flex-wrap gap-1` com botoes menores usando apenas icones e texto truncado, garantindo que "Arquivar" fique sempre visivel.
-- **Insercao de imagem**: Apos upload, criar URL assinada (1h de validade), inserir `<img src="..." class="max-w-full rounded" />` no cursor do `contentEditable` usando `insertHTML`.
-- **Empresa ativa**: Usar `useActiveAccount().activeAccountId` como `companyId` para filtrar notas por empresa em todos os contextos.
+**Alteracoes:**
 
+1. **`processQuestionEvent`**: Implementar busca da pergunta especifica via `GET /questions/{id}`, upsert em `qa_questions`, e criacao de notificacao se a pergunta eh nova e UNANSWERED.
+
+2. **`processMessageEvent`**: Implementar busca do pack de mensagens via resource, upsert em `post_sale_conversations` + `post_sale_conversation_messages`, e criacao de notificacao se ha nova mensagem do comprador.
+
+3. **Funcao auxiliar `createNotification`**: Reutilizavel para criar notificacoes no `app_notifications` com texto incluindo o nome da empresa, buscando via `ml_accounts` -> `companies`.
+
+4. **Corrigir autenticacao do cron**: Atualizar o SQL do cron para incluir `x-internal-key` no header, ou alterar o worker para aceitar o `Authorization` como alternativa.
+
+---
+
+## Parte 3 - Banco de Dados
+
+### Migracao SQL
+
+1. Inserir registro no `sync_scheduler` para o novo job:
+
+```sql
+INSERT INTO sync_scheduler (job_name, status)
+VALUES ('qa-messages-polling', 'idle')
+ON CONFLICT (job_name) DO NOTHING;
+```
+
+2. Criar 2 jobs pg_cron:
+
+- **Diurno**: A cada 10 minutos, entre 09:00-01:29 UTC (06:00-22:29 BRT)
+- **Noturno**: A cada 30 minutos, entre 01:30-08:59 UTC (22:30-05:59 BRT)
+
+3. Atualizar o cron job existente do `ml-worker-process` para incluir `x-internal-key` no header (corrigindo a autenticacao 401).
+
+---
+
+## Parte 4 - Indicador de Auto-Sync no Frontend
+
+### Arquivo: `src/hooks/useSyncSchedulerStatus.ts` (editar)
+
+Adicionar leitura do job `qa-messages-polling` ao hook existente, expondo:
+- `pollingLastRun: Date | null`
+- `pollingStatus: string`
+
+### Arquivo: `src/components/qa/QaHeader.tsx` (editar)
+
+Adicionar badge discreto mostrando o tempo desde a ultima sincronizacao automatica:
+- "Auto-sync: ha 8 min" (texto pequeno, cor `text-muted-foreground`)
+- Indicador verde pulsante se rodou nos ultimos 15 minutos
+- Indicador amarelo se mais de 15 minutos sem sync
+
+### Arquivo: `src/components/post-sale/PostSaleHeader.tsx` (editar)
+
+Mesmo indicador de auto-sync, reutilizando o hook `useSyncSchedulerStatus`.
+
+---
+
+## Parte 5 - config.toml
+
+### Arquivo: `supabase/config.toml` (editar)
+
+Adicionar entrada para a nova funcao:
+```toml
+[functions.qa-messages-polling-sync]
+verify_jwt = false
+```
+
+---
+
+## Resumo de Arquivos
+
+| Arquivo | Acao |
+|---------|------|
+| `supabase/functions/qa-messages-polling-sync/index.ts` | **Criar** - Funcao principal de polling |
+| `supabase/functions/ml-worker-process/index.ts` | **Editar** - Ativar handlers reais + notificacoes |
+| `supabase/config.toml` | **Editar** - Registrar nova funcao |
+| Migracao SQL | **Criar** - sync_scheduler + pg_cron jobs |
+| `src/hooks/useSyncSchedulerStatus.ts` | **Editar** - Ler novo job |
+| `src/components/qa/QaHeader.tsx` | **Editar** - Indicador auto-sync |
+| `src/components/post-sale/PostSaleHeader.tsx` | **Editar** - Indicador auto-sync |
+
+---
+
+## Detalhes Tecnicos
+
+### Cronograma de Execucao (BRT)
+
+| Periodo | Horario BRT | Horario UTC | Intervalo |
+|---------|-------------|-------------|-----------|
+| Diurno | 06:00 - 22:29 | 09:00 - 01:29 | 10 minutos |
+| Noturno | 22:30 - 05:59 | 01:30 - 08:59 | 30 minutos |
+
+### Formato das Notificacoes
+
+**Nova pergunta:**
+- **Titulo**: "Verifique a caixa de perguntas, tem algo a responder na {empresa}"
+- **Body**: "{N} pergunta(s) pendente(s)"
+- **Categoria**: `qa_pending`
+- **Prioridade**: `high`
+- **action_url**: `/perguntas`
+- **group_key**: `qa_pending_{seller_id}_{YYYY-MM-DD}` (uma por dia por conta)
+
+**Nova mensagem pos-venda:**
+- **Titulo**: "Opa, chegou mensagem para voce na empresa {empresa}"
+- **Body**: "{N} mensagem(ns) nao lida(s)"
+- **Categoria**: `post_sale_blocked` (reutiliza categoria existente mais proxima)
+- **Prioridade**: `normal`
+- **action_url**: `/mensagens-pos-venda`
+- **group_key**: `post_sale_new_{seller_id}_{YYYY-MM-DD}` (uma por dia por conta)
+
+### Deduplicacao de Notificacoes
+
+- Antes de inserir, verifica se ja existe notificacao com o mesmo `group_key` e `is_dismissed = false`
+- Se existir, atualiza o `body` com a contagem atualizada em vez de criar duplicata
+- Isso evita inundar o usuario com notificacoes repetidas a cada 10 minutos
+
+### Protecoes
+
+- **Lock com TTL**: Impede execucoes simultaneas via `sync_scheduler`
+- **Rate limiting**: 200ms entre chamadas API, 500ms entre contas
+- **Timeout**: Para apos 50s para respeitar o limite de Edge Functions
+- **Token fallback**: Se refresh falha, marca conta como `attention` e segue para a proxima
+- **Sem spam**: Notificacoes agrupadas por `group_key` diario, sem notificacao repetida no mesmo dia
+- **Horario reduzido a noite**: 30 minutos em vez de 10
+
+### Correcao do Worker (ml-worker-process)
+
+O cron job existente (jobid 11, a cada 5 minutos) envia requests sem `x-internal-key`, causando 401 no worker. A migracao SQL corrigira isso recriando o cron com o header correto, permitindo que webhooks do ML sejam processados em tempo real (complementando o polling).
