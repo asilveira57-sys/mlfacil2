@@ -351,7 +351,8 @@ function mapMlAccountToUnified(row: Record<string, unknown>): UnifiedMarketplace
  */
 export async function validateSellerAccess(sellerId: string): Promise<boolean> {
   const account = await getAccountBySellerId(sellerId);
-  return account !== null && account.status === 'connected';
+  // FIX #3: Accept 'attention' status (token being refreshed) to prevent module lockouts
+  return account !== null && (account.status === 'connected' || account.status === 'attention');
 }
 
 /**
