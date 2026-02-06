@@ -107,7 +107,7 @@ export function AppShellLayout() {
                 </div>
               )}
               <div className="flex items-center gap-2 ml-auto">
-                <HeaderUtilities />
+                <HeaderUtilities companyId={sellerId} />
                 <Separator orientation="vertical" className="h-6 hidden sm:block" />
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -136,7 +136,7 @@ export function AppShellLayout() {
             {/* Main Content - Outlet renders the matched route */}
             <main className="flex-1 overflow-auto relative">
               <Outlet />
-              <ModuleNotesOverlay />
+              <ModuleNotesOverlay companyId={sellerId} />
             </main>
           </SidebarInset>
           <FloatingSupportButton visible={utilitiesPrefs.showSupportButton} />

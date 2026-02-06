@@ -2,11 +2,10 @@ import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 
 /**
- * Extracts the active module key from the current route path.
- * Maps route segments to module_key identifiers dynamically.
- * No hardcoded enum — derives from URL structure.
+ * Maps route segments to module_key identifiers.
+ * Exported for use in module selector UIs.
  */
-const ROUTE_MODULE_MAP: Record<string, string> = {
+export const ROUTE_MODULE_MAP: Record<string, string> = {
   'inicio': 'inicio',
   'dashboard': 'dashboard',
   'shipping-labels': 'etiquetas',
@@ -27,6 +26,37 @@ const ROUTE_MODULE_MAP: Record<string, string> = {
   'tools': 'tools',
   'produtos': 'produtos',
 };
+
+/** Label map for human-readable module names in selectors */
+export const MODULE_LABELS: Record<string, string> = {
+  'inicio': 'Início',
+  'dashboard': 'Dashboard',
+  'etiquetas': 'Etiquetas',
+  'tarefas': 'Tarefas',
+  'seed': 'Seed',
+  'promocoes': 'Promoções',
+  'mercado_ads': 'Publicidade',
+  'linha_do_tempo': 'Anúncios',
+  'pos_venda': 'Pós-Venda',
+  'perguntas': 'Perguntas',
+  'radiografia': 'Radiografia',
+  'mercado': 'Mercado',
+  'tendencias': 'Tendências',
+  'concorrencia': 'Concorrência',
+  'abc': 'ABC',
+  'custos': 'Custos',
+  'settings': 'Configurações',
+  'tools': 'Ferramentas',
+  'produtos': 'Produtos',
+};
+
+/** Returns list of available modules for selectors */
+export function getAvailableModules() {
+  return Object.values(ROUTE_MODULE_MAP).map((key) => ({
+    key,
+    label: MODULE_LABELS[key] || key,
+  }));
+}
 
 export function useActiveModuleKey(): string {
   const { pathname } = useLocation();

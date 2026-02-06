@@ -19,19 +19,24 @@
     "gray": "Gris"
   },
   "actions": {
-    "pin_module": "Fijar en este módulo",
+    "pin_module": "Fijar en módulo",
     "unpin_module": "Desfijar del módulo",
     "send_to_tasks": "Enviar a tareas",
     "archive": "Archivar",
     "edit": "Editar",
     "delete": "Eliminar",
     "upload_image": "Insertar imagen",
-    "back": "Volver"
+    "back": "Volver",
+    "bold": "Negrita",
+    "italic": "Cursiva",
+    "unordered_list": "Lista con viñetas",
+    "ordered_list": "Lista numerada"
   },
   "pin": {
     "pinned": "Fijada",
     "pinned_here": "Fijada en este módulo",
-    "no_pins": "Sin notas fijadas"
+    "no_pins": "Sin notas fijadas",
+    "select_module": "Seleccionar módulo"
   },
   "task": {
     "sent_success": "Nota enviada a tareas",

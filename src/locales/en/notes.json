@@ -19,19 +19,24 @@
     "gray": "Gray"
   },
   "actions": {
-    "pin_module": "Pin to this module",
+    "pin_module": "Pin to module",
     "unpin_module": "Unpin from module",
     "send_to_tasks": "Send to tasks",
     "archive": "Archive",
     "edit": "Edit",
     "delete": "Delete",
     "upload_image": "Insert image",
-    "back": "Back"
+    "back": "Back",
+    "bold": "Bold",
+    "italic": "Italic",
+    "unordered_list": "Bullet list",
+    "ordered_list": "Numbered list"
   },
   "pin": {
     "pinned": "Pinned",
     "pinned_here": "Pinned to this module",
-    "no_pins": "No pinned notes"
+    "no_pins": "No pinned notes",
+    "select_module": "Select module"
   },
   "task": {
     "sent_success": "Note sent to tasks",

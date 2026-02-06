@@ -30,9 +30,9 @@ export function useNoteAttachments({ workspaceId, noteId }: UseNoteAttachmentsOp
     enabled: !!noteId,
   });
 
-  // Upload a file
+  // Upload a file and return signed URL for display
   const uploadMutation = useMutation({
-    mutationFn: async ({ file, width, height }: { file: File; width?: number; height?: number }) => {
+    mutationFn: async ({ file, width, height }: { file: File; width?: number; height?: number }): Promise<string> => {
       if (!workspaceId || !noteId) throw new Error('Contexto inválido');
 
       const ext = file.name.split('.').pop() || 'bin';
@@ -57,7 +57,16 @@ export function useNoteAttachments({ workspaceId, noteId }: UseNoteAttachmentsOp
 
       if (dbError) throw dbError;
 
-      return path;
+      // Return signed URL for display (1 hour expiry)
+      const { data: signedData, error: signedError } = await supabase.storage
+        .from('note-attachments')
+        .createSignedUrl(path, 3600);
+
+      if (signedError || !signedData?.signedUrl) {
+        throw signedError || new Error('Failed to get signed URL');
+      }
+
+      return signedData.signedUrl;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey });
@@ -67,16 +76,17 @@ export function useNoteAttachments({ workspaceId, noteId }: UseNoteAttachmentsOp
     },
   });
 
-  // Get public URL for a file
-  const getFileUrl = useCallback((storagePath: string) => {
-    const { data } = supabase.storage
+  // Get signed URL for a file (private bucket)
+  const getFileUrl = useCallback(async (storagePath: string): Promise<string> => {
+    const { data, error } = await supabase.storage
       .from('note-attachments')
-      .getPublicUrl(storagePath);
-    return data.publicUrl;
+      .createSignedUrl(storagePath, 3600);
+    if (error || !data?.signedUrl) throw error || new Error('Failed to get signed URL');
+    return data.signedUrl;
   }, []);
 
-  // Upload from clipboard paste (image)
-  const uploadFromClipboard = useCallback(async (clipboardData: DataTransfer) => {
+  // Upload from clipboard paste (image) - returns signed URL
+  const uploadFromClipboard = useCallback(async (clipboardData: DataTransfer): Promise<string | null> => {
     const items = Array.from(clipboardData.items);
     const imageItem = items.find((item) => item.type.startsWith('image/'));
     if (!imageItem) return null;
