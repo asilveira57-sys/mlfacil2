@@ -188,3 +188,6 @@ verify_jwt = false
 
 [functions.ml-worker-process]
 verify_jwt = false
+
+[functions.weather-api]
+verify_jwt = false
