@@ -4,8 +4,10 @@ import { supabase } from '@/integrations/supabase/client';
 interface SyncSchedulerStatus {
   nightlyLastRun: Date | null;
   hourlyLastRun: Date | null;
+  pollingLastRun: Date | null;
   nightlyStatus: string;
   hourlyStatus: string;
+  pollingStatus: string;
   isLoading: boolean;
 }
 
@@ -16,8 +18,10 @@ export function useSyncSchedulerStatus(): SyncSchedulerStatus {
   const [status, setStatus] = useState<SyncSchedulerStatus>({
     nightlyLastRun: null,
     hourlyLastRun: null,
+    pollingLastRun: null,
     nightlyStatus: 'idle',
     hourlyStatus: 'idle',
+    pollingStatus: 'idle',
     isLoading: true,
   });
 
@@ -26,7 +30,7 @@ export function useSyncSchedulerStatus(): SyncSchedulerStatus {
       const { data, error } = await supabase
         .from('sync_scheduler')
         .select('job_name, last_run_at, status')
-        .in('job_name', ['orders-nightly-sync', 'orders-hourly-sync']);
+        .in('job_name', ['orders-nightly-sync', 'orders-hourly-sync', 'qa-messages-polling']);
 
       if (error) {
         console.error('[useSyncSchedulerStatus] Error fetching status:', error);
@@ -35,12 +39,15 @@ export function useSyncSchedulerStatus(): SyncSchedulerStatus {
 
       const nightlyJob = data?.find(j => j.job_name === 'orders-nightly-sync');
       const hourlyJob = data?.find(j => j.job_name === 'orders-hourly-sync');
+      const pollingJob = data?.find(j => j.job_name === 'qa-messages-polling');
 
       setStatus({
         nightlyLastRun: nightlyJob?.last_run_at ? new Date(nightlyJob.last_run_at) : null,
         hourlyLastRun: hourlyJob?.last_run_at ? new Date(hourlyJob.last_run_at) : null,
+        pollingLastRun: pollingJob?.last_run_at ? new Date(pollingJob.last_run_at) : null,
         nightlyStatus: nightlyJob?.status || 'idle',
         hourlyStatus: hourlyJob?.status || 'idle',
+        pollingStatus: pollingJob?.status || 'idle',
         isLoading: false,
       });
     } catch (err) {

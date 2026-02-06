@@ -1,19 +1,23 @@
 import { MessageSquareText, AlertTriangle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { AutoSyncBadge } from "@/components/shared/AutoSyncBadge";
 
 export function PostSaleHeader() {
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-          <MessageSquareText className="h-5 w-5 text-primary" />
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+            <MessageSquareText className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Mensagem Pós-Venda</h1>
+            <p className="text-sm text-muted-foreground">
+              Orientação, prevenção de problemas e suporte ao comprador
+            </p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Mensagem Pós-Venda</h1>
-          <p className="text-sm text-muted-foreground">
-            Orientação, prevenção de problemas e suporte ao comprador
-          </p>
-        </div>
+        <AutoSyncBadge />
       </div>
 
       <Alert variant="default" className="border-amber-500/50 bg-amber-500/10">
