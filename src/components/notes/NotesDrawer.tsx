@@ -144,16 +144,16 @@ export function NotesDrawer({ companyId }: NotesDrawerProps) {
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>
-        <Tooltip>
-          <TooltipTrigger asChild>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <SheetTrigger asChild>
             <Button variant="ghost" size="icon" className="h-8 w-8">
               <StickyNote className="h-4 w-4" />
             </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t('title')}</TooltipContent>
-        </Tooltip>
-      </SheetTrigger>
+          </SheetTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{t('title')}</TooltipContent>
+      </Tooltip>
       <SheetContent side="right" className="w-[380px] sm:w-[420px] p-0 flex flex-col">
         {editingNote ? (
           <NoteEditor
