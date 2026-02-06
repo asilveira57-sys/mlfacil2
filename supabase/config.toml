@@ -191,3 +191,6 @@ verify_jwt = false
 
 [functions.weather-api]
 verify_jwt = false
+
+[functions.qa-messages-polling-sync]
+verify_jwt = false

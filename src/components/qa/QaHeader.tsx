@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { useQueryClient } from "@tanstack/react-query";
+import { AutoSyncBadge } from "@/components/shared/AutoSyncBadge";
 
 export function QaHeader() {
   const { activeAccount, sellerId } = useActiveAccount();
@@ -81,16 +82,19 @@ export function QaHeader() {
           </div>
         </div>
 
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleSync}
-          disabled={isSyncing || !sellerId}
-          className="gap-2"
-        >
-          <RefreshCw className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`} />
-          {isSyncing ? "Sincronizando..." : "Atualizar"}
-        </Button>
+        <div className="flex items-center gap-3">
+          <AutoSyncBadge />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleSync}
+            disabled={isSyncing || !sellerId}
+            className="gap-2"
+          >
+            <RefreshCw className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`} />
+            {isSyncing ? "Sincronizando..." : "Atualizar"}
+          </Button>
+        </div>
       </div>
 
       <Alert variant="default" className="border-amber-500/30 bg-amber-500/5">

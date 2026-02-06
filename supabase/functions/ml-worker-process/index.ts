@@ -373,6 +373,80 @@ async function logEvent(supabase: SupabaseAny, eventId: string, level: string, m
   });
 }
 
+// Helper: Get company name for notifications
+async function getCompanyNameForAccount(supabase: SupabaseAny, mlUserId: string): Promise<{ userId: string; companyName: string } | null> {
+  const { data: account } = await supabase
+    .from("ml_accounts")
+    .select("user_id, nickname, company_id")
+    .eq("ml_user_id", mlUserId)
+    .maybeSingle();
+
+  if (!account) return null;
+
+  let companyName = account.nickname || "sua empresa";
+  if (account.company_id) {
+    const { data: company } = await supabase
+      .from("companies")
+      .select("display_name")
+      .eq("id", account.company_id)
+      .maybeSingle();
+    if (company?.display_name) companyName = company.display_name;
+  }
+  return { userId: account.user_id, companyName };
+}
+
+// Helper: Create or update notification (deduplicated by group_key)
+async function upsertNotification(
+  supabase: SupabaseAny,
+  userId: string,
+  sellerId: string,
+  companyName: string,
+  type: "question" | "message",
+  count: number,
+) {
+  const today = new Date().toISOString().split("T")[0];
+  const groupKey = type === "question"
+    ? `qa_pending_${sellerId}_${today}`
+    : `post_sale_new_${sellerId}_${today}`;
+
+  const title = type === "question"
+    ? `Verifique a caixa de perguntas, tem algo a responder na ${companyName}`
+    : `Opa, chegou mensagem para você na empresa ${companyName}`;
+
+  const body = type === "question"
+    ? `${count} pergunta(s) pendente(s)`
+    : `${count} mensagem(ns) não lida(s)`;
+
+  const category = type === "question" ? "qa_pending" : "post_sale_blocked";
+  const priority = type === "question" ? "high" : "normal";
+  const actionUrl = type === "question" ? "/perguntas" : "/mensagens-pos-venda";
+
+  const { data: existing } = await supabase
+    .from("app_notifications")
+    .select("id")
+    .eq("group_key", groupKey)
+    .eq("is_dismissed", false)
+    .maybeSingle();
+
+  if (existing) {
+    await supabase.from("app_notifications").update({ body, title }).eq("id", existing.id);
+    console.log(`[ml-worker] Updated notification ${existing.id} for ${type}`);
+  } else {
+    await supabase.from("app_notifications").insert({
+      user_id: userId,
+      seller_id: sellerId,
+      title,
+      body,
+      category,
+      priority,
+      action_url: actionUrl,
+      group_key: groupKey,
+      origin_module: type === "question" ? "qa" : "post_sale",
+    });
+    console.log(`[ml-worker] Created notification for ${type}`);
+  }
+}
+
 // Topic processors
 async function processItemEvent(
   supabase: SupabaseAny,
@@ -470,19 +544,167 @@ async function processOrderEvent(
 async function processMessageEvent(
   supabase: SupabaseAny,
   event: WebhookEvent,
-  _integration: MlIntegration
+  integration: MlIntegration
 ): Promise<ProcessResult> {
-  console.log(`[ml-worker] Message event received: ${event.resource}`);
-  await logEvent(supabase, event.id, "info", "Message event received");
+  console.log(`[ml-worker] Processing message event: ${event.resource}`);
+
+  // Get access token
+  const { data: mlAccount } = await supabase
+    .from("ml_accounts")
+    .select("access_token, ml_user_id")
+    .eq("ml_user_id", event.ml_user_id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (!mlAccount?.access_token) {
+    return { success: false, error: "No active ML account or token" };
+  }
+
+  // Try to fetch the resource from ML
+  try {
+    const resourceUrl = `https://api.mercadolibre.com${event.resource}`;
+    const response = await fetch(resourceUrl, {
+      headers: { Authorization: `Bearer ${mlAccount.access_token}` },
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) return { success: false, error: "TOKEN_EXPIRED" };
+      if (response.status === 404) {
+        await logEvent(supabase, event.id, "warn", `Message resource not found: ${event.resource}`);
+        return { success: true };
+      }
+      await logEvent(supabase, event.id, "warn", `Message API error: ${response.status}`);
+      return { success: true }; // Don't retry – polling will catch it
+    }
+
+    // Create notification about potential new message
+    const accountInfo = await getCompanyNameForAccount(supabase, event.ml_user_id);
+    if (accountInfo) {
+      const { data: convs } = await supabase
+        .from("post_sale_conversations")
+        .select("unread_count")
+        .eq("seller_id", event.ml_user_id)
+        .gt("unread_count", 0);
+
+      const totalUnread = ((convs || []) as any[]).reduce((s: number, c: any) => s + (c.unread_count || 0), 0) + 1;
+
+      await upsertNotification(supabase, accountInfo.userId, event.ml_user_id, accountInfo.companyName, "message", totalUnread);
+    }
+  } catch (err) {
+    console.error(`[ml-worker] Error processing message event:`, err);
+  }
+
+  await logEvent(supabase, event.id, "info", `Message event processed: ${event.resource}`);
   return { success: true };
 }
 
 async function processQuestionEvent(
   supabase: SupabaseAny,
   event: WebhookEvent,
-  _integration: MlIntegration
+  integration: MlIntegration
 ): Promise<ProcessResult> {
-  console.log(`[ml-worker] Question event received: ${event.resource}`);
-  await logEvent(supabase, event.id, "info", "Question event received");
+  const match = event.resource.match(/\/questions\/(\d+)/);
+  if (!match) {
+    return { success: false, error: "Invalid resource format for question" };
+  }
+
+  const questionId = match[1];
+  console.log(`[ml-worker] Processing question ${questionId}`);
+
+  // Get access token
+  const { data: mlAccount } = await supabase
+    .from("ml_accounts")
+    .select("access_token, refresh_token, ml_user_id")
+    .eq("ml_user_id", event.ml_user_id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (!mlAccount?.access_token) {
+    return { success: false, error: "No active ML account or token" };
+  }
+
+  // Fetch question from ML API
+  const response = await fetch(`https://api.mercadolibre.com/questions/${questionId}`, {
+    headers: { Authorization: `Bearer ${mlAccount.access_token}` },
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) return { success: false, error: "TOKEN_EXPIRED" };
+    if (response.status === 404) {
+      await logEvent(supabase, event.id, "warn", `Question ${questionId} not found (deleted)`);
+      return { success: true };
+    }
+    return { success: false, error: `ML_API_${response.status}` };
+  }
+
+  const q = await response.json();
+
+  // Risk analysis
+  const analyzeRisk = (text: string) => {
+    const reasons: string[] = [];
+    let level = "low";
+    const highP = [
+      { p: /whats|telefone|liga|chama|contato/i, r: "Pedido de contato externo" },
+      { p: /reclama|denunci|advogado|procon|processo/i, r: "Possível ameaça legal" },
+    ];
+    const medP = [
+      { p: /troca|devolu[çc][aã]o|quebr|defeito|problema/i, r: "Potencial problema" },
+      { p: /prazo|demora|atraso|quando.*chega/i, r: "Dúvida sobre prazo" },
+    ];
+    for (const { p, r } of highP) if (p.test(text)) { level = "high"; reasons.push(r); }
+    if (level !== "high") for (const { p, r } of medP) if (p.test(text)) { level = "medium"; reasons.push(r); }
+    return { level, reasons };
+  };
+
+  const risk = analyzeRisk(q.text || "");
+  const slaDeadline = new Date(q.date_created);
+  slaDeadline.setHours(slaDeadline.getHours() + 15);
+  const isSlaBreached = slaDeadline < new Date() && !q.answer;
+  const status = q.answer ? "answered" : q.status === "DELETED" ? "deleted" : "pending";
+
+  // Upsert question
+  const { error: upsertError } = await supabase
+    .from("qa_questions")
+    .upsert({
+      user_id: integration.user_id,
+      seller_id: event.ml_user_id,
+      ml_question_id: String(q.id),
+      ml_item_id: q.item_id,
+      ml_buyer_id: String(q.from?.id),
+      question_text: q.text,
+      status,
+      risk_level: risk.level,
+      risk_reasons: risk.reasons,
+      question_date: q.date_created,
+      answered_at: q.answer?.date_created || null,
+      sla_deadline: slaDeadline.toISOString(),
+      is_sla_breached: isSlaBreached,
+      needs_attention: risk.level === "high" || isSlaBreached,
+      updated_at: new Date().toISOString(),
+    } as never, { onConflict: "ml_question_id" });
+
+  if (upsertError) {
+    return { success: false, error: `DB_UPSERT: ${upsertError.message}` };
+  }
+
+  // Create notification if UNANSWERED
+  if (status === "pending") {
+    try {
+      const accountInfo = await getCompanyNameForAccount(supabase, event.ml_user_id);
+      if (accountInfo) {
+        const { count } = await supabase
+          .from("qa_questions")
+          .select("id", { count: "exact", head: true })
+          .eq("seller_id", event.ml_user_id)
+          .eq("status", "pending");
+
+        await upsertNotification(supabase, accountInfo.userId, event.ml_user_id, accountInfo.companyName, "question", count || 1);
+      }
+    } catch (notifErr) {
+      console.error(`[ml-worker] Notification error:`, notifErr);
+    }
+  }
+
+  await logEvent(supabase, event.id, "info", `Question ${questionId} synced (${status})`);
   return { success: true };
 }
