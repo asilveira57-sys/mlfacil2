@@ -413,7 +413,7 @@ const SettingsCompanies = () => {
             company_id: companyId,
             provider: config.erp_provider,
             api_key: config.erp_api_token,
-            status: 'active',
+            status: 'connected',
             updated_at: new Date().toISOString(),
           }, {
             onConflict: 'company_id,provider',
