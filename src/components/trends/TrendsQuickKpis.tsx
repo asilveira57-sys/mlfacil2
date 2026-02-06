@@ -1,12 +1,12 @@
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Activity, TrendingUp, Layers, Search } from 'lucide-react';
+import { Activity, TrendingUp, Layers, Search, ShoppingCart, DollarSign, Package, Receipt } from 'lucide-react';
 import { useTrends } from '@/contexts/TrendsContext';
 
 // ============================================================
 // QUICK KPIs
-// Objetivo: sempre ter algo útil, mesmo sem dados seller
-// 4 cards em linha (desktop) / 2x2 (mobile)
+// Linha 1: KPIs de mercado (snapshot, não respondem a período)
+// Linha 2: KPIs do seller (respondem ao período selecionado)
 // ============================================================
 
 export function TrendsQuickKpis() {
@@ -15,7 +15,8 @@ export function TrendsQuickKpis() {
   
   const isLoading = ui.loadingFlags.status || ui.loadingFlags.marketTrends;
   
-  // Card 1: Status da categoria
+  // === MARKET KPIs (snapshot-based, period-independent) ===
+  
   const getStatusValue = () => {
     if (!hasCategory) return 'Aguardando';
     if (capabilities.canUseSellerInsights) return 'Ativa com histórico';
@@ -30,19 +31,16 @@ export function TrendsQuickKpis() {
     return 'Usando dados de mercado';
   };
   
-  // Card 2: Tendência (mercado)
   const getTrendValue = () => {
     if (data.marketTrends.length === 0) return '—';
     return `${data.marketTrends.length} termos`;
   };
   
-  // Card 3: Subcategorias em alta
   const getSubcategoriesValue = () => {
     if (data.marketSubcategories.length === 0) return '—';
     return `Top ${Math.min(3, data.marketSubcategories.length)}`;
   };
   
-  // Card 4: Alcance/Busca
   const getReachValue = () => {
     if (data.keywords.length === 0) return '—';
     const fundoKeywords = data.keywords.filter(k => k.funnel === 'fundo');
@@ -52,7 +50,7 @@ export function TrendsQuickKpis() {
     return `${data.keywords.length} termos`;
   };
   
-  const cards = [
+  const marketCards = [
     {
       title: 'Status da categoria',
       value: getStatusValue(),
@@ -87,24 +85,67 @@ export function TrendsQuickKpis() {
     },
   ];
   
+  // === SELLER KPIs (period-dependent) ===
+  
+  const sellerGoals = data.sellerGoals;
+  const periodLabel = `${state.selectedPeriod}d`;
+  
+  const formatCurrency = (val: number) => {
+    if (val >= 1000) return `R$ ${(val / 1000).toFixed(1)}K`;
+    return `R$ ${val.toFixed(0)}`;
+  };
+  
+  const sellerCards = capabilities.canUseSellerInsights && sellerGoals ? [
+    {
+      title: 'Pedidos',
+      value: sellerGoals.ordersCount.toLocaleString('pt-BR'),
+      subtitle: `Últimos ${periodLabel}`,
+      icon: ShoppingCart,
+      iconColor: 'text-green-500',
+    },
+    {
+      title: 'Faturamento',
+      value: formatCurrency(sellerGoals.revenue),
+      subtitle: `Últimos ${periodLabel}`,
+      icon: DollarSign,
+      iconColor: 'text-emerald-500',
+    },
+    {
+      title: 'Unidades vendidas',
+      value: sellerGoals.unitsSold.toLocaleString('pt-BR'),
+      subtitle: `Últimos ${periodLabel}`,
+      icon: Package,
+      iconColor: 'text-blue-500',
+    },
+    {
+      title: 'Ticket médio',
+      value: sellerGoals.averageTicket > 0 ? formatCurrency(sellerGoals.averageTicket) : '—',
+      subtitle: `Últimos ${periodLabel}`,
+      icon: Receipt,
+      iconColor: 'text-amber-500',
+    },
+  ] : null;
+  
   // Loading skeleton
   if (isLoading) {
     return (
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[1, 2, 3, 4].map((i) => (
-          <Card key={i}>
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between">
-                <div className="space-y-2 flex-1">
-                  <Skeleton className="h-4 w-24" />
-                  <Skeleton className="h-6 w-20" />
-                  <Skeleton className="h-3 w-32" />
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Card key={i}>
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between">
+                  <div className="space-y-2 flex-1">
+                    <Skeleton className="h-4 w-24" />
+                    <Skeleton className="h-6 w-20" />
+                    <Skeleton className="h-3 w-32" />
+                  </div>
+                  <Skeleton className="h-8 w-8 rounded-full" />
                 </div>
-                <Skeleton className="h-8 w-8 rounded-full" />
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </div>
     );
   }
@@ -113,7 +154,7 @@ export function TrendsQuickKpis() {
   if (!hasSeller && !hasCategory) {
     return (
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {cards.map((card, i) => (
+        {marketCards.map((card, i) => (
           <Card key={i} className="opacity-50">
             <CardContent className="p-4">
               <div className="flex items-start justify-between">
@@ -134,23 +175,48 @@ export function TrendsQuickKpis() {
   }
   
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      {cards.map((card, i) => (
-        <Card key={i}>
-          <CardContent className="p-4">
-            <div className="flex items-start justify-between">
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">{card.title}</p>
-                <p className="text-lg font-semibold">{card.value}</p>
-                <p className="text-xs text-muted-foreground">{card.subtitle}</p>
+    <div className="space-y-4">
+      {/* Row 1: Market KPIs */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {marketCards.map((card, i) => (
+          <Card key={i}>
+            <CardContent className="p-4">
+              <div className="flex items-start justify-between">
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">{card.title}</p>
+                  <p className="text-lg font-semibold">{card.value}</p>
+                  <p className="text-xs text-muted-foreground">{card.subtitle}</p>
+                </div>
+                <div className={`p-2 rounded-full bg-muted`}>
+                  <card.icon className={`h-4 w-4 ${card.iconColor}`} />
+                </div>
               </div>
-              <div className={`p-2 rounded-full bg-muted`}>
-                <card.icon className={`h-4 w-4 ${card.iconColor}`} />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+      
+      {/* Row 2: Seller KPIs (only if eligible) */}
+      {sellerCards && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {sellerCards.map((card, i) => (
+            <Card key={i} className="border-primary/20">
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between">
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground">{card.title}</p>
+                    <p className="text-lg font-semibold">{card.value}</p>
+                    <p className="text-xs text-muted-foreground">{card.subtitle}</p>
+                  </div>
+                  <div className={`p-2 rounded-full bg-muted`}>
+                    <card.icon className={`h-4 w-4 ${card.iconColor}`} />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
