@@ -1,0 +1,45 @@
+{
+  "title": "Notepad",
+  "description": "Create and organize quick notes",
+  "new_note": "New note",
+  "search_placeholder": "Search notes...",
+  "no_notes": "No notes found",
+  "no_notes_hint": "Create a note to get started",
+  "untitled": "Untitled",
+  "auto_saved": "Auto-saved",
+  "saving": "Saving...",
+  "colors": {
+    "yellow": "Yellow",
+    "green": "Green",
+    "blue": "Blue",
+    "pink": "Pink",
+    "purple": "Purple",
+    "orange": "Orange",
+    "red": "Red",
+    "gray": "Gray"
+  },
+  "actions": {
+    "pin_module": "Pin to this module",
+    "unpin_module": "Unpin from module",
+    "send_to_tasks": "Send to tasks",
+    "archive": "Archive",
+    "edit": "Edit",
+    "delete": "Delete",
+    "upload_image": "Insert image",
+    "back": "Back"
+  },
+  "pin": {
+    "pinned": "Pinned",
+    "pinned_here": "Pinned to this module",
+    "no_pins": "No pinned notes"
+  },
+  "task": {
+    "sent_success": "Note sent to tasks",
+    "sent_error": "Error sending to tasks"
+  },
+  "settings": {
+    "title": "Notepad",
+    "description": "Enable or disable the notepad in the header.",
+    "show_in_header": "Show in header"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "title": "Bloco de Notas",
+  "description": "Crie e organize notas rápidas",
+  "new_note": "Nova nota",
+  "search_placeholder": "Buscar notas...",
+  "no_notes": "Nenhuma nota encontrada",
+  "no_notes_hint": "Crie uma nota para começar",
+  "untitled": "Sem título",
+  "auto_saved": "Salvo automaticamente",
+  "saving": "Salvando...",
+  "colors": {
+    "yellow": "Amarelo",
+    "green": "Verde",
+    "blue": "Azul",
+    "pink": "Rosa",
+    "purple": "Roxo",
+    "orange": "Laranja",
+    "red": "Vermelho",
+    "gray": "Cinza"
+  },
+  "actions": {
+    "pin_module": "Fixar neste módulo",
+    "unpin_module": "Desfixar do módulo",
+    "send_to_tasks": "Enviar para tarefas",
+    "archive": "Arquivar",
+    "edit": "Editar",
+    "delete": "Excluir",
+    "upload_image": "Inserir imagem",
+    "back": "Voltar"
+  },
+  "pin": {
+    "pinned": "Fixada",
+    "pinned_here": "Fixada neste módulo",
+    "no_pins": "Sem notas fixadas"
+  },
+  "task": {
+    "sent_success": "Nota enviada para tarefas",
+    "sent_error": "Erro ao enviar para tarefas"
+  },
+  "settings": {
+    "title": "Bloco de Notas",
+    "description": "Ative ou desative o bloco de notas no cabeçalho.",
+    "show_in_header": "Exibir no cabeçalho"
+  }
+}
