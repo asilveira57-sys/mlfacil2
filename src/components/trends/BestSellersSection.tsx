@@ -32,16 +32,8 @@ export function BestSellersSection({ onCollect, isCollecting, snapshotDate }: Be
   const isEmpty = ui.emptyFlags.bestSellers;
   const error = ui.errors.bestSellers;
 
-  // Auto-trigger collect if no data (moved before early returns to fix hooks order)
-  useEffect(() => {
-    if (hasCategory && isEmpty && !isLoading && !isCollecting && data.bestSellers.length === 0) {
-      const timer = setTimeout(() => {
-        console.log('[BestSellersSection] Auto-triggering collection');
-        onCollect();
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [hasCategory, isEmpty, isLoading, isCollecting, data.bestSellers.length, onCollect]);
+  // Track if we already attempted a collect this session to prevent loops
+  const [collectAttempted, setCollectAttempted] = useState(false);
 
   // Pre-warm cache with existing data
   useEffect(() => {
@@ -200,9 +192,7 @@ export function BestSellersSection({ onCollect, isCollecting, snapshotDate }: Be
     );
   }
   
-  // Note: Auto-trigger useEffect moved before early returns
-
-  // Empty state with loading indicator
+  // Empty state — manual collect only (no auto-loop)
   if ((isEmpty || enrichedItems.length === 0) && !isCollecting) {
     return (
       <Card>
@@ -211,21 +201,33 @@ export function BestSellersSection({ onCollect, isCollecting, snapshotDate }: Be
             <Trophy className="h-5 w-5 text-amber-500" />
             Mais Vendidos da Categoria
           </CardTitle>
-          <CardDescription>Ranking público do Mercado Livre</CardDescription>
+          <CardDescription>
+            Ranking público do Mercado Livre
+            {snapshotDate && (
+              <span className="ml-2 text-xs">
+                • Dados de {new Date(snapshotDate).toLocaleDateString('pt-BR')}
+              </span>
+            )}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="text-center py-8">
             <Trophy className="h-12 w-12 mx-auto mb-3 text-amber-500 opacity-30" />
             <p className="text-muted-foreground mb-4">
-              Carregando ranking da categoria...
+              {collectAttempted 
+                ? 'Nenhum dado disponível para esta categoria no momento.'
+                : 'Clique para buscar o ranking desta categoria.'}
             </p>
             <Button 
               variant="outline" 
-              onClick={onCollect}
+              onClick={() => {
+                setCollectAttempted(true);
+                onCollect();
+              }}
               disabled={isCollecting}
             >
-              <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-              Buscando dados...
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Buscar ranking
             </Button>
           </div>
         </CardContent>

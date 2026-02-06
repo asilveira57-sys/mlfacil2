@@ -12,6 +12,7 @@ import { performGlobalUiCleanup } from '@/lib/uiRouteCleanup';
 import { TrendsHeaderBar } from '@/components/trends/TrendsHeaderBar';
 import { TrendsStatusBanner } from '@/components/trends/TrendsStatusBanner';
 import { TrendsQuickKpis } from '@/components/trends/TrendsQuickKpis';
+import { TrendsCategoryBreadcrumb } from '@/components/trends/TrendsCategoryBreadcrumb';
 import { MarketTrendsSection } from '@/components/trends/MarketTrendsSection';
 import { KeywordTrendsList } from '@/components/trends/KeywordTrendsList';
 import { TopicChips } from '@/components/trends/TopicChips';
@@ -61,7 +62,7 @@ function TendenciasContent() {
   const [isAutoLoading, setIsAutoLoading] = useState(true);
   const autoLoadAttemptedRef = useRef(false);
   
-  const { state, setAccount, setCategory, setSubcategory, hasCategory } = useTrends();
+  const { state, setAccount, setCategory, setSubcategory, hasCategory, resetForAccount } = useTrends();
   const { collectPublicData, reload, snapshotDate, eligibility, isLoading } = useTrendsController();
   const autoLoad = useTrendsAutoLoad();
   
@@ -146,10 +147,17 @@ function TendenciasContent() {
     autoLoad,
   ]);
 
-  // Reset auto-load attempt when account changes
+  // Reset EVERYTHING when account changes (prevents stale data)
+  const prevAccountRef = useRef<string | null>(null);
   useEffect(() => {
-    autoLoadAttemptedRef.current = false;
-  }, [state.selectedAccountId]);
+    if (prevAccountRef.current !== null && state.selectedAccountId !== prevAccountRef.current) {
+      // Account actually changed — full reset
+      console.log('[Tendencias] Account changed, resetting module');
+      resetForAccount(state.selectedAccountId);
+      autoLoadAttemptedRef.current = false;
+    }
+    prevAccountRef.current = state.selectedAccountId;
+  }, [state.selectedAccountId, resetForAccount]);
 
   // Save category selection for persistence
   const handleCategoryChange = useCallback((categoryId: string | null, categoryName: string) => {
@@ -244,6 +252,8 @@ function TendenciasContent() {
 
         {/* 1. Status Banner */}
         <TrendsStatusBanner />
+        {/* 1.5. Category Breadcrumb */}
+        <TrendsCategoryBreadcrumb />
 
         {/* 2. Quick KPIs */}
         <TrendsQuickKpis />

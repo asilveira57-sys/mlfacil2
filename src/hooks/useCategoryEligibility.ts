@@ -394,8 +394,9 @@ export function useCategoryEligibility(
       };
     },
     enabled: !!sellerId,
-    staleTime: 5 * 60 * 1000, // 5 minutos
+    staleTime: 2 * 60 * 1000, // 2 minutes (reduced to catch expired caches faster)
     gcTime: 30 * 60 * 1000, // 30 minutos
+    refetchOnMount: 'always', // Always check on mount to catch expired caches
   });
 }
 

@@ -123,7 +123,8 @@ type TrendsAction =
   | { type: 'SET_LAST_UPDATED'; timestamp: string }
   | { type: 'INCREMENT_NONCE' }
   | { type: 'RESET_UI_ERRORS' }
-  | { type: 'CLEAR_SELLER_DATA' };
+  | { type: 'CLEAR_SELLER_DATA' }
+  | { type: 'RESET_FOR_ACCOUNT'; accountId: string | null };
 
 // ============================================================
 // ESTADO INICIAL
@@ -245,6 +246,17 @@ function trendsReducer(state: TrendsState, action: TrendsAction): TrendsState {
       return {
         ...state,
         selectedPeriod: action.period,
+        // Clear seller data to force recalculation with new period
+        data: {
+          ...state.data,
+          sellerSubcategories: null,
+          sellerGoals: null,
+        },
+        // Reset capabilities to re-evaluate with new period
+        capabilities: {
+          canUseSellerInsights: false,
+          reason: state.selectedCategoryId ? 'NO_CATEGORY' : state.capabilities.reason,
+        },
       };
       
     case 'SET_CAPABILITIES':
@@ -356,6 +368,13 @@ function trendsReducer(state: TrendsState, action: TrendsAction): TrendsState {
           sellerGoals: null,
         },
       };
+    
+    case 'RESET_FOR_ACCOUNT':
+      return {
+        ...initialState,
+        selectedAccountId: action.accountId,
+        selectedPeriod: state.selectedPeriod, // Preserve period preference
+      };
       
     default:
       return state;
@@ -384,6 +403,7 @@ interface TrendsContextValue {
   markUpdated: () => void;
   triggerRefresh: () => void;
   clearSellerData: () => void;
+  resetForAccount: (accountId: string | null) => void;
   
   // Computed values
   effectiveCategoryId: string | null;
@@ -454,6 +474,10 @@ export function TrendsProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'CLEAR_SELLER_DATA' });
   }, []);
   
+  const resetForAccount = useCallback((accountId: string | null) => {
+    dispatch({ type: 'RESET_FOR_ACCOUNT', accountId });
+  }, []);
+  
   // Computed values
   const effectiveCategoryId = state.selectedSubcategoryId || state.selectedCategoryId;
   const hasSeller = !!state.selectedAccountId;
@@ -475,6 +499,7 @@ export function TrendsProvider({ children }: { children: ReactNode }) {
     markUpdated,
     triggerRefresh,
     clearSellerData,
+    resetForAccount,
     effectiveCategoryId,
     hasSeller,
     hasCategory,
@@ -493,6 +518,7 @@ export function TrendsProvider({ children }: { children: ReactNode }) {
     markUpdated,
     triggerRefresh,
     clearSellerData,
+    resetForAccount,
     effectiveCategoryId,
     hasSeller,
     hasCategory,
