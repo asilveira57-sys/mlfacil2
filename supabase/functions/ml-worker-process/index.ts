@@ -62,9 +62,11 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Validate internal key for security
+  // Validate internal key for security (supports x-internal-key for webhooks, x-cron-key for cron jobs)
   const internalKey = req.headers.get("x-internal-key");
-  if (internalKey !== INTERNAL_KEY) {
+  const cronKey = req.headers.get("x-cron-key");
+  const CRON_SECRET = Deno.env.get("CRON_JOB_SECRET") || "default-cron-secret";
+  if (internalKey !== INTERNAL_KEY && cronKey !== CRON_SECRET) {
     console.error("[ml-worker] Unauthorized request");
     return new Response("Unauthorized", { status: 401 });
   }
