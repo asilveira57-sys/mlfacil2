@@ -1,283 +1,110 @@
 
 
-# Plano: Widget Bloco de Notas
+# Correcoes do Widget Bloco de Notas - 6 Problemas
 
-## Visao Geral
+## Problema 1: Criar nova nota sempre edita a primeira
 
-Implementar um widget completo de Bloco de Notas integrado ao header do sistema, com drawer lateral, editor rich text, fixacao contextual por modulo (post-it), integracao com tarefas existentes e auditoria.
+**Causa raiz:** O `NoteEditor` inicializa o `contentEditable` apenas quando `note.id` muda (useEffect com `[note.id]`), mas o state `title` usa `useState(note.title)` que nao reinicializa quando a nota muda. Alem disso, o `editingNote` no `NotesDrawer` nao limpa o estado do editor corretamente entre notas.
 
----
+**Solucao:**
+- No `NoteEditor.tsx`, adicionar `key={note.id}` no componente para forcar remontagem quando trocar de nota, ou resetar o state `title` e `editorRef.current.innerHTML` via `useEffect` quando `note.id` mudar.
+- No `NotesDrawer.tsx`, garantir que `setEditingNote(null)` seja chamado antes de criar nova nota, e que `handleNewNote` limpe o editor antes de abrir a nova nota.
 
-## Parte 1 - Banco de Dados (4 tabelas + 1 bucket + indices)
-
-### 1.1 Tabela `notes`
-
-| Coluna | Tipo | Notas |
-|--------|------|-------|
-| id | uuid PK | gen_random_uuid() |
-| workspace_id | uuid NOT NULL | FK workspace |
-| company_id | uuid NULL | NULL = nota global |
-| created_by_user_id | uuid NOT NULL | auth.uid() |
-| title | text NOT NULL | default '' |
-| content_rich | jsonb | conteudo rich text (Tiptap JSON ou similar) |
-| content_plain | text | texto puro para busca |
-| color_hex | text | default '#FBBF24' (amarelo post-it) |
-| status | text | default 'active', check in ('active','archived') |
-| created_at | timestamptz | now() |
-| updated_at | timestamptz | now() |
-
-RLS: Membros do workspace podem SELECT; operadores+ podem INSERT/UPDATE/DELETE (usando funcoes `is_workspace_member` e `can_edit_tasks` ja existentes).
-
-### 1.2 Tabela `note_attachments`
-
-| Coluna | Tipo | Notas |
-|--------|------|-------|
-| id | uuid PK | gen_random_uuid() |
-| workspace_id | uuid NOT NULL | |
-| note_id | uuid NOT NULL | FK notes(id) ON DELETE CASCADE |
-| storage_path | text NOT NULL | caminho no bucket |
-| file_name | text | nome original |
-| mime_type | text | |
-| file_size | integer | bytes |
-| width | integer NULL | px (imagens) |
-| height | integer NULL | px (imagens) |
-| created_at | timestamptz | now() |
-
-RLS: Mesma logica de `notes`, baseada em `workspace_id`.
-
-### 1.3 Tabela `note_pins`
-
-| Coluna | Tipo | Notas |
-|--------|------|-------|
-| id | uuid PK | gen_random_uuid() |
-| workspace_id | uuid NOT NULL | |
-| company_id | uuid NULL | |
-| note_id | uuid NOT NULL | FK notes(id) ON DELETE CASCADE |
-| module_key | text NOT NULL | ex: 'dashboard', 'custos' |
-| route_path | text NULL | rota exata opcional |
-| entity_type | text NULL | |
-| entity_id | text NULL | |
-| created_by_user_id | uuid NOT NULL | |
-| created_at | timestamptz | now() |
-
-Constraint UNIQUE: (note_id, module_key, company_id) para evitar duplicacao.
-
-### 1.4 Tabela `note_events`
-
-| Coluna | Tipo | Notas |
-|--------|------|-------|
-| id | uuid PK | gen_random_uuid() |
-| workspace_id | uuid NOT NULL | |
-| note_id | uuid NOT NULL | FK notes(id) ON DELETE CASCADE |
-| event_type | text NOT NULL | created, updated, pinned, unpinned, sent_to_tasks, archived |
-| payload_json | jsonb | dados contextuais |
-| created_by_user_id | uuid NOT NULL | |
-| created_at | timestamptz | now() |
-
-RLS: SELECT para membros do workspace.
-
-### 1.5 Bucket de Storage
-
-Criar bucket `note-attachments` (privado) para imagens e arquivos das notas.
-
-### 1.6 Indices
-
-- `notes`: (workspace_id, company_id, updated_at DESC)
-- `note_pins`: (workspace_id, module_key, company_id)
-- `note_attachments`: (note_id)
-- `note_events`: (note_id, created_at DESC)
+**Arquivos:** `NoteEditor.tsx`, `NotesDrawer.tsx`
 
 ---
 
-## Parte 2 - Tipos TypeScript
+## Problema 2: Nao consegue trocar o modulo ao fixar
 
-### Arquivo: `src/types/notes.ts` (novo)
+**Causa raiz:** O botao "Fixar neste modulo" usa automaticamente o `moduleKey` ativo (da rota). Nao ha opcao de selecionar outro modulo.
 
-Definir interfaces `Note`, `NoteAttachment`, `NotePin`, `NoteEvent` e constantes de cores disponiveis.
+**Solucao:**
+- Substituir o botao simples de fixar por um `DropdownMenu` ou `Popover` que lista os modulos disponiveis (extraidos do `ROUTE_MODULE_MAP` existente no `useActiveModuleKey.ts`).
+- Exportar a lista de modulos como constante para uso no seletor.
+- O modulo ativo ficara pre-selecionado, mas o usuario pode escolher outro.
+- Atualizar o `pinNote` no `useNotePins` para aceitar um `moduleKey` customizado ao inves de usar sempre o ativo.
 
----
-
-## Parte 3 - Hook Principal
-
-### Arquivo: `src/hooks/useNotes.ts` (novo)
-
-Hook com React Query que gerencia:
-
-- **Listagem com scroll infinito** - Paginacao por cursor (updated_at DESC), sem limite de 1000 registros
-- **Busca textual** - ilike em title + content_plain
-- **CRUD** - create, update, archive, delete
-- **Filtros** - por company_id (ativa) + notas globais (company_id IS NULL)
-- **Auto-save** - debounce de 1.5s apos ultima alteracao
-
-### Arquivo: `src/hooks/useNotePins.ts` (novo)
-
-- Fixar/desfixar nota em module_key
-- Buscar notas fixadas no modulo atual + notas globais fixadas
-- Registrar evento em note_events
-
-### Arquivo: `src/hooks/useNoteAttachments.ts` (novo)
-
-- Upload de imagens para bucket `note-attachments`
-- Listagem por note_id
-- Suporte a paste de clipboard (imagem)
+**Arquivos:** `NoteEditor.tsx`, `useActiveModuleKey.ts` (exportar lista), `useNotePins.ts` (aceitar moduleKey parametrizado), `NotesDrawer.tsx`, `NoteCard.tsx`
 
 ---
 
-## Parte 4 - Deteccao do Modulo Ativo
+## Problema 3: Layout cortado a direita (botao Arquivar nao aparece)
 
-### Arquivo: `src/hooks/useActiveModuleKey.ts` (novo)
+**Causa raiz:** A barra de acoes inferior no `NoteEditor.tsx` usa `flex` com botoes que excedem a largura do drawer de 380-420px. Os textos dos botoes "Fixar neste modulo" + "Enviar para tarefas" + "Arquivar" ocupam muito espaco.
 
-Hook que extrai o `module_key` a partir da rota atual (`useLocation().pathname`), usando o mapeamento ja existente no `AppSidebar` (campo `moduleKey` dos navItems):
+**Solucao:**
+- Tornar a barra de acoes inferior responsiva: usar `flex-wrap` ou empilhar os botoes.
+- Usar apenas icones com tooltip quando o espaco for limitado, ou reduzir o tamanho do texto.
+- Alternativa: usar 2 linhas de acoes, ou um layout com `overflow-x-auto`.
+- Centralizar melhor o editor no espaco disponivel.
 
-| Rota | module_key |
-|------|-----------|
-| /dashboard | dashboard |
-| /custos | custos |
-| /tarefas | tarefas |
-| /settings | settings |
-| ... | ... |
-
-Sem enum fixo - usa apenas o primeiro segmento da rota mapeado dinamicamente.
+**Arquivos:** `NoteEditor.tsx`
 
 ---
 
-## Parte 5 - Componentes UI
+## Problema 4: Upload e paste de imagens nao funcionam
 
-### 5.1 Icone no Header
+**Causa raiz:** Multiplos problemas:
+1. O `uploadFromClipboard` e o `uploadFile` no `useNoteAttachments` fazem upload para o storage e registram no banco, mas **nao inserem a imagem no editor** visualmente. Apos o upload, nada aparece no `contentEditable`.
+2. O `handlePaste` no `NoteEditor` chama `e.preventDefault()` e `onPasteImage(e.clipboardData)` mas o resultado (URL da imagem) nao e inserido no DOM do editor.
+3. O bucket e privado, entao `getPublicUrl` nao funciona - precisa usar `createSignedUrl` para exibir.
 
-**Arquivo:** `src/components/utilities/HeaderUtilities.tsx` (editar)
+**Solucao:**
+- Apos upload bem-sucedido, obter a URL assinada do arquivo e inserir um `<img>` no `contentEditable` usando `document.execCommand('insertHTML')` ou manipulacao direta do DOM.
+- Mudar `getPublicUrl` para `createSignedUrl` (bucket privado).
+- Retornar a URL da imagem dos callbacks `onPasteImage` e `onUploadImage` para que o editor insira no conteudo.
+- Alterar a assinatura dos callbacks para retornar `Promise<string | null>` (URL).
 
-Adicionar icone de Bloco de Notas (Lucide `StickyNote`) ao lado da calculadora, controlado pela preferencia `showNotesInHeader` (novo campo em `useUtilitiesPreferences`).
-
-### 5.2 Drawer lateral
-
-**Arquivo:** `src/components/notes/NotesDrawer.tsx` (novo)
-
-- Abre ao clicar no icone
-- Lista notas (empresa ativa + globais) com scroll infinito
-- Barra de busca no topo
-- Botao "Nova nota"
-- Cada card mostra: titulo, preview de 2 linhas, cor, data, badge se fixada
-
-### 5.3 Editor de nota
-
-**Arquivo:** `src/components/notes/NoteEditor.tsx` (novo)
-
-- Textarea com formatacao basica (negrito, italico, listas) usando contentEditable com sanitizacao
-- Suporte a:
-  - Colar imagens do clipboard (Ctrl+V)
-  - Upload de imagens via botao
-  - Seletor de cor (6-8 cores pre-definidas)
-- Auto-save com indicador visual
-- Barra de acoes: "Fixar neste modulo", "Enviar para tarefas", "Arquivar"
-
-### 5.4 Post-it contextual
-
-**Arquivo:** `src/components/notes/ModulePostIt.tsx` (novo)
-
-- Componente discreto renderizado nos modulos que tenham notas fixadas
-- Aparece como um pequeno post-it no canto superior direito da area de conteudo
-- Expandivel ao clicar
-- Acoes rapidas: editar, desfixar, enviar para tarefas
-
-### 5.5 Wrapper para injecao automatica
-
-**Arquivo:** `src/components/notes/ModuleNotesOverlay.tsx` (novo)
-
-Componente que encapsula a deteccao do modulo ativo e renderiza os post-its. Sera inserido no `AppShellLayout` dentro da area `<main>`.
+**Arquivos:** `NoteEditor.tsx`, `useNoteAttachments.ts`, `NotesDrawer.tsx`
 
 ---
 
-## Parte 6 - Integracao com Tarefas
+## Problema 5: Faltam bullet points numericos (lista ordenada)
 
-Ao clicar "Enviar para tarefas":
+**Causa raiz:** O editor so tem botao para `insertUnorderedList` (lista com pontos). Nao tem botao para `insertOrderedList` (lista numerada).
 
-1. Chamar `createTask` do hook `useTasks` existente com:
-   - `title`: nota.title ou primeira linha do content_plain
-   - `description`: content_plain completo
-   - `source_type`: 'note' (adicionar ao `SOURCE_TYPES` em `src/types/tasks.ts`)
-   - `source_id`: note.id
-   - `source_ref`: { note_id, module_key, color_hex }
-   - `workspace_id`: atual
-   - `account_id`: null (notas nao sao por conta ML)
+**Solucao:**
+- Adicionar botao `ListOrdered` (icone do Lucide) na toolbar do editor.
+- Usar `document.execCommand('insertOrderedList')` para listas numeradas.
 
-2. Copiar anexos da nota como referencia no `source_ref.attachments[]`
-
-3. Registrar evento `sent_to_tasks` em `note_events` com `{ task_id }`
-
-**Arquivo:** `src/types/tasks.ts` (editar)
-- Adicionar `NOTE: 'note'` ao `SOURCE_TYPES`
+**Arquivos:** `NoteEditor.tsx`
 
 ---
 
-## Parte 7 - Preferencias do Widget
+## Problema 6: Validar vinculacao com empresa
 
-**Arquivo:** `src/hooks/useUtilitiesPreferences.ts` (editar)
+**Causa raiz:** O `ModuleNotesOverlay` no `AppShellLayout.tsx` e renderizado sem `companyId` (`<ModuleNotesOverlay />`), e o `HeaderUtilities` tambem nao recebe `companyId` corretamente do contexto da conta ativa.
 
-- Adicionar `showNotesInHeader: boolean` (default: true) ao `WidgetsEnabled`
-- Persistir no JSONB `widgets_enabled` existente
+**Solucao:**
+- No `AppShellLayout.tsx`, obter o `activeAccountId` do `ActiveAccountContext` e passar como `companyId` para o `ModuleNotesOverlay`.
+- Verificar que o `NotesDrawer` no `HeaderUtilities` tambem recebe o `companyId` - atualmente o `HeaderUtilities` aceita `companyId` como prop mas no `AppShellLayout` nao esta sendo passado.
+- Usar `useActiveAccount()` para obter o `activeAccountId` e propagar como `companyId`.
 
-**Arquivo:** `src/components/settings/SettingsUtilities.tsx` (editar)
-
-- Adicionar card "Bloco de Notas" com switch para habilitar/desabilitar no header
-
----
-
-## Parte 8 - Traducoes
-
-Adicionar chaves em `src/locales/{pt-BR,en,es}/notes.json` (novo namespace):
-
-- Titulos, acoes, placeholders, mensagens de sucesso/erro
-- Cores dos post-its
+**Arquivos:** `AppShellLayout.tsx`, `HeaderUtilities.tsx`
 
 ---
 
-## Parte 9 - Integracao no Layout
+## Resumo de Alteracoes
 
-**Arquivo:** `src/components/layout/AppShellLayout.tsx` (editar)
-
-- Importar e renderizar `ModuleNotesOverlay` dentro da tag `<main>`, posicionado de forma absoluta
-
-**Arquivo:** `src/components/utilities/index.ts` (editar)
-
-- Exportar `NotesWidget`
-
----
-
-## Resumo de Arquivos
-
-| Arquivo | Acao |
-|---------|------|
-| Migracao SQL (4 tabelas + indices + bucket + RLS) | **Criar** |
-| `src/types/notes.ts` | **Criar** |
-| `src/types/tasks.ts` | Editar (adicionar source_type 'note') |
-| `src/hooks/useNotes.ts` | **Criar** |
-| `src/hooks/useNotePins.ts` | **Criar** |
-| `src/hooks/useNoteAttachments.ts` | **Criar** |
-| `src/hooks/useActiveModuleKey.ts` | **Criar** |
-| `src/hooks/useUtilitiesPreferences.ts` | Editar |
-| `src/components/notes/NotesDrawer.tsx` | **Criar** |
-| `src/components/notes/NoteEditor.tsx` | **Criar** |
-| `src/components/notes/NotesList.tsx` | **Criar** |
-| `src/components/notes/NoteCard.tsx` | **Criar** |
-| `src/components/notes/ModulePostIt.tsx` | **Criar** |
-| `src/components/notes/ModuleNotesOverlay.tsx` | **Criar** |
-| `src/components/notes/index.ts` | **Criar** |
-| `src/components/utilities/HeaderUtilities.tsx` | Editar |
-| `src/components/utilities/index.ts` | Editar |
-| `src/components/settings/SettingsUtilities.tsx` | Editar |
-| `src/components/layout/AppShellLayout.tsx` | Editar |
-| `src/locales/pt-BR/notes.json` | **Criar** |
-| `src/locales/en/notes.json` | **Criar** |
-| `src/locales/es/notes.json` | **Criar** |
+| Arquivo | Alteracao |
+|---------|-----------|
+| `src/components/notes/NoteEditor.tsx` | Reset de estado ao trocar nota; seletor de modulo para fixar; layout responsivo da barra de acoes; botao lista ordenada; insercao de imagem no editor |
+| `src/components/notes/NotesDrawer.tsx` | Passar `key={note.id}` ao NoteEditor; adaptar callbacks de imagem para inserir no editor; propagar moduleKey selecionado |
+| `src/hooks/useNoteAttachments.ts` | Retornar URL assinada apos upload; usar `createSignedUrl` ao inves de `getPublicUrl` |
+| `src/hooks/useActiveModuleKey.ts` | Exportar `ROUTE_MODULE_MAP` ou lista de modulos para uso no seletor |
+| `src/hooks/useNotePins.ts` | Aceitar `moduleKey` como parametro no `pinNote` (override do default) |
+| `src/components/notes/NoteCard.tsx` | Adicionar seletor de modulo no menu de pin |
+| `src/components/layout/AppShellLayout.tsx` | Passar `companyId` (da conta ativa) ao `ModuleNotesOverlay` e `HeaderUtilities` |
+| `src/components/utilities/HeaderUtilities.tsx` | Propagar `companyId` recebido como prop |
+| `src/locales/pt-BR/notes.json` | Adicionar chaves para "Lista numerada" e "Selecionar modulo" |
+| `src/locales/en/notes.json` | Adicionar chaves correspondentes |
+| `src/locales/es/notes.json` | Adicionar chaves correspondentes |
 
 ### Detalhes Tecnicos
 
-- **Scroll infinito**: Implementado via `useInfiniteQuery` do React Query, paginando por `updated_at` cursor
-- **Rich text**: ContentEditable com sanitizacao HTML basica (sem dependencia externa pesada como Tiptap/ProseMirror)
-- **Auto-save**: Debounce de 1500ms usando `useRef` + `setTimeout`
-- **Clipboard paste**: Listener `paste` no editor que detecta `clipboardData.items` com type `image/*`
-- **Storage**: Bucket `note-attachments` privado, paths `{workspace_id}/{note_id}/{filename}`
-- **RLS**: Todas as 4 tabelas usam as funcoes existentes `is_workspace_member` e `can_edit_tasks`
-- **Sem limite global**: Paginacao incremental em todas as listagens
+- **Reset do editor**: Usar `key={editingNote.id}` no `<NoteEditor>` no `NotesDrawer` para forcar remontagem completa ao trocar de nota, eliminando qualquer estado residual.
+- **Seletor de modulo**: Popover com lista de modulos extraida de `ROUTE_MODULE_MAP`. Pre-seleciona o modulo atual. Ao confirmar, chama `pinNote` com o `moduleKey` escolhido.
+- **Layout responsivo**: Barra inferior usara `flex-wrap gap-1` com botoes menores usando apenas icones e texto truncado, garantindo que "Arquivar" fique sempre visivel.
+- **Insercao de imagem**: Apos upload, criar URL assinada (1h de validade), inserir `<img src="..." class="max-w-full rounded" />` no cursor do `contentEditable` usando `insertHTML`.
+- **Empresa ativa**: Usar `useActiveAccount().activeAccountId` como `companyId` para filtrar notas por empresa em todos os contextos.
 
