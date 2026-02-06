@@ -286,9 +286,9 @@ async function syncMessages(
   const prevUnreadMap = new Map<string, number>();
   for (const c of existingConvs || []) prevUnreadMap.set(c.order_id, c.unread_count || 0);
 
-  // Fetch recent orders (7 days)
+  // Fetch recent orders (60 days)
   const dateFrom = new Date();
-  dateFrom.setDate(dateFrom.getDate() - 7);
+  dateFrom.setDate(dateFrom.getDate() - 60);
   const dateFromStr = dateFrom.toISOString().replace("Z", "-03:00");
 
   const ordersUrl = `https://api.mercadolibre.com/orders/search?seller=${sellerId}&sort=date_desc&limit=${MAX_ORDERS_PER_ACCOUNT}&order.date_created.from=${encodeURIComponent(dateFromStr)}`;

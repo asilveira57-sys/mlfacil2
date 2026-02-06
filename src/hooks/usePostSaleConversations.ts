@@ -114,7 +114,7 @@ export function useSyncPostSaleMessages() {
     mutationFn: async ({
       sellerId,
       accountId,
-      daysBack = 15,
+      daysBack = 60,
     }: {
       sellerId: string;
       accountId?: string; // UUID of ml_accounts - preferred for credential lookup
