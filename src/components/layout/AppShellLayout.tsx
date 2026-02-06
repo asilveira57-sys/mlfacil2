@@ -27,12 +27,17 @@ interface PageHeaderContextType {
 
 const PageHeaderContext = createContext<PageHeaderContextType | null>(null);
 
+const noopSetHeader = () => {};
+const fallbackContext: PageHeaderContextType = {
+  title: "",
+  subtitle: undefined,
+  headerContent: undefined,
+  setHeader: noopSetHeader,
+};
+
 export function usePageHeader() {
   const context = useContext(PageHeaderContext);
-  if (!context) {
-    throw new Error("usePageHeader must be used within AppShellLayout");
-  }
-  return context;
+  return context ?? fallbackContext;
 }
 
 // Hook for pages to set their header - stable reference
