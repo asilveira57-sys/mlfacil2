@@ -17,19 +17,14 @@ interface SellerKpis {
 }
 
 interface TrendsOverviewCardsProps {
-  // Category status
   hasCategory: boolean;
+  hasSeller: boolean;
   eligibilityStatus: 'eligible' | 'low_base' | 'inactive' | 'unknown';
   ordersCount: number;
-  
-  // Market data
   trendsCount: number;
   highlightsCount: number;
-  
-  // Seller KPIs (only shown when eligible)
   sellerKpis: SellerKpis | null;
-  
-  // Loading states
+  selectedPeriod: number;
   isLoadingEligibility: boolean;
   isLoadingTrends: boolean;
   isLoadingHighlights: boolean;
@@ -75,15 +70,24 @@ function KpiCard({ title, value, subtitle, icon: Icon, iconColor, isLoading }: K
 
 export function TrendsOverviewCards({
   hasCategory,
+  hasSeller,
   eligibilityStatus,
   ordersCount,
   trendsCount,
   highlightsCount,
   sellerKpis,
+  selectedPeriod,
   isLoadingEligibility,
   isLoadingTrends,
   isLoadingHighlights,
 }: TrendsOverviewCardsProps) {
+  // Period label for seller KPIs
+  const periodLabel = selectedPeriod === 7 
+    ? 'Últimos 7 dias' 
+    : selectedPeriod === 90 
+      ? 'Últimos 90 dias' 
+      : 'Últimos 30 dias';
+
   // Status card values
   const getStatusValue = () => {
     if (!hasCategory) return 'Aguardando';
@@ -98,7 +102,7 @@ export function TrendsOverviewCards({
   const getStatusSubtitle = () => {
     if (!hasCategory) return 'Selecione uma categoria';
     switch (eligibilityStatus) {
-      case 'eligible': return `${ordersCount} pedidos no período`;
+      case 'eligible': return `${ordersCount} pedidos • ${periodLabel}`;
       case 'low_base': return `${ordersCount} pedidos (mín: 10)`;
       case 'inactive': return 'Sem vendas registradas';
       default: return 'Carregando...';
@@ -158,17 +162,17 @@ export function TrendsOverviewCards({
   // Row 2: Seller KPIs (only when eligible)
   const sellerCards = sellerKpis ? [
     {
-      title: 'Unidades Vendidas',
-      value: sellerKpis.unitsSold.toLocaleString('pt-BR'),
-      subtitle: 'No período selecionado',
+      title: 'Pedidos',
+      value: sellerKpis.ordersCount.toLocaleString('pt-BR'),
+      subtitle: periodLabel,
       icon: ShoppingCart,
       iconColor: 'text-green-500',
       isLoading: false,
     },
     {
-      title: 'Pedidos',
-      value: sellerKpis.ordersCount.toLocaleString('pt-BR'),
-      subtitle: 'Transações realizadas',
+      title: 'Unidades Vendidas',
+      value: sellerKpis.unitsSold.toLocaleString('pt-BR'),
+      subtitle: `≈ ${periodLabel}`,
       icon: BarChart3,
       iconColor: 'text-blue-500',
       isLoading: false,
@@ -176,7 +180,7 @@ export function TrendsOverviewCards({
     {
       title: 'Faturamento',
       value: formatCurrency(sellerKpis.revenue),
-      subtitle: 'Receita bruta',
+      subtitle: `Receita bruta • ${periodLabel}`,
       icon: DollarSign,
       iconColor: 'text-emerald-500',
       isLoading: false,
@@ -184,7 +188,7 @@ export function TrendsOverviewCards({
     {
       title: 'Ticket Médio',
       value: formatCurrency(sellerKpis.averageTicket),
-      subtitle: 'Por pedido',
+      subtitle: `Média • ${periodLabel}`,
       icon: Activity,
       iconColor: 'text-amber-500',
       isLoading: false,
@@ -201,13 +205,27 @@ export function TrendsOverviewCards({
       </div>
       
       {/* Seller KPIs Row (conditional) */}
-      {sellerCards && (
+      {sellerCards ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {sellerCards.map((card, i) => (
             <KpiCard key={i} {...card} />
           ))}
         </div>
-      )}
+      ) : hasSeller && isLoadingEligibility && hasCategory ? (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map(i => (
+            <KpiCard 
+              key={i} 
+              title="" 
+              value="" 
+              subtitle="" 
+              icon={Activity} 
+              iconColor="text-muted-foreground" 
+              isLoading={true} 
+            />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -19,9 +19,12 @@ import {
   useHighlightsCached,
   useEligibilityCached,
   useTrendsRefresh,
+  clearMemoryCacheForAccount,
+  clearEligibilityMemoryCache,
 } from '@/hooks/useTrendsDataCache';
 
 import { useSellerCategories } from '@/hooks/useSellerCategories';
+import { TrendsCategoryBreadcrumbV2 } from '@/components/trends-v2/TrendsCategoryBreadcrumbV2';
 
 // ============================================================
 // TENDENCIAS PAGE V2
@@ -208,11 +211,16 @@ export default function TendenciasV2() {
   // ============================================================
   
   const handleAccountChange = useCallback((accountId: string | null) => {
+    // Clear all caches before switching account
+    clearMemoryCacheForAccount();
+    queryClient.removeQueries({ queryKey: ['seller-categories'] });
+    queryClient.removeQueries({ queryKey: ['trends-cached'] });
+    
     setSelectedAccountId(accountId);
     setSelectedCategoryId(null);
     setSelectedCategoryName('Selecionar categoria');
     setSelectedKeyword(null);
-  }, []);
+  }, [queryClient]);
   
   const handleCategoryChange = useCallback((categoryId: string | null, categoryName: string) => {
     setSelectedCategoryId(categoryId);
@@ -226,8 +234,10 @@ export default function TendenciasV2() {
   }, [selectedAccountId, lastCategoryStore]);
   
   const handlePeriodChange = useCallback((period: number) => {
+    clearEligibilityMemoryCache();
+    queryClient.invalidateQueries({ queryKey: ['trends-cached', 'eligibility'] });
     setSelectedPeriod(period);
-  }, []);
+  }, [queryClient]);
   
   const handleKeywordSelect = useCallback((keyword: string | null) => {
     setSelectedKeyword(keyword);
@@ -285,14 +295,24 @@ export default function TendenciasV2() {
           lastUpdate={marketTrends?.snapshotDate || null}
         />
         
+        {/* Category Breadcrumb Navigation */}
+        {selectedCategoryId && (
+          <TrendsCategoryBreadcrumbV2
+            categoryId={selectedCategoryId}
+            onCategoryChange={handleCategoryChange}
+          />
+        )}
+        
         {/* Overview Cards (KPIs) */}
         <TrendsOverviewCards
           hasCategory={hasCategory}
+          hasSeller={hasSeller}
           eligibilityStatus={eligibilityStatus}
           ordersCount={eligibility?.ordersCount || 0}
           trendsCount={marketTrends?.trends.length || 0}
           highlightsCount={highlights?.items.length || 0}
           sellerKpis={sellerKpis}
+          selectedPeriod={selectedPeriod}
           isLoadingEligibility={eligibilityLoading}
           isLoadingTrends={trendsLoading}
           isLoadingHighlights={highlightsLoading}

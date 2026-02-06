@@ -116,7 +116,13 @@ export function TrendsBestSellersCard({
     const doEnrich = async () => {
       setIsEnriching(true);
       try {
-        const enriched = await enrichItems(items);
+        // Race enrichment against 5s timeout to prevent infinite "0/5" badge
+        const enrichmentPromise = enrichItems(items);
+        const timeoutPromise = new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Enrichment timeout (5s)')), 5000)
+        );
+        
+        const enriched = await Promise.race([enrichmentPromise, timeoutPromise]);
         if (!cancelled) {
           setEnrichedItems(enriched);
           setLocalDebug(prev => ({
@@ -125,8 +131,9 @@ export function TrendsBestSellersCard({
           }));
         }
       } catch (err) {
-        console.error('[TrendsBestSellersCard] Enrichment error:', err);
+        console.warn('[TrendsBestSellersCard] Enrichment error/timeout:', err);
         if (!cancelled) {
+          // Fallback: use raw items without enrichment
           setEnrichedItems(items.map(item => ({
             ...item,
             is_catalog: item.item_id.startsWith('MLBU'),

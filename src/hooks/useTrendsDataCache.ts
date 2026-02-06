@@ -392,8 +392,25 @@ export function useEligibilityCached(sellerId: string | null, categoryId: string
     staleTime: TTL.ELIGIBILITY / 2,
     gcTime: TTL.ELIGIBILITY,
     enabled: !!sellerId,
-    placeholderData: (prev) => prev,
   });
+}
+
+// ============================================================
+// CACHE CLEARING UTILITIES
+// ============================================================
+
+export function clearMemoryCacheForAccount() {
+  memoryCache.clear();
+  console.log('[useTrendsDataCache] Memory cache cleared (account change)');
+}
+
+export function clearEligibilityMemoryCache() {
+  for (const key of memoryCache.keys()) {
+    if (key.startsWith('eligibility:')) {
+      memoryCache.delete(key);
+    }
+  }
+  console.log('[useTrendsDataCache] Eligibility memory cache cleared (period change)');
 }
 
 // ============================================================
