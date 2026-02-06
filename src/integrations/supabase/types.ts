@@ -5854,6 +5854,209 @@ export type Database = {
         }
         Relationships: []
       }
+      note_attachments: {
+        Row: {
+          created_at: string
+          file_name: string | null
+          file_size: number | null
+          height: number | null
+          id: string
+          mime_type: string | null
+          note_id: string
+          storage_path: string
+          width: number | null
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          file_name?: string | null
+          file_size?: number | null
+          height?: number | null
+          id?: string
+          mime_type?: string | null
+          note_id: string
+          storage_path: string
+          width?: number | null
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          file_name?: string | null
+          file_size?: number | null
+          height?: number | null
+          id?: string
+          mime_type?: string | null
+          note_id?: string
+          storage_path?: string
+          width?: number | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "note_attachments_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "note_attachments_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      note_events: {
+        Row: {
+          created_at: string
+          created_by_user_id: string
+          event_type: string
+          id: string
+          note_id: string
+          payload_json: Json | null
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by_user_id: string
+          event_type: string
+          id?: string
+          note_id: string
+          payload_json?: Json | null
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by_user_id?: string
+          event_type?: string
+          id?: string
+          note_id?: string
+          payload_json?: Json | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "note_events_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "note_events_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      note_pins: {
+        Row: {
+          company_id: string | null
+          created_at: string
+          created_by_user_id: string
+          entity_id: string | null
+          entity_type: string | null
+          id: string
+          module_key: string
+          note_id: string
+          route_path: string | null
+          workspace_id: string
+        }
+        Insert: {
+          company_id?: string | null
+          created_at?: string
+          created_by_user_id: string
+          entity_id?: string | null
+          entity_type?: string | null
+          id?: string
+          module_key: string
+          note_id: string
+          route_path?: string | null
+          workspace_id: string
+        }
+        Update: {
+          company_id?: string | null
+          created_at?: string
+          created_by_user_id?: string
+          entity_id?: string | null
+          entity_type?: string | null
+          id?: string
+          module_key?: string
+          note_id?: string
+          route_path?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "note_pins_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "note_pins_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notes: {
+        Row: {
+          color_hex: string | null
+          company_id: string | null
+          content_plain: string | null
+          content_rich: Json | null
+          created_at: string
+          created_by_user_id: string
+          id: string
+          status: string
+          title: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          color_hex?: string | null
+          company_id?: string | null
+          content_plain?: string | null
+          content_rich?: Json | null
+          created_at?: string
+          created_by_user_id: string
+          id?: string
+          status?: string
+          title?: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          color_hex?: string | null
+          company_id?: string | null
+          content_plain?: string | null
+          content_rich?: Json | null
+          created_at?: string
+          created_by_user_id?: string
+          id?: string
+          status?: string
+          title?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notes_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       notification_audit_log: {
         Row: {
           action: string

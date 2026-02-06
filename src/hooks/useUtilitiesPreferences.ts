@@ -7,6 +7,7 @@ export interface WidgetsEnabled {
   clock: boolean;
   weather: boolean;
   calculator: boolean;
+  notes: boolean;
 }
 
 export interface WidgetsLayout {
@@ -24,6 +25,7 @@ export interface UtilitiesPreferences {
   showClockInHeader: boolean;
   showWeatherInHeader: boolean;
   showCalculatorInHeader: boolean;
+  showNotesInHeader: boolean;
   showSupportButton: boolean;
   weatherCity: string;
   weatherCountry: string;
@@ -36,6 +38,7 @@ const DEFAULT_PREFERENCES: UtilitiesPreferences = {
     clock: true,
     weather: true,
     calculator: true,
+    notes: true,
   },
   widgetsLayout: {
     order: ['clock', 'weather', 'calculator'],
@@ -46,6 +49,7 @@ const DEFAULT_PREFERENCES: UtilitiesPreferences = {
   showClockInHeader: true,
   showWeatherInHeader: true,
   showCalculatorInHeader: true,
+  showNotesInHeader: true,
   showSupportButton: true,
   weatherCity: 'São Paulo',
   weatherCountry: 'BR',
@@ -98,6 +102,7 @@ export function useUtilitiesPreferences() {
             showClockInHeader: widgetsEnabled?.clock ?? true,
             showWeatherInHeader: widgetsEnabled?.weather ?? true,
             showCalculatorInHeader: widgetsEnabled?.calculator ?? true,
+            showNotesInHeader: widgetsEnabled?.notes ?? true,
             showSupportButton: widgetsLayout?.showSupportButton ?? true,
             weatherCity: widgetsLayout?.weatherCity || DEFAULT_PREFERENCES.weatherCity,
             weatherCountry: widgetsLayout?.weatherCountry || DEFAULT_PREFERENCES.weatherCountry,

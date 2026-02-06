@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Clock, CloudSun, Calculator, Wrench } from 'lucide-react';
+import { Clock, CloudSun, Calculator, StickyNote, Wrench } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -245,6 +245,39 @@ export function SettingsUtilities() {
                   widgetsEnabled: {
                     ...preferences.widgetsEnabled,
                     calculator: checked,
+                  },
+                })
+              }
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Notes Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <StickyNote className="h-5 w-5" />
+            {t('notes:settings.title', { defaultValue: 'Bloco de Notas' })}
+          </CardTitle>
+          <CardDescription>
+            {t('notes:settings.description', { defaultValue: 'Ative ou desative o bloco de notas no cabeçalho.' })}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="notes-header">
+              {t('utilities:settings.show_in_header', { defaultValue: 'Exibir no header' })}
+            </Label>
+            <Switch
+              id="notes-header"
+              checked={preferences.showNotesInHeader}
+              onCheckedChange={(checked) =>
+                updatePreferences({
+                  showNotesInHeader: checked,
+                  widgetsEnabled: {
+                    ...preferences.widgetsEnabled,
+                    notes: checked,
                   },
                 })
               }

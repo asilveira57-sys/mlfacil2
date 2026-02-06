@@ -78,6 +78,7 @@ export const SOURCE_TYPES = {
   ORDER: 'order',
   LISTING: 'listing',
   MANUAL: 'manual',
+  NOTE: 'note',
 } as const;
 
 // =============================================

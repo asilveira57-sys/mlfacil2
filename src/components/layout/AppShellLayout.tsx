@@ -14,6 +14,7 @@ import { RefreshCw } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FloatingSupportButton } from "@/components/support/FloatingSupportButton";
 import { HeaderUtilities } from "@/components/utilities";
+import { ModuleNotesOverlay } from "@/components/notes";
 import { useUtilitiesPreferences } from "@/hooks/useUtilitiesPreferences";
 
 // Context for page-level header customization
@@ -128,8 +129,9 @@ export function AppShellLayout() {
             </header>
 
             {/* Main Content - Outlet renders the matched route */}
-            <main className="flex-1 overflow-auto">
+            <main className="flex-1 overflow-auto relative">
               <Outlet />
+              <ModuleNotesOverlay />
             </main>
           </SidebarInset>
           <FloatingSupportButton visible={utilitiesPrefs.showSupportButton} />

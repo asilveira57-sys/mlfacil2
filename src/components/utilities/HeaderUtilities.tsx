@@ -1,15 +1,17 @@
 import { ClockWidget } from './ClockWidget';
 import { WeatherWidget } from './WeatherWidget';
 import { CalculatorWidget } from './CalculatorWidget';
+import { NotesDrawer } from '@/components/notes';
 import { useUtilitiesPreferences } from '@/hooks/useUtilitiesPreferences';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 
 interface HeaderUtilitiesProps {
   className?: string;
+  companyId?: string | null;
 }
 
-export function HeaderUtilities({ className }: HeaderUtilitiesProps) {
+export function HeaderUtilities({ className, companyId }: HeaderUtilitiesProps) {
   const { preferences, loading } = useUtilitiesPreferences();
 
   if (loading) {
@@ -19,8 +21,9 @@ export function HeaderUtilities({ className }: HeaderUtilitiesProps) {
   const showClock = preferences.showClockInHeader;
   const showWeather = preferences.showWeatherInHeader;
   const showCalculator = preferences.showCalculatorInHeader;
+  const showNotes = preferences.showNotesInHeader;
 
-  const hasAnyWidget = showClock || showWeather || showCalculator;
+  const hasAnyWidget = showClock || showWeather || showCalculator || showNotes;
 
   if (!hasAnyWidget) {
     return null;
@@ -36,7 +39,7 @@ export function HeaderUtilities({ className }: HeaderUtilitiesProps) {
         />
       )}
       
-      {showClock && (showWeather || showCalculator) && (
+      {showClock && (showWeather || showCalculator || showNotes) && (
         <Separator orientation="vertical" className="h-4" />
       )}
       
@@ -48,12 +51,20 @@ export function HeaderUtilities({ className }: HeaderUtilitiesProps) {
         />
       )}
       
-      {showWeather && showCalculator && (
+      {showWeather && (showCalculator || showNotes) && (
         <Separator orientation="vertical" className="h-4" />
       )}
       
       {showCalculator && (
         <CalculatorWidget variant="icon" />
+      )}
+
+      {showCalculator && showNotes && (
+        <Separator orientation="vertical" className="h-4" />
+      )}
+
+      {showNotes && (
+        <NotesDrawer companyId={companyId} />
       )}
     </div>
   );
