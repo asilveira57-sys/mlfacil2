@@ -8013,14 +8013,21 @@ export type Database = {
           account_id: string | null
           created_at: string
           discount_percent: number | null
+          effective_price: number | null
           error_reason: string | null
           id: string
           item_id: string
           item_status: string
+          max_discounted_price: number | null
+          min_discounted_price: number | null
+          net_proceeds_amount: number | null
+          net_proceeds_currency: string | null
           original_price: number | null
           promo_price: number | null
           promotion_id: string
+          raw_item_data: Json | null
           seller_id: string | null
+          suggested_price: number | null
           updated_at: string
           workspace_id: string
         }
@@ -8028,14 +8035,21 @@ export type Database = {
           account_id?: string | null
           created_at?: string
           discount_percent?: number | null
+          effective_price?: number | null
           error_reason?: string | null
           id?: string
           item_id: string
           item_status?: string
+          max_discounted_price?: number | null
+          min_discounted_price?: number | null
+          net_proceeds_amount?: number | null
+          net_proceeds_currency?: string | null
           original_price?: number | null
           promo_price?: number | null
           promotion_id: string
+          raw_item_data?: Json | null
           seller_id?: string | null
+          suggested_price?: number | null
           updated_at?: string
           workspace_id: string
         }
@@ -8043,14 +8057,21 @@ export type Database = {
           account_id?: string | null
           created_at?: string
           discount_percent?: number | null
+          effective_price?: number | null
           error_reason?: string | null
           id?: string
           item_id?: string
           item_status?: string
+          max_discounted_price?: number | null
+          min_discounted_price?: number | null
+          net_proceeds_amount?: number | null
+          net_proceeds_currency?: string | null
           original_price?: number | null
           promo_price?: number | null
           promotion_id?: string
+          raw_item_data?: Json | null
           seller_id?: string | null
+          suggested_price?: number | null
           updated_at?: string
           workspace_id?: string
         }

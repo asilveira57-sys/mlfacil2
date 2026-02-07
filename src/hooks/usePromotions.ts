@@ -26,6 +26,12 @@ export interface PromotionItemSnapshot {
   item_status: string;
   original_price: number | null;
   promo_price: number | null;
+  effective_price: number | null;
+  net_proceeds_amount: number | null;
+  net_proceeds_currency: string | null;
+  suggested_price: number | null;
+  max_discounted_price: number | null;
+  min_discounted_price: number | null;
   discount_percent: number | null;
   error_reason: string | null;
   created_at: string;

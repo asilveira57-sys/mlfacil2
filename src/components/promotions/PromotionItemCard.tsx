@@ -1,6 +1,7 @@
-import { Package, Percent, PlayCircle, Trash2, ExternalLink, AlertCircle } from 'lucide-react';
+import { Package, Percent, PlayCircle, Trash2, ExternalLink, AlertCircle, DollarSign } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Tooltip,
   TooltipContent,
@@ -11,6 +12,8 @@ import type { EnrichedPromotionItem } from '@/hooks/useEnrichedPromotionItems';
 interface PromotionItemCardProps {
   item: EnrichedPromotionItem;
   promotionStatus: string;
+  selected: boolean;
+  onToggleSelect: (itemId: string) => void;
   onAdhere?: (item: EnrichedPromotionItem) => void;
   onRemove?: (item: EnrichedPromotionItem) => void;
   actionLoading: boolean;
@@ -34,18 +37,45 @@ function ItemStatusBadge({ status }: { status: string }) {
   );
 }
 
+function ListingTypeBadge({ listingTypeId }: { listingTypeId: string | null }) {
+  if (!listingTypeId) return null;
+  const labels: Record<string, string> = {
+    gold_special: 'Clássico',
+    gold_pro: 'Premium',
+    gold: 'Gold',
+    free: 'Grátis',
+  };
+  const label = labels[listingTypeId] || listingTypeId;
+  return (
+    <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+      {label}
+    </span>
+  );
+}
+
 export function PromotionItemCard({ 
   item, 
   promotionStatus, 
+  selected,
+  onToggleSelect,
   onAdhere, 
   onRemove, 
   actionLoading 
 }: PromotionItemCardProps) {
-  const hasDiscount = item.discount_percent && item.discount_percent > 0;
+  const hasDiscount = item.computedDiscount && item.computedDiscount > 0;
   const itemLink = item.permalink || `https://www.mercadolivre.com.br/p/${item.item_id}`;
 
   return (
     <div className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-accent/30 transition-colors">
+      {/* Checkbox */}
+      <div className="flex-shrink-0">
+        <Checkbox
+          checked={selected}
+          onCheckedChange={() => onToggleSelect(item.item_id)}
+          aria-label={`Selecionar ${item.title || item.item_id}`}
+        />
+      </div>
+
       {/* Thumbnail */}
       <div className="flex-shrink-0 w-14 h-14 rounded-md overflow-hidden bg-muted flex items-center justify-center border">
         {item.thumbnail ? (
@@ -70,8 +100,8 @@ export function PromotionItemCard({
           {item.title || item.item_id}
         </p>
 
-        {/* SKU + MLB ID */}
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        {/* SKU + MLB ID + Listing Type */}
+        <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
           {item.sku && (
             <span className="font-mono truncate max-w-[120px]" title={item.sku}>
               SKU: {item.sku}
@@ -87,6 +117,7 @@ export function PromotionItemCard({
             {item.item_id}
             <ExternalLink className="h-3 w-3" />
           </a>
+          <ListingTypeBadge listingTypeId={item.listing_type_id} />
         </div>
 
         {/* Error reason for ineligible */}
@@ -106,14 +137,14 @@ export function PromotionItemCard({
       </div>
 
       {/* Price Block */}
-      <div className="flex-shrink-0 text-right space-y-0.5 min-w-[100px]">
-        {item.promo_price ? (
+      <div className="flex-shrink-0 text-right space-y-0.5 min-w-[110px]">
+        {item.finalPrice ? (
           <>
             <span className="line-through text-xs text-muted-foreground block">
               R$ {item.original_price?.toFixed(2)}
             </span>
             <span className="font-semibold text-sm text-success block">
-              R$ {item.promo_price.toFixed(2)}
+              R$ {item.finalPrice.toFixed(2)}
             </span>
           </>
         ) : (
@@ -124,8 +155,21 @@ export function PromotionItemCard({
         {hasDiscount && (
           <Badge variant="outline" className="gap-0.5 text-xs bg-primary/10 text-primary border-primary/30">
             <Percent className="h-2.5 w-2.5" />
-            {item.discount_percent}%
+            {item.computedDiscount}%
           </Badge>
+        )}
+      </div>
+
+      {/* Net Proceeds */}
+      <div className="flex-shrink-0 text-right min-w-[90px]">
+        <span className="text-[10px] text-muted-foreground block uppercase tracking-wide">Você recebe</span>
+        {item.net_proceeds_amount ? (
+          <span className="text-sm font-semibold text-foreground flex items-center justify-end gap-0.5">
+            <DollarSign className="h-3 w-3 text-muted-foreground" />
+            R$ {item.net_proceeds_amount.toFixed(2)}
+          </span>
+        ) : (
+          <span className="text-sm text-muted-foreground">-</span>
         )}
       </div>
 

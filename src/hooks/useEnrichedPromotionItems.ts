@@ -9,6 +9,7 @@ export interface ListingVisual {
   thumbnail: string | null;
   sku: string | null;
   permalink: string | null;
+  listing_type_id: string | null;
 }
 
 export interface EnrichedPromotionItem extends PromotionItemSnapshot {
@@ -16,6 +17,11 @@ export interface EnrichedPromotionItem extends PromotionItemSnapshot {
   thumbnail: string | null;
   sku: string | null;
   permalink: string | null;
+  listing_type_id: string | null;
+  /** Computed: best available final price (deal_price || effective_price) */
+  finalPrice: number | null;
+  /** Computed: discount % with fallback logic */
+  computedDiscount: number | null;
 }
 
 interface UseEnrichedPromotionItemsResult {
@@ -30,7 +36,8 @@ interface UseEnrichedPromotionItemsResult {
 
 /**
  * Enriched version of usePromotionItems that joins with meli_listings_cache
- * to add thumbnail, title, sku, and permalink to each item.
+ * to add thumbnail, title, sku, permalink, and listing_type_id to each item.
+ * Also computes finalPrice and computedDiscount with fallback logic.
  */
 export function useEnrichedPromotionItems(
   workspaceId: string | null,
@@ -92,13 +99,12 @@ export function useEnrichedPromotionItems(
           const batch = itemIds.slice(i, i + batchSize);
           const { data: listingsData } = await supabase
             .from('meli_listings_cache')
-            .select('item_id, title, thumbnail, sku, permalink')
+            .select('item_id, title, thumbnail, sku, permalink, listing_type_id')
             .eq('seller_id', sellerId)
             .in('item_id', batch);
 
           if (listingsData) {
             for (const listing of listingsData) {
-              // Only keep first match per item_id (may have multiple variations)
               if (!visualsMap.has(listing.item_id)) {
                 visualsMap.set(listing.item_id, listing as ListingVisual);
               }
@@ -122,16 +128,33 @@ export function useEnrichedPromotionItems(
     fetchItems();
   }, [fetchItems]);
 
-  // Merge raw items with visuals
+  // Merge raw items with visuals + compute derived fields
   const enrichedItems = useMemo<EnrichedPromotionItem[]>(() => {
     return rawItems.map(item => {
       const visual = visuals.get(item.item_id);
+      
+      // Best available final price
+      const finalPrice = item.promo_price || item.effective_price || null;
+      
+      // Compute discount with fallbacks
+      let computedDiscount = item.discount_percent;
+      if (!computedDiscount && item.original_price && item.original_price > 0) {
+        if (item.promo_price) {
+          computedDiscount = Math.round((1 - item.promo_price / item.original_price) * 100);
+        } else if (item.effective_price && item.effective_price !== item.original_price) {
+          computedDiscount = Math.round((1 - item.effective_price / item.original_price) * 100);
+        }
+      }
+      
       return {
         ...item,
         title: visual?.title || null,
         thumbnail: visual?.thumbnail || null,
         sku: visual?.sku || null,
         permalink: visual?.permalink || null,
+        listing_type_id: visual?.listing_type_id || null,
+        finalPrice,
+        computedDiscount,
       };
     });
   }, [rawItems, visuals]);
@@ -162,4 +185,3 @@ export function useEnrichedPromotionItems(
     startedItems,
   };
 }
-
