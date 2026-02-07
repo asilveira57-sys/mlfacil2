@@ -78,7 +78,7 @@ export function useNotes({ workspaceId, companyId, search, status = 'active' }: 
   const createMutation = useMutation({
     mutationFn: async (note: Partial<Note>) => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Não autenticado');
+      if (!user) throw new Error('Not authenticated');
 
       const { data, error } = await supabase
         .from('notes')
@@ -110,8 +110,10 @@ export function useNotes({ workspaceId, companyId, search, status = 'active' }: 
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notes'] });
     },
-    onError: (err) => {
-      toast({ title: 'Erro', description: String(err), variant: 'destructive' });
+    onError: (err: unknown) => {
+      console.error('[Notes] Create error:', err);
+      const message = err instanceof Error ? err.message : 'Erro ao criar nota';
+      toast({ title: 'Erro', description: message, variant: 'destructive' });
     },
   });
 
@@ -142,7 +144,7 @@ export function useNotes({ workspaceId, companyId, search, status = 'active' }: 
   const archiveMutation = useMutation({
     mutationFn: async (noteId: string) => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Não autenticado');
+      if (!user) throw new Error('Not authenticated');
 
       const { error } = await supabase
         .from('notes')
