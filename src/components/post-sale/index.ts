@@ -7,3 +7,4 @@ export { PostSaleConversationsTab } from "./PostSaleConversationsTab";
 export { PostSaleInbox } from "./PostSaleInbox";
 export { PostSaleConversation } from "./PostSaleConversation";
 export { PostSaleReplyEditor } from "./PostSaleReplyEditor";
+export { PostSalePendingDrafts } from "./PostSalePendingDrafts";
