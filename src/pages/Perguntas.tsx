@@ -10,6 +10,7 @@ import {
   QaInbox,
   QaResponseEditor,
   QaLibraryPanel,
+  QaSettingsPanel,
 } from "@/components/qa";
 import {
   useQuestions,
@@ -72,6 +73,8 @@ export default function Perguntas() {
     );
   }
 
+  const storeName = activeAccount?.nickname || undefined;
+
   return (
     <PageContainer title="Perguntas" subtitle="Responda perguntas dos clientes">
       <div className="p-6 space-y-6 min-h-screen bg-background">
@@ -82,6 +85,7 @@ export default function Perguntas() {
             <TabsTrigger value="inbox">Inbox</TabsTrigger>
             <TabsTrigger value="library">Biblioteca</TabsTrigger>
             <TabsTrigger value="metrics">Métricas</TabsTrigger>
+            <TabsTrigger value="settings">Configurações</TabsTrigger>
           </TabsList>
 
           <TabsContent value="inbox" className="mt-0">
@@ -110,6 +114,7 @@ export default function Perguntas() {
                     libraryResponses={libraryResponses || []}
                     sellerId={sellerId}
                     accountId={activeAccount?.id}
+                    storeName={storeName}
                   />
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full text-center">
@@ -157,6 +162,12 @@ export default function Perguntas() {
           <TabsContent value="metrics">
             <Card className="p-6">
               <QaMetricsDashboard sellerId={sellerId} />
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="settings">
+            <Card className="p-6">
+              <QaSettingsPanel />
             </Card>
           </TabsContent>
         </Tabs>

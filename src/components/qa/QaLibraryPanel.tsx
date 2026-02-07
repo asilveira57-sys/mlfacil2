@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -235,6 +236,8 @@ function AddResponseForm({ sellerId, onSuccess }: AddResponseFormProps) {
   const [shortcut, setShortcut] = useState("");
   const [tags, setTags] = useState("");
   const [categoryId, setCategoryId] = useState("");
+  const [useGreeting, setUseGreeting] = useState(true);
+  const [useSignature, setUseSignature] = useState(true);
 
   const { toast } = useToast();
   const { data: categories } = useResponseCategories(sellerId);
@@ -262,6 +265,8 @@ function AddResponseForm({ sellerId, onSuccess }: AddResponseFormProps) {
         .split(",")
         .map((t) => t.trim())
         .filter(Boolean),
+      use_greeting: useGreeting,
+      use_signature: useSignature,
     });
 
     onSuccess();
@@ -326,6 +331,31 @@ function AddResponseForm({ sellerId, onSuccess }: AddResponseFormProps) {
           onChange={(e) => setTags(e.target.value)}
           placeholder="frete, prazo, entrega"
         />
+      </div>
+
+      {/* Greeting/Signature flags */}
+      <div className="space-y-3 pt-2 border-t border-border">
+        <p className="text-sm font-medium">Automação</p>
+        <div className="flex items-center justify-between">
+          <Label htmlFor="use-greeting" className="text-sm text-muted-foreground cursor-pointer">
+            Incluir saudação automática
+          </Label>
+          <Switch
+            id="use-greeting"
+            checked={useGreeting}
+            onCheckedChange={setUseGreeting}
+          />
+        </div>
+        <div className="flex items-center justify-between">
+          <Label htmlFor="use-signature" className="text-sm text-muted-foreground cursor-pointer">
+            Incluir assinatura automática
+          </Label>
+          <Switch
+            id="use-signature"
+            checked={useSignature}
+            onCheckedChange={setUseSignature}
+          />
+        </div>
       </div>
 
       <div className="flex justify-end gap-2 pt-4">

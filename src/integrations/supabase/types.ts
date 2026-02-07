@@ -8554,6 +8554,8 @@ export type Database = {
           tags: string[] | null
           updated_at: string
           usage_count: number | null
+          use_greeting: boolean
+          use_signature: boolean
           user_id: string
         }
         Insert: {
@@ -8569,6 +8571,8 @@ export type Database = {
           tags?: string[] | null
           updated_at?: string
           usage_count?: number | null
+          use_greeting?: boolean
+          use_signature?: boolean
           user_id: string
         }
         Update: {
@@ -8584,6 +8588,8 @@ export type Database = {
           tags?: string[] | null
           updated_at?: string
           usage_count?: number | null
+          use_greeting?: boolean
+          use_signature?: boolean
           user_id?: string
         }
         Relationships: [
@@ -8676,6 +8682,42 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      qa_settings: {
+        Row: {
+          created_at: string
+          greeting_enabled: boolean
+          greeting_template: string
+          id: string
+          seller_id: string
+          signature_enabled: boolean
+          signature_template: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          greeting_enabled?: boolean
+          greeting_template?: string
+          id?: string
+          seller_id: string
+          signature_enabled?: boolean
+          signature_template?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          greeting_enabled?: boolean
+          greeting_template?: string
+          id?: string
+          seller_id?: string
+          signature_enabled?: boolean
+          signature_template?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       seller_category_eligibility: {
         Row: {

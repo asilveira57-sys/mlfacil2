@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -50,12 +50,15 @@ import {
   useIncrementLibraryUsage,
   useQuestionResponses,
 } from "@/hooks/useQA";
+import { useQaSettings, resolveTemplate, type QaSettings } from "@/hooks/useQaSettings";
+import { AdLinkSearchModal } from "./AdLinkSearchModal";
 
 interface QaResponseEditorProps {
   question: QaQuestion;
   libraryResponses: QaLibraryResponse[];
   sellerId: string;
   accountId?: string;
+  storeName?: string;
 }
 
 export function QaResponseEditor({
@@ -63,6 +66,7 @@ export function QaResponseEditor({
   libraryResponses,
   sellerId,
   accountId,
+  storeName,
 }: QaResponseEditorProps) {
   const [content, setContent] = useState("");
   const [category, setCategory] = useState(question.category || "");
@@ -73,6 +77,7 @@ export function QaResponseEditor({
   } | null>(null);
   const [usedLibraryId, setUsedLibraryId] = useState<string | null>(null);
   const [aiOriginalText, setAiOriginalText] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { toast } = useToast();
   const createResponse = useCreateResponse();
@@ -81,6 +86,7 @@ export function QaResponseEditor({
   const incrementUsage = useIncrementLibraryUsage();
   const { validate, isValidating } = useValidateResponse();
   const { suggest, isGenerating } = useAiSuggest();
+  const { data: qaSettings } = useQaSettings(sellerId);
   
   // Fetch existing responses for this question
   const { data: existingResponses } = useQuestionResponses(question.id);
@@ -109,6 +115,22 @@ export function QaResponseEditor({
 
     return () => clearTimeout(timer);
   }, [content, validate]);
+
+  // Build final text with greeting/signature
+  const buildFinalText = useCallback((rawContent: string) => {
+    const ctx = { buyerName: null, storeName: storeName || null };
+    const parts: string[] = [];
+
+    if (qaSettings?.greeting_enabled) {
+      parts.push(resolveTemplate(qaSettings.greeting_template, ctx));
+    }
+    parts.push(rawContent.trim());
+    if (qaSettings?.signature_enabled) {
+      parts.push(resolveTemplate(qaSettings.signature_template, ctx));
+    }
+
+    return parts.filter(Boolean).join("\n");
+  }, [qaSettings, storeName]);
 
   const handleAiSuggest = async () => {
     try {
@@ -140,6 +162,27 @@ export function QaResponseEditor({
     incrementUsage.mutate(response.id);
   };
 
+  const handleInsertLink = (link: string) => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const newContent = content.substring(0, start) + link + content.substring(end);
+      setContent(newContent);
+      // Focus back and set cursor after link
+      setTimeout(() => {
+        textarea.focus();
+        textarea.setSelectionRange(start + link.length, start + link.length);
+      }, 50);
+    } else {
+      setContent((prev) => prev + (prev ? " " : "") + link);
+    }
+    toast({
+      title: "Link inserido",
+      description: "O link do anúncio foi adicionado à resposta",
+    });
+  };
+
   const handleSaveDraft = async () => {
     if (!content.trim()) return;
 
@@ -162,8 +205,11 @@ export function QaResponseEditor({
   const handleSend = async () => {
     if (!content.trim()) return;
 
+    // Build final text with greeting + signature
+    const finalText = buildFinalText(content);
+
     // Final validation before send
-    const result = await validate(content);
+    const result = await validate(finalText);
     if (!result.isValid) {
       setValidationResult(result);
       toast({
@@ -176,7 +222,7 @@ export function QaResponseEditor({
 
     const sendResult = await createResponse.mutateAsync({
       question_id: question.id,
-      response_text: content,
+      response_text: finalText,
       source: usedLibraryId ? "library" : aiOriginalText ? (content === aiOriginalText ? "ai_suggested" : "ai_edited") : "manual",
       library_response_id: usedLibraryId || undefined,
       ai_original_text: aiOriginalText || undefined,
@@ -204,8 +250,9 @@ export function QaResponseEditor({
   };
 
   const characterCount = content.length;
+  const finalTextLength = buildFinalText(content).length;
   const maxCharacters = 2000;
-  const isOverLimit = characterCount > maxCharacters;
+  const isOverLimit = finalTextLength > maxCharacters;
 
   return (
     <div className="space-y-4">
@@ -288,11 +335,24 @@ export function QaResponseEditor({
         </Select>
       </div>
 
+      {/* Greeting preview */}
+      {qaSettings?.greeting_enabled && content.trim() && (
+        <div className="bg-primary/5 border border-primary/10 rounded-md px-3 py-2">
+          <p className="text-[10px] text-muted-foreground mb-0.5">Saudação automática:</p>
+          <p className="text-xs text-primary">
+            {resolveTemplate(qaSettings.greeting_template, { storeName: storeName || null })}
+          </p>
+        </div>
+      )}
+
       {/* Response Editor */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium">Sua resposta</span>
           <div className="flex items-center gap-2">
+            {/* Ad Link Search */}
+            <AdLinkSearchModal sellerId={sellerId} onInsertLink={handleInsertLink} />
+
             {/* Library Quick Insert */}
             {libraryResponses.length > 0 && (
               <DropdownMenu>
@@ -339,6 +399,7 @@ export function QaResponseEditor({
 
         <div className="relative">
           <Textarea
+            ref={textareaRef}
             value={content}
             onChange={(e) => setContent(e.target.value)}
             placeholder="Digite sua resposta..."
@@ -359,10 +420,20 @@ export function QaResponseEditor({
                 isOverLimit ? "text-destructive" : "text-muted-foreground"
               )}
             >
-              {characterCount}/{maxCharacters}
+              {finalTextLength}/{maxCharacters}
             </span>
           </div>
         </div>
+
+        {/* Signature preview */}
+        {qaSettings?.signature_enabled && content.trim() && (
+          <div className="bg-primary/5 border border-primary/10 rounded-md px-3 py-2">
+            <p className="text-[10px] text-muted-foreground mb-0.5">Assinatura automática:</p>
+            <p className="text-xs text-primary">
+              {resolveTemplate(qaSettings.signature_template, { storeName: storeName || null })}
+            </p>
+          </div>
+        )}
 
         {/* Validation Feedback */}
         {validationResult && (
