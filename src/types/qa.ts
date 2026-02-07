@@ -43,6 +43,8 @@ export interface QaLibraryResponse {
   usage_count: number;
   is_approved: boolean;
   is_active: boolean;
+  use_greeting: boolean;
+  use_signature: boolean;
   created_at: string;
   updated_at: string;
   category?: QaResponseCategory;

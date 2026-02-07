@@ -388,6 +388,8 @@ export function useCreateLibraryResponse() {
       category_id?: string;
       shortcut?: string;
       tags?: string[];
+      use_greeting?: boolean;
+      use_signature?: boolean;
     }) => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
@@ -402,6 +404,8 @@ export function useCreateLibraryResponse() {
         tags: data.tags || [],
         is_approved: true,
         is_active: true,
+        use_greeting: data.use_greeting ?? true,
+        use_signature: data.use_signature ?? true,
       };
 
       const { data: response, error } = await supabase
