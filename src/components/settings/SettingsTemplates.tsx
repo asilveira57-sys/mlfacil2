@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Eye, LayoutTemplate, ListChecks, Sparkles, Settings2 } from 'lucide-react';
+import { Eye, LayoutTemplate, ListChecks, Sparkles } from 'lucide-react';
 import { AdminOnly } from '@/components/auth/AdminOnly';
 import { TemplatesOverview } from './templates/TemplatesOverview';
 import { TemplatesList } from './templates/TemplatesList';
