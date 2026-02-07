@@ -2,26 +2,25 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Eye, Palette, LayoutTemplate, ListChecks, ArrowRight } from 'lucide-react';
+import { Eye, Palette, LayoutTemplate, ListChecks, ArrowRight, CheckCircle2, Zap } from 'lucide-react';
 import { useThemeResolver } from '@/hooks/useThemeResolver';
 import { useCurrentWorkspaceId } from '@/hooks/useCurrentWorkspaceId';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
+import { useTemplateVariants } from '@/hooks/useTemplates';
+import { TemplateMiniPreview, TemplateColorPreview } from './TemplateColorPreview';
+import { useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
+import type { DesignTokens, Template } from '@/types/templates';
 
 interface TemplatesOverviewProps {
   onNavigate: (tab: string) => void;
 }
 
-const SCOPE_LABELS: Record<string, string> = {
-  global_default: 'Default Global',
-  company_override: 'Override Empresa',
-  category: 'Categoria',
-  subcategory: 'Subcategoria',
-  seasonal: 'Sazonal',
-};
-
 export function TemplatesOverview({ onNavigate }: TemplatesOverviewProps) {
   const { data: workspaceId } = useCurrentWorkspaceId();
   const { activeAccountId } = useActiveAccount();
+  const qc = useQueryClient();
 
   const { resolved, isLoading, templates, rules } = useThemeResolver({
     workspace_id: workspaceId,
@@ -29,6 +28,32 @@ export function TemplatesOverview({ onNavigate }: TemplatesOverviewProps) {
     current_date: new Date(),
     user_theme_preference: 'light',
   });
+
+  const handleQuickSwitch = async (template: Template) => {
+    try {
+      // Deactivate current system default and activate selected one
+      const { error } = await supabase
+        .from('templates')
+        .update({ is_active: true } as any)
+        .eq('id', template.id);
+      if (error) throw error;
+
+      // Log audit
+      const { data: { user } } = await supabase.auth.getUser();
+      await supabase.from('template_audit_log').insert({
+        actor_user_id: user?.id,
+        action: 'quick_switch',
+        template_id: template.id,
+        payload: { switched_from: resolved?.template?.id },
+      } as any);
+
+      qc.invalidateQueries({ queryKey: ['templates'] });
+      qc.invalidateQueries({ queryKey: ['theme-resolver'] });
+      toast.success(`Template "${template.name}" ativado`);
+    } catch (err: any) {
+      toast.error(`Erro: ${err.message}`);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -43,6 +68,8 @@ export function TemplatesOverview({ onNavigate }: TemplatesOverviewProps) {
     );
   }
 
+  const inactiveTemplates = templates.filter(t => !t.is_active);
+
   return (
     <div className="space-y-6">
       {/* Current template card */}
@@ -52,10 +79,10 @@ export function TemplatesOverview({ onNavigate }: TemplatesOverviewProps) {
             <div>
               <CardTitle className="flex items-center gap-2">
                 <Palette className="h-5 w-5 text-primary" />
-                Template em Uso
+                Aparência Atual
               </CardTitle>
               <CardDescription className="mt-1">
-                Template atualmente aplicado no sistema
+                Template visual ativo no sistema
               </CardDescription>
             </div>
             {resolved && (
@@ -68,52 +95,28 @@ export function TemplatesOverview({ onNavigate }: TemplatesOverviewProps) {
         <CardContent>
           {resolved ? (
             <div className="space-y-4">
-              {/* Template info */}
-              <div className="flex items-center gap-4">
-                {/* Mini preview */}
-                <div className="w-24 h-16 rounded-lg border overflow-hidden flex-shrink-0 relative">
-                  <div
-                    className="absolute inset-0"
-                    style={{
-                      background: resolved.resolved_tokens.background
-                        ? `hsl(${resolved.resolved_tokens.background})`
-                        : undefined,
-                    }}
-                  >
-                    <div
-                      className="absolute left-0 top-0 bottom-0 w-6"
-                      style={{
-                        background: resolved.resolved_tokens.sidebar_background
-                          ? `hsl(${resolved.resolved_tokens.sidebar_background})`
-                          : 'hsl(var(--sidebar-background))',
-                      }}
-                    />
-                    <div
-                      className="absolute top-2 left-8 right-2 h-2 rounded-sm"
-                      style={{
-                        background: resolved.resolved_tokens.primary
-                          ? `hsl(${resolved.resolved_tokens.primary})`
-                          : 'hsl(var(--primary))',
-                      }}
-                    />
-                    <div
-                      className="absolute top-6 left-8 right-6 h-1.5 rounded-sm opacity-60"
-                      style={{
-                        background: resolved.resolved_tokens.muted
-                          ? `hsl(${resolved.resolved_tokens.muted})`
-                          : 'hsl(var(--muted))',
-                      }}
-                    />
-                  </div>
-                </div>
+              <div className="flex items-start gap-4">
+                {/* Live mini preview */}
+                <TemplateMiniPreview
+                  tokens={resolved.resolved_tokens}
+                  className="w-32 h-20 flex-shrink-0"
+                />
 
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-lg">{resolved.template.name}</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-lg">{resolved.template.name}</h3>
+                    <CheckCircle2 className="h-4 w-4 text-primary" />
+                  </div>
                   {resolved.template.description && (
-                    <p className="text-sm text-muted-foreground line-clamp-1">
+                    <p className="text-sm text-muted-foreground line-clamp-2 mt-1">
                       {resolved.template.description}
                     </p>
                   )}
+                  <TemplateColorPreview
+                    tokens={resolved.resolved_tokens}
+                    size="sm"
+                    className="mt-3 max-w-xs"
+                  />
                 </div>
               </div>
 
@@ -135,7 +138,7 @@ export function TemplatesOverview({ onNavigate }: TemplatesOverviewProps) {
               {resolved.seasonal_overlay && (
                 <div className="bg-accent/10 border border-accent/20 rounded-lg p-3">
                   <p className="text-xs font-medium text-accent-foreground">
-                    🎉 Overlay sazonal ativo
+                    🎉 Overlay sazonal ativo — aplicação automática por data
                   </p>
                 </div>
               )}
@@ -152,6 +155,37 @@ export function TemplatesOverview({ onNavigate }: TemplatesOverviewProps) {
           )}
         </CardContent>
       </Card>
+
+      {/* Quick switch — available templates */}
+      {inactiveTemplates.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Zap className="h-4 w-4 text-primary" />
+              Troca Rápida
+            </CardTitle>
+            <CardDescription>
+              Ative outro template com um clique
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {inactiveTemplates.slice(0, 6).map(template => (
+                <QuickSwitchCard
+                  key={template.id}
+                  template={template}
+                  onActivate={() => handleQuickSwitch(template)}
+                />
+              ))}
+            </div>
+            {inactiveTemplates.length > 6 && (
+              <Button variant="link" className="mt-3 text-xs" onClick={() => onNavigate('templates')}>
+                Ver todos os templates →
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Quick stats */}
       <div className="grid gap-4 md:grid-cols-3">
@@ -201,6 +235,32 @@ export function TemplatesOverview({ onNavigate }: TemplatesOverviewProps) {
             </div>
           </CardContent>
         </Card>
+      </div>
+    </div>
+  );
+}
+
+/** Quick switch card for inactive templates */
+function QuickSwitchCard({ template, onActivate }: { template: Template; onActivate: () => void }) {
+  return (
+    <div className="border rounded-lg p-3 bg-card hover:border-primary/40 hover:shadow-sm transition-all group">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <h4 className="text-sm font-medium truncate">{template.name}</h4>
+          {template.description && (
+            <p className="text-xs text-muted-foreground line-clamp-1 mt-0.5">
+              {template.description}
+            </p>
+          )}
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+          onClick={onActivate}
+        >
+          Ativar
+        </Button>
       </div>
     </div>
   );

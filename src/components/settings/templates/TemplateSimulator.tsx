@@ -1,18 +1,17 @@
 import { useState, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Sparkles, Sun, Moon, Info } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import type { Template, TemplateVariant, TemplateRule, ThemeResolverInput } from '@/types/templates';
+import { TemplateMiniPreview, TemplateColorPreview } from './TemplateColorPreview';
+import type { Template, TemplateVariant, TemplateRule, ThemeResolverInput, DesignTokens } from '@/types/templates';
 
-// Inline resolver to avoid circular deps
+// Inline resolver
 function resolveForSimulator(
   input: ThemeResolverInput,
   templates: Template[],
@@ -67,9 +66,25 @@ function resolveForSimulator(
   const baseVar = variants.find(v => v.template_id === baseRule!.template_id && v.variant_key === user_theme_preference)
     || variants.find(v => v.template_id === baseRule!.template_id && v.variant_key === 'light');
 
+  // Merge seasonal tokens
+  let resolvedTokens = baseVar ? { ...(baseVar.design_tokens as DesignTokens) } : {};
+  if (seasonalRule) {
+    const seasonalVar = variants.find(v => v.template_id === seasonalRule!.template_id && v.variant_key === user_theme_preference)
+      || variants.find(v => v.template_id === seasonalRule!.template_id && v.variant_key === 'light');
+    if (seasonalVar) {
+      const overlay = seasonalVar.design_tokens as DesignTokens;
+      for (const [key, value] of Object.entries(overlay)) {
+        if (value !== undefined && value !== null && value !== '') {
+          (resolvedTokens as any)[key] = value;
+        }
+      }
+    }
+  }
+
   return {
     template: baseTpl,
     variant: baseVar,
+    resolved_tokens: resolvedTokens as DesignTokens,
     has_seasonal: !!seasonalRule,
     seasonal_key: seasonalRule?.seasonal_key,
     chain,
@@ -123,7 +138,7 @@ export function TemplateSimulator() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-primary" />
-            Simulador de Template
+            Simulador de Aparência
           </CardTitle>
           <CardDescription>
             Teste como o tema é resolvido para diferentes cenários
@@ -167,7 +182,7 @@ export function TemplateSimulator() {
             <div className="space-y-2">
               <Label className="text-xs">Modo</Label>
               <div className="flex items-center gap-2">
-                <Sun className="h-4 w-4 text-warning" />
+                <Sun className="h-4 w-4 text-accent-foreground" />
                 <Switch checked={isDark} onCheckedChange={setIsDark} />
                 <Moon className="h-4 w-4 text-primary" />
                 <span className="text-xs text-muted-foreground ml-1">
@@ -182,15 +197,29 @@ export function TemplateSimulator() {
             <Skeleton className="h-32" />
           ) : result ? (
             <div className="border rounded-lg p-4 space-y-4">
-              <div className="flex items-start gap-3">
-                <Info className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
-                <div className="flex-1">
-                  <h4 className="font-semibold">
-                    {result.template?.name || 'Template não encontrado'}
-                  </h4>
+              <div className="flex items-start gap-4">
+                {/* Real preview with resolved tokens */}
+                <TemplateMiniPreview
+                  tokens={result.resolved_tokens}
+                  className="w-40 h-28 flex-shrink-0"
+                />
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <Info className="h-4 w-4 text-primary flex-shrink-0" />
+                    <h4 className="font-semibold">
+                      {result.template?.name || 'Template não encontrado'}
+                    </h4>
+                  </div>
                   <p className="text-sm text-muted-foreground mt-1">
                     Origem: <strong>{result.source}</strong>
                   </p>
+
+                  <TemplateColorPreview
+                    tokens={result.resolved_tokens}
+                    size="md"
+                    className="mt-3 max-w-xs"
+                  />
                 </div>
               </div>
 
@@ -208,58 +237,25 @@ export function TemplateSimulator() {
                 </div>
               )}
 
-              {/* Mock preview */}
-              {result.variant && (
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground">Preview (mock):</p>
-                  <div className="grid grid-cols-3 gap-2 h-32">
-                    {/* Dashboard mock */}
-                    <div
-                      className="rounded-lg border overflow-hidden relative"
-                      style={{
-                        background: result.variant.design_tokens?.background
-                          ? `hsl(${(result.variant.design_tokens as any).background})`
-                          : undefined,
-                      }}
-                    >
-                      <div
-                        className="absolute left-0 top-0 bottom-0 w-8"
-                        style={{
-                          background: result.variant.design_tokens?.sidebar_background
-                            ? `hsl(${(result.variant.design_tokens as any).sidebar_background})`
-                            : 'hsl(var(--sidebar-background))',
-                        }}
-                      />
-                      <div className="absolute top-2 left-10 right-2 space-y-1.5">
-                        <div className="h-2 rounded-sm bg-primary/20 w-3/4" />
-                        <div className="grid grid-cols-2 gap-1">
-                          <div className="h-6 rounded-sm bg-card border" />
-                          <div className="h-6 rounded-sm bg-card border" />
+              {/* Detailed tokens preview */}
+              {result.resolved_tokens && (
+                <div className="bg-muted/30 rounded-lg p-3">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Tokens resolvidos:</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                    {Object.entries(result.resolved_tokens)
+                      .filter(([, v]) => typeof v === 'string' && v.includes('%'))
+                      .slice(0, 12)
+                      .map(([key, value]) => (
+                        <div key={key} className="flex items-center gap-1.5">
+                          <div
+                            className="w-4 h-4 rounded-sm border flex-shrink-0"
+                            style={{ background: `hsl(${value})` }}
+                          />
+                          <span className="text-[10px] text-muted-foreground truncate">
+                            {key.replace(/_/g, ' ')}
+                          </span>
                         </div>
-                      </div>
-                      <p className="absolute bottom-1 left-10 text-[8px] text-muted-foreground">Dashboard</p>
-                    </div>
-                    {/* Perguntas mock */}
-                    <div className="rounded-lg border bg-background p-2 relative">
-                      <div className="space-y-1">
-                        <div className="h-2 rounded-sm bg-primary/30 w-1/2" />
-                        <div className="h-4 rounded-sm border bg-card" />
-                        <div className="h-4 rounded-sm border bg-card" />
-                        <div className="h-4 rounded-sm border bg-card" />
-                      </div>
-                      <p className="absolute bottom-1 left-2 text-[8px] text-muted-foreground">Perguntas</p>
-                    </div>
-                    {/* Impressão mock */}
-                    <div className="rounded-lg border bg-background p-2 relative">
-                      <div className="flex items-center gap-1 mb-1">
-                        <div className="h-1.5 w-1.5 rounded-full bg-success" />
-                        <div className="h-1.5 rounded-sm bg-muted flex-1" />
-                      </div>
-                      <div className="border rounded-sm h-14 bg-card flex items-center justify-center">
-                        <div className="w-8 h-8 border-2 border-dashed border-muted-foreground/20 rounded" />
-                      </div>
-                      <p className="absolute bottom-1 left-2 text-[8px] text-muted-foreground">ZPL</p>
-                    </div>
+                      ))}
                   </div>
                 </div>
               )}

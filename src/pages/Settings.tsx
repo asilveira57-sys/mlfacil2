@@ -24,7 +24,7 @@ const Settings = () => {
     { id: "language", label: t('common:language'), icon: Globe },
     { id: "collaborators", label: t('nav:collaborators'), icon: Users },
     { id: "customization", label: t('nav:customization'), icon: Palette },
-    { id: "templates", label: "Templates", icon: LayoutTemplate },
+    { id: "templates", label: "Aparência", icon: LayoutTemplate },
     { id: "utilities", label: t('utilities:title', { defaultValue: 'Utilidades' }), icon: Wrench },
     { id: "support", label: t('nav:support', { defaultValue: 'Suporte' }), icon: Headphones },
     { id: "billing", label: t('nav:billing'), icon: Receipt },

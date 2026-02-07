@@ -8,9 +8,13 @@ import {
   Plus, Copy, Pencil, ToggleLeft, ToggleRight, Search,
   LayoutTemplate, Star, Globe, Tag, Calendar, Building2,
 } from 'lucide-react';
-import { useTemplatesList, useTemplateMutations } from '@/hooks/useTemplates';
+import { useTemplatesList, useTemplateMutations, useTemplateVariants } from '@/hooks/useTemplates';
 import { TemplateWizard } from './TemplateWizard';
-import type { TemplateScope } from '@/types/templates';
+import { TemplateColorPreview, TemplateMiniPreview } from './TemplateColorPreview';
+import type { TemplateScope, DesignTokens } from '@/types/templates';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import type { TemplateVariant } from '@/types/templates';
 
 interface TemplatesListProps {
   onEdit: (id: string) => void;
@@ -30,6 +34,19 @@ export function TemplatesList({ onEdit }: TemplatesListProps) {
   const [search, setSearch] = useState('');
   const [showWizard, setShowWizard] = useState(false);
 
+  // Fetch all variants for preview swatches
+  const { data: allVariants } = useQuery({
+    queryKey: ['templates', 'all-variants-list'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('template_variants')
+        .select('*')
+        .eq('variant_key', 'light');
+      if (error) throw error;
+      return data as TemplateVariant[];
+    },
+  });
+
   if (showWizard) {
     return <TemplateWizard templateId={null} onClose={() => setShowWizard(false)} />;
   }
@@ -38,6 +55,11 @@ export function TemplatesList({ onEdit }: TemplatesListProps) {
     t.name.toLowerCase().includes(search.toLowerCase()) ||
     t.description?.toLowerCase().includes(search.toLowerCase())
   );
+
+  const getVariantTokens = (templateId: string): DesignTokens | null => {
+    const variant = allVariants?.find(v => v.template_id === templateId);
+    return variant ? (variant.design_tokens as DesignTokens) : null;
+  };
 
   return (
     <div className="space-y-6">
@@ -89,14 +111,22 @@ export function TemplatesList({ onEdit }: TemplatesListProps) {
               {filtered.map(template => {
                 const scopeCfg = SCOPE_CONFIG[template.scope as TemplateScope] || SCOPE_CONFIG.global;
                 const ScopeIcon = scopeCfg.icon;
+                const tokens = getVariantTokens(template.id);
 
                 return (
                   <div
                     key={template.id}
                     className="flex items-center gap-4 p-4 border rounded-lg bg-card hover:shadow-sm transition-shadow"
                   >
-                    {/* Status indicator */}
-                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${template.is_active ? 'bg-success' : 'bg-muted-foreground/30'}`} />
+                    {/* Mini preview with actual colors */}
+                    {tokens ? (
+                      <TemplateMiniPreview
+                        tokens={tokens}
+                        className="w-20 h-14 flex-shrink-0"
+                      />
+                    ) : (
+                      <div className={`w-2 h-2 rounded-full flex-shrink-0 ${template.is_active ? 'bg-primary' : 'bg-muted-foreground/30'}`} />
+                    )}
 
                     {/* Info */}
                     <div className="flex-1 min-w-0">
@@ -122,6 +152,9 @@ export function TemplatesList({ onEdit }: TemplatesListProps) {
                         <Badge variant={template.is_active ? 'default' : 'secondary'} className="text-[10px]">
                           {template.is_active ? 'Ativo' : 'Inativo'}
                         </Badge>
+                        {tokens && (
+                          <TemplateColorPreview tokens={tokens} size="sm" className="w-20 ml-auto hidden sm:flex" />
+                        )}
                       </div>
                     </div>
 
@@ -155,7 +188,7 @@ export function TemplatesList({ onEdit }: TemplatesListProps) {
                         disabled={toggleActive.isPending}
                       >
                         {template.is_active ? (
-                          <ToggleRight className="h-3.5 w-3.5 text-success" />
+                          <ToggleRight className="h-3.5 w-3.5 text-primary" />
                         ) : (
                           <ToggleLeft className="h-3.5 w-3.5 text-muted-foreground" />
                         )}
