@@ -1,51 +1,110 @@
 
+# Melhoria da Central de Promocoes - Dados Reais da API + Selecao em Massa + Filtros
 
-# Melhoria do Modulo de Promocoes - Tela de Detalhes Rica
+## Diagnostico
 
-## Problema Atual
+### Problema dos dados faltantes (desconto e "Voce recebe")
+Analisando os dados no banco, **todos os itens** estao com `promo_price = NULL`, `discount_percent = NULL`. Isso acontece porque o sync atual extrai apenas `deal_price` da API, que retorna `null` para promocoes do tipo BANK (desconto no Pix/cartao).
 
-Conforme identificado no screenshot:
+Porem, a API do Mercado Livre retorna **campos adicionais** que o sync nao esta capturando:
 
-1. O detalhe da promocao abre em um **Sheet lateral estreito** (`sm:max-w-xl` = ~576px), cabendo apenas 2 itens por vez
-2. Os itens mostram apenas o **MLB ID** (ex: `MLB5212738374`) sem informacao do produto
-3. A barra de rolagem eh muito curta e "pula" ao ser manipulada (area de scroll de apenas ~400px)
-4. Nao ha thumbnail, titulo, SKU -- informacoes essenciais para identificar o produto
-5. A experiencia eh inferior ao proprio Mercado Livre
+- **`price`**: preco promocional efetivo (diferente de `deal_price`, preenchido mesmo em promocoes BANK)
+- **`net_proceeds.amount`**: valor liquido que o vendedor recebe (exatamente o "Voce recebe" do screenshot)
+- **`max_discounted_price`**, **`min_discounted_price`**, **`suggested_discounted_price`**: faixa de precos permitida
 
-## Solucao Proposta
+O campo `net_proceeds` eh o dado **oficial da API** que mostra quanto o vendedor recebe, ja descontando a comissao real da categoria -- nao uma estimativa de 13% ou 16%.
 
-### 1. Substituir Sheet por Dialog em tela cheia
+### Problema da interface
+- Sem caixas de selecao para marcar itens
+- Sem filtro por percentual de desconto
+- Sem ordenacao por desconto ou preco
+- Sem informacao de "valor compartilhado" / "Voce recebe"
 
-Trocar o componente `Sheet` (painel lateral) por um `Dialog` (modal centralizado) ocupando **90% da tela** (`max-w-6xl`, ~1152px de largura). Isso permite mostrar 8-10 itens visiveis simultaneamente sem scroll excessivo.
+## Solucao em 4 Frentes
 
-### 2. Enriquecer itens com dados do produto
+### 1. Migracao SQL - Novas colunas na tabela
 
-Ao abrir o detalhe de uma promocao, fazer um JOIN local com `meli_listings_cache` para trazer:
-- **Thumbnail** (imagem do produto)
-- **Titulo** do anuncio
-- **SKU** (quando disponivel)
-- **Permalink** (link do anuncio)
+Adicionar as seguintes colunas em `promotion_items_snapshots`:
 
-Isso sera feito no hook `usePromotionItems`, adicionando uma segunda query que busca os dados visuais dos itens.
+| Coluna | Tipo | Descricao |
+|---|---|---|
+| `effective_price` | NUMERIC | Preco promocional efetivo (campo `price` da API) |
+| `net_proceeds_amount` | NUMERIC | "Voce recebe" - valor liquido (campo `net_proceeds.amount`) |
+| `net_proceeds_currency` | TEXT | Moeda do net_proceeds |
+| `suggested_price` | NUMERIC | Preco sugerido pelo ML |
+| `max_discounted_price` | NUMERIC | Preco maximo com desconto |
+| `min_discounted_price` | NUMERIC | Preco minimo com desconto |
+| `raw_item_data` | JSONB | JSON bruto da API para garantir que nenhum campo futuro seja perdido |
 
-### 3. Layout visual dos itens (cards em grid)
+### 2. Atualizacao do Edge Function `promotions-sync`
 
-Substituir a tabela simples por um **grid de cards** com layout:
+Capturar os novos campos da resposta da API:
 
 ```text
-+------------------------------------------+
-| [IMG] Titulo do Produto                  |
-|        SKU: ABC123 | MLB1234567890       |
-|        R$ 120,00 --> R$ 89,90  (-25%)    |
-|        Status: Candidato    [Aderir]     |
-+------------------------------------------+
+Antes (atual):
+  item_id, status, original_price, deal_price, error
+
+Depois (novo):
+  item_id, status, original_price, deal_price,
+  price, net_proceeds.amount, net_proceeds.currency,
+  suggested_discounted_price, max_discounted_price,
+  min_discounted_price, error, + raw JSON completo
 ```
 
-Cada card tera ~80px de altura, permitindo 8-10 itens visiveis na area de scroll (que tera ~650px de altura).
+Tambem melhorar o calculo de `discount_percent` usando fallbacks:
+1. Se `deal_price` existe: desconto = `(1 - deal_price/original_price) * 100`
+2. Se `price` existe e eh diferente de `original_price`: desconto = `(1 - price/original_price) * 100`
+3. Se nenhum: `null`
 
-### 4. Cabecalho do modal otimizado
+### 3. Atualizacao do Frontend - Hook e Tipos
 
-Reorganizar o cabecalho com informacoes da promocao em layout horizontal compacto, liberando espaco vertical para os itens.
+Atualizar `PromotionItemSnapshot` e `EnrichedPromotionItem` para incluir:
+- `effective_price`
+- `net_proceeds_amount`
+- `suggested_price`
+- `max_discounted_price`
+- `min_discounted_price`
+
+Tambem trazer `listing_type_id` do `meli_listings_cache` para exibir o tipo de anuncio (Classico/Premium).
+
+### 4. Atualizacao da Interface - Modal com Selecao, Filtros e Ordenacao
+
+#### Selecao em Massa
+- Checkbox em cada card de item
+- Checkbox "Selecionar Todos" no topo (seleciona apenas itens filtrados)
+- Botoes "Aderir Selecionados" e "Remover Selecionados" aparecem quando ha selecao
+- Selecao resetada quando filtros mudam
+
+#### Barra de Filtros e Ordenacao
+```text
+[Buscar titulo/SKU...] [Status: Todos v] [Desc. max: ____%] [Ordenar: Desconto v]
+```
+- Busca por titulo, SKU ou MLB ID
+- Filtro por status (Participando / Candidato / Inelegivel)
+- Filtro por desconto maximo (ex: "somente menores que 15%")
+- Ordenacao por: % desconto, preco, status, "Voce recebe"
+
+#### Card de Item Atualizado
+Cada card passara a exibir:
+
+```text
++---------------------------------------------------------------+
+| [x] [IMG] Titulo do Produto Completo                          |
+|            SKU: ABC123 | MLB1234567890 | Classico              |
+|                                                                |
+|      R$ 82,75         R$ 38,81 (-53%)         Voce recebe      |
+|      preco original   preco final              R$ 27,85        |
+|                                                                |
+|      Status: Candidato                         [Aderir]        |
++---------------------------------------------------------------+
+```
+
+- Preco original riscado
+- Preco final em destaque (verde)
+- Badge de desconto percentual
+- "Voce recebe" com o valor real da API (`net_proceeds_amount`)
+- Se `net_proceeds` nao estiver disponivel, exibir "-" (sem estimativa)
+- Tipo de anuncio (Classico/Premium) como badge discreta
 
 ## Detalhes Tecnicos
 
@@ -53,47 +112,41 @@ Reorganizar o cabecalho com informacoes da promocao em layout horizontal compact
 
 | Arquivo | Acao |
 |---|---|
-| `src/hooks/usePromotionItems.ts` (dentro de `usePromotions.ts`) | Enriquecer itens com dados de `meli_listings_cache` |
-| `src/pages/Promocoes.tsx` | Substituir Sheet por Dialog full-screen, novo layout de cards |
+| Nova migracao SQL | Adicionar 7 colunas em `promotion_items_snapshots` |
+| `supabase/functions/promotions-sync/index.ts` | Capturar `price`, `net_proceeds`, faixas de preco, raw JSON |
+| `src/hooks/usePromotions.ts` | Atualizar tipo `PromotionItemSnapshot` com novos campos |
+| `src/hooks/useEnrichedPromotionItems.ts` | Trazer `listing_type_id` do cache, expor novos campos |
+| `src/components/promotions/PromotionDetailModal.tsx` | Adicionar filtros, ordenacao, selecao em massa |
+| `src/components/promotions/PromotionItemCard.tsx` | Exibir checkbox, `net_proceeds`, desconto, tipo anuncio |
+| `src/pages/Promocoes.tsx` | Ajustar callbacks para acoes em massa com itens selecionados |
 
-### Enriquecimento de dados (usePromotionItems)
+### Logica de selecao em massa
 
-Apos buscar os itens da promocao, fazer uma segunda query:
+- Estado `selectedIds: Set<string>` gerenciado no `PromotionDetailModal`
+- "Selecionar Todos" opera apenas sobre itens **visíveis apos filtro**
+- Botoes de acao em massa operam sobre itens selecionados do tipo correto (ex: so candidatos para "Aderir")
+- Reset automatico ao mudar filtro
 
-```text
-SELECT item_id, title, thumbnail, sku, permalink
-FROM meli_listings_cache
-WHERE item_id IN (lista dos item_ids)
-AND seller_id = sellerId
-```
+### Logica de filtros (useMemo no modal)
 
-Mesclar os resultados criando um tipo `EnrichedPromotionItem` que inclui `title`, `thumbnail`, `sku` e `permalink`.
-
-### Novo layout do Dialog
-
-- `Dialog` com `max-w-6xl w-[90vw]` e altura `max-h-[90vh]`
-- Cabecalho compacto: nome, tipo, status, datas e KPIs em linha unica
-- Acoes (Aderir Todos, Planejar Renovacao) logo abaixo do cabecalho
-- Area de itens com `ScrollArea` de `h-[calc(90vh-280px)]` (~650px)
-- Grid de cards responsivo: 1 coluna em telas menores, layout rico
-
-### Estrutura do card de item
-
-Cada card tera:
-- Thumbnail 56x56px com fallback (icone Package)
-- Titulo truncado em 2 linhas
-- SKU (se disponivel) + MLB ID como link
-- Preco original riscado + preco promocional em destaque
-- Badge de desconto percentual
-- Badge de status (Candidato, Participando, Inelegivel)
-- Botao de acao contextual (Aderir/Remover)
-- Para itens inelegiveis: motivo do erro em tooltip
+Aplicar em sequencia sobre `items`:
+1. Busca por texto (titulo, SKU, item_id)
+2. Filtro por status
+3. Filtro por desconto maximo
+4. Ordenacao selecionada
 
 ### Ordem de execucao
 
-1. Atualizar hook `usePromotionItems` para enriquecer com dados visuais
-2. Criar componente `PromotionDetailModal` com Dialog full-screen
-3. Criar componente `PromotionItemCard` com layout rico
-4. Atualizar `Promocoes.tsx` para usar o novo modal em vez do Sheet
-5. Remover imports nao utilizados do Sheet
+1. Migracao SQL: adicionar colunas
+2. Atualizar `promotions-sync` para capturar novos campos + deploy
+3. Atualizar tipos TypeScript (`PromotionItemSnapshot`)
+4. Expandir `useEnrichedPromotionItems` com `listing_type_id`
+5. Refatorar `PromotionDetailModal` com filtros, sort e selecao
+6. Atualizar `PromotionItemCard` com novos dados visuais
+7. Ajustar `Promocoes.tsx` para acoes em massa
 
+### Nota importante sobre `net_proceeds`
+
+O campo `net_proceeds` so aparece na resposta da API quando o item **tem preco final definido** (status `started` ou `candidate` com preco). Para itens `candidate` com `price = 0`, o campo pode nao estar presente. Nesse caso, o card exibira "-" na coluna "Voce recebe".
+
+Apos a implementacao, sera necessario **re-sincronizar** as promocoes para que os novos campos sejam preenchidos no banco.
