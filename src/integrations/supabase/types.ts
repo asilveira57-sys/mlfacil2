@@ -10295,6 +10295,215 @@ export type Database = {
           },
         ]
       }
+      template_assets: {
+        Row: {
+          asset_type: string
+          created_at: string
+          file_url: string
+          id: string
+          meta: Json | null
+          template_id: string
+        }
+        Insert: {
+          asset_type: string
+          created_at?: string
+          file_url: string
+          id?: string
+          meta?: Json | null
+          template_id: string
+        }
+        Update: {
+          asset_type?: string
+          created_at?: string
+          file_url?: string
+          id?: string
+          meta?: Json | null
+          template_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "template_assets_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      template_audit_log: {
+        Row: {
+          action: string
+          actor_user_id: string
+          created_at: string
+          id: string
+          payload: Json | null
+          template_id: string | null
+        }
+        Insert: {
+          action: string
+          actor_user_id: string
+          created_at?: string
+          id?: string
+          payload?: Json | null
+          template_id?: string | null
+        }
+        Update: {
+          action?: string
+          actor_user_id?: string
+          created_at?: string
+          id?: string
+          payload?: Json | null
+          template_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "template_audit_log_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      template_rules: {
+        Row: {
+          category_key: string | null
+          company_id: string | null
+          created_at: string
+          end_day: number | null
+          end_month: number | null
+          id: string
+          is_enabled: boolean
+          priority: number
+          rule_type: string
+          seasonal_key: string | null
+          start_day: number | null
+          start_month: number | null
+          subcategory_key: string | null
+          template_id: string
+          updated_at: string
+        }
+        Insert: {
+          category_key?: string | null
+          company_id?: string | null
+          created_at?: string
+          end_day?: number | null
+          end_month?: number | null
+          id?: string
+          is_enabled?: boolean
+          priority?: number
+          rule_type: string
+          seasonal_key?: string | null
+          start_day?: number | null
+          start_month?: number | null
+          subcategory_key?: string | null
+          template_id: string
+          updated_at?: string
+        }
+        Update: {
+          category_key?: string | null
+          company_id?: string | null
+          created_at?: string
+          end_day?: number | null
+          end_month?: number | null
+          id?: string
+          is_enabled?: boolean
+          priority?: number
+          rule_type?: string
+          seasonal_key?: string | null
+          start_day?: number | null
+          start_month?: number | null
+          subcategory_key?: string | null
+          template_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "template_rules_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      template_variants: {
+        Row: {
+          created_at: string
+          design_tokens: Json
+          id: string
+          preview_image_url: string | null
+          template_id: string
+          updated_at: string
+          variant_key: string
+        }
+        Insert: {
+          created_at?: string
+          design_tokens?: Json
+          id?: string
+          preview_image_url?: string | null
+          template_id: string
+          updated_at?: string
+          variant_key?: string
+        }
+        Update: {
+          created_at?: string
+          design_tokens?: Json
+          id?: string
+          preview_image_url?: string | null
+          template_id?: string
+          updated_at?: string
+          variant_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "template_variants_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      templates: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          is_active: boolean
+          is_system_default: boolean
+          name: string
+          owner_workspace_id: string | null
+          scope: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          is_system_default?: boolean
+          name: string
+          owner_workspace_id?: string | null
+          scope?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          is_system_default?: boolean
+          name?: string
+          owner_workspace_id?: string | null
+          scope?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       trend_alerts: {
         Row: {
           alert_data: Json | null
