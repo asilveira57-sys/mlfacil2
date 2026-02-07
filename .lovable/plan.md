@@ -1,45 +1,23 @@
 
-# Diagnostico e Correções: Módulo de Mensagens Pós-Venda
+# Menus com Suporte a "Abrir em Nova Guia"  
+## Resumo
 
-## Status: Fases 1-4 Implementadas ✅
+Duas melhorias complementares:
+1. **Menu da sidebar passa a usar links reais (`<a href>`)** em vez de `<button onClick>`, habilitando "Abrir em nova guia" via clique direito ou Ctrl+Click
 
----
-
-## O que foi corrigido
-
-### Fase 1 - Configurações DB ✅
-- `ml_integrations` do seller `66043362`: ativado `can_sync_orders`, `can_sync_messages`, `can_sync_questions`
-- Criado `ml_integrations` para seller `1667452966` (MLFACIL_CONSULTORIA) com todas flags ativas
-- Re-enfileirados webhooks `orders_v2` que estavam como "skipped" por `feature_not_enabled`
-
-### Fase 2 - Logging e Limites ✅
-- `qa-messages-polling-sync`: MAX_ORDERS_PER_ACCOUNT aumentado de 20 para 50
-- `qa-messages-polling-sync`: Logging detalhado para respostas non-200 da API de mensagens (antes era silencioso)
-
-### Fase 3 - Automação de Boas Vindas ✅
-- `ml-worker-process`: `processOrderEvent` implementado com lógica completa:
-  - Busca dados do pedido na API do ML
-  - Consulta `post_sale_automation_rules` ativas
-  - Busca template vinculado e interpola variáveis ({{nome_comprador}}, {{produto}}, etc.)
-  - Valida conteúdo contra `post_sale_blocked_patterns`
-  - Se `require_approval = true`: cria rascunho em `post_sale_messages` com status `pendente`
-  - Se `require_approval = false`: envia automaticamente via Action Guide API
-  - Prevenção de duplicatas por order_id + seller_id + trigger_event
-  - Notificações para mensagens pendentes de aprovação
-
-### Fase 4 - Action Guide API ✅
-- `ml-send-message`: Suporte ao endpoint Action Guide adicionado
-  - Novo parâmetro `use_action_guide: true` ativa envio via `/messages/action_guide`
-  - Parâmetro `action_guide_reason` aceita: DELIVERY_PROMISE, REQUEST_VARIANTS, REQUEST_BILLING_INFO, SEND_INVOICE_LINK, OTHER
-  - Validação de razões permitidas
 
 ---
 
-## Fase 5 - Frontend (Implementada ✅)
+## Parte 1: Links Reais no Menu
 
-- Aba "Pendentes" com badge de contagem adicionada à página Mensagens Pós-Venda
-- Componente `PostSalePendingDrafts` permite visualizar, editar, aprovar e descartar rascunhos
-- Hook `usePostSalePendingMessages` com queries e mutations dedicados
-- Aprovação envia via Action Guide API com razão `DELIVERY_PROMISE`
-- Rejeição oculta o rascunho (soft delete via `is_visible = false`)
-- Tab "Pendentes" abre por padrão quando há mensagens pendentes
+### Problema Atual
+Os itens do menu sidebar usam `<button onClick={() => navigate(url)}>`. Isso impede o comportamento nativo do navegador de "Abrir em nova guia" (clique direito ou Ctrl+Click).
+
+### Solucao
+Trocar `<button>` por `<Link to={url}>` do React Router. O componente `Link` renderiza uma tag `<a>` real com `href`, mantendo navegacao SPA no clique normal e permitindo abrir em nova guia.
+
+**Impacto**: Somente `AppSidebar.tsx` precisa ser alterado. Tanto o modo expandido quanto o modo collapsed (com tooltips) serao atualizados.
+
+---
+
+
