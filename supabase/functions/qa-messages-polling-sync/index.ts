@@ -14,7 +14,7 @@ const CRON_JOB_SECRET = Deno.env.get("CRON_JOB_SECRET") || "default-cron-secret"
 const JOB_NAME = "qa-messages-polling";
 const LOCK_TTL_MINUTES = 10;
 const MAX_QUESTIONS_PER_ACCOUNT = 50;
-const MAX_ORDERS_PER_ACCOUNT = 20;
+const MAX_ORDERS_PER_ACCOUNT = 50;
 const DELAY_API_MS = 200;
 const DELAY_ACCOUNT_MS = 500;
 const MAX_EXECUTION_MS = 50000;
@@ -319,7 +319,11 @@ async function syncMessages(
       const msgUrl = `https://api.mercadolibre.com/messages/packs/${packId}/sellers/${sellerId}?tag=post_sale&mark_as_read=false`;
       const msgRes = await fetch(msgUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
 
-      if (!msgRes.ok) continue; // 404 or other errors, skip
+      if (!msgRes.ok) {
+        const errBody = await msgRes.text().catch(() => "");
+        console.log(`[polling] Messages API ${msgRes.status} for pack ${packId} (seller ${sellerId}): ${errBody.substring(0, 200)}`);
+        continue;
+      }
 
       const rawConv = (await msgRes.json()) as Record<string, unknown>;
       const rawMsgs = Array.isArray(rawConv.messages) ? (rawConv.messages as Record<string, unknown>[]) : [];

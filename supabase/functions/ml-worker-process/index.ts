@@ -532,14 +532,340 @@ async function processItemEvent(
 async function processOrderEvent(
   supabase: SupabaseAny,
   event: WebhookEvent,
-  _integration: MlIntegration
+  integration: MlIntegration
 ): Promise<ProcessResult> {
-  // Orders processing - log and mark for manual sync
-  // Full implementation would fetch order details and update meli_orders_cache
-  console.log(`[ml-worker] Order event received: ${event.resource}`);
-  await logEvent(supabase, event.id, "info", "Order event received, triggering background sync");
-  
-  // Mark as success - the nightly/hourly sync will pick up the actual data
+  const resource = event.resource; // e.g., "/orders/12345"
+  const orderIdMatch = resource.match(/\/orders\/(\d+)/);
+
+  if (!orderIdMatch) {
+    console.log(`[ml-worker] Order event received but could not parse order ID from: ${resource}`);
+    await logEvent(supabase, event.id, "info", "Order event received, no order ID extracted");
+    return { success: true };
+  }
+
+  const orderId = orderIdMatch[1];
+  console.log(`[ml-worker] Processing order event for order ${orderId} (seller ${event.ml_user_id})`);
+
+  // Get access token
+  const { data: mlAccount } = await supabase
+    .from("ml_accounts")
+    .select("id, access_token, refresh_token, ml_user_id")
+    .eq("ml_user_id", event.ml_user_id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (!mlAccount?.access_token) {
+    await logEvent(supabase, event.id, "warn", "No active ML account for order processing");
+    return { success: true }; // Don't retry - account issue
+  }
+
+  // Fetch order details from ML API
+  let orderData: Record<string, unknown>;
+  try {
+    const orderResponse = await fetch(`https://api.mercadolibre.com/orders/${orderId}`, {
+      headers: { Authorization: `Bearer ${mlAccount.access_token}` },
+    });
+
+    if (!orderResponse.ok) {
+      if (orderResponse.status === 401) return { success: false, error: "TOKEN_EXPIRED" };
+      if (orderResponse.status === 404) {
+        await logEvent(supabase, event.id, "warn", `Order ${orderId} not found`);
+        return { success: true };
+      }
+      return { success: false, error: `ML_API_${orderResponse.status}` };
+    }
+
+    orderData = await orderResponse.json();
+  } catch (err) {
+    return { success: false, error: `Fetch order failed: ${String(err)}` };
+  }
+
+  // Only process paid orders for welcome messages
+  const orderStatus = orderData.status as string;
+  if (orderStatus !== "paid") {
+    await logEvent(supabase, event.id, "info", `Order ${orderId} status is ${orderStatus}, skipping automation`);
+    return { success: true };
+  }
+
+  // Check for active automation rules for "venda_confirmada"
+  const { data: rules, error: rulesError } = await supabase
+    .from("post_sale_automation_rules")
+    .select("id, template_id, require_approval, wait_for_buyer_response, seller_id")
+    .eq("seller_id", event.ml_user_id)
+    .eq("is_active", true);
+
+  if (rulesError) {
+    console.error(`[ml-worker] Error fetching automation rules:`, rulesError.message);
+    return { success: true }; // Don't block on rule fetch failure
+  }
+
+  if (!rules || rules.length === 0) {
+    await logEvent(supabase, event.id, "info", `No active automation rules for seller ${event.ml_user_id}`);
+    return { success: true };
+  }
+
+  console.log(`[ml-worker] Found ${rules.length} automation rule(s) for seller ${event.ml_user_id}`);
+
+  // Check if we already processed this order (prevent duplicates)
+  const { data: existingMessage } = await supabase
+    .from("post_sale_messages")
+    .select("id")
+    .eq("order_id", orderId)
+    .eq("seller_id", event.ml_user_id)
+    .eq("trigger_event", "venda_confirmada")
+    .maybeSingle();
+
+  if (existingMessage) {
+    await logEvent(supabase, event.id, "info", `Order ${orderId} already has a welcome message, skipping`);
+    return { success: true };
+  }
+
+  // Process each rule
+  for (const rule of rules as { id: string; template_id: string; require_approval: boolean; wait_for_buyer_response: boolean; seller_id: string }[]) {
+    // Fetch the template
+    const { data: template, error: templateError } = await supabase
+      .from("post_sale_templates")
+      .select("id, name, trigger_event, content, message_type, is_active")
+      .eq("id", rule.template_id)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (templateError || !template) {
+      console.log(`[ml-worker] Template ${rule.template_id} not found or inactive`);
+      continue;
+    }
+
+    // Only process templates for "venda_confirmada"
+    if (template.trigger_event !== "venda_confirmada") {
+      continue;
+    }
+
+    // Interpolate variables in template content
+    const buyer = orderData.buyer as Record<string, unknown> | undefined;
+    const buyerFirstName = (buyer?.first_name as string) || (buyer?.nickname as string) || "Comprador";
+    const buyerName = [buyer?.first_name, buyer?.last_name].filter(Boolean).join(" ") || (buyer?.nickname as string) || "Comprador";
+    const orderItems = orderData.order_items as Array<{ item: { id: string; title: string } }> | undefined;
+    const itemTitle = orderItems?.[0]?.item?.title || "seu produto";
+
+    let messageContent = template.content
+      .replace(/\{\{nome_comprador\}\}/gi, buyerName)
+      .replace(/\{\{primeiro_nome\}\}/gi, buyerFirstName)
+      .replace(/\{\{produto\}\}/gi, itemTitle)
+      .replace(/\{\{numero_pedido\}\}/gi, orderId);
+
+    // Validate content against blocked patterns
+    const { data: patterns } = await supabase
+      .from("post_sale_blocked_patterns")
+      .select("pattern, pattern_type, category, description")
+      .eq("is_active", true);
+
+    let isBlocked = false;
+    let blockReason = "";
+    const blockDetails: { category: string; match: string }[] = [];
+
+    for (const pattern of (patterns || []) as { pattern: string; pattern_type: string; category: string; description?: string }[]) {
+      try {
+        let matches = false;
+        if (pattern.pattern_type === "regex") {
+          matches = new RegExp(pattern.pattern, "gi").test(messageContent);
+        } else if (pattern.pattern_type === "contains") {
+          matches = messageContent.toLowerCase().includes(pattern.pattern.toLowerCase());
+        }
+        if (matches) {
+          isBlocked = true;
+          blockReason = pattern.description || `Conteúdo bloqueado: ${pattern.category}`;
+          blockDetails.push({ category: pattern.category, match: pattern.pattern });
+        }
+      } catch { /* invalid pattern */ }
+    }
+
+    // Truncate to ML character limit
+    if (messageContent.length > 350) {
+      messageContent = messageContent.substring(0, 347) + "...";
+    }
+
+    // Determine pack_id and buyer_id
+    const packId = orderData.pack_id ? String(orderData.pack_id) : orderId;
+    const buyerId = buyer?.id ? String(buyer.id) : null;
+
+    if (isBlocked) {
+      // Save as blocked draft
+      await supabase.from("post_sale_messages").insert({
+        user_id: integration.user_id,
+        seller_id: event.ml_user_id,
+        order_id: orderId,
+        pack_id: orderData.pack_id ? String(orderData.pack_id) : null,
+        buyer_id: buyerId,
+        buyer_name: buyerName,
+        listing_id: orderItems?.[0]?.item?.id || null,
+        listing_title: itemTitle,
+        template_id: template.id,
+        trigger_event: "venda_confirmada",
+        message_type: template.message_type,
+        content_sent: messageContent,
+        status: "bloqueada",
+        block_reason: blockReason,
+        block_details: blockDetails,
+      } as never);
+
+      console.log(`[ml-worker] Welcome message BLOCKED for order ${orderId}: ${blockReason}`);
+      await logEvent(supabase, event.id, "warn", `Welcome message blocked: ${blockReason}`);
+      continue;
+    }
+
+    if (rule.require_approval) {
+      // Save as pending draft for manual approval
+      await supabase.from("post_sale_messages").insert({
+        user_id: integration.user_id,
+        seller_id: event.ml_user_id,
+        order_id: orderId,
+        pack_id: orderData.pack_id ? String(orderData.pack_id) : null,
+        buyer_id: buyerId,
+        buyer_name: buyerName,
+        listing_id: orderItems?.[0]?.item?.id || null,
+        listing_title: itemTitle,
+        template_id: template.id,
+        trigger_event: "venda_confirmada",
+        message_type: template.message_type,
+        content_sent: messageContent,
+        status: "pendente",
+      } as never);
+
+      console.log(`[ml-worker] Welcome message saved as PENDING for order ${orderId} (requires approval)`);
+      await logEvent(supabase, event.id, "info", `Welcome message queued for approval (order ${orderId})`);
+
+      // Create notification about pending approval
+      const accountInfo = await getCompanyNameForAccount(supabase, event.ml_user_id);
+      if (accountInfo) {
+        const { count } = await supabase
+          .from("post_sale_messages")
+          .select("id", { count: "exact", head: true })
+          .eq("seller_id", event.ml_user_id)
+          .eq("status", "pendente");
+
+        const today = new Date().toISOString().split("T")[0];
+        const groupKey = `post_sale_pending_${event.ml_user_id}_${today}`;
+
+        const { data: existing } = await supabase
+          .from("app_notifications")
+          .select("id")
+          .eq("group_key", groupKey)
+          .eq("is_dismissed", false)
+          .maybeSingle();
+
+        const notifTitle = `Mensagem de boas-vindas pendente na ${accountInfo.companyName}`;
+        const notifBody = `${count || 1} mensagem(ns) aguardando aprovação`;
+
+        if (existing) {
+          await supabase.from("app_notifications").update({ body: notifBody, title: notifTitle }).eq("id", existing.id);
+        } else {
+          await supabase.from("app_notifications").insert({
+            user_id: accountInfo.userId,
+            seller_id: event.ml_user_id,
+            title: notifTitle,
+            body: notifBody,
+            category: "post_sale_blocked",
+            priority: "normal",
+            action_url: "/mensagens-pos-venda",
+            group_key: groupKey,
+            origin_module: "post_sale",
+          });
+        }
+      }
+    } else {
+      // Auto-send via Action Guide API
+      console.log(`[ml-worker] Auto-sending welcome message for order ${orderId} via Action Guide`);
+
+      try {
+        // First, ensure conversation exists in our DB
+        await supabase.from("post_sale_conversations").upsert({
+          user_id: integration.user_id,
+          seller_id: event.ml_user_id,
+          order_id: orderId,
+          pack_id: orderData.pack_id ? String(orderData.pack_id) : null,
+          buyer_id: buyerId,
+          buyer_name: buyerName,
+          item_title: itemTitle,
+          conversation_status: "active",
+          unread_count: 0,
+          updated_at: new Date().toISOString(),
+        } as never, { onConflict: "seller_id,order_id" });
+
+        // Send via Action Guide API directly
+        const actionGuideUrl = `https://api.mercadolibre.com/messages/action_guide/packs/${packId}/sellers/${event.ml_user_id}`;
+        const actionGuidePayload = {
+          from: { user_id: parseInt(event.ml_user_id, 10) },
+          to: { user_id: buyerId ? parseInt(buyerId, 10) : 0 },
+          text: messageContent,
+          reason: "DELIVERY_PROMISE",
+        };
+
+        const sendResponse = await fetch(actionGuideUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${mlAccount.access_token}`,
+          },
+          body: JSON.stringify(actionGuidePayload),
+        });
+
+        const sendResponseText = await sendResponse.text();
+
+        if (sendResponse.ok) {
+          const sendData = JSON.parse(sendResponseText);
+          
+          // Save as sent
+          await supabase.from("post_sale_messages").insert({
+            user_id: integration.user_id,
+            seller_id: event.ml_user_id,
+            order_id: orderId,
+            pack_id: orderData.pack_id ? String(orderData.pack_id) : null,
+            buyer_id: buyerId,
+            buyer_name: buyerName,
+            listing_id: orderItems?.[0]?.item?.id || null,
+            listing_title: itemTitle,
+            template_id: template.id,
+            trigger_event: "venda_confirmada",
+            message_type: template.message_type,
+            content_sent: messageContent,
+            status: "enviada",
+            ml_message_id: sendData.id || null,
+            sent_at: new Date().toISOString(),
+          } as never);
+
+          console.log(`[ml-worker] Welcome message SENT for order ${orderId}, ML message ID: ${sendData.id}`);
+          await logEvent(supabase, event.id, "info", `Welcome message sent for order ${orderId}`);
+        } else {
+          console.error(`[ml-worker] Action Guide API failed ${sendResponse.status}: ${sendResponseText.substring(0, 300)}`);
+          
+          // Save as pending for manual review
+          await supabase.from("post_sale_messages").insert({
+            user_id: integration.user_id,
+            seller_id: event.ml_user_id,
+            order_id: orderId,
+            pack_id: orderData.pack_id ? String(orderData.pack_id) : null,
+            buyer_id: buyerId,
+            buyer_name: buyerName,
+            listing_id: orderItems?.[0]?.item?.id || null,
+            listing_title: itemTitle,
+            template_id: template.id,
+            trigger_event: "venda_confirmada",
+            message_type: template.message_type,
+            content_sent: messageContent,
+            status: "pendente",
+            block_reason: `Erro API ML: ${sendResponse.status}`,
+            block_details: { api_status: sendResponse.status, response: sendResponseText.substring(0, 500) },
+          } as never);
+
+          await logEvent(supabase, event.id, "warn", `Action Guide failed for order ${orderId}: ${sendResponse.status}`);
+        }
+      } catch (sendErr) {
+        console.error(`[ml-worker] Error sending welcome message:`, sendErr);
+        await logEvent(supabase, event.id, "error", `Send error for order ${orderId}: ${String(sendErr)}`);
+      }
+    }
+  }
+
   return { success: true };
 }
 

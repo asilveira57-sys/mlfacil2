@@ -11,6 +11,8 @@ interface SendMessageRequest {
   seller_id?: string;
   account_id?: string; // UUID of ml_accounts - preferred
   text: string;
+  use_action_guide?: boolean; // Use Action Guide API for first contact
+  action_guide_reason?: string; // Reason for Action Guide: DELIVERY_PROMISE, REQUEST_VARIANTS, REQUEST_BILLING_INFO, SEND_INVOICE_LINK, OTHER
 }
 
 interface BlockedPattern {
@@ -149,7 +151,7 @@ serve(async (req) => {
 
     log(`User authenticated: ${user.id}`);
 
-    const { conversation_id, seller_id, account_id, text }: SendMessageRequest = await req.json();
+    const { conversation_id, seller_id, account_id, text, use_action_guide, action_guide_reason }: SendMessageRequest = await req.json();
 
     if (!conversation_id || !text) {
       return new Response(
@@ -334,15 +336,34 @@ serve(async (req) => {
     // Use pack_id if available, otherwise use order_id
     const packId = conversation.pack_id || conversation.order_id;
     
-    // Send message to ML API
-    const mlUrl = `https://api.mercadolibre.com/messages/packs/${packId}/sellers/${actualSellerId}?tag=post_sale`;
-    log(`Sending message to ML: ${mlUrl}`);
+    // Action Guide params from already-parsed request body
+    const useActionGuide = use_action_guide === true;
+    const validReasons = ["DELIVERY_PROMISE", "REQUEST_VARIANTS", "REQUEST_BILLING_INFO", "SEND_INVOICE_LINK", "OTHER"];
+    const resolvedReason = validReasons.includes(action_guide_reason || "") ? action_guide_reason! : "OTHER";
 
-    const mlPayload = {
-      from: { user_id: parseInt(actualSellerId, 10) },
-      to: { user_id: parseInt(conversation.buyer_id, 10) },
-      text: text,
-    };
+    let mlUrl: string;
+    let mlPayload: Record<string, unknown>;
+
+    if (useActionGuide) {
+      // Action Guide API - for first contact (welcome messages)
+      mlUrl = `https://api.mercadolibre.com/messages/action_guide/packs/${packId}/sellers/${actualSellerId}`;
+      mlPayload = {
+        from: { user_id: parseInt(actualSellerId, 10) },
+        to: { user_id: parseInt(conversation.buyer_id, 10) },
+        text: text,
+        reason: resolvedReason,
+      };
+      log(`Sending Action Guide message to ML: ${mlUrl} (reason: ${resolvedReason})`);
+    } else {
+      // Standard message API - for ongoing conversations
+      mlUrl = `https://api.mercadolibre.com/messages/packs/${packId}/sellers/${actualSellerId}?tag=post_sale`;
+      mlPayload = {
+        from: { user_id: parseInt(actualSellerId, 10) },
+        to: { user_id: parseInt(conversation.buyer_id, 10) },
+        text: text,
+      };
+      log(`Sending standard message to ML: ${mlUrl}`);
+    }
 
     const mlResponse = await fetch(mlUrl, {
       method: "POST",
