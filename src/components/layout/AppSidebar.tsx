@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   LayoutDashboard,
@@ -201,12 +201,12 @@ export function AppSidebar() {
                             isActive(item.url) && "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
                           )}
                         >
-                          <button
-                            onClick={() => navigate(item.url)}
+                          <Link
+                            to={item.url}
                             className="flex items-center gap-3 w-full"
                           >
                             <item.icon className="h-4 w-4 shrink-0" />
-                          </button>
+                          </Link>
                         </SidebarMenuButton>
                       </TooltipTrigger>
                       <TooltipContent side="right" className="flex items-center gap-2">
@@ -263,8 +263,8 @@ export function AppSidebar() {
                           isActive(item.url) && "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
                         )}
                       >
-                        <button
-                          onClick={() => navigate(item.url)}
+                        <Link
+                          to={item.url}
                           className="flex items-center gap-3 w-full"
                         >
                           <item.icon className="h-4 w-4 shrink-0" />
@@ -277,7 +277,7 @@ export function AppSidebar() {
                           {moduleTags.length > 0 && (
                             <ModuleTagsDisplay tags={moduleTags} size="sm" maxDisplay={1} />
                           )}
-                        </button>
+                        </Link>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );
