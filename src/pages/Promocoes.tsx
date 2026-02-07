@@ -7,7 +7,6 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -27,20 +26,17 @@ import {
   Package,
   Loader2,
   Info,
-  Percent,
   CalendarClock,
-  ClipboardPlus,
   Store,
   History,
   WifiOff,
   Link2,
   Search,
-  PlayCircle,
-  Trash2,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
-import { usePromotions, usePromotionItems, PromotionSnapshot, PromotionItemSnapshot } from '@/hooks/usePromotions';
+import { usePromotions, PromotionSnapshot } from '@/hooks/usePromotions';
+import { useEnrichedPromotionItems, EnrichedPromotionItem } from '@/hooks/useEnrichedPromotionItems';
 import { usePromotionTasks } from '@/hooks/usePromotionTasks';
 import { usePromotionSyncLogs } from '@/hooks/usePromotionSyncLogs';
 import { invokeEdgeFunction, getUserFriendlyError } from '@/lib/edgeFunctionClient';
@@ -55,13 +51,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet';
 import {
   Tooltip,
   TooltipContent,
@@ -78,7 +67,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { PromotionDetailModal } from '@/components/promotions/PromotionDetailModal';
 
 export default function Promocoes() {
   const navigate = useNavigate();
@@ -139,7 +128,7 @@ export default function Promocoes() {
     pendingItems,
     ineligibleItems,
     startedItems,
-  } = usePromotionItems(workspaceId, selectedPromotion?.promotion_id, sellerId);
+  } = useEnrichedPromotionItems(workspaceId, selectedPromotion?.promotion_id, sellerId);
 
   // Sync logs
   const { lastSync, refetch: refetchLogs } = usePromotionSyncLogs(workspaceId, sellerId);
@@ -527,231 +516,37 @@ export default function Promocoes() {
           </CardContent>
         </Card>
 
-        {/* Promotion Detail Drawer */}
-        <Sheet open={!!selectedPromotion} onOpenChange={() => setSelectedPromotion(null)}>
-          <SheetContent className="sm:max-w-xl">
-            <SheetHeader>
-              <SheetTitle className="flex items-center gap-2">
-                <Tag className="h-5 w-5" />
-                {selectedPromotion?.promotion_name || `Promoção ${selectedPromotion?.promotion_id}`}
-              </SheetTitle>
-              <SheetDescription>
-                Tipo: {selectedPromotion?.promotion_type} | Status: {selectedPromotion?.status}
-              </SheetDescription>
-            </SheetHeader>
-
-            <div className="mt-6 space-y-6">
-              {/* Promotion Info */}
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span className="text-muted-foreground block">Início</span>
-                  <span className="font-medium">
-                    {selectedPromotion?.start_at 
-                      ? format(new Date(selectedPromotion.start_at), 'dd/MM/yyyy HH:mm', { locale: ptBR })
-                      : '-'}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground block">Término</span>
-                  <span className="font-medium">
-                    {selectedPromotion?.end_at 
-                      ? format(new Date(selectedPromotion.end_at), 'dd/MM/yyyy HH:mm', { locale: ptBR })
-                      : '-'}
-                  </span>
-                </div>
-              </div>
-
-              {/* Items Summary */}
-              <div className="grid grid-cols-3 gap-3">
-                <div className="p-3 rounded-lg bg-success/10 text-center">
-                  <span className="text-2xl font-bold text-success">{startedItems.length}</span>
-                  <span className="block text-xs text-muted-foreground">Participando</span>
-                </div>
-                <div className="p-3 rounded-lg bg-warning/10 text-center">
-                  <span className="text-2xl font-bold text-warning">{pendingItems.length}</span>
-                  <span className="block text-xs text-muted-foreground">Candidatos</span>
-                </div>
-                <div className="p-3 rounded-lg bg-destructive/10 text-center">
-                  <span className="text-2xl font-bold text-destructive">{ineligibleItems.length}</span>
-                  <span className="block text-xs text-muted-foreground">Inelegíveis</span>
-                </div>
-              </div>
-
-              {/* Actions Section - FIX #7 */}
-              <div className="space-y-3">
-                <Separator />
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Ações</span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {/* Adhere all candidates */}
-                  {pendingItems.length > 0 && selectedPromotion?.status === 'started' && (
-                    <Button 
-                      size="sm" 
-                      className="gap-1.5"
-                      onClick={() => setConfirmAction({
-                        action: 'adhere',
-                        items: pendingItems.map(i => ({ 
-                          item_id: i.item_id, 
-                          price: i.promo_price || i.original_price || undefined 
-                        })),
-                        label: `Aderir ${pendingItems.length} itens candidatos à promoção`,
-                      })}
-                      disabled={actionLoading}
-                    >
-                      {actionLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlayCircle className="h-3.5 w-3.5" />}
-                      Aderir {pendingItems.length} Candidatos
-                    </Button>
-                  )}
-                  
-                  {/* Task creation buttons */}
-                  {ineligibleItems.length > 0 && (
-                    <Button 
-                      size="sm" 
-                      variant="outline" 
-                      className="gap-1.5 text-destructive border-destructive/30"
-                      onClick={() => handleCreateTask('ineligible')}
-                      disabled={creating}
-                    >
-                      <ClipboardPlus className="h-3.5 w-3.5" />
-                      Corrigir Inelegíveis
-                    </Button>
-                  )}
-                  {selectedPromotion?.status === 'started' && (
-                    <Button 
-                      size="sm" 
-                      variant="outline" 
-                      className="gap-1.5"
-                      onClick={() => handleCreateTask('expiring')}
-                      disabled={creating}
-                    >
-                      <ClipboardPlus className="h-3.5 w-3.5" />
-                      Planejar Renovação
-                    </Button>
-                  )}
-                  {selectedPromotion?.status === 'finished' && (
-                    <Button 
-                      size="sm" 
-                      variant="outline" 
-                      className="gap-1.5"
-                      onClick={() => handleCreateTask('review')}
-                      disabled={creating}
-                    >
-                      <ClipboardPlus className="h-3.5 w-3.5" />
-                      Revisar Resultados
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              <Separator />
-
-              {/* Items Table - show ALL items with scroll */}
-              <div>
-                <h4 className="font-medium mb-3">Itens da Promoção ({selectedItems.length})</h4>
-                {itemsLoading ? (
-                  <Skeleton className="h-32" />
-                ) : selectedItems.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p>Nenhum item encontrado</p>
-                  </div>
-                ) : (
-                  <ScrollArea className="h-[400px]">
-                    <div className="border rounded-lg overflow-hidden">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Item ID</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead className="text-right">Preço</TableHead>
-                            <TableHead className="text-right">Desconto</TableHead>
-                            <TableHead className="text-right">Ação</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {selectedItems.map(item => (
-                            <TableRow key={item.id}>
-                              <TableCell>
-                                <a 
-                                  href={`https://www.mercadolivre.com.br/p/${item.item_id}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="font-mono text-xs text-primary hover:underline"
-                                >
-                                  {item.item_id}
-                                </a>
-                              </TableCell>
-                              <TableCell>
-                                <ItemStatusBadge status={item.item_status} />
-                              </TableCell>
-                              <TableCell className="text-right">
-                                {item.promo_price ? (
-                                  <div>
-                                    <span className="line-through text-muted-foreground text-xs">
-                                      R$ {item.original_price?.toFixed(2)}
-                                    </span>
-                                    <span className="block font-medium text-success">
-                                      R$ {item.promo_price.toFixed(2)}
-                                    </span>
-                                  </div>
-                                ) : (
-                                  <span>R$ {item.original_price?.toFixed(2) || '-'}</span>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                {item.discount_percent ? (
-                                  <Badge variant="outline" className="gap-1">
-                                    <Percent className="h-3 w-3" />
-                                    {item.discount_percent}%
-                                  </Badge>
-                                ) : '-'}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                {item.item_status === 'candidate' && selectedPromotion?.status === 'started' && (
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="h-7 gap-1 text-xs"
-                                    onClick={() => setConfirmAction({
-                                      action: 'adhere',
-                                      items: [{ item_id: item.item_id, price: item.promo_price || item.original_price || undefined }],
-                                      label: `Aderir item ${item.item_id} à promoção`,
-                                    })}
-                                    disabled={actionLoading}
-                                  >
-                                    <PlayCircle className="h-3 w-3" />
-                                    Aderir
-                                  </Button>
-                                )}
-                                {item.item_status === 'started' && (
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="h-7 gap-1 text-xs text-destructive"
-                                    onClick={() => setConfirmAction({
-                                      action: 'remove',
-                                      items: [{ item_id: item.item_id }],
-                                      label: `Remover item ${item.item_id} da promoção`,
-                                    })}
-                                    disabled={actionLoading}
-                                  >
-                                    <Trash2 className="h-3 w-3" />
-                                    Remover
-                                  </Button>
-                                )}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </ScrollArea>
-                )}
-              </div>
-            </div>
-          </SheetContent>
-        </Sheet>
+        {/* Promotion Detail Modal */}
+        <PromotionDetailModal
+          promotion={selectedPromotion}
+          onClose={() => setSelectedPromotion(null)}
+          items={selectedItems}
+          itemsLoading={itemsLoading}
+          pendingItems={pendingItems}
+          ineligibleItems={ineligibleItems}
+          startedItems={startedItems}
+          actionLoading={actionLoading}
+          creating={creating}
+          onAdhere={(item: EnrichedPromotionItem) => setConfirmAction({
+            action: 'adhere',
+            items: [{ item_id: item.item_id, price: item.promo_price || item.original_price || undefined }],
+            label: `Aderir item ${item.title || item.item_id} à promoção`,
+          })}
+          onRemove={(item: EnrichedPromotionItem) => setConfirmAction({
+            action: 'remove',
+            items: [{ item_id: item.item_id }],
+            label: `Remover item ${item.title || item.item_id} da promoção`,
+          })}
+          onAdhereAll={() => setConfirmAction({
+            action: 'adhere',
+            items: pendingItems.map(i => ({
+              item_id: i.item_id,
+              price: i.promo_price || i.original_price || undefined,
+            })),
+            label: `Aderir ${pendingItems.length} itens candidatos à promoção`,
+          })}
+          onCreateTask={handleCreateTask}
+        />
 
         {/* Confirmation Dialog */}
         <AlertDialog open={!!confirmAction} onOpenChange={() => setConfirmAction(null)}>
@@ -911,16 +706,3 @@ function PromotionStatusBadge({ status }: { status: string }) {
   );
 }
 
-function ItemStatusBadge({ status }: { status: string }) {
-  const config: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
-    started: { label: 'Participando', variant: 'default' },
-    candidate: { label: 'Candidato', variant: 'secondary' },
-    pending: { label: 'Pendente', variant: 'secondary' },
-    ineligible: { label: 'Inelegível', variant: 'destructive' },
-    finished: { label: 'Finalizado', variant: 'outline' },
-  };
-
-  const { label, variant } = config[status] || { label: status, variant: 'outline' };
-
-  return <Badge variant={variant}>{label}</Badge>;
-}
