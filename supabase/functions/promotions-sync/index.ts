@@ -286,13 +286,23 @@ Deno.serve(async (req) => {
 
       if (itemsData) {
         const rawItems = itemsData.results || [];
-        promo.items = rawItems.map((i) => ({
-          item_id: (i.item_id as string) || (i.id as string),
-          status: i.status as string,
-          original_price: i.original_price as number,
-          deal_price: i.deal_price as number,
-          error: (i.error_message as string) || (i.error as string),
-        }));
+        promo.items = rawItems.map((i) => {
+          const netProceeds = i.net_proceeds as Record<string, unknown> | undefined;
+          return {
+            item_id: (i.item_id as string) || (i.id as string),
+            status: i.status as string,
+            original_price: i.original_price as number,
+            deal_price: i.deal_price as number,
+            effective_price: (i.price as number) || null,
+            net_proceeds_amount: netProceeds?.amount as number || null,
+            net_proceeds_currency: netProceeds?.currency_id as string || null,
+            suggested_price: (i.suggested_discounted_price as number) || null,
+            max_discounted_price: (i.max_discounted_price as number) || null,
+            min_discounted_price: (i.min_discounted_price as number) || null,
+            error: (i.error_message as string) || (i.error as string),
+            raw: i,
+          };
+        });
       }
     }
 
@@ -351,12 +361,17 @@ Deno.serve(async (req) => {
       for (const item of promo.items || []) {
         const previousStatus = existingItemStatuses.get(item.item_id);
 
-        // FIX #1: Calculate discount_percent
-        const discountPercent = (item.original_price && item.deal_price && item.original_price > 0)
-          ? Math.round((1 - item.deal_price / item.original_price) * 100)
-          : null;
+        // Calculate discount_percent with fallbacks
+        let discountPercent: number | null = null;
+        if (item.original_price && item.original_price > 0) {
+          if (item.deal_price) {
+            discountPercent = Math.round((1 - item.deal_price / item.original_price) * 100);
+          } else if (item.effective_price && item.effective_price !== item.original_price) {
+            discountPercent = Math.round((1 - item.effective_price / item.original_price) * 100);
+          }
+        }
 
-        // Upsert item snapshot
+        // Upsert item snapshot with enriched data
         const { error: itemError } = await supabase
           .from('promotion_items_snapshots')
           .upsert({
@@ -368,8 +383,15 @@ Deno.serve(async (req) => {
             item_status: item.status,
             original_price: item.original_price,
             promo_price: item.deal_price,
-            discount_percent: discountPercent, // FIX #1: Populate discount_percent
+            effective_price: item.effective_price,
+            net_proceeds_amount: item.net_proceeds_amount,
+            net_proceeds_currency: item.net_proceeds_currency,
+            suggested_price: item.suggested_price,
+            max_discounted_price: item.max_discounted_price,
+            min_discounted_price: item.min_discounted_price,
+            discount_percent: discountPercent,
             error_reason: item.error,
+            raw_item_data: item.raw || null,
             updated_at: new Date().toISOString(),
           }, {
             onConflict: 'workspace_id,promotion_id,item_id',

@@ -529,7 +529,7 @@ export default function Promocoes() {
           creating={creating}
           onAdhere={(item: EnrichedPromotionItem) => setConfirmAction({
             action: 'adhere',
-            items: [{ item_id: item.item_id, price: item.promo_price || item.original_price || undefined }],
+            items: [{ item_id: item.item_id, price: item.finalPrice || item.original_price || undefined }],
             label: `Aderir item ${item.title || item.item_id} à promoção`,
           })}
           onRemove={(item: EnrichedPromotionItem) => setConfirmAction({
@@ -541,9 +541,22 @@ export default function Promocoes() {
             action: 'adhere',
             items: pendingItems.map(i => ({
               item_id: i.item_id,
-              price: i.promo_price || i.original_price || undefined,
+              price: i.finalPrice || i.original_price || undefined,
             })),
             label: `Aderir ${pendingItems.length} itens candidatos à promoção`,
+          })}
+          onAdhereSelected={(selected: EnrichedPromotionItem[]) => setConfirmAction({
+            action: 'adhere',
+            items: selected.map(i => ({
+              item_id: i.item_id,
+              price: i.finalPrice || i.original_price || undefined,
+            })),
+            label: `Aderir ${selected.length} itens selecionados à promoção`,
+          })}
+          onRemoveSelected={(selected: EnrichedPromotionItem[]) => setConfirmAction({
+            action: 'remove',
+            items: selected.map(i => ({ item_id: i.item_id })),
+            label: `Remover ${selected.length} itens selecionados da promoção`,
           })}
           onCreateTask={handleCreateTask}
         />
