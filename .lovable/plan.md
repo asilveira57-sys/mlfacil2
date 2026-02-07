@@ -1,77 +1,51 @@
 
 
-# Analise e Correcao do Modulo Pos-Venda
+# Melhoria do Modulo de Promocoes - Tela de Detalhes Rica
 
-## Diagnostico Completo
+## Problema Atual
 
-### Problema 1: Mensagens criadas para pedidos ja enviados/entregues
+Conforme identificado no screenshot:
 
-O `processOrderEvent` no worker verifica apenas `orderData.status === "paid"`, mas **nao verifica o status de envio (shipping)**. No Mercado Livre, pedidos ja enviados ou entregues mantêm `status: "paid"` -- o que muda eh o `shipping.status`. Resultado: ao re-enfileirar 7 dias de eventos, o sistema criou rascunhos para pedidos onde o produto ja esta a caminho ou foi entregue.
+1. O detalhe da promocao abre em um **Sheet lateral estreito** (`sm:max-w-xl` = ~576px), cabendo apenas 2 itens por vez
+2. Os itens mostram apenas o **MLB ID** (ex: `MLB5212738374`) sem informacao do produto
+3. A barra de rolagem eh muito curta e "pula" ao ser manipulada (area de scroll de apenas ~400px)
+4. Nao ha thumbnail, titulo, SKU -- informacoes essenciais para identificar o produto
+5. A experiencia eh inferior ao proprio Mercado Livre
 
-**Evidencia**: 40 mensagens pendentes criadas em lote, incluindo pedidos antigos como `2000014808119220` e `2000014861128514`.
+## Solucao Proposta
 
-### Problema 2: "Conversa nao encontrada" ao tentar aprovar
+### 1. Substituir Sheet por Dialog em tela cheia
 
-O hook `useApprovePendingMessage` busca uma conversa existente em `post_sale_conversations` para enviar via `ml-send-message`. Porem, so existe **1 conversa** na tabela (e esta com status "blocked"). A maioria dos pedidos nunca teve troca de mensagens, entao nao tem registro de conversa. O fluxo de aprovacao falha imediatamente.
+Trocar o componente `Sheet` (painel lateral) por um `Dialog` (modal centralizado) ocupando **90% da tela** (`max-w-6xl`, ~1152px de largura). Isso permite mostrar 8-10 itens visiveis simultaneamente sem scroll excessivo.
 
-### Problema 3: Restricoes da API Action Guide do Mercado Livre
+### 2. Enriquecer itens com dados do produto
 
-A documentacao oficial confirma restricoes severas:
+Ao abrir o detalhe de uma promocao, fazer um JOIN local com `meli_listings_cache` para trazer:
+- **Thumbnail** (imagem do produto)
+- **Titulo** do anuncio
+- **SKU** (quando disponivel)
+- **Permalink** (link do anuncio)
 
-- **`blocked_by_conversation_started_by_seller`**: apos usar Action Guide, o vendedor **deve aguardar a resposta do comprador** antes de poder enviar novamente
-- **`blocked_by_conversation_use_message_api`**: se o comprador ja iniciou a conversa, Action Guide nao funciona
-- **Caps de uso**: ha limite de quantas vezes cada "reason" pode ser usada (ex: "OTHER" tem cap)
-- **403 - limit_exceeded**: "You are not allowed to execute the option OTHER again"
-- **403 - forbidden**: "This package has the conversation blocked"
+Isso sera feito no hook `usePromotionItems`, adicionando uma segunda query que busca os dados visuais dos itens.
 
-O Mercado Livre ja notifica automaticamente o comprador sobre aprovacao, envio e entrega. O envio proativo de mensagens eh **intencionalmente restrito** pela plataforma.
+### 3. Layout visual dos itens (cards em grid)
 
-### Conclusao
+Substituir a tabela simples por um **grid de cards** com layout:
 
-**Sim, eh bloqueio do Mercado Livre.** A API Action Guide existe mas tem restricoes tao severas que torna o envio automatico de boas-vindas pouco viavel na pratica. O modulo deveria focar em **responder mensagens do comprador** (fluxo reativo), similar ao modulo de Perguntas.
+```text
++------------------------------------------+
+| [IMG] Titulo do Produto                  |
+|        SKU: ABC123 | MLB1234567890       |
+|        R$ 120,00 --> R$ 89,90  (-25%)    |
+|        Status: Candidato    [Aderir]     |
++------------------------------------------+
+```
 
----
+Cada card tera ~80px de altura, permitindo 8-10 itens visiveis na area de scroll (que tera ~650px de altura).
 
-## Plano de Correcao
+### 4. Cabecalho do modal otimizado
 
-### Fase 1: Limpar mensagens pendentes invalidas
-
-- Executar SQL para marcar como `is_visible = false` todas as 40 mensagens pendentes atuais (foram criadas incorretamente para pedidos ja enviados)
-- Desativar temporariamente a regra de automacao (`post_sale_automation_rules.is_active = false`) ate o modulo estar corrigido
-
-### Fase 2: Corrigir filtro de shipping no worker
-
-No `processOrderEvent` em `ml-worker-process/index.ts`:
-- Apos buscar dados do pedido na API ML, verificar `orderData.shipping.status`
-- Apenas criar rascunho se `shipping.status` for `null`, `pending` ou `to_be_agreed` (pedido sem envio ainda)
-- Rejeitar automaticamente pedidos com shipping `shipped`, `delivered`, `ready_to_ship`, etc.
-- Adicionar log claro: "Order has shipping status X, skipping welcome message"
-
-### Fase 3: Corrigir fluxo de aprovacao (eliminar dependencia de conversa)
-
-No `useApprovePendingMessage`:
-- Em vez de buscar conversa existente, **criar a conversa automaticamente** antes de enviar (upsert), ou
-- Chamar `ml-send-message` diretamente passando `pack_id` e `seller_id` do rascunho, sem exigir conversa pre-existente
-
-No `ml-send-message`:
-- Aceitar `pack_id` como alternativa a `conversation_id` para o caso de primeiro contato via Action Guide
-- Se nao encontrar conversa, criar uma automaticamente (ja que eh primeiro contato)
-
-### Fase 4: Adicionar avisos claros sobre limitacoes
-
-Na UI `PostSalePendingDrafts`:
-- Adicionar banner informativo explicando as restricoes do ML
-- Mostrar status do shipping junto ao rascunho (ex: "Pedido ja enviado -- nao recomendado")
-- Adicionar botao "Descartar Todos" para limpar rascunhos invalidos em lote
-
-### Fase 5: Preparar para modo "somente resposta"
-
-Caso o bloqueio persista apos as correcoes:
-- Manter o modulo de conversas existente (`PostSaleConversationsTab`, `PostSaleInbox`, `PostSaleConversation`, `PostSaleReplyEditor`) como funcionalidade principal
-- Mover a aba "Pendentes" para funcionar apenas como fila de respostas sugeridas (quando o comprador enviar mensagem)
-- Desativar o gatilho `venda_confirmada` no worker e focar em gatilhos reativos (quando comprador envia mensagem)
-
----
+Reorganizar o cabecalho com informacoes da promocao em layout horizontal compacto, liberando espaco vertical para os itens.
 
 ## Detalhes Tecnicos
 
@@ -79,29 +53,47 @@ Caso o bloqueio persista apos as correcoes:
 
 | Arquivo | Acao |
 |---|---|
-| `supabase/functions/ml-worker-process/index.ts` | Adicionar verificacao de `shipping.status` no `processOrderEvent` |
-| `supabase/functions/ml-send-message/index.ts` | Aceitar `pack_id` direto, criar conversa automaticamente |
-| `src/hooks/usePostSalePendingMessages.ts` | Remover dependencia de conversa pre-existente, usar pack_id |
-| `src/components/post-sale/PostSalePendingDrafts.tsx` | Banner de avisos, botao "Descartar Todos", info de shipping |
-| SQL migration | Limpar pendentes invalidas + desativar regra temporariamente |
+| `src/hooks/usePromotionItems.ts` (dentro de `usePromotions.ts`) | Enriquecer itens com dados de `meli_listings_cache` |
+| `src/pages/Promocoes.tsx` | Substituir Sheet por Dialog full-screen, novo layout de cards |
 
-### Verificacao de Shipping no Worker (logica)
+### Enriquecimento de dados (usePromotionItems)
+
+Apos buscar os itens da promocao, fazer uma segunda query:
 
 ```text
-orderData.shipping.status:
-  null / pending / to_be_agreed  -->  OK, pode criar rascunho
-  ready_to_ship / handling       -->  SKIP (ja em preparacao)
-  shipped / in_transit           -->  SKIP (ja enviado)
-  delivered                      -->  SKIP (ja entregue)
-  cancelled / not_delivered      -->  SKIP (cancelado/problema)
+SELECT item_id, title, thumbnail, sku, permalink
+FROM meli_listings_cache
+WHERE item_id IN (lista dos item_ids)
+AND seller_id = sellerId
 ```
+
+Mesclar os resultados criando um tipo `EnrichedPromotionItem` que inclui `title`, `thumbnail`, `sku` e `permalink`.
+
+### Novo layout do Dialog
+
+- `Dialog` com `max-w-6xl w-[90vw]` e altura `max-h-[90vh]`
+- Cabecalho compacto: nome, tipo, status, datas e KPIs em linha unica
+- Acoes (Aderir Todos, Planejar Renovacao) logo abaixo do cabecalho
+- Area de itens com `ScrollArea` de `h-[calc(90vh-280px)]` (~650px)
+- Grid de cards responsivo: 1 coluna em telas menores, layout rico
+
+### Estrutura do card de item
+
+Cada card tera:
+- Thumbnail 56x56px com fallback (icone Package)
+- Titulo truncado em 2 linhas
+- SKU (se disponivel) + MLB ID como link
+- Preco original riscado + preco promocional em destaque
+- Badge de desconto percentual
+- Badge de status (Candidato, Participando, Inelegivel)
+- Botao de acao contextual (Aderir/Remover)
+- Para itens inelegiveis: motivo do erro em tooltip
 
 ### Ordem de execucao
 
-1. SQL: limpar rascunhos + desativar regra
-2. Corrigir worker (shipping filter)
-3. Corrigir fluxo de aprovacao (pack_id direto)
-4. UI: banners e botao de limpeza
-5. Deploy e teste
-6. Se bloqueio persistir: pivotar para modo somente-resposta
+1. Atualizar hook `usePromotionItems` para enriquecer com dados visuais
+2. Criar componente `PromotionDetailModal` com Dialog full-screen
+3. Criar componente `PromotionItemCard` com layout rico
+4. Atualizar `Promocoes.tsx` para usar o novo modal em vez do Sheet
+5. Remover imports nao utilizados do Sheet
 
