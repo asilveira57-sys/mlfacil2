@@ -73,26 +73,19 @@ export function useApprovePendingMessage() {
       const textToSend = editedText || message.content_sent;
       const accountId = activeAccount?.id;
 
-      // We need a conversation to send via — look up by order_id
-      const { data: conversation } = await supabase
-        .from("post_sale_conversations")
-        .select("id")
-        .eq("seller_id", message.seller_id)
-        .eq("order_id", message.order_id)
-        .maybeSingle();
+      // Use pack_id directly — no need for pre-existing conversation
+      const packId = message.pack_id || message.order_id;
 
-      if (!conversation) {
-        throw new Error("Conversa não encontrada para este pedido. Sincronize as mensagens primeiro.");
-      }
-
-      // Send via ml-send-message with Action Guide
+      // Send via ml-send-message with Action Guide using pack_id directly
       const result = await invokeEdgeFunction<{
         success: boolean;
         ml_message_id?: string;
         error?: string;
       }>("ml-send-message", {
         body: {
-          conversation_id: conversation.id,
+          pack_id: packId,
+          order_id: message.order_id,
+          buyer_id: message.buyer_id,
           seller_id: message.seller_id,
           account_id: accountId,
           text: textToSend,

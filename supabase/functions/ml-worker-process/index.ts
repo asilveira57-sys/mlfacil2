@@ -587,6 +587,19 @@ async function processOrderEvent(
     return { success: true };
   }
 
+  // Check shipping status — only create drafts for orders not yet shipped
+  const shipping = orderData.shipping as Record<string, unknown> | undefined;
+  const shippingStatus = (shipping?.status as string) || null;
+  const allowedShippingStatuses = [null, "pending", "to_be_agreed"];
+  
+  if (shippingStatus && !allowedShippingStatuses.includes(shippingStatus)) {
+    console.log(`[ml-worker] Order ${orderId} has shipping status "${shippingStatus}", skipping welcome message`);
+    await logEvent(supabase, event.id, "info", `Order ${orderId} shipping status is "${shippingStatus}" (already in transit/delivered), skipping automation`);
+    return { success: true };
+  }
+
+  console.log(`[ml-worker] Order ${orderId} shipping status: ${shippingStatus || "none"} — eligible for automation`);
+
   // Check for active automation rules for "venda_confirmada"
   const { data: rules, error: rulesError } = await supabase
     .from("post_sale_automation_rules")
