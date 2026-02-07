@@ -35,7 +35,11 @@
 
 ---
 
-## Fase 5 - Frontend (Pendente)
+## Fase 5 - Frontend (Implementada ✅)
 
-- Adicionar aba ou indicador na tela de Conversas para mensagens pendentes de aprovação
-- Permitir aprovar/editar/rejeitar rascunhos de Boas Vindas antes do envio
+- Aba "Pendentes" com badge de contagem adicionada à página Mensagens Pós-Venda
+- Componente `PostSalePendingDrafts` permite visualizar, editar, aprovar e descartar rascunhos
+- Hook `usePostSalePendingMessages` com queries e mutations dedicados
+- Aprovação envia via Action Guide API com razão `DELIVERY_PROMISE`
+- Rejeição oculta o rascunho (soft delete via `is_visible = false`)
+- Tab "Pendentes" abre por padrão quando há mensagens pendentes
