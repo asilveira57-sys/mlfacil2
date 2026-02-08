@@ -36,7 +36,9 @@
     "pinned": "Fijada",
     "pinned_here": "Fijada en este módulo",
     "no_pins": "Sin notas fijadas",
-    "select_module": "Seleccionar módulo"
+    "select_module": "Seleccionar módulo",
+    "select_company": "Empresa",
+    "all_companies": "Todas las empresas"
   },
   "task": {
     "sent_success": "Nota enviada a tareas",

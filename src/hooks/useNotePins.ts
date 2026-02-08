@@ -2,6 +2,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import type { NotePin, Note } from '@/types/notes';
 import { useToast } from '@/hooks/use-toast';
+import { useMemo } from 'react';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface UseNotePinsOptions {
   workspaceId: string | null;
@@ -13,7 +16,13 @@ export function useNotePins({ workspaceId, moduleKey, companyId }: UseNotePinsOp
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const queryKey = ['note-pins', workspaceId, moduleKey, companyId];
+  // Only use companyId if it's a valid UUID
+  const safeCompanyId = useMemo(
+    () => (companyId && UUID_REGEX.test(companyId) ? companyId : null),
+    [companyId]
+  );
+
+  const queryKey = ['note-pins', workspaceId, moduleKey, safeCompanyId];
 
   // Fetch notes pinned to the current module
   const { data: pinnedNotes = [], isLoading } = useQuery({
@@ -27,8 +36,8 @@ export function useNotePins({ workspaceId, moduleKey, companyId }: UseNotePinsOp
         .eq('workspace_id', workspaceId)
         .eq('module_key', moduleKey);
 
-      if (companyId) {
-        query = query.or(`company_id.eq.${companyId},company_id.is.null`);
+      if (safeCompanyId) {
+        query = query.or(`company_id.eq.${safeCompanyId},company_id.is.null`);
       }
 
       const { data: pins, error } = await query;
@@ -55,17 +64,35 @@ export function useNotePins({ workspaceId, moduleKey, companyId }: UseNotePinsOp
     staleTime: 2 * 60 * 1000,
   });
 
-  // Pin a note — accepts optional moduleKey override
+  // Pin a note — accepts optional moduleKey and companyId override
   const pinMutation = useMutation({
-    mutationFn: async ({ noteId, moduleKey: targetModuleKey, routePath }: { noteId: string; moduleKey?: string; routePath?: string }) => {
+    mutationFn: async ({
+      noteId,
+      moduleKey: targetModuleKey,
+      companyId: targetCompanyId,
+      routePath,
+    }: {
+      noteId: string;
+      moduleKey?: string;
+      companyId?: string;
+      routePath?: string;
+    }) => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Não autenticado');
 
       const effectiveModuleKey = targetModuleKey || moduleKey;
 
+      // Use explicit companyId if provided and valid, otherwise fallback to safeCompanyId
+      let effectiveCompanyId: string | null = null;
+      if (targetCompanyId && UUID_REGEX.test(targetCompanyId)) {
+        effectiveCompanyId = targetCompanyId;
+      } else if (safeCompanyId) {
+        effectiveCompanyId = safeCompanyId;
+      }
+
       const { error } = await supabase.from('note_pins').insert({
         workspace_id: workspaceId!,
-        company_id: companyId ?? null,
+        company_id: effectiveCompanyId,
         note_id: noteId,
         module_key: effectiveModuleKey,
         route_path: routePath ?? null,
@@ -79,7 +106,7 @@ export function useNotePins({ workspaceId, moduleKey, companyId }: UseNotePinsOp
         workspace_id: workspaceId!,
         note_id: noteId,
         event_type: 'pinned',
-        payload_json: { module_key: effectiveModuleKey, company_id: companyId },
+        payload_json: { module_key: effectiveModuleKey, company_id: effectiveCompanyId },
         created_by_user_id: user.id,
       } as any);
     },
@@ -88,7 +115,8 @@ export function useNotePins({ workspaceId, moduleKey, companyId }: UseNotePinsOp
       toast({ title: 'Nota fixada neste módulo' });
     },
     onError: (err) => {
-      toast({ title: 'Erro ao fixar nota', description: String(err), variant: 'destructive' });
+      const message = err instanceof Error ? err.message : 'Erro ao fixar nota';
+      toast({ title: 'Erro ao fixar nota', description: message, variant: 'destructive' });
     },
   });
 
@@ -105,8 +133,8 @@ export function useNotePins({ workspaceId, moduleKey, companyId }: UseNotePinsOp
         .eq('module_key', moduleKey)
         .eq('workspace_id', workspaceId!);
 
-      if (companyId) {
-        query = query.eq('company_id', companyId);
+      if (safeCompanyId) {
+        query = query.eq('company_id', safeCompanyId);
       } else {
         query = query.is('company_id', null);
       }

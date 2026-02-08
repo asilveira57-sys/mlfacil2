@@ -12,7 +12,7 @@ interface NoteEditorProps {
   currentModuleKey: string;
   onBack: () => void;
   onUpdate: (updates: Partial<Note>) => void;
-  onPin?: (moduleKey: string) => void;
+  onPin?: (moduleKey: string, companyId?: string) => void;
   onUnpin?: () => void;
   onSendToTasks?: () => void;
   onArchive?: () => void;
@@ -166,7 +166,7 @@ export function NoteEditor({
       <NoteEditorActions
         isPinned={isPinned}
         currentModuleKey={currentModuleKey}
-        onPin={(moduleKey) => onPin?.(moduleKey)}
+        onPin={(moduleKey, companyId) => onPin?.(moduleKey, companyId)}
         onUnpin={onUnpin}
         onSendToTasks={onSendToTasks}
         onArchive={onArchive}

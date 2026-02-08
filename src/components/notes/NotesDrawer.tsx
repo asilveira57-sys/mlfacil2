@@ -2,12 +2,13 @@ import { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { StickyNote, Plus, Search } from 'lucide-react';
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from '@/components/ui/sheet';
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -73,7 +74,6 @@ export function NotesDrawer({ companyId }: NotesDrawerProps) {
 
   // Handle creating a new note
   const handleNewNote = useCallback(async () => {
-    // Clear editing state first to avoid state bleed
     setEditingNote(null);
     try {
       const note = await createNote({
@@ -126,7 +126,7 @@ export function NotesDrawer({ companyId }: NotesDrawerProps) {
     [workspaceId, createTask, moduleKey, toast, t]
   );
 
-  // Handle paste image in editor — returns signed URL
+  // Handle paste image in editor
   const handlePasteImage = useCallback(
     async (data: DataTransfer): Promise<string | null> => {
       return uploadFromClipboard(data);
@@ -134,7 +134,7 @@ export function NotesDrawer({ companyId }: NotesDrawerProps) {
     [uploadFromClipboard]
   );
 
-  // Handle file upload in editor — returns signed URL
+  // Handle file upload in editor
   const handleUploadImage = useCallback(
     async (file: File): Promise<string> => {
       return uploadFile({ file });
@@ -143,18 +143,21 @@ export function NotesDrawer({ companyId }: NotesDrawerProps) {
   );
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={setOpen}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <SheetTrigger asChild>
+          <DialogTrigger asChild>
             <Button variant="ghost" size="icon" className="h-8 w-8">
               <StickyNote className="h-4 w-4" />
             </Button>
-          </SheetTrigger>
+          </DialogTrigger>
         </TooltipTrigger>
         <TooltipContent>{t('title')}</TooltipContent>
       </Tooltip>
-      <SheetContent side="right" className="w-[380px] sm:w-[420px] p-0 flex flex-col">
+      <DialogContent className="max-w-3xl h-[80vh] p-0 flex flex-col overflow-hidden">
+        <DialogDescription className="sr-only">
+          {t('description')}
+        </DialogDescription>
         {editingNote ? (
           <NoteEditor
             key={editingNote.id}
@@ -163,7 +166,9 @@ export function NotesDrawer({ companyId }: NotesDrawerProps) {
             currentModuleKey={moduleKey}
             onBack={() => setEditingNote(null)}
             onUpdate={handleUpdate}
-            onPin={(targetModule) => pinNote({ noteId: editingNote.id, moduleKey: targetModule })}
+            onPin={(targetModule, targetCompanyId) =>
+              pinNote({ noteId: editingNote.id, moduleKey: targetModule, companyId: targetCompanyId })
+            }
             onUnpin={() => unpinNote(editingNote.id)}
             onSendToTasks={() => handleSendToTasks(editingNote)}
             onArchive={() => {
@@ -175,12 +180,12 @@ export function NotesDrawer({ companyId }: NotesDrawerProps) {
           />
         ) : (
           <>
-            <SheetHeader className="px-4 pt-4 pb-2">
+            <DialogHeader className="px-6 pt-6 pb-2">
               <div className="flex items-center justify-between">
-                <SheetTitle className="flex items-center gap-2 text-base">
+                <DialogTitle className="flex items-center gap-2 text-base">
                   <StickyNote className="h-4 w-4" />
                   {t('title')}
-                </SheetTitle>
+                </DialogTitle>
                 <Button
                   size="sm"
                   className="h-7 gap-1 text-xs"
@@ -191,10 +196,10 @@ export function NotesDrawer({ companyId }: NotesDrawerProps) {
                   {t('new_note')}
                 </Button>
               </div>
-            </SheetHeader>
+            </DialogHeader>
 
             {/* Search */}
-            <div className="px-4 pb-2">
+            <div className="px-6 pb-2">
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                 <Input
@@ -207,7 +212,7 @@ export function NotesDrawer({ companyId }: NotesDrawerProps) {
             </div>
 
             {/* Notes list */}
-            <div className="flex-1 overflow-y-auto px-4 pb-4">
+            <div className="flex-1 overflow-y-auto px-6 pb-4">
               <NotesList
                 notes={notes}
                 isLoading={isLoading}
@@ -224,7 +229,7 @@ export function NotesDrawer({ companyId }: NotesDrawerProps) {
             </div>
           </>
         )}
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }

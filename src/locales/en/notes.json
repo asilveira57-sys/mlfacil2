@@ -36,7 +36,9 @@
     "pinned": "Pinned",
     "pinned_here": "Pinned to this module",
     "no_pins": "No pinned notes",
-    "select_module": "Select module"
+    "select_module": "Select module",
+    "select_company": "Company",
+    "all_companies": "All companies"
   },
   "task": {
     "sent_success": "Note sent to tasks",
