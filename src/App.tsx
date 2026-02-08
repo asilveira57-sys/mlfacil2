@@ -47,6 +47,7 @@ import FreightManagement from "./pages/FreightManagement";
 import Precificacao from "./pages/Precificacao";
 import Comissoes from "./pages/Comissoes";
 import Consultoria from "./pages/Consultoria";
+import ModuloDetalhe from "./pages/ModuloDetalhe";
 import ProductsPage from "./pages/ProductsPage";
 import ProductDetailPage from "./pages/ProductDetailPage";
 import NotFound from "./pages/NotFound";
@@ -138,6 +139,9 @@ const App = () => {
                 
                 {/* Consultoria */}
                 <Route path="/consultoria" element={<Consultoria />} />
+                
+                {/* Module detail pages */}
+                <Route path="/modulo/:slug" element={<ModuloDetalhe />} />
                 
                 {/* Public Tools routes (no shell) */}
                 <Route path="/ferramentas/zpl" element={<ZplViewerTool />} />

@@ -1,0 +1,249 @@
+{
+  "back_to_home": "Back to home",
+  "features_title": "Features",
+  "faq_title": "Frequently asked questions",
+  "cta_title": "Ready to use this module?",
+  "cta_subtitle": "Start your free trial and get access to all features.",
+  "cta_button": "Start free trial",
+  "cta_secondary": "View all modules",
+  "gestao_anuncios": {
+    "title": "Listing Management",
+    "subtitle": "Complete control of your listings, ADS campaigns, bids and advertising performance. Manage everything in a single integrated dashboard.",
+    "feature1": {
+      "title": "ADS Campaigns",
+      "description": "View and manage all your Mercado Libre advertising campaigns, with cost, clicks, impressions and conversion metrics."
+    },
+    "feature2": {
+      "title": "Bid Management",
+      "description": "Adjust bids per product or ad group, with suggestions based on historical performance."
+    },
+    "feature3": {
+      "title": "ACOS & ROAS Metrics",
+      "description": "Track cost per sale (ACOS) and return on ad spend (ROAS) for each campaign."
+    },
+    "feature4": {
+      "title": "Performance Alerts",
+      "description": "Receive notifications when campaigns lose efficiency or advertised products run out of stock."
+    },
+    "feature5": {
+      "title": "Listing Timeline",
+      "description": "Visualize the lifecycle of your listings with sales history, gaps and health status."
+    },
+    "feature6": {
+      "title": "Bulk Actions",
+      "description": "Pause, reactivate or adjust multiple listings at once with the action center."
+    },
+    "faq1": {
+      "question": "Do I need to connect my ADS account separately?",
+      "answer": "No, when you connect your Mercado Libre account, advertising data is imported automatically."
+    },
+    "faq2": {
+      "question": "Can I manage ADS for multiple accounts?",
+      "answer": "Yes! You can view and manage campaigns from all your Mercado Libre accounts in one dashboard."
+    },
+    "faq3": {
+      "question": "Are metrics updated in real time?",
+      "answer": "Metrics are synced periodically with the official Mercado Libre API, ensuring always up-to-date data."
+    }
+  },
+  "dashboard_analises": {
+    "title": "Dashboard & Analytics",
+    "subtitle": "Complete panels with sales KPIs, revenue, average ticket and performance evolution. Make decisions based on real data.",
+    "feature1": {
+      "title": "Sales KPIs",
+      "description": "Track sales, revenue, average ticket and order volume in real time."
+    },
+    "feature2": {
+      "title": "Evolution Charts",
+      "description": "Visualize how your metrics evolve over time with interactive charts."
+    },
+    "feature3": {
+      "title": "Period Comparison",
+      "description": "Compare current performance with previous periods to identify trends."
+    },
+    "feature4": {
+      "title": "ABC Analysis",
+      "description": "Classify products by importance using ABC curve for revenue, profit and volume."
+    },
+    "feature5": {
+      "title": "Module Grid",
+      "description": "Quick access to all system modules from the centralized control panel."
+    },
+    "feature6": {
+      "title": "Data Export",
+      "description": "Export reports in various formats for external analysis or presentations."
+    },
+    "faq1": {
+      "question": "How many days of history are available?",
+      "answer": "Paid plans include up to 12 months of retroactive history. The trial period includes data available at the time of connection."
+    },
+    "faq2": {
+      "question": "Can I create custom dashboards?",
+      "answer": "The system offers pre-configured dashboards optimized for Mercado Libre sellers. Customizations are on the roadmap."
+    },
+    "faq3": {
+      "question": "Does data include all my accounts?",
+      "answer": "Yes, dashboards consolidate data from all Mercado Libre accounts connected to your panel."
+    }
+  },
+  "precificacao_custos": {
+    "title": "Pricing & Costs",
+    "subtitle": "Price simulator, automatic Mercado Libre commission calculation, profit margin and break-even point per product.",
+    "feature1": {
+      "title": "Price Simulator",
+      "description": "Simulate different price scenarios and see the impact on profit margin in real time."
+    },
+    "feature2": {
+      "title": "Commission Calculator",
+      "description": "Automatically calculate Mercado Libre commissions by category and listing type."
+    },
+    "feature3": {
+      "title": "Profit Margin",
+      "description": "View the real margin of each product considering cost, shipping, commissions and taxes."
+    },
+    "feature4": {
+      "title": "Break-even Point",
+      "description": "Discover the minimum price to cover all costs and start making profit."
+    },
+    "feature5": {
+      "title": "Operational Costs",
+      "description": "Record fixed and variable costs for a complete view of profitability."
+    },
+    "feature6": {
+      "title": "Updated Commission Table",
+      "description": "Access the always-updated Mercado Libre commission table by category."
+    },
+    "faq1": {
+      "question": "Does the system consider shipping in calculations?",
+      "answer": "Yes, the system considers shipping costs, commissions, taxes and operational costs in margin calculations."
+    },
+    "faq2": {
+      "question": "Are commissions updated automatically?",
+      "answer": "Yes, we keep the Mercado Libre commission table always synced with the latest updates."
+    },
+    "faq3": {
+      "question": "Can I calculate costs for multiple products?",
+      "answer": "Yes, you can calculate costs and margins for all your products at once."
+    }
+  },
+  "radiografia_seed": {
+    "title": "X-Ray & Seed",
+    "subtitle": "Deep listing analysis, health diagnosis and quality validation. Identify problems before they impact your sales.",
+    "feature1": {
+      "title": "Listing X-Ray",
+      "description": "Complete analysis of any Mercado Libre listing with detailed quality scoring."
+    },
+    "feature2": {
+      "title": "Health Diagnosis",
+      "description": "Check the health of your listings with indicators for title, photos, description and attributes."
+    },
+    "feature3": {
+      "title": "Quality Validation",
+      "description": "Quality score that evaluates if your listing follows marketplace best practices."
+    },
+    "feature4": {
+      "title": "Improvement Suggestions",
+      "description": "Receive specific recommendations to improve the positioning of your listings."
+    },
+    "feature5": {
+      "title": "Competitor Analysis",
+      "description": "Compare your listings with competitors and identify improvement opportunities."
+    },
+    "feature6": {
+      "title": "Continuous Monitoring",
+      "description": "Track listing quality evolution over time with Seed monitoring tool."
+    },
+    "faq1": {
+      "question": "Can I analyze competitor listings?",
+      "answer": "Yes! X-Ray works with any public Mercado Libre listing, yours or competitors."
+    },
+    "faq2": {
+      "question": "What is Seed?",
+      "answer": "Seed is a continuous monitoring tool that tracks the health and performance of your listings over time."
+    },
+    "faq3": {
+      "question": "Are analyses AI-powered?",
+      "answer": "Yes, we use artificial intelligence to generate precise diagnostics and personalized improvement suggestions."
+    }
+  },
+  "tendencias_concorrencia": {
+    "title": "Trends & Competition",
+    "subtitle": "Discover trending products, trending keywords and monitor competitor prices and strategies in real time.",
+    "feature1": {
+      "title": "Market Trends",
+      "description": "Identify trending categories and products on Mercado Libre with updated data."
+    },
+    "feature2": {
+      "title": "Trending Keywords",
+      "description": "Discover the most searched and trending keywords to optimize your titles."
+    },
+    "feature3": {
+      "title": "Price Monitoring",
+      "description": "Track competitor prices and receive alerts for significant changes."
+    },
+    "feature4": {
+      "title": "Competition Analysis",
+      "description": "View the positioning of your products relative to direct competitors."
+    },
+    "feature5": {
+      "title": "Niche Opportunities",
+      "description": "Identify niches with high demand and low competition to expand your catalog."
+    },
+    "feature6": {
+      "title": "Market Reports",
+      "description": "Periodic reports with insights about market behavior in your category."
+    },
+    "faq1": {
+      "question": "Where does trend data come from?",
+      "answer": "Data is collected directly from official Mercado Libre APIs, ensuring accuracy and timeliness."
+    },
+    "faq2": {
+      "question": "Can I monitor specific categories?",
+      "answer": "Yes, you can select categories of interest and receive updates about trends and competition."
+    },
+    "faq3": {
+      "question": "How often is data updated?",
+      "answer": "Trends and competition data is updated daily to ensure information is always relevant."
+    }
+  },
+  "automacoes_alertas": {
+    "title": "Automations & Alerts",
+    "subtitle": "Automatic rules, smart notifications and task management. Automate your operation and never miss an important event.",
+    "feature1": {
+      "title": "Automation Rules",
+      "description": "Create rules to adjust bids, pause listings or send alerts based on defined conditions."
+    },
+    "feature2": {
+      "title": "Real-time Alerts",
+      "description": "Receive notifications about critical events like sales drops, low stock or price changes."
+    },
+    "feature3": {
+      "title": "Task Management",
+      "description": "Integrated Kanban board to organize and track pending actions for your business."
+    },
+    "feature4": {
+      "title": "Post-Sale Messages",
+      "description": "Configure automatic messages to send to buyers after each sale."
+    },
+    "feature5": {
+      "title": "Question Responses",
+      "description": "Manage and respond to buyer questions in a centralized and agile way."
+    },
+    "feature6": {
+      "title": "Promotion Management",
+      "description": "Create and manage promotions for your products with dedicated tools."
+    },
+    "faq1": {
+      "question": "Do automations execute actions on Mercado Libre?",
+      "answer": "Currently, automations generate alerts and suggestions. Automatic action execution via ML API is on the roadmap."
+    },
+    "faq2": {
+      "question": "Can I customize alert types?",
+      "answer": "Yes, you can define which events generate alerts and the priority of each notification type."
+    },
+    "faq3": {
+      "question": "Is the task board shared?",
+      "answer": "Yes, in plans with multi-user support, the task board is shared among all team members."
+    }
+  }
+}

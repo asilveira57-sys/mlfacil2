@@ -1,0 +1,249 @@
+{
+  "back_to_home": "Volver al inicio",
+  "features_title": "Funcionalidades",
+  "faq_title": "Preguntas frecuentes",
+  "cta_title": "¿Listo para usar este módulo?",
+  "cta_subtitle": "Comienza tu prueba gratis y accede a todas las funcionalidades.",
+  "cta_button": "Comenzar prueba gratis",
+  "cta_secondary": "Ver todos los módulos",
+  "gestao_anuncios": {
+    "title": "Gestión de Anuncios",
+    "subtitle": "Control completo de tus anuncios, campañas de ADS, pujas y rendimiento publicitario. Gestiona todo en un único panel integrado.",
+    "feature1": {
+      "title": "Campañas de ADS",
+      "description": "Visualiza y gestiona todas tus campañas publicitarias de Mercado Libre, con métricas de costo, clics, impresiones y conversiones."
+    },
+    "feature2": {
+      "title": "Gestión de Pujas",
+      "description": "Ajusta pujas por producto o grupo de anuncios, con sugerencias basadas en rendimiento histórico."
+    },
+    "feature3": {
+      "title": "Métricas de ACOS y ROAS",
+      "description": "Acompaña el costo por venta (ACOS) y retorno sobre inversión en ads (ROAS) de cada campaña."
+    },
+    "feature4": {
+      "title": "Alertas de Rendimiento",
+      "description": "Recibe notificaciones cuando las campañas pierden eficiencia o los productos se quedan sin stock."
+    },
+    "feature5": {
+      "title": "Línea de Tiempo de Anuncios",
+      "description": "Visualiza el ciclo de vida de tus anuncios con historial de ventas, gaps y estado de salud."
+    },
+    "feature6": {
+      "title": "Acciones en Lote",
+      "description": "Pausa, reactiva o ajusta múltiples anuncios a la vez con el centro de acciones."
+    },
+    "faq1": {
+      "question": "¿Necesito conectar mi cuenta de ADS por separado?",
+      "answer": "No, al conectar tu cuenta de Mercado Libre, los datos de publicidad se importan automáticamente."
+    },
+    "faq2": {
+      "question": "¿Puedo gestionar ADS de múltiples cuentas?",
+      "answer": "¡Sí! Puedes visualizar y gestionar campañas de todas tus cuentas de Mercado Libre en un solo panel."
+    },
+    "faq3": {
+      "question": "¿Las métricas se actualizan en tiempo real?",
+      "answer": "Las métricas se sincronizan periódicamente con la API oficial de Mercado Libre, garantizando datos siempre actualizados."
+    }
+  },
+  "dashboard_analises": {
+    "title": "Dashboard y Análisis",
+    "subtitle": "Paneles completos con KPIs de ventas, facturación, ticket promedio y evolución de rendimiento. Toma decisiones basadas en datos reales.",
+    "feature1": {
+      "title": "KPIs de Ventas",
+      "description": "Acompaña ventas, facturación, ticket promedio y volumen de pedidos en tiempo real."
+    },
+    "feature2": {
+      "title": "Gráficos de Evolución",
+      "description": "Visualiza la evolución de tus métricas a lo largo del tiempo con gráficos interactivos."
+    },
+    "feature3": {
+      "title": "Comparación de Períodos",
+      "description": "Compara el rendimiento actual con períodos anteriores para identificar tendencias."
+    },
+    "feature4": {
+      "title": "Análisis ABC",
+      "description": "Clasifica tus productos por importancia usando la curva ABC de facturación, ganancia y volumen."
+    },
+    "feature5": {
+      "title": "Grid de Módulos",
+      "description": "Acceso rápido a todos los módulos del sistema desde el panel de control centralizado."
+    },
+    "feature6": {
+      "title": "Exportación de Datos",
+      "description": "Exporta informes en diversos formatos para análisis externo o presentaciones."
+    },
+    "faq1": {
+      "question": "¿Cuántos días de historial están disponibles?",
+      "answer": "Los planes pagos incluyen hasta 12 meses de historial retroactivo. El período de prueba incluye los datos disponibles al momento de la conexión."
+    },
+    "faq2": {
+      "question": "¿Puedo crear dashboards personalizados?",
+      "answer": "El sistema ofrece dashboards preconfigurados optimizados para vendedores de Mercado Libre. Las personalizaciones están en el roadmap."
+    },
+    "faq3": {
+      "question": "¿Los datos incluyen todas mis cuentas?",
+      "answer": "Sí, los dashboards consolidan datos de todas las cuentas de Mercado Libre conectadas a tu panel."
+    }
+  },
+  "precificacao_custos": {
+    "title": "Precios y Costos",
+    "subtitle": "Simulador de precios, cálculo automático de comisiones de Mercado Libre, margen de ganancia y punto de equilibrio por producto.",
+    "feature1": {
+      "title": "Simulador de Precios",
+      "description": "Simula diferentes escenarios de precio y ve el impacto en el margen de ganancia en tiempo real."
+    },
+    "feature2": {
+      "title": "Cálculo de Comisiones",
+      "description": "Calcula automáticamente las comisiones de Mercado Libre por categoría y tipo de anuncio."
+    },
+    "feature3": {
+      "title": "Margen de Ganancia",
+      "description": "Visualiza el margen real de cada producto considerando costo, envío, comisiones e impuestos."
+    },
+    "feature4": {
+      "title": "Punto de Equilibrio",
+      "description": "Descubre el precio mínimo para cubrir todos los costos y comenzar a tener ganancias."
+    },
+    "feature5": {
+      "title": "Costos Operativos",
+      "description": "Registra costos fijos y variables para tener una visión completa de la rentabilidad."
+    },
+    "feature6": {
+      "title": "Tabla de Comisiones Actualizada",
+      "description": "Accede a la tabla de comisiones de Mercado Libre siempre actualizada, por categoría."
+    },
+    "faq1": {
+      "question": "¿El sistema considera envío en los cálculos?",
+      "answer": "Sí, el sistema considera costos de envío, comisiones, impuestos y costos operativos en los cálculos de margen."
+    },
+    "faq2": {
+      "question": "¿Las comisiones se actualizan automáticamente?",
+      "answer": "Sí, mantenemos la tabla de comisiones de Mercado Libre siempre sincronizada con las últimas actualizaciones."
+    },
+    "faq3": {
+      "question": "¿Puedo calcular costos para múltiples productos?",
+      "answer": "Sí, puedes calcular costos y márgenes para todos tus productos a la vez."
+    }
+  },
+  "radiografia_seed": {
+    "title": "Radiografía y Seed",
+    "subtitle": "Análisis profundo de anuncios, diagnóstico de salud de los listings y validación de calidad. Identifica problemas antes de que impacten tus ventas.",
+    "feature1": {
+      "title": "Radiografía de Anuncio",
+      "description": "Análisis completo de cualquier anuncio de Mercado Libre con puntuación de calidad detallada."
+    },
+    "feature2": {
+      "title": "Diagnóstico de Salud",
+      "description": "Verifica la salud de tus listings con indicadores de título, fotos, descripción y atributos."
+    },
+    "feature3": {
+      "title": "Validación de Calidad",
+      "description": "Score de calidad que evalúa si tu anuncio sigue las mejores prácticas del marketplace."
+    },
+    "feature4": {
+      "title": "Sugerencias de Mejora",
+      "description": "Recibe recomendaciones específicas para mejorar el posicionamiento de tus anuncios."
+    },
+    "feature5": {
+      "title": "Análisis de Competidores",
+      "description": "Compara tus anuncios con los de la competencia e identifica oportunidades de mejora."
+    },
+    "feature6": {
+      "title": "Monitoreo Continuo",
+      "description": "Acompaña la evolución de la calidad de tus anuncios a lo largo del tiempo con Seed."
+    },
+    "faq1": {
+      "question": "¿Puedo analizar anuncios de competidores?",
+      "answer": "¡Sí! La radiografía funciona con cualquier anuncio público de Mercado Libre, tuyo o de competidores."
+    },
+    "faq2": {
+      "question": "¿Qué es Seed?",
+      "answer": "Seed es una herramienta de monitoreo continuo que acompaña la salud y rendimiento de tus anuncios a lo largo del tiempo."
+    },
+    "faq3": {
+      "question": "¿Los análisis usan inteligencia artificial?",
+      "answer": "Sí, utilizamos inteligencia artificial para generar diagnósticos precisos y sugerencias personalizadas de mejora."
+    }
+  },
+  "tendencias_concorrencia": {
+    "title": "Tendencias y Competencia",
+    "subtitle": "Descubre productos en auge, palabras clave trending y monitorea precios y estrategias de los competidores en tiempo real.",
+    "feature1": {
+      "title": "Tendencias de Mercado",
+      "description": "Identifica categorías y productos en auge en Mercado Libre con datos actualizados."
+    },
+    "feature2": {
+      "title": "Palabras Clave Trending",
+      "description": "Descubre las palabras clave más buscadas y trending para optimizar tus títulos."
+    },
+    "feature3": {
+      "title": "Monitoreo de Precios",
+      "description": "Acompaña los precios de los competidores y recibe alertas de cambios significativos."
+    },
+    "feature4": {
+      "title": "Análisis de Competencia",
+      "description": "Visualiza el posicionamiento de tus productos en relación a los competidores directos."
+    },
+    "feature5": {
+      "title": "Oportunidades de Nicho",
+      "description": "Identifica nichos con alta demanda y baja competencia para expandir tu catálogo."
+    },
+    "feature6": {
+      "title": "Informes de Mercado",
+      "description": "Informes periódicos con insights sobre el comportamiento del mercado en tu categoría."
+    },
+    "faq1": {
+      "question": "¿De dónde vienen los datos de tendencias?",
+      "answer": "Los datos se recopilan directamente de las APIs oficiales de Mercado Libre, garantizando precisión y actualidad."
+    },
+    "faq2": {
+      "question": "¿Puedo monitorear categorías específicas?",
+      "answer": "Sí, puedes seleccionar categorías de interés y recibir actualizaciones sobre tendencias y competencia."
+    },
+    "faq3": {
+      "question": "¿Con qué frecuencia se actualizan los datos?",
+      "answer": "Los datos de tendencias y competencia se actualizan diariamente para garantizar información siempre relevante."
+    }
+  },
+  "automacoes_alertas": {
+    "title": "Automatizaciones y Alertas",
+    "subtitle": "Reglas automáticas, notificaciones inteligentes y gestión de tareas. Automatiza tu operación y nunca pierdas un evento importante.",
+    "feature1": {
+      "title": "Reglas de Automatización",
+      "description": "Crea reglas para ajustar pujas, pausar anuncios o enviar alertas basadas en condiciones definidas."
+    },
+    "feature2": {
+      "title": "Alertas en Tiempo Real",
+      "description": "Recibe notificaciones sobre eventos críticos como caída de ventas, stock bajo o cambios de precio."
+    },
+    "feature3": {
+      "title": "Gestión de Tareas",
+      "description": "Tablero Kanban integrado para organizar y acompañar las acciones pendientes de tu negocio."
+    },
+    "feature4": {
+      "title": "Mensajes Post-Venta",
+      "description": "Configura mensajes automáticos para enviar a los compradores después de cada venta."
+    },
+    "feature5": {
+      "title": "Respuestas a Preguntas",
+      "description": "Gestiona y responde preguntas de los compradores de forma centralizada y ágil."
+    },
+    "feature6": {
+      "title": "Gestión de Promociones",
+      "description": "Crea y gestiona promociones de tus productos con herramientas dedicadas."
+    },
+    "faq1": {
+      "question": "¿Las automatizaciones ejecutan acciones en Mercado Libre?",
+      "answer": "Actualmente, las automatizaciones generan alertas y sugerencias. La ejecución automática de acciones en la API de ML está en el roadmap."
+    },
+    "faq2": {
+      "question": "¿Puedo personalizar los tipos de alerta?",
+      "answer": "Sí, puedes definir qué eventos generan alertas y la prioridad de cada tipo de notificación."
+    },
+    "faq3": {
+      "question": "¿El tablero de tareas es compartido?",
+      "answer": "Sí, en planes con soporte multi-usuarios, el tablero de tareas es compartido entre todos los miembros del equipo."
+    }
+  }
+}
