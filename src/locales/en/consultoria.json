@@ -1,0 +1,124 @@
+{
+  "page_title": "Expert Consulting",
+  "page_subtitle": "Accelerate your Mercado Libre results with professional guidance and personalized strategies.",
+  "hero": {
+    "badge": "1:1 Consulting",
+    "title": "Transform your Mercado Libre operation",
+    "subtitle": "In-depth analysis of your business, personalized strategies and follow-up to maximize your results.",
+    "cta": "Schedule consultation"
+  },
+  "benefits": {
+    "title": "Why hire consulting?",
+    "item1": {
+      "title": "Complete diagnosis",
+      "description": "Detailed analysis of your account, listings, pricing and competitive positioning."
+    },
+    "item2": {
+      "title": "Personalized strategy",
+      "description": "Custom action plan for your business, with clear goals and defined deadlines."
+    },
+    "item3": {
+      "title": "Measurable results",
+      "description": "KPI and metrics tracking to ensure changes generate real impact."
+    },
+    "item4": {
+      "title": "Proven experience",
+      "description": "Years of experience selling and guiding sellers on Mercado Libre."
+    }
+  },
+  "packages": {
+    "title": "Consulting Packages",
+    "subtitle": "Choose the format that best fits your needs.",
+    "basic": {
+      "name": "Express Diagnosis",
+      "description": "Quick analysis of your operation with practical recommendations.",
+      "price": "$60",
+      "duration": "1 session of 1h30",
+      "features": [
+        "Complete ML account analysis",
+        "Review of up to 10 listings",
+        "Pricing diagnosis",
+        "Report with recommendations",
+        "30 days of email support"
+      ],
+      "cta": "Get diagnosis"
+    },
+    "pro": {
+      "name": "Strategic Mentoring",
+      "badge": "Most popular",
+      "description": "Intensive follow-up to transform your results.",
+      "price": "$180",
+      "duration": "4 sessions of 1h (monthly)",
+      "features": [
+        "Everything in Express Diagnosis",
+        "4 live mentoring sessions",
+        "Personalized strategic plan",
+        "In-depth competition analysis",
+        "ADS campaign optimization",
+        "Priority WhatsApp support",
+        "Access to exclusive materials"
+      ],
+      "cta": "Get mentoring"
+    },
+    "enterprise": {
+      "name": "Full Consulting",
+      "description": "Complete consultative management for high-volume operations.",
+      "price": "Custom pricing",
+      "duration": "Customized project",
+      "features": [
+        "Everything in Strategic Mentoring",
+        "Unlimited weekly meetings",
+        "Hands-on operation management",
+        "Team training",
+        "Process implementation",
+        "Custom reports",
+        "Dedicated 24/7 support"
+      ],
+      "cta": "Talk to specialist"
+    }
+  },
+  "process": {
+    "title": "How it works",
+    "step1": {
+      "title": "Scheduling",
+      "description": "Choose the ideal package and schedule your first session."
+    },
+    "step2": {
+      "title": "Diagnosis",
+      "description": "We analyze your operation and identify opportunities."
+    },
+    "step3": {
+      "title": "Action plan",
+      "description": "We create a personalized roadmap with clear priorities."
+    },
+    "step4": {
+      "title": "Follow-up",
+      "description": "We monitor results and adjust the strategy."
+    }
+  },
+  "faq": {
+    "title": "Consulting FAQ",
+    "item1": {
+      "question": "How are sessions conducted?",
+      "answer": "Sessions are conducted via Google Meet or Zoom, with screen sharing for live analysis."
+    },
+    "item2": {
+      "question": "Do I need to be an ML Fácil customer?",
+      "answer": "It's not mandatory, but platform customers get more out of recommendations with already integrated data."
+    },
+    "item3": {
+      "question": "How long until I see results?",
+      "answer": "Initial results usually appear in 2 to 4 weeks. Deeper transformations take 2 to 3 months."
+    },
+    "item4": {
+      "question": "Can I cancel or reschedule?",
+      "answer": "Yes, reschedules can be made with 24h notice. Refund available if cancelled before the first session."
+    }
+  },
+  "cta": {
+    "title": "Ready to accelerate your results?",
+    "subtitle": "Get in touch and discover how we can help your business grow.",
+    "btn_primary": "Schedule consultation",
+    "btn_secondary": "Back to home"
+  }
+}

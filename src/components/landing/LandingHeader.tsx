@@ -21,6 +21,7 @@ export function LandingHeader() {
     { label: t('header.menu_como_funciona'), href: "#como-funciona" },
     { label: t('header.menu_integracoes'), href: "#integracoes" },
     { label: t('header.menu_planos'), href: "#planos" },
+    { label: t('header.menu_consultoria'), href: "/consultoria" },
     { label: t('header.menu_blog'), href: "/blog" },
     { label: t('header.menu_suporte'), href: "#faq" },
   ];

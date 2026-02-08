@@ -16,6 +16,7 @@ export function LandingFooter() {
       { label: t('footer.col1.link1'), href: "#recursos" },
       { label: t('footer.col1.link2'), href: "#planos" },
       { label: t('footer.col1.link3'), href: "#integracoes" },
+      { label: t('footer.col1.link5', 'Consultoria'), href: "/consultoria" },
       { label: t('footer.col1.link4'), href: "/blog" }
     ],
     suporte: [
