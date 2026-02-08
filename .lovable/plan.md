@@ -1,107 +1,175 @@
 
+# Plano: Integrar Frete, Precificacao e Comissoes no Menu do Sistema
 
-# Plano de Correção Definitiva - Bloco de Notas
+## Situacao Atual
 
-## Problemas Identificados
+### O que existe hoje
 
-1. **Bloco de notas abre no canto direito e pequeno**: Atualmente usa o componente `Sheet` (gaveta lateral de 380-420px). Precisa abrir centralizado e maior.
+| Funcionalidade | Pagina | Rota | No Sidebar? | No system_modules? | No ROUTE_MODULE_MAP? |
+|---|---|---|---|---|---|
+| Frete | `FreightManagement.tsx` | `/frete` (dentro do shell) | NAO | NAO | NAO |
+| Precificacao | `PricingSimulatorTool.tsx` | `/ferramentas/precificacao` (fora do shell) | NAO | NAO | NAO |
+| Comissoes | `CommissionsTool.tsx` | `/ferramentas/comissoes` (fora do shell) | NAO | NAO | NAO |
 
-2. **Erro ao fixar módulo** (`invalid input syntax for type uuid: "66043362"`): O `companyId` passado para o bloco de notas vem do `sellerId` do Mercado Livre (ex: "66043362"), que **nao e UUID**. A coluna `note_pins.company_id` e do tipo `uuid`, causando o erro na insercao.
+### Estrutura atual do sidebar
 
-3. **Lista de modulos estatica (hardcoded)**: Os modulos disponiveis para fixar estao definidos em `src/hooks/useActiveModuleKey.ts` como constantes no codigo. Novos modulos nao aparecem automaticamente.
+```text
+MENU PRINCIPAL: Inicio, Dashboard, Etiquetas, Tarefas, Seed, Promocoes, ADS, Linha do Tempo, Pos-Venda, Perguntas
+ANALISES: Radiografia, Mercado, Tendencias, Concorrencia, Curva ABC, Custos
+FERRAMENTAS: ZPL, Blog (em breve), Relatorios (em breve)
+SISTEMA: Configuracoes
+```
 
-4. **Falta selecao de empresa ao fixar**: Ao fixar uma nota em um modulo, nao ha como escolher a empresa. Deveria permitir selecionar a empresa destino.
+## Restricao Critica
+
+As ferramentas publicas (`/ferramentas/*`) sao isoladas dos modulos pagos - nao compartilham codigo, componentes ou hooks. Portanto, Precificacao e Comissoes precisam de **paginas internas novas** dentro do shell, independentes das versoes publicas.
+
+---
+
+## Plano de Implementacao
+
+### 1. Criar paginas internas para Precificacao e Comissoes
+
+**Precificacao Interna** (`src/pages/Precificacao.tsx`):
+- Nova pagina standalone usando `PageContainer`
+- Simulador de precificacao com a mesma logica de calculo (lucro, margem, break-even), mas componentes proprios
+- Nao importa nada de `src/components/tools/` ou `src/pages/tools/`
+- Usa namespace i18n proprio (nao o `tools.json`)
+
+**Comissoes Interna** (`src/pages/Comissoes.tsx`):
+- Nova pagina standalone usando `PageContainer`
+- Consulta de comissoes por categoria ML, mesma logica de fetch da API publica ML
+- Componentes proprios, independentes da versao publica
+- Usa namespace i18n proprio
+
+### 2. Adicionar rotas no App.tsx
+
+Dentro do bloco `<AppShellLayout>`:
+```text
+/precificacao → Precificacao
+/comissoes → Comissoes
+/frete → FreightManagement (ja existe)
+```
+
+### 3. Adicionar ao Sidebar (AppSidebar.tsx)
+
+Proposta de organizacao - adicionar os 3 itens ao grupo **Analises** (que ja contem Custos, ABC, etc.):
+
+```text
+ANALISES (atualizado):
+  - Radiografia
+  - Mercado
+  - Tendencias
+  - Concorrencia
+  - Curva ABC
+  - Custos
+  - Precificacao (NOVO)
+  - Comissoes (NOVO)
+  - Gestao de Frete (NOVO)
+```
+
+Icones:
+- Precificacao: `Calculator`
+- Comissoes: `Percent`
+- Frete: `Truck`
+
+### 4. Registrar no system_modules (migracao SQL)
+
+Inserir 3 novos modulos na tabela `system_modules`:
+
+```text
+id: precificacao | name: Precificacao | icon_name: Calculator | route: /precificacao | is_active: true
+id: comissoes | name: Comissoes | icon_name: Percent | route: /comissoes | is_active: true
+id: frete | name: Gestao de Frete | icon_name: Truck | route: /frete | is_active: true
+```
+
+Isso garante que o Bloco de Notas (e qualquer outro consumidor de `useSystemModules`) reconheca automaticamente esses modulos.
+
+### 5. Atualizar ROUTE_MODULE_MAP
+
+Adicionar mapeamentos em `src/hooks/useActiveModuleKey.ts`:
+
+```text
+'precificacao' → 'precificacao'
+'comissoes' → 'comissoes'
+'frete' → 'frete'
+```
+
+### 6. Adicionar traducoes (i18n)
+
+Chaves novas nos 3 locales (`nav.json`):
+
+| Chave | pt-BR | en | es |
+|---|---|---|---|
+| `nav:commissions` | Comissoes | Commissions | Comisiones |
+
+As chaves `nav:pricing` e `nav:freight` ja existem nos 3 idiomas.
+
+Criar novos namespaces `precificacao.json` e `comissoes.json` para as paginas internas (labels, placeholders, etc.).
+
+### 7. Adicionar ao DashboardModulesGrid
+
+Incluir cards para Precificacao, Comissoes e Frete no grid de modulos do Dashboard.
 
 ---
 
-## Solucao Proposta
+## Arquivos a Criar
 
-### Parte 1 - Abrir Centralizado e Maior
-
-**Trocar `Sheet` por `Dialog`** no `NotesDrawer.tsx`:
-- Substituir o componente `Sheet` (que abre como gaveta lateral) por `Dialog` (que abre centralizado como modal)
-- Definir tamanho maior: largura de ~700px e altura de ~80vh
-- Manter toda a funcionalidade interna (lista, editor, busca) intacta
-- O botao de abrir no header continua o mesmo (icone de nota)
-
-### Parte 2 - Corrigir Erro ao Fixar (company_id UUID)
-
-**Problema raiz**: O `AppShellLayout` passa `sellerId` (string numerica do ML) como `companyId` para `HeaderUtilities` e `ModuleNotesOverlay`. Esse valor chega ate `useNotePins` que tenta inserir na coluna `company_id` (tipo UUID).
-
-**Solucao**:
-- Adicionar validacao UUID no `useNotePins` (mesmo padrao que ja foi feito no `useNotes`)
-- O `companyId` invalido sera tratado como `null` nas queries e insercoes
-- Quando o usuario fixar uma nota, a empresa sera selecionada explicitamente pelo seletor (Parte 4)
-
-### Parte 3 - Lista de Modulos Dinamica (do Banco de Dados)
-
-**Situacao atual**: Ja existe a tabela `system_modules` no banco com 14 modulos cadastrados (Dashboard, Tarefas, Etiquetas, etc.), com campos `id`, `name`, `description`, `icon_name`, `route`, `is_active`.
-
-**Solucao**:
-- Criar um hook `useSystemModules` que busca os modulos da tabela `system_modules` (filtrando `is_active = true`)
-- Substituir a funcao estatica `getAvailableModules()` no `NoteEditorActions` pelo hook dinamico
-- Quando um novo modulo for adicionado ao sistema, basta inserir na tabela `system_modules` e ele aparecera automaticamente na lista do bloco de notas
-- Manter fallback para a lista estatica caso a query falhe
-
-### Parte 4 - Seletor de Empresa ao Fixar
-
-**Solucao**:
-- No `NoteEditorActions`, ao lado do botao "Fixar em modulo", adicionar um seletor de empresa
-- Buscar empresas da tabela `companies` (que tem `id` UUID, `display_name`, `is_active`)
-- O fluxo fica: selecionar modulo + selecionar empresa (opcional) -> fixar
-- A empresa atual fica pre-selecionada, mas o usuario pode trocar
-- Usar o campo `company_id` existente na tabela `note_pins` para gravar a empresa selecionada
-
----
+| Arquivo | Descricao |
+|---|---|
+| `src/pages/Precificacao.tsx` | Pagina interna do simulador de precificacao |
+| `src/pages/Comissoes.tsx` | Pagina interna de consulta de comissoes |
+| `src/locales/pt-BR/precificacao.json` | Traducoes pt-BR para precificacao interna |
+| `src/locales/en/precificacao.json` | Traducoes en |
+| `src/locales/es/precificacao.json` | Traducoes es |
+| `src/locales/pt-BR/comissoes.json` | Traducoes pt-BR para comissoes interna |
+| `src/locales/en/comissoes.json` | Traducoes en |
+| `src/locales/es/comissoes.json` | Traducoes es |
 
 ## Arquivos a Modificar
 
 | Arquivo | Alteracao |
-|---------|-----------|
-| `src/components/notes/NotesDrawer.tsx` | Trocar `Sheet` por `Dialog`, aumentar tamanho, centralizar |
-| `src/hooks/useNotePins.ts` | Adicionar validacao UUID no `companyId`, aceitar `companyId` no `pinNote` |
-| `src/hooks/useActiveModuleKey.ts` | Manter para resolucao de rota, mas remover dependencia do `getAvailableModules` para notas |
-| `src/hooks/useSystemModules.ts` | **Novo** - Hook que busca modulos da tabela `system_modules` |
-| `src/components/notes/NoteEditorActions.tsx` | Usar modulos dinamicos + adicionar seletor de empresa |
-| `src/components/notes/NoteEditor.tsx` | Propagar empresa selecionada para o `onPin` |
-| Locales (en, es, pt-BR) | Adicionar chave para "Selecionar empresa" |
+|---|---|
+| `src/App.tsx` | Importar novas paginas + adicionar rotas `/precificacao` e `/comissoes` |
+| `src/components/layout/AppSidebar.tsx` | Adicionar 3 itens ao grupo `analyticsNavItems` |
+| `src/hooks/useActiveModuleKey.ts` | Adicionar 3 entradas no `ROUTE_MODULE_MAP` e `MODULE_LABELS` |
+| `src/components/dashboard/DashboardModulesGrid.tsx` | Adicionar 3 cards de modulo |
+| `src/locales/*/nav.json` | Adicionar chave `commissions` (pt-BR, en, es) |
+| Migracao SQL | INSERT de 3 registros em `system_modules` |
 
 ---
 
 ## Detalhes Tecnicos
 
-### Hook useSystemModules (novo)
-```text
-- Query: SELECT id, name, icon_name, route FROM system_modules WHERE is_active = true ORDER BY name
-- Cache: staleTime de 5 minutos (modulos mudam raramente)
-- Fallback: lista estatica do ROUTE_MODULE_MAP em caso de erro
-- Retorna: { modules: Array<{key, label, icon}>, isLoading }
-```
+### Precificacao Interna - Estrutura
 
-### Fluxo de Fixar Nota (corrigido)
-```text
-1. Usuario clica "Fixar em modulo"
-2. Popover abre com:
-   - Lista de modulos (da tabela system_modules)
-   - Seletor de empresa (da tabela companies)
-3. Usuario seleciona modulo e opcionalmente a empresa
-4. Sistema insere em note_pins com:
-   - module_key = id do modulo selecionado
-   - company_id = UUID da empresa selecionada (ou null)
-5. Toast de sucesso
-```
+A pagina tera a mesma funcionalidade do simulador publico, mas com componentes independentes:
+- Formulario de inputs (preco de venda, custo, taxa ML, frete, embalagem, outros)
+- Display de resultados (lucro, margem, custo total, taxas, break-even)
+- Calculos em `useMemo` (sem backend necessario neste momento)
+- Futuramente podera integrar com o `pricing-engine` para persistencia
 
-### Validacao UUID (useNotePins)
-```text
-- Mesma regex UUID usada no useNotes
-- companyId invalido -> tratado como null
-- Previne erro de "invalid input syntax for type uuid"
-```
+### Comissoes Interna - Estrutura
 
-### Dialog centralizado (NotesDrawer)
-```text
-- max-w-3xl (768px) com h-[80vh]
-- Conteudo usa flex-col com overflow interno
-- Mantém toda a UX atual (lista, editor, busca, toolbar)
-```
+A pagina tera a mesma funcionalidade da consulta publica:
+- Seletor de categorias ML (30 categorias)
+- Fetch da API publica ML (`https://api.mercadolibre.com/sites/MLB/listing_prices`)
+- Fallback para dados estaticos quando API falha
+- Exibicao em cards agrupados por categoria (Premium vs Classico)
 
+### Frete - Apenas integracao no menu
+
+A pagina `FreightManagement.tsx` ja existe e funciona dentro do shell. Precisa apenas:
+- Entrada no sidebar
+- Registro no `system_modules`
+- Entrada no `ROUTE_MODULE_MAP`
+
+### Migracao SQL
+
+```text
+INSERT INTO system_modules (id, name, description, icon_name, route, is_active) VALUES
+  ('precificacao', 'Precificacao', 'Simulador de precificacao para Mercado Livre', 'Calculator', '/precificacao', true),
+  ('comissoes', 'Comissoes', 'Consulta de comissoes por categoria do Mercado Livre', 'Percent', '/comissoes', true),
+  ('frete', 'Gestao de Frete', 'Tabela de frete, calculo de custos e divergencias', 'Truck', '/frete', true)
+ON CONFLICT (id) DO NOTHING;
+```
