@@ -46,6 +46,7 @@ import Seed from "./pages/Seed";
 import FreightManagement from "./pages/FreightManagement";
 import Precificacao from "./pages/Precificacao";
 import Comissoes from "./pages/Comissoes";
+import Consultoria from "./pages/Consultoria";
 import ProductsPage from "./pages/ProductsPage";
 import ProductDetailPage from "./pages/ProductDetailPage";
 import NotFound from "./pages/NotFound";
@@ -134,6 +135,9 @@ const App = () => {
                 <Route path="/blog" element={<Blog />} />
                 <Route path="/blog/:slug" element={<Blog />} />
                 <Route path="/blog/categoria/:slug" element={<Blog />} />
+                
+                {/* Consultoria */}
+                <Route path="/consultoria" element={<Consultoria />} />
                 
                 {/* Public Tools routes (no shell) */}
                 <Route path="/ferramentas/zpl" element={<ZplViewerTool />} />

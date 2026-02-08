@@ -6,6 +6,7 @@
     "menu_como_funciona": "Cómo funciona",
     "menu_integracoes": "Integraciones",
     "menu_planos": "Planes",
+    "menu_consultoria": "Consultoría",
     "menu_blog": "Blog",
     "menu_suporte": "Soporte",
     "btn_entrar": "Iniciar sesión",
@@ -210,7 +211,8 @@
       "link1": "Recursos",
       "link2": "Planes",
       "link3": "Integraciones",
-      "link4": "Blog"
+      "link4": "Blog",
+      "link5": "Consultoría"
     },
     "col2": {
       "title": "Soporte",

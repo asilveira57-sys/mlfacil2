@@ -19,6 +19,7 @@ import ptBRLanding from '@/locales/pt-BR/landing.json';
 import ptBRSales from '@/locales/pt-BR/sales.json';
 import ptBRTools from '@/locales/pt-BR/tools.json';
 import ptBRNotes from '@/locales/pt-BR/notes.json';
+import ptBRConsultoria from '@/locales/pt-BR/consultoria.json';
 
 import enCommon from '@/locales/en/common.json';
 import enNav from '@/locales/en/nav.json';
@@ -36,6 +37,7 @@ import enLanding from '@/locales/en/landing.json';
 import enSales from '@/locales/en/sales.json';
 import enTools from '@/locales/en/tools.json';
 import enNotes from '@/locales/en/notes.json';
+import enConsultoria from '@/locales/en/consultoria.json';
 
 import esCommon from '@/locales/es/common.json';
 import esNav from '@/locales/es/nav.json';
@@ -53,6 +55,7 @@ import esLanding from '@/locales/es/landing.json';
 import esSales from '@/locales/es/sales.json';
 import esTools from '@/locales/es/tools.json';
 import esNotes from '@/locales/es/notes.json';
+import esConsultoria from '@/locales/es/consultoria.json';
 
 export const SUPPORTED_LANGUAGES = ['pt-BR', 'en', 'es'] as const;
 export type SupportedLanguage = typeof SUPPORTED_LANGUAGES[number];
@@ -81,6 +84,7 @@ const resources = {
     sales: ptBRSales,
     tools: ptBRTools,
     notes: ptBRNotes,
+    consultoria: ptBRConsultoria,
   },
   en: {
     common: enCommon,
@@ -99,6 +103,7 @@ const resources = {
     sales: enSales,
     tools: enTools,
     notes: enNotes,
+    consultoria: enConsultoria,
   },
   es: {
     common: esCommon,
@@ -117,6 +122,7 @@ const resources = {
     sales: esSales,
     tools: esTools,
     notes: esNotes,
+    consultoria: esConsultoria,
   },
 };
 
@@ -133,7 +139,7 @@ i18n
     resources,
     fallbackLng: 'pt-BR',
     defaultNS: 'common',
-    ns: ['common', 'nav', 'auth', 'errors', 'actions', 'settings', 'dashboard', 'home', 'seed', 'shipping', 'utilities', 'products', 'landing', 'sales', 'tools', 'notes'],
+    ns: ['common', 'nav', 'auth', 'errors', 'actions', 'settings', 'dashboard', 'home', 'seed', 'shipping', 'utilities', 'products', 'landing', 'sales', 'tools', 'notes', 'consultoria'],
     
     detection: {
       order: detectionOrder,

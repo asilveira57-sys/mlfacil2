@@ -6,6 +6,7 @@
     "menu_como_funciona": "How it Works",
     "menu_integracoes": "Integrations",
     "menu_planos": "Plans",
+    "menu_consultoria": "Consulting",
     "menu_blog": "Blog",
     "menu_suporte": "Support",
     "btn_entrar": "Sign In",
@@ -210,7 +211,8 @@
       "link1": "Features",
       "link2": "Plans",
       "link3": "Integrations",
-      "link4": "Blog"
+      "link4": "Blog",
+      "link5": "Consulting"
     },
     "col2": {
       "title": "Support",

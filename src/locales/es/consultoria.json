@@ -1,0 +1,124 @@
+{
+  "page_title": "Consultoría Especializada",
+  "page_subtitle": "Acelera tus resultados en Mercado Libre con orientación profesional y estrategias personalizadas.",
+  "hero": {
+    "badge": "Consultoría 1:1",
+    "title": "Transforma tu operación en Mercado Libre",
+    "subtitle": "Análisis profundo de tu negocio, estrategias personalizadas y seguimiento para maximizar tus resultados.",
+    "cta": "Agendar consultoría"
+  },
+  "benefits": {
+    "title": "¿Por qué contratar consultoría?",
+    "item1": {
+      "title": "Diagnóstico completo",
+      "description": "Análisis detallado de tu cuenta, anuncios, precios y posicionamiento competitivo."
+    },
+    "item2": {
+      "title": "Estrategia personalizada",
+      "description": "Plan de acción a medida para tu negocio, con metas claras y plazos definidos."
+    },
+    "item3": {
+      "title": "Resultados medibles",
+      "description": "Seguimiento de KPIs y métricas para garantizar que los cambios generen impacto real."
+    },
+    "item4": {
+      "title": "Experiencia comprobada",
+      "description": "Años de experiencia vendiendo y orientando vendedores en Mercado Libre."
+    }
+  },
+  "packages": {
+    "title": "Paquetes de Consultoría",
+    "subtitle": "Elige el formato que mejor se adapte a tus necesidades.",
+    "basic": {
+      "name": "Diagnóstico Express",
+      "description": "Análisis rápido de tu operación con recomendaciones prácticas.",
+      "price": "USD 60",
+      "duration": "1 sesión de 1h30",
+      "features": [
+        "Análisis completo de la cuenta ML",
+        "Revisión de hasta 10 anuncios",
+        "Diagnóstico de precios",
+        "Informe con recomendaciones",
+        "30 días de soporte por email"
+      ],
+      "cta": "Contratar diagnóstico"
+    },
+    "pro": {
+      "name": "Mentoría Estratégica",
+      "badge": "Más popular",
+      "description": "Seguimiento intensivo para transformar tus resultados.",
+      "price": "USD 180",
+      "duration": "4 sesiones de 1h (mensual)",
+      "features": [
+        "Todo del Diagnóstico Express",
+        "4 sesiones de mentoría en vivo",
+        "Plan estratégico personalizado",
+        "Análisis de competencia profundo",
+        "Optimización de campañas de ADS",
+        "Soporte prioritario por WhatsApp",
+        "Acceso a materiales exclusivos"
+      ],
+      "cta": "Contratar mentoría"
+    },
+    "enterprise": {
+      "name": "Consultoría Full",
+      "description": "Gestión consultiva completa para operaciones de alto volumen.",
+      "price": "Bajo consulta",
+      "duration": "Proyecto personalizado",
+      "features": [
+        "Todo de la Mentoría Estratégica",
+        "Reuniones semanales ilimitadas",
+        "Gestión hands-on de la operación",
+        "Capacitación del equipo",
+        "Implementación de procesos",
+        "Informes personalizados",
+        "Soporte 24/7 dedicado"
+      ],
+      "cta": "Hablar con especialista"
+    }
+  },
+  "process": {
+    "title": "Cómo funciona",
+    "step1": {
+      "title": "Agendamiento",
+      "description": "Elige el paquete ideal y agenda tu primera sesión."
+    },
+    "step2": {
+      "title": "Diagnóstico",
+      "description": "Analizamos tu operación e identificamos oportunidades."
+    },
+    "step3": {
+      "title": "Plan de acción",
+      "description": "Creamos un roadmap personalizado con prioridades claras."
+    },
+    "step4": {
+      "title": "Seguimiento",
+      "description": "Monitoreamos resultados y ajustamos la estrategia."
+    }
+  },
+  "faq": {
+    "title": "Dudas sobre consultoría",
+    "item1": {
+      "question": "¿Cómo se realizan las sesiones?",
+      "answer": "Las sesiones se realizan vía Google Meet o Zoom, con pantalla compartida para análisis en vivo."
+    },
+    "item2": {
+      "question": "¿Necesito ser cliente de ML Fácil?",
+      "answer": "No es obligatorio, pero los clientes de la plataforma aprovechan mejor las recomendaciones con los datos ya integrados."
+    },
+    "item3": {
+      "question": "¿Cuánto tiempo hasta ver resultados?",
+      "answer": "Los resultados iniciales suelen aparecer en 2 a 4 semanas. Las transformaciones más profundas toman de 2 a 3 meses."
+    },
+    "item4": {
+      "question": "¿Puedo cancelar o reagendar?",
+      "answer": "Sí, los reagendamientos se pueden hacer con 24h de anticipación. Reembolso disponible si cancelas antes de la primera sesión."
+    }
+  },
+  "cta": {
+    "title": "¿Listo para acelerar tus resultados?",
+    "subtitle": "Ponte en contacto y descubre cómo podemos ayudar a tu negocio a crecer.",
+    "btn_primary": "Agendar consultoría",
+    "btn_secondary": "Volver al inicio"
+  }
+}
