@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Section, SectionHeader } from "./Section";
+import { EditableText } from "@/components/admin/EditableText";
 import { TierPlanCard } from "@/components/pricing/TierPlanCard";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -83,8 +84,16 @@ export function LandingPricing() {
   return (
     <Section id="planos">
       <SectionHeader
-        title={t('pricing.title')}
-        subtitle={t('pricing.subtitle')}
+        title={
+          <EditableText contentKey="home.pricing.title" as="span">
+            {t('pricing.title')}
+          </EditableText>
+        }
+        subtitle={
+          <EditableText contentKey="home.pricing.subtitle" as="span" multiline>
+            {t('pricing.subtitle')}
+          </EditableText>
+        }
       />
 
       {/* Trial badge */}

@@ -25,7 +25,7 @@ export function EditableText({
   multiline = false,
   children
 }: EditableTextProps) {
-  const { getText, refresh } = useSiteContentContext();
+  const { getText, refresh, content } = useSiteContentContext();
   const { isAdmin, loading: roleLoading } = useUserRole();
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState('');
@@ -39,9 +39,11 @@ export function EditableText({
   
   const Tag = as as ElementType;
 
-  // Non-admin: render plain text
+  const hasDbOverride = contentKey in content;
+
+  // Non-admin: render DB override if available, otherwise children (i18n), otherwise default
   if (roleLoading || !isAdmin) {
-    return <Tag className={className}>{children || displayText}</Tag>;
+    return <Tag className={className}>{(hasDbOverride ? displayText : children) || displayText}</Tag>;
   }
 
   const handleSave = async () => {
@@ -99,7 +101,7 @@ export function EditableText({
             "hover:ring-2 hover:ring-primary/50 hover:ring-offset-2 rounded transition-all"
           )}
         >
-          {children || displayText}
+          {(hasDbOverride ? displayText : children) || displayText}
           <Pencil className="absolute -right-5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-primary opacity-0 group-hover:opacity-100 transition-opacity" />
         </Tag>
       </PopoverTrigger>

@@ -1,41 +1,35 @@
 import { useTranslation } from "react-i18next";
 import { Section, SectionHeader } from "./Section";
+import { EditableText } from "@/components/admin/EditableText";
 import { Link2, BarChart3, Rocket } from "lucide-react";
 
 export function LandingHowItWorks() {
   const { t } = useTranslation('landing');
 
   const steps = [
-    {
-      number: "01",
-      icon: Link2,
-      title: t('howitworks.step1.title'),
-      description: t('howitworks.step1.description')
-    },
-    {
-      number: "02",
-      icon: BarChart3,
-      title: t('howitworks.step2.title'),
-      description: t('howitworks.step2.description')
-    },
-    {
-      number: "03",
-      icon: Rocket,
-      title: t('howitworks.step3.title'),
-      description: t('howitworks.step3.description')
-    }
+    { number: "01", icon: Link2, key: 'step1' },
+    { number: "02", icon: BarChart3, key: 'step2' },
+    { number: "03", icon: Rocket, key: 'step3' }
   ];
 
   return (
     <Section id="como-funciona" variant="muted">
       <SectionHeader
-        title={t('howitworks.title')}
-        subtitle={t('howitworks.subtitle')}
+        title={
+          <EditableText contentKey="home.howitworks.title" as="span">
+            {t('howitworks.title')}
+          </EditableText>
+        }
+        subtitle={
+          <EditableText contentKey="home.howitworks.subtitle" as="span" multiline>
+            {t('howitworks.subtitle')}
+          </EditableText>
+        }
       />
 
       <div className="grid md:grid-cols-3 gap-8 md:gap-12">
         {steps.map((step, index) => (
-          <div key={index} className="relative text-center">
+          <div key={step.key} className="relative text-center">
             {/* Connector line for desktop */}
             {index < steps.length - 1 && (
               <div className="hidden md:block absolute top-16 left-1/2 w-full h-0.5 bg-border" />
@@ -52,11 +46,15 @@ export function LandingHowItWorks() {
               </div>
               
               <h3 className="text-lg font-semibold text-foreground mb-2">
-                {step.title}
+                <EditableText contentKey={`home.howitworks.${step.key}.title`} as="span">
+                  {t(`howitworks.${step.key}.title`)}
+                </EditableText>
               </h3>
               
               <p className="text-muted-foreground text-sm max-w-xs">
-                {step.description}
+                <EditableText contentKey={`home.howitworks.${step.key}.description`} as="span" multiline>
+                  {t(`howitworks.${step.key}.description`)}
+                </EditableText>
               </p>
             </div>
           </div>

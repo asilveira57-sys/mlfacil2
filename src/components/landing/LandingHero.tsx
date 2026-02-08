@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { ArrowRight, Play, Shield, Users, Zap } from "lucide-react";
 import { useSiteContentContext } from "@/contexts/SiteContentContext";
 import { EditableImage } from "@/components/admin/EditableImage";
+import { EditableText } from "@/components/admin/EditableText";
 
 export function LandingHero() {
   const navigate = useNavigate();
@@ -26,18 +27,24 @@ export function LandingHero() {
           <div className="flex justify-center mb-6">
             <div className="inline-flex items-center gap-2 bg-primary/10 text-primary px-4 py-2 rounded-full text-sm font-medium">
               <Zap className="w-4 h-4" />
-              <span>{t('hero.badge')}</span>
+              <EditableText contentKey="home.hero.badge" as="span">
+                {t('hero.badge')}
+              </EditableText>
             </div>
           </div>
 
           {/* Headline */}
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-center text-foreground mb-6 leading-tight">
-            {t('hero.title')}
+            <EditableText contentKey="home.hero.title" as="span">
+              {t('hero.title')}
+            </EditableText>
           </h1>
 
           {/* Subheadline */}
           <p className="text-lg md:text-xl text-muted-foreground text-center max-w-3xl mx-auto mb-10">
-            {t('hero.subtitle')}
+            <EditableText contentKey="home.hero.subtitle" as="span" multiline>
+              {t('hero.subtitle')}
+            </EditableText>
           </p>
 
           {/* CTAs */}
@@ -68,11 +75,15 @@ export function LandingHero() {
           <div className="flex flex-wrap items-center justify-center gap-6 md:gap-10">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Shield className="w-5 h-5 text-success" />
-              <span>{t('hero.trust_mercadopago')}</span>
+              <EditableText contentKey="home.hero.trust_mercadopago" as="span">
+                {t('hero.trust_mercadopago')}
+              </EditableText>
             </div>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Users className="w-5 h-5 text-primary" />
-              <span>{t('hero.trust_multiconta')}</span>
+              <EditableText contentKey="home.hero.trust_multiconta" as="span">
+                {t('hero.trust_multiconta')}
+              </EditableText>
             </div>
           </div>
 
