@@ -90,6 +90,23 @@ export function useNotePins({ workspaceId, moduleKey, companyId }: UseNotePinsOp
         effectiveCompanyId = safeCompanyId;
       }
 
+      // First, delete any existing pin for this note+module+company combo
+      // (handles NULL company_id correctly since UNIQUE treats NULLs as distinct)
+      let deleteQuery = supabase
+        .from('note_pins')
+        .delete()
+        .eq('note_id', noteId)
+        .eq('module_key', effectiveModuleKey)
+        .eq('workspace_id', workspaceId!);
+
+      if (effectiveCompanyId) {
+        deleteQuery = deleteQuery.eq('company_id', effectiveCompanyId);
+      } else {
+        deleteQuery = deleteQuery.is('company_id', null);
+      }
+
+      await deleteQuery;
+
       const { error } = await supabase.from('note_pins').insert({
         workspace_id: workspaceId!,
         company_id: effectiveCompanyId,
