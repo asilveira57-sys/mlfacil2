@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import {
   Accordion,
   AccordionContent,
@@ -6,8 +7,8 @@ import {
 } from "@/components/ui/accordion";
 
 interface FAQItemProps {
-  question: string;
-  answer: string;
+  question: ReactNode;
+  answer: ReactNode;
   value: string;
 }
 
@@ -25,7 +26,7 @@ export function FAQItem({ question, answer, value }: FAQItemProps) {
 }
 
 interface FAQListProps {
-  items: { question: string; answer: string }[];
+  items: { question: ReactNode; answer: ReactNode }[];
 }
 
 export function FAQList({ items }: FAQListProps) {

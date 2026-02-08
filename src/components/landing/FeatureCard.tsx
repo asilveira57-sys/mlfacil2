@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { cn } from "@/lib/utils";
 import { LucideIcon } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -6,8 +7,8 @@ import { useTranslation } from "react-i18next";
 
 interface FeatureCardProps {
   icon: LucideIcon;
-  title: string;
-  description: string;
+  title: ReactNode;
+  description: ReactNode;
   href?: string;
   className?: string;
   iconClassName?: string;

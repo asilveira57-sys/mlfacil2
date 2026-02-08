@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowRight } from "lucide-react";
+import { EditableText } from "@/components/admin/EditableText";
 
 export function LandingCTA() {
   const navigate = useNavigate();
@@ -11,10 +12,14 @@ export function LandingCTA() {
     <section className="py-20 md:py-28 bg-primary">
       <div className="container mx-auto px-4 md:px-6 text-center">
         <h2 className="text-3xl md:text-4xl font-bold text-primary-foreground mb-4">
-          {t('cta.title')}
+          <EditableText contentKey="home.cta.title" as="span">
+            {t('cta.title')}
+          </EditableText>
         </h2>
         <p className="text-lg text-primary-foreground/80 max-w-2xl mx-auto mb-10">
-          {t('cta.subtitle')}
+          <EditableText contentKey="home.cta.subtitle" as="span" multiline>
+            {t('cta.subtitle')}
+          </EditableText>
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
           <Button

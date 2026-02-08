@@ -1,61 +1,55 @@
 import { useTranslation } from "react-i18next";
 import { Section, SectionHeader } from "./Section";
+import { EditableText } from "@/components/admin/EditableText";
 import { Star, Quote } from "lucide-react";
 
 export function LandingTestimonials() {
   const { t } = useTranslation('landing');
 
-  const testimonials = [
-    {
-      name: t('testimonials.item1.name'),
-      role: t('testimonials.item1.role'),
-      content: t('testimonials.item1.content'),
-      avatar: t('testimonials.item1.avatar')
-    },
-    {
-      name: t('testimonials.item2.name'),
-      role: t('testimonials.item2.role'),
-      content: t('testimonials.item2.content'),
-      avatar: t('testimonials.item2.avatar')
-    },
-    {
-      name: t('testimonials.item3.name'),
-      role: t('testimonials.item3.role'),
-      content: t('testimonials.item3.content'),
-      avatar: t('testimonials.item3.avatar')
-    }
-  ];
-
-  const stats = [
-    { value: t('testimonials.stat1.value'), label: t('testimonials.stat1.label') },
-    { value: t('testimonials.stat2.value'), label: t('testimonials.stat2.label') },
-    { value: t('testimonials.stat3.value'), label: t('testimonials.stat3.label') },
-    { value: t('testimonials.stat4.value'), label: t('testimonials.stat4.label') }
-  ];
+  const testimonialKeys = ['item1', 'item2', 'item3'];
+  const statKeys = ['stat1', 'stat2', 'stat3', 'stat4'];
 
   return (
     <Section id="depoimentos" variant="muted">
       <SectionHeader
-        title={t('testimonials.title')}
-        subtitle={t('testimonials.subtitle')}
+        title={
+          <EditableText contentKey="home.testimonials.title" as="span">
+            {t('testimonials.title')}
+          </EditableText>
+        }
+        subtitle={
+          <EditableText contentKey="home.testimonials.subtitle" as="span" multiline>
+            {t('testimonials.subtitle')}
+          </EditableText>
+        }
       />
 
       {/* Testimonials grid */}
       <div className="grid md:grid-cols-3 gap-6 md:gap-8 mb-16">
-        {testimonials.map((testimonial, index) => (
+        {testimonialKeys.map((key) => (
           <div
-            key={index}
+            key={key}
             className="bg-card border border-border rounded-xl p-6 relative"
           >
             <Quote className="w-8 h-8 text-primary/20 absolute top-4 right-4" />
             
             <div className="flex items-center gap-3 mb-4">
               <div className="w-12 h-12 bg-primary/10 text-primary font-semibold rounded-full flex items-center justify-center">
-                {testimonial.avatar}
+                <EditableText contentKey={`home.testimonials.${key}.avatar`} as="span">
+                  {t(`testimonials.${key}.avatar`)}
+                </EditableText>
               </div>
               <div>
-                <p className="font-semibold text-foreground">{testimonial.name}</p>
-                <p className="text-sm text-muted-foreground">{testimonial.role}</p>
+                <p className="font-semibold text-foreground">
+                  <EditableText contentKey={`home.testimonials.${key}.name`} as="span">
+                    {t(`testimonials.${key}.name`)}
+                  </EditableText>
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  <EditableText contentKey={`home.testimonials.${key}.role`} as="span">
+                    {t(`testimonials.${key}.role`)}
+                  </EditableText>
+                </p>
               </div>
             </div>
             
@@ -66,7 +60,9 @@ export function LandingTestimonials() {
             </div>
             
             <p className="text-muted-foreground text-sm leading-relaxed">
-              "{testimonial.content}"
+              "<EditableText contentKey={`home.testimonials.${key}.content`} as="span" multiline>
+                {t(`testimonials.${key}.content`)}
+              </EditableText>"
             </p>
           </div>
         ))}
@@ -74,13 +70,17 @@ export function LandingTestimonials() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-6 md:gap-8">
-        {stats.map((stat, index) => (
-          <div key={index} className="text-center">
+        {statKeys.map((key) => (
+          <div key={key} className="text-center">
             <div className="text-3xl md:text-4xl font-bold text-primary mb-1">
-              {stat.value}
+              <EditableText contentKey={`home.testimonials.${key}.value`} as="span">
+                {t(`testimonials.${key}.value`)}
+              </EditableText>
             </div>
             <div className="text-sm text-muted-foreground">
-              {stat.label}
+              <EditableText contentKey={`home.testimonials.${key}.label`} as="span">
+                {t(`testimonials.${key}.label`)}
+              </EditableText>
             </div>
           </div>
         ))}
