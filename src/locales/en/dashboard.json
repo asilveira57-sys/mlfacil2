@@ -54,7 +54,13 @@
     "zpl_converter": "ZPL Converter",
     "zpl_converter_desc": "Convert labels to ZPL format for thermal printers.",
     "settings": "Settings",
-    "settings_desc": "Profile, companies, integrations and subscription."
+    "settings_desc": "Profile, companies, integrations and subscription.",
+    "pricing": "Pricing",
+    "pricing_desc": "Simulate sale price, margin and profit per product.",
+    "commissions": "Commissions",
+    "commissions_desc": "Check official Mercado Livre commissions by category.",
+    "freight": "Freight Management",
+    "freight_desc": "Freight table, cost calculation and discrepancies."
   },
   "shortcuts": {
     "import_sales": "Import Sales",

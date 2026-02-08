@@ -19,6 +19,9 @@ import {
   MessageSquareText,
   History,
   BookOpen,
+  Calculator,
+  Percent,
+  Truck,
 } from "lucide-react";
 
 interface Module {
@@ -132,6 +135,33 @@ const modules: Module[] = [
     bgColor: "bg-teal-500/10",
     borderColor: "border-teal-500/20 hover:border-teal-500/40",
     badge: "Novo",
+  },
+  {
+    titleKey: "dashboard:modules.pricing",
+    descriptionKey: "dashboard:modules.pricing_desc",
+    icon: Calculator,
+    route: "/precificacao",
+    color: "text-lime-500",
+    bgColor: "bg-lime-500/10",
+    borderColor: "border-lime-500/20 hover:border-lime-500/40",
+  },
+  {
+    titleKey: "dashboard:modules.commissions",
+    descriptionKey: "dashboard:modules.commissions_desc",
+    icon: Percent,
+    route: "/comissoes",
+    color: "text-fuchsia-500",
+    bgColor: "bg-fuchsia-500/10",
+    borderColor: "border-fuchsia-500/20 hover:border-fuchsia-500/40",
+  },
+  {
+    titleKey: "dashboard:modules.freight",
+    descriptionKey: "dashboard:modules.freight_desc",
+    icon: Truck,
+    route: "/frete",
+    color: "text-yellow-500",
+    bgColor: "bg-yellow-500/10",
+    borderColor: "border-yellow-500/20 hover:border-yellow-500/40",
   },
   {
     titleKey: "dashboard:modules.labels",
