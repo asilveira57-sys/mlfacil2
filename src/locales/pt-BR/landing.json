@@ -52,29 +52,30 @@
   "modules": {
     "title": "Módulos para cada necessidade",
     "subtitle": "Ferramentas especializadas para cobrir todas as áreas da sua operação.",
+    "view_more": "Ver mais",
     "item1": {
       "title": "Gestão de Anúncios",
-      "description": "Controle completo dos seus anúncios, preços e estoque em um só lugar."
+      "description": "Controle completo dos seus anúncios, campanhas de ADS, lances e performance publicitária em um só lugar."
     },
     "item2": {
-      "title": "Análise de Vendas",
-      "description": "Relatórios detalhados de vendas, faturamento e performance."
+      "title": "Dashboard e Análises",
+      "description": "Painéis com KPIs de vendas, faturamento, ticket médio e evolução de performance por período."
     },
     "item3": {
-      "title": "Gestão de Clientes",
-      "description": "Histórico de compras, avaliações e comunicação com compradores."
+      "title": "Precificação e Custos",
+      "description": "Simulador de preços, cálculo de comissões, margem de lucro e ponto de equilíbrio por produto."
     },
     "item4": {
-      "title": "Controle de Qualidade",
-      "description": "Monitore a reputação e qualidade do atendimento da sua loja."
+      "title": "Radiografia e Seed",
+      "description": "Análise profunda de anúncios, diagnóstico de saúde e validação de qualidade dos seus listings."
     },
     "item5": {
-      "title": "Calculadora de Custos",
-      "description": "Calcule custos, taxas e margens de lucro de cada produto."
+      "title": "Tendências e Concorrência",
+      "description": "Descubra produtos em alta, palavras-chave trending e monitore preços e estratégias dos concorrentes."
     },
     "item6": {
-      "title": "Relatórios Fiscais",
-      "description": "Gere relatórios para contabilidade e declarações fiscais."
+      "title": "Automações e Alertas",
+      "description": "Regras automáticas para ajuste de lances, notificações de eventos críticos e gerenciamento de tarefas."
     }
   },
   "howitworks": {
@@ -101,8 +102,8 @@
       "description": "Sincronização automática de pagamentos e taxas."
     },
     "item2": {
-      "title": "Notas Fiscais",
-      "description": "Integração com sistemas de emissão de NF-e."
+      "title": "API do Mercado Livre",
+      "description": "Integração oficial via OAuth com acesso seguro a pedidos, anúncios e métricas."
     },
     "item3": {
       "title": "Segurança",

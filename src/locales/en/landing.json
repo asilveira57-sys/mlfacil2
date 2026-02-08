@@ -52,29 +52,30 @@
   "modules": {
     "title": "Modules for every need",
     "subtitle": "Specialized tools to cover all areas of your operation.",
+    "view_more": "Learn more",
     "item1": {
       "title": "Listing Management",
-      "description": "Complete control of your listings, prices and inventory in one place."
+      "description": "Complete control of your listings, ADS campaigns, bids and advertising performance in one place."
     },
     "item2": {
-      "title": "Sales Analytics",
-      "description": "Detailed sales, revenue and performance reports."
+      "title": "Dashboard & Analytics",
+      "description": "Panels with sales KPIs, revenue, average ticket and performance evolution by period."
     },
     "item3": {
-      "title": "Customer Management",
-      "description": "Purchase history, reviews and buyer communication."
+      "title": "Pricing & Costs",
+      "description": "Price simulator, commission calculator, profit margin and break-even point per product."
     },
     "item4": {
-      "title": "Quality Control",
-      "description": "Monitor your store's reputation and service quality."
+      "title": "X-Ray & Seed",
+      "description": "Deep listing analysis, health diagnosis and quality validation of your listings."
     },
     "item5": {
-      "title": "Cost Calculator",
-      "description": "Calculate costs, fees and profit margins for each product."
+      "title": "Trends & Competition",
+      "description": "Discover trending products, trending keywords and monitor competitor prices and strategies."
     },
     "item6": {
-      "title": "Tax Reports",
-      "description": "Generate reports for accounting and tax declarations."
+      "title": "Automations & Alerts",
+      "description": "Automatic rules for bid adjustments, critical event notifications and task management."
     }
   },
   "howitworks": {
@@ -101,8 +102,8 @@
       "description": "Automatic synchronization of payments and fees."
     },
     "item2": {
-      "title": "Invoices",
-      "description": "Integration with invoice issuance systems."
+      "title": "Mercado Libre API",
+      "description": "Official OAuth integration with secure access to orders, listings and metrics."
     },
     "item3": {
       "title": "Security",

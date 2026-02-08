@@ -3,11 +3,11 @@ import { Section, SectionHeader } from "./Section";
 import { FeatureCard } from "./FeatureCard";
 import { 
   ClipboardList,
-  TrendingUp,
-  Users,
-  CheckCircle,
+  BarChart3,
   Calculator,
-  FileText
+  Activity,
+  TrendingUp,
+  Zap
 } from "lucide-react";
 
 export function LandingModules() {
@@ -18,37 +18,37 @@ export function LandingModules() {
       icon: ClipboardList,
       title: t('modules.item1.title'),
       description: t('modules.item1.description'),
-      href: "#"
+      href: "/modulo/gestao-anuncios"
     },
     {
-      icon: TrendingUp,
+      icon: BarChart3,
       title: t('modules.item2.title'),
       description: t('modules.item2.description'),
-      href: "#"
-    },
-    {
-      icon: Users,
-      title: t('modules.item3.title'),
-      description: t('modules.item3.description'),
-      href: "#"
-    },
-    {
-      icon: CheckCircle,
-      title: t('modules.item4.title'),
-      description: t('modules.item4.description'),
-      href: "#"
+      href: "/modulo/dashboard-analises"
     },
     {
       icon: Calculator,
-      title: t('modules.item5.title'),
-      description: t('modules.item5.description'),
-      href: "#"
+      title: t('modules.item3.title'),
+      description: t('modules.item3.description'),
+      href: "/modulo/precificacao-custos"
     },
     {
-      icon: FileText,
+      icon: Activity,
+      title: t('modules.item4.title'),
+      description: t('modules.item4.description'),
+      href: "/modulo/radiografia-seed"
+    },
+    {
+      icon: TrendingUp,
+      title: t('modules.item5.title'),
+      description: t('modules.item5.description'),
+      href: "/modulo/tendencias-concorrencia"
+    },
+    {
+      icon: Zap,
       title: t('modules.item6.title'),
       description: t('modules.item6.description'),
-      href: "#"
+      href: "/modulo/automacoes-alertas"
     }
   ];
 

@@ -52,29 +52,30 @@
   "modules": {
     "title": "Módulos para cada necesidad",
     "subtitle": "Herramientas especializadas para cubrir todas las áreas de tu operación.",
+    "view_more": "Ver más",
     "item1": {
       "title": "Gestión de Anuncios",
-      "description": "Control completo de tus anuncios, precios e inventario en un solo lugar."
+      "description": "Control completo de tus anuncios, campañas de ADS, pujas y rendimiento publicitario en un solo lugar."
     },
     "item2": {
-      "title": "Análisis de Ventas",
-      "description": "Informes detallados de ventas, facturación y rendimiento."
+      "title": "Dashboard y Análisis",
+      "description": "Paneles con KPIs de ventas, facturación, ticket promedio y evolución de rendimiento por período."
     },
     "item3": {
-      "title": "Gestión de Clientes",
-      "description": "Historial de compras, evaluaciones y comunicación con compradores."
+      "title": "Precios y Costos",
+      "description": "Simulador de precios, cálculo de comisiones, margen de ganancia y punto de equilibrio por producto."
     },
     "item4": {
-      "title": "Control de Calidad",
-      "description": "Monitorea la reputación y calidad del servicio de tu tienda."
+      "title": "Radiografía y Seed",
+      "description": "Análisis profundo de anuncios, diagnóstico de salud y validación de calidad de tus listings."
     },
     "item5": {
-      "title": "Calculadora de Costos",
-      "description": "Calcula costos, tarifas y márgenes de ganancia de cada producto."
+      "title": "Tendencias y Competencia",
+      "description": "Descubre productos en auge, palabras clave trending y monitorea precios y estrategias de la competencia."
     },
     "item6": {
-      "title": "Informes Fiscales",
-      "description": "Genera informes para contabilidad y declaraciones fiscales."
+      "title": "Automatizaciones y Alertas",
+      "description": "Reglas automáticas para ajuste de pujas, notificaciones de eventos críticos y gestión de tareas."
     }
   },
   "howitworks": {
@@ -101,8 +102,8 @@
       "description": "Sincronización automática de pagos y tarifas."
     },
     "item2": {
-      "title": "Facturas",
-      "description": "Integración con sistemas de emisión de facturas."
+      "title": "API de Mercado Libre",
+      "description": "Integración oficial vía OAuth con acceso seguro a pedidos, anuncios y métricas."
     },
     "item3": {
       "title": "Seguridad",
