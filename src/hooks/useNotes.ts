@@ -1,10 +1,11 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import type { Note } from '@/types/notes';
 import { useToast } from '@/hooks/use-toast';
 
 const PAGE_SIZE = 20;
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface UseNotesOptions {
   workspaceId: string | null;
@@ -19,7 +20,13 @@ export function useNotes({ workspaceId, companyId, search, status = 'active' }: 
   const [autoSaveTimers] = useState(() => new Map<string, NodeJS.Timeout>());
   const lastSaveRef = useRef<Record<string, number>>({});
 
-  const queryKey = ['notes', workspaceId, companyId, search, status];
+  // Only use companyId if it's a valid UUID — otherwise ignore it
+  const safeCompanyId = useMemo(
+    () => (companyId && UUID_REGEX.test(companyId) ? companyId : null),
+    [companyId]
+  );
+
+  const queryKey = ['notes', workspaceId, safeCompanyId, search, status];
 
   const {
     data,
@@ -42,8 +49,8 @@ export function useNotes({ workspaceId, companyId, search, status = 'active' }: 
         .limit(PAGE_SIZE);
 
       // Filter: company notes + global notes (company_id IS NULL)
-      if (companyId) {
-        query = query.or(`company_id.eq.${companyId},company_id.is.null`);
+      if (safeCompanyId) {
+        query = query.or(`company_id.eq.${safeCompanyId},company_id.is.null`);
       }
 
       // Search
@@ -84,7 +91,7 @@ export function useNotes({ workspaceId, companyId, search, status = 'active' }: 
         .from('notes')
         .insert({
           workspace_id: workspaceId!,
-          company_id: note.company_id ?? null,
+          company_id: note.company_id && UUID_REGEX.test(note.company_id) ? note.company_id : null,
           created_by_user_id: user.id,
           title: note.title || '',
           content_rich: (note.content_rich || null) as any,
