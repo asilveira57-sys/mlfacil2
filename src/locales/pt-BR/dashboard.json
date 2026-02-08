@@ -54,7 +54,13 @@
     "zpl_converter": "ZPL Converter",
     "zpl_converter_desc": "Converta etiquetas para formato ZPL de impressoras térmicas.",
     "settings": "Configurações",
-    "settings_desc": "Perfil, empresas, integrações e assinatura."
+    "settings_desc": "Perfil, empresas, integrações e assinatura.",
+    "pricing": "Precificação",
+    "pricing_desc": "Simule preço de venda, margem e lucro por produto.",
+    "commissions": "Comissões",
+    "commissions_desc": "Consulte comissões oficiais do Mercado Livre por categoria.",
+    "freight": "Gestão de Frete",
+    "freight_desc": "Tabela de frete, cálculo de custos e divergências."
   },
   "shortcuts": {
     "import_sales": "Importar Vendas",

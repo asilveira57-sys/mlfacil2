@@ -24,6 +24,9 @@ import {
   History,
   Sprout,
   BookOpen,
+  Calculator,
+  Percent,
+  Truck,
 } from "lucide-react";
 import {
   Collapsible,
@@ -87,6 +90,9 @@ const analyticsNavItems: NavItem[] = [
   { titleKey: "nav:competitor", url: "/concorrencia", icon: Target, moduleId: "concorrencia", moduleKey: "concorrencia" },
   { titleKey: "nav:abc_analysis", url: "/abc-analysis", icon: BarChart3, moduleId: "abc", moduleKey: "abc" },
   { titleKey: "nav:costs", url: "/custos", icon: DollarSign, moduleId: "custos", moduleKey: "custos" },
+  { titleKey: "nav:pricing", url: "/precificacao", icon: Calculator, moduleId: "precificacao", moduleKey: "precificacao" },
+  { titleKey: "nav:commissions", url: "/comissoes", icon: Percent, moduleId: "comissoes", moduleKey: "comissoes" },
+  { titleKey: "nav:freight", url: "/frete", icon: Truck, moduleId: "frete", moduleKey: "frete" },
 ];
 
 const toolsNavItems: NavItem[] = [

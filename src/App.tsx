@@ -44,6 +44,8 @@ import AdTimelineDetail from "./pages/AdTimelineDetail";
 import AdActionsCenter from "./pages/AdActionsCenter";
 import Seed from "./pages/Seed";
 import FreightManagement from "./pages/FreightManagement";
+import Precificacao from "./pages/Precificacao";
+import Comissoes from "./pages/Comissoes";
 import ProductsPage from "./pages/ProductsPage";
 import ProductDetailPage from "./pages/ProductDetailPage";
 import NotFound from "./pages/NotFound";
@@ -171,6 +173,8 @@ const App = () => {
                   <Route path="/seed/:itemId" element={<Seed />} />
                   <Route path="/seed/sementes" element={<Seed />} />
                   <Route path="/frete" element={<FreightManagement />} />
+                  <Route path="/precificacao" element={<Precificacao />} />
+                  <Route path="/comissoes" element={<Comissoes />} />
                   {/* Products module */}
                   <Route path="/produtos" element={<ProductsPage />} />
                   <Route path="/produtos/:id" element={<ProductDetailPage />} />
