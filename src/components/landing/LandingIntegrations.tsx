@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { Section, SectionHeader } from "./Section";
 import { 
   CreditCard, 
-  FileCheck, 
+  Globe, 
   Shield, 
   Users,
   Check
@@ -18,7 +18,7 @@ export function LandingIntegrations() {
       description: t('integrations.item1.description')
     },
     {
-      icon: FileCheck,
+      icon: Globe,
       title: t('integrations.item2.title'),
       description: t('integrations.item2.description')
     },

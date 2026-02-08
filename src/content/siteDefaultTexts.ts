@@ -50,24 +50,24 @@ export const siteDefaultTexts: Record<string, string> = {
   'home.modules.title': 'Módulos poderosos para seu negócio',
   'home.modules.subtitle':
     'Ferramentas especializadas que cobrem todas as necessidades de um seller profissional.',
-  'home.modules.item1.title': 'Pendências',
+  'home.modules.item1.title': 'Gestão de Anúncios',
   'home.modules.item1.description':
-    'Gerencie tarefas, pedidos em atraso e ações necessárias em um painel centralizado.',
-  'home.modules.item2.title': 'Tendências & Insights',
+    'Controle completo dos seus anúncios, campanhas de ADS, lances e performance publicitária em um só lugar.',
+  'home.modules.item2.title': 'Dashboard e Análises',
   'home.modules.item2.description':
-    'Descubra produtos em alta, palavras-chave trending e oportunidades de mercado.',
-  'home.modules.item3.title': 'Concorrência',
+    'Painéis com KPIs de vendas, faturamento, ticket médio e evolução de performance por período.',
+  'home.modules.item3.title': 'Precificação e Custos',
   'home.modules.item3.description':
-    'Monitore preços, posicionamento e estratégias dos seus principais concorrentes.',
-  'home.modules.item4.title': 'Auditoria & Validações',
+    'Simulador de preços, cálculo de comissões, margem de lucro e ponto de equilíbrio por produto.',
+  'home.modules.item4.title': 'Radiografia e Seed',
   'home.modules.item4.description':
-    'Identifique problemas nos seus anúncios antes que afetem suas vendas.',
-  'home.modules.item5.title': 'Custos & Margem',
+    'Análise profunda de anúncios, diagnóstico de saúde e validação de qualidade dos seus listings.',
+  'home.modules.item5.title': 'Tendências e Concorrência',
   'home.modules.item5.description':
-    'Controle custos, calcule margens reais e otimize a precificação dos produtos.',
-  'home.modules.item6.title': 'Relatórios',
+    'Descubra produtos em alta, palavras-chave trending e monitore preços e estratégias dos concorrentes.',
+  'home.modules.item6.title': 'Automações e Alertas',
   'home.modules.item6.description':
-    'Exporte dados detalhados para análise e acompanhe a evolução ao longo do tempo.',
+    'Regras automáticas para ajuste de lances, notificações de eventos críticos e gerenciamento de tarefas.',
 
   // ============ HOME / HOW IT WORKS ============
   'home.howitworks.title': 'Como funciona?',
@@ -89,9 +89,9 @@ export const siteDefaultTexts: Record<string, string> = {
   'home.integrations.item1.title': 'Mercado Pago',
   'home.integrations.item1.description':
     'Pagamentos por assinatura e avulsos integrados nativamente.',
-  'home.integrations.item2.title': 'Notas e Faturamento',
+  'home.integrations.item2.title': 'API do Mercado Livre',
   'home.integrations.item2.description':
-    'Acompanhe notas fiscais e histórico de cobranças.',
+    'Integração oficial via OAuth com acesso seguro a pedidos, anúncios e métricas.',
   'home.integrations.item3.title': 'Segurança & LGPD',
   'home.integrations.item3.description':
     'Dados criptografados e conformidade com legislação brasileira.',

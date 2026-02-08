@@ -2,6 +2,7 @@ import { cn } from "@/lib/utils";
 import { LucideIcon } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 interface FeatureCardProps {
   icon: LucideIcon;
@@ -20,6 +21,8 @@ export function FeatureCard({
   className,
   iconClassName
 }: FeatureCardProps) {
+  const { t } = useTranslation('landing');
+
   return (
     <div className={cn(
       "group bg-card p-6 md:p-8 rounded-2xl border border-border",
@@ -47,7 +50,7 @@ export function FeatureCard({
           to={href}
           className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:gap-2 transition-all"
         >
-          Ver mais
+          {t('modules.view_more', 'Ver mais')}
           <ArrowRight className="w-4 h-4" />
         </Link>
       )}
