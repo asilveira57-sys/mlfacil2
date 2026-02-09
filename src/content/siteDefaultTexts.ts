@@ -216,6 +216,7 @@ export const siteDefaultTexts: Record<string, string> = {
   'home.footer.col3.link2': 'Privacidade',
   'home.footer.col3.link3': 'Cookies',
   'home.footer.col3.link4': 'LGPD',
+  'home.footer.col1.link5': 'Consultoria',
   'home.footer.copyright': '© 2024 ML Analyzer Pro. Todos os direitos reservados.',
   'home.footer.social_twitter': '',
   'home.footer.social_linkedin': '',
