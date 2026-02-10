@@ -433,6 +433,14 @@ serve(async (req) => {
 
     console.log('Authenticated user:', user.id);
 
+    // ML API Access Gate
+    const { assertMlApiAccess } = await import("../_shared/ml-api-gate.ts");
+    const gate = await assertMlApiAccess(supabaseAdmin, user.id);
+    if (!gate.allowed) {
+      console.log(`[ml-generate-labels] Access denied: ${gate.reason}`);
+      return gate.response!;
+    }
+
     const { seller_id, shipment_ids, format, layout = 'meli_100x150' } = await req.json();
     
     if (!seller_id || !shipment_ids || shipment_ids.length === 0) {

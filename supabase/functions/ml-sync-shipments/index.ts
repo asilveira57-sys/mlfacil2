@@ -244,6 +244,14 @@ serve(async (req) => {
 
     console.log('Authenticated user:', user.id);
 
+    // ML API Access Gate
+    const { assertMlApiAccess } = await import("../_shared/ml-api-gate.ts");
+    const gate = await assertMlApiAccess(supabaseAdmin, user.id);
+    if (!gate.allowed) {
+      console.log(`[ml-sync-shipments] Access denied: ${gate.reason}`);
+      return gate.response!;
+    }
+
     const { seller_id, shipment_ids } = await req.json();
     
     if (!seller_id) {

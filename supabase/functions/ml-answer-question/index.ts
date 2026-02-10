@@ -59,6 +59,14 @@ serve(async (req) => {
 
     log(`User authenticated: ${user.id}`);
 
+    // ML API Access Gate - check trial/subscription
+    const { assertMlApiAccess } = await import("../_shared/ml-api-gate.ts");
+    const gate = await assertMlApiAccess(supabase, user.id);
+    if (!gate.allowed) {
+      log(`Access denied: ${gate.reason}`);
+      return gate.response!;
+    }
+
     const { question_id, response_text, seller_id, account_id }: AnswerRequest & { account_id?: string } = await req.json();
 
     if (!question_id || !response_text || !seller_id) {

@@ -51,6 +51,18 @@ serve(async (req) => {
       );
     }
 
+    // ML API Access Gate
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    );
+    const { assertMlApiAccess } = await import("../_shared/ml-api-gate.ts");
+    const gate = await assertMlApiAccess(supabaseAdmin, user.id);
+    if (!gate.allowed) {
+      console.log(`[ml-get-item] Access denied: ${gate.reason}`);
+      return gate.response!;
+    }
+
     // Get user's ML account (with valid token)
     const { data: mlAccount, error: accountError } = await supabaseClient
       .from('ml_accounts')

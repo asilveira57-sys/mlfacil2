@@ -189,6 +189,14 @@ serve(async (req) => {
 
     log(`User authenticated: ${user.id}`);
 
+    // ML API Access Gate
+    const { assertMlApiAccess } = await import("../_shared/ml-api-gate.ts");
+    const gate = await assertMlApiAccess(supabase, user.id);
+    if (!gate.allowed) {
+      log(`Access denied: ${gate.reason}`);
+      return gate.response!;
+    }
+
     const { seller_id, account_id, days_back = 60, batch_size: rawBatchSize = 30 } = await req.json();
     const batch_size = Math.min(rawBatchSize, 50); // ML API limit is 50
 

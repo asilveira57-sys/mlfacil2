@@ -54,6 +54,14 @@ serve(async (req) => {
 
     console.log('Authenticated user:', user.id);
 
+    // ML API Access Gate - check trial/subscription
+    const { assertMlApiAccess } = await import("../_shared/ml-api-gate.ts");
+    const gate = await assertMlApiAccess(supabaseAdmin, user.id);
+    if (!gate.allowed) {
+      console.log(`[ml-sales-data] Access denied: ${gate.reason}`);
+      return gate.response!;
+    }
+
     // Parse request body for date filters and optional seller_id/account_id
     let dateFrom: string | null = null;
     let dateTo: string | null = null;

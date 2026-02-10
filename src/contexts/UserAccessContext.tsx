@@ -38,6 +38,9 @@ interface UserAccessContextValue {
   canPrintLabels: boolean;
   mlConnected: boolean;
   mlIsOwner: boolean;
+  mlApiAccessAllowed: boolean;
+  mlApiAccessReason: string | null;
+  mlApiAccessMessage: string | null;
 }
 
 const UserAccessContext = createContext<UserAccessContextValue | undefined>(undefined);
