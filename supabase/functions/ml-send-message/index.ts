@@ -124,6 +124,14 @@ serve(async (req) => {
 
     log(`User authenticated: ${user.id}`);
 
+    // ML API Access Gate
+    const { assertMlApiAccess } = await import("../_shared/ml-api-gate.ts");
+    const gate = await assertMlApiAccess(supabase, user.id);
+    if (!gate.allowed) {
+      log(`Access denied: ${gate.reason}`);
+      return gate.response!;
+    }
+
     const body: SendMessageRequest = await req.json();
     const { conversation_id, pack_id, order_id, buyer_id, seller_id, account_id, text, use_action_guide, action_guide_reason } = body;
 

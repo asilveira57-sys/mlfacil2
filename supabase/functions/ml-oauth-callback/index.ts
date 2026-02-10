@@ -44,7 +44,6 @@ serve(async (req) => {
     console.log('Company ID from state:', companyId || 'none');
 
     if (!userId) {
-      // Redirect with error - no user ID
       const errorUrl = new URL(`${frontendOrigin}/dashboard`);
       errorUrl.searchParams.set('ml_error', 'missing_user_id');
       return Response.redirect(errorUrl.toString(), 302);
@@ -118,9 +117,11 @@ serve(async (req) => {
       .eq('ml_user_id', mlUserIdStr)
       .maybeSingle();
 
+    let mlAccountId: string;
+
     if (existingAccount) {
-      // UPDATE existing account - just refresh tokens, keep everything else
-      console.log('Updating existing account:', existingAccount.id);
+      mlAccountId = existingAccount.id;
+      console.log('Updating existing account:', mlAccountId);
       
       const updateData: Record<string, unknown> = {
         access_token: tokenData.access_token,
@@ -129,7 +130,6 @@ serve(async (req) => {
         nickname: userData.nickname || null,
         email: userData.email || null,
         country_id: userData.site_id || null,
-        // Restore connection status to connected
         connection_status: 'connected',
         is_active: true,
         last_token_refresh_at: now,
@@ -140,7 +140,6 @@ serve(async (req) => {
         updated_at: now,
       };
       
-      // Update company_id if provided and not already set
       if (companyId) {
         updateData.company_id = companyId;
       }
@@ -157,7 +156,6 @@ serve(async (req) => {
         return Response.redirect(errorUrl.toString(), 302);
       }
     } else {
-      // INSERT new account - does not affect other accounts
       console.log('Creating new ML account for seller:', mlUserIdStr, 'with company:', companyId || 'none');
       
       const insertData: Record<string, unknown> = {
@@ -176,27 +174,138 @@ serve(async (req) => {
         consecutive_failures: 0,
       };
       
-      // Add company_id if provided
       if (companyId) {
         insertData.company_id = companyId;
       }
       
-      const { error: insertError } = await supabaseAdmin
+      const { data: newAccount, error: insertError } = await supabaseAdmin
         .from('ml_accounts')
-        .insert(insertData);
+        .insert(insertData)
+        .select('id')
+        .single();
 
-      if (insertError) {
+      if (insertError || !newAccount) {
         console.error('Error creating ML account:', insertError);
         const errorUrl = new URL(`${frontendOrigin}/dashboard`);
         errorUrl.searchParams.set('ml_error', 'save_failed');
         return Response.redirect(errorUrl.toString(), 302);
       }
+      
+      mlAccountId = newAccount.id;
     }
 
     console.log('ML account saved successfully');
-    console.log('ML OAuth completed successfully - other accounts unaffected');
 
-    // Redirect back to frontend dashboard with simple success flag (NO TOKENS!)
+    // ================================================================
+    // TRIAL + BOOTSTRAP: Start trial on first OAuth and trigger 30d import
+    // ================================================================
+    
+    // Resolve company_id if not provided in state
+    let resolvedCompanyId = companyId;
+    if (!resolvedCompanyId) {
+      // Try to get company from ml_account
+      const { data: mlAcc } = await supabaseAdmin
+        .from('ml_accounts')
+        .select('company_id')
+        .eq('id', mlAccountId)
+        .single();
+      
+      resolvedCompanyId = mlAcc?.company_id || null;
+      
+      // If still no company, try user's default company
+      if (!resolvedCompanyId) {
+        const { data: userCompany } = await supabaseAdmin
+          .from('companies')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('is_active', true)
+          .limit(1)
+          .single();
+        
+        resolvedCompanyId = userCompany?.id || null;
+        
+        // Link ml_account to company if found
+        if (resolvedCompanyId) {
+          await supabaseAdmin
+            .from('ml_accounts')
+            .update({ company_id: resolvedCompanyId })
+            .eq('id', mlAccountId);
+        }
+      }
+    }
+
+    if (resolvedCompanyId) {
+      // Start trial if first OAuth connection ever for this company
+      try {
+        const { data: trialResult } = await supabaseAdmin.rpc('start_company_trial', {
+          p_company_id: resolvedCompanyId,
+        });
+        
+        if (trialResult?.started) {
+          console.log('Trial started for company:', resolvedCompanyId, 'ends at:', trialResult.trial_ends_at);
+        } else {
+          console.log('Trial already started or not applicable:', trialResult?.reason);
+        }
+      } catch (trialErr) {
+        console.error('Error starting trial (non-fatal):', trialErr);
+      }
+
+      // Create bootstrap_30d job (idempotent via unique constraint)
+      try {
+        const windowEnd = new Date();
+        const windowStart = new Date(windowEnd.getTime() - 30 * 24 * 60 * 60 * 1000);
+        
+        // Truncate to day boundaries for idempotency
+        windowStart.setHours(0, 0, 0, 0);
+        windowEnd.setHours(23, 59, 59, 999);
+
+        const { data: existingJob } = await supabaseAdmin
+          .from('sync_jobs')
+          .select('id, status')
+          .eq('company_id', resolvedCompanyId)
+          .eq('ml_account_id', mlAccountId)
+          .eq('job_type', 'bootstrap_30d')
+          .eq('status', 'success')
+          .limit(1)
+          .maybeSingle();
+
+        if (existingJob) {
+          console.log('Bootstrap already completed for this account, skipping');
+        } else {
+          const { error: jobError } = await supabaseAdmin
+            .from('sync_jobs')
+            .upsert({
+              user_id: userId,
+              seller_id: mlUserIdStr,
+              company_id: resolvedCompanyId,
+              ml_account_id: mlAccountId,
+              job_type: 'bootstrap_30d',
+              status: 'processing',
+              window_start: windowStart.toISOString(),
+              window_end: windowEnd.toISOString(),
+              total_records: 0,
+              processed_records: 0,
+            }, {
+              onConflict: 'company_id,ml_account_id,job_type,window_start,window_end',
+              ignoreDuplicates: true,
+            });
+
+          if (jobError) {
+            console.error('Error creating bootstrap job (non-fatal):', jobError);
+          } else {
+            console.log('Bootstrap 30d job created for account:', mlAccountId);
+          }
+        }
+      } catch (bootstrapErr) {
+        console.error('Error setting up bootstrap (non-fatal):', bootstrapErr);
+      }
+    } else {
+      console.warn('No company found for user, trial/bootstrap skipped');
+    }
+
+    console.log('ML OAuth completed successfully');
+
+    // Redirect back to frontend dashboard with success flag
     const redirectUrl = new URL(`${frontendOrigin}/dashboard`);
     redirectUrl.searchParams.set('ml_connected', 'true');
     redirectUrl.searchParams.set('nickname', userData.nickname || '');
@@ -208,7 +317,6 @@ serve(async (req) => {
     
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     
-    // Redirect to frontend with error
     return new Response(
       JSON.stringify({ 
         error: errorMessage,

@@ -67,6 +67,14 @@ serve(async (req) => {
       );
     }
 
+    // ML API Access Gate - check trial/subscription
+    const { assertMlApiAccess } = await import("../_shared/ml-api-gate.ts");
+    const gate = await assertMlApiAccess(supabase, user.id);
+    if (!gate.allowed) {
+      console.log(`[ml-sync-questions] Access denied: ${gate.reason}`);
+      return gate.response!;
+    }
+
     const { seller_id, account_id, limit = 100 } = await req.json();
 
     if (!seller_id) {

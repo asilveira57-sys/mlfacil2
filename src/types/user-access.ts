@@ -50,6 +50,11 @@ export interface FeatureFlags {
   ml_is_collaborator: boolean;
   ml_requires_owner_warning: boolean;
   
+  // ML API Access Gate
+  ml_api_access_allowed: boolean;
+  ml_api_access_reason: string | null;
+  ml_api_access_message: string | null;
+  
   // Recursos
   can_print_labels: boolean;
   can_import_sales: boolean;

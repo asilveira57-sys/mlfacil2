@@ -39,6 +39,9 @@ interface UseUserAccessStateReturn {
   canPrintLabels: boolean;
   mlConnected: boolean;
   mlIsOwner: boolean;
+  mlApiAccessAllowed: boolean;
+  mlApiAccessReason: string | null;
+  mlApiAccessMessage: string | null;
 }
 
 export function useUserAccessState(): UseUserAccessStateReturn {
@@ -197,5 +200,8 @@ export function useUserAccessState(): UseUserAccessStateReturn {
     canPrintLabels: flags?.can_print_labels ?? false,
     mlConnected: flags?.ml_connected ?? false,
     mlIsOwner: flags?.ml_is_owner ?? false,
+    mlApiAccessAllowed: flags?.ml_api_access_allowed ?? false,
+    mlApiAccessReason: flags?.ml_api_access_reason ?? null,
+    mlApiAccessMessage: flags?.ml_api_access_message ?? null,
   };
 }

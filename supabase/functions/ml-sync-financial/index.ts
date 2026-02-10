@@ -64,6 +64,14 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ML API Access Gate
+    const { assertMlApiAccess } = await import("../_shared/ml-api-gate.ts");
+    const gate = await assertMlApiAccess(supabase, user.id);
+    if (!gate.allowed) {
+      console.log(`[ml-sync-financial] Access denied: ${gate.reason}`);
+      return gate.response!;
+    }
+
     const body = await req.json().catch(() => ({}));
     const { seller_id, days = 30, mode = 'full', continue_sync = false, action } = body;
 

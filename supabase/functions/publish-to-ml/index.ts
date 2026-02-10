@@ -41,6 +41,18 @@ serve(async (req) => {
       );
     }
 
+    // ML API Access Gate
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    );
+    const { assertMlApiAccess } = await import("../_shared/ml-api-gate.ts");
+    const gate = await assertMlApiAccess(supabaseAdmin, user.id);
+    if (!gate.allowed) {
+      console.log(`[publish-to-ml] Access denied: ${gate.reason}`);
+      return gate.response!;
+    }
+
     // Get product record
     const { data: record, error: recordError } = await supabase
       .from('product_records')

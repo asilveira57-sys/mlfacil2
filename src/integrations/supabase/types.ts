@@ -2560,6 +2560,9 @@ export type Database = {
           display_name: string
           id: string
           is_active: boolean | null
+          trial_ends_at: string | null
+          trial_started_at: string | null
+          trial_status: string | null
           updated_at: string | null
           user_id: string
         }
@@ -2569,6 +2572,9 @@ export type Database = {
           display_name: string
           id?: string
           is_active?: boolean | null
+          trial_ends_at?: string | null
+          trial_started_at?: string | null
+          trial_status?: string | null
           updated_at?: string | null
           user_id: string
         }
@@ -2578,6 +2584,9 @@ export type Database = {
           display_name?: string
           id?: string
           is_active?: boolean | null
+          trial_ends_at?: string | null
+          trial_started_at?: string | null
+          trial_status?: string | null
           updated_at?: string | null
           user_id?: string
         }
@@ -9970,42 +9979,76 @@ export type Database = {
       }
       sync_jobs: {
         Row: {
+          company_id: string | null
           completed_at: string | null
           created_at: string
           error_message: string | null
           id: string
           job_type: string
+          ml_account_id: string | null
           processed_records: number | null
           seller_id: string
           status: string
           total_records: number | null
           user_id: string
+          window_end: string | null
+          window_start: string | null
         }
         Insert: {
+          company_id?: string | null
           completed_at?: string | null
           created_at?: string
           error_message?: string | null
           id?: string
           job_type?: string
+          ml_account_id?: string | null
           processed_records?: number | null
           seller_id: string
           status?: string
           total_records?: number | null
           user_id: string
+          window_end?: string | null
+          window_start?: string | null
         }
         Update: {
+          company_id?: string | null
           completed_at?: string | null
           created_at?: string
           error_message?: string | null
           id?: string
           job_type?: string
+          ml_account_id?: string | null
           processed_records?: number | null
           seller_id?: string
           status?: string
           total_records?: number | null
           user_id?: string
+          window_end?: string | null
+          window_start?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "sync_jobs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sync_jobs_ml_account_id_fkey"
+            columns: ["ml_account_id"]
+            isOneToOne: false
+            referencedRelation: "ml_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sync_jobs_ml_account_id_fkey"
+            columns: ["ml_account_id"]
+            isOneToOne: false
+            referencedRelation: "unified_marketplace_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       sync_scheduler: {
         Row: {
@@ -11666,6 +11709,7 @@ export type Database = {
         Args: { _user_id: string; _workspace_id: string }
         Returns: boolean
       }
+      check_ml_api_access: { Args: { p_user_id: string }; Returns: Json }
       check_snoozed_notifications: { Args: never; Returns: undefined }
       count_orders_needing_cost_sync: {
         Args: { p_seller_id: string }
@@ -11834,6 +11878,7 @@ export type Database = {
         Args: { p_notification_id: string; p_snooze_hours?: number }
         Returns: undefined
       }
+      start_company_trial: { Args: { p_company_id: string }; Returns: Json }
       start_user_trial: {
         Args: { p_plan_code?: string; p_user_id: string }
         Returns: string
