@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { fetchAllRows } from '../_shared/fetch-all-rows.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -193,25 +194,27 @@ Deno.serve(async (req) => {
     }));
 
     // Fetch existing snapshots for comparison
-    const { data: existingSnapshots } = await supabase
-      .from('promotion_snapshots')
-      .select('promotion_id, status, end_at')
-      .eq('workspace_id', workspaceId)
-      .eq('account_id', accountId);
+    const existingSnapshots = await fetchAllRows(
+      supabase.from('promotion_snapshots')
+        .select('promotion_id, status, end_at')
+        .eq('workspace_id', workspaceId)
+        .eq('account_id', accountId)
+    );
 
     const existingMap = new Map(
-      (existingSnapshots || []).map(s => [s.promotion_id, s])
+      existingSnapshots.map(s => [s.promotion_id, s])
     );
 
     // Fetch existing items for comparison
-    const { data: existingItems } = await supabase
-      .from('promotion_items_snapshots')
-      .select('promotion_id, item_id, item_status')
-      .eq('workspace_id', workspaceId)
-      .eq('account_id', accountId);
+    const existingItems = await fetchAllRows(
+      supabase.from('promotion_items_snapshots')
+        .select('promotion_id, item_id, item_status')
+        .eq('workspace_id', workspaceId)
+        .eq('account_id', accountId)
+    );
 
     const existingItemsMap = new Map<string, Map<string, string>>();
-    for (const item of existingItems || []) {
+    for (const item of existingItems) {
       if (!existingItemsMap.has(item.promotion_id)) {
         existingItemsMap.set(item.promotion_id, new Map());
       }

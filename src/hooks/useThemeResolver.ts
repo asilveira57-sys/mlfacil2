@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { fetchAllRows } from '@/lib/supabaseHelpers';
 import type {
   Template,
   TemplateVariant,
@@ -200,20 +201,16 @@ export function useThemeResolver(input: ThemeResolverInput) {
   const { data: resolverData, isLoading } = useQuery({
     queryKey: ['theme-resolver', 'data'],
     queryFn: async () => {
-      const [templatesRes, variantsRes, rulesRes] = await Promise.all([
-        supabase.from('templates').select('*').eq('is_active', true),
-        supabase.from('template_variants').select('*'),
-        supabase.from('template_rules').select('*').eq('is_enabled', true),
+      const [templates, variants, rules] = await Promise.all([
+        fetchAllRows<Template>(supabase.from('templates').select('*').eq('is_active', true)),
+        fetchAllRows<TemplateVariant>(supabase.from('template_variants').select('*')),
+        fetchAllRows<TemplateRule>(supabase.from('template_rules').select('*').eq('is_enabled', true)),
       ]);
 
-      if (templatesRes.error) throw templatesRes.error;
-      if (variantsRes.error) throw variantsRes.error;
-      if (rulesRes.error) throw rulesRes.error;
-
       return {
-        templates: (templatesRes.data || []) as Template[],
-        variants: (variantsRes.data || []) as TemplateVariant[],
-        rules: (rulesRes.data || []) as TemplateRule[],
+        templates,
+        variants,
+        rules,
       };
     },
     staleTime: 5 * 60 * 1000, // 5min cache
