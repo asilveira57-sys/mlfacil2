@@ -306,6 +306,7 @@ export default function AdminPlanos() {
                       <SelectItem value="trimestral">Trimestral</SelectItem>
                       <SelectItem value="semestral">Semestral</SelectItem>
                       <SelectItem value="anual">Anual</SelectItem>
+                      <SelectItem value="vitalicio">Vitalício</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

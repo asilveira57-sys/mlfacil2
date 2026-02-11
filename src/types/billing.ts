@@ -2,7 +2,7 @@
 
 export type PlanCategory = 'volume' | 'zpl';
 export type PriceMode = 'avulso' | 'assinatura';
-export type PricePeriod = 'mensal' | 'trimestral' | 'semestral' | 'anual';
+export type PricePeriod = 'mensal' | 'trimestral' | 'semestral' | 'anual' | 'vitalicio';
 
 export interface PlanPrice {
   id: string;

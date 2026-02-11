@@ -3,7 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 
 // Types for tier-based plans
 export type PricingMode = 'avulso' | 'assinatura';
-export type BillingCycle = 'mensal' | 'trimestral' | 'semestral' | 'anual';
+export type BillingCycle = 'mensal' | 'trimestral' | 'semestral' | 'anual' | 'vitalicio';
 
 export interface TierPlanPrice {
   id: string;
@@ -178,6 +178,7 @@ export function getPeriodLabel(period: BillingCycle): string {
     trimestral: 'Trimestral',
     semestral: 'Semestral',
     anual: 'Anual',
+    vitalicio: 'Vitalício',
   };
   return labels[period] || period;
 }
