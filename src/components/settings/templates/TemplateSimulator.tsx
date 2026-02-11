@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Sparkles, Sun, Moon, Info } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { fetchAllRows } from '@/lib/supabaseHelpers';
 import { TemplateMiniPreview, TemplateColorPreview } from './TemplateColorPreview';
 import type { Template, TemplateVariant, TemplateRule, ThemeResolverInput, DesignTokens } from '@/types/templates';
 
@@ -102,15 +103,15 @@ export function TemplateSimulator() {
   const { data, isLoading } = useQuery({
     queryKey: ['theme-resolver', 'simulator-data'],
     queryFn: async () => {
-      const [t, v, r] = await Promise.all([
-        supabase.from('templates').select('*'),
-        supabase.from('template_variants').select('*'),
-        supabase.from('template_rules').select('*'),
+      const [templates, variants, rules] = await Promise.all([
+        fetchAllRows<Template>(supabase.from('templates').select('*')),
+        fetchAllRows<TemplateVariant>(supabase.from('template_variants').select('*')),
+        fetchAllRows<TemplateRule>(supabase.from('template_rules').select('*')),
       ]);
       return {
-        templates: (t.data || []) as Template[],
-        variants: (v.data || []) as TemplateVariant[],
-        rules: (r.data || []) as TemplateRule[],
+        templates,
+        variants,
+        rules,
       };
     },
     staleTime: 60_000,

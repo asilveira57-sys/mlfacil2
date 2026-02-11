@@ -1,5 +1,6 @@
 // @ts-nocheck - Deno types not available in build context
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { fetchWithBatchedIn } from "../_shared/fetch-all-rows.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -433,13 +434,13 @@ async function processBackfill(supabase: any, userId: string, sellerId: string):
 
     // Check which already have breakdown
     const orderIds = ordersWithoutBreakdown.map((o: any) => o.order_id);
-    const { data: existing } = await supabase
-      .from('order_cost_breakdown_cache')
-      .select('order_id')
-      .eq('seller_id', sellerId)
-      .in('order_id', orderIds);
+    const existing = await fetchWithBatchedIn(
+      supabase, 'order_cost_breakdown_cache', 'order_id',
+      'order_id', orderIds,
+      [{ column: 'seller_id', value: sellerId }]
+    );
 
-    const existingIds = new Set((existing || []).map((e: any) => e.order_id));
+    const existingIds = new Set(existing.map((e: any) => e.order_id));
     const missing = ordersWithoutBreakdown.filter((o: any) => !existingIds.has(o.order_id));
 
     if (missing.length === 0) {
@@ -512,16 +513,17 @@ async function processRealCosts(supabase: any, userId: string, sellerId: string,
     const shipmentIds = pendingOrders.map((o: any) => o.shipment_id).filter(Boolean);
 
     // Get billing data
-    const { data: billingData } = await supabase
-      .from('meli_billing_details_cache')
-      .select('order_id, shipment_id, charge_type, gross_amount')
-      .eq('seller_id', sellerId)
-      .in('order_id', orderIds);
+    const billingData = await fetchWithBatchedIn(
+      supabase, 'meli_billing_details_cache',
+      'order_id, shipment_id, charge_type, gross_amount',
+      'order_id', orderIds,
+      [{ column: 'seller_id', value: sellerId }]
+    );
 
     // Aggregate billing by order
     const billingByOrder = new Map<string, { fee_ml: number; shipping: number; installments: number; adjustments: number }>();
     
-    for (const detail of (billingData || [])) {
+    for (const detail of billingData) {
       const orderId = String(detail.order_id);
       if (!billingByOrder.has(orderId)) {
         billingByOrder.set(orderId, { fee_ml: 0, shipping: 0, installments: 0, adjustments: 0 });

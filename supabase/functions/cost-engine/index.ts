@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { fetchAllRows, fetchWithBatchedIn } from '../_shared/fetch-all-rows.ts';
 
 declare const EdgeRuntime: {
   waitUntil(promise: Promise<unknown>): void;
@@ -189,9 +190,7 @@ async function getCatalog(supabase: any, userId: string, params: Record<string, 
     );
   }
 
-  const { data: items, error: itemsError } = await itemsQuery;
-
-  if (itemsError) throw itemsError;
+  const items = await fetchAllRows(itemsQuery);
 
   // Aggregate unique products
   const productMap = new Map<string, any>();
@@ -209,13 +208,11 @@ async function getCatalog(supabase: any, userId: string, params: Record<string, 
   }
 
   // Get existing costs
-  const { data: costs } = await supabase
-    .from('product_cost_catalog')
-    .select('*')
-    .eq('seller_id', sellerId)
-    .eq('user_id', userId);
+  const costs = await fetchAllRows(
+    supabase.from('product_cost_catalog').select('*').eq('seller_id', sellerId).eq('user_id', userId)
+  );
 
-  const costMap = new Map<string, any>((costs || []).map((c: any) => [c.product_key, c]));
+  const costMap = new Map<string, any>(costs.map((c: any) => [c.product_key, c]));
 
   // Merge and filter
   let products = Array.from(productMap.values()).map(p => {
@@ -294,15 +291,16 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
 
   // Handle cancelled orders separately - they come from meli_orders_cache
   if (orderStatus === 'cancelled') {
-    const { data: cancelledOrders } = await supabase
-      .from('meli_orders_cache')
-      .select('order_id, shipment_id, total_amount, buyer_nickname, buyer_name, created_at_meli, order_status')
-      .eq('seller_id', sellerId)
-      .in('order_status', ['cancelled', 'refunded', 'partially_refunded'])
-      .gte('created_at_meli', dateFromStr)
-      .order('created_at_meli', { ascending: false });
+    const cancelledOrders = await fetchAllRows(
+      supabase.from('meli_orders_cache')
+        .select('order_id, shipment_id, total_amount, buyer_nickname, buyer_name, created_at_meli, order_status')
+        .eq('seller_id', sellerId)
+        .in('order_status', ['cancelled', 'refunded', 'partially_refunded'])
+        .gte('created_at_meli', dateFromStr)
+        .order('created_at_meli', { ascending: false })
+    );
 
-    let results = (cancelledOrders || []).map((o: any) => ({
+    let results = cancelledOrders.map((o: any) => ({
       id: o.order_id,
       order_id: o.order_id,
       shipment_id: o.shipment_id,
@@ -398,10 +396,9 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
     query = query.or(`order_id.ilike.%${search}%,shipment_id.ilike.%${search}%,buyer_nickname.ilike.%${search}%`);
   }
 
-  const { data: breakdowns, error } = await query;
-  if (error) throw error;
+  const results_raw = await fetchAllRows(query);
 
-  let results = breakdowns || [];
+  let results = results_raw;
 
   // Filter by profit type
   if (profitType === 'lucro') {
@@ -550,48 +547,49 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
     const packagingMode = packaging?.packaging_cost_mode || 'por_pedido';
 
     // Get all paid orders
-    const { data: orders, error: ordersError } = await supabase
-      .from('meli_orders_cache')
-      .select('order_id, shipment_id, total_amount, buyer_nickname, buyer_name, created_at_meli')
-      .eq('seller_id', sellerId)
-      .eq('user_id', userId)
-      .eq('order_status', 'paid')
-      .gte('created_at_meli', dateFromStr);
+    const orders = await fetchAllRows(
+      supabase.from('meli_orders_cache')
+        .select('order_id, shipment_id, total_amount, buyer_nickname, buyer_name, created_at_meli')
+        .eq('seller_id', sellerId)
+        .eq('user_id', userId)
+        .eq('order_status', 'paid')
+        .gte('created_at_meli', dateFromStr)
+    );
 
-    if (ordersError) throw ordersError;
-    console.log(`[cost-engine] Found ${orders?.length || 0} orders to process`);
+    console.log(`[cost-engine] Found ${orders.length} orders to process`);
 
     // Get all order items
-    const orderIds = (orders || []).map((o: any) => o.order_id);
-    const { data: allItems } = await supabase
-      .from('meli_order_items_cache')
-      .select('order_id, product_key, item_id, variation_id, quantity, unit_price')
-      .eq('seller_id', sellerId)
-      .in('order_id', orderIds);
+    const orderIds = orders.map((o: any) => o.order_id);
+    const allItems = await fetchWithBatchedIn(
+      supabase, 'meli_order_items_cache',
+      'order_id, product_key, item_id, variation_id, quantity, unit_price',
+      'order_id', orderIds,
+      [{ column: 'seller_id', value: sellerId }]
+    );
 
     // Get all product costs
-    const { data: costs } = await supabase
-      .from('product_cost_catalog')
-      .select('product_key, cost_value')
-      .eq('seller_id', sellerId);
+    const costs = await fetchAllRows(
+      supabase.from('product_cost_catalog').select('product_key, cost_value').eq('seller_id', sellerId)
+    );
 
-    const costMap = new Map<string, number>((costs || []).map((c: any) => [c.product_key, Number(c.cost_value) || 0]));
+    const costMap = new Map<string, number>(costs.map((c: any) => [c.product_key, Number(c.cost_value) || 0]));
 
     // Get real billing data from ML
-    const { data: financials } = await supabase
-      .from('meli_order_financials_cache')
-      .select('order_id, revenue_products, revenue_shipping, cost_sale_fee, cost_shipping_fee, cost_installment_fee, cost_cancellations')
-      .eq('seller_id', sellerId)
-      .in('order_id', orderIds);
+    const financials = await fetchWithBatchedIn(
+      supabase, 'meli_order_financials_cache',
+      'order_id, revenue_products, revenue_shipping, cost_sale_fee, cost_shipping_fee, cost_installment_fee, cost_cancellations',
+      'order_id', orderIds,
+      [{ column: 'seller_id', value: sellerId }]
+    );
 
     const financialsMap = new Map<string, any>(
-      (financials || []).map((f: any) => [f.order_id, f])
+      financials.map((f: any) => [f.order_id, f])
     );
-    console.log(`[cost-engine] Found ${financials?.length || 0} orders with real billing data`);
+    console.log(`[cost-engine] Found ${financials.length} orders with real billing data`);
 
     // Group items by order
     const itemsByOrder = new Map<string, any[]>();
-    for (const item of allItems || []) {
+    for (const item of allItems) {
       const key = item.product_key || `${item.item_id}:${item.variation_id || ''}`;
       const itemWithKey = { ...item, product_key: key };
       if (!itemsByOrder.has(item.order_id)) {
@@ -603,7 +601,7 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
     // Calculate for each order
     const breakdowns: any[] = [];
 
-    for (const order of orders || []) {
+    for (const order of orders) {
       const items = itemsByOrder.get(order.order_id) || [];
       const billing = financialsMap.get(order.order_id);
       
@@ -827,28 +825,29 @@ async function updateProductAggregates(supabase: any, userId: string, sellerId: 
   const periodKey = `${periodDays}d`;
 
   // Get all order breakdowns
-  const { data: breakdowns } = await supabase
-    .from('order_cost_breakdown_cache')
-    .select('order_id, profit_total, revenue_total, cost_total')
-    .eq('seller_id', sellerId)
-    .gte('calculated_at', dateFrom.toISOString());
+  const breakdowns = await fetchAllRows(
+    supabase.from('order_cost_breakdown_cache')
+      .select('order_id, profit_total, revenue_total, cost_total')
+      .eq('seller_id', sellerId)
+      .gte('calculated_at', dateFrom.toISOString())
+  );
 
-  const orderIds = (breakdowns || []).map((b: any) => b.order_id);
+  const orderIds = breakdowns.map((b: any) => b.order_id);
 
   // Get all items for these orders
-  const { data: items } = await supabase
-    .from('meli_order_items_cache')
-    .select('order_id, product_key, item_id, variation_id, quantity, unit_price, title_short, title')
-    .eq('seller_id', sellerId)
-    .in('order_id', orderIds);
+  const items = await fetchWithBatchedIn(
+    supabase, 'meli_order_items_cache',
+    'order_id, product_key, item_id, variation_id, quantity, unit_price, title_short, title',
+    'order_id', orderIds,
+    [{ column: 'seller_id', value: sellerId }]
+  );
 
   // Get costs
-  const { data: costs } = await supabase
-    .from('product_cost_catalog')
-    .select('product_key, cost_value')
-    .eq('seller_id', sellerId);
+  const costs = await fetchAllRows(
+    supabase.from('product_cost_catalog').select('product_key, cost_value').eq('seller_id', sellerId)
+  );
 
-  const costMap = new Map<string, number>((costs || []).map((c: any) => [c.product_key, Number(c.cost_value) || 0]));
+  const costMap = new Map<string, number>(costs.map((c: any) => [c.product_key, Number(c.cost_value) || 0]));
 
   // Aggregate by product
   const productAgg = new Map<string, { 
@@ -858,7 +857,7 @@ async function updateProductAggregates(supabase: any, userId: string, sellerId: 
     display_name: string;
   }>();
 
-  for (const item of items || []) {
+  for (const item of items) {
     const key = item.product_key || `${item.item_id}:${item.variation_id || ''}`;
     const unitCost = costMap.get(key) || 0;
     const itemRevenue = item.quantity * Number(item.unit_price);
@@ -918,14 +917,15 @@ async function getSummary(supabase: any, userId: string, params: Record<string, 
   const dateFrom = new Date();
   dateFrom.setDate(dateFrom.getDate() - periodDays);
 
-  const { data: breakdowns } = await supabase
-    .from('order_cost_breakdown_cache')
-    .select('revenue_total, cost_total, profit_total, margin_percent, status, missing_cost_items_count')
-    .eq('seller_id', sellerId)
-    .eq('user_id', userId)
-    .gte('created_at_meli', dateFrom.toISOString());
+  const breakdowns = await fetchAllRows(
+    supabase.from('order_cost_breakdown_cache')
+      .select('revenue_total, cost_total, profit_total, margin_percent, status, missing_cost_items_count')
+      .eq('seller_id', sellerId)
+      .eq('user_id', userId)
+      .gte('created_at_meli', dateFrom.toISOString())
+  );
 
-  const data = breakdowns || [];
+  const data = breakdowns;
   const totalRevenue = data.reduce((sum: number, b: any) => sum + Number(b.revenue_total), 0);
   const totalCost = data.reduce((sum: number, b: any) => sum + Number(b.cost_total), 0);
   const totalProfit = data.reduce((sum: number, b: any) => sum + Number(b.profit_total), 0);
@@ -936,15 +936,16 @@ async function getSummary(supabase: any, userId: string, params: Record<string, 
   const incompletePercent = data.length > 0 ? (incompleteCount / data.length) * 100 : 0;
 
   // Get cancelled orders count and value
-  const { data: cancelledOrders } = await supabase
-    .from('meli_orders_cache')
-    .select('order_id, total_amount')
-    .eq('seller_id', sellerId)
-    .in('order_status', ['cancelled', 'refunded', 'partially_refunded'])
-    .gte('created_at_meli', dateFrom.toISOString());
+  const cancelledOrders = await fetchAllRows(
+    supabase.from('meli_orders_cache')
+      .select('order_id, total_amount')
+      .eq('seller_id', sellerId)
+      .in('order_status', ['cancelled', 'refunded', 'partially_refunded'])
+      .gte('created_at_meli', dateFrom.toISOString())
+  );
 
-  const cancelledCount = cancelledOrders?.length || 0;
-  const cancelledVGV = (cancelledOrders || []).reduce((sum: number, o: any) => sum + Number(o.total_amount || 0), 0);
+  const cancelledCount = cancelledOrders.length;
+  const cancelledVGV = cancelledOrders.reduce((sum: number, o: any) => sum + Number(o.total_amount || 0), 0);
 
   // Top products by profit
   const { data: topProfit } = await supabase
@@ -990,15 +991,16 @@ async function getAbcProfit(supabase: any, userId: string, params: Record<string
 
   if (!sellerId) throw new Error('seller_id is required');
 
-  const { data } = await supabase
-    .from('abc_profit_cache')
-    .select('*')
-    .eq('seller_id', sellerId)
-    .eq('period_key', `${periodDays}d`)
-    .eq('metric', metric)
-    .order('rank', { ascending: true });
+  const data = await fetchAllRows(
+    supabase.from('abc_profit_cache')
+      .select('*')
+      .eq('seller_id', sellerId)
+      .eq('period_key', `${periodDays}d`)
+      .eq('metric', metric)
+      .order('rank', { ascending: true })
+  );
 
-  const results = data || [];
+  const results = data;
   const classA = results.filter((r: any) => r.class === 'A');
   const classB = results.filter((r: any) => r.class === 'B');
   const classC = results.filter((r: any) => r.class === 'C');
@@ -1019,13 +1021,14 @@ async function calculateAbcProfit(supabase: any, userId: string, sellerId: strin
   const periodKey = `${periodDays}d`;
 
   // Get aggregates
-  const { data: aggregates } = await supabase
-    .from('product_profit_aggregate_cache')
-    .select('*')
-    .eq('seller_id', sellerId)
-    .eq('period_key', periodKey);
+  const aggregates = await fetchAllRows(
+    supabase.from('product_profit_aggregate_cache')
+      .select('*')
+      .eq('seller_id', sellerId)
+      .eq('period_key', periodKey)
+  );
 
-  if (!aggregates || aggregates.length === 0) {
+  if (aggregates.length === 0) {
     console.log('[cost-engine] No aggregates found for ABC calculation');
     return;
   }
