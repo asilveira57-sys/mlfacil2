@@ -26,6 +26,7 @@ export function getPeriodLabel(period: PricePeriod): string {
     trimestral: 'Trimestral',
     semestral: 'Semestral',
     anual: 'Anual',
+    vitalicio: 'Vitalício',
   };
   return labels[period] || period;
 }

@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -8,10 +8,14 @@ import { useUserAccess } from '@/contexts/UserAccessContext';
 
 export function TrialExpiredPaywall() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { trialExpired, flags, selectedPlan, loading, isAuthenticated } = useUserAccess();
 
-  // Don't show if not authenticated or trial not expired
-  if (!isAuthenticated || !trialExpired || loading) {
+  // Don't show on /planos page (user needs to browse plans freely)
+  const isOnPlanosPage = location.pathname === '/planos';
+
+  // Don't show if not authenticated, trial not expired, or on plans page
+  if (!isAuthenticated || !trialExpired || loading || isOnPlanosPage) {
     return null;
   }
 

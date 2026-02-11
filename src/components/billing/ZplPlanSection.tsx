@@ -15,6 +15,7 @@ const periodLabels: Record<PricePeriod, string> = {
   trimestral: 'Trimestral',
   semestral: 'Semestral',
   anual: 'Anual',
+  vitalicio: 'Vitalício',
 };
 
 interface ZplPlanSectionProps {
