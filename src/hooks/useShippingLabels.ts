@@ -505,6 +505,8 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     enabled: !!sellerId,
     staleTime: 30000, // 30 seconds
     refetchOnWindowFocus: false,
+    // Keep previous data while refetching (instant period switch)
+    placeholderData: (prev: any) => prev,
   });
 
   const orders = ordersData?.orders ?? [];
@@ -1246,6 +1248,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     },
     enabled: !!sellerId,
     staleTime: 30000,
+    placeholderData: (prev: any) => prev,
   });
 
   const statusCounts = {
@@ -1254,6 +1257,37 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     aguardando_nf: allOrdersForCounts.filter(o => o.finalStatus === 'aguardando_nf').length,
     reimprimir: allOrdersForCounts.filter(o => o.finalStatus === 'reimprimir').length,
   };
+
+  // === SILENT AUTO-REFRESH: Update shipment statuses every 5 minutes ===
+  const refreshShipmentStatuses = useCallback(async () => {
+    if (!sellerId || isSyncing) return;
+
+    try {
+      // Query only active shipments (status that can change) from local DB
+      const { data: activeShipments } = await supabase
+        .from('meli_shipments_cache')
+        .select('shipment_id')
+        .eq('seller_id', sellerId)
+        .in('shipment_status', ['ready_to_ship', 'handling']);
+
+      if (!activeShipments || activeShipments.length === 0) return;
+
+      console.log(`[auto-refresh] Found ${activeShipments.length} active shipments, refreshing from DB...`);
+
+      // Just refetch from local DB (backend cron/webhook keeps it updated)
+      await refetch();
+      queryClient.invalidateQueries({ queryKey: ['shipping-orders-all', sellerId] });
+    } catch (err) {
+      console.error('[auto-refresh] Error:', err);
+    }
+  }, [sellerId, isSyncing, refetch, queryClient]);
+
+  // Auto-refresh every 5 minutes
+  useEffect(() => {
+    if (!sellerId) return;
+    const interval = setInterval(refreshShipmentStatuses, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [sellerId, refreshShipmentStatuses]);
 
   // Auto-sync on first load with staleness check
   useEffect(() => {
