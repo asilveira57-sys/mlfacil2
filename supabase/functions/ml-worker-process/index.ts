@@ -42,6 +42,7 @@ interface MlIntegration {
     can_sync_orders?: boolean;
     can_sync_messages?: boolean;
     can_sync_questions?: boolean;
+    can_sync_shipments?: boolean;
     daily_event_limit?: number;
     worker_frequency_seconds?: number;
   };
@@ -159,6 +160,7 @@ Deno.serve(async (req) => {
                 can_sync_orders: false,
                 can_sync_messages: false,
                 can_sync_questions: false,
+                can_sync_shipments: true,
                 daily_event_limit: 500,
               },
             })
@@ -235,6 +237,7 @@ Deno.serve(async (req) => {
           "orders": "can_sync_orders",
           "messages": "can_sync_messages",
           "questions": "can_sync_questions",
+          "shipments": "can_sync_shipments",
         };
 
         const featureKey = topicFeatureMap[event.topic];
@@ -270,6 +273,9 @@ Deno.serve(async (req) => {
             break;
           case "questions":
             processResult = await processQuestionEvent(supabase, event, integration);
+            break;
+          case "shipments":
+            processResult = await processShipmentEvent(supabase, event, integration);
             break;
           default:
             processResult = { success: true }; // Unknown topic, mark as done
@@ -1047,5 +1053,83 @@ async function processQuestionEvent(
   }
 
   await logEvent(supabase, event.id, "info", `Question ${questionId} synced (${status})`);
+  return { success: true };
+}
+
+async function processShipmentEvent(
+  supabase: SupabaseAny,
+  event: WebhookEvent,
+  integration: MlIntegration
+): Promise<ProcessResult> {
+  const shipmentIdMatch = event.resource.match(/\/shipments\/(\d+)/);
+
+  if (!shipmentIdMatch) {
+    await logEvent(supabase, event.id, "warn", `Could not parse shipment ID from: ${event.resource}`);
+    return { success: true };
+  }
+
+  const shipmentId = shipmentIdMatch[1];
+  console.log(`[ml-worker] Processing shipment event for ${shipmentId}`);
+
+  // Get access token
+  const { data: mlAccount } = await supabase
+    .from("ml_accounts")
+    .select("id, user_id, access_token, ml_user_id")
+    .eq("ml_user_id", event.ml_user_id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (!mlAccount?.access_token) {
+    await logEvent(supabase, event.id, "warn", "No active ML account for shipment processing");
+    return { success: true };
+  }
+
+  // Fetch shipment from ML API
+  const response = await fetch(`https://api.mercadolibre.com/shipments/${shipmentId}`, {
+    headers: { Authorization: `Bearer ${mlAccount.access_token}` },
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) return { success: false, error: "TOKEN_EXPIRED" };
+    if (response.status === 404) {
+      await logEvent(supabase, event.id, "warn", `Shipment ${shipmentId} not found`);
+      return { success: true };
+    }
+    if (response.status === 429) return { success: false, error: "RATE_LIMITED" };
+    return { success: false, error: `ML_API_${response.status}` };
+  }
+
+  const shipmentData = await response.json();
+
+  // Extract relevant fields
+  const receiverAddress = shipmentData.receiver_address || {};
+  const receiverName = receiverAddress.receiver_name || shipmentData.receiver_id || null;
+  const trackingNumber = shipmentData.tracking_number || null;
+  const logisticType = shipmentData.logistic_type || null;
+  const labelAvailable = shipmentData.substatus === "ready_to_print" || shipmentData.substatus === "printed";
+
+  // Upsert to meli_shipments_cache
+  const { error: upsertError } = await supabase
+    .from("meli_shipments_cache")
+    .upsert({
+      user_id: integration.user_id,
+      seller_id: event.ml_user_id,
+      shipment_id: shipmentId,
+      shipment_status: shipmentData.status,
+      shipment_substatus: shipmentData.substatus || null,
+      tracking_number: trackingNumber,
+      receiver_name: receiverName,
+      logistic_type: logisticType,
+      label_available: labelAvailable,
+      last_sync_at: new Date().toISOString(),
+    }, {
+      onConflict: "seller_id,shipment_id",
+    });
+
+  if (upsertError) {
+    return { success: false, error: `DB_UPSERT: ${upsertError.message}` };
+  }
+
+  await logEvent(supabase, event.id, "info", `Shipment ${shipmentId} synced: ${shipmentData.status}/${shipmentData.substatus}`);
   return { success: true };
 }
