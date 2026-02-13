@@ -11809,6 +11809,20 @@ export type Database = {
         Args: { p_seller_id: string; p_user_id: string }
         Returns: number
       }
+      get_shipping_orders: {
+        Args: {
+          p_date_from?: string
+          p_date_to?: string
+          p_page?: number
+          p_page_size?: number
+          p_search_query?: string
+          p_seller_id: string
+          p_sort_dir?: string
+          p_sort_field?: string
+          p_status_filter?: string
+        }
+        Returns: Json
+      }
       get_user_feature_flags: { Args: { p_user_id: string }; Returns: Json }
       get_user_full_context: { Args: { p_user_id: string }; Returns: Json }
       get_user_role: { Args: { _user_id: string }; Returns: string }
