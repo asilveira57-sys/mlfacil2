@@ -1,122 +1,106 @@
 
-# Plano: Sincronizacao Automatica de Status + Cache Inteligente para Etiquetas de Envio
+
+# Correcao de Performance e Filtro de Etiquetas de Envio
 
 ## Problemas Identificados
 
-1. **Status nao atualiza automaticamente** -- O sistema busca pedidos e envios na sincronizacao manual, mas nunca atualiza *apenas o status* dos envios ja cacheados. Se voce emitiu NF ou imprimiu no ML, o sistema nao reflete isso.
+### 1. Lentidao extrema ao carregar/trocar filtros
+A query principal (`useQuery` linha 273) usa `fetchAllRowsPaginated` para buscar **TODOS** os pedidos do periodo, depois faz joins com shipments e invoices **em JavaScript**, e so entao filtra e pagina. Para 30 dias com centenas de pedidos, isso significa multiplas queries sequenciais ao banco, processamento pesado no navegador e travamento da UI.
 
-2. **Webhook ignora topic "shipments"** -- O `ml-worker-process` processa `items`, `orders_v2`, `messages` e `questions`, mas **nao trata o topic `shipments`**. Quando o ML manda um webhook de mudanca de status de envio, ele e simplesmente ignorado (marcado como "done" sem acao).
+### 2. Filtro "Hoje" induz ao erro
+O filtro "Hoje" filtra por `created_at_meli` (data de criacao do pedido), mas o que importa para operacao e **quais envios precisam de acao hoje** -- incluindo pedidos de ontem apos o horario de corte. O ML usa o conceito de "Envios de hoje" baseado no deadline de despacho, nao na data do pedido.
 
-3. **Nao ha sync automatico periodico de status** -- O `orders-hourly-sync` sincroniza *pedidos* (orders) a cada hora, mas nao atualiza os *envios* (shipments). O status fica preso no que foi buscado na primeira sincronizacao.
-
-4. **Troca de periodo (Hoje -> 7 dias) recarrega tudo** -- Quando voce muda o filtro de periodo, o sistema refaz a query inteira do banco + joins de envios/NFs, sem cache local dos dados ja carregados.
+### 3. API do ML nao tem filtro "envios de hoje" direto
+A API `orders/search` suporta filtros como `shipping.status=ready_to_ship` e `order.status=paid`, mas nao tem um filtro equivalente ao "TAB_TODAY" da interface web do ML. O conceito de "envios de hoje" e determinado internamente pelo ML baseado no horario de corte e logistica. A solucao e filtrar localmente por shipments com status ativo (`ready_to_ship` com substatus `invoice_pending` ou `ready_to_print`).
 
 ---
 
-## Solucao em 4 Partes
+## Solucao
 
-### Parte 1: Processar Webhook de Shipments no Worker
-
-**Arquivo:** `supabase/functions/ml-worker-process/index.ts`
-
-Adicionar handler `processShipmentEvent()` que:
-- Extrai o `shipment_id` do resource (`/shipments/12345`)
-- Busca status atualizado na API ML (`GET /shipments/{id}`)
-- Faz upsert no `meli_shipments_cache` com o novo status/substatus
-- Registra no topicFeatureMap para que o evento nao seja ignorado
-
-Registrar no switch-case do worker:
-```
-case "shipments":
-  processResult = await processShipmentEvent(supabase, event, integration);
-  break;
-```
-
-E habilitar no feature_flags padrao: `can_sync_shipments: true`.
-
-### Parte 2: Criar Edge Function de Status Sync Periodico
-
-**Novo arquivo:** `supabase/functions/shipping-status-sync/index.ts`
-
-Edge Function agendada (via pg_cron a cada 10 minutos) que:
-1. Busca todas contas ML ativas
-2. Para cada conta, busca envios com `shipment_status` em `ready_to_ship` ou `handling` (os que podem mudar) dos ultimos 7 dias
-3. Faz batch GET na API ML (`/shipments/{id}`) para verificar mudancas
-4. Atualiza `meli_shipments_cache` apenas quando status mudou
-5. Respeita rate limits com delay de 200ms entre chamadas e 2s entre contas
-6. Usa lock via `sync_scheduler` para evitar execucoes simultaneas
-
-Isso garante que mesmo sem webhook, os status se atualizem automaticamente.
-
-### Parte 3: Cache Inteligente no Frontend
+### Parte 1: Mudar filtro padrao para 7 dias
 
 **Arquivo:** `src/hooks/useShippingLabels.ts`
 
-Refatorar o carregamento para usar cache em memoria por periodo:
+- Alterar `useState<PeriodFilter>('today')` para `useState<PeriodFilter>('7d')` (linha 194)
+- Isso garante que ao abrir a pagina, o usuario ve todos os pedidos da semana, incluindo os de ontem que ainda precisam de acao
 
-1. **Cache de dados por periodo** -- Manter um `useRef` com os dados ja carregados por cada periodo (hoje, 7d, 15d, 30d). Quando o usuario troca de periodo:
-   - Se ja tem dados em cache, exibe imediatamente
-   - Em background, faz refetch apenas dos status que podem ter mudado (envios com status `ready_to_ship`, `handling`, `invoice_pending`)
-   
-2. **Query otimizada para troca de periodo** -- Em vez de refazer a query completa de orders + shipments + invoices, manter o `ordersData` em cache e apenas expandir/filtrar conforme o periodo muda
+### Parte 2: Query otimizada com paginacao no banco
 
-3. **Refetch incremental de status** -- Adicionar funcao `refreshShipmentStatuses()` que busca apenas envios "ativos" (nao delivered/shipped) e atualiza o cache local, sem refazer toda a pipeline
+**Arquivo:** `src/hooks/useShippingLabels.ts`
 
-4. **Auto-refresh a cada 5 minutos** -- Adicionar `setInterval` que chama `refreshShipmentStatuses()` silenciosamente para pedidos do dia, sem mostrar spinner
+Refatorar a query principal para:
+1. **Criar uma view ou RPC no banco** que faz o JOIN de `meli_orders_cache` + `meli_shipments_cache` + `meli_invoices_cache` e calcula o `final_status` direto no SQL
+2. A RPC recebe: `seller_id`, `date_from`, `date_to`, `status_filter`, `search_query`, `sort_field`, `sort_dir`, `page`, `page_size`
+3. Retorna apenas os registros da pagina solicitada + `total_count` (via `COUNT(*) OVER()`)
+4. Isso elimina: fetch de todos os registros, joins em JS, filtragem em JS, paginacao em JS
 
-### Parte 4: Registrar Cron Job no Banco
+A RPC fara:
+- LEFT JOIN entre as 3 tabelas
+- CASE/WHEN para calcular `final_status` no SQL (mesma logica das linhas 362-406)
+- Deduplicacao por `shipment_id` com `DISTINCT ON` ou `ROW_NUMBER()`
+- Filtros de status, busca (ILIKE), e periodo aplicados no WHERE
+- `ORDER BY` e `LIMIT/OFFSET` no SQL
+- Retorno de `status_counts` (contagem por status) numa segunda query ou CTE
 
-Via SQL (nao migration, pois contem dados do projeto):
-- Habilitar extensoes `pg_cron` e `pg_net`
-- Agendar `shipping-status-sync` a cada 10 minutos
-- Adicionar entrada no `sync_scheduler` para controle de lock
+### Parte 3: Contagem de status sem recarregar tudo
+
+A RPC tambem retornara as contagens por status (`pronta`, `aguardando_nf`, `reimprimir`, etc.) calculadas sobre o periodo inteiro (sem paginacao), para exibir nos badges de filtro. Isso sera feito com um CTE separado na mesma chamada.
+
+### Parte 4: Cache com placeholderData (ja existente, manter)
+
+O `placeholderData: (prev) => prev` ja esta implementado (linha 509). Com a RPC otimizada, a troca de periodo sera quase instantanea pois:
+- Dados anteriores ficam visiveis enquanto a nova query roda
+- A nova query sera rapida (SQL paginado em vez de fetch-all + JS processing)
 
 ---
 
 ## Detalhes Tecnicos
 
-### Fluxo de Atualizacao de Status
+### RPC: `get_shipping_orders`
 
 ```text
-ML muda status do envio
-       |
-       v
-+--[Webhook ML]--+     +--[Cron 10min]--+
-|  ml-webhook-   |     | shipping-      |
-|  ingest        |     | status-sync    |
-+-------+--------+     +-------+--------+
-        |                       |
-        v                       v
-  webhook_events          meli_shipments_cache
-        |                  (status atualizado)
-        v                       |
-  ml-worker-process             |
-  processShipmentEvent()        |
-        |                       |
-        v                       v
-  meli_shipments_cache    Frontend auto-refresh
-  (status atualizado)     a cada 5 minutos
+Parametros:
+  p_seller_id TEXT
+  p_date_from TIMESTAMPTZ
+  p_date_to TIMESTAMPTZ  
+  p_status_filter TEXT (default 'all')
+  p_search_query TEXT (default '')
+  p_sort_field TEXT (default 'created_at_meli')
+  p_sort_dir TEXT (default 'desc')
+  p_page INT (default 1)
+  p_page_size INT (default 30)
+
+Retorno:
+  orders: JSONB[] (pagina atual)
+  total_count: INT
+  status_counts: JSONB {all, pronta, aguardando_nf, reimprimir, ...}
 ```
 
-### Envios que Precisam de Atualizacao
-
-Apenas envios com estes status precisam ser verificados periodicamente:
-- `ready_to_ship` (pode mudar para shipped, printed, etc.)
-- `handling` (em processamento)
-
-Envios com status `delivered`, `shipped`, `not_delivered`, `cancelled` sao finais e nao precisam mais ser verificados.
-
-### Rate Limits
-
-- **Shipping status sync:** 200ms entre chamadas, max 50 envios por conta por ciclo
-- **Webhook worker:** ja tem delay de 100ms entre eventos
-- **Frontend auto-refresh:** a cada 5 minutos, busca apenas do banco local (sem chamar ML)
+Logica SQL do `final_status`:
+```text
+CASE
+  WHEN s.shipment_id IS NULL AND o.shipment_id IS NOT NULL THEN 'pendente_sync'
+  WHEN o.shipment_id IS NULL THEN 'outros'
+  WHEN s.logistic_type IN ('fulfillment','cross_docking') THEN 'full'
+  WHEN s.shipment_status IN ('delivered','shipped','not_delivered') THEN 'enviado'
+  WHEN s.shipment_substatus = 'printed' THEN 'reimprimir'
+  WHEN s.shipment_substatus = 'invoice_pending' THEN 'aguardando_nf'
+  WHEN s.shipment_substatus = 'ready_to_print' AND s.label_available THEN 'pronta'
+  ELSE 'outros'
+END
+```
 
 ### Impacto nos Arquivos
 
 | Arquivo | Acao |
 |---------|------|
-| `supabase/functions/ml-worker-process/index.ts` | Adicionar `processShipmentEvent()` |
-| `supabase/functions/shipping-status-sync/index.ts` | Novo - sync periodico de status |
-| `src/hooks/useShippingLabels.ts` | Cache por periodo + auto-refresh |
-| SQL (via insert tool) | Cron job pg_cron + sync_scheduler entry |
+| Migration SQL | Criar RPC `get_shipping_orders` |
+| `src/hooks/useShippingLabels.ts` | Substituir fetch-all + JS joins por chamada RPC; mudar default para '7d' |
+
+### Resultado Esperado
+
+- Troca de periodo: de 3-10 segundos para menos de 500ms
+- Carregamento inicial: de 5+ segundos para menos de 1 segundo
+- Filtro padrao 7 dias mostra todos os envios pendentes da semana
+- Contagens de status sempre atualizadas sem recarregar dados
+
