@@ -191,7 +191,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const queryClient = useQueryClient();
   
   const [statusFilter, setStatusFilter] = useState<FinalStatus>('all');
-  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('today'); // Default: today for daily label management
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('7d'); // Default: 7 days to include pending shipments from previous days
   const [customDateRange, setCustomDateRange] = useState<DateRange>({ from: null, to: null });
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('created_at_meli');
@@ -273,239 +273,42 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
   const { data: ordersData, isLoading, refetch } = useQuery({
     queryKey: ['shipping-orders', sellerId, statusFilter, periodFilter, customDateRange, currentPage, searchQuery, sortField, sortDirection],
     queryFn: async () => {
-      if (!sellerId) return { orders: [], totalCount: 0 };
+      if (!sellerId) return { orders: [], totalCount: 0, statusCounts: { all: 0, pronta: 0, aguardando_nf: 0, reimprimir: 0 } };
 
       const { dateFrom, dateTo } = getDateRange();
 
-      // Build base query - exclude cancelled, order by recent first
-      // Use fetchAllRowsPaginated to bypass Supabase's 1000 row limit
-      const ordersRaw = await fetchAllRowsPaginated(async (offset, limit) => {
-        let q = supabase
-          .from('meli_orders_cache')
-          .select('*')
-          .eq('seller_id', sellerId)
-          .not('order_status', 'in', `(${COMPLETED_ORDER_STATUSES.join(',')})`)
-          .order('created_at_meli', { ascending: false })
-          .range(offset, offset + limit - 1);
-
-        // Apply date filters
-        if (dateFrom) {
-          q = q.gte('created_at_meli', dateFrom);
-        }
-        if (dateTo) {
-          q = q.lte('created_at_meli', dateTo);
-        }
-
-        return q;
+      const { data, error } = await supabase.rpc('get_shipping_orders', {
+        p_seller_id: sellerId,
+        p_date_from: dateFrom,
+        p_date_to: dateTo,
+        p_status_filter: statusFilter,
+        p_search_query: searchQuery.trim(),
+        p_sort_field: sortField,
+        p_sort_dir: sortDirection,
+        p_page: currentPage,
+        p_page_size: PAGE_SIZE,
       });
 
-      if (!ordersRaw || ordersRaw.length === 0) {
-        return { orders: [], totalCount: 0 };
+      if (error) {
+        console.error('RPC get_shipping_orders error:', error);
+        return { orders: [], totalCount: 0, statusCounts: { all: 0, pronta: 0, aguardando_nf: 0, reimprimir: 0 } };
       }
 
-      // Step 2: Get shipment_ids and order_ids for joins
-      const shipmentIds = ordersRaw
-        .map(o => o.shipment_id)
-        .filter(Boolean) as string[];
-      const orderIds = ordersRaw.map(o => o.order_id);
+      const result = data as unknown as {
+        orders: ShippingOrder[];
+        total_count: number;
+        status_counts: { all: number; pronta: number; aguardando_nf: number; reimprimir: number };
+      };
 
-      // Step 3: Fetch shipments and invoices in batches to avoid URL length limits
-      const BATCH_SIZE = 100;
-      
-      // Fetch shipments in batches
-      const shipmentsData: Array<Record<string, unknown>> = [];
-      for (let i = 0; i < shipmentIds.length; i += BATCH_SIZE) {
-        const batchIds = shipmentIds.slice(i, i + BATCH_SIZE);
-        const { data, error } = await supabase
-          .from('meli_shipments_cache')
-          .select('*')
-          .eq('seller_id', sellerId)
-          .in('shipment_id', batchIds);
-        
-        if (error) {
-          console.error('Error fetching shipments:', error);
-          continue;
-        }
-        if (data) shipmentsData.push(...data);
-      }
-
-      // Fetch invoices in batches
-      const invoicesData: Array<Record<string, unknown>> = [];
-      for (let i = 0; i < orderIds.length; i += BATCH_SIZE) {
-        const batchIds = orderIds.slice(i, i + BATCH_SIZE);
-        const { data, error } = await supabase
-          .from('meli_invoices_cache')
-          .select('*')
-          .eq('seller_id', sellerId)
-          .in('order_id', batchIds);
-        
-        if (error) {
-          console.error('Error fetching invoices:', error);
-          continue;
-        }
-        if (data) invoicesData.push(...data);
-      }
-
-      const shipmentsMap = new Map(
-        shipmentsData.map(s => [s.shipment_id as string, s])
-      );
-      const invoicesMap = new Map(
-        invoicesData.map(i => [i.order_id as string, i])
-      );
-
-      // Step 4: Build combined view - INCLUDE orders even without shipment cache
-      const combinedOrders: ShippingOrder[] = ordersRaw
-        .map(order => {
-          const shipment = order.shipment_id ? shipmentsMap.get(order.shipment_id) : null;
-          const invoice = invoicesMap.get(order.order_id);
-
-          // Calculate final_status
-          let finalStatus: string;
-          let selectable = false;
-
-          // If no shipment data in cache yet, show as pending sync
-          if (!shipment && order.shipment_id) {
-            finalStatus = 'pendente_sync';
-            selectable = false;
-          } else if (!order.shipment_id) {
-            // No shipment ID at all - other status
-            finalStatus = 'outros';
-            selectable = false;
-          } else {
-            const logisticType = shipment?.logistic_type as string | null;
-            const labelAvailable = (shipment?.label_available as boolean | null) ?? false;
-            const substatus = shipment?.shipment_substatus as string | null;
-            const shipmentStatus = shipment?.shipment_status as string | null;
-
-            // FULL logistics - ML handles these
-            if (logisticType && FULL_LOGISTIC_TYPES.includes(logisticType)) {
-              finalStatus = 'full';
-            }
-            // Already shipped/delivered
-            else if (shipmentStatus && COMPLETED_SHIPMENT_STATUSES.includes(shipmentStatus)) {
-              finalStatus = 'enviado';
-            }
-            // Already printed - can reprint
-            else if (substatus === 'printed') {
-              finalStatus = 'reimprimir';
-              selectable = true;
-            }
-            // Waiting for NF emission at ML
-            else if (substatus === 'invoice_pending') {
-              finalStatus = 'aguardando_nf';
-            }
-            // Ready to print (NF already emitted)
-            else if (substatus === 'ready_to_print' && labelAvailable) {
-              finalStatus = 'pronta';
-              selectable = true;
-            }
-            // Other statuses (in_hub, packed, etc.)
-            else {
-              finalStatus = 'outros';
-            }
-          }
-
-          const logisticType = shipment?.logistic_type as string | null ?? null;
-
-          return {
-            id: order.id,
-            user_id: order.user_id,
-            seller_id: order.seller_id,
-            order_id: order.order_id,
-            created_at_meli: order.created_at_meli,
-            order_status: order.order_status,
-            shipment_id: order.shipment_id,
-            buyer_nickname: order.buyer_nickname,
-            total_amount: order.total_amount,
-            order_sync_at: order.last_sync_at,
-            shipment_status: (shipment?.shipment_status as string | null) ?? null,
-            shipment_substatus: (shipment?.shipment_substatus as string | null) ?? null,
-            tracking_number: (shipment?.tracking_number as string | null) ?? null,
-            label_available: (shipment?.label_available as boolean | null) ?? false,
-            receiver_name: (shipment?.receiver_name as string | null) ?? null,
-            shipment_sync_at: (shipment?.last_sync_at as string | null) ?? null,
-            invoice_status: (invoice?.invoice_status as string | null) ?? 'pendente',
-            invoice_number: (invoice?.invoice_number as string | null) ?? null,
-            invoice_key: (invoice?.invoice_key as string | null) ?? null,
-            issued_at: (invoice?.issued_at as string | null) ?? null,
-            invoice_sync_at: (invoice?.last_sync_at as string | null) ?? null,
-            final_status: finalStatus,
-            selectable,
-            logistic_type: logisticType,
-          };
-        });
-
-      // Group by shipment_id to handle shopping cart orders (multiple orders = one shipment)
-      // Keep the one with higher priority status
-      const groupedByShipment = new Map<string, ShippingOrder>();
-      combinedOrders.forEach(order => {
-        // For orders without shipment_id, use order_id as key
-        const key = order.shipment_id || order.order_id;
-        
-        const existing = groupedByShipment.get(key);
-        if (!existing) {
-          groupedByShipment.set(key, order);
-        } else {
-          // Keep the one with higher priority (lower number = higher priority)
-          const existingPriority = STATUS_PRIORITY[existing.final_status || ''] || 99;
-          const newPriority = STATUS_PRIORITY[order.final_status || ''] || 99;
-          if (newPriority < existingPriority) {
-            groupedByShipment.set(key, order);
-          }
-        }
-      });
-
-      let uniqueOrders = Array.from(groupedByShipment.values());
-
-      // Apply status filter - "all" shows everything
-      if (statusFilter !== 'all') {
-        uniqueOrders = uniqueOrders.filter(o => o.final_status === statusFilter);
-      }
-
-      // Apply search filter
-      if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase().trim();
-        uniqueOrders = uniqueOrders.filter(o => 
-          o.order_id.toLowerCase().includes(query) ||
-          o.buyer_nickname?.toLowerCase().includes(query) ||
-          o.shipment_id?.toLowerCase().includes(query) ||
-          o.receiver_name?.toLowerCase().includes(query)
-        );
-      }
-
-      // Apply sorting
-      uniqueOrders.sort((a, b) => {
-        let comparison = 0;
-        
-        if (sortField === 'created_at_meli') {
-          const dateA = a.created_at_meli ? new Date(a.created_at_meli).getTime() : 0;
-          const dateB = b.created_at_meli ? new Date(b.created_at_meli).getTime() : 0;
-          comparison = dateA - dateB;
-        } else if (sortField === 'buyer_nickname') {
-          const nameA = (a.buyer_nickname || '').toLowerCase();
-          const nameB = (b.buyer_nickname || '').toLowerCase();
-          comparison = nameA.localeCompare(nameB);
-        } else if (sortField === 'final_status') {
-          const priorityA = STATUS_PRIORITY[a.final_status || ''] || 99;
-          const priorityB = STATUS_PRIORITY[b.final_status || ''] || 99;
-          comparison = priorityA - priorityB;
-        }
-        
-        return sortDirection === 'asc' ? comparison : -comparison;
-      });
-
-      const totalCount = uniqueOrders.length;
-
-      // Apply pagination
-      const startIndex = (currentPage - 1) * PAGE_SIZE;
-      const paginatedOrders = uniqueOrders.slice(startIndex, startIndex + PAGE_SIZE);
-
-      return { orders: paginatedOrders, totalCount };
+      return {
+        orders: result.orders || [],
+        totalCount: result.total_count || 0,
+        statusCounts: result.status_counts || { all: 0, pronta: 0, aguardando_nf: 0, reimprimir: 0 },
+      };
     },
     enabled: !!sellerId,
-    staleTime: 30000, // 30 seconds
+    staleTime: 30000,
     refetchOnWindowFocus: false,
-    // Keep previous data while refetching (instant period switch)
     placeholderData: (prev: any) => prev,
   });
 
@@ -1135,127 +938,12 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     startSyncPipeline();
   }, [startSyncPipeline]);
 
-  // Calculate status counts from the current orders (already deduped)
-  // FIXED: Use batched queries to avoid truncation
-  const { data: allOrdersForCounts = [] } = useQuery({
-    queryKey: ['shipping-orders-all', sellerId, periodFilter, customDateRange],
-    queryFn: async () => {
-      if (!sellerId) return [];
-
-      const { dateFrom, dateTo } = getDateRange();
-
-      // Get orders using pagination to avoid 1000 limit
-      type OrderBasic = { order_id: string; shipment_id: string | null };
-      const ordersData = await fetchAllRowsPaginated<OrderBasic>(
-        async (offset, limit) => {
-          let q = supabase
-            .from('meli_orders_cache')
-            .select('order_id, shipment_id')
-            .eq('seller_id', sellerId)
-            .not('order_status', 'in', `(${COMPLETED_ORDER_STATUSES.join(',')})`);
-          
-          if (dateFrom) q = q.gte('created_at_meli', dateFrom);
-          if (dateTo) q = q.lte('created_at_meli', dateTo);
-          
-          const { data, error } = await q
-            .order('created_at_meli', { ascending: false })
-            .range(offset, offset + limit - 1);
-          
-          return { data: data as OrderBasic[] | null, error };
-        }
-      );
-
-      if (ordersData.length === 0) return [];
-
-      const shipmentIds = ordersData.map(o => o.shipment_id).filter(Boolean) as string[];
-
-      // Fetch shipments in batches
-      const shipmentsMap = new Map<string, {
-        shipment_id: string;
-        label_available: boolean | null;
-        shipment_status: string | null;
-        shipment_substatus: string | null;
-        logistic_type: string | null;
-      }>();
-      
-      const BATCH_SIZE = 200;
-      for (let i = 0; i < shipmentIds.length; i += BATCH_SIZE) {
-        const batch = shipmentIds.slice(i, i + BATCH_SIZE);
-        const { data } = await supabase
-          .from('meli_shipments_cache')
-          .select('shipment_id, label_available, shipment_status, shipment_substatus, logistic_type')
-          .eq('seller_id', sellerId)
-          .in('shipment_id', batch);
-        
-        (data || []).forEach(s => shipmentsMap.set(s.shipment_id, s));
-      }
-
-      // Build list with deduplication by shipment_id and priority
-      const groupedByShipment = new Map<string, { finalStatus: string; priority: number }>();
-      
-      ordersData.forEach(o => {
-        const shipment = o.shipment_id ? shipmentsMap.get(o.shipment_id) : null;
-        const key = o.shipment_id || o.order_id;
-
-        let finalStatus: string;
-
-        // If order has shipment_id but not in cache yet
-        if (o.shipment_id && !shipment) {
-          finalStatus = 'pendente_sync';
-        } else if (!o.shipment_id) {
-          finalStatus = 'outros';
-        } else {
-          const substatus = shipment!.shipment_substatus;
-          const labelAvailable = shipment!.label_available ?? false;
-          const logisticType = shipment!.logistic_type;
-          const shipmentStatus = shipment!.shipment_status;
-
-          // FULL logistics
-          if (logisticType && FULL_LOGISTIC_TYPES.includes(logisticType)) {
-            finalStatus = 'full';
-          }
-          // Already shipped/delivered
-          else if (shipmentStatus && COMPLETED_SHIPMENT_STATUSES.includes(shipmentStatus)) {
-            finalStatus = 'enviado';
-          }
-          // Already printed
-          else if (substatus === 'printed') {
-            finalStatus = 'reimprimir';
-          }
-          // Invoice pending
-          else if (substatus === 'invoice_pending') {
-            finalStatus = 'aguardando_nf';
-          }
-          // Ready to print
-          else if (substatus === 'ready_to_print' && labelAvailable) {
-            finalStatus = 'pronta';
-          }
-          // Other
-          else {
-            finalStatus = 'outros';
-          }
-        }
-
-        const priority = STATUS_PRIORITY[finalStatus] || 99;
-        const existing = groupedByShipment.get(key);
-        
-        if (!existing || priority < existing.priority) {
-          groupedByShipment.set(key, { finalStatus, priority });
-        }
-      });
-
-      return Array.from(groupedByShipment.values());
-    },
-    enabled: !!sellerId,
-    staleTime: 30000,
-    placeholderData: (prev: any) => prev,
-  });
-
-  const statusCounts = {
-    all: allOrdersForCounts.length,
-    pronta: allOrdersForCounts.filter(o => o.finalStatus === 'pronta').length,
-    aguardando_nf: allOrdersForCounts.filter(o => o.finalStatus === 'aguardando_nf').length,
-    reimprimir: allOrdersForCounts.filter(o => o.finalStatus === 'reimprimir').length,
+  // Status counts come directly from the RPC result
+  const statusCounts = ordersData?.statusCounts ?? {
+    all: 0,
+    pronta: 0,
+    aguardando_nf: 0,
+    reimprimir: 0,
   };
 
   // === SILENT AUTO-REFRESH: Update shipment statuses every 5 minutes ===
