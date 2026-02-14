@@ -188,7 +188,7 @@ async function syncQuestions(
   supabase: any,
   account: any,
   accessToken: string,
-): Promise<{ total: number; newCount: number; pendingCount: number }> {
+): Promise<{ total: number; newCount: number; pendingCount: number; reconciledCount: number }> {
   const sellerId = account.ml_user_id;
 
   // Get existing pending question IDs before sync
@@ -206,65 +206,153 @@ async function syncQuestions(
 
   if (!res.ok) {
     console.error(`[polling] Questions API ${res.status} for ${sellerId}`);
-    return { total: 0, newCount: 0, pendingCount: 0 };
+    return { total: 0, newCount: 0, pendingCount: 0, reconciledCount: 0 };
   }
 
   const data = await res.json();
   const questions: any[] = data.questions || [];
-  if (questions.length === 0) return { total: 0, newCount: 0, pendingCount: 0 };
 
   console.log(`[polling] ${sellerId}: ${questions.length} unanswered questions from ML`);
 
-  // Fetch item details
-  const itemIds = [...new Set(questions.map((q: any) => q.item_id))];
-  const itemsMap = await fetchItemDetails(accessToken, itemIds);
+  // ── Reconcile: detect questions answered externally on ML ────
+  // Local pending questions NOT in the ML unanswered list were answered outside the system
+  const mlUnansweredIds = new Set(questions.map((q: any) => String(q.id)));
+  const answeredExternally = [...existingIds].filter((id) => !mlUnansweredIds.has(id));
+  let reconciledCount = 0;
 
-  // Build upsert records
-  const records = questions.map((q: any) => {
-    const item = itemsMap.get(q.item_id);
-    const risk = analyzeRisk(q.text || "");
-    const slaDeadline = new Date(q.date_created);
-    slaDeadline.setHours(slaDeadline.getHours() + 15);
-    const isSlaBreached = slaDeadline < new Date();
+  if (answeredExternally.length > 0) {
+    console.log(`[polling] ${sellerId}: ${answeredExternally.length} questions may have been answered externally, checking...`);
 
-    let sku = item?.seller_custom_field || null;
-    if (!sku && item?.variations?.[0]?.seller_custom_field) {
-      sku = item.variations[0].seller_custom_field;
+    // Fetch each question from ML to confirm and get the answer
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < answeredExternally.length; i += BATCH_SIZE) {
+      const batch = answeredExternally.slice(i, i + BATCH_SIZE);
+
+      for (const mlQuestionId of batch) {
+        try {
+          const qRes = await fetch(`https://api.mercadolibre.com/questions/${mlQuestionId}`, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+
+          if (!qRes.ok) {
+            if (qRes.status === 404) {
+              // Question was deleted on ML
+              await supabase
+                .from("qa_questions")
+                .update({ status: "archived", updated_at: new Date().toISOString() })
+                .eq("ml_question_id", mlQuestionId)
+                .eq("seller_id", sellerId);
+              reconciledCount++;
+              console.log(`[polling] Question ${mlQuestionId} deleted on ML, archived locally`);
+            }
+            continue;
+          }
+
+          const q = await qRes.json();
+
+          if (q.answer) {
+            // Mark as answered
+            await supabase
+              .from("qa_questions")
+              .update({
+                status: "answered",
+                answered_at: q.answer.date_created || new Date().toISOString(),
+                needs_attention: false,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("ml_question_id", mlQuestionId)
+              .eq("seller_id", sellerId);
+
+            // Save the ML response
+            const { data: localQ } = await supabase
+              .from("qa_questions")
+              .select("id")
+              .eq("ml_question_id", mlQuestionId)
+              .eq("seller_id", sellerId)
+              .maybeSingle();
+
+            if (localQ) {
+              await supabase
+                .from("qa_responses")
+                .upsert({
+                  user_id: account.user_id,
+                  seller_id: sellerId,
+                  question_id: localQ.id,
+                  response_text: q.answer.text || "",
+                  source: "ml_synced",
+                  is_draft: false,
+                  is_sent: true,
+                  sent_at: q.answer.date_created || new Date().toISOString(),
+                  ml_response_id: String(q.answer.id || q.id),
+                  updated_at: new Date().toISOString(),
+                } as never, { onConflict: "question_id,ml_response_id" });
+            }
+
+            reconciledCount++;
+            console.log(`[polling] Question ${mlQuestionId} answered externally, synced`);
+          }
+
+          await sleep(DELAY_API_MS);
+        } catch (err) {
+          console.error(`[polling] Error reconciling question ${mlQuestionId}:`, err);
+        }
+      }
     }
+  }
 
-    return {
-      user_id: account.user_id,
-      seller_id: sellerId,
-      ml_question_id: String(q.id),
-      ml_item_id: q.item_id,
-      ml_buyer_id: String(q.from?.id),
-      question_text: q.text,
-      item_title: item?.title || null,
-      item_sku: sku,
-      item_thumbnail: item?.thumbnail || null,
-      status: q.answer ? "answered" : "pending",
-      risk_level: risk.level,
-      risk_reasons: risk.reasons,
-      question_date: q.date_created,
-      answered_at: q.answer?.date_created || null,
-      sla_deadline: slaDeadline.toISOString(),
-      is_sla_breached: isSlaBreached,
-      needs_attention: risk.level === "high" || isSlaBreached,
-      updated_at: new Date().toISOString(),
-    };
-  });
+  // ── Upsert unanswered questions ─────────────────────────────
+  if (questions.length > 0) {
+    // Fetch item details
+    const itemIds = [...new Set(questions.map((q: any) => q.item_id))];
+    const itemsMap = await fetchItemDetails(accessToken, itemIds);
 
-  const { error: upsertErr } = await supabase
-    .from("qa_questions")
-    .upsert(records as never[], { onConflict: "ml_question_id", ignoreDuplicates: false });
+    // Build upsert records
+    const records = questions.map((q: any) => {
+      const item = itemsMap.get(q.item_id);
+      const risk = analyzeRisk(q.text || "");
+      const slaDeadline = new Date(q.date_created);
+      slaDeadline.setHours(slaDeadline.getHours() + 15);
+      const isSlaBreached = slaDeadline < new Date();
 
-  if (upsertErr) console.error(`[polling] Upsert questions error:`, upsertErr.message);
+      let sku = item?.seller_custom_field || null;
+      if (!sku && item?.variations?.[0]?.seller_custom_field) {
+        sku = item.variations[0].seller_custom_field;
+      }
+
+      return {
+        user_id: account.user_id,
+        seller_id: sellerId,
+        ml_question_id: String(q.id),
+        ml_item_id: q.item_id,
+        ml_buyer_id: String(q.from?.id),
+        question_text: q.text,
+        item_title: item?.title || null,
+        item_sku: sku,
+        item_thumbnail: item?.thumbnail || null,
+        status: q.answer ? "answered" : "pending",
+        risk_level: risk.level,
+        risk_reasons: risk.reasons,
+        question_date: q.date_created,
+        answered_at: q.answer?.date_created || null,
+        sla_deadline: slaDeadline.toISOString(),
+        is_sla_breached: isSlaBreached,
+        needs_attention: risk.level === "high" || isSlaBreached,
+        updated_at: new Date().toISOString(),
+      };
+    });
+
+    const { error: upsertErr } = await supabase
+      .from("qa_questions")
+      .upsert(records as never[], { onConflict: "ml_question_id", ignoreDuplicates: false });
+
+    if (upsertErr) console.error(`[polling] Upsert questions error:`, upsertErr.message);
+  }
 
   const newCount = questions.filter((q: any) => !existingIds.has(String(q.id)) && !q.answer).length;
   const pendingCount = questions.filter((q: any) => !q.answer).length;
 
-  console.log(`[polling] ${sellerId}: ${newCount} new pending, ${pendingCount} total pending`);
-  return { total: questions.length, newCount, pendingCount };
+  console.log(`[polling] ${sellerId}: ${newCount} new pending, ${pendingCount} total pending, ${reconciledCount} reconciled`);
+  return { total: questions.length, newCount, pendingCount, reconciledCount };
 }
 
 // ── Sync messages for one account ──────────────────────────────────
@@ -514,6 +602,7 @@ Deno.serve(async (req) => {
       accounts_failed: 0,
       questions_synced: 0,
       questions_new: 0,
+      questions_reconciled: 0,
       messages_synced: 0,
       messages_new_unread: 0,
       notifications_created: 0,
@@ -560,6 +649,7 @@ Deno.serve(async (req) => {
         const qResult = await syncQuestions(supabase, account, accessToken);
         stats.questions_synced += qResult.total;
         stats.questions_new += qResult.newCount;
+        stats.questions_reconciled += qResult.reconciledCount;
 
         if (qResult.newCount > 0) {
           await upsertNotification(supabase, account.user_id, account.ml_user_id, companyName, "question", qResult.pendingCount);
