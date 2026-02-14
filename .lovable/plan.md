@@ -1,106 +1,80 @@
 
 
-# Correcao de Performance e Filtro de Etiquetas de Envio
+# Sincronizacao em Tempo Real de Vendas e Status de Envio
 
-## Problemas Identificados
+## Problema
 
-### 1. Lentidao extrema ao carregar/trocar filtros
-A query principal (`useQuery` linha 273) usa `fetchAllRowsPaginated` para buscar **TODOS** os pedidos do periodo, depois faz joins com shipments e invoices **em JavaScript**, e so entao filtra e pagina. Para 30 dias com centenas de pedidos, isso significa multiplas queries sequenciais ao banco, processamento pesado no navegador e travamento da UI.
+Quando o seller emite a nota fiscal no Mercado Livre, o status muda de "Aguardando NF" para "Para Imprimir", mas o sistema nao reflete essa mudanca em tempo real. Existem duas falhas:
 
-### 2. Filtro "Hoje" induz ao erro
-O filtro "Hoje" filtra por `created_at_meli` (data de criacao do pedido), mas o que importa para operacao e **quais envios precisam de acao hoje** -- incluindo pedidos de ontem apos o horario de corte. O ML usa o conceito de "Envios de hoje" baseado no deadline de despacho, nao na data do pedido.
+1. **Vendas novas nao sao cacheadas via webhook**: O `processOrderEvent` atual so processa automacao de boas-vindas. Ele NAO salva o pedido na `meli_orders_cache`. Vendas novas so aparecem quando o job `orders-hourly-sync` roda (a cada hora).
 
-### 3. API do ML nao tem filtro "envios de hoje" direto
-A API `orders/search` suporta filtros como `shipping.status=ready_to_ship` e `order.status=paid`, mas nao tem um filtro equivalente ao "TAB_TODAY" da interface web do ML. O conceito de "envios de hoje" e determinado internamente pelo ML baseado no horario de corte e logistica. A solucao e filtrar localmente por shipments com status ativo (`ready_to_ship` com substatus `invoice_pending` ou `ready_to_print`).
-
----
+2. **Mudancas de status de envio**: O `processShipmentEvent` ja atualiza `meli_shipments_cache` corretamente, mas o `processOrderEvent` nao atualiza o status do pedido na cache, entao o JOIN da RPC pode mostrar dados desatualizados.
 
 ## Solucao
 
-### Parte 1: Mudar filtro padrao para 7 dias
+### Parte 1: Webhook de pedidos salva na cache (processOrderEvent)
 
-**Arquivo:** `src/hooks/useShippingLabels.ts`
+Modificar `processOrderEvent` em `ml-worker-process/index.ts` para **tambem** fazer upsert do pedido na `meli_orders_cache` quando receber um webhook de `orders_v2`. Isso faz com que vendas novas aparecam imediatamente no sistema.
 
-- Alterar `useState<PeriodFilter>('today')` para `useState<PeriodFilter>('7d')` (linha 194)
-- Isso garante que ao abrir a pagina, o usuario ve todos os pedidos da semana, incluindo os de ontem que ainda precisam de acao
+A logica sera adicionada ANTES da verificacao de automacao existente:
+- Buscar dados do pedido na API do ML (ja faz isso)
+- Upsert em `meli_orders_cache` com `order_id`, `shipment_id`, `order_status`, `buyer_nickname`, `buyer_name`, `total_amount`, etc.
+- Buscar e upsert dos items do pedido em `meli_order_items_cache`
+- Continuar com a logica de automacao existente
 
-### Parte 2: Query otimizada com paginacao no banco
+### Parte 2: Webhook de pedidos tambem atualiza shipment
 
-**Arquivo:** `src/hooks/useShippingLabels.ts`
+Quando o webhook de `orders_v2` chega (ex: NF emitida), o status do shipping muda. Alem de atualizar o pedido, o sistema tambem vai:
+- Extrair o `shipping.id` do pedido
+- Buscar `GET /shipments/{id}` na API do ML
+- Upsert em `meli_shipments_cache` com o status atualizado
 
-Refatorar a query principal para:
-1. **Criar uma view ou RPC no banco** que faz o JOIN de `meli_orders_cache` + `meli_shipments_cache` + `meli_invoices_cache` e calcula o `final_status` direto no SQL
-2. A RPC recebe: `seller_id`, `date_from`, `date_to`, `status_filter`, `search_query`, `sort_field`, `sort_dir`, `page`, `page_size`
-3. Retorna apenas os registros da pagina solicitada + `total_count` (via `COUNT(*) OVER()`)
-4. Isso elimina: fetch de todos os registros, joins em JS, filtragem em JS, paginacao em JS
+Isso garante que ao emitir NF no ML, o sistema atualiza tanto o pedido quanto o envio em tempo real.
 
-A RPC fara:
-- LEFT JOIN entre as 3 tabelas
-- CASE/WHEN para calcular `final_status` no SQL (mesma logica das linhas 362-406)
-- Deduplicacao por `shipment_id` com `DISTINCT ON` ou `ROW_NUMBER()`
-- Filtros de status, busca (ILIKE), e periodo aplicados no WHERE
-- `ORDER BY` e `LIMIT/OFFSET` no SQL
-- Retorno de `status_counts` (contagem por status) numa segunda query ou CTE
+### Parte 3: Manter o job agendado como fallback
 
-### Parte 3: Contagem de status sem recarregar tudo
+O `shipping-status-sync` (a cada 10 min) e o `orders-hourly-sync` continuam funcionando como rede de seguranca. Se o webhook falhar ou atrasar, esses jobs corrigem os dados periodicamente.
 
-A RPC tambem retornara as contagens por status (`pronta`, `aguardando_nf`, `reimprimir`, etc.) calculadas sobre o periodo inteiro (sem paginacao), para exibir nos badges de filtro. Isso sera feito com um CTE separado na mesma chamada.
+## Resumo do Fluxo
 
-### Parte 4: Cache com placeholderData (ja existente, manter)
+```text
+ML emite NF / Nova venda
+       |
+       v
+  Webhook ML (orders_v2)
+       |
+       v
+  ml-webhook-ingest (enfileira)
+       |
+       v
+  ml-worker-process (processa)
+       |
+       +---> Upsert meli_orders_cache (NOVO)
+       +---> Upsert meli_order_items_cache (NOVO)
+       +---> GET /shipments/{id} + Upsert meli_shipments_cache (NOVO)
+       +---> Automacao de boas-vindas (existente)
+       |
+       v
+  Dashboard atualizado em tempo real
+```
 
-O `placeholderData: (prev) => prev` ja esta implementado (linha 509). Com a RPC otimizada, a troca de periodo sera quase instantanea pois:
-- Dados anteriores ficam visiveis enquanto a nova query roda
-- A nova query sera rapida (SQL paginado em vez de fetch-all + JS processing)
-
----
+Fallback: `orders-hourly-sync` (a cada hora) + `shipping-status-sync` (a cada 10 min)
 
 ## Detalhes Tecnicos
 
-### RPC: `get_shipping_orders`
+### Arquivo modificado: `supabase/functions/ml-worker-process/index.ts`
 
-```text
-Parametros:
-  p_seller_id TEXT
-  p_date_from TIMESTAMPTZ
-  p_date_to TIMESTAMPTZ  
-  p_status_filter TEXT (default 'all')
-  p_search_query TEXT (default '')
-  p_sort_field TEXT (default 'created_at_meli')
-  p_sort_dir TEXT (default 'desc')
-  p_page INT (default 1)
-  p_page_size INT (default 30)
+**Funcao `processOrderEvent`** - adicionar antes da logica de automacao:
 
-Retorno:
-  orders: JSONB[] (pagina atual)
-  total_count: INT
-  status_counts: JSONB {all, pronta, aguardando_nf, reimprimir, ...}
-```
+1. **Upsert do pedido**: Salvar em `meli_orders_cache` com os mesmos campos que o `orders-hourly-sync` usa (user_id, seller_id, order_id, created_at_meli, order_status, shipment_id, buyer_nickname, buyer_name, total_amount, items_count, last_sync_at)
 
-Logica SQL do `final_status`:
-```text
-CASE
-  WHEN s.shipment_id IS NULL AND o.shipment_id IS NOT NULL THEN 'pendente_sync'
-  WHEN o.shipment_id IS NULL THEN 'outros'
-  WHEN s.logistic_type IN ('fulfillment','cross_docking') THEN 'full'
-  WHEN s.shipment_status IN ('delivered','shipped','not_delivered') THEN 'enviado'
-  WHEN s.shipment_substatus = 'printed' THEN 'reimprimir'
-  WHEN s.shipment_substatus = 'invoice_pending' THEN 'aguardando_nf'
-  WHEN s.shipment_substatus = 'ready_to_print' AND s.label_available THEN 'pronta'
-  ELSE 'outros'
-END
-```
+2. **Upsert dos items**: Para cada item do pedido, salvar em `meli_order_items_cache` (seller_id, order_id, item_id, variation_id, title, quantity, unit_price, etc.)
 
-### Impacto nos Arquivos
+3. **Sync do shipment**: Se o pedido tem `shipping.id`, buscar `GET /shipments/{shipping.id}` e upsert em `meli_shipments_cache` com status, substatus, tracking_number, receiver_name, logistic_type, label_available
 
-| Arquivo | Acao |
-|---------|------|
-| Migration SQL | Criar RPC `get_shipping_orders` |
-| `src/hooks/useShippingLabels.ts` | Substituir fetch-all + JS joins por chamada RPC; mudar default para '7d' |
+4. **Remover restricao de status**: Atualmente o `processOrderEvent` so processa pedidos `paid`. O upsert da cache deve acontecer para TODOS os status (paid, cancelled, etc.), e so a automacao de boas-vindas continua restrita a `paid`.
 
-### Resultado Esperado
+### Nenhuma migracao SQL necessaria
 
-- Troca de periodo: de 3-10 segundos para menos de 500ms
-- Carregamento inicial: de 5+ segundos para menos de 1 segundo
-- Filtro padrao 7 dias mostra todos os envios pendentes da semana
-- Contagens de status sempre atualizadas sem recarregar dados
+A estrutura das tabelas ja suporta todos os campos necessarios. A mudanca e apenas no codigo da Edge Function.
 
