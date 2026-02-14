@@ -586,15 +586,119 @@ async function processOrderEvent(
     return { success: false, error: `Fetch order failed: ${String(err)}` };
   }
 
-  // Only process paid orders for welcome messages
   const orderStatus = orderData.status as string;
+  const shipping = orderData.shipping as Record<string, unknown> | undefined;
+  const shippingId = shipping?.id ? String(shipping.id) : null;
+  const buyer = orderData.buyer as Record<string, unknown> | undefined;
+  const orderItems = orderData.order_items as Array<{ item: { id: string; title: string; variation_id?: number }; quantity: number; unit_price: number; full_unit_price?: number; currency_id?: string }> | undefined;
+
+  // ===== PART 1: Upsert order into meli_orders_cache (ALL statuses) =====
+  try {
+    const totalAmount = (orderData.total_amount as number) || 0;
+    const itemsCount = orderItems?.length || 0;
+
+    const { error: orderCacheError } = await supabase
+      .from("meli_orders_cache")
+      .upsert({
+        user_id: integration.user_id,
+        seller_id: event.ml_user_id,
+        order_id: orderId,
+        created_at_meli: orderData.date_created || new Date().toISOString(),
+        order_status: orderStatus,
+        shipment_id: shippingId,
+        buyer_nickname: (buyer?.nickname as string) || null,
+        buyer_name: [buyer?.first_name, buyer?.last_name].filter(Boolean).join(" ") || null,
+        total_amount: totalAmount,
+        items_count: itemsCount,
+        last_sync_at: new Date().toISOString(),
+      }, { onConflict: "seller_id,order_id" });
+
+    if (orderCacheError) {
+      console.error(`[ml-worker] Order cache upsert error for ${orderId}:`, orderCacheError.message);
+    } else {
+      console.log(`[ml-worker] Order ${orderId} cached (status: ${orderStatus})`);
+    }
+  } catch (cacheErr) {
+    console.error(`[ml-worker] Order cache error:`, cacheErr);
+  }
+
+  // ===== PART 2: Upsert order items into meli_order_items_cache =====
+  if (orderItems && orderItems.length > 0) {
+    try {
+      const itemRows = orderItems.map((oi) => ({
+        seller_id: event.ml_user_id,
+        order_id: orderId,
+        item_id: oi.item?.id || "",
+        variation_id: oi.item?.variation_id ? String(oi.item.variation_id) : null,
+        title: oi.item?.title || "",
+        quantity: oi.quantity || 1,
+        unit_price: oi.unit_price || 0,
+        full_unit_price: oi.full_unit_price || oi.unit_price || 0,
+        currency_id: oi.currency_id || "BRL",
+        last_sync_at: new Date().toISOString(),
+      }));
+
+      const { error: itemsCacheError } = await supabase
+        .from("meli_order_items_cache")
+        .upsert(itemRows, { onConflict: "seller_id,order_id,item_id" });
+
+      if (itemsCacheError) {
+        console.error(`[ml-worker] Order items cache error for ${orderId}:`, itemsCacheError.message);
+      } else {
+        console.log(`[ml-worker] ${itemRows.length} item(s) cached for order ${orderId}`);
+      }
+    } catch (itemsErr) {
+      console.error(`[ml-worker] Order items cache error:`, itemsErr);
+    }
+  }
+
+  // ===== PART 3: Fetch and upsert shipment into meli_shipments_cache =====
+  if (shippingId) {
+    try {
+      const shipResponse = await fetch(`https://api.mercadolibre.com/shipments/${shippingId}`, {
+        headers: { Authorization: `Bearer ${mlAccount.access_token}` },
+      });
+
+      if (shipResponse.ok) {
+        const shipData = await shipResponse.json();
+        const receiverAddress = shipData.receiver_address || {};
+        const labelAvailable = shipData.substatus === "ready_to_print" || shipData.substatus === "printed";
+
+        const { error: shipCacheError } = await supabase
+          .from("meli_shipments_cache")
+          .upsert({
+            user_id: integration.user_id,
+            seller_id: event.ml_user_id,
+            shipment_id: shippingId,
+            shipment_status: shipData.status,
+            shipment_substatus: shipData.substatus || null,
+            tracking_number: shipData.tracking_number || null,
+            receiver_name: receiverAddress.receiver_name || null,
+            logistic_type: shipData.logistic_type || null,
+            label_available: labelAvailable,
+            last_sync_at: new Date().toISOString(),
+          }, { onConflict: "seller_id,shipment_id" });
+
+        if (shipCacheError) {
+          console.error(`[ml-worker] Shipment cache error for ${shippingId}:`, shipCacheError.message);
+        } else {
+          console.log(`[ml-worker] Shipment ${shippingId} cached (${shipData.status}/${shipData.substatus})`);
+        }
+      } else if (shipResponse.status !== 404) {
+        console.warn(`[ml-worker] Shipment ${shippingId} fetch failed: ${shipResponse.status}`);
+      }
+    } catch (shipErr) {
+      console.error(`[ml-worker] Shipment sync error:`, shipErr);
+    }
+  }
+
+  // ===== PART 4: Automation (welcome messages) — only for paid orders =====
   if (orderStatus !== "paid") {
-    await logEvent(supabase, event.id, "info", `Order ${orderId} status is ${orderStatus}, skipping automation`);
+    await logEvent(supabase, event.id, "info", `Order ${orderId} cached (status: ${orderStatus}), skipping automation`);
     return { success: true };
   }
 
   // Check shipping status — only create drafts for orders not yet shipped
-  const shipping = orderData.shipping as Record<string, unknown> | undefined;
   const shippingStatus = (shipping?.status as string) || null;
   const allowedShippingStatuses = [null, "pending", "to_be_agreed"];
   
@@ -659,11 +763,9 @@ async function processOrderEvent(
       continue;
     }
 
-    // Interpolate variables in template content
-    const buyer = orderData.buyer as Record<string, unknown> | undefined;
+    // Interpolate variables in template content (buyer/orderItems already in scope)
     const buyerFirstName = (buyer?.first_name as string) || (buyer?.nickname as string) || "Comprador";
     const buyerName = [buyer?.first_name, buyer?.last_name].filter(Boolean).join(" ") || (buyer?.nickname as string) || "Comprador";
-    const orderItems = orderData.order_items as Array<{ item: { id: string; title: string } }> | undefined;
     const itemTitle = orderItems?.[0]?.item?.title || "seu produto";
 
     let messageContent = template.content
