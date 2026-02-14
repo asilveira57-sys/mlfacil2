@@ -127,7 +127,7 @@ export function AdLinkSearchModal({ sellerId, onInsertLink }: AdLinkSearchModalP
           Link
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Inserir link de anúncio</DialogTitle>
         </DialogHeader>
