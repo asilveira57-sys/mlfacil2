@@ -89,7 +89,7 @@ export function useEnrichedPromotionItems(
       const items = (itemsData as unknown as PromotionItemSnapshot[]) || [];
       setRawItems(items);
 
-      // 2. Enrich with listing visuals (second query)
+      // 2. Enrich with listing visuals (second query + ML API fallback)
       if (items.length > 0) {
         const itemIds = [...new Set(items.map(i => i.item_id))];
         
@@ -110,6 +110,36 @@ export function useEnrichedPromotionItems(
               if (!visualsMap.has(listing.item_id)) {
                 visualsMap.set(listing.item_id, listing as ListingVisual);
               }
+            }
+          }
+        }
+
+        // Fallback: fetch missing items from ML public API
+        const missingIds = itemIds.filter(id => !visualsMap.has(id));
+        if (missingIds.length > 0) {
+          const mlBatchSize = 20; // ML API allows up to 20 ids per call
+          for (let i = 0; i < missingIds.length; i += mlBatchSize) {
+            const batch = missingIds.slice(i, i + mlBatchSize);
+            try {
+              const idsParam = batch.join(',');
+              const res = await fetch(`https://api.mercadolibre.com/items?ids=${idsParam}&attributes=id,title,thumbnail,permalink`);
+              if (res.ok) {
+                const results = await res.json() as { code: number; body: { id: string; title: string; thumbnail: string; permalink: string } }[];
+                for (const result of results) {
+                  if (result.code === 200 && result.body) {
+                    visualsMap.set(result.body.id, {
+                      item_id: result.body.id,
+                      title: result.body.title || null,
+                      thumbnail: result.body.thumbnail || null,
+                      sku: null,
+                      permalink: result.body.permalink || null,
+                      listing_type_id: null,
+                    });
+                  }
+                }
+              }
+            } catch (err) {
+              console.warn('[useEnrichedPromotionItems] ML API fallback failed:', err);
             }
           }
         }
