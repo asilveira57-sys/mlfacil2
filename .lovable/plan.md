@@ -1,80 +1,125 @@
 
+# Correcao da Central de Promocoes: Adesao, Layout e Dados Visuais
 
-# Sincronizacao em Tempo Real de Vendas e Status de Envio
+## Problema 1: Adesao falhando para todos os 18 itens
 
-## Problema
+**Causa raiz identificada nos logs:**
+```
+Resource /seller-promotions/promotions/P-MLB16555022/items/MLB3389129181 not found.
+```
 
-Quando o seller emite a nota fiscal no Mercado Livre, o status muda de "Aguardando NF" para "Para Imprimir", mas o sistema nao reflete essa mudanca em tempo real. Existem duas falhas:
+O endpoint da API esta errado. Para promocoes do tipo **SMART**, a API do Mercado Livre usa uma URL diferente:
 
-1. **Vendas novas nao sao cacheadas via webhook**: O `processOrderEvent` atual so processa automacao de boas-vindas. Ele NAO salva o pedido na `meli_orders_cache`. Vendas novas so aparecem quando o job `orders-hourly-sync` roda (a cada hora).
+- **Errado (atual):** `POST /seller-promotions/promotions/{promo_id}/items/{item_id}?promotion_type=SMART`
+- **Correto:** `POST /seller-promotions/items/{item_id}?app_version=v2` com body contendo `promotion_id`, `promotion_type` e `offer_id`
 
-2. **Mudancas de status de envio**: O `processShipmentEvent` ja atualiza `meli_shipments_cache` corretamente, mas o `processOrderEvent` nao atualiza o status do pedido na cache, entao o JOIN da RPC pode mostrar dados desatualizados.
+Alem disso, cada item SMART requer um `offer_id` unico (ex: `CANDIDATE-MLB3389129181-75059206804`), que ja esta salvo no campo `raw_item_data` da tabela `promotion_items_snapshots`, mas nao esta sendo enviado ao edge function.
+
+## Problema 2: Janela muito pequena (so mostra 2 itens)
+
+A `ScrollArea` no modal usa `h-[calc(90vh-370px)]`. Com o cabecalho, filtros e toolbar, sobra pouco espaco vertical. Precisa reduzir o padding do cabecalho e aumentar a area util da lista.
+
+## Problema 3: Sem thumbnail, titulo e "Voce recebe"
+
+O hook `useEnrichedPromotionItems` faz um JOIN com `meli_listings_cache`, mas se os itens nao estiverem no cache, retorna null para thumbnail, title, sku, etc. Isso acontece quando os listings nunca foram sincronizados ou o item_id nao corresponde exatamente. O `net_proceeds_amount` ja esta na tabela `promotion_items_snapshots` mas pode estar null se a API do ML nao retornou esse dado na sincronizacao.
+
+---
 
 ## Solucao
 
-### Parte 1: Webhook de pedidos salva na cache (processOrderEvent)
+### Parte 1: Corrigir URL da API de adesao (Edge Function)
 
-Modificar `processOrderEvent` em `ml-worker-process/index.ts` para **tambem** fazer upsert do pedido na `meli_orders_cache` quando receber um webhook de `orders_v2`. Isso faz com que vendas novas aparecam imediatamente no sistema.
+**Arquivo:** `supabase/functions/promotions-action/index.ts`
 
-A logica sera adicionada ANTES da verificacao de automacao existente:
-- Buscar dados do pedido na API do ML (ja faz isso)
-- Upsert em `meli_orders_cache` com `order_id`, `shipment_id`, `order_status`, `buyer_nickname`, `buyer_name`, `total_amount`, etc.
-- Buscar e upsert dos items do pedido em `meli_order_items_cache`
-- Continuar com a logica de automacao existente
+Refatorar a logica de adesao para usar o endpoint correto baseado no `promotion_type`:
 
-### Parte 2: Webhook de pedidos tambem atualiza shipment
+- Para **SMART** e **PRICE_MATCHING**: `POST /seller-promotions/items/{item_id}?app_version=v2` com body `{ promotion_id, promotion_type, offer_id }`
+- Para **DEAL** e outros: `POST /seller-promotions/items/{item_id}?user_id={seller_id}` com body `{ promotion_id, promotion_type, deal_price }` e header `version: v2`
+- Para **remocao (DELETE)**: manter `DELETE /seller-promotions/items/{item_id}?app_version=v2` com body `{ promotion_id, promotion_type }`
 
-Quando o webhook de `orders_v2` chega (ex: NF emitida), o status do shipping muda. Alem de atualizar o pedido, o sistema tambem vai:
-- Extrair o `shipping.id` do pedido
-- Buscar `GET /shipments/{id}` na API do ML
-- Upsert em `meli_shipments_cache` com o status atualizado
+Tambem e necessario:
+- Adicionar `offer_id` ao interface `ActionItem`
+- Buscar o `offer_id` do `raw_item_data` no banco quando nao enviado pelo frontend
 
-Isso garante que ao emitir NF no ML, o sistema atualiza tanto o pedido quanto o envio em tempo real.
+### Parte 2: Enviar offer_id do frontend
 
-### Parte 3: Manter o job agendado como fallback
+**Arquivo:** `src/pages/Promocoes.tsx`
 
-O `shipping-status-sync` (a cada 10 min) e o `orders-hourly-sync` continuam funcionando como rede de seguranca. Se o webhook falhar ou atrasar, esses jobs corrigem os dados periodicamente.
+Atualizar as callbacks `onAdhere`, `onAdhereAll` e `onAdhereSelected` para incluir o `offer_id` de cada item (extraido de `raw_item_data` via hook, ou buscado diretamente).
 
-## Resumo do Fluxo
+**Arquivo:** `src/hooks/useEnrichedPromotionItems.ts`
 
-```text
-ML emite NF / Nova venda
-       |
-       v
-  Webhook ML (orders_v2)
-       |
-       v
-  ml-webhook-ingest (enfileira)
-       |
-       v
-  ml-worker-process (processa)
-       |
-       +---> Upsert meli_orders_cache (NOVO)
-       +---> Upsert meli_order_items_cache (NOVO)
-       +---> GET /shipments/{id} + Upsert meli_shipments_cache (NOVO)
-       +---> Automacao de boas-vindas (existente)
-       |
-       v
-  Dashboard atualizado em tempo real
-```
+Expor o campo `offer_id` extraido de `raw_item_data` no tipo `EnrichedPromotionItem` para que o frontend possa envia-lo.
 
-Fallback: `orders-hourly-sync` (a cada hora) + `shipping-status-sync` (a cada 10 min)
+### Parte 3: Aumentar area visivel da lista de itens
+
+**Arquivo:** `src/components/promotions/PromotionDetailModal.tsx`
+
+- Compactar o cabecalho: reduzir padding de `pt-6 pb-3` para `pt-4 pb-2`
+- Aumentar a ScrollArea: mudar de `h-[calc(90vh-370px)]` para `h-[calc(90vh-280px)]`
+- Isso permitira ver 4-5 itens sem scroll, em vez dos 2 atuais
+
+### Parte 4: Garantir dados visuais (thumbnail, titulo)
+
+**Arquivo:** `src/hooks/useEnrichedPromotionItems.ts`
+
+O hook ja faz o JOIN correto. O problema e que a `meli_listings_cache` pode nao ter os itens. A solucao e:
+- Extrair `title` e `price` do `raw_item_data` como fallback quando o listing cache nao tem a informacao
+- Adicionar query na coluna `raw_item_data` da `promotion_items_snapshots` para extrair campos como titulo original quando disponivel
+
+Para o "Voce recebe" (`net_proceeds_amount`): o valor ja vem da API na sincronizacao. Se esta null, e porque a API do ML nao retornou esse campo para o tipo SMART. Nesse caso, exibir um calculo estimado baseado nas taxas conhecidas, ou simplesmente manter o "-" com tooltip explicativo.
+
+---
 
 ## Detalhes Tecnicos
 
-### Arquivo modificado: `supabase/functions/ml-worker-process/index.ts`
+### Mudanca na Edge Function (`promotions-action/index.ts`)
 
-**Funcao `processOrderEvent`** - adicionar antes da logica de automacao:
+```text
+Interface ActionItem atualizada:
+  item_id: string
+  price?: number
+  offer_id?: string   // NOVO
 
-1. **Upsert do pedido**: Salvar em `meli_orders_cache` com os mesmos campos que o `orders-hourly-sync` usa (user_id, seller_id, order_id, created_at_meli, order_status, shipment_id, buyer_nickname, buyer_name, total_amount, items_count, last_sync_at)
+Logica de URL por tipo:
+  SMART / PRICE_MATCHING:
+    POST /seller-promotions/items/{item_id}?app_version=v2
+    Body: { promotion_id, promotion_type, offer_id }
 
-2. **Upsert dos items**: Para cada item do pedido, salvar em `meli_order_items_cache` (seller_id, order_id, item_id, variation_id, title, quantity, unit_price, etc.)
+  DEAL:
+    POST /seller-promotions/items/{item_id}?user_id={seller_id}
+    Headers: version: v2
+    Body: { promotion_id, promotion_type, deal_price: price }
 
-3. **Sync do shipment**: Se o pedido tem `shipping.id`, buscar `GET /shipments/{shipping.id}` e upsert em `meli_shipments_cache` com status, substatus, tracking_number, receiver_name, logistic_type, label_available
+  DELETE (todos):
+    DELETE /seller-promotions/items/{item_id}?app_version=v2
+    Body: { promotion_id, promotion_type }
 
-4. **Remover restricao de status**: Atualmente o `processOrderEvent` so processa pedidos `paid`. O upsert da cache deve acontecer para TODOS os status (paid, cancelled, etc.), e so a automacao de boas-vindas continua restrita a `paid`.
+Fallback: se offer_id nao vier no request, buscar de raw_item_data no banco
+```
 
-### Nenhuma migracao SQL necessaria
+### Campo offer_id no EnrichedPromotionItem
 
-A estrutura das tabelas ja suporta todos os campos necessarios. A mudanca e apenas no codigo da Edge Function.
+```text
+Extrair de raw_item_data no hook:
+  const rawData = item.raw_item_data as Record<string, unknown> | null;
+  const offerId = rawData?.offer_id as string | null;
 
+Adicionar ao tipo:
+  offer_id: string | null
+```
+
+### Impacto nos arquivos
+
+| Arquivo | Acao |
+|---------|------|
+| `supabase/functions/promotions-action/index.ts` | Corrigir URL da API por tipo de promocao; adicionar offer_id |
+| `src/hooks/useEnrichedPromotionItems.ts` | Expor offer_id; fallback de title via raw_item_data |
+| `src/pages/Promocoes.tsx` | Enviar offer_id nas callbacks de adesao |
+| `src/components/promotions/PromotionDetailModal.tsx` | Compactar header; aumentar ScrollArea |
+
+### Resultado esperado
+
+- Adesao SMART funciona corretamente usando o endpoint e offer_id corretos
+- Lista mostra 4-5 itens visiveis (em vez de 2)
+- Thumbnails e titulos aparecem via cache ou fallback do raw_item_data
