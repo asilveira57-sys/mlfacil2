@@ -87,7 +87,7 @@ export default function Promocoes() {
   const [actionLoading, setActionLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{
     action: 'adhere' | 'remove';
-    items: { item_id: string; price?: number }[];
+    items: { item_id: string; price?: number; offer_id?: string }[];
     label: string;
   } | null>(null);
 
@@ -529,7 +529,7 @@ export default function Promocoes() {
           creating={creating}
           onAdhere={(item: EnrichedPromotionItem) => setConfirmAction({
             action: 'adhere',
-            items: [{ item_id: item.item_id, price: item.finalPrice || item.original_price || undefined }],
+            items: [{ item_id: item.item_id, price: item.finalPrice || item.original_price || undefined, offer_id: item.offer_id || undefined }],
             label: `Aderir item ${item.title || item.item_id} à promoção`,
           })}
           onRemove={(item: EnrichedPromotionItem) => setConfirmAction({
@@ -542,6 +542,7 @@ export default function Promocoes() {
             items: pendingItems.map(i => ({
               item_id: i.item_id,
               price: i.finalPrice || i.original_price || undefined,
+              offer_id: i.offer_id || undefined,
             })),
             label: `Aderir ${pendingItems.length} itens candidatos à promoção`,
           })}
@@ -550,6 +551,7 @@ export default function Promocoes() {
             items: selected.map(i => ({
               item_id: i.item_id,
               price: i.finalPrice || i.original_price || undefined,
+              offer_id: i.offer_id || undefined,
             })),
             label: `Aderir ${selected.length} itens selecionados à promoção`,
           })}

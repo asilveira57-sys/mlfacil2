@@ -22,6 +22,8 @@ export interface EnrichedPromotionItem extends PromotionItemSnapshot {
   finalPrice: number | null;
   /** Computed: discount % with fallback logic */
   computedDiscount: number | null;
+  /** offer_id extracted from raw_item_data (needed for SMART adhesion) */
+  offer_id: string | null;
 }
 
 interface UseEnrichedPromotionItemsResult {
@@ -69,10 +71,10 @@ export function useEnrichedPromotionItems(
         return;
       }
 
-      // 1. Fetch promotion items
+      // 1. Fetch promotion items (include raw_item_data for fallbacks)
       let query = supabase
         .from('promotion_items_snapshots')
-        .select('*')
+        .select('*, raw_item_data')
         .eq('workspace_id', workspaceId)
         .eq('seller_id', sellerId)
         .order('item_status', { ascending: true });
@@ -132,6 +134,7 @@ export function useEnrichedPromotionItems(
   const enrichedItems = useMemo<EnrichedPromotionItem[]>(() => {
     return rawItems.map(item => {
       const visual = visuals.get(item.item_id);
+      const rawData = (item as unknown as Record<string, unknown>).raw_item_data as Record<string, unknown> | null;
       
       // Best available final price
       const finalPrice = item.promo_price || item.effective_price || null;
@@ -145,16 +148,24 @@ export function useEnrichedPromotionItems(
           computedDiscount = Math.round((1 - item.effective_price / item.original_price) * 100);
         }
       }
+
+      // Extract offer_id from raw_item_data
+      const offerId = (rawData?.offer_id as string) || null;
+
+      // Fallback title/thumbnail from raw_item_data when cache misses
+      const rawTitle = (rawData?.title as string) || (rawData?.item_title as string) || null;
+      const rawThumbnail = (rawData?.thumbnail as string) || (rawData?.picture_url as string) || null;
       
       return {
         ...item,
-        title: visual?.title || null,
-        thumbnail: visual?.thumbnail || null,
+        title: visual?.title || rawTitle || null,
+        thumbnail: visual?.thumbnail || rawThumbnail || null,
         sku: visual?.sku || null,
         permalink: visual?.permalink || null,
         listing_type_id: visual?.listing_type_id || null,
         finalPrice,
         computedDiscount,
+        offer_id: offerId,
       };
     });
   }, [rawItems, visuals]);

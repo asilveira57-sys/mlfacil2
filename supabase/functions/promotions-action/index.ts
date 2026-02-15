@@ -9,6 +9,7 @@ const corsHeaders = {
 interface ActionItem {
   item_id: string;
   price?: number;
+  offer_id?: string;
 }
 
 interface ActionRequest {
@@ -48,7 +49,6 @@ Deno.serve(async (req) => {
 
     const { action, workspace_id, seller_id, promotion_id, promotion_type, items } = body;
 
-    // Validate
     if (!action || !workspace_id || !seller_id || !promotion_id || !promotion_type || !items?.length) {
       return new Response(
         JSON.stringify({ ok: false, error: { code: 'MISSING_PARAMS', message: 'action, workspace_id, seller_id, promotion_id, promotion_type, and items are required' } }),
@@ -83,56 +83,56 @@ Deno.serve(async (req) => {
 
     const accessToken = (mlAccount as { access_token: string }).access_token;
     const mlUserId = (mlAccount as { ml_user_id: string }).ml_user_id;
+
+    // Pre-fetch offer_ids from DB for items that don't have one (SMART/PRICE_MATCHING)
+    const needsOfferId = (promotion_type === 'SMART' || promotion_type === 'PRICE_MATCHING') && action === 'adhere';
+    let offerIdMap: Map<string, string> = new Map();
+
+    if (needsOfferId) {
+      const itemsWithoutOfferId = items.filter(i => !i.offer_id).map(i => i.item_id);
+      if (itemsWithoutOfferId.length > 0) {
+        const { data: rawRows } = await supabase
+          .from('promotion_items_snapshots')
+          .select('item_id, raw_item_data')
+          .eq('workspace_id', workspace_id)
+          .eq('promotion_id', promotion_id)
+          .in('item_id', itemsWithoutOfferId);
+
+        if (rawRows) {
+          for (const row of rawRows) {
+            const raw = row.raw_item_data as Record<string, unknown> | null;
+            const oid = raw?.offer_id as string | undefined;
+            if (oid) {
+              offerIdMap.set(row.item_id, oid);
+            }
+          }
+        }
+      }
+    }
+
     const results: ItemResult[] = [];
     let successCount = 0;
     let failedCount = 0;
 
     for (const item of items) {
       try {
-        const baseUrl = `https://api.mercadolibre.com/seller-promotions/promotions/${promotion_id}/items/${item.item_id}`;
-        const queryParams = `?promotion_type=${encodeURIComponent(promotion_type)}&app_version=v2&seller_id=${mlUserId}`;
-        const url = `${baseUrl}${queryParams}`;
-
-        let response: Response;
-
-        if (action === 'adhere') {
-          // POST to adhere item to promotion
-          const requestBody: Record<string, unknown> = {};
-          if (item.price) {
-            requestBody.price = item.price;
-          }
-          
-          response = await fetch(url, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${accessToken}`,
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-            body: JSON.stringify(requestBody),
-          });
-        } else {
-          // DELETE to remove item from promotion
-          response = await fetch(url, {
-            method: 'DELETE',
-            headers: {
-              'Authorization': `Bearer ${accessToken}`,
-              'Accept': 'application/json',
-            },
-          });
-        }
+        const response = await callMeliApi({
+          action,
+          promotionType: promotion_type,
+          promotionId: promotion_id,
+          itemId: item.item_id,
+          sellerId: mlUserId,
+          accessToken,
+          price: item.price,
+          offerId: item.offer_id || offerIdMap.get(item.item_id),
+        });
 
         const status = response.status;
         let responseBody: Record<string, unknown> | null = null;
-        
         try {
           const text = await response.text();
-          if (text) {
-            responseBody = JSON.parse(text);
-          }
-        } catch {
-          // ignore parse errors for empty responses
-        }
+          if (text) responseBody = JSON.parse(text);
+        } catch { /* ignore */ }
 
         if (status >= 200 && status < 300) {
           results.push({ item_id: item.item_id, success: true });
@@ -142,7 +142,7 @@ Deno.serve(async (req) => {
           const errorMsg = responseBody?.message || responseBody?.error || `HTTP ${status}`;
           results.push({ item_id: item.item_id, success: false, error: String(errorMsg) });
           failedCount++;
-          console.warn(`[promotions-action] ${action} FAILED for item ${item.item_id}: ${errorMsg}`);
+          console.warn(`[promotions-action] ${action} FAILED for item ${item.item_id}: ${errorMsg}`, JSON.stringify(responseBody));
         }
       } catch (err) {
         results.push({ item_id: item.item_id, success: false, error: String(err) });
@@ -154,14 +154,10 @@ Deno.serve(async (req) => {
     // Update item statuses in the database for successful operations
     for (const result of results) {
       if (!result.success) continue;
-
       const newStatus = action === 'adhere' ? 'started' : 'candidate';
       await supabase
         .from('promotion_items_snapshots')
-        .update({ 
-          item_status: newStatus, 
-          updated_at: new Date().toISOString() 
-        })
+        .update({ item_status: newStatus, updated_at: new Date().toISOString() })
         .eq('workspace_id', workspace_id)
         .eq('promotion_id', promotion_id)
         .eq('item_id', result.item_id);
@@ -189,15 +185,10 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({
         ok: true,
-        data: {
-          success_count: successCount,
-          failed_count: failedCount,
-          results,
-        },
+        data: { success_count: successCount, failed_count: failedCount, results },
       }),
       { status: 200, headers: corsHeaders }
     );
-
   } catch (error) {
     console.error('[promotions-action] Unhandled error:', error);
     return new Response(
@@ -206,3 +197,82 @@ Deno.serve(async (req) => {
     );
   }
 });
+
+// ===== Helper: Build and execute the correct ML API call =====
+interface MeliApiParams {
+  action: 'adhere' | 'remove';
+  promotionType: string;
+  promotionId: string;
+  itemId: string;
+  sellerId: string;
+  accessToken: string;
+  price?: number;
+  offerId?: string;
+}
+
+async function callMeliApi(params: MeliApiParams): Promise<Response> {
+  const { action, promotionType, promotionId, itemId, sellerId, accessToken, price, offerId } = params;
+  const baseUrl = 'https://api.mercadolibre.com/seller-promotions';
+
+  if (action === 'remove') {
+    // DELETE: same endpoint for all types
+    const url = `${baseUrl}/items/${itemId}?app_version=v2`;
+    return fetch(url, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({
+        promotion_id: promotionId,
+        promotion_type: promotionType,
+      }),
+    });
+  }
+
+  // ADHERE
+  if (promotionType === 'SMART' || promotionType === 'PRICE_MATCHING') {
+    // SMART / PRICE_MATCHING: POST /seller-promotions/items/{item_id}?app_version=v2
+    const url = `${baseUrl}/items/${itemId}?app_version=v2`;
+    const body: Record<string, unknown> = {
+      promotion_id: promotionId,
+      promotion_type: promotionType,
+    };
+    if (offerId) body.offer_id = offerId;
+    if (price) body.price = price;
+
+    console.log(`[promotions-action] SMART adhere URL: ${url}, body:`, JSON.stringify(body));
+
+    return fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+  }
+
+  // DEAL and other types: POST /seller-promotions/items/{item_id}?user_id={seller_id}
+  const url = `${baseUrl}/items/${itemId}?user_id=${sellerId}`;
+  const body: Record<string, unknown> = {
+    promotion_id: promotionId,
+    promotion_type: promotionType,
+  };
+  if (price) body.deal_price = price;
+
+  console.log(`[promotions-action] DEAL adhere URL: ${url}, body:`, JSON.stringify(body));
+
+  return fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'version': 'v2',
+    },
+    body: JSON.stringify(body),
+  });
+}

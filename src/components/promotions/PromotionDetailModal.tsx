@@ -221,7 +221,7 @@ export function PromotionDetailModal({
     <Dialog open={!!promotion} onOpenChange={() => onClose()}>
       <DialogContent className="max-w-6xl w-[90vw] max-h-[90vh] flex flex-col p-0 gap-0">
         {/* Compact Header */}
-        <div className="px-6 pt-6 pb-3 space-y-3">
+        <div className="px-6 pt-4 pb-2 space-y-2">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-lg">
               <Tag className="h-5 w-5 text-primary" />
@@ -467,7 +467,7 @@ export function PromotionDetailModal({
               <p className="text-sm mt-1">Ajuste os filtros para ver mais itens.</p>
             </div>
           ) : (
-            <ScrollArea className="h-[calc(90vh-370px)]">
+            <ScrollArea className="h-[calc(90vh-280px)]">
               <div className="space-y-2 pr-2">
                 {filteredItems.map(item => (
                   <PromotionItemCard
