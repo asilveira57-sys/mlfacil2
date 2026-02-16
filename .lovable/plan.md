@@ -1,125 +1,126 @@
 
-# Correcao da Central de Promocoes: Adesao, Layout e Dados Visuais
+# Correcao da Central de Promocoes - Plano Revisado
 
-## Problema 1: Adesao falhando para todos os 18 itens
+## Diagnostico
 
-**Causa raiz identificada nos logs:**
-```
-Resource /seller-promotions/promotions/P-MLB16555022/items/MLB3389129181 not found.
-```
+1. **Thumbnails e titulos vazios**: O `raw_item_data` da API de promocoes NAO contem `title` nem `thumbnail` (so tem dados de preco/desconto). O cache local de anuncios (`meli_listings_cache`) tem 0 registros para o seller atual. O fallback via API publica do ML no browser falha por CORS (browser nao pode chamar `api.mercadolibre.com` diretamente).
 
-O endpoint da API esta errado. Para promocoes do tipo **SMART**, a API do Mercado Livre usa uma URL diferente:
+2. **Adesao nao funciona**: A Edge Function `promotions-action` NUNCA foi deployada (zero logs). O codigo esta correto mas precisa ser deployado.
 
-- **Errado (atual):** `POST /seller-promotions/promotions/{promo_id}/items/{item_id}?promotion_type=SMART`
-- **Correto:** `POST /seller-promotions/items/{item_id}?app_version=v2` com body contendo `promotion_id`, `promotion_type` e `offer_id`
+3. **Modal fecha antes da acao terminar**: O componente `AlertDialogAction` do Radix fecha automaticamente o dialog quando clicado, ANTES da Promise async resolver. Resultado: o usuario ve a tela voltar para a lista de promocoes antes de a acao completar.
 
-Alem disso, cada item SMART requer um `offer_id` unico (ex: `CANDIDATE-MLB3389129181-75059206804`), que ja esta salvo no campo `raw_item_data` da tabela `promotion_items_snapshots`, mas nao esta sendo enviado ao edge function.
-
-## Problema 2: Janela muito pequena (so mostra 2 itens)
-
-A `ScrollArea` no modal usa `h-[calc(90vh-370px)]`. Com o cabecalho, filtros e toolbar, sobra pouco espaco vertical. Precisa reduzir o padding do cabecalho e aumentar a area util da lista.
-
-## Problema 3: Sem thumbnail, titulo e "Voce recebe"
-
-O hook `useEnrichedPromotionItems` faz um JOIN com `meli_listings_cache`, mas se os itens nao estiverem no cache, retorna null para thumbnail, title, sku, etc. Isso acontece quando os listings nunca foram sincronizados ou o item_id nao corresponde exatamente. O `net_proceeds_amount` ja esta na tabela `promotion_items_snapshots` mas pode estar null se a API do ML nao retornou esse dado na sincronizacao.
-
----
+4. **"Voce recebe"**: O usuario pediu para NAO implementar agora - requer analise mais cuidadosa considerando comissao + frete.
 
 ## Solucao
 
-### Parte 1: Corrigir URL da API de adesao (Edge Function)
+### Parte 1: Enriquecer durante a sincronizacao (sem edge function nova)
+
+Em vez de criar uma edge function separada, o enriquecimento acontece dentro do `promotions-sync` que ja roda no servidor (sem CORS). Apos sincronizar os itens de cada promocao, buscar titulo/thumbnail na API publica do ML para os item_ids que NAO estao no `meli_listings_cache`, e salvar no cache.
+
+Isso resolve o problema na raiz: na proxima vez que o usuario abrir a central de promocoes, os dados visuais ja estarao no banco.
+
+**Arquivo:** `supabase/functions/promotions-sync/index.ts`
+
+Apos o loop de upsert dos itens (linha ~417), adicionar:
+- Coletar todos os `item_id` unicos dos itens da promocao
+- Verificar quais JA existem na `meli_listings_cache`
+- Para os que faltam, buscar `GET /items?ids={ids}&attributes=id,title,thumbnail,permalink` na API do ML (batches de 20)
+- Upsert em `meli_listings_cache` com os dados basicos (item_id, seller_id, title, thumbnail, permalink)
+
+### Parte 2: Fallback imediato no frontend (para sessao atual)
+
+Como o enriquecimento na sync resolve para FUTURAS sessoes, para a sessao ATUAL (antes de re-sincronizar), o hook precisa buscar os dados faltantes. Como o browser nao pode chamar a API do ML diretamente (CORS), a solucao e usar a propria edge function `promotions-action` para retornar uma rota de enriquecimento, OU aceitar o trade-off de exigir uma re-sync.
+
+A abordagem mais simples e eficiente: adicionar uma rota `enrich` na MESMA edge function `promotions-action` (sem criar funcao nova). Quando `action = "enrich"`, busca titulo/thumbnail do ML e retorna.
 
 **Arquivo:** `supabase/functions/promotions-action/index.ts`
 
-Refatorar a logica de adesao para usar o endpoint correto baseado no `promotion_type`:
+Adicionar acao `"enrich"`:
+- Recebe `{ action: "enrich", items: [{ item_id: "MLB..." }, ...] }`
+- Busca `GET /items?ids={ids}` na API publica do ML (nao precisa token)
+- Retorna `{ data: { MLB123: { title, thumbnail, permalink }, ... } }`
+- Nao precisa de workspace_id, seller_id nem token - usa API publica
 
-- Para **SMART** e **PRICE_MATCHING**: `POST /seller-promotions/items/{item_id}?app_version=v2` com body `{ promotion_id, promotion_type, offer_id }`
-- Para **DEAL** e outros: `POST /seller-promotions/items/{item_id}?user_id={seller_id}` com body `{ promotion_id, promotion_type, deal_price }` e header `version: v2`
-- Para **remocao (DELETE)**: manter `DELETE /seller-promotions/items/{item_id}?app_version=v2` com body `{ promotion_id, promotion_type }`
+**Arquivo:** `src/hooks/useEnrichedPromotionItems.ts`
 
-Tambem e necessario:
-- Adicionar `offer_id` ao interface `ActionItem`
-- Buscar o `offer_id` do `raw_item_data` no banco quando nao enviado pelo frontend
+- Remover o `fetch` direto para `api.mercadolibre.com` (bloqueado por CORS)
+- Substituir pela chamada a `promotions-action` com `action: "enrich"` via `supabase.functions.invoke`
+- Isso usa o proxy do backend, sem problemas de CORS
 
-### Parte 2: Enviar offer_id do frontend
+### Parte 3: Deploy da edge function de adesao
+
+A `promotions-action` precisa ser deployada. O codigo ja esta correto (endpoint v2 + offer_id para SMART), so falta o deploy.
+
+### Parte 4: Corrigir fechamento prematuro do modal
 
 **Arquivo:** `src/pages/Promocoes.tsx`
 
-Atualizar as callbacks `onAdhere`, `onAdhereAll` e `onAdhereSelected` para incluir o `offer_id` de cada item (extraido de `raw_item_data` via hook, ou buscado diretamente).
+- Trocar `AlertDialogAction` por um `Button` normal dentro do `AlertDialogFooter`
+- Usar `e.preventDefault()` para impedir o fechamento automatico
+- Controlar o fechamento manualmente: so fechar apos a acao completar
+- Manter o modal de detalhes da promocao aberto apos a acao
 
-**Arquivo:** `src/hooks/useEnrichedPromotionItems.ts`
+### Parte 5: "Voce recebe" - NAO implementar agora
 
-Expor o campo `offer_id` extraido de `raw_item_data` no tipo `EnrichedPromotionItem` para que o frontend possa envia-lo.
-
-### Parte 3: Aumentar area visivel da lista de itens
-
-**Arquivo:** `src/components/promotions/PromotionDetailModal.tsx`
-
-- Compactar o cabecalho: reduzir padding de `pt-6 pb-3` para `pt-4 pb-2`
-- Aumentar a ScrollArea: mudar de `h-[calc(90vh-370px)]` para `h-[calc(90vh-280px)]`
-- Isso permitira ver 4-5 itens sem scroll, em vez dos 2 atuais
-
-### Parte 4: Garantir dados visuais (thumbnail, titulo)
-
-**Arquivo:** `src/hooks/useEnrichedPromotionItems.ts`
-
-O hook ja faz o JOIN correto. O problema e que a `meli_listings_cache` pode nao ter os itens. A solucao e:
-- Extrair `title` e `price` do `raw_item_data` como fallback quando o listing cache nao tem a informacao
-- Adicionar query na coluna `raw_item_data` da `promotion_items_snapshots` para extrair campos como titulo original quando disponivel
-
-Para o "Voce recebe" (`net_proceeds_amount`): o valor ja vem da API na sincronizacao. Se esta null, e porque a API do ML nao retornou esse campo para o tipo SMART. Nesse caso, exibir um calculo estimado baseado nas taxas conhecidas, ou simplesmente manter o "-" com tooltip explicativo.
+Conforme solicitado, o calculo de "Voce recebe" sera tratado separadamente em momento futuro, considerando comissao + frete corretamente.
 
 ---
 
 ## Detalhes Tecnicos
 
-### Mudanca na Edge Function (`promotions-action/index.ts`)
+### Enriquecimento na sync (`promotions-sync/index.ts`)
+
+Apos o loop dos itens (~linha 417), adicionar bloco:
 
 ```text
-Interface ActionItem atualizada:
-  item_id: string
-  price?: number
-  offer_id?: string   // NOVO
-
-Logica de URL por tipo:
-  SMART / PRICE_MATCHING:
-    POST /seller-promotions/items/{item_id}?app_version=v2
-    Body: { promotion_id, promotion_type, offer_id }
-
-  DEAL:
-    POST /seller-promotions/items/{item_id}?user_id={seller_id}
-    Headers: version: v2
-    Body: { promotion_id, promotion_type, deal_price: price }
-
-  DELETE (todos):
-    DELETE /seller-promotions/items/{item_id}?app_version=v2
-    Body: { promotion_id, promotion_type }
-
-Fallback: se offer_id nao vier no request, buscar de raw_item_data no banco
+1. Coletar item_ids unicos do promo.items
+2. Consultar meli_listings_cache para ver quais ja existem
+3. Para os faltantes, chamar GET /items?ids=X,Y,Z&attributes=id,title,thumbnail,permalink
+4. Upsert no meli_listings_cache com dados basicos
 ```
 
-### Campo offer_id no EnrichedPromotionItem
+Nao precisa de token de acesso - a API publica de items aceita requests sem autenticacao.
+
+### Rota "enrich" na `promotions-action`
 
 ```text
-Extrair de raw_item_data no hook:
-  const rawData = item.raw_item_data as Record<string, unknown> | null;
-  const offerId = rawData?.offer_id as string | null;
-
-Adicionar ao tipo:
-  offer_id: string | null
+action = "enrich":
+  - Nao precisa de seller_id, workspace_id, promotion_id
+  - Recebe apenas items[].item_id
+  - Chama API publica ML em batches de 20
+  - Retorna mapa { item_id: { title, thumbnail, permalink } }
 ```
+
+### Correcao do AlertDialog (`Promocoes.tsx`)
+
+Trocar:
+```text
+<AlertDialogAction onClick={...} disabled={actionLoading}>
+  Confirmar
+</AlertDialogAction>
+```
+
+Por:
+```text
+<Button onClick={async (e) => { e.preventDefault(); await handleAction(); }}>
+  Confirmar
+</Button>
+```
+
+E controlar o `onOpenChange` do AlertDialog para nao fechar enquanto `actionLoading` for true.
 
 ### Impacto nos arquivos
 
 | Arquivo | Acao |
 |---------|------|
-| `supabase/functions/promotions-action/index.ts` | Corrigir URL da API por tipo de promocao; adicionar offer_id |
-| `src/hooks/useEnrichedPromotionItems.ts` | Expor offer_id; fallback de title via raw_item_data |
-| `src/pages/Promocoes.tsx` | Enviar offer_id nas callbacks de adesao |
-| `src/components/promotions/PromotionDetailModal.tsx` | Compactar header; aumentar ScrollArea |
+| `supabase/functions/promotions-sync/index.ts` | Enriquecer items com titulo/thumb apos sync |
+| `supabase/functions/promotions-action/index.ts` | Adicionar rota "enrich"; deploy |
+| `src/hooks/useEnrichedPromotionItems.ts` | Usar rota "enrich" via edge function (sem CORS) |
+| `src/pages/Promocoes.tsx` | Corrigir AlertDialog para nao fechar antes da acao completar |
 
 ### Resultado esperado
 
-- Adesao SMART funciona corretamente usando o endpoint e offer_id corretos
-- Lista mostra 4-5 itens visiveis (em vez de 2)
-- Thumbnails e titulos aparecem via cache ou fallback do raw_item_data
+- Titulos e thumbnails aparecem via cache (populado na sync) + fallback via edge function
+- Adesao SMART funciona (edge function deployada com endpoint v2 + offer_id)
+- Modal permanece aberto durante e apos a adesao
+- "Voce recebe" fica para implementacao futura
