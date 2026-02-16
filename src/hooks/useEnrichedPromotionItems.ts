@@ -114,33 +114,35 @@ export function useEnrichedPromotionItems(
           }
         }
 
-        // Fallback: fetch missing items from ML public API
+        // Fallback: fetch missing items via edge function (bypasses CORS)
         const missingIds = itemIds.filter(id => !visualsMap.has(id));
         if (missingIds.length > 0) {
-          const mlBatchSize = 20; // ML API allows up to 20 ids per call
-          for (let i = 0; i < missingIds.length; i += mlBatchSize) {
-            const batch = missingIds.slice(i, i + mlBatchSize);
-            try {
-              const idsParam = batch.join(',');
-              const res = await fetch(`https://api.mercadolibre.com/items?ids=${idsParam}&attributes=id,title,thumbnail,permalink`);
-              if (res.ok) {
-                const results = await res.json() as { code: number; body: { id: string; title: string; thumbnail: string; permalink: string } }[];
-                for (const result of results) {
-                  if (result.code === 200 && result.body) {
-                    visualsMap.set(result.body.id, {
-                      item_id: result.body.id,
-                      title: result.body.title || null,
-                      thumbnail: result.body.thumbnail || null,
-                      sku: null,
-                      permalink: result.body.permalink || null,
-                      listing_type_id: null,
-                    });
-                  }
+          try {
+            const { data: enrichData, error: enrichError } = await supabase.functions.invoke('promotions-action', {
+              body: {
+                action: 'enrich',
+                seller_id: sellerId,
+                items: missingIds.map(id => ({ item_id: id })),
+              },
+            });
+
+            if (!enrichError && enrichData?.ok && enrichData.data) {
+              const enrichMap = enrichData.data as Record<string, { title: string | null; thumbnail: string | null; permalink: string | null }>;
+              for (const [itemId, info] of Object.entries(enrichMap)) {
+                if (!visualsMap.has(itemId)) {
+                  visualsMap.set(itemId, {
+                    item_id: itemId,
+                    title: info.title || null,
+                    thumbnail: info.thumbnail || null,
+                    sku: null,
+                    permalink: info.permalink || null,
+                    listing_type_id: null,
+                  });
                 }
               }
-            } catch (err) {
-              console.warn('[useEnrichedPromotionItems] ML API fallback failed:', err);
             }
+          } catch (err) {
+            console.warn('[useEnrichedPromotionItems] Edge function enrich fallback failed:', err);
           }
         }
         
