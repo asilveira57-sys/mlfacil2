@@ -59,7 +59,6 @@ import {
 import { toast } from 'sonner';
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -564,7 +563,12 @@ export default function Promocoes() {
         />
 
         {/* Confirmation Dialog */}
-        <AlertDialog open={!!confirmAction} onOpenChange={() => setConfirmAction(null)}>
+        <AlertDialog 
+          open={!!confirmAction} 
+          onOpenChange={(open) => {
+            if (!open && !actionLoading) setConfirmAction(null);
+          }}
+        >
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>
@@ -580,13 +584,17 @@ export default function Promocoes() {
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel disabled={actionLoading}>Cancelar</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={() => confirmAction && handlePromotionAction(confirmAction.action, confirmAction.items)}
+              <Button
+                onClick={async () => {
+                  if (confirmAction) {
+                    await handlePromotionAction(confirmAction.action, confirmAction.items);
+                  }
+                }}
                 disabled={actionLoading}
               >
                 {actionLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                 Confirmar
-              </AlertDialogAction>
+              </Button>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>

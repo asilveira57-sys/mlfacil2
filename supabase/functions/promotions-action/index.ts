@@ -13,11 +13,11 @@ interface ActionItem {
 }
 
 interface ActionRequest {
-  action: 'adhere' | 'remove';
-  workspace_id: string;
-  seller_id: string;
-  promotion_id: string;
-  promotion_type: string;
+  action: 'adhere' | 'remove' | 'enrich';
+  workspace_id?: string;
+  seller_id?: string;
+  promotion_id?: string;
+  promotion_type?: string;
   items: ActionItem[];
 }
 
@@ -49,16 +49,78 @@ Deno.serve(async (req) => {
 
     const { action, workspace_id, seller_id, promotion_id, promotion_type, items } = body;
 
-    if (!action || !workspace_id || !seller_id || !promotion_id || !promotion_type || !items?.length) {
+    if (!action || !items?.length) {
       return new Response(
-        JSON.stringify({ ok: false, error: { code: 'MISSING_PARAMS', message: 'action, workspace_id, seller_id, promotion_id, promotion_type, and items are required' } }),
+        JSON.stringify({ ok: false, error: { code: 'MISSING_PARAMS', message: 'action and items are required' } }),
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
+    // ===== ENRICH route: fetch title/thumbnail from ML API using seller's token =====
+    if (action === 'enrich') {
+      console.log(`[promotions-action] enrich ${items.length} items, seller_id=${seller_id}`);
+      const enrichResult: Record<string, { title: string | null; thumbnail: string | null; permalink: string | null }> = {};
+      const itemIds = items.map(i => i.item_id);
+
+      // Get seller's access token for authenticated requests
+      let authHeaders: Record<string, string> = {};
+      if (seller_id) {
+        const { data: mlAcc } = await supabase
+          .from('ml_accounts')
+          .select('access_token')
+          .eq('ml_user_id', seller_id)
+          .eq('is_active', true)
+          .maybeSingle();
+        if (mlAcc) {
+          authHeaders = { 'Authorization': `Bearer ${(mlAcc as { access_token: string }).access_token}` };
+        }
+      }
+
+      // Use multiget with auth token (batches of 20)
+      const mlBatchSize = 20;
+      for (let i = 0; i < itemIds.length; i += mlBatchSize) {
+        const batch = itemIds.slice(i, i + mlBatchSize);
+        try {
+          const idsParam = batch.join(',');
+          const res = await fetch(`https://api.mercadolibre.com/items?ids=${idsParam}&attributes=id,title,thumbnail,permalink`, {
+            headers: authHeaders,
+          });
+          if (res.ok) {
+            const results = await res.json() as { code: number; body: { id: string; title: string; thumbnail: string; permalink: string } }[];
+            for (const r of results) {
+              if (r.code === 200 && r.body) {
+                enrichResult[r.body.id] = {
+                  title: r.body.title || null,
+                  thumbnail: r.body.thumbnail || null,
+                  permalink: r.body.permalink || null,
+                };
+              }
+            }
+          } else {
+            console.warn(`[promotions-action] enrich multiget status: ${res.status}`);
+          }
+        } catch (err) {
+          console.warn('[promotions-action] enrich batch error:', err);
+        }
+      }
+
+      return new Response(
+        JSON.stringify({ ok: true, data: enrichResult }),
+        { status: 200, headers: corsHeaders }
+      );
+    }
+
+    // For adhere/remove, all params are required
+    if (!workspace_id || !seller_id || !promotion_id || !promotion_type) {
+      return new Response(
+        JSON.stringify({ ok: false, error: { code: 'MISSING_PARAMS', message: 'workspace_id, seller_id, promotion_id, promotion_type are required for adhere/remove' } }),
         { status: 400, headers: corsHeaders }
       );
     }
 
     if (action !== 'adhere' && action !== 'remove') {
       return new Response(
-        JSON.stringify({ ok: false, error: { code: 'INVALID_ACTION', message: 'action must be "adhere" or "remove"' } }),
+        JSON.stringify({ ok: false, error: { code: 'INVALID_ACTION', message: 'action must be "adhere", "remove", or "enrich"' } }),
         { status: 400, headers: corsHeaders }
       );
     }

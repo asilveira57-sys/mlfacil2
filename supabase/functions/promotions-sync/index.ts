@@ -416,6 +416,60 @@ Deno.serve(async (req) => {
         }
       }
 
+      // === Enrich missing items in meli_listings_cache ===
+      const promoItemIds = (promo.items || []).map(i => i.item_id).filter(Boolean);
+      if (promoItemIds.length > 0) {
+        // Check which are already cached
+        const { data: cachedRows } = await supabase
+          .from('meli_listings_cache')
+          .select('item_id')
+          .eq('seller_id', accountId)
+          .in('item_id', promoItemIds);
+
+        const cachedSet = new Set((cachedRows || []).map(r => r.item_id));
+        const uncachedIds = promoItemIds.filter(id => !cachedSet.has(id));
+
+        if (uncachedIds.length > 0) {
+          console.log(`${logPrefix} Enriching ${uncachedIds.length} uncached items for promo ${promo.id}`);
+          const enrichBatchSize = 20;
+          for (let ei = 0; ei < uncachedIds.length; ei += enrichBatchSize) {
+            const batch = uncachedIds.slice(ei, ei + enrichBatchSize);
+            try {
+              const idsParam = batch.join(',');
+              const enrichRes = await fetch(`https://api.mercadolibre.com/items?ids=${idsParam}&attributes=id,title,thumbnail,permalink`, {
+                headers: mlHeaders,
+              });
+              if (enrichRes.ok) {
+                const enrichResults = await enrichRes.json() as { code: number; body: { id: string; title: string; thumbnail: string; permalink: string } }[];
+                const toUpsert = enrichResults
+                  .filter(r => r.code === 200 && r.body)
+                  .map(r => ({
+                    item_id: r.body.id,
+                    seller_id: accountId,
+                    title: r.body.title || null,
+                    thumbnail: r.body.thumbnail || null,
+                    permalink: r.body.permalink || null,
+                    updated_at: new Date().toISOString(),
+                  }));
+
+                if (toUpsert.length > 0) {
+                  const { error: upsertErr } = await supabase
+                    .from('meli_listings_cache')
+                    .upsert(toUpsert, { onConflict: 'seller_id,item_id' });
+                  if (upsertErr) {
+                    console.warn(`${logPrefix} Failed to upsert enriched listings:`, upsertErr);
+                  }
+                }
+              } else {
+                console.warn(`${logPrefix} ML multiget status: ${enrichRes.status}`);
+              }
+            } catch (enrichErr) {
+              console.warn(`${logPrefix} ML public API enrich failed:`, enrichErr);
+            }
+          }
+        }
+      }
+
       // FIX #2: Use mlAccountId (UUID) for all events instead of accountId (text)
       if (ineligibleItems.length > 0) {
         eventsToCreate.push({
