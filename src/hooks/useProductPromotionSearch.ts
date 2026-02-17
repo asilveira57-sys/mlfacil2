@@ -8,6 +8,7 @@ export interface ProductPromotionInfo {
   promotion_status: string;
   item_status: string;
   meli_percentage: number | null;
+  seller_percentage: number | null;
   offer_id: string | null;
   original_price: number | null;
   promo_price: number | null;
@@ -181,6 +182,9 @@ export function useProductPromotionSearch(
         const promo = promoMap.get(pi.promotion_id);
         const rawData = pi.raw_item_data as Record<string, unknown> | null;
         const meliPct = (rawData?.meli_percentage as number) || null;
+        const sellerPct = (rawData?.seller_percentage as number) || null;
+        const rawPrice = (rawData?.price as number) || null;
+        const effectivePromoPrice = pi.promo_price || rawPrice;
         const offerId = (rawData?.offer_id as string) || null;
         const feeReduction = (meliPct && pi.original_price)
           ? pi.original_price * meliPct / 100
@@ -206,8 +210,9 @@ export function useProductPromotionSearch(
           meli_percentage: meliPct,
           offer_id: offerId,
           original_price: pi.original_price,
-          promo_price: pi.promo_price,
+          promo_price: effectivePromoPrice,
           feeReductionAmount: feeReduction,
+          seller_percentage: sellerPct,
           start_at: promo?.start_at || null,
           end_at: promo?.end_at || null,
         });
