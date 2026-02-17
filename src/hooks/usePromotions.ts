@@ -41,6 +41,7 @@ export interface PromotionItemSnapshot {
 export interface PromotionItemCounts {
   participating: number;
   eligible: number;
+  hasCoParticipation: boolean;
 }
 
 interface UsePromotionsResult {
@@ -111,7 +112,7 @@ export function usePromotions(workspaceId: string | null, sellerId?: string | nu
           .order('end_at', { ascending: true }),
         supabase
           .from('promotion_items_snapshots')
-          .select('promotion_id, item_status')
+          .select('promotion_id, item_status, raw_item_data')
           .eq('workspace_id', workspaceId)
           .eq('seller_id', sellerId),
       ]);
@@ -125,11 +126,17 @@ export function usePromotions(workspaceId: string | null, sellerId?: string | nu
       if (itemStatusesResult.data) {
         for (const row of itemStatusesResult.data) {
           const pid = row.promotion_id;
-          if (!counts[pid]) counts[pid] = { participating: 0, eligible: 0 };
+          if (!counts[pid]) counts[pid] = { participating: 0, eligible: 0, hasCoParticipation: false };
           if (row.item_status === 'started') {
             counts[pid].participating++;
           } else if (row.item_status === 'candidate' || row.item_status === 'pending') {
             counts[pid].eligible++;
+          }
+          // Check for ML co-participation
+          const rawData = row.raw_item_data as Record<string, unknown> | null;
+          const meliPct = rawData?.meli_percentage as number | undefined;
+          if (meliPct && meliPct > 0) {
+            counts[pid].hasCoParticipation = true;
           }
         }
       }
@@ -174,7 +181,7 @@ export function usePromotions(workspaceId: string | null, sellerId?: string | nu
 
   // Computed views
   const now = new Date();
-  const hours48FromNow = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+  const hours72FromNow = new Date(now.getTime() + 72 * 60 * 60 * 1000);
 
   const activePromotions = promotions.filter(p => p.status === 'started');
   const pendingPromotions = promotions.filter(p => p.status === 'pending');
@@ -182,7 +189,7 @@ export function usePromotions(workspaceId: string | null, sellerId?: string | nu
   const endingSoonPromotions = promotions.filter(p => {
     if (p.status !== 'started' || !p.end_at) return false;
     const endDate = new Date(p.end_at);
-    return endDate <= hours48FromNow && endDate > now;
+    return endDate <= hours72FromNow && endDate > now;
   });
 
   const finishedPromotions = promotions.filter(p => p.status === 'finished');

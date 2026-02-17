@@ -37,6 +37,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { usePromotions, PromotionSnapshot, PromotionItemCounts } from '@/hooks/usePromotions';
 import { useEnrichedPromotionItems, EnrichedPromotionItem } from '@/hooks/useEnrichedPromotionItems';
+import { useProductPromotionSearch, ProductSearchResult } from '@/hooks/useProductPromotionSearch';
 import { usePromotionTasks } from '@/hooks/usePromotionTasks';
 import { usePromotionSyncLogs } from '@/hooks/usePromotionSyncLogs';
 import { invokeEdgeFunction, getUserFriendlyError } from '@/lib/edgeFunctionClient';
@@ -81,6 +82,7 @@ export default function Promocoes() {
   // Search & filter state
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
+  const [coParticipationFilter, setCoParticipationFilter] = useState(false);
 
   // Adhere/remove action state
   const [actionLoading, setActionLoading] = useState(false);
@@ -134,6 +136,9 @@ export default function Promocoes() {
   // Sync logs
   const { lastSync, refetch: refetchLogs } = usePromotionSyncLogs(workspaceId, sellerId);
 
+  // Product search (cross-promotion)
+  const { results: productResults, loading: productSearchLoading } = useProductPromotionSearch(workspaceId, sellerId, searchQuery);
+
   // Unique promotion types for filter dropdown
   const promotionTypes = useMemo(() => {
     const types = new Set(promotions.map(p => p.promotion_type));
@@ -147,14 +152,15 @@ export default function Promocoes() {
         (p.promotion_name?.toLowerCase().includes(searchQuery.toLowerCase())) ||
         p.promotion_id.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesType = typeFilter === 'all' || p.promotion_type === typeFilter;
-      return matchesSearch && matchesType;
+      const matchesCoParticipation = !coParticipationFilter || 
+        (itemCounts[p.promotion_id]?.hasCoParticipation === true);
+      return matchesSearch && matchesType && matchesCoParticipation;
     });
   };
 
-  const filteredActive = useMemo(() => filterPromotions(activePromotions), [activePromotions, searchQuery, typeFilter]);
-  const filteredPending = useMemo(() => filterPromotions(pendingPromotions), [pendingPromotions, searchQuery, typeFilter]);
-  const filteredEnding = useMemo(() => filterPromotions(endingSoonPromotions), [endingSoonPromotions, searchQuery, typeFilter]);
-  const filteredFinished = useMemo(() => filterPromotions(finishedPromotions), [finishedPromotions, searchQuery, typeFilter]);
+  const filteredActive = useMemo(() => filterPromotions(activePromotions), [activePromotions, searchQuery, typeFilter, coParticipationFilter, itemCounts]);
+  const filteredPending = useMemo(() => filterPromotions(pendingPromotions), [pendingPromotions, searchQuery, typeFilter, coParticipationFilter, itemCounts]);
+  const filteredEnding = useMemo(() => filterPromotions(endingSoonPromotions), [endingSoonPromotions, searchQuery, typeFilter, coParticipationFilter, itemCounts]);
 
   // Define result type for sync
   interface SyncResultData {
@@ -401,7 +407,7 @@ export default function Promocoes() {
         )}
 
         {/* KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <KpiCard
             title="Promoções Ativas"
             value={activePromotions.length}
@@ -417,7 +423,7 @@ export default function Promocoes() {
             color={pendingPromotions.length > 0 ? 'warning' : 'default'}
           />
           <KpiCard
-            title="Terminando em 48h"
+            title="Terminando em 3 dias"
             value={endingSoonPromotions.length}
             icon={<CalendarClock className="h-5 w-5" />}
             loading={loading}
@@ -429,21 +435,14 @@ export default function Promocoes() {
             icon={<Package className="h-5 w-5" />}
             loading={loading}
           />
-          <KpiCard
-            title="Finalizadas"
-            value={finishedPromotions.length}
-            icon={<CheckCircle2 className="h-5 w-5" />}
-            loading={loading}
-            color="muted"
-          />
         </div>
 
-        {/* Search & Filter - FIX #6 */}
+        {/* Search & Filter */}
         <div className="flex items-center gap-3 flex-wrap">
           <div className="relative flex-1 min-w-[200px] max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Buscar promoção..."
+              placeholder="Buscar promoção ou produto (título, SKU, MLB)..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-9"
@@ -460,7 +459,46 @@ export default function Promocoes() {
               ))}
             </SelectContent>
           </Select>
+          <Button
+            variant={coParticipationFilter ? 'default' : 'outline'}
+            size="sm"
+            className="gap-2"
+            onClick={() => setCoParticipationFilter(!coParticipationFilter)}
+          >
+            <TrendingUp className="h-4 w-4 text-success" />
+            Co-participação ML
+          </Button>
         </div>
+
+        {/* Product Search Results */}
+        {searchQuery.length >= 3 && (productSearchLoading || productResults.length > 0) && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Package className="h-4 w-4" />
+                Resultados por Produto
+                {productSearchLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+              </CardTitle>
+              <CardDescription>
+                Campanhas disponíveis para os produtos encontrados
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {productResults.length === 0 && !productSearchLoading ? (
+                <p className="text-sm text-muted-foreground text-center py-4">Nenhum produto encontrado em campanhas</p>
+              ) : (
+                <div className="space-y-4">
+                  {productResults.map(product => (
+                    <ProductPromotionCard key={product.item_id} product={product} onSelectPromotion={(promoId) => {
+                      const promo = promotions.find(p => p.promotion_id === promoId);
+                      if (promo) setSelectedPromotion(promo);
+                    }} />
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Promotions Tabs */}
         <Card>
@@ -500,10 +538,6 @@ export default function Promocoes() {
                     <CalendarClock className="h-4 w-4" />
                     Terminando ({filteredEnding.length})
                   </TabsTrigger>
-                  <TabsTrigger value="finished" className="gap-2">
-                    <CheckCircle2 className="h-4 w-4" />
-                    Finalizadas ({filteredFinished.length})
-                  </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="active">
@@ -523,13 +557,6 @@ export default function Promocoes() {
                 <TabsContent value="ending">
                   <PromotionsTable 
                     promotions={filteredEnding} 
-                    onSelect={setSelectedPromotion}
-                    itemCounts={itemCounts}
-                  />
-                </TabsContent>
-                <TabsContent value="finished">
-                  <PromotionsTable 
-                    promotions={filteredFinished} 
                     onSelect={setSelectedPromotion}
                     itemCounts={itemCounts}
                   />
@@ -701,7 +728,7 @@ function PromotionsTable({
         </TableHeader>
         <TableBody>
           {promotions.map(promo => {
-            const counts = itemCounts[promo.promotion_id] || { participating: 0, eligible: 0 };
+            const counts = itemCounts[promo.promotion_id] || { participating: 0, eligible: 0, hasCoParticipation: false };
             return (
               <TableRow 
                 key={promo.id} 
@@ -709,7 +736,17 @@ function PromotionsTable({
                 onClick={() => onSelect(promo)}
               >
                 <TableCell className="font-medium">
-                  {promo.promotion_name || `Promoção ${promo.promotion_id.slice(0, 8)}...`}
+                  <span className="flex items-center gap-1.5">
+                    {promo.promotion_name || `Promoção ${promo.promotion_id.slice(0, 8)}...`}
+                    {counts.hasCoParticipation && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <TrendingUp className="h-3.5 w-3.5 text-success inline-flex shrink-0" />
+                        </TooltipTrigger>
+                        <TooltipContent>Co-participação ML: redução de tarifas</TooltipContent>
+                      </Tooltip>
+                    )}
+                  </span>
                 </TableCell>
                 <TableCell>
                   <Badge variant="outline">{promo.promotion_type}</Badge>
@@ -728,7 +765,7 @@ function PromotionsTable({
                   ) : '-'}
                 </TableCell>
                 <TableCell className="text-right">
-                  <Badge variant="default" className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
+                  <Badge variant="default" className="bg-success/10 text-success">
                     {counts.participating}
                   </Badge>
                 </TableCell>
@@ -764,3 +801,69 @@ function PromotionStatusBadge({ status }: { status: string }) {
   );
 }
 
+function ProductPromotionCard({ 
+  product, 
+  onSelectPromotion 
+}: { 
+  product: ProductSearchResult; 
+  onSelectPromotion: (promoId: string) => void;
+}) {
+  return (
+    <div className="border rounded-lg p-4 flex gap-4">
+      {product.thumbnail && (
+        <img 
+          src={product.thumbnail} 
+          alt={product.title || product.item_id}
+          className="w-16 h-16 rounded-md object-cover shrink-0"
+        />
+      )}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-start justify-between gap-2 mb-1">
+          <div>
+            <p className="font-medium text-sm truncate">{product.title || product.item_id}</p>
+            <p className="text-xs text-muted-foreground">
+              {product.item_id}
+              {product.sku && ` · SKU: ${product.sku}`}
+            </p>
+          </div>
+          <Badge variant="secondary" className="shrink-0">
+            {product.promotions.length} campanha{product.promotions.length !== 1 ? 's' : ''}
+          </Badge>
+        </div>
+        <div className="mt-2 space-y-1.5">
+          {product.promotions.map(promo => (
+            <div key={promo.promotion_id} className="flex items-center justify-between gap-2 text-sm bg-muted/30 rounded-md px-3 py-1.5">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="truncate font-medium">
+                  {promo.promotion_name || promo.promotion_id.slice(0, 12)}
+                </span>
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">{promo.promotion_type}</Badge>
+                {promo.meli_percentage && promo.meli_percentage > 0 && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <TrendingUp className="h-3.5 w-3.5 text-success shrink-0" />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      Redução de tarifa: R$ {promo.feeReductionAmount?.toFixed(2) || '—'}
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {promo.item_status === 'started' ? (
+                  <Badge variant="default" className="text-xs">Participando</Badge>
+                ) : promo.item_status === 'candidate' || promo.item_status === 'pending' ? (
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => onSelectPromotion(promo.promotion_id)}>
+                    Participar
+                  </Button>
+                ) : (
+                  <Badge variant="secondary" className="text-xs">{promo.item_status}</Badge>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
