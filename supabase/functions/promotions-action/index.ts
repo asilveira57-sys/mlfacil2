@@ -345,8 +345,8 @@ async function callMeliApi(params: MeliApiParams): Promise<Response> {
     });
   }
 
-  // DEAL and other types: POST /seller-promotions/items/{item_id}?user_id={seller_id}
-  const url = `${baseUrl}/items/${itemId}?user_id=${sellerId}`;
+  // DEAL and other types: POST /seller-promotions/items/{item_id}?user_id={seller_id}&app_version=v2
+  const url = `${baseUrl}/items/${itemId}?user_id=${sellerId}&app_version=v2`;
   const body: Record<string, unknown> = {
     promotion_id: promotionId,
     promotion_type: promotionType,
@@ -361,7 +361,6 @@ async function callMeliApi(params: MeliApiParams): Promise<Response> {
       'Authorization': `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-      'version': 'v2',
     },
     body: JSON.stringify(body),
   });

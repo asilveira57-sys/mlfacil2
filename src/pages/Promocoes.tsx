@@ -147,7 +147,7 @@ export default function Promocoes() {
   const { lastSync, refetch: refetchLogs } = usePromotionSyncLogs(workspaceId, sellerId);
 
   // Product search (cross-promotion)
-  const { results: productResults, loading: productSearchLoading } = useProductPromotionSearch(workspaceId, sellerId, searchQuery);
+  const { results: productResults, loading: productSearchLoading, refetch: refetchProductSearch } = useProductPromotionSearch(workspaceId, sellerId, searchQuery);
 
   // Unique promotion types for filter dropdown
   const promotionTypes = useMemo(() => {
@@ -249,9 +249,10 @@ export default function Promocoes() {
         } else {
           toast.success(`${action === 'adhere' ? 'Aderido' : 'Removido'}: ${data?.success_count || 0} itens`);
         }
-        // Refresh items and promotions
+        // Refresh items, promotions, and product search results
         await refetchItems();
         await refetch();
+        refetchProductSearch();
       }
     } catch (err) {
       toast.error('Erro ao executar ação');

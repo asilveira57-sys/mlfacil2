@@ -102,29 +102,45 @@ export function usePromotions(workspaceId: string | null, sellerId?: string | nu
         return;
       }
 
-      // Fetch promotions and item statuses in parallel
-      const [promosResult, itemStatusesResult] = await Promise.all([
-        supabase
-          .from('promotion_snapshots')
-          .select('*')
-          .eq('workspace_id', workspaceId)
-          .eq('seller_id', sellerId)
-          .order('end_at', { ascending: true }),
-        supabase
-          .from('promotion_items_snapshots')
-          .select('promotion_id, item_status, raw_item_data')
-          .eq('workspace_id', workspaceId)
-          .eq('seller_id', sellerId),
-      ]);
+      // Fetch promotions
+      const promosResult = await supabase
+        .from('promotion_snapshots')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .eq('seller_id', sellerId)
+        .order('end_at', { ascending: true });
 
       if (promosResult.error) throw promosResult.error;
 
       setPromotions((promosResult.data as unknown as PromotionSnapshot[]) || []);
 
+      // Fetch item statuses with pagination to overcome 1000 row limit
+      let allItemStatuses: { promotion_id: string; item_status: string; raw_item_data: unknown }[] = [];
+      let from = 0;
+      const pageSize = 1000;
+      let hasMore = true;
+
+      while (hasMore) {
+        const { data } = await supabase
+          .from('promotion_items_snapshots')
+          .select('promotion_id, item_status, raw_item_data')
+          .eq('workspace_id', workspaceId)
+          .eq('seller_id', sellerId)
+          .range(from, from + pageSize - 1);
+
+        if (data && data.length > 0) {
+          allItemStatuses = allItemStatuses.concat(data);
+          hasMore = data.length === pageSize;
+          from += pageSize;
+        } else {
+          hasMore = false;
+        }
+      }
+
       // Build item counts map
       const counts: Record<string, PromotionItemCounts> = {};
-      if (itemStatusesResult.data) {
-        for (const row of itemStatusesResult.data) {
+      if (allItemStatuses.length > 0) {
+        for (const row of allItemStatuses) {
           const pid = row.promotion_id;
           if (!counts[pid]) counts[pid] = { participating: 0, eligible: 0, hasCoParticipation: false };
           if (row.item_status === 'started') {
