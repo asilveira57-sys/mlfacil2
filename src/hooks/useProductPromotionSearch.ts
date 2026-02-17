@@ -29,6 +29,7 @@ interface UseProductPromotionSearchResult {
   results: ProductSearchResult[];
   loading: boolean;
   error: string | null;
+  refetch: () => void;
 }
 
 /**
@@ -246,5 +247,11 @@ export function useProductPromotionSearch(
     };
   }, [query, search]);
 
-  return { results, loading, error };
+  const refetch = useCallback(() => {
+    if (query.length >= 3) {
+      search(query);
+    }
+  }, [query, search]);
+
+  return { results, loading, error, refetch };
 }
