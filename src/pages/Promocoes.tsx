@@ -92,6 +92,14 @@ export default function Promocoes() {
     label: string;
     promotionId?: string;
     promotionType?: string;
+    productTitle?: string;
+    productThumbnail?: string;
+    campaignName?: string;
+    discountPercent?: number;
+    meliReduction?: number;
+    endDate?: string;
+    originalPrice?: number;
+    promoPrice?: number;
   } | null>(null);
 
   // Fetch workspace on mount
@@ -496,13 +504,21 @@ export default function Promocoes() {
                     <ProductPromotionCard 
                       key={product.item_id} 
                       product={product} 
-                      onDirectParticipate={(promoId, promoType, itemId, price, offerId) => {
+                      onDirectParticipate={(promoId, promoType, itemId, price, offerId, meta) => {
                         setConfirmAction({
                           action: 'adhere',
                           items: [{ item_id: itemId, price, offer_id: offerId }],
                           label: `Aderir "${product.title || itemId}" na campanha`,
                           promotionId: promoId,
                           promotionType: promoType,
+                          productTitle: product.title || itemId,
+                          productThumbnail: product.thumbnail || undefined,
+                          campaignName: meta?.campaignName,
+                          discountPercent: meta?.discountPercent,
+                          meliReduction: meta?.meliReduction,
+                          endDate: meta?.endDate,
+                          originalPrice: meta?.originalPrice,
+                          promoPrice: meta?.promoPrice,
                         });
                       }}
                     />
@@ -636,14 +652,88 @@ export default function Promocoes() {
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>
-                {confirmAction?.action === 'adhere' ? 'Aderir Itens' : 'Remover Itens'}
+                {confirmAction?.action === 'adhere' ? 'Aderir à Campanha' : 'Remover Itens'}
               </AlertDialogTitle>
-              <AlertDialogDescription>
-                {confirmAction?.label}
-                <br />
-                <span className="text-xs text-muted-foreground mt-1 block">
-                  Esta ação será executada diretamente na API do Mercado Livre.
-                </span>
+              <AlertDialogDescription asChild>
+                <div className="space-y-3">
+                  {/* Product details when available */}
+                  {confirmAction?.productTitle && (
+                    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50 border">
+                      {confirmAction.productThumbnail && (
+                        <img 
+                          src={confirmAction.productThumbnail} 
+                          alt="" 
+                          className="w-14 h-14 rounded-md object-cover shrink-0"
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <p className="font-medium text-sm text-foreground truncate">{confirmAction.productTitle}</p>
+                        <p className="text-xs text-muted-foreground">{confirmAction.items[0]?.item_id}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Campaign details */}
+                  <div className="space-y-1.5 text-sm">
+                    {confirmAction?.campaignName && (
+                      <div className="flex items-center gap-2">
+                        <Tag className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <span className="text-foreground">
+                          {confirmAction.campaignName}
+                          {confirmAction.promotionType && (
+                            <Badge variant="outline" className="ml-2 text-[10px] px-1.5 py-0">{confirmAction.promotionType}</Badge>
+                          )}
+                        </span>
+                      </div>
+                    )}
+
+                    {confirmAction?.discountPercent != null && confirmAction.discountPercent > 0 && (
+                      <div className="flex items-center gap-2">
+                        <TrendingUp className="h-3.5 w-3.5 text-primary shrink-0" />
+                        <span>
+                          <span className="font-semibold text-primary">{confirmAction.discountPercent.toFixed(1)}% off</span>
+                          {confirmAction.originalPrice && confirmAction.promoPrice && (
+                            <span className="text-muted-foreground ml-1">
+                              (R$ {confirmAction.originalPrice.toFixed(2).replace('.', ',')} → R$ {confirmAction.promoPrice.toFixed(2).replace('.', ',')})
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    )}
+
+                    {confirmAction?.meliReduction != null && confirmAction.meliReduction > 0 && (
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0" />
+                        <span className="text-success font-medium">
+                          ML reduz R$ {confirmAction.meliReduction.toFixed(2).replace('.', ',')} das tarifas
+                        </span>
+                      </div>
+                    )}
+
+                    {confirmAction?.endDate && (
+                      <div className="flex items-center gap-2">
+                        <CalendarClock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <span>
+                          {(() => {
+                            const end = new Date(confirmAction.endDate);
+                            const days = Math.ceil((end.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                            if (days <= 0) return 'Encerrada';
+                            return `Termina em ${days} dia${days !== 1 ? 's' : ''} (${format(end, 'dd/MM', { locale: ptBR })})`;
+                          })()}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Fallback label when no enriched data */}
+                  {!confirmAction?.productTitle && (
+                    <p>{confirmAction?.label}</p>
+                  )}
+
+                  <p className="text-xs text-muted-foreground">
+                    Esta ação será executada diretamente na API do Mercado Livre.
+                  </p>
+                </div>
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -657,7 +747,7 @@ export default function Promocoes() {
                 disabled={actionLoading}
               >
                 {actionLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                Confirmar
+                {confirmAction?.action === 'adhere' ? 'Confirmar Adesão' : 'Confirmar Remoção'}
               </Button>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -819,7 +909,14 @@ function ProductPromotionCard({
   onDirectParticipate 
 }: { 
   product: ProductSearchResult; 
-  onDirectParticipate: (promoId: string, promoType: string, itemId: string, price?: number, offerId?: string) => void;
+  onDirectParticipate: (promoId: string, promoType: string, itemId: string, price?: number, offerId?: string, meta?: {
+    campaignName?: string;
+    discountPercent?: number;
+    meliReduction?: number;
+    endDate?: string;
+    originalPrice?: number;
+    promoPrice?: number;
+  }) => void;
 }) {
   return (
     <div className="border rounded-lg p-4 flex gap-4">
@@ -845,9 +942,14 @@ function ProductPromotionCard({
         </div>
         <div className="mt-2 space-y-1.5">
           {product.promotions.map(promo => {
-            const discountPct = promo.original_price && promo.promo_price && promo.original_price > 0
-              ? Math.round(((promo.original_price - promo.promo_price) / promo.original_price) * 100)
-              : null;
+            // Use sum of meli + seller percentages as primary discount calculation
+            const pctFromFields = (promo.meli_percentage || 0) + (promo.seller_percentage || 0);
+            // Fallback: calculate from price difference
+            const pctFromPrice = promo.original_price && promo.promo_price && promo.original_price > 0
+              ? ((promo.original_price - promo.promo_price) / promo.original_price) * 100
+              : 0;
+            const discountPct = pctFromFields > 0 ? pctFromFields : pctFromPrice;
+            
             const endDate = promo.end_at ? new Date(promo.end_at) : null;
             const now = new Date();
             const daysLeft = endDate ? Math.ceil((endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : null;
@@ -860,8 +962,8 @@ function ProductPromotionCard({
                   </span>
                   <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">{promo.promotion_type}</Badge>
                   
-                  {discountPct !== null && discountPct > 0 && (
-                    <span className="text-xs font-semibold text-primary shrink-0">{discountPct}% off</span>
+                  {discountPct > 0 && (
+                    <span className="text-xs font-semibold text-primary shrink-0">{discountPct.toFixed(1)}% off</span>
                   )}
 
                   {promo.feeReductionAmount && promo.feeReductionAmount > 0 && (
@@ -899,7 +1001,15 @@ function ProductPromotionCard({
                         promo.promotion_type, 
                         product.item_id, 
                         promo.promo_price || promo.original_price || undefined,
-                        promo.offer_id || undefined
+                        promo.offer_id || undefined,
+                        {
+                          campaignName: promo.promotion_name || promo.promotion_id,
+                          discountPercent: discountPct > 0 ? discountPct : undefined,
+                          meliReduction: promo.feeReductionAmount || undefined,
+                          endDate: promo.end_at || undefined,
+                          originalPrice: promo.original_price || undefined,
+                          promoPrice: promo.promo_price || undefined,
+                        }
                       )}
                     >
                       Participar
