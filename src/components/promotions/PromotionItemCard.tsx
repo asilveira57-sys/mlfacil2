@@ -160,16 +160,21 @@ export function PromotionItemCard({
         )}
       </div>
 
-      {/* Net Proceeds */}
-      <div className="flex-shrink-0 text-right min-w-[90px]">
+      {/* Net Proceeds + Fee Reduction */}
+      <div className="flex-shrink-0 text-right min-w-[120px] space-y-0.5">
         <span className="text-[10px] text-muted-foreground block uppercase tracking-wide">Você recebe</span>
         {item.net_proceeds_amount ? (
           <span className="text-sm font-semibold text-foreground flex items-center justify-end gap-0.5">
             <DollarSign className="h-3 w-3 text-muted-foreground" />
             R$ {item.net_proceeds_amount.toFixed(2)}
           </span>
-        ) : (
+        ) : !item.feeReductionAmount ? (
           <span className="text-sm text-muted-foreground">-</span>
+        ) : null}
+        {item.feeReductionAmount && item.feeReductionAmount > 0 && (
+          <span className="text-[11px] text-success leading-tight block">
+            Reduzimos R$ {item.feeReductionAmount.toFixed(2)} das suas tarifas por cada venda
+          </span>
         )}
       </div>
 
