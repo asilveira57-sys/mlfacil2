@@ -1,93 +1,98 @@
 
 
-# Enriquecer Resultados por Produto e Melhorar Fluxo de Participacao
+# Corrigir Percentual de Desconto e Enriquecer Dialog de Confirmacao
 
-## Problema Atual
+## Problema 1: Percentual nao aparece
 
-1. **Informacoes insuficientes nos resultados de busca por produto**: Cada linha de campanha mostra apenas nome, tipo e um icone de co-participacao (tooltip). Faltam: percentual de desconto, valor de co-participacao, data de finalizacao.
+A coluna `promo_price` no banco esta sempre NULL. O preco promocional real esta em `raw_item_data->>'price'` e o desconto total e `meli_percentage + seller_percentage`. O codigo atual calcula o desconto usando `promo_price` (que e NULL), por isso nunca exibe nada.
 
-2. **Clicar em "Participar" abre o modal com TODOS os itens da campanha**: O usuario pesquisa "etiqueta fragil", clica em Participar na campanha "Impulsione suas vendas", mas o modal abre com 27 itens em vez de filtrar apenas o produto pesquisado.
+**Dados reais do banco:**
+- MLB1047536992: original_price=211.12, price=194.54, meli_pct=2.9, seller_pct=5 (total 7.9% off)
+- MLB1304171724: original_price=56.23, price=46.90, meli_pct=2.6, seller_pct=14 (total 16.6% off)
+
+## Problema 2: Dialog de confirmacao vazio
+
+Ao clicar "Participar", o dialog mostra apenas o texto generico. Faltam: thumbnail, nome do produto, nome da campanha, desconto, co-participacao e data de finalizacao.
 
 ## Solucao
 
-### 1. Enriquecer as linhas de campanha no card de produto
+### 1. Corrigir extracao de dados no hook (`useProductPromotionSearch.ts`)
 
-Adicionar na mesma linha de cada campanha (inline, sem precisar clicar):
-- Percentual de desconto (ex: "3% off")
-- Valor de co-participacao ML em verde (ex: "ML reduz R$ 0,19")
-- Data de finalizacao (ex: "Termina em 3 dias" ou "14/03")
-- Preco original riscado e preco promocional
-
-**Arquivo:** `src/hooks/useProductPromotionSearch.ts`
-- Adicionar `start_at` e `end_at` na query de `promotion_snapshots` (linha 149)
-- Adicionar esses campos na interface `ProductPromotionInfo`
-- Calcular `discount_percentage` a partir de `original_price` e `promo_price`
-
-**Arquivo:** `src/pages/Promocoes.tsx` (componente `ProductPromotionCard`, linhas 804-868)
-- Redesenhar cada linha de campanha para exibir inline:
-  - Nome da campanha + tipo badge
-  - Desconto: "X% off" 
-  - Co-participacao ML: "ML reduz R$ X,XX" em verde (quando houver)
-  - Data fim: "Termina dd/MM" ou "Termina em X dias"
-  - Precos: original riscado + promocional
-  - Botao Participar / Badge "Participando"
-
-### 2. Participar filtrado pelo produto pesquisado
-
-Quando clicar em "Participar" no resultado de busca por produto, em vez de abrir o modal generico com todos os itens, abrir um dialog compacto focado naquele produto especifico naquela campanha, com opcao de confirmar a adesao direto.
-
-**Arquivo:** `src/pages/Promocoes.tsx`
-- Novo estado `productAction` para controlar a adesao direta de um produto especifico
-- Ao clicar "Participar" no `ProductPromotionCard`, disparar a acao diretamente via `confirmAction` (ja existe o dialog de confirmacao) passando o `item_id`, `offer_id` e `price` do produto + `promotion_id`
-- Nao abrir mais o `PromotionDetailModal` ao clicar Participar no resultado por produto
-
-### Detalhes Tecnicos
-
-**Interface `ProductPromotionInfo` atualizada:**
+- Extrair `seller_percentage` e `price` (preco promo real) do `raw_item_data`
+- Usar `raw_item_data.price` como `promo_price` quando a coluna do banco for null
+- Calcular desconto total: `meli_percentage + seller_percentage`
+- Adicionar `seller_percentage` a interface `ProductPromotionInfo`
 
 ```text
-export interface ProductPromotionInfo {
-  promotion_id: string;
-  promotion_name: string | null;
-  promotion_type: string;
-  promotion_status: string;
-  item_status: string;
-  meli_percentage: number | null;
-  offer_id: string | null;
-  original_price: number | null;
-  promo_price: number | null;
-  feeReductionAmount: number | null;
-  start_at: string | null;   // novo
-  end_at: string | null;     // novo
+// Linha 183-184 - extrair mais campos do rawData
+const sellerPct = (rawData?.seller_percentage as number) || null;
+const rawPrice = (rawData?.price as number) || null;
+const effectivePromoPrice = pi.promo_price || rawPrice;
+
+// Linha 209 - usar preco efetivo
+promo_price: effectivePromoPrice,
+seller_percentage: sellerPct,
+```
+
+### 2. Corrigir calculo no card (`Promocoes.tsx` - ProductPromotionCard)
+
+Em vez de calcular desconto por diferenca de preco, usar diretamente a soma das percentagens:
+
+```text
+const discountPct = (promo.meli_percentage || 0) + (promo.seller_percentage || 0);
+// Se ambos forem 0, tentar calcular pela diferenca de preco como fallback
+```
+
+### 3. Enriquecer o estado `confirmAction` e o dialog
+
+Expandir o estado para incluir metadados do produto e campanha:
+
+```text
+confirmAction: {
+  action: 'adhere' | 'remove';
+  items: [...];
+  label: string;
+  promotionId?: string;
+  promotionType?: string;
+  // Novos campos:
+  productTitle?: string;
+  productThumbnail?: string;
+  campaignName?: string;
+  discountPercent?: number;
+  meliReduction?: number;
+  endDate?: string;
+  originalPrice?: number;
+  promoPrice?: number;
 }
 ```
 
-**Query atualizada em `useProductPromotionSearch.ts` (linha 148-149):**
+O dialog de confirmacao passara de:
 
 ```text
-.select('promotion_id, promotion_name, promotion_type, status, start_at, end_at')
-```
-
-**`ProductPromotionCard` redesenhado (Promocoes.tsx):**
-
-Cada linha de campanha passara de:
-```text
-[Nome] [TIPO] [icone] ............... [Participar]
+[Titulo generico]
+[Texto generico]
+[Cancelar] [Confirmar]
 ```
 
 Para:
+
 ```text
-[Nome] [TIPO] | 3% off | ML reduz R$0,19 | Termina 14/03 | R$31,03 > R$30,88 | [Participar]
+Aderir a Campanha
++----------+
+| [thumb]  |  Etiqueta Selo Fragil 80x30...
+|          |  MLB3380488766
++----------+
+Campanha: Impulsione suas vendas (SMART)
+Desconto: 8% off (R$ 31,03 -> R$ 28,55)
+Co-participacao: ML reduz R$ 0,90 das tarifas
+Termina em: 5 dias (22/02)
+
+[Cancelar]  [Confirmar Adesao]
 ```
 
-**Acao "Participar" direta:**
-
-Ao clicar Participar no card de produto, em vez de `onSelectPromotion(promoId)` que abre o modal grande, o sistema dispara diretamente o `setConfirmAction` com os dados do item (`item_id`, `price`, `offer_id`) e o `promotion_id`, abrindo o dialog de confirmacao ja existente. Sera necessario ajustar o `handlePromotionAction` para aceitar um `promotion_id` parametrizado (atualmente usa `selectedPromotion`).
-
-### Impacto nos Arquivos
+### Arquivos impactados
 
 | Arquivo | Acao |
 |---------|------|
-| `src/hooks/useProductPromotionSearch.ts` | Adicionar `start_at`, `end_at` na query e interface |
-| `src/pages/Promocoes.tsx` | Redesenhar `ProductPromotionCard` com info inline; mudar acao "Participar" para adesao direta |
-
+| `src/hooks/useProductPromotionSearch.ts` | Extrair seller_percentage e price do raw_item_data, usar como promo_price |
+| `src/pages/Promocoes.tsx` | Corrigir calculo desconto no card; expandir confirmAction com metadados; redesenhar dialog |
