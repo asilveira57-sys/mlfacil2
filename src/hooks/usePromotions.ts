@@ -38,6 +38,11 @@ export interface PromotionItemSnapshot {
   updated_at: string;
 }
 
+export interface PromotionItemCounts {
+  participating: number;
+  eligible: number;
+}
+
 interface UsePromotionsResult {
   promotions: PromotionSnapshot[];
   loading: boolean;
@@ -46,8 +51,12 @@ interface UsePromotionsResult {
   
   // Computed views
   activePromotions: PromotionSnapshot[];
+  pendingPromotions: PromotionSnapshot[];
   endingSoonPromotions: PromotionSnapshot[];
   finishedPromotions: PromotionSnapshot[];
+  
+  // Item counts per promotion
+  itemCounts: Record<string, PromotionItemCounts>;
 }
 
 interface UsePromotionItemsResult {
@@ -68,13 +77,14 @@ interface UsePromotionItemsResult {
  */
 export function usePromotions(workspaceId: string | null, sellerId?: string | null): UsePromotionsResult {
   const [promotions, setPromotions] = useState<PromotionSnapshot[]>([]);
+  const [itemCounts, setItemCounts] = useState<Record<string, PromotionItemCounts>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchPromotions = useCallback(async () => {
-    // Both workspaceId and sellerId are required for security
     if (!workspaceId || !sellerId) {
       setPromotions([]);
+      setItemCounts({});
       setLoading(false);
       return;
     }
@@ -83,7 +93,6 @@ export function usePromotions(workspaceId: string | null, sellerId?: string | nu
       setLoading(true);
       setError(null);
 
-      // Validate seller access via unified layer
       const hasAccess = await validateSellerAccess(sellerId);
       if (!hasAccess) {
         console.warn('[usePromotions] No access to seller:', sellerId);
@@ -92,18 +101,39 @@ export function usePromotions(workspaceId: string | null, sellerId?: string | nu
         return;
       }
 
-      // Query with both workspace and seller_id filter (security)
-      // Using seller_id column (TEXT) instead of account_id (UUID)
-      const { data, error: fetchError } = await supabase
-        .from('promotion_snapshots')
-        .select('*')
-        .eq('workspace_id', workspaceId)
-        .eq('seller_id', sellerId)
-        .order('end_at', { ascending: true });
+      // Fetch promotions and item statuses in parallel
+      const [promosResult, itemStatusesResult] = await Promise.all([
+        supabase
+          .from('promotion_snapshots')
+          .select('*')
+          .eq('workspace_id', workspaceId)
+          .eq('seller_id', sellerId)
+          .order('end_at', { ascending: true }),
+        supabase
+          .from('promotion_items_snapshots')
+          .select('promotion_id, item_status')
+          .eq('workspace_id', workspaceId)
+          .eq('seller_id', sellerId),
+      ]);
 
-      if (fetchError) throw fetchError;
+      if (promosResult.error) throw promosResult.error;
 
-      setPromotions((data as unknown as PromotionSnapshot[]) || []);
+      setPromotions((promosResult.data as unknown as PromotionSnapshot[]) || []);
+
+      // Build item counts map
+      const counts: Record<string, PromotionItemCounts> = {};
+      if (itemStatusesResult.data) {
+        for (const row of itemStatusesResult.data) {
+          const pid = row.promotion_id;
+          if (!counts[pid]) counts[pid] = { participating: 0, eligible: 0 };
+          if (row.item_status === 'started') {
+            counts[pid].participating++;
+          } else if (row.item_status === 'candidate' || row.item_status === 'pending') {
+            counts[pid].eligible++;
+          }
+        }
+      }
+      setItemCounts(counts);
     } catch (err) {
       console.error('[usePromotions] Error:', err);
       setError(err instanceof Error ? err.message : 'Erro ao carregar promoções');
@@ -147,6 +177,7 @@ export function usePromotions(workspaceId: string | null, sellerId?: string | nu
   const hours48FromNow = new Date(now.getTime() + 48 * 60 * 60 * 1000);
 
   const activePromotions = promotions.filter(p => p.status === 'started');
+  const pendingPromotions = promotions.filter(p => p.status === 'pending');
   
   const endingSoonPromotions = promotions.filter(p => {
     if (p.status !== 'started' || !p.end_at) return false;
@@ -162,8 +193,10 @@ export function usePromotions(workspaceId: string | null, sellerId?: string | nu
     error,
     refetch: fetchPromotions,
     activePromotions,
+    pendingPromotions,
     endingSoonPromotions,
     finishedPromotions,
+    itemCounts,
   };
 }
 
