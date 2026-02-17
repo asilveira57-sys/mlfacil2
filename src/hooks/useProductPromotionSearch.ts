@@ -54,11 +54,11 @@ export function useProductPromotionSearch(
       setError(null);
 
       const trimmed = searchQuery.trim();
-
-      // 1. Find matching item_ids from meli_listings_cache (by title, sku, or item_id)
       const isItemId = /^ML[A-Z]\d+$/i.test(trimmed);
 
+      // 1. Find matching item_ids from meli_listings_cache (by title, sku, or item_id)
       let matchingItemIds: string[] = [];
+      let listingsMap = new Map<string, { title: string | null; thumbnail: string | null; sku: string | null }>();
 
       if (isItemId) {
         matchingItemIds = [trimmed.toUpperCase()];
@@ -73,6 +73,52 @@ export function useProductPromotionSearch(
 
         if (listings && listings.length > 0) {
           matchingItemIds = listings.map(l => l.item_id);
+          for (const l of listings) {
+            listingsMap.set(l.item_id, { title: l.title, thumbnail: l.thumbnail, sku: l.sku });
+          }
+        }
+      }
+
+      // 2. If no cache results and not an item_id search, try enriching all promo items
+      // and filtering by title client-side
+      if (matchingItemIds.length === 0 && !isItemId) {
+        // Fetch all unique item_ids from promotions
+        const { data: allPromoItems } = await supabase
+          .from('promotion_items_snapshots')
+          .select('item_id')
+          .eq('workspace_id', workspaceId)
+          .eq('seller_id', sellerId);
+
+        if (!allPromoItems || allPromoItems.length === 0) {
+          setResults([]);
+          return;
+        }
+
+        const uniqueIds = [...new Set(allPromoItems.map(i => i.item_id))];
+
+        // Try to enrich via edge function
+        try {
+          const { data: enrichData, error: enrichError } = await supabase.functions.invoke('promotions-action', {
+            body: {
+              action: 'enrich',
+              seller_id: sellerId,
+              items: uniqueIds.map(id => ({ item_id: id })),
+            },
+          });
+
+          if (!enrichError && enrichData?.ok && enrichData.data) {
+            const enrichMap = enrichData.data as Record<string, { title: string | null; thumbnail: string | null; permalink: string | null }>;
+            
+            // Filter by title match
+            for (const [itemId, info] of Object.entries(enrichMap)) {
+              if (info.title && info.title.toLowerCase().includes(trimmed.toLowerCase())) {
+                matchingItemIds.push(itemId);
+                listingsMap.set(itemId, { title: info.title, thumbnail: info.thumbnail, sku: null });
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('[useProductPromotionSearch] Enrich fallback failed:', err);
         }
       }
 
@@ -109,23 +155,27 @@ export function useProductPromotionSearch(
         (promos || []).map(p => [p.promotion_id, p])
       );
 
-      // 4. Get listing visuals
+      // 4. Get listing visuals (merge with already-found listingsMap)
       const uniqueItemIds = [...new Set(promoItems.map(pi => pi.item_id))];
-      const { data: listings } = await supabase
-        .from('meli_listings_cache')
-        .select('item_id, title, thumbnail, sku')
-        .eq('seller_id', sellerId)
-        .in('item_id', uniqueItemIds);
+      const missingVisualIds = uniqueItemIds.filter(id => !listingsMap.has(id));
+      if (missingVisualIds.length > 0) {
+        const { data: listings } = await supabase
+          .from('meli_listings_cache')
+          .select('item_id, title, thumbnail, sku')
+          .eq('seller_id', sellerId)
+          .in('item_id', missingVisualIds);
 
-      const listingMap = new Map(
-        (listings || []).map(l => [l.item_id, l])
-      );
+        if (listings) {
+          for (const l of listings) {
+            listingsMap.set(l.item_id, { title: l.title, thumbnail: l.thumbnail, sku: l.sku });
+          }
+        }
+      }
 
       // 5. Group by item_id
       const grouped = new Map<string, ProductSearchResult>();
 
       for (const pi of promoItems) {
-        const listing = listingMap.get(pi.item_id);
         const promo = promoMap.get(pi.promotion_id);
         const rawData = pi.raw_item_data as Record<string, unknown> | null;
         const meliPct = (rawData?.meli_percentage as number) || null;
@@ -135,11 +185,12 @@ export function useProductPromotionSearch(
           : null;
 
         if (!grouped.has(pi.item_id)) {
+          const cachedVisual = listingsMap.get(pi.item_id);
           grouped.set(pi.item_id, {
             item_id: pi.item_id,
-            title: listing?.title || (rawData?.title as string) || null,
-            thumbnail: listing?.thumbnail || (rawData?.thumbnail as string) || null,
-            sku: listing?.sku || null,
+            title: cachedVisual?.title || (rawData?.title as string) || null,
+            thumbnail: cachedVisual?.thumbnail || (rawData?.thumbnail as string) || null,
+            sku: cachedVisual?.sku || null,
             promotions: [],
           });
         }
