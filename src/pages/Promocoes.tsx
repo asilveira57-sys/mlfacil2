@@ -35,7 +35,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
-import { usePromotions, PromotionSnapshot } from '@/hooks/usePromotions';
+import { usePromotions, PromotionSnapshot, PromotionItemCounts } from '@/hooks/usePromotions';
 import { useEnrichedPromotionItems, EnrichedPromotionItem } from '@/hooks/useEnrichedPromotionItems';
 import { usePromotionTasks } from '@/hooks/usePromotionTasks';
 import { usePromotionSyncLogs } from '@/hooks/usePromotionSyncLogs';
@@ -116,8 +116,10 @@ export default function Promocoes() {
     error,
     refetch,
     activePromotions,
+    pendingPromotions,
     endingSoonPromotions,
     finishedPromotions,
+    itemCounts,
   } = usePromotions(workspaceId, sellerId);
 
   const {
@@ -150,6 +152,7 @@ export default function Promocoes() {
   };
 
   const filteredActive = useMemo(() => filterPromotions(activePromotions), [activePromotions, searchQuery, typeFilter]);
+  const filteredPending = useMemo(() => filterPromotions(pendingPromotions), [pendingPromotions, searchQuery, typeFilter]);
   const filteredEnding = useMemo(() => filterPromotions(endingSoonPromotions), [endingSoonPromotions, searchQuery, typeFilter]);
   const filteredFinished = useMemo(() => filterPromotions(finishedPromotions), [finishedPromotions, searchQuery, typeFilter]);
 
@@ -398,13 +401,20 @@ export default function Promocoes() {
         )}
 
         {/* KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           <KpiCard
             title="Promoções Ativas"
             value={activePromotions.length}
             icon={<TrendingUp className="h-5 w-5" />}
             loading={loading}
             color="success"
+          />
+          <KpiCard
+            title="Pendentes"
+            value={pendingPromotions.length}
+            icon={<Clock className="h-5 w-5" />}
+            loading={loading}
+            color={pendingPromotions.length > 0 ? 'warning' : 'default'}
           />
           <KpiCard
             title="Terminando em 48h"
@@ -482,8 +492,12 @@ export default function Promocoes() {
                     <TrendingUp className="h-4 w-4" />
                     Ativas ({filteredActive.length})
                   </TabsTrigger>
-                  <TabsTrigger value="ending" className="gap-2">
+                  <TabsTrigger value="pending" className="gap-2">
                     <Clock className="h-4 w-4" />
+                    Pendentes ({filteredPending.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="ending" className="gap-2">
+                    <CalendarClock className="h-4 w-4" />
                     Terminando ({filteredEnding.length})
                   </TabsTrigger>
                   <TabsTrigger value="finished" className="gap-2">
@@ -496,18 +510,28 @@ export default function Promocoes() {
                   <PromotionsTable 
                     promotions={filteredActive} 
                     onSelect={setSelectedPromotion}
+                    itemCounts={itemCounts}
+                  />
+                </TabsContent>
+                <TabsContent value="pending">
+                  <PromotionsTable 
+                    promotions={filteredPending} 
+                    onSelect={setSelectedPromotion}
+                    itemCounts={itemCounts}
                   />
                 </TabsContent>
                 <TabsContent value="ending">
                   <PromotionsTable 
                     promotions={filteredEnding} 
                     onSelect={setSelectedPromotion}
+                    itemCounts={itemCounts}
                   />
                 </TabsContent>
                 <TabsContent value="finished">
                   <PromotionsTable 
                     promotions={filteredFinished} 
                     onSelect={setSelectedPromotion}
+                    itemCounts={itemCounts}
                   />
                 </TabsContent>
               </Tabs>
@@ -646,10 +670,12 @@ function KpiCard({
 
 function PromotionsTable({ 
   promotions, 
-  onSelect 
+  onSelect,
+  itemCounts,
 }: { 
   promotions: PromotionSnapshot[]; 
   onSelect: (p: PromotionSnapshot) => void;
+  itemCounts: Record<string, PromotionItemCounts>;
 }) {
   if (promotions.length === 0) {
     return (
@@ -669,40 +695,49 @@ function PromotionsTable({
             <TableHead>Tipo</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Período</TableHead>
-            <TableHead className="text-right">Itens</TableHead>
+            <TableHead className="text-right">Participando</TableHead>
+            <TableHead className="text-right">Elegíveis</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {promotions.map(promo => (
-            <TableRow 
-              key={promo.id} 
-              className="cursor-pointer hover:bg-muted/50"
-              onClick={() => onSelect(promo)}
-            >
-              <TableCell className="font-medium">
-                {promo.promotion_name || `Promoção ${promo.promotion_id.slice(0, 8)}...`}
-              </TableCell>
-              <TableCell>
-                <Badge variant="outline">{promo.promotion_type}</Badge>
-              </TableCell>
-              <TableCell>
-                <PromotionStatusBadge status={promo.status} />
-              </TableCell>
-              <TableCell>
-                {promo.end_at ? (
-                  <span className="text-sm">
-                    {formatDistanceToNow(new Date(promo.end_at), { 
-                      addSuffix: true, 
-                      locale: ptBR 
-                    })}
-                  </span>
-                ) : '-'}
-              </TableCell>
-              <TableCell className="text-right">
-                <Badge variant="secondary">{promo.items_count || 0}</Badge>
-              </TableCell>
-            </TableRow>
-          ))}
+          {promotions.map(promo => {
+            const counts = itemCounts[promo.promotion_id] || { participating: 0, eligible: 0 };
+            return (
+              <TableRow 
+                key={promo.id} 
+                className="cursor-pointer hover:bg-muted/50"
+                onClick={() => onSelect(promo)}
+              >
+                <TableCell className="font-medium">
+                  {promo.promotion_name || `Promoção ${promo.promotion_id.slice(0, 8)}...`}
+                </TableCell>
+                <TableCell>
+                  <Badge variant="outline">{promo.promotion_type}</Badge>
+                </TableCell>
+                <TableCell>
+                  <PromotionStatusBadge status={promo.status} />
+                </TableCell>
+                <TableCell>
+                  {promo.end_at ? (
+                    <span className="text-sm">
+                      {formatDistanceToNow(new Date(promo.end_at), { 
+                        addSuffix: true, 
+                        locale: ptBR 
+                      })}
+                    </span>
+                  ) : '-'}
+                </TableCell>
+                <TableCell className="text-right">
+                  <Badge variant="default" className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
+                    {counts.participating}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-right">
+                  <Badge variant="secondary">{counts.eligible}</Badge>
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </div>
