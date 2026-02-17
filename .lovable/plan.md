@@ -1,105 +1,76 @@
 
-# Correcao: Campanhas faltando + Colunas de participacao
+# Exibir Reducao de Tarifa nas Promocoes
 
-## Problema 1: Apenas 7 de 11 campanhas aparecem
+## O que esta acontecendo
 
-O banco de dados tem 11 promocoes sincronizadas, mas a UI so mostra 7. Motivo: o hook `usePromotions` divide as promocoes em 3 grupos:
-- **Ativas** = status `started` (7 promocoes)
-- **Terminando em 48h** = status `started` + end_at proximo (subconjunto das ativas)
-- **Finalizadas** = status `finished` (0 promocoes)
+O Mercado Livre mostra em verde "Reduzimos R$ X,XX das suas tarifas por cada venda" nos itens de campanhas co-financiadas (SMART, PRICE_MATCHING, MARKETPLACE_CAMPAIGN). Esse valor representa a parcela que o ML paga do desconto.
 
-As 4 promocoes com status **`pending`** (ainda nao iniciadas) nao aparecem em nenhuma aba. Sao elas:
-- Liquida Outlet (DEAL)
-- Aumente suas vendas (SMART, 22/fev-14/mar)
-- Impulsione suas vendas (SMART, 22/fev-14/mar)
-- 03.03 e Dia do Consumidor (DEAL)
+Os dados **ja existem** no banco de dados dentro do campo `raw_item_data`:
+- `meli_percentage`: percentual do desconto que o ML paga (ex: 0.6%, 1.8%, 2.4%)
+- `seller_percentage`: percentual do desconto que o vendedor paga
 
-**Solucao:** Adicionar uma aba "Pendentes" no hook e na UI para exibir promocoes com status `pending`.
+O calculo do valor de reducao de tarifa e: `original_price * meli_percentage / 100`
 
-## Problema 2: Coluna unica "Itens" nao mostra participacao
+Exemplo real do banco:
+- original_price: R$ 41,38 | meli_percentage: 1.6% -> Reducao = R$ 0,66
+- original_price: R$ 190,96 | meli_percentage: 1.6% -> Reducao = R$ 3,06
 
-Atualmente a tabela so tem uma coluna "Itens" com o total (`items_count`). O Mercado Livre mostra "X elegiveis | Y participando" em cada card.
+## Plano de Implementacao
 
-Os dados ja existem no banco (`promotion_items_snapshots`) com contagens por `item_status`:
-- `started` = participando
-- `candidate`/`pending` = elegiveis (a participar)
+### 1. Hook `useEnrichedPromotionItems.ts`
+- Extrair `meli_percentage` e `seller_percentage` do `raw_item_data`
+- Calcular `feeReductionAmount = original_price * meli_percentage / 100`
+- Adicionar campos ao `EnrichedPromotionItem`:
+  - `meliPercentage: number | null`
+  - `sellerPercentage: number | null`  
+  - `feeReductionAmount: number | null`
 
-**Solucao:** Substituir a coluna unica "Itens" por duas colunas: "Participando" e "Elegiveis". Buscar essas contagens do banco junto com a query de promocoes.
+### 2. Componente `PromotionItemCard.tsx`
+- Na coluna "Voce recebe", abaixo do valor de net_proceeds (quando disponivel), exibir em verde:
+  - "Reduzimos R$ X,XX das suas tarifas por cada venda"
+- Quando `net_proceeds_amount` for null mas `feeReductionAmount` existir, exibir apenas a reducao de tarifa (sem o "Voce recebe" numerico, que ficou para implementacao futura)
+- Quando nenhum dos dois existir, manter o "-" atual
 
----
+### Detalhes Tecnicos
 
-## Implementacao
-
-### 1. Hook `usePromotions.ts`
-- Adicionar `pendingPromotions` como computed view: `promotions.filter(p => p.status === 'pending')`
-- Retornar `pendingPromotions` no resultado do hook
-
-### 2. Buscar contagens por status de item
-- Ao carregar promocoes, fazer uma segunda query em `promotion_items_snapshots` agrupando por `promotion_id` e `item_status`
-- Criar um mapa `{ promotion_id: { participating: N, eligible: M } }`
-- Expor esse mapa no hook ou como campos adicionais no `PromotionSnapshot`
-
-### 3. Pagina `Promocoes.tsx`
-- Adicionar aba "Pendentes" nas tabs, entre "Ativas" e "Terminando"
-- Consumir `pendingPromotions` do hook e exibir na nova aba
-
-### 4. Componente `PromotionsTable`
-- Substituir coluna "Itens" por duas colunas: "Participando" e "Elegiveis"
-- "Participando": mostra contagem de itens com `item_status = 'started'` (cor verde)
-- "Elegiveis": mostra contagem de itens com `item_status IN ('candidate', 'pending')` (cor azul/cinza)
-- Receber o mapa de contagens como prop
-
----
-
-## Detalhes Tecnicos
-
-### Query de contagens por promocao
+**Extracao no hook (useEnrichedPromotionItems.ts):**
 
 ```text
-SELECT 
-  promotion_id,
-  COUNT(*) FILTER (WHERE item_status = 'started') as participating,
-  COUNT(*) FILTER (WHERE item_status IN ('candidate', 'pending')) as eligible
-FROM promotion_items_snapshots
-WHERE workspace_id = ? AND seller_id = ?
-GROUP BY promotion_id
+const meliPercentage = rawData?.meli_percentage as number | null;
+const sellerPercentage = rawData?.seller_percentage as number | null;
+const feeReductionAmount = (meliPercentage && item.original_price) 
+  ? item.original_price * meliPercentage / 100 
+  : null;
 ```
 
-Como o Supabase JS SDK nao suporta FILTER diretamente, a alternativa e buscar todos os itens com `select('promotion_id, item_status')` e agrupar no frontend, ou usar uma RPC/view. A abordagem mais simples e agrupar no frontend a partir dos dados ja disponiveis.
+**Exibicao no card (PromotionItemCard.tsx):**
 
-### Mudanca no hook `usePromotions`
-
-Adicionar uma query separada para buscar `promotion_id` e `item_status` de todos os itens do workspace/seller, e computar as contagens no frontend:
+Na secao "Voce recebe" (linhas 163-174), adicionar abaixo do valor:
 
 ```text
-const { data: itemStatuses } = await supabase
-  .from('promotion_items_snapshots')
-  .select('promotion_id, item_status')
-  .eq('workspace_id', workspaceId)
-  .eq('seller_id', sellerId);
-
-// Agrupar: { promoId: { participating: N, eligible: M } }
+{item.feeReductionAmount && (
+  <span className="text-xs text-green-600 leading-tight">
+    Reduzimos R$ {item.feeReductionAmount.toFixed(2)} das suas tarifas por cada venda
+  </span>
+)}
 ```
 
-### Mudanca na PromotionsTable
-
-Receber prop `itemCounts: Map<string, { participating: number, eligible: number }>` e renderizar:
+**Interface atualizada do EnrichedPromotionItem:**
 
 ```text
-<TableHead>Participando</TableHead>
-<TableHead>Elegiveis</TableHead>
-...
-<TableCell>
-  <Badge variant="default" className="bg-green-100 text-green-800">{counts.participating}</Badge>
-</TableCell>
-<TableCell>
-  <Badge variant="secondary">{counts.eligible}</Badge>
-</TableCell>
+export interface EnrichedPromotionItem extends PromotionItemSnapshot {
+  // ... campos existentes ...
+  meliPercentage: number | null;
+  sellerPercentage: number | null;
+  feeReductionAmount: number | null;
+}
 ```
 
 ### Impacto nos arquivos
 
 | Arquivo | Acao |
 |---------|------|
-| `src/hooks/usePromotions.ts` | Adicionar `pendingPromotions`; buscar contagens de itens por status |
-| `src/pages/Promocoes.tsx` | Adicionar aba "Pendentes"; atualizar PromotionsTable com 2 colunas |
+| `src/hooks/useEnrichedPromotionItems.ts` | Extrair meli/seller percentage e calcular reducao |
+| `src/components/promotions/PromotionItemCard.tsx` | Exibir reducao de tarifa em verde |
+
+Nenhuma mudanca no backend necessaria - os dados ja estao no `raw_item_data`.
