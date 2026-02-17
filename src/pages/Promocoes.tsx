@@ -90,6 +90,8 @@ export default function Promocoes() {
     action: 'adhere' | 'remove';
     items: { item_id: string; price?: number; offer_id?: string }[];
     label: string;
+    promotionId?: string;
+    promotionType?: string;
   } | null>(null);
 
   // Fetch workspace on mount
@@ -208,8 +210,10 @@ export default function Promocoes() {
   };
 
   // Handle adhere/remove action
-  const handlePromotionAction = async (action: 'adhere' | 'remove', items: { item_id: string; price?: number }[]) => {
-    if (!workspaceId || !sellerId || !selectedPromotion) return;
+  const handlePromotionAction = async (action: 'adhere' | 'remove', items: { item_id: string; price?: number }[], overridePromotionId?: string, overridePromotionType?: string) => {
+    const promoId = overridePromotionId || selectedPromotion?.promotion_id;
+    const promoType = overridePromotionType || selectedPromotion?.promotion_type;
+    if (!workspaceId || !sellerId || !promoId) return;
     setActionLoading(true);
 
     try {
@@ -222,8 +226,8 @@ export default function Promocoes() {
           action,
           workspace_id: workspaceId,
           seller_id: sellerId,
-          promotion_id: selectedPromotion.promotion_id,
-          promotion_type: selectedPromotion.promotion_type,
+          promotion_id: promoId,
+          promotion_type: promoType,
           items,
         },
       });
@@ -489,10 +493,19 @@ export default function Promocoes() {
               ) : (
                 <div className="space-y-4">
                   {productResults.map(product => (
-                    <ProductPromotionCard key={product.item_id} product={product} onSelectPromotion={(promoId) => {
-                      const promo = promotions.find(p => p.promotion_id === promoId);
-                      if (promo) setSelectedPromotion(promo);
-                    }} />
+                    <ProductPromotionCard 
+                      key={product.item_id} 
+                      product={product} 
+                      onDirectParticipate={(promoId, promoType, itemId, price, offerId) => {
+                        setConfirmAction({
+                          action: 'adhere',
+                          items: [{ item_id: itemId, price, offer_id: offerId }],
+                          label: `Aderir "${product.title || itemId}" na campanha`,
+                          promotionId: promoId,
+                          promotionType: promoType,
+                        });
+                      }}
+                    />
                   ))}
                 </div>
               )}
@@ -638,7 +651,7 @@ export default function Promocoes() {
               <Button
                 onClick={async () => {
                   if (confirmAction) {
-                    await handlePromotionAction(confirmAction.action, confirmAction.items);
+                    await handlePromotionAction(confirmAction.action, confirmAction.items, confirmAction.promotionId, confirmAction.promotionType);
                   }
                 }}
                 disabled={actionLoading}
@@ -803,10 +816,10 @@ function PromotionStatusBadge({ status }: { status: string }) {
 
 function ProductPromotionCard({ 
   product, 
-  onSelectPromotion 
+  onDirectParticipate 
 }: { 
   product: ProductSearchResult; 
-  onSelectPromotion: (promoId: string) => void;
+  onDirectParticipate: (promoId: string, promoType: string, itemId: string, price?: number, offerId?: string) => void;
 }) {
   return (
     <div className="border rounded-lg p-4 flex gap-4">
@@ -831,37 +844,73 @@ function ProductPromotionCard({
           </Badge>
         </div>
         <div className="mt-2 space-y-1.5">
-          {product.promotions.map(promo => (
-            <div key={promo.promotion_id} className="flex items-center justify-between gap-2 text-sm bg-muted/30 rounded-md px-3 py-1.5">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="truncate font-medium">
-                  {promo.promotion_name || promo.promotion_id.slice(0, 12)}
-                </span>
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">{promo.promotion_type}</Badge>
-                {promo.meli_percentage && promo.meli_percentage > 0 && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <TrendingUp className="h-3.5 w-3.5 text-success shrink-0" />
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      Redução de tarifa: R$ {promo.feeReductionAmount?.toFixed(2) || '—'}
-                    </TooltipContent>
-                  </Tooltip>
-                )}
+          {product.promotions.map(promo => {
+            const discountPct = promo.original_price && promo.promo_price && promo.original_price > 0
+              ? Math.round(((promo.original_price - promo.promo_price) / promo.original_price) * 100)
+              : null;
+            const endDate = promo.end_at ? new Date(promo.end_at) : null;
+            const now = new Date();
+            const daysLeft = endDate ? Math.ceil((endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : null;
+
+            return (
+              <div key={promo.promotion_id} className="flex items-center justify-between gap-2 text-sm bg-muted/30 rounded-md px-3 py-2">
+                <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                  <span className="truncate font-medium max-w-[180px]">
+                    {promo.promotion_name || promo.promotion_id.slice(0, 12)}
+                  </span>
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">{promo.promotion_type}</Badge>
+                  
+                  {discountPct !== null && discountPct > 0 && (
+                    <span className="text-xs font-semibold text-primary shrink-0">{discountPct}% off</span>
+                  )}
+
+                  {promo.feeReductionAmount && promo.feeReductionAmount > 0 && (
+                    <span className="text-xs font-medium text-success shrink-0">
+                      ML reduz R$ {promo.feeReductionAmount.toFixed(2).replace('.', ',')}
+                    </span>
+                  )}
+
+                  {endDate && daysLeft !== null && (
+                    <span className={cn("text-xs shrink-0", daysLeft <= 3 ? "text-warning font-medium" : "text-muted-foreground")}>
+                      {daysLeft <= 0 ? 'Encerrada' : daysLeft <= 7 
+                        ? `Termina em ${daysLeft}d` 
+                        : `Termina ${format(endDate, 'dd/MM', { locale: ptBR })}`}
+                    </span>
+                  )}
+
+                  {promo.original_price && promo.promo_price && promo.original_price !== promo.promo_price && (
+                    <span className="text-xs shrink-0">
+                      <span className="line-through text-muted-foreground">R$ {promo.original_price.toFixed(2).replace('.', ',')}</span>
+                      {' '}
+                      <span className="font-semibold text-foreground">R$ {promo.promo_price.toFixed(2).replace('.', ',')}</span>
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {promo.item_status === 'started' ? (
+                    <Badge variant="default" className="text-xs">Participando</Badge>
+                  ) : promo.item_status === 'candidate' || promo.item_status === 'pending' ? (
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      className="h-7 text-xs" 
+                      onClick={() => onDirectParticipate(
+                        promo.promotion_id, 
+                        promo.promotion_type, 
+                        product.item_id, 
+                        promo.promo_price || promo.original_price || undefined,
+                        promo.offer_id || undefined
+                      )}
+                    >
+                      Participar
+                    </Button>
+                  ) : (
+                    <Badge variant="secondary" className="text-xs">{promo.item_status}</Badge>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {promo.item_status === 'started' ? (
-                  <Badge variant="default" className="text-xs">Participando</Badge>
-                ) : promo.item_status === 'candidate' || promo.item_status === 'pending' ? (
-                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => onSelectPromotion(promo.promotion_id)}>
-                    Participar
-                  </Button>
-                ) : (
-                  <Badge variant="secondary" className="text-xs">{promo.item_status}</Badge>
-                )}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

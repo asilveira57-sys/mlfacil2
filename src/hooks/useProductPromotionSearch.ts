@@ -12,6 +12,8 @@ export interface ProductPromotionInfo {
   original_price: number | null;
   promo_price: number | null;
   feeReductionAmount: number | null;
+  start_at: string | null;
+  end_at: string | null;
 }
 
 export interface ProductSearchResult {
@@ -146,7 +148,7 @@ export function useProductPromotionSearch(
       const promoIds = [...new Set(promoItems.map(pi => pi.promotion_id))];
       const { data: promos } = await supabase
         .from('promotion_snapshots')
-        .select('promotion_id, promotion_name, promotion_type, status')
+        .select('promotion_id, promotion_name, promotion_type, status, start_at, end_at')
         .eq('workspace_id', workspaceId)
         .eq('seller_id', sellerId)
         .in('promotion_id', promoIds);
@@ -206,6 +208,8 @@ export function useProductPromotionSearch(
           original_price: pi.original_price,
           promo_price: pi.promo_price,
           feeReductionAmount: feeReduction,
+          start_at: promo?.start_at || null,
+          end_at: promo?.end_at || null,
         });
       }
 
