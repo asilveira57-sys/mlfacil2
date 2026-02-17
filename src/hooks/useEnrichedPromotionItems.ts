@@ -24,6 +24,12 @@ export interface EnrichedPromotionItem extends PromotionItemSnapshot {
   computedDiscount: number | null;
   /** offer_id extracted from raw_item_data (needed for SMART adhesion) */
   offer_id: string | null;
+  /** ML co-funded discount percentage */
+  meliPercentage: number | null;
+  /** Seller discount percentage */
+  sellerPercentage: number | null;
+  /** Computed: fee reduction amount = original_price * meli_percentage / 100 */
+  feeReductionAmount: number | null;
 }
 
 interface UseEnrichedPromotionItemsResult {
@@ -184,6 +190,13 @@ export function useEnrichedPromotionItems(
       // Extract offer_id from raw_item_data
       const offerId = (rawData?.offer_id as string) || null;
 
+      // Extract meli/seller percentage for fee reduction display
+      const meliPercentage = (rawData?.meli_percentage as number) || null;
+      const sellerPercentage = (rawData?.seller_percentage as number) || null;
+      const feeReductionAmount = (meliPercentage && item.original_price)
+        ? item.original_price * meliPercentage / 100
+        : null;
+
       // Fallback title/thumbnail from raw_item_data when cache misses
       const rawTitle = (rawData?.title as string) || (rawData?.item_title as string) || null;
       const rawThumbnail = (rawData?.thumbnail as string) || (rawData?.picture_url as string) || null;
@@ -198,6 +211,9 @@ export function useEnrichedPromotionItems(
         finalPrice,
         computedDiscount,
         offer_id: offerId,
+        meliPercentage,
+        sellerPercentage,
+        feeReductionAmount,
       };
     });
   }, [rawItems, visuals]);
