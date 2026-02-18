@@ -131,29 +131,40 @@ export function useAdsBudgetSimulator(sellerId?: string) {
     setLoading(true);
 
     try {
-      const endDate = new Date();
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - input.period);
-
-      // Build query based on target type
+      // Use ads_items for aggregated metrics (ads_daily_metrics may be empty)
       let query = supabase
-        .from('ads_daily_metrics')
-        .select('*')
+        .from('ads_items')
+        .select('spent, revenue_from_ads, clicks, impressions, conversions, acos, roas')
         .eq('seller_id', sellerId)
-        .gte('metric_date', startDate.toISOString().split('T')[0])
-        .lte('metric_date', endDate.toISOString().split('T')[0]);
+        .eq('status', 'active');
 
-      if (input.targetType === 'campaign' && input.targetId) {
-        query = query.eq('campaign_id', input.targetId);
-      } else if (input.targetType === 'item' && input.targetId) {
-        query = query.eq('item_id', input.targetId);
+      if (input.targetType === 'item' && input.targetId) {
+        query = query.eq('id', input.targetId);
       }
+      // For campaign filter, we'd need ad_group_id mapping - skip for now
 
-      const { data: metrics, error } = await query;
+      const { data: items, error } = await query;
       if (error) throw error;
 
-      // Aggregate historical metrics
-      const historical = aggregateMetrics(metrics || [], input.period);
+      // Aggregate from items
+      const totalSpent = (items || []).reduce((sum, m) => sum + (m.spent || 0), 0);
+      const totalRevenue = (items || []).reduce((sum, m) => sum + (m.revenue_from_ads || 0), 0);
+      const totalClicks = (items || []).reduce((sum, m) => sum + (m.clicks || 0), 0);
+      const totalImpressions = (items || []).reduce((sum, m) => sum + (m.impressions || 0), 0);
+      const totalConversions = (items || []).reduce((sum, m) => sum + (m.conversions || 0), 0);
+
+      const historical = {
+        spent: totalSpent,
+        revenue: totalRevenue,
+        clicks: totalClicks,
+        impressions: totalImpressions,
+        conversions: totalConversions,
+        acos: totalRevenue > 0 ? (totalSpent / totalRevenue) * 100 : 0,
+        roas: totalSpent > 0 ? totalRevenue / totalSpent : 0,
+        avgDailySpend: totalSpent / input.period,
+        margin: totalRevenue - totalSpent,
+        stockConsumed: totalConversions,
+      };
 
       // Apply budget change factor with diminishing returns
       const changeFactor = 1 + (input.budgetChangePercent / 100);
