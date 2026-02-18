@@ -203,3 +203,6 @@ verify_jwt = false
 
 [functions.generate-consent-pdf]
 verify_jwt = false
+
+[functions.competitor-seller-sync]
+verify_jwt = false

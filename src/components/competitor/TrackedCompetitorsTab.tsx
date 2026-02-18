@@ -14,12 +14,15 @@ import {
   Settings,
   History,
   AlertCircle,
-  Copy
+  Copy,
+  Users,
+  Package
 } from 'lucide-react';
 import { useCompetitorTracking, CompetitorTracker } from '@/hooks/useCompetitorTracking';
 import { AddTrackedListingDialog } from './AddTrackedListingDialog';
 import { TrackedListingDetailDrawer } from './TrackedListingDetailDrawer';
 import { CloneCompetitorDialog } from './CloneCompetitorDialog';
+import { SellerTrackingList } from './SellerTrackingList';
 import { 
   AlertDialog, 
   AlertDialogAction, 
@@ -56,6 +59,7 @@ export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) 
   const [statusFilter, setStatusFilter] = useState<'ativo' | 'pausado' | 'all'>('ativo');
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
   const [trackerToClone, setTrackerToClone] = useState<CompetitorTracker | null>(null);
+  const [viewMode, setViewMode] = useState<'listings' | 'sellers'>('listings');
 
   useEffect(() => {
     fetchTrackers(statusFilter);
@@ -141,6 +145,32 @@ export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) 
 
   return (
     <div className="space-y-6">
+      {/* View Mode Toggle */}
+      <div className="flex items-center gap-2 border-b pb-3">
+        <Button
+          variant={viewMode === 'listings' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setViewMode('listings')}
+          className="gap-2"
+        >
+          <Package className="h-4 w-4" />
+          Anúncios
+        </Button>
+        <Button
+          variant={viewMode === 'sellers' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setViewMode('sellers')}
+          className="gap-2"
+        >
+          <Users className="h-4 w-4" />
+          Sellers
+        </Button>
+      </div>
+
+      {viewMode === 'sellers' ? (
+        <SellerTrackingList sellerId={sellerId} />
+      ) : (
+      <>
       {/* Overview Cards */}
       {overview && (
         <div className="grid gap-4 md:grid-cols-4">
@@ -414,6 +444,8 @@ export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) 
           competitorTitle={trackerToClone.competitor_title}
           competitorPrice={trackerToClone.last_known_price}
         />
+      )}
+      </>
       )}
     </div>
   );
