@@ -119,6 +119,10 @@
       "title": "Multi-users",
       "description": "Manage team access with different permission levels."
     },
+    "item6": {
+      "title": "Unified Database",
+      "description": "Smart consolidation of information for more complete operation analyses."
+    },
     "badge1": "API integrations",
     "badge2": "Encrypted data",
     "badge3": "Structure ready for expansion",
