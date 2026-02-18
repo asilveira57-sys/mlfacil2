@@ -47,11 +47,11 @@ function BlogSEO({ post, category }: { post?: BlogPost | null; category?: BlogCa
     } else if (category) {
       document.title = `${category.nome} - Blog`;
     } else {
-      document.title = 'Blog - ML Fácil';
+      document.title = 'Blog - Marketplace Fácil';
     }
     
     return () => {
-      document.title = 'ML Fácil';
+      document.title = 'Marketplace Fácil';
     };
   }, [post, category]);
   
