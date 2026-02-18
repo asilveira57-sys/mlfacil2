@@ -264,6 +264,8 @@ export function useAdsSyncState(sellerId?: string) {
 }
 
 export function useAdsMetricsSummary(sellerId?: string, dateFrom?: string, dateTo?: string): AdsMetricsSummary {
+  // Keep useAdsDailyMetrics call to maintain stable hook order
+  useAdsDailyMetrics(sellerId, dateFrom, dateTo);
   const { items } = useAdsItems(sellerId);
 
   return useMemo(() => {
