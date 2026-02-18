@@ -656,6 +656,20 @@ Deno.serve(async (req) => {
           stats.notifications_created++;
         }
 
+        // Auto-resolve qa_pending notifications when no pending questions remain
+        if (qResult.pendingCount === 0) {
+          const { data: resolvedNotifs } = await supabase
+            .from("app_notifications")
+            .update({ is_actioned: true, read_at: new Date().toISOString() })
+            .eq("seller_id", account.ml_user_id)
+            .eq("category", "qa_pending")
+            .eq("is_actioned", false)
+            .select("id");
+          if (resolvedNotifs && resolvedNotifs.length > 0) {
+            console.log(`[polling] Auto-resolved ${resolvedNotifs.length} qa_pending notifications for seller ${account.ml_user_id}`);
+          }
+        }
+
         await sleep(DELAY_API_MS);
 
         // ── Sync messages ───────────────────────────────────────

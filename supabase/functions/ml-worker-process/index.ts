@@ -956,6 +956,23 @@ async function processOrderEvent(
 
           console.log(`[ml-worker] Welcome message SENT for order ${orderId}, ML message ID: ${sendData.id}`);
           await logEvent(supabase, event.id, "info", `Welcome message sent for order ${orderId}`);
+
+          // Auto-resolve post_sale_blocked notifications if no more pending drafts
+          const { count: pendingCount } = await supabase
+            .from("post_sale_messages")
+            .select("*", { count: "exact", head: true })
+            .eq("seller_id", event.ml_user_id)
+            .eq("is_visible", true)
+            .in("status", ["pendente", "rascunho"]);
+          if (pendingCount === 0) {
+            await supabase
+              .from("app_notifications")
+              .update({ is_actioned: true, read_at: new Date().toISOString() })
+              .eq("seller_id", event.ml_user_id)
+              .eq("category", "post_sale_blocked")
+              .eq("is_actioned", false);
+            console.log(`[ml-worker] Auto-resolved post_sale_blocked notifications for seller ${event.ml_user_id}`);
+          }
         } else {
           console.error(`[ml-worker] Action Guide API failed ${sendResponse.status}: ${sendResponseText.substring(0, 300)}`);
           
