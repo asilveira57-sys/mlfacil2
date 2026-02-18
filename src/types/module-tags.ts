@@ -13,11 +13,16 @@ export interface ModuleTag {
 
 export interface SystemModule {
   id: string;
+  key: string;
   name: string;
   description: string | null;
-  icon_name: string | null;
+  icon_key: string | null;
   route: string | null;
   is_active: boolean;
+  layer: string;
+  parent_module_id: string | null;
+  sort_order: number;
+  is_internal_only: boolean;
   created_at: string;
   updated_at: string;
 }
