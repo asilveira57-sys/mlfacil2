@@ -48,11 +48,12 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign }: AdsCampaignsT
   // Calculate ACOS and ROAS from raw_data metrics if available
   const getCampaignMetrics = (campaign: AdsCampaign) => {
     const metrics = campaign.raw_data?.metrics as Record<string, number> | undefined;
-    const spent = campaign.spent_total || 0;
-    const revenue = metrics?.revenue || 0;
-    const acos = revenue > 0 ? (spent / revenue) * 100 : 0;
-    const roas = spent > 0 ? revenue / spent : 0;
-    return { acos, roas, revenue };
+    const spent = metrics?.cost || campaign.spent_total || 0;
+    const revenue = metrics?.total_amount || 0;
+    const acos = metrics?.acos || (revenue > 0 ? (spent / revenue) * 100 : 0);
+    const roas = metrics?.roas || (spent > 0 ? revenue / spent : 0);
+    const budget = (campaign.raw_data?.budget as number) || campaign.daily_budget || null;
+    return { acos, roas, revenue, budget };
   };
 
   if (campaigns.length === 0) {
@@ -82,7 +83,7 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign }: AdsCampaignsT
         </TableHeader>
         <TableBody>
           {campaigns.map((campaign) => {
-            const { acos, roas, revenue } = getCampaignMetrics(campaign);
+            const { acos, roas, revenue, budget } = getCampaignMetrics(campaign);
             const isHighAcos = acos > 30;
             const isGoodRoas = roas >= 3;
 
@@ -102,8 +103,8 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign }: AdsCampaignsT
                 </TableCell>
                 <TableCell>{getStatusBadge(campaign.status)}</TableCell>
                 <TableCell className="text-right">
-                  {campaign.daily_budget
-                    ? `${formatCurrency(campaign.daily_budget)}/dia`
+                  {budget
+                    ? `${formatCurrency(budget)}/dia`
                     : '-'}
                 </TableCell>
                 <TableCell className="text-right font-medium">
