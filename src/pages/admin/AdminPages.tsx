@@ -32,6 +32,13 @@ const FRONT_PAGES: FrontPage[] = [
     path: '/politica-de-privacidade',
     contentKey: 'privacidade.content',
     description: 'Política de tratamento de dados pessoais conforme LGPD.'
+  },
+  {
+    id: 'cookies',
+    title: 'Política de Cookies',
+    path: '/politica-de-cookies',
+    contentKey: 'cookies.content',
+    description: 'Política de uso de cookies e tecnologias de rastreamento.'
   }
 ];
 
