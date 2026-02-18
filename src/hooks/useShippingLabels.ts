@@ -230,10 +230,8 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     
     switch (periodFilter) {
       case 'all':
-        // For "all", default to last 30 days for performance
-        dateFrom = startOfDay(subDays(nowBrasilia, 30));
-        dateTo = endOfDay(nowBrasilia);
-        break;
+        // "Todos" - no date limit, fetch everything
+        return { dateFrom: null, dateTo: null };
       case 'today':
         // "Envios de hoje" - handled by p_period_type='today_dispatch' in RPC
         // No date range needed, RPC filters by estimated_handling_limit
