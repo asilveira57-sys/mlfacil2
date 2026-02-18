@@ -30,7 +30,7 @@ export function LandingFooter() {
       { labelKey: "home.footer.col3.link1", label: t('footer.col3.link1'), href: "/termos-de-uso" },
       { labelKey: "home.footer.col3.link2", label: t('footer.col3.link2'), href: "/politica-de-privacidade" },
       { labelKey: "home.footer.col3.link3", label: t('footer.col3.link3'), href: "/politica-de-cookies" },
-      { labelKey: "home.footer.col3.link4", label: t('footer.col3.link4'), href: "#" }
+      { labelKey: "home.footer.col3.link4", label: "LGPD", href: "/lgpd" }
     ]
   };
 
