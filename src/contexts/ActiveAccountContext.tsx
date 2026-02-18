@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef, Re
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { getAllAccounts, UnifiedMarketplaceAccount, ConnectionStatus } from '@/lib/accountUnification';
+import { refreshAccountToken } from '@/lib/mlTokenRefresh';
 
 // Account from ml_accounts (source of truth via accountUnification)
 export interface ActiveAccount {
@@ -233,6 +234,29 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
         
         // Also update localStorage for legacy code
         localStorage.setItem('cost_watchdog_seller_id', active.sellerId);
+
+        // Proactive token refresh: if the active account has an expired token,
+        // trigger a background refresh immediately so the user doesn't see "attention" for minutes
+        if (active.status === 'attention') {
+          console.info('[ActiveAccountContext] Token expired for active account, refreshing proactively...');
+          refreshAccountToken(active.id).then(async (result) => {
+            if (result.success) {
+              console.info('[ActiveAccountContext] Proactive token refresh succeeded');
+              // Reload accounts to update status to 'connected'
+              const refreshedAccounts = await loadAccounts();
+              setAccounts(refreshedAccounts);
+              accountsRef.current = refreshedAccounts;
+              const refreshedActive = refreshedAccounts.find(a => a.id === active.id);
+              if (refreshedActive) {
+                setActiveAccountState(refreshedActive);
+              }
+            } else {
+              console.warn('[ActiveAccountContext] Proactive token refresh failed:', result.error);
+            }
+          }).catch((err) => {
+            console.error('[ActiveAccountContext] Proactive refresh error:', err);
+          });
+        }
       }
     } catch (err) {
       console.error('[ActiveAccountContext] Initialize error:', err);
