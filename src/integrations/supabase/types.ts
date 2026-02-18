@@ -2429,6 +2429,44 @@ export type Database = {
           },
         ]
       }
+      collaborator_menu_permissions: {
+        Row: {
+          created_at: string
+          id: string
+          is_allowed: boolean
+          permission_key: string
+          updated_at: string
+          user_id: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_allowed?: boolean
+          permission_key: string
+          updated_at?: string
+          user_id: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_allowed?: boolean
+          permission_key?: string
+          updated_at?: string
+          user_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collaborator_menu_permissions_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       collaborator_module_access: {
         Row: {
           collaborator_id: string
@@ -3039,6 +3077,38 @@ export type Database = {
           user_id?: string | null
         }
         Relationships: []
+      }
+      dynamic_feature_flags: {
+        Row: {
+          feature_key: string
+          id: string
+          is_enabled: boolean
+          updated_at: string
+          workspace_id: string | null
+        }
+        Insert: {
+          feature_key: string
+          id?: string
+          is_enabled?: boolean
+          updated_at?: string
+          workspace_id?: string | null
+        }
+        Update: {
+          feature_key?: string
+          id?: string
+          is_enabled?: boolean
+          updated_at?: string
+          workspace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dynamic_feature_flags_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       erp_integrations: {
         Row: {
@@ -5503,6 +5573,112 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      menu_item_rules: {
+        Row: {
+          allowed_plans: string[] | null
+          allowed_roles: string[] | null
+          created_at: string
+          id: string
+          is_enabled: boolean
+          menu_item_id: string
+          min_plan_code: string | null
+          required_feature_flags: string[] | null
+          requires_marketplace_connected: boolean
+          updated_at: string
+        }
+        Insert: {
+          allowed_plans?: string[] | null
+          allowed_roles?: string[] | null
+          created_at?: string
+          id?: string
+          is_enabled?: boolean
+          menu_item_id: string
+          min_plan_code?: string | null
+          required_feature_flags?: string[] | null
+          requires_marketplace_connected?: boolean
+          updated_at?: string
+        }
+        Update: {
+          allowed_plans?: string[] | null
+          allowed_roles?: string[] | null
+          created_at?: string
+          id?: string
+          is_enabled?: boolean
+          menu_item_id?: string
+          min_plan_code?: string | null
+          required_feature_flags?: string[] | null
+          requires_marketplace_connected?: boolean
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "menu_item_rules_menu_item_id_fkey"
+            columns: ["menu_item_id"]
+            isOneToOne: true
+            referencedRelation: "menu_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      menu_items: {
+        Row: {
+          category_root: string
+          created_at: string
+          feature_key: string | null
+          icon_key: string | null
+          id: string
+          label: string
+          marketplace_code: string | null
+          order_index: number
+          parent_id: string | null
+          permission_key: string | null
+          route: string | null
+          scope: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          category_root: string
+          created_at?: string
+          feature_key?: string | null
+          icon_key?: string | null
+          id?: string
+          label: string
+          marketplace_code?: string | null
+          order_index?: number
+          parent_id?: string | null
+          permission_key?: string | null
+          route?: string | null
+          scope?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          category_root?: string
+          created_at?: string
+          feature_key?: string | null
+          icon_key?: string | null
+          id?: string
+          label?: string
+          marketplace_code?: string | null
+          order_index?: number
+          parent_id?: string | null
+          permission_key?: string | null
+          route?: string | null
+          scope?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "menu_items_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "menu_items"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       ml_accounts: {
         Row: {
