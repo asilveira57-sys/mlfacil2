@@ -5,7 +5,8 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   LayoutDashboard, 
   Rocket, 
-  Users, 
+  Users,
+  Shield, 
   CreditCard, 
   Receipt, 
   FileText, 
@@ -31,11 +32,13 @@ import { AdminInvoiceQueue } from './admin/AdminInvoiceQueue';
 import { AdminPages } from './admin/AdminPages';
 import AdminMenuBuilder from './admin/AdminMenuBuilder';
 import BlogAdmin from './BlogAdmin';
+import { AdminAccessProfiles } from './admin/AdminAccessProfiles';
 
 const adminTabs = [
   { id: '', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'onboarding', label: 'Primeiros Passos', icon: Rocket },
   { id: 'usuarios', label: 'Usuários', icon: Users },
+  { id: 'perfis', label: 'Perfis', icon: Shield },
   { id: 'planos', label: 'Planos', icon: CreditCard },
   { id: 'pagamentos', label: 'Pagamentos', icon: Receipt },
   { id: 'tags', label: 'Tags', icon: Tags },
@@ -92,6 +95,7 @@ export default function Admin() {
           <Route index element={<AdminDashboard />} />
           <Route path="onboarding" element={<AdminOnboarding />} />
           <Route path="usuarios" element={<AdminUsers />} />
+          <Route path="perfis" element={<AdminAccessProfiles />} />
           <Route path="planos/*" element={<PlanosRedirect />} />
           <Route path="pagamentos" element={<AdminPayments />} />
           <Route path="tags" element={<AdminModuleTags />} />
