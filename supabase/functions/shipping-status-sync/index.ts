@@ -6,24 +6,33 @@ const corsHeaders = {
 };
 
 const CRON_SECRET = Deno.env.get("CRON_JOB_SECRET") || "default-cron-secret";
-const MAX_SHIPMENTS_PER_ACCOUNT = 50;
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
+const MAX_SHIPMENTS_PER_ACCOUNT = 150;
 const DELAY_BETWEEN_CALLS_MS = 200;
 const DELAY_BETWEEN_ACCOUNTS_MS = 2000;
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 // Statuses that may still change and need periodic checking
-const ACTIVE_STATUSES = ["ready_to_ship", "handling"];
+const ACTIVE_STATUSES = ["ready_to_ship", "handling", "pending"];
+
+function isAuthorized(req: Request): boolean {
+  const cronKey = req.headers.get("x-cron-key");
+  if (cronKey === CRON_SECRET) return true;
+
+  const authHeader = req.headers.get("authorization") || "";
+  const token = authHeader.replace("Bearer ", "").trim();
+  if (token === SUPABASE_ANON_KEY) return true;
+
+  return false;
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Validate cron key
-  const cronKey = req.headers.get("x-cron-key");
-  const authHeader = req.headers.get("authorization");
-  if (cronKey !== CRON_SECRET && !authHeader?.includes(Deno.env.get("SUPABASE_ANON_KEY") || "")) {
+  if (!isAuthorized(req)) {
     return new Response("Unauthorized", { status: 401 });
   }
 
@@ -44,7 +53,6 @@ Deno.serve(async (req) => {
 
     if (scheduler?.status === "running") {
       const lastRun = scheduler.last_run_at ? new Date(scheduler.last_run_at).getTime() : 0;
-      // If stuck for more than 10 minutes, allow re-run
       if (Date.now() - lastRun < 10 * 60 * 1000) {
         console.log("[shipping-status-sync] Already running, skipping");
         return new Response(JSON.stringify({ status: "skipped", reason: "already_running" }), {
@@ -82,7 +90,6 @@ Deno.serve(async (req) => {
       stats.accounts++;
 
       try {
-        // Get shipments with active statuses from last 7 days
         const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
         const { data: activeShipments, error: shipError } = await supabase
@@ -118,7 +125,7 @@ Deno.serve(async (req) => {
 
             if (response.status === 401) {
               console.warn(`[shipping-status-sync] Token expired for ${account.ml_user_id}`);
-              break; // Skip rest of this account
+              break;
             }
 
             if (response.status === 429) {
@@ -135,32 +142,48 @@ Deno.serve(async (req) => {
 
             const data = await response.json();
 
-            // Only update if status actually changed
-            if (
-              data.status !== shipment.shipment_status ||
-              data.substatus !== shipment.shipment_substatus
-            ) {
+            // Extract estimated_handling_limit
+            let estimatedHandlingLimit: string | null = null;
+            if (data.lead_time?.estimated_handling_limit?.date) {
+              estimatedHandlingLimit = data.lead_time.estimated_handling_limit.date;
+            } else if (data.shipping_option?.estimated_handling_limit?.date) {
+              estimatedHandlingLimit = data.shipping_option.estimated_handling_limit.date;
+            }
+
+            // Only update if status changed or we have new handling limit data
+            const statusChanged = data.status !== shipment.shipment_status ||
+              data.substatus !== shipment.shipment_substatus;
+
+            if (statusChanged || estimatedHandlingLimit) {
               const receiverAddress = data.receiver_address || {};
               const labelAvailable = data.substatus === "ready_to_print" || data.substatus === "printed";
 
+              const updateData: Record<string, any> = {
+                shipment_status: data.status,
+                shipment_substatus: data.substatus || null,
+                tracking_number: data.tracking_number || null,
+                receiver_name: receiverAddress.receiver_name || null,
+                logistic_type: data.logistic_type || null,
+                label_available: labelAvailable,
+                last_sync_at: new Date().toISOString(),
+              };
+
+              if (estimatedHandlingLimit) {
+                updateData.estimated_handling_limit = estimatedHandlingLimit;
+              }
+
               await supabase
                 .from("meli_shipments_cache")
-                .update({
-                  shipment_status: data.status,
-                  shipment_substatus: data.substatus || null,
-                  tracking_number: data.tracking_number || null,
-                  receiver_name: receiverAddress.receiver_name || null,
-                  logistic_type: data.logistic_type || null,
-                  label_available: labelAvailable,
-                  last_sync_at: new Date().toISOString(),
-                })
+                .update(updateData)
                 .eq("seller_id", account.ml_user_id)
                 .eq("shipment_id", shipment.shipment_id);
 
-              stats.updated++;
-              console.log(
-                `[shipping-status-sync] Updated ${shipment.shipment_id}: ${shipment.shipment_status}/${shipment.shipment_substatus} → ${data.status}/${data.substatus}`
-              );
+              if (statusChanged) {
+                stats.updated++;
+                console.log(
+                  `[shipping-status-sync] Updated ${shipment.shipment_id}: ${shipment.shipment_status}/${shipment.shipment_substatus} → ${data.status}/${data.substatus}`
+                );
+              }
             }
 
             await sleep(DELAY_BETWEEN_CALLS_MS);
@@ -170,7 +193,6 @@ Deno.serve(async (req) => {
           }
         }
 
-        // Delay between accounts
         if (stats.accounts < accounts.length) {
           await sleep(DELAY_BETWEEN_ACCOUNTS_MS);
         }

@@ -9,10 +9,11 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Eye, Loader2, ArrowUp, ArrowDown, ArrowUpDown, Package } from 'lucide-react';
+import { Eye, Loader2, ArrowUp, ArrowDown, ArrowUpDown, Package, Clock } from 'lucide-react';
 import { ShippingOrder, SortField, SortDirection, OrderItemSummary } from '@/hooks/useShippingLabels';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { toZonedTime } from 'date-fns-tz';
 import { getFinalStatus } from '@/lib/shippingStatusMap';
 
 interface ShippingTableProps {
@@ -156,6 +157,12 @@ export function ShippingTable({
               </div>
             </TableHead>
             <TableHead>
+              <div className="flex items-center gap-1">
+                <Clock className="h-3.5 w-3.5" />
+                Prazo
+              </div>
+            </TableHead>
+            <TableHead>
               <button
                 onClick={() => onToggleSort('final_status')}
                 className="flex items-center hover:text-foreground transition-colors"
@@ -203,6 +210,15 @@ export function ShippingTable({
                   title={itemsSummary}
                 >
                   {itemsSummary}
+                </TableCell>
+                <TableCell className="text-sm whitespace-nowrap">
+                  {order.estimated_handling_limit ? (
+                    <span className="text-muted-foreground">
+                      {format(toZonedTime(new Date(order.estimated_handling_limit), 'America/Sao_Paulo'), 'dd/MM HH:mm', { locale: ptBR })}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground/50">-</span>
+                  )}
                 </TableCell>
                 <TableCell>
                   <Badge 

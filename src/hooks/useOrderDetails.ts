@@ -111,6 +111,7 @@ export function useOrderDetails(sellerId: string | null) {
         final_status: finalStatus,
         selectable,
         logistic_type: logisticType ?? null,
+        estimated_handling_limit: (shipmentData as any)?.estimated_handling_limit ?? null,
       };
 
       const items: OrderItemSummary[] = (itemsData || []).map(item => ({
