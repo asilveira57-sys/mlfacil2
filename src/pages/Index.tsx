@@ -12,7 +12,6 @@ import {
   LandingIntegrations,
   LandingDemo,
   LandingPricing,
-  LandingTestimonials,
   LandingFAQ,
   LandingCTA,
   LandingFooter
@@ -41,7 +40,6 @@ const Index = () => {
           <LandingIntegrations />
           <LandingDemo />
           <LandingPricing />
-          <LandingTestimonials />
           <LandingFAQ />
           <LandingCTA />
         </main>

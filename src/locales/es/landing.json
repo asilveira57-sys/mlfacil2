@@ -1,6 +1,6 @@
 {
   "header": {
-    "logo_name": "ML Fácil",
+    "logo_name": "Marketplace Fácil",
     "menu_recursos": "Recursos",
     "menu_ferramentas": "Herramientas",
     "menu_como_funciona": "Cómo funciona",
@@ -204,7 +204,7 @@
     "btn_plans": "Ver planes"
   },
   "footer": {
-    "logo_name": "ML Fácil",
+    "logo_name": "Marketplace Fácil",
     "description": "La plataforma completa para que los vendedores de Mercado Libre hagan crecer sus negocios.",
     "col1": {
       "title": "Producto",
@@ -228,7 +228,7 @@
       "link3": "Cookies",
       "link4": "LGPD"
     },
-    "copyright": "© 2025 ML Fácil. Todos los derechos reservados."
+    "copyright": "© 2025 Marketplace Fácil. Todos los derechos reservados."
   },
   "planos": {
     "title": "Planes y Precios",
