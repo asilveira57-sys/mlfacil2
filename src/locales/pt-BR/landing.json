@@ -96,28 +96,33 @@
     }
   },
   "integrations": {
-    "title": "Integrações poderosas",
-    "subtitle": "Conecte-se às principais ferramentas do ecossistema Mercado Livre.",
+    "title": "Integrações inteligentes para decisões mais precisas",
+    "subtitle": "Conecte sua operação às principais ferramentas e centralize dados estratégicos em um único sistema.",
     "item1": {
-      "title": "Mercado Pago",
-      "description": "Sincronização automática de pagamentos e taxas."
+      "title": "Mercado Livre (API Oficial)",
+      "description": "Integração segura para leitura de pedidos, anúncios e métricas da conta, permitindo análises detalhadas da performance."
     },
     "item2": {
-      "title": "API do Mercado Livre",
-      "description": "Integração oficial via OAuth com acesso seguro a pedidos, anúncios e métricas."
+      "title": "Mercado Pago",
+      "description": "Sincronização automática de pagamentos e taxas para compor análises financeiras com mais precisão."
     },
     "item3": {
-      "title": "Segurança",
-      "description": "Dados protegidos com criptografia de ponta a ponta."
+      "title": "ERP Integrado",
+      "subtitle": "Compatível com Bling e Olist",
+      "description": "Conecte seu ERP para importar custos do produto e estruturar sua margem com base em dados reais da operação."
     },
     "item4": {
-      "title": "Multi-usuários",
-      "description": "Gerencie acessos da sua equipe com permissões."
+      "title": "Segurança",
+      "description": "Dados protegidos com criptografia e boas práticas de proteção e armazenamento."
     },
-    "badge1": "Dados criptografados",
-    "badge2": "LGPD compliant",
-    "badge3": "Backup automático",
-    "badge4": "Uptime 99.9%"
+    "item5": {
+      "title": "Multiusuários",
+      "description": "Gerencie acessos da equipe com diferentes níveis de permissão."
+    },
+    "badge1": "Integrações via API",
+    "badge2": "Dados criptografados",
+    "badge3": "Estrutura preparada para expansão",
+    "badge4": "Evolução contínua de conectores"
   },
   "demo": {
     "title": "Veja o sistema em ação",

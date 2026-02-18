@@ -96,28 +96,33 @@
     }
   },
   "integrations": {
-    "title": "Integraciones poderosas",
-    "subtitle": "Conéctate a las principales herramientas del ecosistema Mercado Libre.",
+    "title": "Integraciones inteligentes para decisiones más precisas",
+    "subtitle": "Conecta tu operación a las principales herramientas y centraliza datos estratégicos en un único sistema.",
     "item1": {
-      "title": "Mercado Pago",
-      "description": "Sincronización automática de pagos y tarifas."
+      "title": "Mercado Libre (API Oficial)",
+      "description": "Integración segura para lectura de pedidos, anuncios y métricas de la cuenta, permitiendo análisis detallados del rendimiento."
     },
     "item2": {
-      "title": "API de Mercado Libre",
-      "description": "Integración oficial vía OAuth con acceso seguro a pedidos, anuncios y métricas."
+      "title": "Mercado Pago",
+      "description": "Sincronización automática de pagos y tarifas para componer análisis financieros con más precisión."
     },
     "item3": {
-      "title": "Seguridad",
-      "description": "Datos protegidos con encriptación de extremo a extremo."
+      "title": "ERP Integrado",
+      "subtitle": "Compatible con Bling y Olist",
+      "description": "Conecta tu ERP para importar costos del producto y estructurar tu margen con base en datos reales de la operación."
     },
     "item4": {
-      "title": "Multi-usuarios",
-      "description": "Gestiona los accesos de tu equipo con permisos."
+      "title": "Seguridad",
+      "description": "Datos protegidos con encriptación y buenas prácticas de protección y almacenamiento."
     },
-    "badge1": "Datos encriptados",
-    "badge2": "LGPD compliant",
-    "badge3": "Backup automático",
-    "badge4": "Uptime 99.9%"
+    "item5": {
+      "title": "Multiusuarios",
+      "description": "Gestiona accesos del equipo con diferentes niveles de permiso."
+    },
+    "badge1": "Integraciones vía API",
+    "badge2": "Datos encriptados",
+    "badge3": "Estructura preparada para expansión",
+    "badge4": "Evolución continua de conectores"
   },
   "demo": {
     "title": "Ve el sistema en acción",
