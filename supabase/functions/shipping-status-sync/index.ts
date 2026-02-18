@@ -142,12 +142,19 @@ Deno.serve(async (req) => {
 
             const data = await response.json();
 
-            // Extract estimated_handling_limit
+            // Extract estimated_handling_limit from multiple paths
             let estimatedHandlingLimit: string | null = null;
-            if (data.lead_time?.estimated_handling_limit?.date) {
-              estimatedHandlingLimit = data.lead_time.estimated_handling_limit.date;
-            } else if (data.shipping_option?.estimated_handling_limit?.date) {
+            if (data.shipping_option?.estimated_handling_limit?.date) {
               estimatedHandlingLimit = data.shipping_option.estimated_handling_limit.date;
+            } else if (data.lead_time?.estimated_handling_limit?.date) {
+              estimatedHandlingLimit = data.lead_time.estimated_handling_limit.date;
+            } else if (data.estimated_handling_limit?.date) {
+              estimatedHandlingLimit = data.estimated_handling_limit.date;
+            } else if (data.shipping_option?.estimated_delivery_time?.handling && data.date_created) {
+              const created = new Date(data.date_created);
+              const handlingHours = data.shipping_option.estimated_delivery_time.handling;
+              const deadline = new Date(created.getTime() + handlingHours * 3600000);
+              estimatedHandlingLimit = deadline.toISOString();
             }
 
             // Only update if status changed or we have new handling limit data
