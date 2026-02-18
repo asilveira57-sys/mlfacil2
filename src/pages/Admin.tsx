@@ -14,7 +14,8 @@ import {
   Settings,
   Tags,
   Link2,
-  FileStack
+  FileStack,
+  Globe
 } from 'lucide-react';
 import { AdminDashboard } from './admin/AdminDashboard';
 import { AdminOnboarding } from './admin/AdminOnboarding';
@@ -26,6 +27,7 @@ import { AdminSettings } from './admin/AdminSettings';
 import { AdminModuleTags } from './admin/AdminModuleTags';
 import { AdminErpIntegrations } from './admin/AdminErpIntegrations';
 import { AdminInvoiceQueue } from './admin/AdminInvoiceQueue';
+import { AdminPages } from './admin/AdminPages';
 import BlogAdmin from './BlogAdmin';
 
 const adminTabs = [
@@ -38,6 +40,7 @@ const adminTabs = [
   { id: 'erp', label: 'Tiny/Olist', icon: Link2 },
   { id: 'faturamento', label: 'Fila NFS-e', icon: FileStack },
   { id: 'blog', label: 'Blog', icon: FileText },
+  { id: 'paginas', label: 'Páginas', icon: Globe },
   { id: 'seo', label: 'SEO', icon: Search },
   { id: 'integracoes', label: 'Integrações', icon: Plug },
   { id: 'configuracoes', label: 'Configurações', icon: Settings },
@@ -92,6 +95,7 @@ export default function Admin() {
           <Route path="erp" element={<AdminErpIntegrations />} />
           <Route path="faturamento" element={<AdminInvoiceQueue />} />
           <Route path="blog/*" element={<BlogAdmin />} />
+          <Route path="paginas" element={<AdminPages />} />
           <Route path="seo" element={<AdminSeo />} />
           <Route path="integracoes" element={<AdminIntegrations />} />
           <Route path="configuracoes" element={<AdminSettings />} />
