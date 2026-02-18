@@ -98,6 +98,50 @@ export type Database = {
         }
         Relationships: []
       }
+      access_profiles: {
+        Row: {
+          company_id: string | null
+          created_at: string
+          id: string
+          is_protected: boolean
+          is_system: boolean
+          key: string
+          level: number
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          company_id?: string | null
+          created_at?: string
+          id?: string
+          is_protected?: boolean
+          is_system?: boolean
+          key: string
+          level?: number
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string | null
+          created_at?: string
+          id?: string
+          is_protected?: boolean
+          is_system?: boolean
+          key?: string
+          level?: number
+          name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "access_profiles_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       account_category_activity: {
         Row: {
           account_id: string
@@ -2467,7 +2511,7 @@ export type Database = {
           },
         ]
       }
-      collaborator_module_access: {
+      collaborator_module_access_legacy: {
         Row: {
           collaborator_id: string
           created_at: string
@@ -2730,6 +2774,54 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      company_users: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          is_owner: boolean
+          profile_id: string | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          is_owner?: boolean
+          profile_id?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          is_owner?: boolean
+          profile_id?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_users_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_users_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "access_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       competitor_alerts: {
         Row: {
@@ -5577,7 +5669,7 @@ export type Database = {
         }
         Relationships: []
       }
-      menu_item_rules: {
+      menu_item_rules_legacy: {
         Row: {
           allowed_plans: string[] | null
           allowed_roles: string[] | null
@@ -5619,12 +5711,12 @@ export type Database = {
             foreignKeyName: "menu_item_rules_menu_item_id_fkey"
             columns: ["menu_item_id"]
             isOneToOne: true
-            referencedRelation: "menu_items"
+            referencedRelation: "menu_items_legacy"
             referencedColumns: ["id"]
           },
         ]
       }
-      menu_items: {
+      menu_items_legacy: {
         Row: {
           category_root: string
           created_at: string
@@ -5678,7 +5770,7 @@ export type Database = {
             foreignKeyName: "menu_items_parent_id_fkey"
             columns: ["parent_id"]
             isOneToOne: false
-            referencedRelation: "menu_items"
+            referencedRelation: "menu_items_legacy"
             referencedColumns: ["id"]
           },
         ]
@@ -5937,7 +6029,7 @@ export type Database = {
             foreignKeyName: "module_tag_assignments_module_id_fkey"
             columns: ["module_id"]
             isOneToOne: false
-            referencedRelation: "system_modules"
+            referencedRelation: "system_modules_legacy"
             referencedColumns: ["id"]
           },
           {
@@ -8202,6 +8294,48 @@ export type Database = {
           },
         ]
       }
+      profile_permissions: {
+        Row: {
+          allowed: boolean
+          created_at: string
+          feature_id: string
+          id: string
+          profile_id: string
+          updated_at: string
+        }
+        Insert: {
+          allowed?: boolean
+          created_at?: string
+          feature_id: string
+          id?: string
+          profile_id: string
+          updated_at?: string
+        }
+        Update: {
+          allowed?: boolean
+          created_at?: string
+          feature_id?: string
+          id?: string
+          profile_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profile_permissions_feature_id_fkey"
+            columns: ["feature_id"]
+            isOneToOne: false
+            referencedRelation: "system_features"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profile_permissions_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "access_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           address_cep: string | null
@@ -10349,6 +10483,27 @@ export type Database = {
         }
         Relationships: []
       }
+      system_actions: {
+        Row: {
+          created_at: string
+          id: string
+          key: string
+          name: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          key: string
+          name: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          key?: string
+          name?: string
+        }
+        Relationships: []
+      }
       system_events: {
         Row: {
           account_id: string | null
@@ -10394,7 +10549,108 @@ export type Database = {
           },
         ]
       }
+      system_features: {
+        Row: {
+          action_id: string
+          created_at: string
+          id: string
+          is_active: boolean
+          key: string
+          module_id: string
+          name: string
+        }
+        Insert: {
+          action_id: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          key: string
+          module_id: string
+          name: string
+        }
+        Update: {
+          action_id?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          key?: string
+          module_id?: string
+          name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "system_features_action_id_fkey"
+            columns: ["action_id"]
+            isOneToOne: false
+            referencedRelation: "system_actions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "system_features_module_id_fkey"
+            columns: ["module_id"]
+            isOneToOne: false
+            referencedRelation: "system_modules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       system_modules: {
+        Row: {
+          created_at: string
+          description: string | null
+          icon_key: string | null
+          id: string
+          is_active: boolean
+          is_internal_only: boolean
+          key: string
+          layer: Database["public"]["Enums"]["module_layer"]
+          name: string
+          parent_module_id: string | null
+          route: string | null
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          icon_key?: string | null
+          id?: string
+          is_active?: boolean
+          is_internal_only?: boolean
+          key: string
+          layer?: Database["public"]["Enums"]["module_layer"]
+          name: string
+          parent_module_id?: string | null
+          route?: string | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          icon_key?: string | null
+          id?: string
+          is_active?: boolean
+          is_internal_only?: boolean
+          key?: string
+          layer?: Database["public"]["Enums"]["module_layer"]
+          name?: string
+          parent_module_id?: string | null
+          route?: string | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "system_modules_parent_module_id_fkey"
+            columns: ["parent_module_id"]
+            isOneToOne: false
+            referencedRelation: "system_modules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      system_modules_legacy: {
         Row: {
           created_at: string
           description: string | null
@@ -12051,6 +12307,10 @@ export type Database = {
         Returns: boolean
       }
       check_ml_api_access: { Args: { p_user_id: string }; Returns: Json }
+      check_permission: {
+        Args: { p_company_id: string; p_feature_key: string; p_user_id: string }
+        Returns: boolean
+      }
       check_snoozed_notifications: { Args: never; Returns: undefined }
       count_orders_needing_cost_sync: {
         Args: { p_seller_id: string }
@@ -12167,6 +12427,27 @@ export type Database = {
       }
       get_user_feature_flags: { Args: { p_user_id: string }; Returns: Json }
       get_user_full_context: { Args: { p_user_id: string }; Returns: Json }
+      get_user_menu: {
+        Args: { p_company_id: string; p_user_id: string }
+        Returns: {
+          icon_key: string
+          is_internal_only: boolean
+          layer: Database["public"]["Enums"]["module_layer"]
+          module_id: string
+          module_key: string
+          module_name: string
+          parent_module_id: string
+          route: string
+          sort_order: number
+        }[]
+      }
+      get_user_permissions: {
+        Args: { p_company_id: string; p_user_id: string }
+        Returns: {
+          allowed: boolean
+          feature_key: string
+        }[]
+      }
       get_user_role: { Args: { _user_id: string }; Returns: string }
       get_user_status: { Args: never; Returns: Json }
       get_user_subscription: {
@@ -12278,6 +12559,12 @@ export type Database = {
       app_role: "admin" | "seller"
       billing_cycle: "monthly" | "quarterly" | "semiannual" | "annual"
       ml_account_role: "none" | "owner" | "collaborator"
+      module_layer:
+        | "admin"
+        | "marketplace"
+        | "operacional"
+        | "ferramentas"
+        | "sistema"
       notification_category:
         | "qa_pending"
         | "qa_sla_warning"
@@ -12483,6 +12770,13 @@ export const Constants = {
       app_role: ["admin", "seller"],
       billing_cycle: ["monthly", "quarterly", "semiannual", "annual"],
       ml_account_role: ["none", "owner", "collaborator"],
+      module_layer: [
+        "admin",
+        "marketplace",
+        "operacional",
+        "ferramentas",
+        "sistema",
+      ],
       notification_category: [
         "qa_pending",
         "qa_sla_warning",
