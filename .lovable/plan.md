@@ -1,122 +1,107 @@
 
-# Consulta da Tabela Oficial de Frete do Mercado Livre via API
 
-## Contexto
+# Plano Definitivo: "Envios de Hoje" + Sincronizacao de Status
 
-O Mercado Livre possui um endpoint oficial que retorna o custo de frete que o seller pagara para um envio, baseado em parametros como dimensoes, preco do item, tipo de anuncio, categoria, etc:
+## Entendimento do Problema
 
-```
-GET /users/{user_id}/shipping_options/free?dimensions={HxWxL,weight}&item_price={price}&listing_type_id={type}&category_id={cat}&mode={mode}
-```
+"Envios de hoje" no Mercado Livre NAO e um filtro por data de venda. E um filtro por **prazo de despacho** (`estimated_handling_limit`) -- ou seja, pedidos que o vendedor precisa despachar HOJE, independente de quando a venda aconteceu (pode ser de feriado, final de semana, etc.).
 
-Este endpoint retorna o `list_cost` (custo oficial do frete) e informacoes de subsidio/desconto. Com ele, podemos montar a tabela oficial do ML para qualquer combinacao de categoria, faixa de preco e peso -- independente de ter vendido ou nao.
+Atualmente o sistema tem 3 problemas criticos:
 
-## Plano
+1. **Campo `estimated_handling_limit` nao existe no banco** -- a tabela `meli_shipments_cache` nao armazena o prazo de despacho. Sem esse dado, e impossivel saber quais envios sao "de hoje".
 
-### 1. Nova Edge Function: `freight-table-query`
+2. **Logica de `final_status` incorreta** -- envios fulfillment ja entregues (832 registros `delivered`) ainda aparecem como "full" porque o CASE verifica `logistic_type` ANTES do `shipment_status`. Resultado: pedidos ja entregues aparecem como se precisassem de NF.
 
-Cria uma Edge Function que consulta a API do ML para montar a tabela oficial de frete. O usuario seleciona os parametros e a funcao faz as chamadas necessarias para popular a grade.
+3. **Filtro "Hoje" usa data de venda** -- atualmente filtra por `created_at_meli` das ultimas 24h, quando deveria filtrar por prazo de despacho.
 
-**Parametros de entrada:**
-- `seller_id` (para autenticacao na API)
-- `category_id` (opcional - categoria do item)
-- `listing_type_id` (gold_pro, gold_special, etc.)
-- `logistic_type` (drop_off, fulfillment, xd_drop_off, cross_docking)
-- `weight_ranges` - array de faixas de peso a consultar (ex: [0.3, 0.5, 1, 2, 5, 10, 15, 30])
-- `price_ranges` - array de faixas de preco a consultar (ex: [79, 120, 200, 500, 1000])
+## Plano de Correcao (4 Etapas)
 
-**Logica:**
-- Para cada combinacao de peso x preco, faz uma chamada ao endpoint `shipping_options/free`
-- Converte peso para dimensoes estimadas (usando os perfis A/B/C ja configurados no sistema)
-- Retorna a grade completa com os custos oficiais
+### Etapa 1: Adicionar campo `estimated_handling_limit` ao banco
 
-**Saida:**
-```text
-[
-  { weight: 0.3, price: 79, listing_type: "gold_pro", list_cost: 18.90, discount_rate: 0, ... },
-  { weight: 0.3, price: 200, listing_type: "gold_pro", list_cost: 0, discount_rate: 1.0, ... },
-  ...
-]
-```
-
-### 2. Atualizar `FreightRulesetsTab.tsx`
-
-Adicionar dois botoes de acao:
-- **"Cadastrar Manualmente"**: formulario para digitar a tabela oficial (ja previsto)
-- **"Consultar na API do ML"**: novo botao que abre um dialog para consultar a tabela oficial direto da API
-
-### 3. Novo componente: `FreightApiQueryDialog.tsx`
-
-Dialog que permite ao usuario:
-1. Selecionar parametros (tipo de anuncio, tipo logistico, categoria opcional)
-2. Definir as faixas de peso e preco a consultar
-3. Clicar "Consultar" - chama a Edge Function
-4. Ver a grade de resultados (tabela peso x preco com custos)
-5. Opcionalmente "Salvar como Tabela" - persiste como `freight_ruleset` + `freight_rule_lines` para uso nos calculos de divergencia
-
-### 4. Novo componente: `FreightCreateDialog.tsx`
-
-Formulario manual para cadastrar regras de frete:
-- Nome e descricao da tabela
-- Tipo logistico e tipo de anuncio
-- Linhas com faixa de peso, faixa de preco e valor do frete
-- Possibilidade de adicionar/remover linhas
-
-### 5. Confronto futuro (ja preparado)
-
-Com as duas fontes de dados:
-- **Tabela oficial** (consultada via API ou cadastrada manualmente) -> `freight_rulesets` / `freight_rule_lines`
-- **Valores cobrados** (historico real de `meli_shipment_costs_cache`)
-
-O FreightEngine existente ja faz o calculo de divergencia (expected vs paid). A tabela oficial alimenta o "expected", e os dados historicos alimentam o "paid".
-
-## Detalhamento Tecnico
-
-### Edge Function `freight-table-query`
+Criar migration para adicionar a coluna na tabela `meli_shipments_cache`:
 
 ```text
-Arquivo: supabase/functions/freight-table-query/index.ts
+ALTER TABLE meli_shipments_cache 
+  ADD COLUMN estimated_handling_limit TIMESTAMPTZ;
 
-1. Recebe seller_id, parametros de consulta
-2. Busca access_token do seller via ml_accounts
-3. Para cada combinacao peso x preco:
-   - Converte peso em dimensoes estimadas (usando perfis A/B/C do freight_settings)
-   - Chama GET /users/{seller_id}/shipping_options/free?dimensions=...&item_price=...&listing_type_id=...
-   - Extrai list_cost, discount, billable_weight
-4. Retorna array com todos os resultados
-5. Rate limit: aguarda 100ms entre chamadas para nao exceder limites da API
+CREATE INDEX idx_shipments_handling_limit 
+  ON meli_shipments_cache(seller_id, estimated_handling_limit) 
+  WHERE shipment_status IN ('ready_to_ship','handling','pending');
 ```
 
-### Componente `FreightApiQueryDialog.tsx`
+### Etapa 2: Capturar `estimated_handling_limit` durante o sync
+
+Atualizar **2 edge functions** para extrair e salvar o campo:
+
+**`ml-sync-shipments/index.ts`** (sync sob demanda do usuario):
+- A API do ML retorna `shipping_option.estimated_handling_limit.date` no response de `/shipments/{id}`
+- Desde maio/2025, a API deprecou esse campo no shipment raiz e o moveu para `/shipments/{id}/sla`
+- Estrategia: tentar extrair de `lead_time.estimated_handling_limit.date` do response principal. Se nulo, fazer chamada adicional a `/shipments/{id}/sla` para buscar a data
+
+**`shipping-status-sync/index.ts`** (sync automatico a cada 10min):
+- Mesma logica: ao atualizar um envio, salvar tambem o `estimated_handling_limit`
+- Corrigir a autenticacao que impede o cron de executar (o `includes()` no header e fragil)
+- Expandir `ACTIVE_STATUSES` para incluir `pending` (pedidos buffered)
+- Aumentar `MAX_SHIPMENTS_PER_ACCOUNT` para 150
+
+### Etapa 3: Corrigir a RPC `get_shipping_orders`
+
+Reescrever o CASE de `final_status` para priorizar status reais sobre logistic_type:
 
 ```text
-- Select: Tipo de Anuncio (Classico, Premium)
-- Select: Tipo Logistico (Mercado Envios, Full, Drop Off)
-- Input: Categoria (opcional, com autocomplete)
-- Chips/Input: Faixas de peso (pre-definidas + customizaveis)
-- Chips/Input: Faixas de preco (pre-definidas + customizaveis)
-- Botao: Consultar API
-- Tabela de resultados: grade peso x preco com valores
-- Botao: Salvar como Tabela de Frete
+CASE
+  -- Sem dados de envio
+  WHEN s.shipment_id IS NULL AND o.shipment_id IS NOT NULL THEN 'pendente_sync'
+  WHEN o.shipment_id IS NULL THEN 'outros'
+  -- Status finais (ANTES de verificar logistic_type)
+  WHEN s.shipment_status IN ('delivered','not_delivered') THEN 'enviado'
+  WHEN s.shipment_status = 'shipped' THEN 'enviado'
+  -- Fulfillment ainda em processamento
+  WHEN s.logistic_type IN ('fulfillment','cross_docking') 
+       AND s.shipment_status IN ('ready_to_ship','handling','pending') THEN 'full'
+  -- Operacional do vendedor
+  WHEN s.shipment_substatus = 'printed' THEN 'reimprimir'
+  WHEN s.shipment_substatus = 'invoice_pending' THEN 'aguardando_nf'
+  WHEN s.shipment_substatus = 'ready_to_print' 
+       AND COALESCE(s.label_available, false) THEN 'pronta'
+  ELSE 'outros'
+END
 ```
 
-### Componente `FreightCreateDialog.tsx`
+Adicionar suporte ao filtro `today` baseado em `estimated_handling_limit`:
+- Novo parametro `p_period_type` na RPC ('date_range' ou 'today_dispatch')
+- Quando `p_period_type = 'today_dispatch'`: filtrar por `s.estimated_handling_limit` no dia de hoje (fuso Brasilia), ignorando `p_date_from`/`p_date_to`
+- Incluir o campo `estimated_handling_limit` no retorno para exibir o horario limite na tabela
 
-```text
-- Input: Nome da tabela
-- Input: Descricao
-- Date: Valida a partir de
-- Tabela editavel com linhas:
-  - Tipo logistico | Tipo anuncio | Peso min | Peso max | Preco min | Preco max | Valor frete
-- Botoes: Adicionar linha, Remover linha
-- Botao: Salvar
-```
+### Etapa 4: Atualizar o frontend
 
-## Arquivos impactados
+**`useShippingLabels.ts`**:
+- Quando `periodFilter = 'today'`: enviar `p_period_type = 'today_dispatch'` para a RPC (sem date range)
+- Adicionar `estimated_handling_limit` ao tipo `ShippingOrder`
 
-| Arquivo | Alteracao |
-|---------|-----------|
-| `supabase/functions/freight-table-query/index.ts` | Nova Edge Function para consultar API do ML |
-| `src/components/freight/FreightRulesetsTab.tsx` | Adicionar botoes "Consultar API" e "Cadastrar Manual" |
-| `src/components/freight/FreightApiQueryDialog.tsx` | Novo dialog de consulta a API |
-| `src/components/freight/FreightCreateDialog.tsx` | Novo dialog de cadastro manual |
+**`ShippingFilters.tsx`**:
+- Renomear o botao "Hoje" para "Envios de hoje" para deixar claro que e sobre despacho, nao data de venda
+
+**`ShippingTable.tsx`**:
+- Exibir o horario limite de despacho (ex: "Ate as 15:00h") na linha do pedido, similar ao Mercado Livre
+
+## Impacto nos Dados Atuais
+
+- Os 832 envios fulfillment `delivered` vao sair de "full" e ir para "enviado" (correcao imediata)
+- Os 36 envios `invoice_pending` continuam aparecendo corretamente como "Aguardando NF"
+- Os 41 envios `pending/buffered` passam a ser monitorados pelo sync de background
+- O campo `estimated_handling_limit` sera preenchido progressivamente conforme o sync roda (a cada 10min para envios ativos, e sob demanda quando o usuario clica "Atualizar")
+
+## Resumo de Arquivos Modificados
+
+| Arquivo | Mudanca |
+|---------|---------|
+| Migration SQL | Adicionar coluna `estimated_handling_limit` + indice |
+| `supabase/functions/ml-sync-shipments/index.ts` | Capturar `estimated_handling_limit` da API |
+| `supabase/functions/shipping-status-sync/index.ts` | Capturar `estimated_handling_limit`, corrigir auth, expandir statuses |
+| Migration SQL (RPC) | Corrigir `final_status`, adicionar filtro por despacho |
+| `src/hooks/useShippingLabels.ts` | Novo tipo de filtro "today_dispatch" |
+| `src/components/shipping/ShippingFilters.tsx` | Label "Envios de hoje" |
+| `src/components/shipping/ShippingTable.tsx` | Mostrar horario limite |
+| Traducoes (shipping.json) | Novas chaves para "Envios de hoje" e horario limite |
+
