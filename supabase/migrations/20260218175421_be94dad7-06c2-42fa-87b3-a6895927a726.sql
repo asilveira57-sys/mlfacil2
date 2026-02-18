@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS public.get_shipping_orders(text, text, text, timestamptz, timestamptz, integer, integer, text, text, text);
