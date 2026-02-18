@@ -99,6 +99,11 @@ async function queryShippingOption(
 
     const data = await resp.json();
     
+    // Log raw response for first combination to debug structure
+    if (weight === 0.5 || true) {
+      console.log(`[freight-table-query] Raw API response for weight=${weight} price=${price}:`, JSON.stringify(data).substring(0, 2000));
+    }
+    
     // Extract the relevant shipping option matching logistic_type
     const options = data?.options || [];
     
@@ -114,18 +119,23 @@ async function queryShippingOption(
     }
 
     if (!bestOption) {
-      // Try coverage structure
+      // Try coverage structure - ML returns { coverage: { all_country: { list_cost, ... } } }
       const coverage = data?.coverage;
       if (coverage) {
+        // Coverage can be nested under region keys like "all_country"
+        const regionData = coverage.all_country || coverage.local || coverage;
+        const listCost = regionData.list_cost ?? coverage.list_cost ?? data.list_cost ?? null;
+        const bw = regionData.billable_weight ?? data.billable_weight ?? null;
+        const dr = regionData.discount?.rate ?? coverage.discount?.rate ?? null;
         return {
           weight, price, listing_type: listingType, logistic_type: logisticType,
-          list_cost: coverage.list_cost ?? data.list_cost ?? null,
-          discount_rate: coverage.discount?.rate ?? null,
-          subsidized_cost: coverage.list_cost != null && coverage.discount?.rate != null
-            ? coverage.list_cost * (1 - coverage.discount.rate)
-            : null,
-          billable_weight: data.billable_weight ?? null,
-          free_shipping: data.free_shipping === true || coverage.list_cost === 0,
+          list_cost: listCost,
+          discount_rate: dr,
+          subsidized_cost: listCost != null && dr != null
+            ? listCost * (1 - dr)
+            : listCost,
+          billable_weight: bw,
+          free_shipping: data.free_shipping === true || listCost === 0,
         };
       }
 
