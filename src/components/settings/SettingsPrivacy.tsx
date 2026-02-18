@@ -111,9 +111,8 @@ export function SettingsPrivacy() {
     try {
       const url = await generateConsentPdf(consentId);
       if (url) {
-        window.open(url, '_blank');
         toast.success('PDF gerado com sucesso!');
-        fetchData(); // Refresh to show pdf_path
+        fetchData();
       } else {
         toast.error('Erro ao gerar PDF');
       }

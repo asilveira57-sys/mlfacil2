@@ -37,7 +37,13 @@ export async function generateConsentPdf(consentId: string): Promise<string | nu
       console.warn('[Consent API] generate-consent-pdf error:', error);
       return null;
     }
-    return data?.pdf_url || null;
+
+    const url = data?.pdf_url || null;
+    if (url) {
+      // Open in new tab for download
+      window.open(url, '_blank');
+    }
+    return url;
   } catch (err) {
     console.warn('[Consent API] generate-consent-pdf failed:', err);
     return null;
