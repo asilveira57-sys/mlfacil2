@@ -7,6 +7,7 @@ import {
   Package, 
   Shield, 
   Users,
+  Database,
   Check
 } from "lucide-react";
 
@@ -18,7 +19,8 @@ export function LandingIntegrations() {
     { icon: CreditCard, key: 'item2' },
     { icon: Package, key: 'item3', hasSubtitle: true },
     { icon: Shield, key: 'item4' },
-    { icon: Users, key: 'item5' }
+    { icon: Users, key: 'item5' },
+    { icon: Database, key: 'item6' }
   ];
 
   const badgeKeys = ['badge1', 'badge2', 'badge3', 'badge4'];

@@ -119,6 +119,10 @@
       "title": "Multiusuários",
       "description": "Gerencie acessos da equipe com diferentes níveis de permissão."
     },
+    "item6": {
+      "title": "Base de Dados Unificada",
+      "description": "Consolidação inteligente de informações para análises mais completas da operação."
+    },
     "badge1": "Integrações via API",
     "badge2": "Dados criptografados",
     "badge3": "Estrutura preparada para expansão",
