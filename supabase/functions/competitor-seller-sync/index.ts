@@ -27,11 +27,34 @@ async function fetchML(path: string, accessToken?: string, timeoutMs = 8000) {
   }
 }
 
-// Resolve seller: accepts seller_id number or profile URL nickname
+// Extract MLB item ID from a listing URL or raw text
+function extractItemIdFromInput(input: string): string | null {
+  // MLB ID patterns in URLs
+  const patterns = [
+    /MLB[-]?(\d{8,})/i,
+    /\/p\/(MLB\d+)/i,
+    /item_id=(MLB\d+)/i,
+    /\/(MLB[-]?\d{8,})/i,
+  ];
+  for (const p of patterns) {
+    const m = input.match(p);
+    if (m) {
+      const raw = m[1] || m[0];
+      return raw.replace(/-/g, '').toUpperCase();
+    }
+  }
+  // Bare MLB ID
+  if (/^MLB\d{8,}$/i.test(input.trim())) {
+    return input.trim().replace(/-/g, '').toUpperCase();
+  }
+  return null;
+}
+
+// Resolve seller: accepts seller_id number, listing URL (MLB), or profile URL
 async function resolveSellerFromInput(input: string, accessToken?: string): Promise<{ ml_seller_id: string; ml_nickname: string; reputation: any }> {
   const trimmed = input.trim();
 
-  // Direct numeric ID
+  // 1. Direct numeric seller ID
   if (/^\d+$/.test(trimmed)) {
     const data = await fetchML(`/users/${trimmed}`, accessToken);
     return {
@@ -41,34 +64,65 @@ async function resolveSellerFromInput(input: string, accessToken?: string): Prom
     };
   }
 
-  // URL: extract nickname from mercadolivre.com.br/perfil/NICKNAME or similar
-  const nicknameMatch = trimmed.match(/perfil\/([^\/\?]+)/i) || trimmed.match(/mercadolivre\.com\.br\/([^\/\?]+)/i);
-  if (nicknameMatch) {
-    const nickname = decodeURIComponent(nicknameMatch[1]);
-    // Search by nickname
-    const searchRes = await fetchML(`/sites/MLB/search?nickname=${encodeURIComponent(nickname)}&limit=1`, accessToken);
-    if (searchRes?.seller?.id) {
-      const userData = await fetchML(`/users/${searchRes.seller.id}`, accessToken);
+  // 2. Try extracting MLB item ID from URL or text → resolve seller from item
+  const itemId = extractItemIdFromInput(trimmed);
+  if (itemId) {
+    console.log(`Resolving seller from item: ${itemId}`);
+    const itemData = await fetchML(`/items/${itemId}`, accessToken);
+    if (itemData?.seller_id) {
+      const userData = await fetchML(`/users/${itemData.seller_id}`, accessToken);
       return {
         ml_seller_id: String(userData.id),
-        ml_nickname: userData.nickname || nickname,
+        ml_nickname: userData.nickname || `Seller ${userData.id}`,
         reputation: userData.seller_reputation || null,
       };
     }
-    throw new Error(`Seller não encontrado para nickname: ${nickname}`);
+    throw new Error(`Não foi possível identificar o vendedor do anúncio ${itemId}`);
   }
 
-  // Try as nickname directly
-  const searchRes = await fetchML(`/sites/MLB/search?nickname=${encodeURIComponent(trimmed)}&limit=1`, accessToken);
-  if (searchRes?.seller?.id) {
-    const userData = await fetchML(`/users/${searchRes.seller.id}`, accessToken);
-    return {
-      ml_seller_id: String(userData.id),
-      ml_nickname: userData.nickname || trimmed,
-      reputation: userData.seller_reputation || null,
-    };
+  // 3. Profile URL: extract nickname → search items by that seller to find seller_id
+  const nicknameMatch = trimmed.match(/perfil\/([^\/\?]+)/i);
+  if (nicknameMatch) {
+    const nickname = decodeURIComponent(nicknameMatch[1]);
+    // Use items search with seller nickname in query to find their items
+    const searchRes = await fetchML(`/sites/MLB/search?q=${encodeURIComponent(nickname)}&limit=1`, accessToken);
+    if (searchRes?.results?.[0]?.seller?.id) {
+      const sellerId = searchRes.results[0].seller.id;
+      const userData = await fetchML(`/users/${sellerId}`, accessToken);
+      if (userData.nickname?.toLowerCase() === nickname.toLowerCase()) {
+        return {
+          ml_seller_id: String(userData.id),
+          ml_nickname: userData.nickname,
+          reputation: userData.seller_reputation || null,
+        };
+      }
+    }
+    throw new Error(`Seller não encontrado para perfil: ${nickname}. Tente colar o link de um anúncio deste vendedor.`);
   }
-  throw new Error(`Não foi possível resolver o seller: ${trimmed}`);
+
+  // 4. Try as direct text (could be a nickname) — search items by query
+  try {
+    const searchRes = await fetchML(`/sites/MLB/search?q=${encodeURIComponent(trimmed)}&limit=5`, accessToken);
+    if (searchRes?.results?.length > 0) {
+      // Check if any result's seller nickname matches input
+      for (const result of searchRes.results) {
+        if (result.seller?.id) {
+          const userData = await fetchML(`/users/${result.seller.id}`, accessToken);
+          if (userData.nickname?.toLowerCase() === trimmed.toLowerCase()) {
+            return {
+              ml_seller_id: String(userData.id),
+              ml_nickname: userData.nickname,
+              reputation: userData.seller_reputation || null,
+            };
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Nickname search fallback error:', e);
+  }
+
+  throw new Error(`Não foi possível resolver o seller. Cole o link de um anúncio do vendedor que deseja monitorar.`);
 }
 
 // Fetch all active listings for a seller (up to 1000)
