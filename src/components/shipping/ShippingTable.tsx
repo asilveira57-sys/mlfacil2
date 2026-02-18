@@ -50,36 +50,62 @@ function SortIcon({ field, currentField, direction }: { field: SortField; curren
 }
 
 /**
- * Builds a compact item summary string from order items
- * Format: "2x SKU | 1x SKU | +N itens"
+ * Renders a compact item summary with thumbnail, like Mercado Livre
  */
-function buildItemsSummary(items: OrderItemSummary[] | undefined): string {
-  if (!items || items.length === 0) return '-';
+function ItemsSummaryCell({ items }: { items: OrderItemSummary[] | undefined }) {
+  if (!items || items.length === 0) {
+    return <span className="text-muted-foreground/50">-</span>;
+  }
 
-  // Sort by quantity desc, then by sku/title
   const sorted = [...items].sort((a, b) => {
     if (b.quantity !== a.quantity) return b.quantity - a.quantity;
-    const labelA = a.sku || a.title_short || '';
-    const labelB = b.sku || b.title_short || '';
-    return labelA.localeCompare(labelB);
+    return (a.sku || a.title_short || '').localeCompare(b.sku || b.title_short || '');
   });
 
   const MAX_DISPLAY = 2;
   const displayed = sorted.slice(0, MAX_DISPLAY);
   const remaining = sorted.length - MAX_DISPLAY;
 
-  const parts = displayed.map(item => {
-    const label = item.sku || item.title_short || item.title || item.item_id;
-    // Truncate long labels
-    const truncated = label.length > 15 ? label.substring(0, 15) + '…' : label;
-    return `${item.quantity}x ${truncated}`;
-  });
+  return (
+    <div className="flex flex-col gap-1.5">
+      {displayed.map((item, idx) => {
+        const label = item.title_short || item.title || item.sku || item.item_id;
+        const truncated = label.length > 30 ? label.substring(0, 30) + '…' : label;
+        const skuLabel = item.sku ? `SKU: ${item.sku}` : null;
 
-  if (remaining > 0) {
-    parts.push(`+${remaining} ${remaining === 1 ? 'item' : 'itens'}`);
-  }
-
-  return parts.join(' | ');
+        return (
+          <div key={idx} className="flex items-center gap-2 min-w-0">
+            {item.thumbnail ? (
+              <img
+                src={item.thumbnail}
+                alt=""
+                className="h-8 w-8 rounded border border-border object-contain bg-background flex-shrink-0"
+                loading="lazy"
+              />
+            ) : (
+              <div className="h-8 w-8 rounded border border-border bg-muted flex items-center justify-center flex-shrink-0">
+                <Package className="h-4 w-4 text-muted-foreground" />
+              </div>
+            )}
+            <div className="min-w-0 flex flex-col">
+              <span className="text-sm text-foreground truncate" title={item.title || label}>
+                {item.quantity > 1 && <span className="font-medium">{item.quantity}x </span>}
+                {truncated}
+              </span>
+              {skuLabel && (
+                <span className="text-xs text-muted-foreground truncate">{skuLabel}</span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+      {remaining > 0 && (
+        <span className="text-xs text-muted-foreground ml-10">
+          +{remaining} {remaining === 1 ? 'item' : 'itens'}
+        </span>
+      )}
+    </div>
+  );
 }
 
 export function ShippingTable({
@@ -190,7 +216,6 @@ export function ShippingTable({
           {orders.map((order) => {
             const statusInfo = getFinalStatus(order.final_status);
             const items = orderItems.get(order.order_id);
-            const itemsSummary = buildItemsSummary(items);
             
             return (
               <TableRow 
@@ -226,11 +251,8 @@ export function ShippingTable({
                 <TableCell>
                   {order.buyer_nickname || '-'}
                 </TableCell>
-                <TableCell 
-                  className="text-sm text-muted-foreground max-w-[200px] truncate"
-                  title={itemsSummary}
-                >
-                  {itemsSummary}
+                <TableCell className="max-w-[280px]">
+                  <ItemsSummaryCell items={items} />
                 </TableCell>
                 <TableCell className="text-sm whitespace-nowrap">
                   {order.estimated_handling_limit ? (
