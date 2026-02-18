@@ -38,6 +38,7 @@ export interface ShippingOrder {
   final_status: string | null;
   selectable: boolean | null;
   logistic_type: string | null;
+  estimated_handling_limit: string | null;
 }
 
 export interface OrderItemSummary {
@@ -234,10 +235,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         dateTo = endOfDay(nowBrasilia);
         break;
       case 'today':
-        // Últimas 24 horas (rolling window)
-        dateFrom = subHours(now, 24);
-        dateTo = now;
-        break;
+        // "Envios de hoje" - handled by p_period_type='today_dispatch' in RPC
+        // No date range needed, RPC filters by estimated_handling_limit
+        return { dateFrom: null, dateTo: null };
+
       case '7d':
         dateFrom = startOfDay(subDays(nowBrasilia, 7));
         dateTo = endOfDay(nowBrasilia);
@@ -287,7 +288,8 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         p_sort_dir: sortDirection,
         p_page: currentPage,
         p_page_size: PAGE_SIZE,
-      });
+        p_period_type: periodFilter === 'today' ? 'today_dispatch' : 'date_range',
+      } as any);
 
       if (error) {
         console.error('RPC get_shipping_orders error:', error);

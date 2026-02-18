@@ -123,7 +123,16 @@ async function processShipmentsInBackground(
           // Map state name to UF code
           const stateUf = rawState ? (STATE_TO_UF[rawState] || addr?.state?.id || rawState) : null;
 
-          const shipmentData = {
+          // Extract estimated_handling_limit from lead_time or shipping_option
+          let estimatedHandlingLimit: string | null = null;
+          const shipmentAny = shipment as any;
+          if (shipmentAny.lead_time?.estimated_handling_limit?.date) {
+            estimatedHandlingLimit = shipmentAny.lead_time.estimated_handling_limit.date;
+          } else if (shipmentAny.shipping_option?.estimated_handling_limit?.date) {
+            estimatedHandlingLimit = shipmentAny.shipping_option.estimated_handling_limit.date;
+          }
+
+          const shipmentData: Record<string, any> = {
             user_id: userId,
             seller_id: sellerId,
             order_id: order_id,
@@ -141,6 +150,10 @@ async function processShipmentsInBackground(
             shipping_neighborhood: rawNeighborhood,
             last_sync_at: new Date().toISOString(),
           };
+
+          if (estimatedHandlingLimit) {
+            shipmentData.estimated_handling_limit = estimatedHandlingLimit;
+          }
 
           const { error: upsertError } = await supabaseAdmin
             .from('meli_shipments_cache')
