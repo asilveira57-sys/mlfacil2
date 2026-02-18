@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { ActiveAccountProvider } from "@/contexts/ActiveAccountContext";
 import { UserAccessProvider } from "@/contexts/UserAccessContext";
 import { RefreshPolicyProvider } from "@/contexts/RefreshPolicyContext";
-import { FacebookTrackingProvider } from "@/contexts/FacebookTrackingContext";
+import { CookieConsentGate } from "@/components/cookies/CookieConsentGate";
 import { RouteChangeCleanup } from "@/components/layout/RouteChangeCleanup";
 import { AccountChangeInvalidator } from "@/components/layout/AccountChangeInvalidator";
 import { AppShellLayout } from "@/components/layout/AppShellLayout";
@@ -123,7 +123,7 @@ const App = () => {
               <Sonner />
               <BrowserRouter>
               <ScrollToTop />
-              <FacebookTrackingProvider>
+              <CookieConsentGate>
               <RouteChangeCleanup />
               <AccountChangeInvalidator />
               <SeoHead />
@@ -201,7 +201,7 @@ const App = () => {
                 <Route path="*" element={<NotFound />} />
               </Routes>
               </ModuleAccessGuard>
-              </FacebookTrackingProvider>
+              </CookieConsentGate>
               </BrowserRouter>
             </UserAccessProvider>
           </ActiveAccountProvider>

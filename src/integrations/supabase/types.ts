@@ -2995,6 +2995,51 @@ export type Database = {
         }
         Relationships: []
       }
+      cookie_consents: {
+        Row: {
+          accepted_at: string
+          analytics: boolean
+          consent_type: string
+          created_at: string
+          essential: boolean
+          fingerprint: string | null
+          id: string
+          ip_address: string | null
+          performance: boolean
+          policy_version: string
+          user_agent: string | null
+          user_id: string | null
+        }
+        Insert: {
+          accepted_at?: string
+          analytics?: boolean
+          consent_type: string
+          created_at?: string
+          essential?: boolean
+          fingerprint?: string | null
+          id?: string
+          ip_address?: string | null
+          performance?: boolean
+          policy_version?: string
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          accepted_at?: string
+          analytics?: boolean
+          consent_type?: string
+          created_at?: string
+          essential?: boolean
+          fingerprint?: string | null
+          id?: string
+          ip_address?: string | null
+          performance?: boolean
+          policy_version?: string
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       erp_integrations: {
         Row: {
           api_key: string | null
