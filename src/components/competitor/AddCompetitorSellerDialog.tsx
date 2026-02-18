@@ -62,16 +62,19 @@ export function AddCompetitorSellerDialog({ open, onOpenChange, onPreview, onAdd
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <UserPlus className="h-5 w-5" />
-            Monitorar Seller Concorrente
+            Monitorar Vendedor Concorrente
           </DialogTitle>
+          <p className="text-sm text-muted-foreground mt-1">
+            Cole o link de um anúncio do vendedor que deseja monitorar. O sistema identificará o vendedor automaticamente.
+          </p>
         </DialogHeader>
 
         <div className="space-y-4">
           <div>
-            <Label>ID do Seller, Nickname ou Link do Perfil</Label>
+            <Label>Link do Anúncio, ID do Seller ou ID do Anúncio (MLB)</Label>
             <div className="flex gap-2 mt-1">
               <Input
-                placeholder="Ex: 66043362 ou mercadolivre.com.br/perfil/NICKNAME"
+                placeholder="Ex: https://www.mercadolivre.com.br/produto-xyz/p/MLB12345678 ou 66043362"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handlePreview()}
