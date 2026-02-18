@@ -1,152 +1,86 @@
 
+# Correcao do Bug de Resolucao de Seller Concorrente
 
-# Monitoramento de Vendedores Concorrentes
+## Problema Identificado
 
-## Resumo
-
-Evoluir o modulo de Concorrencia para permitir o acompanhamento de **contas de vendedores** (sellers) alem de anuncios individuais. O usuario podera seguir uma conta concorrente, ver todos os seus anuncios ativos, acompanhar vendas estimadas a partir da data de vinculo, e adicionar um apelido (nickname) ao nome mascarado da API.
-
-## Como funciona dentro das diretrizes da API
-
-A API publica do Mercado Livre disponibiliza os seguintes endpoints sem autenticacao (ou com token proprio):
-
-- `GET /users/{user_id}` -- dados publicos: nickname mascarado (ex: GATO.SAPATO.MARIOLA), reputacao, data de registro, nivel
-- `GET /sites/MLB/search?seller_id={seller_id}` -- lista de anuncios ativos do seller (ate 1000 resultados com paginacao)
-- `GET /items/{item_id}` -- dados publicos do anuncio: preco, titulo, thumbnail, sold_quantity (faixa referencial), status
-- `GET /items?ids=ID1,ID2,...` -- multiget ate 20 itens por chamada
-
-**Importante**: `sold_quantity` e `available_quantity` sao valores **referenciais** (faixas), nao exatos. Plataformas como Nubimetrics e Real Trends usam a mesma abordagem: capturam snapshots periodicos de `sold_quantity` e calculam o **delta** entre capturas para estimar vendas no periodo. E exatamente isso que faremos.
-
-## Abordagem de Nickname (LGPD + Etica)
-
-- O sistema armazena o `nickname` original retornado pela API (mascarado pelo ML)
-- O usuario pode adicionar um **apelido proprio** que sera concatenado: `GATO.SAPATO.MARIOLA (Fornecedor Joao)`
-- O apelido fica visivel apenas para o usuario que o criou
-- Nenhum dado pessoal real do vendedor e buscado ou armazenado
-
----
-
-## Mudancas Tecnicas
-
-### 1. Nova tabela: `competitor_sellers`
-
-Armazena os sellers concorrentes monitorados.
+Na funcao `extractItemIdFromInput` do edge function `competitor-seller-sync`, o primeiro regex pattern:
 
 ```text
-competitor_sellers
-  id                  UUID PK
-  user_id             UUID FK (auth.users)
-  seller_id           TEXT (seller do usuario logado)
-  ml_seller_id        TEXT (ID ML do concorrente, ex: 66043362)
-  ml_nickname         TEXT (nickname mascarado da API)
-  user_alias          TEXT (apelido dado pelo usuario)
-  seller_reputation   JSONB (snapshot da reputacao)
-  total_items_tracked INT
-  last_synced_at      TIMESTAMPTZ
-  next_sync_at        TIMESTAMPTZ
-  sync_interval_hours INT DEFAULT 6
-  status              TEXT DEFAULT 'ativo'
-  binding_date        TIMESTAMPTZ (data de vinculo - baseline)
-  created_at          TIMESTAMPTZ
-  updated_at          TIMESTAMPTZ
+/MLB[-]?(\d{8,})/i
 ```
 
-### 2. Nova tabela: `competitor_seller_items`
+Captura apenas os **digitos** no grupo 1 (ex: `1347574279`), descartando o prefixo "MLB". O resultado e uma chamada a `/items/1347574279` que retorna 404, quando o correto seria `/items/MLB1347574279`.
 
-Snapshot dos anuncios do seller concorrente.
+O mesmo problema ocorre no quarto pattern `/\/(MLB[-]?\d{8,})/i` que captura corretamente, mas como o primeiro pattern faz match antes, nunca e alcancado.
+
+## URL do usuario como exemplo
 
 ```text
-competitor_seller_items
-  id                  UUID PK
-  competitor_seller_id UUID FK
-  user_id             UUID
-  item_id             TEXT (MLB...)
-  title               TEXT
-  thumbnail           TEXT
-  price               NUMERIC
-  original_price      NUMERIC
-  currency_id         TEXT
-  sold_quantity_ref   INT (valor referencial da API)
-  available_qty_ref   INT (valor referencial)
-  category_id         TEXT
-  listing_type        TEXT (gold_special, etc)
-  condition           TEXT (new/used)
-  status              TEXT (active/paused/closed)
-  permalink           TEXT
-  free_shipping       BOOLEAN
-  catalog_listing     BOOLEAN
-  last_synced_at      TIMESTAMPTZ
-  created_at          TIMESTAMPTZ
-  updated_at          TIMESTAMPTZ
+https://www.mercadolivre.com.br/.../up/MLBU1403875470?pdp_filters=item_id:MLB1347574279
 ```
 
-### 3. Nova tabela: `competitor_seller_item_snapshots`
+- Pattern `item_id[=:]?(MLB\d+)` do `extractMeliId.ts` (modulo existente) capturaria `MLB1347574279` corretamente
+- Mas o `extractItemIdFromInput` da edge function usa patterns diferentes e quebrados
 
-Para calcular delta de vendas (mesma tecnica do Nubimetrics).
+## Solucao
+
+Corrigir os patterns de regex para capturar o ID completo com prefixo "MLB":
 
 ```text
-competitor_seller_item_snapshots
-  id                  UUID PK
-  item_id             TEXT
-  competitor_seller_id UUID FK
-  price               NUMERIC
-  sold_quantity_ref   INT
-  available_qty_ref   INT
-  status              TEXT
-  captured_at         TIMESTAMPTZ DEFAULT now()
+Antes: /MLB[-]?(\d{8,})/i       → grupo 1 = "1347574279"
+Depois: /(MLB[-]?\d{8,})/i      → grupo 1 = "MLB1347574279"
 ```
 
-### 4. Edge Function: `competitor-seller-sync`
+### Mudancas especificas no arquivo `supabase/functions/competitor-seller-sync/index.ts`:
 
-Nova funcao backend para sincronizar dados do seller concorrente:
+1. **Reordenar e corrigir os patterns** para priorizar `item_id` (que ja aparece na URL do usuario como `item_id:MLB1347574279`):
 
-- **Adicionar seller**: Recebe nickname ou seller_id, busca `/users/{id}` para dados publicos, busca `/sites/MLB/search?seller_id={id}` para listar anuncios
-- **Sync periodica**: A cada N horas, re-busca todos os anuncios do seller, compara `sold_quantity` com snapshot anterior para estimar vendas
-- **Calculo de delta**: `vendas_estimadas = sold_quantity_atual - sold_quantity_snapshot_anterior`
-- **Rate limiting**: delay de 200ms entre chamadas, maximo 50 itens por batch via multiget
+```text
+Patterns corrigidos (em ordem de prioridade):
+  1. /item_id[=:]?(MLB\d+)/i          -- item_id param (mais especifico)
+  2. /pdp_filters=item_id[=:]?(MLB\d+)/i  -- pdp_filters (URL do usuario)
+  3. /\/(MLB[-]?\d{8,})/i             -- MLB direto no path
+  4. /(MLB[-]?\d{8,})/i               -- MLB em qualquer lugar
+```
 
-### 5. Componentes Frontend
+2. **Adicionar fallback MLBU**: Se nenhum MLB for encontrado, tentar extrair MLBU e resolver via `/products/{MLBU_ID}` ou buscar o item vinculado.
 
-**SellerTrackingTab** (nova aba ou sub-secao dentro de "Monitorados"):
-- Card de resumo do seller: nickname + apelido, reputacao, total de anuncios, vendas estimadas desde vinculo
-- Lista de anuncios do seller com: thumbnail, titulo, preco, sold_quantity (delta), status
-- Ordenacao por mais vendidos, preco, recentes
-- Botao "Editar apelido" inline
-- Botao "Monitorar este anuncio" (cria tracker individual a partir do item)
+3. **Normalizar o resultado**: garantir que o ID retornado sempre comeca com "MLB" (ou "MLBU") e nao apenas digitos.
 
-**AddCompetitorSellerDialog**:
-- Campo para colar link do perfil do vendedor OU ID do seller
-- Parser que extrai seller_id de URLs como `mercadolivre.com.br/perfil/NICKNAME`
-- Preview com dados publicos antes de confirmar
-- Campo de apelido opcional
+## Arquivos Modificados
 
-**SellerDetailDrawer**:
-- Detalhes completos do seller
-- Grafico de vendas estimadas ao longo do tempo
-- Lista paginada de anuncios com filtros (categoria, faixa de preco)
-- Timeline de eventos (novos anuncios, anuncios removidos, mudancas de preco)
+- `supabase/functions/competitor-seller-sync/index.ts` -- corrigir `extractItemIdFromInput`
 
-### 6. Integracao com tab existente "Monitorados"
+## Secao Tecnica
 
-- Adicionar filtro "Anuncios | Sellers" na parte superior da tab
-- Quando visualizando sellers, mostrar cards no formato de perfil
-- Permitir expandir seller para ver seus anuncios diretamente
+A funcao corrigida ficara assim:
 
-### 7. Migracao de dados e RLS
+```typescript
+function extractItemIdFromInput(input: string): string | null {
+  const patterns = [
+    /item_id[=:]?(MLB\d{8,})/i,
+    /pdp_filters=item_id[=:]?(MLB\d{8,})/i,
+    /\/(MLB[-]?\d{8,})/i,
+    /(MLB[-]?\d{8,})/i,
+  ];
+  for (const p of patterns) {
+    const m = input.match(p);
+    if (m && m[1]) {
+      return m[1].replace(/-/g, '').toUpperCase();
+    }
+  }
+  if (/^MLB\d{8,}$/i.test(input.trim())) {
+    return input.trim().replace(/-/g, '').toUpperCase();
+  }
+  // MLBU fallback
+  const mlbuMatch = input.match(/(MLBU\d+)/i);
+  if (mlbuMatch) {
+    return mlbuMatch[1].toUpperCase();
+  }
+  return null;
+}
+```
 
-- RLS em todas as novas tabelas: usuario so ve seus proprios dados
-- Indice em `competitor_sellers(user_id, ml_seller_id)` para evitar duplicatas
-- Indice em `competitor_seller_items(competitor_seller_id, item_id)`
-- pg_cron job para sync automatica (similar ao competitor-scan existente)
+E na funcao `resolveSellerFromInput`, adicionar tratamento para IDs MLBU (buscar item vinculado via catalog endpoint ou search).
 
----
-
-## Sequencia de Implementacao
-
-1. Criar tabelas via migracao SQL com RLS
-2. Criar edge function `competitor-seller-sync` com endpoints: add, sync, list, detail
-3. Criar hook `useCompetitorSellers` no frontend
-4. Criar componentes: AddCompetitorSellerDialog, SellerTrackingList, SellerDetailDrawer
-5. Integrar na pagina de Concorrencia (nova sub-aba ou filtro na tab Monitorados)
-6. Agendar sync automatica via pg_cron
-
+Apos o deploy, a URL do usuario `item_id:MLB1347574279` sera extraida corretamente e a chamada `/items/MLB1347574279` retornara o seller_id do concorrente.
