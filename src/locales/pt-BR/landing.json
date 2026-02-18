@@ -26,31 +26,43 @@
     "trust_multiconta": "Suporte multi-conta"
   },
   "benefits": {
-    "title": "Benefícios que impulsionam seu negócio",
-    "subtitle": "Ferramentas poderosas para otimizar cada aspecto da sua operação no Mercado Livre.",
+    "title": "O que o MKTP Fácil faz por você",
+    "subtitle": "Funcionalidades reais que otimizam cada aspecto da sua operação no Mercado Livre.",
     "item1": {
-      "title": "Gestão unificada",
-      "description": "Controle múltiplas contas do Mercado Livre em um único painel centralizado."
+      "title": "Histórico Progressivo",
+      "description": "30 dias liberados no teste e até 12 meses após ativação para análise completa da operação."
     },
     "item2": {
-      "title": "Análises em tempo real",
-      "description": "Dashboards com métricas atualizadas para decisões mais assertivas."
+      "title": "Curva ABC Estratégica",
+      "description": "Análises por produto, cidade, bairro, cliente e lucro para identificar onde realmente está o resultado da operação."
     },
     "item3": {
-      "title": "Automação inteligente",
-      "description": "Automatize tarefas repetitivas e foque no crescimento do negócio."
+      "title": "Análise de Intervalo de Vendas",
+      "description": "Identifique o tempo médio entre vendas de cada anúncio e entenda quais produtos realmente giram."
     },
     "item4": {
-      "title": "Alertas personalizados",
-      "description": "Receba notificações sobre eventos importantes e oportunidades."
+      "title": "Central de Promoções",
+      "description": "Filtre promoções qualificadas, aplique percentuais, faça adesão em lote e reagende campanhas com controle."
     },
     "item5": {
-      "title": "Histórico completo",
-      "description": "Acompanhe a evolução dos seus produtos e métricas ao longo do tempo."
+      "title": "Impressão Profissional de Etiquetas",
+      "description": "Etiquetas de envio com cabeçalho e observação personalizada. Impressão ZPL sem limites, com conversão em PDF e temporizador integrado."
     },
     "item6": {
-      "title": "Metas e objetivos",
-      "description": "Defina e acompanhe metas de vendas para cada produto ou categoria."
+      "title": "Gestão Estratégica de Anúncios",
+      "description": "Organização e acompanhamento de desempenho para decisões mais assertivas."
+    },
+    "item7": {
+      "title": "Multicontas Inteligente",
+      "description": "Gerencie múltiplas empresas com separação total de dados e configurações individuais."
+    },
+    "item8": {
+      "title": "Controle de Colaboradores",
+      "description": "Defina níveis de acesso, permissões de menu e limites operacionais por usuário."
+    },
+    "item9": {
+      "title": "Ferramentas Internas Integradas",
+      "description": "Gerenciamento de tarefas, post-its por módulo e utilidades como calculadora e bloco de notas direto no painel."
     }
   },
   "modules": {
