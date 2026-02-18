@@ -9,7 +9,9 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Eye, Loader2, ArrowUp, ArrowDown, ArrowUpDown, Package, Clock } from 'lucide-react';
+import { Eye, Loader2, ArrowUp, ArrowDown, ArrowUpDown, Package, Clock, Copy, Check } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { useToast } from '@/hooks/use-toast';
 import { ShippingOrder, SortField, SortDirection, OrderItemSummary } from '@/hooks/useShippingLabels';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -92,6 +94,16 @@ export function ShippingTable({
   onToggleSort,
   orderItems,
 }: ShippingTableProps) {
+  const { toast } = useToast();
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const handleCopy = useCallback((orderId: string) => {
+    navigator.clipboard.writeText(orderId);
+    setCopiedId(orderId);
+    toast({ title: 'Pedido copiado', description: orderId });
+    setTimeout(() => setCopiedId(null), 1500);
+  }, [toast]);
+
   const selectableOrders = orders.filter(o => o.selectable);
   const allSelected = selectableOrders.length > 0 && 
     selectableOrders.every(o => selectedIds.has(o.id));
@@ -200,7 +212,16 @@ export function ShippingTable({
                   }
                 </TableCell>
                 <TableCell className="font-mono text-sm">
-                  {order.order_id}
+                  <span className="inline-flex items-center gap-1">
+                    {order.order_id}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleCopy(order.order_id); }}
+                      className="inline-flex items-center justify-center h-6 w-6 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                      title="Copiar número do pedido"
+                    >
+                      {copiedId === order.order_id ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                    </button>
+                  </span>
                 </TableCell>
                 <TableCell>
                   {order.buyer_nickname || '-'}
