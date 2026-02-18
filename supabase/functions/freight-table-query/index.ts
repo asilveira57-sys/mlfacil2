@@ -196,13 +196,20 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Get access token
-    const { data: mlAccount } = await supabase
+    // Get access token - seller_id can be either internal UUID (id) or ML numeric ID (ml_user_id)
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(seller_id);
+    const query = supabase
       .from("ml_accounts")
-      .select("access_token, token_expires_at")
-      .eq("ml_user_id", seller_id)
-      .eq("is_active", true)
-      .maybeSingle();
+      .select("access_token, token_expires_at, ml_user_id")
+      .eq("is_active", true);
+    
+    if (isUuid) {
+      query.eq("id", seller_id);
+    } else {
+      query.eq("ml_user_id", seller_id);
+    }
+    
+    const { data: mlAccount } = await query.maybeSingle();
 
     if (!mlAccount) {
       return new Response(
@@ -240,14 +247,16 @@ Deno.serve(async (req) => {
     const results: ShippingResult[] = [];
     const totalCombinations = weight_ranges.length * price_ranges.length;
 
-    console.log(`[freight-table-query] Querying ${totalCombinations} combinations for seller ${seller_id}`);
+    // Use the actual ML numeric user ID for API calls
+    const mlUserId = mlAccount.ml_user_id;
+    console.log(`[freight-table-query] Querying ${totalCombinations} combinations for ML user ${mlUserId}`);
 
     // Query each combination with rate limiting
     for (const weight of weight_ranges) {
       for (const price of price_ranges) {
         const result = await queryShippingOption(
           mlAccount.access_token,
-          seller_id,
+          mlUserId,
           weight,
           price,
           listing_type_id,
