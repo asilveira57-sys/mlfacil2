@@ -1,6 +1,6 @@
 {
   "header": {
-    "logo_name": "Marketplace Fácil",
+    "logo_name": "MKTP Fácil",
     "menu_recursos": "Recursos",
     "menu_ferramentas": "Ferramentas",
     "menu_como_funciona": "Como funciona",
@@ -204,7 +204,7 @@
     "btn_plans": "Ver planos"
   },
   "footer": {
-    "logo_name": "Marketplace Fácil",
+    "logo_name": "MKTP Fácil",
     "description": "A plataforma completa para vendedores do Mercado Livre crescerem seus negócios.",
     "col1": {
       "title": "Produto",
@@ -228,7 +228,7 @@
       "link3": "Cookies",
       "link4": "LGPD"
     },
-    "copyright": "© 2025 Marketplace Fácil. Todos os direitos reservados."
+    "copyright": "© 2025 MKTP Fácil. Todos os direitos reservados."
   },
   "planos": {
     "title": "Planos e Preços",
