@@ -15,7 +15,6 @@ export function useModuleTags() {
       if (error) throw error;
       return data as ModuleTag[];
     },
-    // Static Mode: No auto-refresh on window focus
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
@@ -33,9 +32,23 @@ export function useSystemModules() {
         .select('*')
         .order('name', { ascending: true });
       if (modulesError) throw modulesError;
-      return modules as SystemModule[];
+      // Map to SystemModule type
+      return (modules || []).map(m => ({
+        id: m.id,
+        key: m.key,
+        name: m.name,
+        description: m.description,
+        icon_key: m.icon_key,
+        route: m.route,
+        is_active: m.is_active,
+        layer: m.layer,
+        parent_module_id: m.parent_module_id,
+        sort_order: m.sort_order,
+        is_internal_only: m.is_internal_only,
+        created_at: m.created_at,
+        updated_at: m.updated_at,
+      })) as SystemModule[];
     },
-    // Static Mode: No auto-refresh on window focus
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
@@ -54,7 +67,6 @@ export function useModuleTagAssignments() {
       if (error) throw error;
       return data as ModuleTagAssignment[];
     },
-    // Static Mode: No auto-refresh on window focus
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,

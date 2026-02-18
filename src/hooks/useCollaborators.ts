@@ -3,7 +3,6 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import type { 
   Collaborator, 
-  CollaboratorModuleAccess, 
   CollaboratorWithModules,
   CollaboratorStatus 
 } from '@/types/collaborator';
@@ -56,7 +55,6 @@ export function useCollaborators(workspaceId: string | null): UseCollaboratorsRe
       setLoading(true);
       setError(null);
 
-      // Fetch collaborators (excluding deleted by default)
       let query = supabase
         .from('collaborators')
         .select('*')
@@ -78,23 +76,13 @@ export function useCollaborators(workspaceId: string | null): UseCollaboratorsRe
         return;
       }
 
-      // Fetch module access for all collaborators
-      const collaboratorIds = collabData.map(c => c.id);
-      const { data: modulesData, error: modulesError } = await supabase
-        .from('collaborator_module_access')
-        .select('*')
-        .in('collaborator_id', collaboratorIds);
-
-      if (modulesError) throw modulesError;
-
-      // Combine data with proper type casting
+      // Map collaborators with empty modules array (legacy module access removed)
       const combined: CollaboratorWithModules[] = collabData.map(collab => ({
         ...collab,
         status: collab.status as CollaboratorStatus,
-        modules: (modulesData || []).filter(m => m.collaborator_id === collab.id) as CollaboratorModuleAccess[],
+        modules: [],
       }));
 
-      // Apply search filter
       let filtered = combined;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -122,7 +110,6 @@ export function useCollaborators(workspaceId: string | null): UseCollaboratorsRe
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Usuário não autenticado');
 
-      // Insert collaborator
       const { data: newCollab, error: insertError } = await supabase
         .from('collaborators')
         .insert({
@@ -144,29 +131,12 @@ export function useCollaborators(workspaceId: string | null): UseCollaboratorsRe
         throw insertError;
       }
 
-      // Cast the status to proper type
       const typedCollab: Collaborator = {
         ...newCollab,
         status: newCollab.status as CollaboratorStatus,
       };
 
-      // Insert module access
-      const moduleInserts = Object.entries(data.modules).map(([moduleKey, enabled]) => ({
-        collaborator_id: newCollab.id,
-        module_key: moduleKey,
-        enabled,
-      }));
-
-      if (moduleInserts.length > 0) {
-        const { error: moduleError } = await supabase
-          .from('collaborator_module_access')
-          .insert(moduleInserts);
-
-        if (moduleError) {
-          console.error('Error inserting module access:', moduleError);
-        }
-      }
-
+      // TODO: Assign profile via company_users + profile_permissions instead of old module access
       toast.success('Colaborador criado com sucesso!');
       await fetchCollaborators();
       return typedCollab;
@@ -201,43 +171,16 @@ export function useCollaborators(workspaceId: string | null): UseCollaboratorsRe
   }, [fetchCollaborators]);
 
   const updateModuleAccess = useCallback(async (
-    collaboratorId: string, 
-    modules: Record<string, boolean>
+    _collaboratorId: string, 
+    _modules: Record<string, boolean>
   ): Promise<boolean> => {
-    try {
-      // Delete existing and insert new
-      await supabase
-        .from('collaborator_module_access')
-        .delete()
-        .eq('collaborator_id', collaboratorId);
-
-      const moduleInserts = Object.entries(modules).map(([moduleKey, enabled]) => ({
-        collaborator_id: collaboratorId,
-        module_key: moduleKey,
-        enabled,
-      }));
-
-      if (moduleInserts.length > 0) {
-        const { error } = await supabase
-          .from('collaborator_module_access')
-          .insert(moduleInserts);
-
-        if (error) throw error;
-      }
-
-      toast.success('Permissões atualizadas!');
-      await fetchCollaborators();
-      return true;
-    } catch (err) {
-      console.error('[updateModuleAccess] Error:', err);
-      toast.error('Erro ao atualizar permissões');
-      return false;
-    }
-  }, [fetchCollaborators]);
+    // TODO: Implement via profile_permissions in new RBAC system
+    toast.info('Permissões serão gerenciadas via Perfis de Acesso');
+    return true;
+  }, []);
 
   const sendInvite = useCallback(async (collaboratorId: string): Promise<boolean> => {
     try {
-      // Get collaborator data
       const { data: collab, error: fetchError } = await supabase
         .from('collaborators')
         .select('*, workspace_id')
@@ -246,7 +189,6 @@ export function useCollaborators(workspaceId: string | null): UseCollaboratorsRe
 
       if (fetchError || !collab) throw new Error('Colaborador não encontrado');
 
-      // Call edge function to send invite
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Não autenticado');
 
@@ -285,14 +227,9 @@ export function useCollaborators(workspaceId: string | null): UseCollaboratorsRe
     try {
       const { error } = await supabase
         .from('collaborators')
-        .update({ 
-          status: 'disabled',
-          disabled_at: new Date().toISOString()
-        })
+        .update({ status: 'disabled', disabled_at: new Date().toISOString() })
         .eq('id', id);
-
       if (error) throw error;
-
       toast.success('Colaborador desativado');
       await fetchCollaborators();
       return true;
@@ -307,14 +244,9 @@ export function useCollaborators(workspaceId: string | null): UseCollaboratorsRe
     try {
       const { error } = await supabase
         .from('collaborators')
-        .update({ 
-          status: 'active',
-          disabled_at: null
-        })
+        .update({ status: 'active', disabled_at: null })
         .eq('id', id);
-
       if (error) throw error;
-
       toast.success('Colaborador reativado');
       await fetchCollaborators();
       return true;
@@ -327,17 +259,11 @@ export function useCollaborators(workspaceId: string | null): UseCollaboratorsRe
 
   const deleteCollaborator = useCallback(async (id: string): Promise<boolean> => {
     try {
-      // Soft delete
       const { error } = await supabase
         .from('collaborators')
-        .update({ 
-          status: 'deleted',
-          deleted_at: new Date().toISOString()
-        })
+        .update({ status: 'deleted', deleted_at: new Date().toISOString() })
         .eq('id', id);
-
       if (error) throw error;
-
       toast.success('Colaborador excluído');
       await fetchCollaborators();
       return true;
