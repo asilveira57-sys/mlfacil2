@@ -2,7 +2,7 @@ import { ReactNode, createContext, useContext, useState, useCallback, useEffect,
 import { Outlet, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
-import { AppSidebar } from "./AppSidebar";
+import { DynamicSidebar } from "./DynamicSidebar";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { Separator } from "@/components/ui/separator";
@@ -92,7 +92,7 @@ export function AppShellLayout() {
     <PageHeaderContext.Provider value={contextValue}>
       <SidebarProvider defaultOpen={true}>
         <div className="min-h-screen flex w-full bg-background">
-          <AppSidebar />
+          <DynamicSidebar />
           <SidebarInset className="flex flex-col flex-1">
             {/* Header */}
             <header className="sticky top-0 z-40 flex h-14 items-center gap-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4 lg:px-6">

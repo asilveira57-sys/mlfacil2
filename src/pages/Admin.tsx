@@ -15,7 +15,8 @@ import {
   Tags,
   Link2,
   FileStack,
-  Globe
+  Globe,
+  Menu,
 } from 'lucide-react';
 import { AdminDashboard } from './admin/AdminDashboard';
 import { AdminOnboarding } from './admin/AdminOnboarding';
@@ -28,6 +29,7 @@ import { AdminModuleTags } from './admin/AdminModuleTags';
 import { AdminErpIntegrations } from './admin/AdminErpIntegrations';
 import { AdminInvoiceQueue } from './admin/AdminInvoiceQueue';
 import { AdminPages } from './admin/AdminPages';
+import AdminMenuBuilder from './admin/AdminMenuBuilder';
 import BlogAdmin from './BlogAdmin';
 
 const adminTabs = [
@@ -44,6 +46,7 @@ const adminTabs = [
   { id: 'seo', label: 'SEO', icon: Search },
   { id: 'integracoes', label: 'Integrações', icon: Plug },
   { id: 'configuracoes', label: 'Configurações', icon: Settings },
+  { id: 'menu-builder', label: 'Menu', icon: Menu },
 ];
 
 export default function Admin() {
@@ -99,6 +102,7 @@ export default function Admin() {
           <Route path="seo" element={<AdminSeo />} />
           <Route path="integracoes" element={<AdminIntegrations />} />
           <Route path="configuracoes" element={<AdminSettings />} />
+          <Route path="menu-builder" element={<AdminMenuBuilder />} />
         </Routes>
       </div>
     </PageContainer>
