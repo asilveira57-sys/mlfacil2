@@ -3001,6 +3001,184 @@ export type Database = {
         }
         Relationships: []
       }
+      competitor_seller_item_snapshots: {
+        Row: {
+          available_qty_ref: number | null
+          captured_at: string
+          competitor_seller_id: string
+          id: string
+          item_id: string
+          price: number | null
+          sold_quantity_ref: number | null
+          status: string | null
+          user_id: string
+        }
+        Insert: {
+          available_qty_ref?: number | null
+          captured_at?: string
+          competitor_seller_id: string
+          id?: string
+          item_id: string
+          price?: number | null
+          sold_quantity_ref?: number | null
+          status?: string | null
+          user_id: string
+        }
+        Update: {
+          available_qty_ref?: number | null
+          captured_at?: string
+          competitor_seller_id?: string
+          id?: string
+          item_id?: string
+          price?: number | null
+          sold_quantity_ref?: number | null
+          status?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitor_seller_item_snapshots_competitor_seller_id_fkey"
+            columns: ["competitor_seller_id"]
+            isOneToOne: false
+            referencedRelation: "competitor_sellers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      competitor_seller_items: {
+        Row: {
+          available_qty_ref: number | null
+          catalog_listing: boolean | null
+          category_id: string | null
+          competitor_seller_id: string
+          condition: string | null
+          created_at: string
+          currency_id: string | null
+          free_shipping: boolean | null
+          id: string
+          item_id: string
+          last_synced_at: string | null
+          listing_type: string | null
+          original_price: number | null
+          permalink: string | null
+          price: number | null
+          sold_quantity_ref: number | null
+          status: string | null
+          thumbnail: string | null
+          title: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          available_qty_ref?: number | null
+          catalog_listing?: boolean | null
+          category_id?: string | null
+          competitor_seller_id: string
+          condition?: string | null
+          created_at?: string
+          currency_id?: string | null
+          free_shipping?: boolean | null
+          id?: string
+          item_id: string
+          last_synced_at?: string | null
+          listing_type?: string | null
+          original_price?: number | null
+          permalink?: string | null
+          price?: number | null
+          sold_quantity_ref?: number | null
+          status?: string | null
+          thumbnail?: string | null
+          title?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          available_qty_ref?: number | null
+          catalog_listing?: boolean | null
+          category_id?: string | null
+          competitor_seller_id?: string
+          condition?: string | null
+          created_at?: string
+          currency_id?: string | null
+          free_shipping?: boolean | null
+          id?: string
+          item_id?: string
+          last_synced_at?: string | null
+          listing_type?: string | null
+          original_price?: number | null
+          permalink?: string | null
+          price?: number | null
+          sold_quantity_ref?: number | null
+          status?: string | null
+          thumbnail?: string | null
+          title?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitor_seller_items_competitor_seller_id_fkey"
+            columns: ["competitor_seller_id"]
+            isOneToOne: false
+            referencedRelation: "competitor_sellers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      competitor_sellers: {
+        Row: {
+          binding_date: string | null
+          created_at: string
+          id: string
+          last_synced_at: string | null
+          ml_nickname: string | null
+          ml_seller_id: string
+          next_sync_at: string | null
+          seller_id: string
+          seller_reputation: Json | null
+          status: string | null
+          sync_interval_hours: number | null
+          total_items_tracked: number | null
+          updated_at: string
+          user_alias: string | null
+          user_id: string
+        }
+        Insert: {
+          binding_date?: string | null
+          created_at?: string
+          id?: string
+          last_synced_at?: string | null
+          ml_nickname?: string | null
+          ml_seller_id: string
+          next_sync_at?: string | null
+          seller_id: string
+          seller_reputation?: Json | null
+          status?: string | null
+          sync_interval_hours?: number | null
+          total_items_tracked?: number | null
+          updated_at?: string
+          user_alias?: string | null
+          user_id: string
+        }
+        Update: {
+          binding_date?: string | null
+          created_at?: string
+          id?: string
+          last_synced_at?: string | null
+          ml_nickname?: string | null
+          ml_seller_id?: string
+          next_sync_at?: string | null
+          seller_id?: string
+          seller_reputation?: Json | null
+          status?: string | null
+          sync_interval_hours?: number | null
+          total_items_tracked?: number | null
+          updated_at?: string
+          user_alias?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       competitor_snapshots: {
         Row: {
           captured_at: string
