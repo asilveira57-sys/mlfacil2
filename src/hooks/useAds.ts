@@ -264,15 +264,14 @@ export function useAdsSyncState(sellerId?: string) {
 }
 
 export function useAdsMetricsSummary(sellerId?: string, dateFrom?: string, dateTo?: string): AdsMetricsSummary {
-  const { metrics } = useAdsDailyMetrics(sellerId, dateFrom, dateTo);
   const { items } = useAdsItems(sellerId);
 
   return useMemo(() => {
-    const total_spent = metrics.reduce((sum, m) => sum + (m.spent || 0), 0);
-    const total_revenue = metrics.reduce((sum, m) => sum + (m.revenue || 0), 0);
-    const total_clicks = metrics.reduce((sum, m) => sum + (m.clicks || 0), 0);
-    const total_impressions = metrics.reduce((sum, m) => sum + (m.impressions || 0), 0);
-    const total_conversions = metrics.reduce((sum, m) => sum + (m.conversions || 0), 0);
+    const total_spent = items.reduce((sum, i) => sum + (i.spent || 0), 0);
+    const total_revenue = items.reduce((sum, i) => sum + (i.revenue_from_ads || 0), 0);
+    const total_clicks = items.reduce((sum, i) => sum + (i.clicks || 0), 0);
+    const total_impressions = items.reduce((sum, i) => sum + (i.impressions || 0), 0);
+    const total_conversions = items.reduce((sum, i) => sum + (i.conversions || 0), 0);
 
     const avg_acos = total_revenue > 0 ? (total_spent / total_revenue) * 100 : 0;
     const avg_roas = total_spent > 0 ? total_revenue / total_spent : 0;
@@ -293,7 +292,7 @@ export function useAdsMetricsSummary(sellerId?: string, dateFrom?: string, dateT
       products_at_loss,
       products_scalable,
     };
-  }, [metrics, items]);
+  }, [items]);
 }
 
 // Enrich items with promotion and margin data
