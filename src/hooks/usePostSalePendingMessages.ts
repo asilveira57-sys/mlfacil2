@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { useToast } from "@/hooks/use-toast";
 import { invokeEdgeFunction } from "@/lib/edgeFunctionClient";
+import { autoResolveNotifications } from "@/lib/notifications/autoResolve";
 import type { PostSaleMessage } from "@/types/post-sale";
 
 /** Fetch pending drafts for the active seller */
@@ -113,10 +114,18 @@ export function useApprovePendingMessage() {
 
       return result;
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["post-sale-pending"] });
       queryClient.invalidateQueries({ queryKey: ["post-sale-pending-count"] });
       queryClient.invalidateQueries({ queryKey: ["post-sale-messages"] });
+      queryClient.invalidateQueries({ queryKey: ["app-notifications"] });
+      queryClient.invalidateQueries({ queryKey: ["unread-notifications-count"] });
+      queryClient.invalidateQueries({ queryKey: ["priority-notifications"] });
+      queryClient.invalidateQueries({ queryKey: ["notification-counts"] });
+      // Auto-resolve post_sale_blocked if no more pending
+      if (variables.message.seller_id) {
+        autoResolveNotifications("post_sale_blocked", variables.message.seller_id);
+      }
       toast({ title: "Mensagem enviada", description: "A mensagem foi aprovada e enviada com sucesso." });
     },
     onError: (error: Error) => {
@@ -143,6 +152,10 @@ export function useRejectPendingMessage() {
       queryClient.invalidateQueries({ queryKey: ["post-sale-pending"] });
       queryClient.invalidateQueries({ queryKey: ["post-sale-pending-count"] });
       queryClient.invalidateQueries({ queryKey: ["post-sale-messages"] });
+      queryClient.invalidateQueries({ queryKey: ["app-notifications"] });
+      queryClient.invalidateQueries({ queryKey: ["unread-notifications-count"] });
+      queryClient.invalidateQueries({ queryKey: ["priority-notifications"] });
+      queryClient.invalidateQueries({ queryKey: ["notification-counts"] });
       toast({ title: "Rascunho descartado", description: "A mensagem foi removida da fila." });
     },
     onError: (error: Error) => {
