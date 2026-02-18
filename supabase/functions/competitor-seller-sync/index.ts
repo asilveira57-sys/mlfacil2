@@ -6,11 +6,71 @@ const corsHeaders = {
 };
 
 const ML_API_BASE = 'https://api.mercadolibre.com';
+const ML_APP_ID = Deno.env.get('ML_APP_ID')!;
+const ML_SECRET_KEY = Deno.env.get('ML_SECRET_KEY')!;
 const DELAY_MS = 200;
 const MULTIGET_BATCH = 20;
 
 function delay(ms: number) {
   return new Promise(r => setTimeout(r, ms));
+}
+
+// Refresh ML access token
+async function refreshMLToken(refreshToken: string): Promise<{ access_token?: string; refresh_token?: string; expires_in?: number } | null> {
+  try {
+    const res = await fetch('https://api.mercadolibre.com/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: ML_APP_ID,
+        client_secret: ML_SECRET_KEY,
+        refresh_token: refreshToken,
+      }),
+    });
+    if (!res.ok) {
+      console.error('Token refresh failed:', await res.text());
+      return null;
+    }
+    return await res.json();
+  } catch (e) {
+    console.error('Token refresh error:', e);
+    return null;
+  }
+}
+
+// Get fresh ML access token, refreshing if needed
+async function getFreshAccessToken(supabaseAdmin: any, userId: string, sellerId: string): Promise<string | undefined> {
+  const { data: mlAccount } = await supabaseAdmin
+    .from('ml_accounts')
+    .select('id, access_token, refresh_token, token_expires_at')
+    .eq('user_id', userId)
+    .eq('ml_user_id', sellerId)
+    .eq('is_active', true)
+    .single();
+
+  if (!mlAccount) return undefined;
+
+  const tokenExpires = mlAccount.token_expires_at ? new Date(mlAccount.token_expires_at) : null;
+  
+  // Always refresh to ensure fresh token (ML tokens can be invalidated server-side)
+  console.log(`Refreshing ML token for seller ${sellerId}...`);
+  const refreshed = await refreshMLToken(mlAccount.refresh_token);
+  if (refreshed?.access_token) {
+    await supabaseAdmin
+      .from('ml_accounts')
+      .update({
+        access_token: refreshed.access_token,
+        refresh_token: refreshed.refresh_token || mlAccount.refresh_token,
+        token_expires_at: new Date(Date.now() + (refreshed.expires_in || 21600) * 1000).toISOString(),
+      })
+      .eq('id', mlAccount.id);
+    console.log(`Token refreshed successfully for seller ${sellerId}`);
+    return refreshed.access_token;
+  }
+
+  console.error(`Failed to refresh token for seller ${sellerId}`);
+  return mlAccount.access_token; // try with old token as last resort
 }
 
 async function fetchML(path: string, accessToken?: string, timeoutMs = 8000) {
@@ -27,27 +87,114 @@ async function fetchML(path: string, accessToken?: string, timeoutMs = 8000) {
   }
 }
 
+// Fetch ML API trying with auth first, then without (resilient for competitor data)
+async function fetchMLResilient(path: string, accessToken?: string, timeoutMs = 8000) {
+  // Try with auth token first (avoids IP-based rate limiting)
+  if (accessToken) {
+    try {
+      return await fetchML(path, accessToken, timeoutMs);
+    } catch (e) {
+      console.log(`Auth request failed for ${path}, trying without auth...`);
+    }
+  }
+  // Fallback: try without auth
+  const controller = new AbortController();
+  const tid = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${ML_API_BASE}${path}`, { signal: controller.signal });
+    if (!res.ok) throw new Error(`ML API ${res.status}: ${path}`);
+    return await res.json();
+  } finally {
+    clearTimeout(tid);
+  }
+}
+
 // Extract MLB item ID from a listing URL or raw text
 function extractItemIdFromInput(input: string): string | null {
-  // MLB ID patterns in URLs
+  // Priority-ordered patterns — all capture the full "MLB..." prefix in group 1
   const patterns = [
-    /MLB[-]?(\d{8,})/i,
-    /\/p\/(MLB\d+)/i,
-    /item_id=(MLB\d+)/i,
-    /\/(MLB[-]?\d{8,})/i,
+    /item_id[=:]?(MLB\d{8,})/i,           // item_id param (most specific, e.g. item_id:MLB1347574279)
+    /pdp_filters=item_id[=:]?(MLB\d{8,})/i, // pdp_filters URL variant
+    /\/p\/(MLB\d+)/i,                       // product page: /p/MLB123
+    /\/(MLB[-]?\d{8,})/i,                   // MLB in URL path
+    /(MLB[-]?\d{8,})/i,                     // MLB anywhere in text
   ];
   for (const p of patterns) {
     const m = input.match(p);
-    if (m) {
-      const raw = m[1] || m[0];
-      return raw.replace(/-/g, '').toUpperCase();
+    if (m && m[1]) {
+      return m[1].replace(/-/g, '').toUpperCase();
     }
   }
   // Bare MLB ID
   if (/^MLB\d{8,}$/i.test(input.trim())) {
     return input.trim().replace(/-/g, '').toUpperCase();
   }
+  // MLBU fallback — catalog product ID
+  const mlbuMatch = input.match(/(MLBU\d+)/i);
+  if (mlbuMatch) {
+    return mlbuMatch[1].toUpperCase();
+  }
   return null;
+}
+
+// Resolve seller from MLBU catalog product ID
+async function resolveFromMLBU(mlbuId: string, accessToken?: string, originalInput?: string): Promise<{ ml_seller_id: string; ml_nickname: string; reputation: any }> {
+  console.log(`MLBU detected: ${mlbuId}, searching catalog...`);
+  // Try catalog search first
+  try {
+    const searchRes = await fetchMLResilient(`/sites/MLB/search?catalog_product_id=${mlbuId}&limit=1`, accessToken);
+    if (searchRes?.results?.[0]?.seller?.id) {
+      const sellerId = searchRes.results[0].seller.id;
+      const userData = await fetchMLResilient(`/users/${sellerId}`, accessToken);
+      return {
+        ml_seller_id: String(userData.id),
+        ml_nickname: userData.nickname || `Seller ${userData.id}`,
+        reputation: userData.seller_reputation || null,
+      };
+    }
+  } catch (e) {
+    console.log(`Catalog search failed for ${mlbuId}: ${e}`);
+  }
+  // Try products endpoint to get item IDs
+  try {
+    const productData = await fetchMLResilient(`/products/${mlbuId}`, accessToken);
+    if (productData?.buy_box_winner?.item_id) {
+      const winnerItemId = productData.buy_box_winner.item_id;
+      const itemData = await fetchMLResilient(`/items/${winnerItemId}`, accessToken);
+      if (itemData?.seller_id) {
+        const userData = await fetchMLResilient(`/users/${itemData.seller_id}`, accessToken);
+        return {
+          ml_seller_id: String(userData.id),
+          ml_nickname: userData.nickname || `Seller ${userData.id}`,
+          reputation: userData.seller_reputation || null,
+        };
+      }
+    }
+  } catch (e) {
+    console.log(`Products endpoint failed for ${mlbuId}: ${e}`);
+  }
+  // Last resort: extract product title from URL slug and search
+  const urlToSearch = originalInput || '';
+  const slugMatch = urlToSearch.match(/mercadolivre\.com\.br\/([^\/]+)\/(?:up|p)\//i);
+  if (slugMatch) {
+    try {
+      const titleQuery = slugMatch[1].replace(/-/g, ' ').substring(0, 60);
+      console.log(`Last resort: searching by title slug "${titleQuery}"...`);
+      const searchRes = await fetchMLResilient(`/sites/MLB/search?q=${encodeURIComponent(titleQuery)}&limit=1`, accessToken);
+      if (searchRes?.results?.[0]?.seller?.id) {
+        const sellerId = searchRes.results[0].seller.id;
+        const userData = await fetchMLResilient(`/users/${sellerId}`, accessToken);
+        return {
+          ml_seller_id: String(userData.id),
+          ml_nickname: userData.nickname || `Seller ${userData.id}`,
+          reputation: userData.seller_reputation || null,
+        };
+      }
+    } catch (e) {
+      console.log(`Title search fallback failed: ${e}`);
+    }
+  }
+  throw new Error(`Não foi possível encontrar vendedores para o produto catálogo ${mlbuId}. Tente colar o link de um anúncio específico.`);
 }
 
 // Resolve seller: accepts seller_id number, listing URL (MLB), or profile URL
@@ -56,7 +203,7 @@ async function resolveSellerFromInput(input: string, accessToken?: string): Prom
 
   // 1. Direct numeric seller ID
   if (/^\d+$/.test(trimmed)) {
-    const data = await fetchML(`/users/${trimmed}`, accessToken);
+    const data = await fetchMLResilient(`/users/${trimmed}`, accessToken);
     return {
       ml_seller_id: String(data.id),
       ml_nickname: data.nickname || `Seller ${data.id}`,
@@ -68,14 +215,33 @@ async function resolveSellerFromInput(input: string, accessToken?: string): Prom
   const itemId = extractItemIdFromInput(trimmed);
   if (itemId) {
     console.log(`Resolving seller from item: ${itemId}`);
-    const itemData = await fetchML(`/items/${itemId}`, accessToken);
-    if (itemData?.seller_id) {
-      const userData = await fetchML(`/users/${itemData.seller_id}`, accessToken);
-      return {
-        ml_seller_id: String(userData.id),
-        ml_nickname: userData.nickname || `Seller ${userData.id}`,
-        reputation: userData.seller_reputation || null,
-      };
+    
+    // If MLBU (catalog product), search for a listing in that catalog to get seller
+    if (/^MLBU/i.test(itemId)) {
+      return await resolveFromMLBU(itemId, accessToken, trimmed);
+    }
+    
+    // Regular MLB item — try with auth (resilient)
+    try {
+      const itemData = await fetchMLResilient(`/items/${itemId}`, accessToken);
+      if (itemData?.seller_id) {
+        const userData = await fetchMLResilient(`/users/${itemData.seller_id}`, accessToken);
+        return {
+          ml_seller_id: String(userData.id),
+          ml_nickname: userData.nickname || `Seller ${userData.id}`,
+          reputation: userData.seller_reputation || null,
+        };
+      }
+    } catch (mlbError) {
+      console.log(`MLB item ${itemId} failed (${mlbError}), trying MLBU fallback from URL...`);
+      // If MLB item fails (403/404), try to find MLBU in the original input as fallback
+      const mlbuMatch = trimmed.match(/(MLBU\d+)/i);
+      if (mlbuMatch) {
+        const mlbuId = mlbuMatch[1].toUpperCase();
+        console.log(`Falling back to MLBU: ${mlbuId}`);
+        return await resolveFromMLBU(mlbuId, accessToken, trimmed);
+      }
+      throw mlbError;
     }
     throw new Error(`Não foi possível identificar o vendedor do anúncio ${itemId}`);
   }
@@ -193,17 +359,10 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Get user access token for ML API
+    // Get fresh ML access token (with auto-refresh)
     let accessToken: string | undefined;
     if (body.seller_id) {
-      const { data: mlAccount } = await supabaseAdmin
-        .from('ml_accounts')
-        .select('access_token')
-        .eq('user_id', user.id)
-        .eq('ml_user_id', body.seller_id)
-        .eq('is_active', true)
-        .single();
-      accessToken = mlAccount?.access_token || undefined;
+      accessToken = await getFreshAccessToken(supabaseAdmin, user.id, body.seller_id);
     }
 
     switch (action) {
