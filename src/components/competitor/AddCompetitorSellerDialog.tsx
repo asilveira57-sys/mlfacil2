@@ -6,40 +6,50 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Search, Star, Package, UserPlus } from 'lucide-react';
-import { SellerPreview } from '@/hooks/useCompetitorSellers';
+import { resolveSellerFromLink, ResolvedSeller } from '@/lib/meli/resolveSellerFromLink';
+import { toast } from 'sonner';
 
 interface AddCompetitorSellerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onPreview: (input: string) => Promise<SellerPreview | null>;
-  onAdd: (input: string, alias?: string) => Promise<boolean>;
+  onAdd: (resolvedSeller: ResolvedSeller, alias?: string) => Promise<boolean>;
 }
 
-export function AddCompetitorSellerDialog({ open, onOpenChange, onPreview, onAdd }: AddCompetitorSellerDialogProps) {
+export function AddCompetitorSellerDialog({ open, onOpenChange, onAdd }: AddCompetitorSellerDialogProps) {
   const [input, setInput] = useState('');
   const [alias, setAlias] = useState('');
-  const [preview, setPreview] = useState<SellerPreview | null>(null);
+  const [preview, setPreview] = useState<ResolvedSeller | null>(null);
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handlePreview = async () => {
     if (!input.trim()) return;
     setLoading(true);
     setPreview(null);
-    const result = await onPreview(input.trim());
-    setPreview(result);
-    setLoading(false);
+    setError(null);
+    try {
+      const result = await resolveSellerFromLink(input.trim());
+      setPreview(result);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Erro ao buscar seller';
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleAdd = async () => {
-    if (!input.trim()) return;
+    if (!preview) return;
     setAdding(true);
-    const ok = await onAdd(input.trim(), alias.trim() || undefined);
+    const ok = await onAdd(preview, alias.trim() || undefined);
     setAdding(false);
     if (ok) {
       setInput('');
       setAlias('');
       setPreview(null);
+      setError(null);
       onOpenChange(false);
     }
   };
@@ -49,6 +59,7 @@ export function AddCompetitorSellerDialog({ open, onOpenChange, onPreview, onAdd
       setInput('');
       setAlias('');
       setPreview(null);
+      setError(null);
     }
     onOpenChange(o);
   };
@@ -76,13 +87,16 @@ export function AddCompetitorSellerDialog({ open, onOpenChange, onPreview, onAdd
               <Input
                 placeholder="Ex: https://www.mercadolivre.com.br/produto-xyz/p/MLB12345678 ou 66043362"
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => { setInput(e.target.value); setError(null); }}
                 onKeyDown={(e) => e.key === 'Enter' && handlePreview()}
               />
               <Button onClick={handlePreview} disabled={loading || !input.trim()} variant="outline">
                 <Search className="h-4 w-4" />
               </Button>
             </div>
+            {error && (
+              <p className="text-sm text-destructive mt-1">{error}</p>
+            )}
           </div>
 
           {loading && (

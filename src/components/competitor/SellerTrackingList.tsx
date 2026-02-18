@@ -24,7 +24,7 @@ interface SellerTrackingListProps {
 export function SellerTrackingList({ sellerId }: SellerTrackingListProps) {
   const {
     sellers, loading, syncing,
-    fetchSellers, previewSeller, addSeller, syncSeller,
+    fetchSellers, addSellerResolved, syncSeller,
     getDetail, updateAlias, deleteSeller,
   } = useCompetitorSellers(sellerId);
 
@@ -200,8 +200,7 @@ export function SellerTrackingList({ sellerId }: SellerTrackingListProps) {
       <AddCompetitorSellerDialog
         open={addDialogOpen}
         onOpenChange={setAddDialogOpen}
-        onPreview={previewSeller}
-        onAdd={addSeller}
+        onAdd={addSellerResolved}
       />
 
       {selectedSeller && (

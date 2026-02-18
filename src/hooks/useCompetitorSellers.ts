@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import type { ResolvedSeller } from '@/lib/meli/resolveSellerFromLink';
 
 export interface CompetitorSeller {
   id: string;
@@ -105,6 +106,30 @@ export function useCompetitorSellers(sellerId: string) {
     }
   }, [sellerId, invoke, fetchSellers]);
 
+  /** Add seller using pre-resolved data from client-side resolution */
+  const addSellerResolved = useCallback(async (resolved: ResolvedSeller, userAlias?: string) => {
+    try {
+      // Send numeric seller_id directly — edge function skips resolution
+      const data = await invoke({
+        action: 'add',
+        seller_id: sellerId,
+        input: resolved.ml_seller_id,
+        user_alias: userAlias,
+      });
+      if (data.error) {
+        toast.error(data.error);
+        return false;
+      }
+      toast.success(`Seller adicionado com ${data.items_count} anúncios`);
+      await fetchSellers();
+      return true;
+    } catch (e) {
+      console.error('addSellerResolved error:', e);
+      toast.error('Erro ao adicionar seller');
+      return false;
+    }
+  }, [sellerId, invoke, fetchSellers]);
+
   const syncSeller = useCallback(async (competitorSellerId: string) => {
     setSyncing(competitorSellerId);
     try {
@@ -159,6 +184,7 @@ export function useCompetitorSellers(sellerId: string) {
     fetchSellers,
     previewSeller,
     addSeller,
+    addSellerResolved,
     syncSeller,
     getDetail,
     updateAlias,
