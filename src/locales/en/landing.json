@@ -15,10 +15,13 @@
   },
   "hero": {
     "badge": "Complete platform for Mercado Libre sellers",
-    "title": "Smart management to scale your sales",
-    "subtitle": "Centralize operations, monitor performance and make data-driven decisions.",
-    "cta_primary": "Start free trial",
-    "cta_secondary": "Watch demo",
+    "title": "Strategic decisions start with real data from your operation.",
+    "subtitle": "Connect your account and view your last 30 days during the trial. After plan activation, unlock retroactive import of up to 12 months of history for deeper analysis.",
+    "cta_primary": "Create free account",
+    "cta_secondary": "See how it works",
+    "check1": "30 days available immediately during the trial period",
+    "check2": "Retroactive import of up to 12 months after activation",
+    "check3": "Consolidated data in a single strategic dashboard",
     "trust_mercadopago": "Integrated with Mercado Pago",
     "trust_multiconta": "Multi-account support"
   },
