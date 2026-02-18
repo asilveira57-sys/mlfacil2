@@ -5,6 +5,7 @@ import { ArrowRight, Play, Shield, Users, Zap } from "lucide-react";
 import { useSiteContentContext } from "@/contexts/SiteContentContext";
 import { EditableImage } from "@/components/admin/EditableImage";
 import { EditableText } from "@/components/admin/EditableText";
+import dashboardPreview from "@/assets/dashboard-preview.jpg";
 
 export function LandingHero() {
   const navigate = useNavigate();
@@ -106,7 +107,7 @@ export function LandingHero() {
                 aspectRatio="video"
                 placeholder={
                   <div className="bg-card border border-border rounded-xl md:rounded-2xl shadow-2xl overflow-hidden">
-                    {/* Mockup header */}
+                    {/* Browser chrome header */}
                     <div className="bg-muted/50 border-b border-border px-4 py-3 flex items-center gap-2">
                       <div className="flex gap-1.5">
                         <div className="w-3 h-3 rounded-full bg-destructive/50" />
@@ -115,49 +116,16 @@ export function LandingHero() {
                       </div>
                       <div className="flex-1 flex justify-center">
                         <div className="bg-muted px-4 py-1 rounded-md text-xs text-muted-foreground">
-                          dashboard.mlfacil.com
+                          dashboard.mktpfacil.com
                         </div>
                       </div>
                     </div>
-                    
-                    {/* Mockup content placeholder */}
-                    <div className="p-6 md:p-10 bg-gradient-to-br from-muted/30 to-muted/10">
-                      <div className="grid grid-cols-4 gap-4 mb-6">
-                        {[1, 2, 3, 4].map((i) => (
-                          <div key={i} className="bg-card border border-border rounded-lg p-4 h-24">
-                            <div className="w-8 h-2 bg-muted rounded mb-2" />
-                            <div className="w-16 h-4 bg-primary/20 rounded" />
-                          </div>
-                        ))}
-                      </div>
-                      <div className="grid grid-cols-3 gap-4">
-                        <div className="col-span-2 bg-card border border-border rounded-lg p-4 h-48">
-                          <div className="w-24 h-3 bg-muted rounded mb-4" />
-                          <div className="flex items-end gap-2 h-32">
-                            {[40, 60, 45, 80, 65, 90, 75, 95].map((h, i) => (
-                              <div
-                                key={i}
-                                className="flex-1 bg-primary/30 rounded-t"
-                                style={{ height: `${h}%` }}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                        <div className="bg-card border border-border rounded-lg p-4 h-48">
-                          <div className="w-20 h-3 bg-muted rounded mb-4" />
-                          <div className="space-y-3">
-                            {[1, 2, 3, 4].map((i) => (
-                              <div key={i} className="flex items-center gap-2">
-                                <div className="w-8 h-8 bg-muted rounded" />
-                                <div className="flex-1">
-                                  <div className="w-full h-2 bg-muted rounded" />
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                    {/* Real dashboard screenshot */}
+                    <img
+                      src={dashboardPreview}
+                      alt="MKTP Fácil Dashboard"
+                      className="w-full h-auto block"
+                    />
                   </div>
                 }
               />
