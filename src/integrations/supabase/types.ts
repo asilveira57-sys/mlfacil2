@@ -2558,6 +2558,7 @@ export type Database = {
           id: string
           invited_at: string | null
           name: string
+          profile_id: string | null
           status: string
           updated_at: string
           workspace_id: string
@@ -2573,6 +2574,7 @@ export type Database = {
           id?: string
           invited_at?: string | null
           name: string
+          profile_id?: string | null
           status?: string
           updated_at?: string
           workspace_id: string
@@ -2588,11 +2590,19 @@ export type Database = {
           id?: string
           invited_at?: string | null
           name?: string
+          profile_id?: string | null
           status?: string
           updated_at?: string
           workspace_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "collaborators_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "access_profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "collaborators_workspace_id_fkey"
             columns: ["workspace_id"]

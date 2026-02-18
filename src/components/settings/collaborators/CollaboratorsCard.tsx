@@ -211,30 +211,42 @@ export function CollaboratorsCard() {
     });
   };
 
-  const handleFormSubmit = async (data: { name: string; email: string; modules: Record<string, boolean> }) => {
+  const handleFormSubmit = async (data: { name: string; email: string; profileId: string | null }) => {
     if (editingCollaborator) {
-      // Update existing
       await updateCollaborator(editingCollaborator.id, { name: data.name, email: data.email });
-      await updateModuleAccess(editingCollaborator.id, data.modules);
+      // Update profile_id on the collaborator
+      if (data.profileId !== undefined) {
+        const { error } = await (await import('@/integrations/supabase/client')).supabase
+          .from('collaborators')
+          .update({ profile_id: data.profileId })
+          .eq('id', editingCollaborator.id);
+        if (error) console.error('Error updating profile_id:', error);
+      }
     } else {
-      // Create new
       if (!currentWorkspace) return;
       await createCollaborator({
         workspaceId: currentWorkspace.id,
         name: data.name,
         email: data.email,
-        modules: data.modules,
+        modules: {},
       });
     }
   };
 
-  const handlePermissionsSubmit = async (data: { name: string; email: string; modules: Record<string, boolean> }) => {
+  const handlePermissionsSubmit = async (data: { name: string; email: string; profileId: string | null }) => {
     if (!permissionsCollaborator) return;
-    await updateModuleAccess(permissionsCollaborator.id, data.modules);
+    if (data.profileId !== undefined) {
+      const { error } = await (await import('@/integrations/supabase/client')).supabase
+        .from('collaborators')
+        .update({ profile_id: data.profileId })
+        .eq('id', permissionsCollaborator.id);
+      if (error) console.error('Error updating profile_id:', error);
+    }
   };
 
-  const enabledModulesCount = (collab: CollaboratorWithModules) => {
-    return collab.modules.filter(m => m.enabled).length;
+  const getProfileLabel = (collab: CollaboratorWithModules) => {
+    const pid = (collab as any).profile_id;
+    return pid ? 'Perfil atribuído' : 'Sem perfil';
   };
 
   return (
@@ -307,7 +319,7 @@ export function CollaboratorsCard() {
                     <TableHead>Nome</TableHead>
                     <TableHead>E-mail</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead className="text-center">Módulos</TableHead>
+                    <TableHead className="text-center">Perfil</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -326,7 +338,7 @@ export function CollaboratorsCard() {
                       </TableCell>
                       <TableCell className="text-center">
                         <Badge variant="secondary">
-                          {enabledModulesCount(collab)} módulos
+                          {getProfileLabel(collab)}
                         </Badge>
                       </TableCell>
                       <TableCell>
