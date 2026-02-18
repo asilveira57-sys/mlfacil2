@@ -96,28 +96,33 @@
     }
   },
   "integrations": {
-    "title": "Powerful integrations",
-    "subtitle": "Connect to the main tools in the Mercado Libre ecosystem.",
+    "title": "Smart integrations for more precise decisions",
+    "subtitle": "Connect your operation to the main tools and centralize strategic data in a single system.",
     "item1": {
-      "title": "Mercado Pago",
-      "description": "Automatic synchronization of payments and fees."
+      "title": "Mercado Libre (Official API)",
+      "description": "Secure integration for reading orders, listings and account metrics, enabling detailed performance analysis."
     },
     "item2": {
-      "title": "Mercado Libre API",
-      "description": "Official OAuth integration with secure access to orders, listings and metrics."
+      "title": "Mercado Pago",
+      "description": "Automatic synchronization of payments and fees to compose financial analyses with more precision."
     },
     "item3": {
-      "title": "Security",
-      "description": "Data protected with end-to-end encryption."
+      "title": "Integrated ERP",
+      "subtitle": "Compatible with Bling and Olist",
+      "description": "Connect your ERP to import product costs and structure your margin based on real operation data."
     },
     "item4": {
-      "title": "Multi-users",
-      "description": "Manage your team's access with permissions."
+      "title": "Security",
+      "description": "Data protected with encryption and best practices for protection and storage."
     },
-    "badge1": "Encrypted data",
-    "badge2": "LGPD compliant",
-    "badge3": "Automatic backup",
-    "badge4": "99.9% Uptime"
+    "item5": {
+      "title": "Multi-users",
+      "description": "Manage team access with different permission levels."
+    },
+    "badge1": "API integrations",
+    "badge2": "Encrypted data",
+    "badge3": "Structure ready for expansion",
+    "badge4": "Continuous connector evolution"
   },
   "demo": {
     "title": "See the system in action",

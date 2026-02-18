@@ -2,8 +2,9 @@ import { useTranslation } from "react-i18next";
 import { Section, SectionHeader } from "./Section";
 import { EditableText } from "@/components/admin/EditableText";
 import { 
-  CreditCard, 
   Globe, 
+  CreditCard, 
+  Package, 
   Shield, 
   Users,
   Check
@@ -13,10 +14,11 @@ export function LandingIntegrations() {
   const { t } = useTranslation('landing');
 
   const integrations = [
-    { icon: CreditCard, key: 'item1' },
-    { icon: Globe, key: 'item2' },
-    { icon: Shield, key: 'item3' },
-    { icon: Users, key: 'item4' }
+    { icon: Globe, key: 'item1' },
+    { icon: CreditCard, key: 'item2' },
+    { icon: Package, key: 'item3', hasSubtitle: true },
+    { icon: Shield, key: 'item4' },
+    { icon: Users, key: 'item5' }
   ];
 
   const badgeKeys = ['badge1', 'badge2', 'badge3', 'badge4'];
@@ -36,7 +38,7 @@ export function LandingIntegrations() {
         }
       />
 
-      <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
         {integrations.map((item) => (
           <div
             key={item.key}
@@ -45,11 +47,18 @@ export function LandingIntegrations() {
             <div className="w-14 h-14 bg-primary/10 rounded-xl flex items-center justify-center mx-auto mb-4">
               <item.icon className="w-7 h-7 text-primary" />
             </div>
-            <h3 className="font-semibold text-foreground mb-2">
+            <h3 className="font-semibold text-foreground mb-1">
               <EditableText contentKey={`home.integrations.${item.key}.title`} as="span">
                 {t(`integrations.${item.key}.title`)}
               </EditableText>
             </h3>
+            {item.hasSubtitle && (
+              <p className="text-xs text-primary font-medium mb-2">
+                <EditableText contentKey={`home.integrations.${item.key}.subtitle`} as="span">
+                  {t(`integrations.${item.key}.subtitle`)}
+                </EditableText>
+              </p>
+            )}
             <p className="text-sm text-muted-foreground">
               <EditableText contentKey={`home.integrations.${item.key}.description`} as="span" multiline>
                 {t(`integrations.${item.key}.description`)}
