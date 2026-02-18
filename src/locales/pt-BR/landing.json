@@ -15,10 +15,13 @@
   },
   "hero": {
     "badge": "Plataforma completa para vendedores do Mercado Livre",
-    "title": "Gestão inteligente para escalar suas vendas",
-    "subtitle": "Centralize operações, monitore performance e tome decisões baseadas em dados.",
-    "cta_primary": "Começar teste grátis",
-    "cta_secondary": "Ver demonstração",
+    "title": "Decisões estratégicas começam com dados reais da sua operação.",
+    "subtitle": "Conecte sua conta e visualize seus últimos 30 dias no teste. Após ativação do plano, desbloqueie a importação retroativa de até 12 meses de histórico para análises mais profundas.",
+    "cta_primary": "Criar conta gratuita",
+    "cta_secondary": "Ver como funciona",
+    "check1": "30 dias liberados imediatamente no período de teste",
+    "check2": "Importação retroativa de até 12 meses após ativação",
+    "check3": "Dados consolidados em um único painel estratégico",
     "trust_mercadopago": "Integrado ao Mercado Pago",
     "trust_multiconta": "Suporte multi-conta"
   },

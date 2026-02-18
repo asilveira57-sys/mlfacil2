@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ArrowRight, Play, Shield, Users, Zap } from "lucide-react";
+import { ArrowRight, Play, Shield, Users, Zap, CheckCircle2 } from "lucide-react";
 import { useSiteContentContext } from "@/contexts/SiteContentContext";
 import { EditableImage } from "@/components/admin/EditableImage";
 import { EditableText } from "@/components/admin/EditableText";
@@ -42,11 +42,23 @@ export function LandingHero() {
           </h1>
 
           {/* Subheadline */}
-          <p className="text-lg md:text-xl text-muted-foreground text-center max-w-3xl mx-auto mb-10">
+          <p className="text-lg md:text-xl text-muted-foreground text-center max-w-3xl mx-auto mb-8">
             <EditableText contentKey="home.hero.subtitle" as="span" multiline>
               {t('hero.subtitle')}
             </EditableText>
           </p>
+
+          {/* Checklist differentials */}
+          <div className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-3 sm:gap-6 mb-10">
+            {(['check1', 'check2', 'check3'] as const).map((key) => (
+              <div key={key} className="flex items-center gap-2 text-sm md:text-base text-foreground/80">
+                <CheckCircle2 className="w-5 h-5 text-primary shrink-0" />
+                <EditableText contentKey={`home.hero.${key}`} as="span">
+                  {t(`hero.${key}`)}
+                </EditableText>
+              </div>
+            ))}
+          </div>
 
           {/* CTAs */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-12">
@@ -63,7 +75,7 @@ export function LandingHero() {
               variant="outline"
               className="text-base px-8 py-6 gap-2"
               onClick={() => {
-                const el = document.querySelector("#demo");
+                const el = document.querySelector("#como-funciona") || document.querySelector("#demo");
                 if (el) el.scrollIntoView({ behavior: "smooth" });
               }}
             >
