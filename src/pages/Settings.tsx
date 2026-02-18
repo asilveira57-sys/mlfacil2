@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { User, Receipt, Building2, CreditCard, Palette, Users, Globe, Wrench, Headphones, LayoutTemplate, ShieldCheck } from "lucide-react";
+import { User, Receipt, Building2, CreditCard, Palette, Users, Globe, Wrench, Headphones, LayoutTemplate, ShieldCheck, Shield } from "lucide-react";
 import SettingsProfile from "@/components/settings/SettingsProfile";
 import SettingsBilling from "@/components/settings/SettingsBilling";
 import SettingsCompanies from "@/components/settings/SettingsCompanies";
@@ -14,6 +14,7 @@ import { SettingsUtilities } from "@/components/settings/SettingsUtilities";
 import { SettingsSupport } from "@/components/settings/SettingsSupport";
 import { SettingsTemplates } from "@/components/settings/SettingsTemplates";
 import { SettingsPrivacy } from "@/components/settings/SettingsPrivacy";
+import { SettingsAccessProfiles } from "@/components/settings/SettingsAccessProfiles";
 
 const Settings = () => {
   const { t } = useTranslation();
@@ -24,6 +25,7 @@ const Settings = () => {
     { id: "profile", label: t('common:profile'), icon: User },
     { id: "language", label: t('common:language'), icon: Globe },
     { id: "collaborators", label: t('nav:collaborators'), icon: Users },
+    { id: "access-profiles", label: "Perfis de Acesso", icon: Shield },
     { id: "customization", label: t('nav:customization'), icon: Palette },
     { id: "templates", label: "Aparência", icon: LayoutTemplate },
     { id: "privacy", label: "Privacidade", icon: ShieldCheck },
@@ -41,7 +43,7 @@ const Settings = () => {
     >
       <div className="container mx-auto py-6 px-4 max-w-6xl">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3 sm:grid-cols-5 lg:grid-cols-11 h-auto p-1 bg-muted/50">
+          <TabsList className="grid w-full grid-cols-3 sm:grid-cols-6 lg:grid-cols-12 h-auto p-1 bg-muted/50">
             {tabs.map((tab) => (
               <TabsTrigger
                 key={tab.id}
@@ -64,6 +66,10 @@ const Settings = () => {
 
           <TabsContent value="collaborators" className="mt-6">
             {activeTab === "collaborators" && <CollaboratorsCard />}
+          </TabsContent>
+
+          <TabsContent value="access-profiles" className="mt-6">
+            <SettingsAccessProfiles />
           </TabsContent>
 
           <TabsContent value="customization" className="mt-6">
