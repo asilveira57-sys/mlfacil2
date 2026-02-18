@@ -194,3 +194,9 @@ verify_jwt = false
 
 [functions.qa-messages-polling-sync]
 verify_jwt = false
+
+[functions.record-consent]
+verify_jwt = false
+
+[functions.generate-consent-pdf]
+verify_jwt = false

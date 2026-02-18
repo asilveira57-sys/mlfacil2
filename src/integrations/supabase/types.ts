@@ -4201,6 +4201,39 @@ export type Database = {
           },
         ]
       }
+      legal_documents: {
+        Row: {
+          content: string
+          content_hash: string
+          created_at: string
+          doc_type: string
+          id: string
+          is_active: boolean
+          published_at: string
+          version: string
+        }
+        Insert: {
+          content: string
+          content_hash: string
+          created_at?: string
+          doc_type: string
+          id?: string
+          is_active?: boolean
+          published_at?: string
+          version: string
+        }
+        Update: {
+          content?: string
+          content_hash?: string
+          created_at?: string
+          doc_type?: string
+          id?: string
+          is_active?: boolean
+          published_at?: string
+          version?: string
+        }
+        Relationships: []
+      }
       listing_events: {
         Row: {
           blocks_affected: string[] | null
@@ -11000,6 +11033,63 @@ export type Database = {
           },
         ]
       }
+      user_consents: {
+        Row: {
+          accepted_at: string
+          analytics: boolean | null
+          consent_scope: string
+          consent_type: string
+          created_at: string
+          document_hash: string
+          document_type: string
+          document_version: string
+          essential: boolean
+          id: string
+          ip_address: string | null
+          pdf_path: string | null
+          performance: boolean | null
+          source: string
+          user_agent: string | null
+          user_id: string
+        }
+        Insert: {
+          accepted_at?: string
+          analytics?: boolean | null
+          consent_scope: string
+          consent_type: string
+          created_at?: string
+          document_hash: string
+          document_type: string
+          document_version: string
+          essential?: boolean
+          id?: string
+          ip_address?: string | null
+          pdf_path?: string | null
+          performance?: boolean | null
+          source: string
+          user_agent?: string | null
+          user_id: string
+        }
+        Update: {
+          accepted_at?: string
+          analytics?: boolean | null
+          consent_scope?: string
+          consent_type?: string
+          created_at?: string
+          document_hash?: string
+          document_type?: string
+          document_version?: string
+          essential?: boolean
+          id?: string
+          ip_address?: string | null
+          pdf_path?: string | null
+          performance?: boolean | null
+          source?: string
+          user_agent?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_context: {
         Row: {
           active_company_id: string | null
@@ -11176,6 +11266,33 @@ export type Database = {
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_sentiments: {
+        Row: {
+          comment: string | null
+          context: string
+          created_at: string
+          id: string
+          sentiment: string
+          user_id: string
+        }
+        Insert: {
+          comment?: string | null
+          context: string
+          created_at?: string
+          id?: string
+          sentiment: string
+          user_id: string
+        }
+        Update: {
+          comment?: string | null
+          context?: string
+          created_at?: string
+          id?: string
+          sentiment?: string
           user_id?: string
         }
         Relationships: []

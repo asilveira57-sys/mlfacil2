@@ -13,6 +13,9 @@ import {
 } from '@/lib/cookies/consent';
 import { syncConsentToDb } from '@/lib/cookies/sync';
 
+import { recordConsentOnServer } from '@/lib/cookies/api';
+import { supabase } from '@/integrations/supabase/client';
+
 interface Props {
   onConsent: (consent: CookieConsent) => void;
 }
@@ -25,21 +28,44 @@ export function CookieConsentBanner({ onConsent }: Props) {
 
   if (!visible) return null;
 
-  const handleAcceptAll = () => {
+  const handleAcceptAll = async () => {
     const consent = createConsent('all', true, true);
     saveConsent(consent);
     syncConsentToDb(consent);
     setVisible(false);
     onConsent(consent);
+
+    // Also record via edge function if logged in
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      recordConsentOnServer({
+        consent_scope: 'cookies',
+        consent_type: 'all',
+        performance: true,
+        analytics: true,
+        source: 'banner',
+      });
+    }
   };
 
-  const handleSavePreferences = () => {
+  const handleSavePreferences = async () => {
     const consent = createConsent('custom', perfEnabled, analyticsEnabled);
     saveConsent(consent);
     syncConsentToDb(consent);
     setShowPreferences(false);
     setVisible(false);
     onConsent(consent);
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      recordConsentOnServer({
+        consent_scope: 'cookies',
+        consent_type: 'custom',
+        performance: perfEnabled,
+        analytics: analyticsEnabled,
+        source: 'banner',
+      });
+    }
   };
 
   return (
