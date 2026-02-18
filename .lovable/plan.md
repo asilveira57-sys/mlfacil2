@@ -1,86 +1,152 @@
 
 
-# Plano: Mover Perfis e Permissoes para Configuracoes do Seller
+# Monitoramento de Vendedores Concorrentes
 
-## Problema Atual
+## Resumo
 
-A tela de Perfis e Permissoes (`AdminAccessProfiles`) esta no modulo Admin (`/admin/perfis`), que e restrito a administradores da plataforma. O Seller (Owner/Admin da empresa) precisa gerenciar perfis e permissoes dos seus colaboradores em **Configuracoes** (`/settings`).
+Evoluir o modulo de Concorrencia para permitir o acompanhamento de **contas de vendedores** (sellers) alem de anuncios individuais. O usuario podera seguir uma conta concorrente, ver todos os seus anuncios ativos, acompanhar vendas estimadas a partir da data de vinculo, e adicionar um apelido (nickname) ao nome mascarado da API.
 
-## O que muda
+## Como funciona dentro das diretrizes da API
 
-### 1. Nova aba "Perfis" em Configuracoes
+A API publica do Mercado Livre disponibiliza os seguintes endpoints sem autenticacao (ou com token proprio):
 
-Adicionar uma aba entre "Colaboradores" e "Personalizacao" chamada **"Perfis de Acesso"** no `/settings`, com icone `Shield`.
+- `GET /users/{user_id}` -- dados publicos: nickname mascarado (ex: GATO.SAPATO.MARIOLA), reputacao, data de registro, nivel
+- `GET /sites/MLB/search?seller_id={seller_id}` -- lista de anuncios ativos do seller (ate 1000 resultados com paginacao)
+- `GET /items/{item_id}` -- dados publicos do anuncio: preco, titulo, thumbnail, sold_quantity (faixa referencial), status
+- `GET /items?ids=ID1,ID2,...` -- multiget ate 20 itens por chamada
 
-### 2. Novo componente: `SettingsAccessProfiles`
+**Importante**: `sold_quantity` e `available_quantity` sao valores **referenciais** (faixas), nao exatos. Plataformas como Nubimetrics e Real Trends usam a mesma abordagem: capturam snapshots periodicos de `sold_quantity` e calculam o **delta** entre capturas para estimar vendas no periodo. E exatamente isso que faremos.
 
-Criar `src/components/settings/SettingsAccessProfiles.tsx` -- uma versao do `AdminAccessProfiles` adaptada para o contexto do Seller:
+## Abordagem de Nickname (LGPD + Etica)
 
-- Filtra apenas perfis globais (base) + perfis customizados da empresa do usuario (`company_id = empresa atual`)
-- Permite ao Owner **duplicar** um perfil base para criar perfil customizado da empresa
-- Permite editar permissoes apenas em perfis customizados (perfis base globais sao somente leitura)
-- Respeita hierarquia: Owner edita tudo, Admin nao edita perfis de nivel superior
-- Exibe a matriz de permissoes (modulos x acoes) com checkboxes
+- O sistema armazena o `nickname` original retornado pela API (mascarado pelo ML)
+- O usuario pode adicionar um **apelido proprio** que sera concatenado: `GATO.SAPATO.MARIOLA (Fornecedor Joao)`
+- O apelido fica visivel apenas para o usuario que o criou
+- Nenhum dado pessoal real do vendedor e buscado ou armazenado
 
-### 3. Atualizar CollaboratorsCard para atribuir perfil
+---
 
-Atualizar o formulario de colaboradores (`CollaboratorFormModal`) para:
+## Mudancas Tecnicas
 
-- Substituir o grid de modulos antigo (`CollaboratorModuleGrid` com `MODULE_CATALOG`) por um **dropdown de perfil de acesso** (Select com perfis disponiveis da empresa)
-- Ao criar/editar colaborador, salvar o `profile_id` na tabela `company_users` (ou `collaborators`)
-- Remover dependencia do `MODULE_CATALOG` legado
+### 1. Nova tabela: `competitor_sellers`
 
-### 4. Hook `useAccessProfiles` -- versao Seller
-
-Adaptar o hook para aceitar um `companyId` opcional:
-
-- Quando `companyId` e passado, filtra perfis por `company_id IS NULL OR company_id = companyId`
-- Adiciona funcao `duplicateProfile(baseProfileId)` que cria copia com `company_id` preenchido
-- Adiciona funcao `renameProfile(profileId, newName)`
-
-### 5. Manter `AdminAccessProfiles` no Admin
-
-O Admin da plataforma continua tendo a visao global de todos os perfis base em `/admin/perfis` -- essa tela permanece para gestao dos templates globais.
-
-## Detalhes Tecnicos
-
-### Arquivos a criar
-
-- `src/components/settings/SettingsAccessProfiles.tsx` -- Componente da aba de perfis no Settings
-
-### Arquivos a modificar
-
-- `src/pages/Settings.tsx` -- Adicionar aba "Perfis de Acesso"
-- `src/hooks/useAccessProfiles.ts` -- Adicionar filtro por `companyId`, funcoes de duplicar/renomear
-- `src/components/settings/collaborators/CollaboratorFormModal.tsx` -- Trocar grid de modulos por dropdown de perfil
-- `src/components/settings/collaborators/CollaboratorsCard.tsx` -- Exibir nome do perfil na tabela em vez de "X modulos"
-- `src/hooks/useCollaborators.ts` -- Incluir `profile_id` no create/update
-
-### Fluxo do Seller
+Armazena os sellers concorrentes monitorados.
 
 ```text
-Configuracoes
-  |-- Perfil (dados pessoais)
-  |-- Idioma
-  |-- Colaboradores (lista + convite + atribuir perfil)
-  |-- Perfis de Acesso (matriz de permissoes por perfil)
-  |-- Personalizacao
-  |-- ...demais abas
+competitor_sellers
+  id                  UUID PK
+  user_id             UUID FK (auth.users)
+  seller_id           TEXT (seller do usuario logado)
+  ml_seller_id        TEXT (ID ML do concorrente, ex: 66043362)
+  ml_nickname         TEXT (nickname mascarado da API)
+  user_alias          TEXT (apelido dado pelo usuario)
+  seller_reputation   JSONB (snapshot da reputacao)
+  total_items_tracked INT
+  last_synced_at      TIMESTAMPTZ
+  next_sync_at        TIMESTAMPTZ
+  sync_interval_hours INT DEFAULT 6
+  status              TEXT DEFAULT 'ativo'
+  binding_date        TIMESTAMPTZ (data de vinculo - baseline)
+  created_at          TIMESTAMPTZ
+  updated_at          TIMESTAMPTZ
 ```
 
-### Logica de permissoes na aba Perfis
+### 2. Nova tabela: `competitor_seller_items`
 
-- Perfis base globais (`is_system=true`): exibidos como referencia, somente leitura
-- Botao "Duplicar" ao lado de cada perfil base: cria copia customizada para a empresa
-- Perfis customizados (`company_id = empresa`): editaveis pelo Owner
-- Owner (level 1): edita todos os perfis customizados
-- Admin (level 2): edita apenas perfis de level >= 2
+Snapshot dos anuncios do seller concorrente.
 
-### Migracao do formulario de colaboradores
+```text
+competitor_seller_items
+  id                  UUID PK
+  competitor_seller_id UUID FK
+  user_id             UUID
+  item_id             TEXT (MLB...)
+  title               TEXT
+  thumbnail           TEXT
+  price               NUMERIC
+  original_price      NUMERIC
+  currency_id         TEXT
+  sold_quantity_ref   INT (valor referencial da API)
+  available_qty_ref   INT (valor referencial)
+  category_id         TEXT
+  listing_type        TEXT (gold_special, etc)
+  condition           TEXT (new/used)
+  status              TEXT (active/paused/closed)
+  permalink           TEXT
+  free_shipping       BOOLEAN
+  catalog_listing     BOOLEAN
+  last_synced_at      TIMESTAMPTZ
+  created_at          TIMESTAMPTZ
+  updated_at          TIMESTAMPTZ
+```
 
-O formulario atual usa `MODULE_CATALOG` (lista estatica hardcoded). Sera substituido por:
+### 3. Nova tabela: `competitor_seller_item_snapshots`
 
-1. Um `Select` com os perfis disponiveis (base + customizados da empresa)
-2. Preview das permissoes do perfil selecionado (somente leitura, para o Owner ver o que cada perfil pode fazer)
-3. O campo `profile_id` e salvo junto com o colaborador
+Para calcular delta de vendas (mesma tecnica do Nubimetrics).
+
+```text
+competitor_seller_item_snapshots
+  id                  UUID PK
+  item_id             TEXT
+  competitor_seller_id UUID FK
+  price               NUMERIC
+  sold_quantity_ref   INT
+  available_qty_ref   INT
+  status              TEXT
+  captured_at         TIMESTAMPTZ DEFAULT now()
+```
+
+### 4. Edge Function: `competitor-seller-sync`
+
+Nova funcao backend para sincronizar dados do seller concorrente:
+
+- **Adicionar seller**: Recebe nickname ou seller_id, busca `/users/{id}` para dados publicos, busca `/sites/MLB/search?seller_id={id}` para listar anuncios
+- **Sync periodica**: A cada N horas, re-busca todos os anuncios do seller, compara `sold_quantity` com snapshot anterior para estimar vendas
+- **Calculo de delta**: `vendas_estimadas = sold_quantity_atual - sold_quantity_snapshot_anterior`
+- **Rate limiting**: delay de 200ms entre chamadas, maximo 50 itens por batch via multiget
+
+### 5. Componentes Frontend
+
+**SellerTrackingTab** (nova aba ou sub-secao dentro de "Monitorados"):
+- Card de resumo do seller: nickname + apelido, reputacao, total de anuncios, vendas estimadas desde vinculo
+- Lista de anuncios do seller com: thumbnail, titulo, preco, sold_quantity (delta), status
+- Ordenacao por mais vendidos, preco, recentes
+- Botao "Editar apelido" inline
+- Botao "Monitorar este anuncio" (cria tracker individual a partir do item)
+
+**AddCompetitorSellerDialog**:
+- Campo para colar link do perfil do vendedor OU ID do seller
+- Parser que extrai seller_id de URLs como `mercadolivre.com.br/perfil/NICKNAME`
+- Preview com dados publicos antes de confirmar
+- Campo de apelido opcional
+
+**SellerDetailDrawer**:
+- Detalhes completos do seller
+- Grafico de vendas estimadas ao longo do tempo
+- Lista paginada de anuncios com filtros (categoria, faixa de preco)
+- Timeline de eventos (novos anuncios, anuncios removidos, mudancas de preco)
+
+### 6. Integracao com tab existente "Monitorados"
+
+- Adicionar filtro "Anuncios | Sellers" na parte superior da tab
+- Quando visualizando sellers, mostrar cards no formato de perfil
+- Permitir expandir seller para ver seus anuncios diretamente
+
+### 7. Migracao de dados e RLS
+
+- RLS em todas as novas tabelas: usuario so ve seus proprios dados
+- Indice em `competitor_sellers(user_id, ml_seller_id)` para evitar duplicatas
+- Indice em `competitor_seller_items(competitor_seller_id, item_id)`
+- pg_cron job para sync automatica (similar ao competitor-scan existente)
+
+---
+
+## Sequencia de Implementacao
+
+1. Criar tabelas via migracao SQL com RLS
+2. Criar edge function `competitor-seller-sync` com endpoints: add, sync, list, detail
+3. Criar hook `useCompetitorSellers` no frontend
+4. Criar componentes: AddCompetitorSellerDialog, SellerTrackingList, SellerDetailDrawer
+5. Integrar na pagina de Concorrencia (nova sub-aba ou filtro na tab Monitorados)
+6. Agendar sync automatica via pg_cron
 
