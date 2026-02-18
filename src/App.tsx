@@ -52,6 +52,7 @@ import ProductsPage from "./pages/ProductsPage";
 import ProductDetailPage from "./pages/ProductDetailPage";
 import TermosDeUso from "./pages/TermosDeUso";
 import PoliticaPrivacidade from "./pages/PoliticaPrivacidade";
+import PoliticaCookies from "./pages/PoliticaCookies";
 import NotFound from "./pages/NotFound";
 import { ZplViewerTool, TrendsLiteTool, PricingSimulatorTool, CommissionsTool } from "./pages/tools";
 import { AdminRoute } from "./components/auth/AdminRoute";
@@ -143,6 +144,7 @@ const App = () => {
                 <Route path="/consultoria" element={<Consultoria />} />
                 <Route path="/termos-de-uso" element={<TermosDeUso />} />
                 <Route path="/politica-de-privacidade" element={<PoliticaPrivacidade />} />
+                <Route path="/politica-de-cookies" element={<PoliticaCookies />} />
                 
                 {/* Module detail pages */}
                 <Route path="/modulo/:slug" element={<ModuloDetalhe />} />
