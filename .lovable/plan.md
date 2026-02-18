@@ -1,130 +1,122 @@
 
-# Auto-resolucao de Pendencias (Notificacoes) baseada no estado real dos modulos
+# Consulta da Tabela Oficial de Frete do Mercado Livre via API
 
-## Problema identificado
+## Contexto
 
-Existem **dois problemas** no modulo de Pendencias Prioritarias:
+O Mercado Livre possui um endpoint oficial que retorna o custo de frete que o seller pagara para um envio, baseado em parametros como dimensoes, preco do item, tipo de anuncio, categoria, etc:
 
-1. **Perguntas ja respondidas continuam como pendencias**: O sistema cria notificacoes `qa_pending` quando perguntas chegam, e o sync (`qa-messages-polling-sync`) faz a reconciliacao das perguntas no banco (marca como `answered`), mas **nunca resolve as notificacoes correspondentes**. O seller 66043362 (Etiqueta Capixaba) tem 117 perguntas, todas com status `answered`, mas 7 notificacoes `qa_pending` ainda aparecem.
+```
+GET /users/{user_id}/shipping_options/free?dimensions={HxWxL,weight}&item_price={price}&listing_type_id={type}&category_id={cat}&mode={mode}
+```
 
-2. **"Mensagem de boas-vindas pendente" sem mensagens pendentes reais**: O worker cria notificacoes `post_sale_blocked` para drafts pendentes, mas quando o draft e enviado ou descartado, a notificacao permanece. Alem disso, o `action_url` aponta para `/mensagens-pos-venda`, que funciona corretamente (nao e 404). O 404 pode ocorrer se a navegacao estiver sendo interceptada de outra forma.
+Este endpoint retorna o `list_cost` (custo oficial do frete) e informacoes de subsidio/desconto. Com ele, podemos montar a tabela oficial do ML para qualquer combinacao de categoria, faixa de preco e peso -- independente de ter vendido ou nao.
 
-## Solucao
+## Plano
 
-### 1. Auto-resolver notificacoes `qa_pending` quando nao ha mais perguntas pendentes
+### 1. Nova Edge Function: `freight-table-query`
 
-**Onde**: `supabase/functions/qa-messages-polling-sync/index.ts`
+Cria uma Edge Function que consulta a API do ML para montar a tabela oficial de frete. O usuario seleciona os parametros e a funcao faz as chamadas necessarias para popular a grade.
 
-Apos o sync de perguntas de cada conta, verificar se o `pendingCount` resultante e **zero**. Se for, buscar todas as notificacoes `qa_pending` nao resolvidas para aquele seller e marca-las como `is_actioned = true`.
+**Parametros de entrada:**
+- `seller_id` (para autenticacao na API)
+- `category_id` (opcional - categoria do item)
+- `listing_type_id` (gold_pro, gold_special, etc.)
+- `logistic_type` (drop_off, fulfillment, xd_drop_off, cross_docking)
+- `weight_ranges` - array de faixas de peso a consultar (ex: [0.3, 0.5, 1, 2, 5, 10, 15, 30])
+- `price_ranges` - array de faixas de preco a consultar (ex: [79, 120, 200, 500, 1000])
+
+**Logica:**
+- Para cada combinacao de peso x preco, faz uma chamada ao endpoint `shipping_options/free`
+- Converte peso para dimensoes estimadas (usando os perfis A/B/C ja configurados no sistema)
+- Retorna a grade completa com os custos oficiais
+
+**Saida:**
+```text
+[
+  { weight: 0.3, price: 79, listing_type: "gold_pro", list_cost: 18.90, discount_rate: 0, ... },
+  { weight: 0.3, price: 200, listing_type: "gold_pro", list_cost: 0, discount_rate: 1.0, ... },
+  ...
+]
+```
+
+### 2. Atualizar `FreightRulesetsTab.tsx`
+
+Adicionar dois botoes de acao:
+- **"Cadastrar Manualmente"**: formulario para digitar a tabela oficial (ja previsto)
+- **"Consultar na API do ML"**: novo botao que abre um dialog para consultar a tabela oficial direto da API
+
+### 3. Novo componente: `FreightApiQueryDialog.tsx`
+
+Dialog que permite ao usuario:
+1. Selecionar parametros (tipo de anuncio, tipo logistico, categoria opcional)
+2. Definir as faixas de peso e preco a consultar
+3. Clicar "Consultar" - chama a Edge Function
+4. Ver a grade de resultados (tabela peso x preco com custos)
+5. Opcionalmente "Salvar como Tabela" - persiste como `freight_ruleset` + `freight_rule_lines` para uso nos calculos de divergencia
+
+### 4. Novo componente: `FreightCreateDialog.tsx`
+
+Formulario manual para cadastrar regras de frete:
+- Nome e descricao da tabela
+- Tipo logistico e tipo de anuncio
+- Linhas com faixa de peso, faixa de preco e valor do frete
+- Possibilidade de adicionar/remover linhas
+
+### 5. Confronto futuro (ja preparado)
+
+Com as duas fontes de dados:
+- **Tabela oficial** (consultada via API ou cadastrada manualmente) -> `freight_rulesets` / `freight_rule_lines`
+- **Valores cobrados** (historico real de `meli_shipment_costs_cache`)
+
+O FreightEngine existente ja faz o calculo de divergencia (expected vs paid). A tabela oficial alimenta o "expected", e os dados historicos alimentam o "paid".
+
+## Detalhamento Tecnico
+
+### Edge Function `freight-table-query`
 
 ```text
-Fluxo atual:
-  syncQuestions() -> retorna pendingCount
-  se newCount > 0: cria/atualiza notificacao
+Arquivo: supabase/functions/freight-table-query/index.ts
 
-Fluxo proposto:
-  syncQuestions() -> retorna pendingCount
-  se newCount > 0: cria/atualiza notificacao
-  se pendingCount == 0: resolver TODAS notificacoes qa_pending do seller
+1. Recebe seller_id, parametros de consulta
+2. Busca access_token do seller via ml_accounts
+3. Para cada combinacao peso x preco:
+   - Converte peso em dimensoes estimadas (usando perfis A/B/C do freight_settings)
+   - Chama GET /users/{seller_id}/shipping_options/free?dimensions=...&item_price=...&listing_type_id=...
+   - Extrai list_cost, discount, billable_weight
+4. Retorna array com todos os resultados
+5. Rate limit: aguarda 100ms entre chamadas para nao exceder limites da API
 ```
 
-### 2. Auto-resolver notificacoes `post_sale_blocked` quando nao ha drafts pendentes
+### Componente `FreightApiQueryDialog.tsx`
 
-**Onde**: `supabase/functions/ml-worker-process/index.ts` e `src/hooks/usePostSalePendingMessages.ts`
-
-**Backend**: Quando o worker processa um evento e detecta que nao ha mais mensagens pendentes para aquele seller, resolver notificacoes `post_sale_blocked`.
-
-**Frontend**: Quando o usuario aprova ou descarta um draft (via `useApprovePendingMessage` ou `useRejectPendingMessage`), apos a invalidacao de queries, verificar se restam pendencias e resolver notificacoes se necessario.
-
-### 3. Invalidar cache de notificacoes ao resolver
-
-**Onde**: `src/hooks/usePostSalePendingMessages.ts` e `src/hooks/useRejectAllPendingMessages.ts`
-
-Adicionar invalidacao das queries `priority-notifications` e `notification-counts` quando drafts sao aprovados/rejeitados, para que o PriorityInbox atualize imediatamente.
-
-## Detalhamento tecnico
-
-### Arquivo 1: `supabase/functions/qa-messages-polling-sync/index.ts`
-
-Apos a chamada `syncQuestions()` (linha ~654), adicionar logica de auto-resolve:
-
-```typescript
-// Apos sync de perguntas
-if (qResult.pendingCount === 0) {
-  // Nenhuma pergunta pendente - resolver todas notificacoes qa_pending do seller
-  await supabase
-    .from('app_notifications')
-    .update({ is_actioned: true, read_at: new Date().toISOString() })
-    .eq('seller_id', account.ml_user_id)
-    .eq('category', 'qa_pending')
-    .eq('is_actioned', false);
-}
+```text
+- Select: Tipo de Anuncio (Classico, Premium)
+- Select: Tipo Logistico (Mercado Envios, Full, Drop Off)
+- Input: Categoria (opcional, com autocomplete)
+- Chips/Input: Faixas de peso (pre-definidas + customizaveis)
+- Chips/Input: Faixas de preco (pre-definidas + customizaveis)
+- Botao: Consultar API
+- Tabela de resultados: grade peso x preco com valores
+- Botao: Salvar como Tabela de Frete
 ```
 
-### Arquivo 2: `supabase/functions/ml-worker-process/index.ts`
+### Componente `FreightCreateDialog.tsx`
 
-Apos criar/atualizar notificacao de post_sale (linha ~894), adicionar verificacao similar quando mensagens sao processadas. Tambem adicionar auto-resolve nas funcoes de envio/bloqueio quando o count de pendentes cai a zero.
-
-### Arquivo 3: `src/hooks/usePostSalePendingMessages.ts`
-
-No `onSuccess` de `useApprovePendingMessage` e `useRejectPendingMessage`, adicionar:
-- Invalidacao de `priority-notifications` e `notification-counts`
-- Chamada para auto-resolver notificacoes `post_sale_blocked` se nao restarem pendencias
-
-### Arquivo 4: `src/hooks/useRejectAllPendingMessages.ts`
-
-Mesmo tratamento: invalidar caches de notificacao e resolver notificacoes post_sale quando todos os drafts sao descartados.
-
-### Arquivo 5: Criar funcao utilitaria `src/lib/notifications/autoResolve.ts`
-
-Funcao reutilizavel para resolver notificacoes por categoria e seller:
-
-```typescript
-export async function autoResolveNotifications(
-  category: string,
-  sellerId: string
-) {
-  await supabase
-    .from('app_notifications')
-    .update({ is_actioned: true })
-    .eq('seller_id', sellerId)
-    .eq('category', category)
-    .eq('is_actioned', false);
-}
+```text
+- Input: Nome da tabela
+- Input: Descricao
+- Date: Valida a partir de
+- Tabela editavel com linhas:
+  - Tipo logistico | Tipo anuncio | Peso min | Peso max | Preco min | Preco max | Valor frete
+- Botoes: Adicionar linha, Remover linha
+- Botao: Salvar
 ```
 
-### Limpeza imediata dos dados
-
-Executar uma query de limpeza para resolver as notificacoes orfas atuais no banco:
-
-```sql
--- Resolver notificacoes qa_pending para sellers sem perguntas pendentes
-UPDATE app_notifications
-SET is_actioned = true
-WHERE category = 'qa_pending'
-  AND is_actioned = false
-  AND seller_id NOT IN (
-    SELECT DISTINCT seller_id FROM qa_questions WHERE status = 'pending'
-  );
-
--- Resolver notificacoes post_sale_blocked para sellers sem drafts pendentes
-UPDATE app_notifications
-SET is_actioned = true
-WHERE category = 'post_sale_blocked'
-  AND is_actioned = false
-  AND seller_id NOT IN (
-    SELECT DISTINCT seller_id FROM post_sale_messages
-    WHERE is_visible = true AND status IN ('pendente', 'rascunho')
-  );
-```
-
-## Resumo de arquivos impactados
+## Arquivos impactados
 
 | Arquivo | Alteracao |
 |---------|-----------|
-| `supabase/functions/qa-messages-polling-sync/index.ts` | Auto-resolver `qa_pending` quando pendingCount = 0 |
-| `supabase/functions/ml-worker-process/index.ts` | Auto-resolver `post_sale_blocked` quando count = 0 |
-| `src/lib/notifications/autoResolve.ts` | Nova funcao utilitaria (frontend) |
-| `src/hooks/usePostSalePendingMessages.ts` | Invalidar caches + auto-resolve no frontend |
-| `src/hooks/useRejectAllPendingMessages.ts` | Invalidar caches + auto-resolve no frontend |
-| Migration SQL | Limpeza de notificacoes orfas existentes |
+| `supabase/functions/freight-table-query/index.ts` | Nova Edge Function para consultar API do ML |
+| `src/components/freight/FreightRulesetsTab.tsx` | Adicionar botoes "Consultar API" e "Cadastrar Manual" |
+| `src/components/freight/FreightApiQueryDialog.tsx` | Novo dialog de consulta a API |
+| `src/components/freight/FreightCreateDialog.tsx` | Novo dialog de cadastro manual |
