@@ -1,50 +1,65 @@
 
-# Correcao: Sincronizacao de Status e Background Cron
+# Corrigir Filtros de Período e Status das Etiquetas de Envio
 
-## Problemas Identificados
+## Problema Atual
+Os filtros de período ("Envios de hoje", "7 dias", etc.) e status ("Reimprimir", "Aguardando NF") estão com lógica misturada na RPC do banco de dados, fazendo com que:
+- "7 dias" mostre 0 resultados mesmo tendo 182 pedidos nos últimos 7 dias
+- "Envios de hoje" filtre por substatus em vez de apenas filtrar pelo prazo de despacho
+- "Reimprimir" mostre 0 mesmo tendo 8 etiquetas com substatus "printed"
+- "Todos" limite artificialmente a 30 dias
 
-### 1. Botao "Atualizar" nao atualiza status existentes
-O sync pipeline (fase 3-4) so busca envios **faltantes** (`missingShipmentIds`). Se um envio ja existe no cache com status `invoice_pending`, ele nunca e re-consultado na API do ML para verificar se ja mudou para `shipped` ou `delivered`.
+## Solucao
 
-### 2. Cron `shipping-status-sync` nunca executa
-A funcao NAO esta configurada com `verify_jwt = false` no `config.toml`. O cron envia o anon key como Bearer token, mas a verificacao JWT rejeita a requisicao antes de chegar ao codigo da funcao. Resultado: `last_run_at` e `null` desde a criacao.
+### Separar claramente as responsabilidades:
+- **Filtros de periodo** (Todos, Envios de hoje, 7d, 15d, 30d): filtram APENAS por data
+- **Filtros de status** (Todos, Para imprimir, Aguardando NF, Reimprimir): filtram APENAS pelo `final_status` calculado
 
-### 3. `estimated_handling_limit` nunca foi preenchido
-Com o cron parado e o sync manual so buscando envios novos, nenhum envio existente foi atualizado com o campo `estimated_handling_limit`. Resultado: "Envios de hoje" mostra 0 registros.
+### Mudancas necessarias:
 
-### 4. RPC duplicada (limpeza)
-Existem 2 versoes da RPC `get_shipping_orders` (9 e 10 parametros). A versao antiga (sem `p_period_type`) tem logica incorreta. Precisa ser removida.
+**1. Atualizar a RPC `get_shipping_orders` (migracao SQL)**
 
-## Plano de Correcao
+Remover a restricao de substatus do filtro `today_dispatch`. Ele deve apenas:
+- Filtrar por `estimated_handling_limit` sendo hoje ou atrasado (quando disponivel)
+- Quando `estimated_handling_limit` for NULL, usar `created_at_meli` do dia como fallback (pedidos criados hoje que ainda nao tem prazo populado)
+- NAO restringir por substatus/logistic_type (isso e trabalho do filtro de status)
 
-### Etapa 1: Corrigir config.toml
-Adicionar `verify_jwt = false` para `shipping-status-sync` no `supabase/config.toml`.
+**2. Corrigir o hook `useShippingLabels.ts`**
 
-### Etapa 2: Corrigir o sync manual para atualizar status existentes
-No `useShippingLabels.ts`, apos sincronizar envios faltantes, adicionar uma fase que re-sincroniza envios com **status ativos** (`ready_to_ship`, `handling`, `pending`) -- esses sao os que podem ter mudado de status no ML.
+- "Todos" (period `all`): remover o limite de 30 dias, enviar `dateFrom/dateTo` como null para buscar tudo
+- "Envios de hoje" (`today`): enviar `dateFrom/dateTo` como null e `p_period_type = 'today_dispatch'` (a RPC cuida da filtragem)
 
-Logica:
-- Buscar do cache local todos os `shipment_id` onde `shipment_status IN ('ready_to_ship','handling','pending')`
-- Enviar para `ml-sync-shipments` (que ja faz upsert, atualizando status existentes)
-- Isso garante que ao clicar "Atualizar", envios que ja foram despachados/entregues sejam corrigidos
+**3. Publicar as mudancas**
 
-### Etapa 3: Remover RPC antiga (9 params)
-Migration SQL para dropar a versao antiga de `get_shipping_orders` sem `p_period_type`.
+Apos aplicar a migracao, as contagens de status (reimprimir, aguardando_nf, pronta) serao calculadas corretamente dentro do periodo selecionado.
 
-### Etapa 4: Re-deploy `shipping-status-sync`
-Apos corrigir o config.toml, fazer deploy da funcao para que o cron funcione.
+---
 
-## Arquivos Modificados
+## Detalhes tecnicos
 
-| Arquivo | Mudanca |
-|---------|---------|
-| `supabase/config.toml` | Adicionar `verify_jwt = false` para `shipping-status-sync` |
-| `src/hooks/useShippingLabels.ts` | Adicionar fase de re-sync de envios ativos apos fase de envios faltantes |
-| Migration SQL | Dropar overload antiga de `get_shipping_orders` (9 params) |
+### RPC `get_shipping_orders` - Nova logica do WHERE para `today_dispatch`:
 
-## Impacto Esperado
+```text
+AND (
+  p_period_type != 'today_dispatch'
+  OR (
+    -- Se tem prazo de despacho, mostra se for hoje ou atrasado
+    (s.estimated_handling_limit IS NOT NULL AND s.estimated_handling_limit <= v_today_end)
+    OR
+    -- Fallback: pedidos criados hoje sem prazo populado que tem envio pendente
+    (s.estimated_handling_limit IS NULL 
+     AND o.created_at_meli >= v_today_start 
+     AND s.shipment_status IN ('ready_to_ship','handling','pending'))
+  )
+)
+```
 
-- O cron de 10 minutos vai finalmente executar, atualizando status e `estimated_handling_limit` em background
-- O botao "Atualizar" vai re-consultar envios ativos na API do ML, corrigindo status desatualizados
-- "Envios de hoje" vai comecar a funcionar conforme `estimated_handling_limit` for preenchido
-- Nenhum reload de tela -- tudo roda em background
+### Hook `useShippingLabels.ts` - Corrigir `getDateRange`:
+
+- `case 'all'`: retornar `{ dateFrom: null, dateTo: null }` (sem limite de data)
+- `case 'today'`: manter retornando null (RPC controla via `today_dispatch`)
+
+### Dados atuais que devem aparecer:
+- 8 envios com substatus `printed` (reimprimir) 
+- 24 envios com substatus `invoice_pending` (aguardando NF)
+- 3 envios com substatus `ready_to_print` (para imprimir)
+- Total de ~35 pedidos acionaveis
