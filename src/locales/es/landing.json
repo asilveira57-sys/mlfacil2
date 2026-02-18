@@ -26,31 +26,43 @@
     "trust_multiconta": "Soporte multi-cuenta"
   },
   "benefits": {
-    "title": "Beneficios que impulsan tu negocio",
-    "subtitle": "Herramientas poderosas para optimizar cada aspecto de tu operación en Mercado Libre.",
+    "title": "Lo que MKTP Fácil hace por ti",
+    "subtitle": "Funcionalidades reales que optimizan cada aspecto de tu operación en Mercado Libre.",
     "item1": {
-      "title": "Gestión unificada",
-      "description": "Controla múltiples cuentas de Mercado Libre en un único panel centralizado."
+      "title": "Historial Progresivo",
+      "description": "30 días disponibles en la prueba y hasta 12 meses después de la activación para análisis completo de la operación."
     },
     "item2": {
-      "title": "Análisis en tiempo real",
-      "description": "Dashboards con métricas actualizadas para decisiones más asertivas."
+      "title": "Curva ABC Estratégica",
+      "description": "Análisis por producto, ciudad, barrio, cliente y ganancia para identificar dónde realmente está el resultado de la operación."
     },
     "item3": {
-      "title": "Automatización inteligente",
-      "description": "Automatiza tareas repetitivas y enfócate en el crecimiento del negocio."
+      "title": "Análisis de Intervalo de Ventas",
+      "description": "Identifica el tiempo promedio entre ventas de cada anuncio y entiende qué productos realmente rotan."
     },
     "item4": {
-      "title": "Alertas personalizadas",
-      "description": "Recibe notificaciones sobre eventos importantes y oportunidades."
+      "title": "Central de Promociones",
+      "description": "Filtra promociones calificadas, aplica porcentajes, adhesión en lote y reprograma campañas con control."
     },
     "item5": {
-      "title": "Historial completo",
-      "description": "Acompaña la evolución de tus productos y métricas a lo largo del tiempo."
+      "title": "Impresión Profesional de Etiquetas",
+      "description": "Etiquetas de envío con encabezado y observación personalizada. Impresión ZPL sin límites, con conversión en PDF y temporizador integrado."
     },
     "item6": {
-      "title": "Metas y objetivos",
-      "description": "Define y acompaña metas de ventas para cada producto o categoría."
+      "title": "Gestión Estratégica de Anuncios",
+      "description": "Organización y seguimiento de rendimiento para decisiones más asertivas."
+    },
+    "item7": {
+      "title": "Multicuentas Inteligente",
+      "description": "Gestiona múltiples empresas con separación total de datos y configuraciones individuales."
+    },
+    "item8": {
+      "title": "Control de Colaboradores",
+      "description": "Define niveles de acceso, permisos de menú y límites operacionales por usuario."
+    },
+    "item9": {
+      "title": "Herramientas Internas Integradas",
+      "description": "Gestión de tareas, post-its por módulo y utilidades como calculadora y bloc de notas directo en el panel."
     }
   },
   "modules": {

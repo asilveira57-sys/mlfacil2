@@ -2,24 +2,30 @@ import { useTranslation } from "react-i18next";
 import { Section, SectionHeader } from "./Section";
 import { EditableText } from "@/components/admin/EditableText";
 import { 
-  Boxes, 
-  LineChart, 
-  Zap, 
-  BellRing, 
   History, 
-  Target 
+  BarChart3, 
+  Clock, 
+  Tag, 
+  Printer, 
+  ClipboardList, 
+  Users, 
+  ShieldCheck, 
+  Wrench 
 } from "lucide-react";
 
 export function LandingBenefits() {
   const { t } = useTranslation('landing');
 
   const benefits = [
-    { icon: Boxes, key: 'item1' },
-    { icon: LineChart, key: 'item2' },
-    { icon: Zap, key: 'item3' },
-    { icon: BellRing, key: 'item4' },
-    { icon: History, key: 'item5' },
-    { icon: Target, key: 'item6' }
+    { icon: History, key: 'item1' },
+    { icon: BarChart3, key: 'item2' },
+    { icon: Clock, key: 'item3' },
+    { icon: Tag, key: 'item4' },
+    { icon: Printer, key: 'item5' },
+    { icon: ClipboardList, key: 'item6' },
+    { icon: Users, key: 'item7' },
+    { icon: ShieldCheck, key: 'item8' },
+    { icon: Wrench, key: 'item9' }
   ];
 
   return (

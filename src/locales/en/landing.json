@@ -26,31 +26,43 @@
     "trust_multiconta": "Multi-account support"
   },
   "benefits": {
-    "title": "Benefits that boost your business",
-    "subtitle": "Powerful tools to optimize every aspect of your Mercado Libre operation.",
+    "title": "What MKTP Fácil does for you",
+    "subtitle": "Real features that optimize every aspect of your Mercado Libre operation.",
     "item1": {
-      "title": "Unified management",
-      "description": "Control multiple Mercado Libre accounts in a single centralized dashboard."
+      "title": "Progressive History",
+      "description": "30 days available on trial and up to 12 months after activation for complete operation analysis."
     },
     "item2": {
-      "title": "Real-time analytics",
-      "description": "Dashboards with updated metrics for more assertive decisions."
+      "title": "Strategic ABC Curve",
+      "description": "Analysis by product, city, neighborhood, customer and profit to identify where results really come from."
     },
     "item3": {
-      "title": "Smart automation",
-      "description": "Automate repetitive tasks and focus on business growth."
+      "title": "Sales Interval Analysis",
+      "description": "Identify the average time between sales for each listing and understand which products really move."
     },
     "item4": {
-      "title": "Custom alerts",
-      "description": "Receive notifications about important events and opportunities."
+      "title": "Promotions Center",
+      "description": "Filter qualified promotions, apply percentages, bulk enrollment and reschedule campaigns with control."
     },
     "item5": {
-      "title": "Complete history",
-      "description": "Track the evolution of your products and metrics over time."
+      "title": "Professional Label Printing",
+      "description": "Shipping labels with custom header and notes. Unlimited ZPL printing with PDF conversion and integrated timer."
     },
     "item6": {
-      "title": "Goals and objectives",
-      "description": "Define and track sales goals for each product or category."
+      "title": "Strategic Ad Management",
+      "description": "Organization and performance tracking for more assertive decisions."
+    },
+    "item7": {
+      "title": "Smart Multi-Account",
+      "description": "Manage multiple businesses with complete data separation and individual configurations."
+    },
+    "item8": {
+      "title": "Team Member Control",
+      "description": "Set access levels, menu permissions and operational limits per user."
+    },
+    "item9": {
+      "title": "Integrated Internal Tools",
+      "description": "Task management, sticky notes per module and utilities like calculator and notepad right in the dashboard."
     }
   },
   "modules": {
