@@ -100,6 +100,17 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Discover advertiser_id from ML API
+    const advertiserId = await getAdvertiserId(accessToken, seller_id);
+    if (!advertiserId) {
+      await updateSyncState(supabase, user.id, seller_id, 'error', 'Advertiser ID not found. User may not have Product Ads enabled.');
+      return new Response(JSON.stringify({ error: 'Advertiser ID not found. Product Ads may not be enabled for this account.' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    console.log(`[ads-sync] Discovered advertiser_id: ${advertiserId}`);
+
     // Calculate date range (last 30 days)
     const dateTo = new Date();
     const dateFrom = new Date();
@@ -110,7 +121,7 @@ Deno.serve(async (req) => {
     console.log(`[ads-sync] Date range: ${dateFromStr} to ${dateToStr}`);
 
     // Fetch campaigns from ML Product Ads API v2
-    const campaignsResult = await fetchCampaigns(accessToken, siteId, seller_id, dateFromStr, dateToStr);
+    const campaignsResult = await fetchCampaigns(accessToken, siteId, advertiserId, dateFromStr, dateToStr);
     console.log(`[ads-sync] Fetched ${campaignsResult.campaigns.length} campaigns`);
 
     // Upsert campaigns
@@ -241,6 +252,44 @@ Deno.serve(async (req) => {
   }
 });
 
+async function getAdvertiserId(accessToken: string, sellerId: string): Promise<string | null> {
+  try {
+    const url = `https://api.mercadolibre.com/advertising/advertisers?product_id=PADS`;
+    console.log(`[ads-sync] Fetching advertiser_id from: ${url}`);
+
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.warn(`[ads-sync] Advertiser lookup failed: ${response.status} - ${errorText}`);
+      // Fallback: try using seller_id as advertiser_id
+      return sellerId;
+    }
+
+    const data = await response.json();
+    console.log(`[ads-sync] Advertisers response:`, JSON.stringify(data).slice(0, 500));
+
+    const advertisers = data.advertisers || data || [];
+    if (Array.isArray(advertisers) && advertisers.length > 0) {
+      // Return the first advertiser_id (or match by site_id if multiple)
+      const advertiser = advertisers[0];
+      return String(advertiser.advertiser_id || advertiser.id || sellerId);
+    }
+
+    // Fallback to seller_id
+    console.warn(`[ads-sync] No advertisers found, falling back to seller_id`);
+    return sellerId;
+  } catch (error) {
+    console.error('[ads-sync] getAdvertiserId error:', error);
+    return sellerId;
+  }
+}
+
 async function refreshToken(supabase: any, sellerId: string, userId: string, refreshTokenValue: string): Promise<string | null> {
   try {
     const response = await fetch('https://api.mercadolibre.com/oauth/token', {
@@ -311,38 +360,81 @@ async function fetchCampaigns(accessToken: string, siteId: string, sellerId: str
   }
 }
 
-async function fetchItems(accessToken: string, siteId: string, sellerId: string, dateFrom: string, dateTo: string) {
-  // Product Ads API v2 items endpoint
-  const metrics = 'clicks,prints,cost,cpc,acos,roas,total_amount';
-  const url = `https://api.mercadolibre.com/marketplace/advertising/${siteId}/advertisers/${sellerId}/product_ads/items/search?date_from=${dateFrom}&date_to=${dateTo}&metrics=${metrics}`;
-  
-  console.log(`[ads-sync] Fetching items from: ${url}`);
+async function fetchItems(accessToken: string, _siteId: string, sellerId: string, dateFrom: string, dateTo: string) {
+  // Use the correct Product Ads ads/search endpoint with pagination
+  const allItems: any[] = [];
+  let offset = 0;
+  const limit = 100;
 
   try {
-    const response = await fetch(url, { 
-      headers: { 
-        'Authorization': `Bearer ${accessToken}`,
-        'api-version': '2',
-      } 
-    });
+    while (true) {
+      const url = `https://api.mercadolibre.com/advertising/product_ads/ads/search?user_id=${sellerId}&status=active,paused&offset=${offset}&limit=${limit}`;
+      console.log(`[ads-sync] Fetching items from: ${url}`);
 
-    console.log(`[ads-sync] Items response status: ${response.status}`);
+      const response = await fetch(url, { 
+        headers: { 
+          'Authorization': `Bearer ${accessToken}`,
+        } 
+      });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.warn(`[ads-sync] Items fetch failed: ${response.status} - ${errorText}`);
-      return { items: [] };
+      console.log(`[ads-sync] Items response status: ${response.status}`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.warn(`[ads-sync] Items fetch failed: ${response.status} - ${errorText}`);
+        break;
+      }
+
+      const data = await response.json();
+      console.log(`[ads-sync] Items page response (offset=${offset}):`, JSON.stringify(data).slice(0, 500));
+      
+      const results = data.results || [];
+      if (!Array.isArray(results) || results.length === 0) break;
+
+      allItems.push(...results);
+      
+      const total = data.paging?.total || 0;
+      offset += limit;
+      if (offset >= total) break;
+
+      // Rate limit between pages
+      await sleep(RATE_LIMIT_DELAY);
     }
 
-    const data = await response.json();
-    console.log(`[ads-sync] Items raw response:`, JSON.stringify(data).slice(0, 500));
-    
-    // Handle different response structures
-    const items = data.results || data.items || data || [];
-    return { items: Array.isArray(items) ? items : [] };
+    console.log(`[ads-sync] Total items fetched: ${allItems.length}`);
+
+    // Now fetch metrics for each item via the v2 endpoint
+    const itemsWithMetrics: any[] = [];
+    for (const item of allItems) {
+      const itemId = item.item_id || item.id;
+      if (!itemId) continue;
+
+      try {
+        await sleep(RATE_LIMIT_DELAY);
+        const metricsUrl = `https://api.mercadolibre.com/advertising/product_ads/items/${itemId}?date_from=${dateFrom}&date_to=${dateTo}&metrics=clicks,prints,cost,cpc,acos,roas,total_amount`;
+        const metricsResp = await fetch(metricsUrl, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'api-version': '2',
+          },
+        });
+
+        if (metricsResp.ok) {
+          const metricsData = await metricsResp.json();
+          itemsWithMetrics.push({ ...item, ...metricsData, metrics: metricsData.metrics || {} });
+        } else {
+          // Use item without metrics
+          itemsWithMetrics.push({ ...item, metrics: {} });
+        }
+      } catch {
+        itemsWithMetrics.push({ ...item, metrics: {} });
+      }
+    }
+
+    return { items: itemsWithMetrics };
   } catch (error) {
     console.error('[ads-sync] fetchItems error:', error);
-    return { items: [] };
+    return { items: allItems.map(i => ({ ...i, metrics: {} })) };
   }
 }
 
