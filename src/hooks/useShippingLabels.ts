@@ -596,6 +596,61 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         }
       }
 
+      // === PHASE 4.5: Re-sync shipments with ACTIVE statuses (may have changed) ===
+      if (!silent) {
+        setSyncProgress('Atualizando status de envios ativos...');
+      }
+
+      try {
+        // Fetch shipments that have active/pending statuses - these may have changed in ML
+        const ACTIVE_STATUSES = ['ready_to_ship', 'handling', 'pending'];
+        type ActiveShipment = { shipment_id: string };
+        
+        const activeShipments = await fetchAllRowsPaginated<ActiveShipment>(
+          async (offset, limit) => {
+            const { data, error } = await supabase
+              .from('meli_shipments_cache')
+              .select('shipment_id')
+              .eq('seller_id', sellerId)
+              .in('shipment_status', ACTIVE_STATUSES)
+              .order('last_sync_at', { ascending: true })
+              .range(offset, offset + limit - 1);
+            return { data: data as ActiveShipment[] | null, error };
+          }
+        );
+
+        const activeShipmentIds = activeShipments.map(s => s.shipment_id);
+        console.log(`Re-syncing ${activeShipmentIds.length} shipments with active statuses`);
+
+        if (activeShipmentIds.length > 0) {
+          const totalActiveBatches = Math.ceil(activeShipmentIds.length / SHIPMENT_SYNC_BATCH);
+          
+          for (let i = 0; i < activeShipmentIds.length; i += SHIPMENT_SYNC_BATCH) {
+            const batchNum = Math.floor(i / SHIPMENT_SYNC_BATCH) + 1;
+            const batch = activeShipmentIds.slice(i, i + SHIPMENT_SYNC_BATCH);
+            
+            if (!silent) {
+              setSyncProgress(`Atualizando status ${batchNum}/${totalActiveBatches} (${batch.length})`);
+            }
+            
+            const resyncResponse = await supabase.functions.invoke('ml-sync-shipments', {
+              headers,
+              body: { seller_id: sellerId, shipment_ids: batch },
+            });
+            
+            if (resyncResponse.data?.job_id) {
+              await waitForJob(resyncResponse.data.job_id, silent);
+            }
+            
+            if (i + SHIPMENT_SYNC_BATCH < activeShipmentIds.length) {
+              await sleep(500);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error re-syncing active shipments:', err);
+      }
+
       // === PHASE 5: Sync invoices in batches ===
       if (!silent) {
         setSyncPhase('invoices');

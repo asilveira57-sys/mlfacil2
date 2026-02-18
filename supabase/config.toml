@@ -144,6 +144,9 @@ verify_jwt = false
 [functions.ml-token-refresh]
 verify_jwt = false
 
+[functions.shipping-status-sync]
+verify_jwt = false
+
 [functions.clone-anti-catalog-execute]
 verify_jwt = false
 
