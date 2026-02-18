@@ -3135,6 +3135,90 @@ export type Database = {
         }
         Relationships: []
       }
+      config_menu_groups: {
+        Row: {
+          active: boolean
+          created_at: string
+          display_order: number
+          icon: string
+          id: string
+          name: string
+          slug: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          display_order?: number
+          icon?: string
+          id?: string
+          name: string
+          slug: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          display_order?: number
+          icon?: string
+          id?: string
+          name?: string
+          slug?: string
+        }
+        Relationships: []
+      }
+      config_menu_items: {
+        Row: {
+          active: boolean
+          created_at: string
+          display_order: number
+          group_id: string
+          icon: string | null
+          id: string
+          name: string
+          parent_id: string | null
+          route: string | null
+          slug: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          display_order?: number
+          group_id: string
+          icon?: string | null
+          id?: string
+          name: string
+          parent_id?: string | null
+          route?: string | null
+          slug: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          display_order?: number
+          group_id?: string
+          icon?: string | null
+          id?: string
+          name?: string
+          parent_id?: string | null
+          route?: string | null
+          slug?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "config_menu_items_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "config_menu_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "config_menu_items_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "config_menu_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cookie_consents: {
         Row: {
           accepted_at: string
@@ -9149,6 +9233,51 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      role_menu_permissions: {
+        Row: {
+          can_edit: boolean
+          can_manage: boolean
+          can_view: boolean
+          created_at: string
+          id: string
+          menu_item_id: string
+          role_id: string
+        }
+        Insert: {
+          can_edit?: boolean
+          can_manage?: boolean
+          can_view?: boolean
+          created_at?: string
+          id?: string
+          menu_item_id: string
+          role_id: string
+        }
+        Update: {
+          can_edit?: boolean
+          can_manage?: boolean
+          can_view?: boolean
+          created_at?: string
+          id?: string
+          menu_item_id?: string
+          role_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "role_menu_permissions_menu_item_id_fkey"
+            columns: ["menu_item_id"]
+            isOneToOne: false
+            referencedRelation: "config_menu_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "role_menu_permissions_role_id_fkey"
+            columns: ["role_id"]
+            isOneToOne: false
+            referencedRelation: "access_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       seller_category_eligibility: {
         Row: {
