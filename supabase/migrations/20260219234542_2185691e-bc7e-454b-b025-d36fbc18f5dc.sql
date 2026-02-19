@@ -1,0 +1,2 @@
+ALTER TABLE public.ads_period_cache ADD COLUMN IF NOT EXISTS range_key text;
+CREATE INDEX IF NOT EXISTS idx_ads_period_cache_range_key ON public.ads_period_cache(seller_id, range_key) WHERE range_key IS NOT NULL;

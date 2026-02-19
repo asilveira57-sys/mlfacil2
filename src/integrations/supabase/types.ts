@@ -1180,6 +1180,7 @@ export type Database = {
           id: string
           items_data: Json | null
           metric_date: string
+          range_key: string | null
           seller_id: string
           total_clicks: number
           total_conversions: number
@@ -1195,6 +1196,7 @@ export type Database = {
           id?: string
           items_data?: Json | null
           metric_date: string
+          range_key?: string | null
           seller_id: string
           total_clicks?: number
           total_conversions?: number
@@ -1210,6 +1212,7 @@ export type Database = {
           id?: string
           items_data?: Json | null
           metric_date?: string
+          range_key?: string | null
           seller_id?: string
           total_clicks?: number
           total_conversions?: number

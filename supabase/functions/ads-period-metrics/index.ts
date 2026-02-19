@@ -125,7 +125,7 @@ Deno.serve(async (req) => {
       .from('ads_period_cache')
       .select('*')
       .eq('seller_id', seller_id)
-      .eq('metric_date', rangeCacheKey)
+      .eq('range_key', rangeCacheKey)
       .maybeSingle();
 
     let adsAggregate: { total_spent: number; total_revenue: number; total_clicks: number; total_impressions: number; total_conversions: number; items: any[]; campaigns: any[] } | null = null;
@@ -153,7 +153,7 @@ Deno.serve(async (req) => {
           .eq('seller_id', seller_id)
           .gte('metric_date', date_from)
           .lte('metric_date', date_to)
-          .not('metric_date', 'like', 'R:%')
+          .is('range_key', null)
           .range(from, to)
       );
 
@@ -281,15 +281,22 @@ Deno.serve(async (req) => {
         console.warn(`[ads-period-metrics] NOT caching: all metrics zero but ${allItems.length} items found (likely rate limit)`);
       } else {
         // 3f. Save range cache
-        await supabase.from('ads_period_cache').upsert({
+        // Delete old range cache for this seller+range, then insert new
+        await supabase.from('ads_period_cache')
+          .delete()
+          .eq('seller_id', seller_id)
+          .eq('range_key', rangeCacheKey);
+        
+        await supabase.from('ads_period_cache').insert({
           seller_id,
           user_id: user.id,
-          metric_date: rangeCacheKey,
+          metric_date: date_from,
+          range_key: rangeCacheKey,
           total_spent, total_revenue, total_clicks, total_impressions, total_conversions,
           items_data: items,
           campaigns_data: campaigns,
           fetched_at: new Date().toISOString(),
-        }, { onConflict: 'seller_id,metric_date' });
+        });
         console.log(`[ads-period-metrics] Saved range cache: ${rangeCacheKey}`);
       }
 
