@@ -43,6 +43,7 @@ type QuickPeriod = Exclude<PeriodFilter, 'custom'>;
 
 const PERIOD_KEYS: { value: QuickPeriod; labelKey: string }[] = [
   { value: 'all', labelKey: 'all' },
+  { value: 'today_sales', labelKey: 'today_sales' },
   { value: 'today', labelKey: 'today' },
   { value: '7d', labelKey: 'days_7' },
   { value: '15d', labelKey: 'days_15' },
