@@ -509,7 +509,7 @@ async function refreshToken(supabase: any, sellerId: string, userId: string, ref
 }
 
 async function fetchCampaigns(accessToken: string, siteId: string, sellerId: string, dateFrom: string, dateTo: string) {
-  const metrics = 'clicks,prints,cost,cpc,acos,roas,total_amount';
+  const metrics = 'clicks,prints,cost,cpc,acos,roas,total_amount,conversions';
   const allCampaigns: any[] = [];
   let offset = 0;
   const limit = 100;
@@ -569,7 +569,7 @@ async function fetchItemMetricsBatch(accessToken: string, items: any[], dateFrom
         const itemId = item.item_id || item.id;
         if (!itemId) return { ...item, metrics: {} };
         try {
-          const url = `https://api.mercadolibre.com/advertising/product_ads/items/${itemId}?date_from=${dateFrom}&date_to=${dateTo}&metrics=clicks,prints,cost,cpc,acos,roas,total_amount`;
+          const url = `https://api.mercadolibre.com/advertising/product_ads/items/${itemId}?date_from=${dateFrom}&date_to=${dateTo}&metrics=clicks,prints,cost,cpc,acos,roas,total_amount,conversions`;
           const resp = await fetchWithRetry(url, {
             headers: { 'Authorization': `Bearer ${accessToken}`, 'api-version': '2' },
           });
