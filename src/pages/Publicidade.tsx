@@ -30,6 +30,7 @@ import {
   useEnrichedAdsItems,
   useAdsSyncState,
 } from '@/hooks/useAds';
+import { useAdsPeriodMetrics } from '@/hooks/useAdsPeriodMetrics';
 import { AdsFilterState } from '@/types/ads';
 import { 
   LayoutDashboard, 
@@ -112,8 +113,18 @@ export default function Publicidade() {
   const { metrics, loading: metricsLoading } = useAdsDailyMetrics(sellerId || undefined, dateFrom, dateTo);
   const { alerts, dismissAlert, markAsRead, unreadCount } = useAdsAlerts(sellerId || undefined);
   const { items: enrichedItems, loading: itemsLoading } = useEnrichedAdsItems(sellerId || undefined, filters);
-  const summary = useAdsMetricsSummary(enrichedItems);
+  const fallbackSummary = useAdsMetricsSummary(enrichedItems);
   const { syncState, triggerSync } = useAdsSyncState(sellerId || undefined);
+  
+  // Period-based metrics from ML API (real-time)
+  const { summary: periodSummary, loading: periodLoading, error: periodError } = useAdsPeriodMetrics(
+    sellerId || undefined,
+    dateFrom,
+    dateTo,
+  );
+  
+  // Use period metrics when available, fallback to cumulative
+  const summary = periodError ? fallbackSummary : (periodLoading && fallbackSummary.total_spent > 0 ? fallbackSummary : periodSummary);
 
   const activeCampaigns = campaigns.filter(c => c.status === 'active').length;
   const pausedCampaigns = campaigns.filter(c => c.status === 'paused').length;
@@ -260,7 +271,13 @@ export default function Publicidade() {
             </div>
 
             {/* KPI Cards */}
-            <AdsKpiCards summary={summary} />
+            {periodLoading ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-20" />)}
+              </div>
+            ) : (
+              <AdsKpiCards summary={summary} />
+            )}
 
             {/* Charts and Alerts Row */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
