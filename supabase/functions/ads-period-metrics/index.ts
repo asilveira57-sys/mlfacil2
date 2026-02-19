@@ -187,6 +187,17 @@ Deno.serve(async (req) => {
         for (let j = 0; j < batch.length; j++) {
           const date = batch[j];
           const dayData = batchResults[j];
+          
+          // Guard: don't cache if all ADS metrics are zero but items were discovered
+          // This usually means the API failed due to rate limits
+          const hasAnyAdsData = dayData.total_spent > 0 || dayData.total_revenue > 0 || dayData.total_clicks > 0 || dayData.total_impressions > 0 || dayData.total_conversions > 0;
+          const hasItems = dayData.items && dayData.items.length > 0;
+          
+          if (!hasAnyAdsData && hasItems) {
+            console.warn(`[ads-period-metrics] Skipping cache for ${date}: all metrics zero but ${dayData.items.length} items found (likely rate limit)`);
+            continue;
+          }
+          
           const cacheRow = {
             seller_id,
             user_id: user.id,
