@@ -63,7 +63,7 @@ export function useAdsCampaigns(sellerId?: string) {
   return { campaigns, loading, refetch: fetchCampaigns };
 }
 
-export function useAdsItems(sellerId?: string, filters?: AdsFilterState, dateFrom?: string, dateTo?: string) {
+export function useAdsItems(sellerId?: string, filters?: AdsFilterState) {
   const [items, setItems] = useState<AdsItem[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
@@ -92,12 +92,6 @@ export function useAdsItems(sellerId?: string, filters?: AdsFilterState, dateFro
       if (filters?.roas_max !== undefined) {
         query = query.lte('roas', filters.roas_max);
       }
-      if (dateFrom) {
-        query = query.gte('updated_at', dateFrom);
-      }
-      if (dateTo) {
-        query = query.lte('updated_at', dateTo + 'T23:59:59');
-      }
 
       const data = await fetchAllRows<AdsItem>(query.order('spent', { ascending: false }));
       setItems(data);
@@ -107,7 +101,7 @@ export function useAdsItems(sellerId?: string, filters?: AdsFilterState, dateFro
     } finally {
       setLoading(false);
     }
-  }, [sellerId, filters, dateFrom, dateTo, toast]);
+  }, [sellerId, filters, toast]);
 
   useEffect(() => {
     fetchItems();
@@ -268,10 +262,8 @@ export function useAdsSyncState(sellerId?: string) {
   return { syncState, loading, triggerSync };
 }
 
-export function useAdsMetricsSummary(sellerId?: string, dateFrom?: string, dateTo?: string): AdsMetricsSummary {
-  // Keep useAdsDailyMetrics call to maintain stable hook order
-  useAdsDailyMetrics(sellerId, dateFrom, dateTo);
-  const { items } = useAdsItems(sellerId, undefined, dateFrom, dateTo);
+export function useAdsMetricsSummary(sellerId?: string): AdsMetricsSummary {
+  const { items } = useAdsItems(sellerId);
 
   return useMemo(() => {
     const total_spent = items.reduce((sum, i) => sum + (i.spent || 0), 0);
@@ -307,8 +299,8 @@ export function useAdsMetricsSummary(sellerId?: string, dateFrom?: string, dateT
 }
 
 // Enrich items with promotion and margin data
-export function useEnrichedAdsItems(sellerId?: string, filters?: AdsFilterState, dateFrom?: string, dateTo?: string) {
-  const { items, loading } = useAdsItems(sellerId, filters, dateFrom, dateTo);
+export function useEnrichedAdsItems(sellerId?: string, filters?: AdsFilterState) {
+  const { items, loading } = useAdsItems(sellerId, filters);
   const [enrichedItems, setEnrichedItems] = useState<EnrichedAdsItem[]>([]);
 
   useEffect(() => {
