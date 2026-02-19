@@ -152,6 +152,17 @@ export interface AdsMetricsSummary {
   avg_tacos: number;
   products_at_loss: number;
   products_scalable: number;
+  // Seller / Organic metrics
+  total_seller_revenue: number;
+  total_seller_orders: number;
+  total_cancelled_revenue: number;
+  total_cancelled_orders: number;
+  organic_revenue: number;
+  organic_percent: number;
+  paid_percent: number;
+  tacos_total: number;
+  cost_per_sale_general: number;
+  cost_per_sale_ads: number;
 }
 
 export interface AdsFilterState {

@@ -292,6 +292,16 @@ export function useAdsMetricsSummary(items: AdsItem[]): AdsMetricsSummary {
       avg_tacos,
       products_at_loss,
       products_scalable,
+      total_seller_revenue: 0,
+      total_seller_orders: 0,
+      total_cancelled_revenue: 0,
+      total_cancelled_orders: 0,
+      organic_revenue: 0,
+      organic_percent: 0,
+      paid_percent: 0,
+      tacos_total: 0,
+      cost_per_sale_general: 0,
+      cost_per_sale_ads: 0,
     };
   }, [items]);
 }
