@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { MoreHorizontal, Pause, Play, TrendingUp, TrendingDown, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Search, ChevronLeft } from 'lucide-react';
+import { MoreHorizontal, Pause, Play, TrendingUp, TrendingDown, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Search, ChevronLeft, RefreshCw } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -17,18 +17,20 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { AdsCampaign } from '@/types/ads';
+import { AdsCampaign, AdsSyncState } from '@/types/ads';
 import { AdsCampaignProducts } from './AdsCampaignProducts';
 
 interface AdsCampaignsTableProps {
   campaigns: AdsCampaign[];
   onSelectCampaign?: (campaign: AdsCampaign) => void;
+  syncState?: AdsSyncState | null;
+  onTriggerSync?: () => void;
 }
 
 type SortColumn = 'name' | 'status' | 'budget' | 'spent' | 'revenue' | 'cpc' | 'acos' | 'tacos' | 'roas';
 type SortDirection = 'asc' | 'desc';
 
-export function AdsCampaignsTable({ campaigns, onSelectCampaign }: AdsCampaignsTableProps) {
+export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTriggerSync }: AdsCampaignsTableProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortColumn, setSortColumn] = useState<SortColumn>('spent');
@@ -148,15 +150,29 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign }: AdsCampaignsT
 
   return (
     <div className="space-y-3">
-      {/* Search */}
-      <div className="relative max-w-sm">
-        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Buscar campanha, tipo ou MLB..."
-          value={searchQuery}
-          onChange={e => { setSearchQuery(e.target.value); setCurrentPage(0); }}
-          className="pl-9 h-9 text-sm"
-        />
+      {/* Search + Sync */}
+      <div className="flex items-center gap-2">
+        <div className="relative max-w-sm flex-1">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Buscar campanha, tipo ou MLB..."
+            value={searchQuery}
+            onChange={e => { setSearchQuery(e.target.value); setCurrentPage(0); }}
+            className="pl-9 h-9 text-sm"
+          />
+        </div>
+        {onTriggerSync && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 text-xs"
+            onClick={onTriggerSync}
+            disabled={syncState?.status === 'syncing'}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${syncState?.status === 'syncing' ? 'animate-spin' : ''}`} />
+            Sinc
+          </Button>
+        )}
       </div>
 
       <div className="rounded-md border overflow-x-auto">

@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { format, subDays } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -7,9 +8,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { PageContainer } from '@/components/layout/PageContainer';
 import {
-  AdsHeader,
   AdsKpiCards,
   AdsCampaignsTable,
   AdsProductsTable,
@@ -41,10 +43,27 @@ import {
   Calculator,
   Brain,
   Link2,
+  CalendarIcon,
 } from 'lucide-react';
 import { AdsBudgetSimulator } from '@/components/ads/AdsBudgetSimulator';
 import { AdsAiConsultant } from '@/components/ads/AdsAiConsultant';
 import { AdsConnectionsPanel } from '@/components/ads/AdsConnectionsPanel';
+import { cn } from '@/lib/utils';
+
+type DatePeriod = '7d' | '14d' | '30d' | '60d' | '90d' | 'custom';
+
+const periodOptions: { value: DatePeriod; label: string }[] = [
+  { value: '7d', label: '7d' },
+  { value: '14d', label: '14d' },
+  { value: '30d', label: '30d' },
+  { value: '60d', label: '60d' },
+  { value: '90d', label: '90d' },
+  { value: 'custom', label: 'Personalizado' },
+];
+
+const periodDays: Record<string, number> = {
+  '7d': 7, '14d': 14, '30d': 30, '60d': 60, '90d': 90,
+};
 
 export default function Publicidade() {
   const navigate = useNavigate();
@@ -52,38 +71,43 @@ export default function Publicidade() {
   const [workspaceId, setWorkspaceId] = useState<string>();
   const [filters, setFilters] = useState<AdsFilterState>({});
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [datePeriod, setDatePeriod] = useState<DatePeriod>('30d');
+  const [customFrom, setCustomFrom] = useState<Date>();
+  const [customTo, setCustomTo] = useState<Date>();
 
-  // Date range (last 30 days by default)
-  const today = new Date();
-  const thirtyDaysAgo = new Date(today);
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-  const dateFrom = thirtyDaysAgo.toISOString().split('T')[0];
-  const dateTo = today.toISOString().split('T')[0];
+  const { dateFrom, dateTo } = useMemo(() => {
+    const today = new Date();
+    if (datePeriod === 'custom' && customFrom && customTo) {
+      return {
+        dateFrom: format(customFrom, 'yyyy-MM-dd'),
+        dateTo: format(customTo, 'yyyy-MM-dd'),
+      };
+    }
+    const days = periodDays[datePeriod] || 30;
+    return {
+      dateFrom: format(subDays(today, days), 'yyyy-MM-dd'),
+      dateTo: format(today, 'yyyy-MM-dd'),
+    };
+  }, [datePeriod, customFrom, customTo]);
 
   // Load workspace for task integration
   useEffect(() => {
     const loadWorkspace = async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        navigate('/auth');
-        return;
-      }
-
+      if (!user) { navigate('/auth'); return; }
       const prefsResult = await supabase
         .from('user_preferences')
         .select('active_workspace_id')
         .eq('user_id', user.id)
         .single();
-
       if (prefsResult.data?.active_workspace_id) {
         setWorkspaceId(prefsResult.data.active_workspace_id);
       }
     };
-
     loadWorkspace();
   }, [navigate]);
 
-  // Hooks for data - use sellerId from context
+  // Hooks for data
   const { campaigns, loading: campaignsLoading } = useAdsCampaigns(sellerId || undefined);
   const { metrics, loading: metricsLoading } = useAdsDailyMetrics(sellerId || undefined, dateFrom, dateTo);
   const { alerts, dismissAlert, markAsRead, unreadCount } = useAdsAlerts(sellerId || undefined);
@@ -91,44 +115,27 @@ export default function Publicidade() {
   const summary = useAdsMetricsSummary(sellerId || undefined, dateFrom, dateTo);
   const { syncState, triggerSync } = useAdsSyncState(sellerId || undefined);
 
-  // Summary cards data
   const activeCampaigns = campaigns.filter(c => c.status === 'active').length;
   const pausedCampaigns = campaigns.filter(c => c.status === 'paused').length;
-
-  // Loading state from context
   const loading = accountLoading || !initialized;
 
-  const headerContent = (
-    <div className="flex items-center gap-2">
-      {unreadCount > 0 && (
-        <Badge variant="destructive" className="gap-1">
-          <AlertCircle className="h-3 w-3" />
-          {unreadCount} alertas
-        </Badge>
-      )}
-      <Button 
-        variant="outline" 
-        size="sm" 
-        onClick={triggerSync}
-        disabled={syncState?.status === 'syncing'}
-      >
-        <RefreshCw className={`h-4 w-4 mr-2 ${syncState?.status === 'syncing' ? 'animate-spin' : ''}`} />
-        Sincronizar
-      </Button>
-    </div>
-  );
+  // Header without sync button
+  const headerContent = unreadCount > 0 ? (
+    <Badge variant="destructive" className="gap-1">
+      <AlertCircle className="h-3 w-3" />
+      {unreadCount} alertas
+    </Badge>
+  ) : null;
 
   if (loading) {
     return (
       <PageContainer title="Mercado ADS" subtitle="Carregando...">
         <div className="p-6 space-y-6">
           <Skeleton className="h-16 w-full" />
-          <div className="grid grid-cols-6 gap-4">
-            {[...Array(6)].map((_, i) => (
-              <Skeleton key={i} className="h-24" />
-            ))}
+          <div className="grid grid-cols-4 gap-3">
+            {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-20" />)}
           </div>
-          <Skeleton className="h-[400px]" />
+          <Skeleton className="h-[300px]" />
         </div>
       </PageContainer>
     );
@@ -149,9 +156,7 @@ export default function Publicidade() {
               </CardDescription>
             </CardHeader>
             <CardContent className="text-center">
-              <Button onClick={() => navigate('/settings')}>
-                Conectar Mercado Livre
-              </Button>
+              <Button onClick={() => navigate('/settings')}>Conectar Mercado Livre</Button>
             </CardContent>
           </Card>
         </div>
@@ -203,7 +208,6 @@ export default function Publicidade() {
               </TabsTrigger>
             </TabsList>
 
-            {/* Sync status info */}
             {syncState?.last_sync_at && (
               <p className="text-xs text-muted-foreground">
                 Última sync: {new Date(syncState.last_sync_at).toLocaleString('pt-BR')}
@@ -212,14 +216,56 @@ export default function Publicidade() {
           </div>
 
           {/* Dashboard Tab */}
-          <TabsContent value="dashboard" className="space-y-6 mt-6">
+          <TabsContent value="dashboard" className="space-y-4 mt-4">
+            {/* Period Filter */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {periodOptions.map(opt => (
+                <Button
+                  key={opt.value}
+                  variant={datePeriod === opt.value ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => setDatePeriod(opt.value)}
+                >
+                  {opt.label}
+                </Button>
+              ))}
+              {datePeriod === 'custom' && (
+                <div className="flex items-center gap-1.5">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" size="sm" className={cn("h-7 text-xs gap-1", !customFrom && "text-muted-foreground")}>
+                        <CalendarIcon className="h-3 w-3" />
+                        {customFrom ? format(customFrom, 'dd/MM/yy') : 'De'}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar mode="single" selected={customFrom} onSelect={setCustomFrom} className="p-3 pointer-events-auto" />
+                    </PopoverContent>
+                  </Popover>
+                  <span className="text-xs text-muted-foreground">→</span>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" size="sm" className={cn("h-7 text-xs gap-1", !customTo && "text-muted-foreground")}>
+                        <CalendarIcon className="h-3 w-3" />
+                        {customTo ? format(customTo, 'dd/MM/yy') : 'Até'}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar mode="single" selected={customTo} onSelect={setCustomTo} className="p-3 pointer-events-auto" />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              )}
+            </div>
+
             {/* KPI Cards */}
             <AdsKpiCards summary={summary} />
 
             {/* Charts and Alerts Row */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <div className="lg:col-span-2">
-                <AdsSpendRevenueChart metrics={metrics} />
+                <AdsSpendRevenueChart metrics={metrics} campaigns={campaigns} />
               </div>
               <div>
                 <AdsAlertsPanel
@@ -231,42 +277,42 @@ export default function Publicidade() {
             </div>
 
             {/* Quick Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <Card>
-                <CardContent className="pt-6">
+                <CardContent className="py-4 px-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-muted-foreground">Campanhas Ativas</p>
-                      <p className="text-2xl font-bold">{activeCampaigns}</p>
+                      <p className="text-xs text-muted-foreground">Campanhas Ativas</p>
+                      <p className="text-xl font-bold">{activeCampaigns}</p>
                     </div>
-                    <div className="h-12 w-12 rounded-full bg-success/10 flex items-center justify-center">
-                      <TrendingUp className="h-6 w-6 text-success" />
+                    <div className="h-10 w-10 rounded-full bg-success/10 flex items-center justify-center">
+                      <TrendingUp className="h-5 w-5 text-success" />
                     </div>
                   </div>
                 </CardContent>
               </Card>
               <Card>
-                <CardContent className="pt-6">
+                <CardContent className="py-4 px-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-muted-foreground">Campanhas Pausadas</p>
-                      <p className="text-2xl font-bold">{pausedCampaigns}</p>
+                      <p className="text-xs text-muted-foreground">Campanhas Pausadas</p>
+                      <p className="text-xl font-bold">{pausedCampaigns}</p>
                     </div>
-                    <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center">
-                      <List className="h-6 w-6 text-muted-foreground" />
+                    <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
+                      <List className="h-5 w-5 text-muted-foreground" />
                     </div>
                   </div>
                 </CardContent>
               </Card>
               <Card>
-                <CardContent className="pt-6">
+                <CardContent className="py-4 px-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-muted-foreground">Produtos Anunciados</p>
-                      <p className="text-2xl font-bold">{enrichedItems.length}</p>
+                      <p className="text-xs text-muted-foreground">Produtos Anunciados</p>
+                      <p className="text-xl font-bold">{enrichedItems.length}</p>
                     </div>
-                    <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
-                      <Package className="h-6 w-6 text-primary" />
+                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                      <Package className="h-5 w-5 text-primary" />
                     </div>
                   </div>
                 </CardContent>
@@ -275,10 +321,10 @@ export default function Publicidade() {
 
             {/* Top Campaigns Preview */}
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
+              <CardHeader className="flex flex-row items-center justify-between py-3">
                 <div>
-                  <CardTitle className="text-lg">Campanhas Ativas</CardTitle>
-                  <CardDescription>Top 5 campanhas por gasto</CardDescription>
+                  <CardTitle className="text-base">Campanhas Ativas</CardTitle>
+                  <CardDescription className="text-xs">Top 5 campanhas por gasto</CardDescription>
                 </div>
                 <Button variant="ghost" size="sm" onClick={() => setActiveTab('campaigns')}>
                   Ver todas
@@ -300,16 +346,24 @@ export default function Publicidade() {
           <TabsContent value="campaigns" className="space-y-6 mt-6">
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">Todas as Campanhas</CardTitle>
-                <CardDescription>
-                  {campaigns.length} campanhas encontradas • {activeCampaigns} ativas
-                </CardDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-lg">Todas as Campanhas</CardTitle>
+                    <CardDescription>
+                      {campaigns.length} campanhas encontradas • {activeCampaigns} ativas
+                    </CardDescription>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
                 {campaignsLoading ? (
                   <Skeleton className="h-[400px]" />
                 ) : (
-                  <AdsCampaignsTable campaigns={campaigns} />
+                  <AdsCampaignsTable
+                    campaigns={campaigns}
+                    syncState={syncState}
+                    onTriggerSync={triggerSync}
+                  />
                 )}
               </CardContent>
             </Card>
@@ -339,9 +393,7 @@ export default function Publicidade() {
                   <CardContent className="py-4">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium">{label}</span>
-                      <Badge variant="secondary" className={color}>
-                        {count}
-                      </Badge>
+                      <Badge variant="secondary" className={color}>{count}</Badge>
                     </div>
                   </CardContent>
                 </Card>
