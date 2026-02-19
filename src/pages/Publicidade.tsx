@@ -111,7 +111,7 @@ export default function Publicidade() {
   const { campaigns, loading: campaignsLoading } = useAdsCampaigns(sellerId || undefined);
   const { metrics, loading: metricsLoading } = useAdsDailyMetrics(sellerId || undefined, dateFrom, dateTo);
   const { alerts, dismissAlert, markAsRead, unreadCount } = useAdsAlerts(sellerId || undefined);
-  const { items: enrichedItems, loading: itemsLoading } = useEnrichedAdsItems(sellerId || undefined, filters);
+  const { items: enrichedItems, loading: itemsLoading } = useEnrichedAdsItems(sellerId || undefined, filters, dateFrom, dateTo);
   const summary = useAdsMetricsSummary(sellerId || undefined, dateFrom, dateTo);
   const { syncState, triggerSync } = useAdsSyncState(sellerId || undefined);
 
