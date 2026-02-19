@@ -6,7 +6,7 @@ import { toZonedTime, fromZonedTime } from 'date-fns-tz';
 import { startOfDay, endOfDay, subDays, subHours } from 'date-fns';
 
 export type FinalStatus = 'pronta' | 'aguardando_nf' | 'reimprimir' | 'full' | 'enviado' | 'outros' | 'pendente_sync' | 'all';
-export type PeriodFilter = 'all' | 'today' | '7d' | '15d' | '30d' | 'custom';
+export type PeriodFilter = 'all' | 'today_sales' | 'today' | '7d' | '15d' | '30d' | 'custom';
 export type SyncPhase = 'idle' | 'orders' | 'shipments' | 'invoices' | 'done';
 export type SortField = 'created_at_meli' | 'buyer_nickname' | 'final_status';
 export type SortDirection = 'asc' | 'desc';
@@ -232,6 +232,15 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       case 'all':
         // "Todos" - no date limit, fetch everything
         return { dateFrom: null, dateTo: null };
+      case 'today_sales': {
+        // "Hoje" (vendas) - filter by created_at_meli of current day
+        const todayStart = startOfDay(nowBrasilia);
+        const todayEnd = endOfDay(nowBrasilia);
+        return {
+          dateFrom: fromZonedTime(todayStart, BRASILIA_TZ).toISOString(),
+          dateTo: fromZonedTime(todayEnd, BRASILIA_TZ).toISOString(),
+        };
+      }
       case 'today':
         // "Envios de hoje" - handled by p_period_type='today_dispatch' in RPC
         // No date range needed, RPC filters by estimated_handling_limit
