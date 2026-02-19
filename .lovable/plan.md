@@ -1,86 +1,69 @@
 
-# Correcao do Bug de Resolucao de Seller Concorrente
 
-## Problema Identificado
+# Corrigir Filtro "Envios de Hoje" - Separar Postagem vs Vendas
 
-Na funcao `extractItemIdFromInput` do edge function `competitor-seller-sync`, o primeiro regex pattern:
-
-```text
-/MLB[-]?(\d{8,})/i
-```
-
-Captura apenas os **digitos** no grupo 1 (ex: `1347574279`), descartando o prefixo "MLB". O resultado e uma chamada a `/items/1347574279` que retorna 404, quando o correto seria `/items/MLB1347574279`.
-
-O mesmo problema ocorre no quarto pattern `/\/(MLB[-]?\d{8,})/i` que captura corretamente, mas como o primeiro pattern faz match antes, nunca e alcancado.
-
-## URL do usuario como exemplo
-
-```text
-https://www.mercadolivre.com.br/.../up/MLBU1403875470?pdp_filters=item_id:MLB1347574279
-```
-
-- Pattern `item_id[=:]?(MLB\d+)` do `extractMeliId.ts` (modulo existente) capturaria `MLB1347574279` corretamente
-- Mas o `extractItemIdFromInput` da edge function usa patterns diferentes e quebrados
+## Problema
+O filtro "Envios de hoje" esta usando a data de venda (`created_at_meli`) como fallback, mostrando apenas pedidos vendidos hoje. O correto e mostrar todos os pedidos que precisam ser despachados hoje (prazo de postagem hoje ou atrasados), independente de quando foram vendidos.
 
 ## Solucao
 
-Corrigir os patterns de regex para capturar o ID completo com prefixo "MLB":
+### 1. Corrigir a funcao SQL `get_shipping_orders`
 
-```text
-Antes: /MLB[-]?(\d{8,})/i       → grupo 1 = "1347574279"
-Depois: /(MLB[-]?\d{8,})/i      → grupo 1 = "MLB1347574279"
+Alterar o bloco `today_dispatch` para remover o filtro de `created_at_meli` do fallback. A logica correta:
+- Se `estimated_handling_limit` existe: mostrar se o prazo e hoje ou esta atrasado
+- Se `estimated_handling_limit` e NULL: mostrar se o envio tem status ativo (`ready_to_ship`, `handling`, `pending`) sem restringir por data de venda
+
+Remover a linha `AND o.created_at_meli >= v_today_start` do fallback, pois pedidos vendidos ha dias podem ter prazo de despacho hoje.
+
+### 2. Adicionar filtro "Hoje" (vendas) separado
+
+Adicionar um novo periodo `today_sales` nos filtros do frontend que filtra por `created_at_meli` do dia atual. Isso da ao usuario dois botoes distintos:
+- **Envios de hoje** = postagem/despacho do dia (filtro de shipment)
+- **Hoje** = vendas realizadas hoje (filtro de data)
+
+### 3. Atualizar o frontend
+
+**`src/hooks/useShippingLabels.ts`**:
+- Adicionar `today_sales` ao tipo `PeriodFilter`
+- No `getDateRange`, tratar `today_sales` como filtro de data do dia atual (inicio e fim do dia)
+
+**`src/components/shipping/ShippingFilters.tsx`**:
+- Adicionar botao "Hoje" na lista de periodos, posicionado entre "Todos" e "Envios de hoje"
+
+**Arquivos de traducao** (`en`, `pt-BR`, `es`):
+- Adicionar chave `today_sales` com "Hoje" / "Today" / "Hoy"
+
+---
+
+## Detalhes Tecnicos
+
+### Migracao SQL
+
+```sql
+-- Corrigir fallback do today_dispatch: remover filtro de created_at_meli
+-- Fallback para shipments sem deadline: mostrar se status ativo, sem restringir data de venda
+AND (
+  p_period_type != 'today_dispatch'
+  OR (
+    (s.estimated_handling_limit IS NOT NULL AND s.estimated_handling_limit <= v_today_end)
+    OR
+    (s.estimated_handling_limit IS NULL 
+     AND s.shipment_status IN ('ready_to_ship','handling','pending'))
+  )
+)
 ```
 
-### Mudancas especificas no arquivo `supabase/functions/competitor-seller-sync/index.ts`:
+### Mudancas no Frontend
 
-1. **Reordenar e corrigir os patterns** para priorizar `item_id` (que ja aparece na URL do usuario como `item_id:MLB1347574279`):
+- `PeriodFilter`: `'all' | 'today_sales' | 'today' | '7d' | '15d' | '30d' | 'custom'`
+- `PERIOD_KEYS` no filtro: adicionar `{ value: 'today_sales', labelKey: 'today_sales' }` entre "Todos" e "Envios de hoje"
+- `getDateRange` para `today_sales`: retorna inicio e fim do dia atual em Brasilia
 
-```text
-Patterns corrigidos (em ordem de prioridade):
-  1. /item_id[=:]?(MLB\d+)/i          -- item_id param (mais especifico)
-  2. /pdp_filters=item_id[=:]?(MLB\d+)/i  -- pdp_filters (URL do usuario)
-  3. /\/(MLB[-]?\d{8,})/i             -- MLB direto no path
-  4. /(MLB[-]?\d{8,})/i               -- MLB em qualquer lugar
-```
+### Arquivos Modificados
+- **Migracao SQL** (nova) - corrigir funcao `get_shipping_orders`
+- `src/hooks/useShippingLabels.ts` - adicionar `today_sales`, ajustar tipo e logica
+- `src/components/shipping/ShippingFilters.tsx` - adicionar botao "Hoje"
+- `src/locales/pt-BR/shipping.json` - adicionar `"today_sales": "Hoje"`
+- `src/locales/en/shipping.json` - adicionar `"today_sales": "Today"`
+- `src/locales/es/shipping.json` - adicionar `"today_sales": "Hoy"`
 
-2. **Adicionar fallback MLBU**: Se nenhum MLB for encontrado, tentar extrair MLBU e resolver via `/products/{MLBU_ID}` ou buscar o item vinculado.
-
-3. **Normalizar o resultado**: garantir que o ID retornado sempre comeca com "MLB" (ou "MLBU") e nao apenas digitos.
-
-## Arquivos Modificados
-
-- `supabase/functions/competitor-seller-sync/index.ts` -- corrigir `extractItemIdFromInput`
-
-## Secao Tecnica
-
-A funcao corrigida ficara assim:
-
-```typescript
-function extractItemIdFromInput(input: string): string | null {
-  const patterns = [
-    /item_id[=:]?(MLB\d{8,})/i,
-    /pdp_filters=item_id[=:]?(MLB\d{8,})/i,
-    /\/(MLB[-]?\d{8,})/i,
-    /(MLB[-]?\d{8,})/i,
-  ];
-  for (const p of patterns) {
-    const m = input.match(p);
-    if (m && m[1]) {
-      return m[1].replace(/-/g, '').toUpperCase();
-    }
-  }
-  if (/^MLB\d{8,}$/i.test(input.trim())) {
-    return input.trim().replace(/-/g, '').toUpperCase();
-  }
-  // MLBU fallback
-  const mlbuMatch = input.match(/(MLBU\d+)/i);
-  if (mlbuMatch) {
-    return mlbuMatch[1].toUpperCase();
-  }
-  return null;
-}
-```
-
-E na funcao `resolveSellerFromInput`, adicionar tratamento para IDs MLBU (buscar item vinculado via catalog endpoint ou search).
-
-Apos o deploy, a URL do usuario `item_id:MLB1347574279` sera extraida corretamente e a chamada `/items/MLB1347574279` retornara o seller_id do concorrente.
