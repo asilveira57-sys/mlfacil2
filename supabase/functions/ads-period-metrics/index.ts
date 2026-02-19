@@ -7,7 +7,8 @@ const corsHeaders = {
 
 const ML_APP_ID = Deno.env.get('ML_APP_ID')!;
 const ML_SECRET_KEY = Deno.env.get('ML_SECRET_KEY')!;
-const RATE_LIMIT_DELAY = 250;
+const BATCH_SIZE = 10; // Parallel requests per batch
+const BATCH_DELAY = 300; // Delay between batches
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -55,6 +56,7 @@ Deno.serve(async (req) => {
       });
     }
 
+    const startTime = Date.now();
     console.log(`[ads-period-metrics] Fetching metrics for ${seller_id} from ${date_from} to ${date_to}`);
 
     // Get ML account tokens
@@ -86,113 +88,23 @@ Deno.serve(async (req) => {
 
     // Discover advertiser_id
     const advertiserId = await getAdvertiserId(accessToken, seller_id);
-    if (!advertiserId) {
-      return new Response(JSON.stringify({ error: 'Advertiser ID not found' }), {
-        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
 
-    // Fetch campaigns with period metrics
-    const campaignsData = await fetchCampaigns(accessToken, siteId, advertiserId, date_from, date_to);
-    console.log(`[ads-period-metrics] Fetched ${campaignsData.length} campaigns`);
+    // Fetch campaigns and discover items in parallel
+    const [campaignsData, allItems] = await Promise.all([
+      fetchCampaigns(accessToken, siteId, advertiserId || seller_id, date_from, date_to),
+      discoverItems(accessToken, seller_id),
+    ]);
+    
+    console.log(`[ads-period-metrics] Fetched ${campaignsData.length} campaigns, ${allItems.length} items discovered in ${Date.now() - startTime}ms`);
 
-    // Fetch items with period metrics
-    await sleep(RATE_LIMIT_DELAY);
-    const itemsData = await fetchItems(accessToken, seller_id, date_from, date_to);
-    console.log(`[ads-period-metrics] Fetched ${itemsData.length} items`);
+    // Fetch metrics for all items in parallel batches
+    const itemsWithMetrics = await fetchItemMetricsBatch(accessToken, allItems, date_from, date_to);
+    console.log(`[ads-period-metrics] Fetched metrics for ${itemsWithMetrics.length} items in ${Date.now() - startTime}ms`);
 
     // Aggregate summary
-    let total_spent = 0, total_revenue = 0, total_clicks = 0, total_impressions = 0, total_conversions = 0;
+    const result = buildResult(campaignsData, itemsWithMetrics, date_from, date_to);
 
-    for (const item of itemsData) {
-      const m = item.metrics || {};
-      total_spent += m.cost || m.spent || 0;
-      total_revenue += m.total_amount || m.revenue || 0;
-      total_clicks += m.clicks || 0;
-      total_impressions += m.prints || m.impressions || 0;
-      total_conversions += m.conversions || 0;
-    }
-
-    // If items have no metrics, try campaigns
-    if (total_spent === 0 && campaignsData.length > 0) {
-      for (const c of campaignsData) {
-        const m = c.metrics || {};
-        total_spent += m.cost || m.spent || 0;
-        total_revenue += m.total_amount || m.revenue || 0;
-        total_clicks += m.clicks || 0;
-        total_impressions += m.prints || m.impressions || 0;
-        total_conversions += m.conversions || 0;
-      }
-    }
-
-    const avg_acos = total_revenue > 0 ? (total_spent / total_revenue) * 100 : 0;
-    const avg_roas = total_spent > 0 ? total_revenue / total_spent : 0;
-    const avg_cpc = total_clicks > 0 ? total_spent / total_clicks : 0;
-    const avg_tacos = total_revenue > 0 ? (total_spent / total_revenue) * 100 : 0;
-
-    // Count products at loss / scalable from items
-    let products_at_loss = 0, products_scalable = 0;
-    for (const item of itemsData) {
-      const m = item.metrics || {};
-      const spent = m.cost || m.spent || 0;
-      const revenue = m.total_amount || m.revenue || 0;
-      const acos = revenue > 0 ? spent / revenue : 0;
-      const roas = spent > 0 ? revenue / spent : 0;
-      if (acos > 0.30) products_at_loss++;
-      if (roas > 3 && (m.conversions || 0) > 0) products_scalable++;
-    }
-
-    const campaigns = campaignsData.map(c => {
-      const m = c.metrics || {};
-      return {
-        ml_campaign_id: String(c.id || c.campaign_id),
-        name: c.name || `Campaign ${c.id || c.campaign_id}`,
-        status: c.status,
-        spent: m.cost || m.spent || 0,
-        revenue: m.total_amount || m.revenue || 0,
-        clicks: m.clicks || 0,
-        impressions: m.prints || m.impressions || 0,
-        conversions: m.conversions || 0,
-      };
-    });
-
-    const items = itemsData.map(item => {
-      const m = item.metrics || {};
-      const spent = m.cost || m.spent || 0;
-      const revenue = m.total_amount || m.revenue || 0;
-      return {
-        item_id: item.item_id || item.id,
-        title: item.title || null,
-        status: item.status,
-        spent,
-        revenue,
-        clicks: m.clicks || 0,
-        impressions: m.prints || m.impressions || 0,
-        conversions: m.conversions || 0,
-        acos: revenue > 0 ? spent / revenue : null,
-        roas: spent > 0 ? revenue / spent : null,
-      };
-    });
-
-    const result = {
-      total_spent,
-      total_revenue,
-      total_clicks,
-      total_impressions,
-      total_conversions,
-      avg_acos,
-      avg_roas,
-      avg_cpc,
-      avg_tacos,
-      products_at_loss,
-      products_scalable,
-      campaigns,
-      items,
-      date_from,
-      date_to,
-    };
-
-    console.log(`[ads-period-metrics] Summary: spent=${total_spent}, revenue=${total_revenue}, items=${itemsData.length}`);
+    console.log(`[ads-period-metrics] Done in ${Date.now() - startTime}ms: spent=${result.total_spent}, revenue=${result.total_revenue}, items=${itemsWithMetrics.length}`);
 
     return new Response(JSON.stringify(result), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -206,15 +118,92 @@ Deno.serve(async (req) => {
   }
 });
 
+function buildResult(campaignsData: any[], itemsData: any[], date_from: string, date_to: string) {
+  let total_spent = 0, total_revenue = 0, total_clicks = 0, total_impressions = 0, total_conversions = 0;
+
+  for (const item of itemsData) {
+    const m = item.metrics || {};
+    total_spent += m.cost || m.spent || 0;
+    total_revenue += m.total_amount || m.revenue || 0;
+    total_clicks += m.clicks || 0;
+    total_impressions += m.prints || m.impressions || 0;
+    total_conversions += m.conversions || 0;
+  }
+
+  // If items have no metrics, try campaigns
+  if (total_spent === 0 && campaignsData.length > 0) {
+    for (const c of campaignsData) {
+      const m = c.metrics || {};
+      total_spent += m.cost || m.spent || 0;
+      total_revenue += m.total_amount || m.revenue || 0;
+      total_clicks += m.clicks || 0;
+      total_impressions += m.prints || m.impressions || 0;
+      total_conversions += m.conversions || 0;
+    }
+  }
+
+  const avg_acos = total_revenue > 0 ? (total_spent / total_revenue) * 100 : 0;
+  const avg_roas = total_spent > 0 ? total_revenue / total_spent : 0;
+  const avg_cpc = total_clicks > 0 ? total_spent / total_clicks : 0;
+  const avg_tacos = total_revenue > 0 ? (total_spent / total_revenue) * 100 : 0;
+
+  let products_at_loss = 0, products_scalable = 0;
+  for (const item of itemsData) {
+    const m = item.metrics || {};
+    const spent = m.cost || m.spent || 0;
+    const revenue = m.total_amount || m.revenue || 0;
+    const acos = revenue > 0 ? spent / revenue : 0;
+    const roas = spent > 0 ? revenue / spent : 0;
+    if (acos > 0.30) products_at_loss++;
+    if (roas > 3 && (m.conversions || 0) > 0) products_scalable++;
+  }
+
+  const campaigns = campaignsData.map(c => {
+    const m = c.metrics || {};
+    return {
+      ml_campaign_id: String(c.id || c.campaign_id),
+      name: c.name || `Campaign ${c.id || c.campaign_id}`,
+      status: c.status,
+      spent: m.cost || m.spent || 0,
+      revenue: m.total_amount || m.revenue || 0,
+      clicks: m.clicks || 0,
+      impressions: m.prints || m.impressions || 0,
+      conversions: m.conversions || 0,
+    };
+  });
+
+  const items = itemsData.map(item => {
+    const m = item.metrics || {};
+    const spent = m.cost || m.spent || 0;
+    const revenue = m.total_amount || m.revenue || 0;
+    return {
+      item_id: item.item_id || item.id,
+      title: item.title || null,
+      status: item.status,
+      spent,
+      revenue,
+      clicks: m.clicks || 0,
+      impressions: m.prints || m.impressions || 0,
+      conversions: m.conversions || 0,
+      acos: revenue > 0 ? spent / revenue : null,
+      roas: spent > 0 ? revenue / spent : null,
+    };
+  });
+
+  return {
+    total_spent, total_revenue, total_clicks, total_impressions, total_conversions,
+    avg_acos, avg_roas, avg_cpc, avg_tacos,
+    products_at_loss, products_scalable,
+    campaigns, items, date_from, date_to,
+  };
+}
+
 async function getAdvertiserId(accessToken: string, sellerId: string): Promise<string | null> {
   try {
     const response = await fetch(`https://api.mercadolibre.com/advertising/advertisers?product_id=PADS`, {
       headers: { 'Authorization': `Bearer ${accessToken}` },
     });
-    if (!response.ok) {
-      await response.text();
-      return sellerId;
-    }
+    if (!response.ok) { await response.text(); return sellerId; }
     const data = await response.json();
     const advertisers = data.advertisers || data || [];
     if (Array.isArray(advertisers) && advertisers.length > 0) {
@@ -273,7 +262,7 @@ async function fetchCampaigns(accessToken: string, siteId: string, sellerId: str
       offset += limit;
       if (total > 0 && offset >= total) break;
       if (!data.paging && !data.total && results.length < limit) break;
-      await sleep(RATE_LIMIT_DELAY);
+      await sleep(200);
     }
   } catch (error) {
     console.error('[ads-period-metrics] fetchCampaigns error:', error);
@@ -281,8 +270,8 @@ async function fetchCampaigns(accessToken: string, siteId: string, sellerId: str
   return allCampaigns;
 }
 
-async function fetchItems(accessToken: string, sellerId: string, dateFrom: string, dateTo: string) {
-  // First discover all ads
+// Discover all ads (without metrics) - fast
+async function discoverItems(accessToken: string, sellerId: string) {
   const allItems: any[] = [];
   let offset = 0;
   const limit = 100;
@@ -299,34 +288,47 @@ async function fetchItems(accessToken: string, sellerId: string, dateFrom: strin
       const total = data.paging?.total || 0;
       offset += limit;
       if (offset >= total) break;
-      await sleep(RATE_LIMIT_DELAY);
+      await sleep(200);
     }
-
-    // Now fetch metrics for each item with the specific date range
-    const itemsWithMetrics: any[] = [];
-    for (const item of allItems) {
-      const itemId = item.item_id || item.id;
-      if (!itemId) continue;
-      try {
-        await sleep(RATE_LIMIT_DELAY);
-        const metricsUrl = `https://api.mercadolibre.com/advertising/product_ads/items/${itemId}?date_from=${dateFrom}&date_to=${dateTo}&metrics=clicks,prints,cost,cpc,acos,roas,total_amount`;
-        const metricsResp = await fetch(metricsUrl, {
-          headers: { 'Authorization': `Bearer ${accessToken}`, 'api-version': '2' },
-        });
-        if (metricsResp.ok) {
-          const metricsData = await metricsResp.json();
-          itemsWithMetrics.push({ ...item, ...metricsData, metrics: metricsData.metrics || {} });
-        } else {
-          await metricsResp.text();
-          itemsWithMetrics.push({ ...item, metrics: {} });
-        }
-      } catch {
-        itemsWithMetrics.push({ ...item, metrics: {} });
-      }
-    }
-    return itemsWithMetrics;
   } catch (error) {
-    console.error('[ads-period-metrics] fetchItems error:', error);
-    return allItems.map(i => ({ ...i, metrics: {} }));
+    console.error('[ads-period-metrics] discoverItems error:', error);
   }
+  return allItems;
+}
+
+// Fetch metrics for items in parallel batches of BATCH_SIZE
+async function fetchItemMetricsBatch(accessToken: string, items: any[], dateFrom: string, dateTo: string) {
+  const results: any[] = [];
+  
+  for (let i = 0; i < items.length; i += BATCH_SIZE) {
+    const batch = items.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.all(
+      batch.map(async (item) => {
+        const itemId = item.item_id || item.id;
+        if (!itemId) return { ...item, metrics: {} };
+        try {
+          const url = `https://api.mercadolibre.com/advertising/product_ads/items/${itemId}?date_from=${dateFrom}&date_to=${dateTo}&metrics=clicks,prints,cost,cpc,acos,roas,total_amount`;
+          const resp = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'api-version': '2' },
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            return { ...item, ...data, metrics: data.metrics || {} };
+          }
+          await resp.text();
+          return { ...item, metrics: {} };
+        } catch {
+          return { ...item, metrics: {} };
+        }
+      })
+    );
+    results.push(...batchResults);
+    
+    // Delay between batches to respect rate limits
+    if (i + BATCH_SIZE < items.length) {
+      await sleep(BATCH_DELAY);
+    }
+  }
+  
+  return results;
 }
