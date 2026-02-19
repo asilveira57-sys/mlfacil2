@@ -10925,6 +10925,7 @@ export type Database = {
           parent_module_id: string | null
           route: string | null
           sort_order: number
+          status: string
           updated_at: string
         }
         Insert: {
@@ -10940,6 +10941,7 @@ export type Database = {
           parent_module_id?: string | null
           route?: string | null
           sort_order?: number
+          status?: string
           updated_at?: string
         }
         Update: {
@@ -10955,6 +10957,7 @@ export type Database = {
           parent_module_id?: string | null
           route?: string | null
           sort_order?: number
+          status?: string
           updated_at?: string
         }
         Relationships: [
