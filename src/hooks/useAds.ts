@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { fetchAllRows } from '@/lib/supabaseHelpers';
 import type {
   AdsCampaign,
   AdsAdGroup,
@@ -22,14 +23,14 @@ export function useAdsCampaigns(sellerId?: string) {
     if (!sellerId) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('ads_campaigns')
-        .select('*')
-        .eq('seller_id', sellerId)
-        .order('spent_total', { ascending: false });
-
-      if (error) throw error;
-      setCampaigns((data as AdsCampaign[]) || []);
+      const data = await fetchAllRows<AdsCampaign>(
+        supabase
+          .from('ads_campaigns')
+          .select('*')
+          .eq('seller_id', sellerId)
+          .order('spent_total', { ascending: false })
+      );
+      setCampaigns(data);
     } catch (err) {
       console.error('[useAdsCampaigns] Error:', err);
       toast({ title: 'Erro ao carregar campanhas', variant: 'destructive' });
@@ -92,9 +93,8 @@ export function useAdsItems(sellerId?: string, filters?: AdsFilterState) {
         query = query.lte('roas', filters.roas_max);
       }
 
-      const { data, error } = await query.order('spent', { ascending: false });
-      if (error) throw error;
-      setItems((data as AdsItem[]) || []);
+      const data = await fetchAllRows<AdsItem>(query.order('spent', { ascending: false }));
+      setItems(data);
     } catch (err) {
       console.error('[useAdsItems] Error:', err);
       toast({ title: 'Erro ao carregar itens de ADS', variant: 'destructive' });
@@ -128,9 +128,8 @@ export function useAdsDailyMetrics(sellerId?: string, dateFrom?: string, dateTo?
         if (dateFrom) query = query.gte('metric_date', dateFrom);
         if (dateTo) query = query.lte('metric_date', dateTo);
 
-        const { data, error } = await query;
-        if (error) throw error;
-        setMetrics((data as AdsDailyMetric[]) || []);
+        const data = await fetchAllRows<AdsDailyMetric>(query);
+        setMetrics(data);
       } catch (err) {
         console.error('[useAdsDailyMetrics] Error:', err);
       } finally {
@@ -152,15 +151,15 @@ export function useAdsAlerts(sellerId?: string) {
     if (!sellerId) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('ads_alerts')
-        .select('*')
-        .eq('seller_id', sellerId)
-        .eq('is_dismissed', false)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setAlerts((data as AdsAlert[]) || []);
+      const data = await fetchAllRows<AdsAlert>(
+        supabase
+          .from('ads_alerts')
+          .select('*')
+          .eq('seller_id', sellerId)
+          .eq('is_dismissed', false)
+          .order('created_at', { ascending: false })
+      );
+      setAlerts(data);
     } catch (err) {
       console.error('[useAdsAlerts] Error:', err);
     } finally {
