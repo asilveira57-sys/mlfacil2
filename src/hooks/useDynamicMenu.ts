@@ -36,7 +36,7 @@ export function useDynamicMenu(): UseDynamicMenuReturn {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('system_modules')
-        .select('id, key, name, layer, parent_module_id, sort_order, icon_key, route, is_active, is_internal_only')
+        .select('id, key, name, layer, parent_module_id, sort_order, icon_key, route, is_active, is_internal_only, status')
         .eq('is_active', true)
         .order('sort_order', { ascending: true });
 
@@ -72,7 +72,7 @@ export function useDynamicMenu(): UseDynamicMenuReturn {
         icon_key: m.icon_key || 'Settings',
         route: m.route,
         is_active: m.is_active,
-        status: 'active',
+        status: (m as any).status || 'active',
         label: m.name,
         children: [],
       };
