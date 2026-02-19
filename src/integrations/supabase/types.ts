@@ -1172,6 +1172,54 @@ export type Database = {
           },
         ]
       }
+      ads_period_cache: {
+        Row: {
+          campaigns_data: Json | null
+          created_at: string
+          fetched_at: string
+          id: string
+          items_data: Json | null
+          metric_date: string
+          seller_id: string
+          total_clicks: number
+          total_conversions: number
+          total_impressions: number
+          total_revenue: number
+          total_spent: number
+          user_id: string
+        }
+        Insert: {
+          campaigns_data?: Json | null
+          created_at?: string
+          fetched_at?: string
+          id?: string
+          items_data?: Json | null
+          metric_date: string
+          seller_id: string
+          total_clicks?: number
+          total_conversions?: number
+          total_impressions?: number
+          total_revenue?: number
+          total_spent?: number
+          user_id: string
+        }
+        Update: {
+          campaigns_data?: Json | null
+          created_at?: string
+          fetched_at?: string
+          id?: string
+          items_data?: Json | null
+          metric_date?: string
+          seller_id?: string
+          total_clicks?: number
+          total_conversions?: number
+          total_impressions?: number
+          total_revenue?: number
+          total_spent?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
       ads_snapshots: {
         Row: {
           connection_id: string
