@@ -1,95 +1,109 @@
 
+# Cache de Metricas Diarias de ADS
 
-# Plano: Filtros de Data Funcionais no Dashboard ADS
+## Problema Atual
 
-## Problema Identificado
+Cada vez que o usuario muda o filtro de data (7d, 30d, 90d), a edge function `ads-period-metrics` faz chamadas em tempo real para a API do ML buscando metricas de **todos os itens** (165+), levando ~30 segundos. A tabela `ads_daily_metrics` existe mas tem **0 registros**.
 
-A tabela `ads_items` armazena **totais acumulados dos ultimos 30 dias** vindos da API do Mercado Livre. Nao existe granularidade diaria nessa tabela -- todos os registros mostram o mesmo valor independente do periodo selecionado. A tabela `ads_daily_metrics` existe mas esta **vazia** (0 registros).
+## Estrategia: Cache por Dia no Banco
 
-O sync atual (edge function `ads-sync`) busca metricas com `date_from` e `date_to` fixos em 30 dias e grava um unico registro por campanha em `ads_daily_metrics` (na data de hoje), perdendo a informacao diaria.
-
-## Solucao Proposta
-
-Criar uma **nova edge function** (`ads-period-metrics`) que consulta a API do Mercado Livre em tempo real com o periodo selecionado pelo usuario, retornando as metricas agregadas. Os KPIs do dashboard serao alimentados por essa funcao em vez de dados estaticos.
-
-### Etapa 1: Edge Function `ads-period-metrics`
-
-Nova funcao backend que:
-- Recebe `seller_id`, `date_from`, `date_to`
-- Autentica o usuario e obtem o token ML
-- Chama a API de campanhas e items do ML com o periodo solicitado (mesmos endpoints que o `ads-sync` ja usa, mas com datas dinamicas)
-- Retorna metricas agregadas: gasto, receita, cliques, impressoes, conversoes, ACOS, ROAS, CPC
+Dados de dias passados **nunca mudam**. Podemos buscar da API apenas uma vez e guardar permanentemente. Apenas o dia de hoje precisa ser atualizado.
 
 ```text
-Frontend (periodo: 7d)
+Requisicao: 90 dias
     |
     v
-Edge Function ads-period-metrics
-    |-- date_from=2026-02-12, date_to=2026-02-19
+1. Buscar no banco: dias ja cacheados (ex: 85 dias)
+2. Buscar da API: apenas dias faltantes (ex: 5 dias)
+3. Salvar novos dias no banco
+4. Retornar tudo agregado
     |
     v
-ML API /product_ads/campaigns/search?date_from=...&date_to=...
-ML API /product_ads/items/{id}?date_from=...&date_to=...
-    |
-    v
-Retorna { total_spent, total_revenue, total_clicks, ... }
+Tempo: ~2s (banco) + ~3s (5 dias da API) = ~5s
+Proxima vez mesmo periodo: ~2s (tudo do banco)
 ```
 
-### Etapa 2: Novo Hook `useAdsPeriodMetrics`
+## Mudancas Tecnicas
 
-Hook React que:
-- Chama a edge function `ads-period-metrics` quando o periodo muda
-- Retorna um `AdsMetricsSummary` compativel com o componente `AdsKpiCards`
-- Mostra estado de loading enquanto busca
-- Faz cache do resultado para evitar chamadas repetidas ao trocar abas
+### 1. Nova Tabela: `ads_period_cache`
 
-### Etapa 3: Atualizar Dashboard
-
-- `AdsKpiCards` passa a usar os dados do `useAdsPeriodMetrics` (metricas do periodo) em vez do `useAdsMetricsSummary` (totais cumulativos)
-- Os cards de "Campanhas Ativas/Pausadas" e "Produtos Anunciados" continuam usando dados locais (contagem, nao depende de periodo)
-- O grafico de Gasto vs Receita continua usando `ads_daily_metrics` + fallback por campanha
-
-### Etapa 4: Melhorar o Sync para Popular `ads_daily_metrics`
-
-Modificar a funcao `ads-sync` para buscar metricas com granularidade diaria (iterando dia a dia ou usando endpoint de breakdown) e popular a tabela `ads_daily_metrics` corretamente. Isso permitira que o grafico de serie temporal tambem funcione com filtros de data.
-
----
-
-## Detalhes Tecnicos
-
-### Edge Function `ads-period-metrics`
+Tabela simplificada para cache de metricas agregadas por dia/seller (sem dependencia de campaign_id que a `ads_daily_metrics` exige como FK):
 
 ```text
-POST /ads-period-metrics
-Body: { seller_id, date_from, date_to }
-Response: {
-  total_spent, total_revenue, total_clicks,
-  total_impressions, total_conversions,
-  avg_acos, avg_roas, avg_cpc, avg_tacos,
-  products_at_loss, products_scalable,
-  campaigns: [{ name, spent, revenue, clicks, ... }],
-  items: [{ item_id, title, spent, revenue, acos, roas, ... }]
-}
+ads_period_cache
+- seller_id (text)
+- user_id (uuid)
+- metric_date (date)
+- total_spent (numeric)
+- total_revenue (numeric)
+- total_clicks (integer)
+- total_impressions (integer)
+- total_conversions (integer)
+- items_data (jsonb) -- detalhes por item
+- campaigns_data (jsonb) -- detalhes por campanha
+- fetched_at (timestamptz)
+- UNIQUE(seller_id, metric_date)
 ```
 
-A funcao reutiliza a logica existente de `ads-sync` (refresh de token, endpoints da API ML) sem duplicar codigo, importando helpers compartilhados.
+Motivo de nao usar `ads_daily_metrics`: ela exige `campaign_id` (FK obrigatorio), fragmentando os dados por campanha. O cache precisa ser agregado por dia.
 
-### Hook `useAdsPeriodMetrics`
+### 2. Edge Function `ads-period-metrics` (Refatorar)
 
-- Parametros: `sellerId`, `dateFrom`, `dateTo`
-- Usa `useCallback` com debounce para evitar chamadas excessivas ao mudar periodo
-- Retorna `{ summary, items, campaigns, loading, error }`
+Nova logica:
 
-### Mudancas em `Publicidade.tsx`
+1. Recebe `seller_id`, `date_from`, `date_to`
+2. Busca no `ads_period_cache` todos os dias do periodo
+3. Identifica dias faltantes (nunca cacheados) + dia de hoje (sempre refetch)
+4. Para dias faltantes: busca da API ML **apenas esses dias**, um a um ou em lote
+5. Salva novos dias no cache
+6. Agrega todos os dias e retorna o resultado
 
-- Substituir `useAdsMetricsSummary(enrichedItems)` por `useAdsPeriodMetrics(sellerId, dateFrom, dateTo)`
-- Os KPI cards recebem `periodSummary` em vez de `summary`
-- A tabela de campanhas no dashboard tambem usa dados do periodo
+Logica de invalidacao:
+- Dias anteriores a hoje: cache permanente (dados nao mudam)
+- Dia de hoje: sempre refetch (dados podem mudar ao longo do dia)
+- TTL opcional de 1h para dia de hoje (evitar chamadas excessivas)
 
-### Impacto
+### 3. Backfill Inicial (Edge Function `ads-backfill-cache`)
 
-- Sem migracao de banco necessaria (tabelas ja existem)
-- KPIs passam a refletir o periodo selecionado exatamente como no Mercado Livre
-- Performance aceitavel (chamada API ML leva 1-3 segundos)
-- Fallback para dados cumulativos se a chamada falhar
+Nova edge function que:
+- Busca os ultimos 365 dias, dia a dia
+- Processa em lotes de 7 dias por execucao (respeitar timeout de 50s)
+- Usa estado resumivel (`ads_backfill_state`) para continuar de onde parou
+- Pode ser disparado manualmente ou via cron diario
 
+### 4. Hook Frontend (Ajustar `useAdsPeriodMetrics`)
+
+Sem mudancas na interface do hook. A melhoria e transparente -- o backend responde mais rapido porque usa cache.
+
+## Fluxo Apos Implementacao
+
+```text
+PRIMEIRA VEZ (backfill):
+  cron/manual -> ads-backfill-cache
+  Dia 1: busca dias 1-7 da API, salva no cache
+  Dia 2: busca dias 8-14, salva...
+  ...ate 365 dias
+
+USO DIARIO:
+  Usuario seleciona "90d"
+  -> Edge function busca 90 dias do banco (~100ms)
+  -> Refetch apenas hoje da API (~3s)
+  -> Retorna em ~3s total
+
+  Usuario muda para "30d"
+  -> Tudo no banco, retorna em ~500ms
+```
+
+## Resultado Esperado
+
+- Primeira carga apos backfill: **2-3 segundos** (vs 30s atual)
+- Troca de filtro com dados cacheados: **menos de 1 segundo**
+- Dados historicos precisos e permanentes
+- Apenas o dia corrente consulta a API ML
+
+## Arquivos Afetados
+
+1. **Nova migracao SQL**: criar tabela `ads_period_cache` com RLS
+2. **`supabase/functions/ads-period-metrics/index.ts`**: refatorar para usar cache-first
+3. **Novo `supabase/functions/ads-backfill-cache/index.ts`**: backfill de 365 dias com estado resumivel
+4. **`src/hooks/useAdsPeriodMetrics.ts`**: sem mudancas (transparente)
