@@ -7,6 +7,12 @@ export interface PeriodDailyPoint {
   date: string;
   spent: number;
   revenue: number;
+  seller_revenue: number;
+  organic_revenue: number;
+  seller_orders: number;
+  clicks: number;
+  impressions: number;
+  conversions: number;
 }
 
 interface PeriodMetricsResult {
@@ -28,6 +34,16 @@ const emptySummary: AdsMetricsSummary = {
   avg_tacos: 0,
   products_at_loss: 0,
   products_scalable: 0,
+  total_seller_revenue: 0,
+  total_seller_orders: 0,
+  total_cancelled_revenue: 0,
+  total_cancelled_orders: 0,
+  organic_revenue: 0,
+  organic_percent: 0,
+  paid_percent: 0,
+  tacos_total: 0,
+  cost_per_sale_general: 0,
+  cost_per_sale_ads: 0,
 };
 
 export function useAdsPeriodMetrics(
@@ -54,7 +70,6 @@ export function useAdsPeriodMetrics(
       return;
     }
 
-    // Abort previous request
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -85,6 +100,16 @@ export function useAdsPeriodMetrics(
         avg_tacos: data.avg_tacos || 0,
         products_at_loss: data.products_at_loss || 0,
         products_scalable: data.products_scalable || 0,
+        total_seller_revenue: data.total_seller_revenue || 0,
+        total_seller_orders: data.total_seller_orders || 0,
+        total_cancelled_revenue: data.total_cancelled_revenue || 0,
+        total_cancelled_orders: data.total_cancelled_orders || 0,
+        organic_revenue: data.organic_revenue || 0,
+        organic_percent: data.organic_percent || 0,
+        paid_percent: data.paid_percent || 0,
+        tacos_total: data.tacos_total || 0,
+        cost_per_sale_general: data.cost_per_sale_general || 0,
+        cost_per_sale_ads: data.cost_per_sale_ads || 0,
       };
 
       cacheRef.current.set(cacheKey, result);
@@ -95,7 +120,6 @@ export function useAdsPeriodMetrics(
       const msg = err?.message || 'Erro ao buscar métricas';
       console.error('[useAdsPeriodMetrics] Error:', msg);
       setError(msg);
-      // Don't toast on every error, only set error state
     } finally {
       if (!controller.signal.aborted) {
         setLoading(false);

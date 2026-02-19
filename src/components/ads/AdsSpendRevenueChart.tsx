@@ -1,5 +1,6 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -21,17 +22,26 @@ interface AdsSpendRevenueChartProps {
   periodDaily?: PeriodDailyPoint[];
 }
 
+type ChartView = 'spend_revenue' | 'organic_paid';
+
 export function AdsSpendRevenueChart({ metrics, campaigns, periodDaily }: AdsSpendRevenueChartProps) {
+  const [view, setView] = useState<ChartView>('spend_revenue');
+
+  const hasSellerData = useMemo(() => {
+    if (!periodDaily) return false;
+    return periodDaily.some(d => (d.seller_revenue || 0) > 0);
+  }, [periodDaily]);
+
   const timeSeriesData = useMemo(() => {
-    // Prefer periodDaily from cache if available
     if (periodDaily && periodDaily.length > 0) {
       return periodDaily.map(d => ({
         date: new Date(d.date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
         gasto: d.spent,
-        receita: d.revenue,
+        receita_ads: d.revenue,
+        faturamento: d.seller_revenue || 0,
+        organico: d.organic_revenue || 0,
       }));
     }
-    // Fallback to ads_daily_metrics
     const byDate = new Map<string, { spent: number; revenue: number }>();
     for (const m of metrics) {
       const existing = byDate.get(m.metric_date) || { spent: 0, revenue: 0 };
@@ -44,7 +54,9 @@ export function AdsSpendRevenueChart({ metrics, campaigns, periodDaily }: AdsSpe
       .map(([date, values]) => ({
         date: new Date(date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
         gasto: values.spent,
-        receita: values.revenue,
+        receita_ads: values.revenue,
+        faturamento: 0,
+        organico: 0,
       }))
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [metrics, periodDaily]);
@@ -92,37 +104,99 @@ export function AdsSpendRevenueChart({ metrics, campaigns, periodDaily }: AdsSpe
     return (
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-lg">Gasto vs Receita (Diário)</CardTitle>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <CardTitle className="text-lg">
+              {view === 'spend_revenue' ? 'Gasto vs Receita (Diário)' : 'Orgânico vs Publicidade'}
+            </CardTitle>
+            {hasSellerData && (
+              <div className="flex gap-1">
+                <Button
+                  variant={view === 'spend_revenue' ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-6 text-[10px] px-2"
+                  onClick={() => setView('spend_revenue')}
+                >
+                  Gasto vs Receita
+                </Button>
+                <Button
+                  variant={view === 'organic_paid' ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-6 text-[10px] px-2"
+                  onClick={() => setView('organic_paid')}
+                >
+                  Orgânico vs Pago
+                </Button>
+              </div>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={280}>
-            <AreaChart data={timeSeriesData}>
-              <defs>
-                <linearGradient id="gastoGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="receitaGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-              <XAxis dataKey="date" tick={{ fontSize: 11 }} className="text-muted-foreground" />
-              <YAxis tickFormatter={formatCurrency} tick={{ fontSize: 11 }} className="text-muted-foreground" />
-              <Tooltip
-                formatter={(value: number) => formatCurrency(value)}
-                labelFormatter={(label) => `Data: ${label}`}
-                contentStyle={{
-                  backgroundColor: 'hsl(var(--background))',
-                  border: '1px solid hsl(var(--border))',
-                  borderRadius: '8px',
-                }}
-              />
-              <Legend />
-              <Area type="monotone" dataKey="gasto" name="Gasto" stroke="hsl(var(--destructive))" fill="url(#gastoGradient)" strokeWidth={2} />
-              <Area type="monotone" dataKey="receita" name="Receita" stroke="hsl(var(--primary))" fill="url(#receitaGradient)" strokeWidth={2} />
-            </AreaChart>
+            {view === 'spend_revenue' ? (
+              <AreaChart data={timeSeriesData}>
+                <defs>
+                  <linearGradient id="gastoGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="receitaAdsGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="hsl(210 100% 50%)" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="hsl(210 100% 50%)" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="faturamentoGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis dataKey="date" tick={{ fontSize: 11 }} className="text-muted-foreground" />
+                <YAxis tickFormatter={formatCurrency} tick={{ fontSize: 11 }} className="text-muted-foreground" />
+                <Tooltip
+                  formatter={(value: number) => formatCurrency(value)}
+                  labelFormatter={(label) => `Data: ${label}`}
+                  contentStyle={{
+                    backgroundColor: 'hsl(var(--background))',
+                    border: '1px solid hsl(var(--border))',
+                    borderRadius: '8px',
+                  }}
+                />
+                <Legend />
+                {hasSellerData && (
+                  <Area type="monotone" dataKey="faturamento" name="Fat. Total" stroke="hsl(var(--primary))" fill="url(#faturamentoGradient)" strokeWidth={1} strokeDasharray="5 3" />
+                )}
+                <Area type="monotone" dataKey="gasto" name="Gasto" stroke="hsl(var(--destructive))" fill="url(#gastoGradient)" strokeWidth={2} />
+                <Area type="monotone" dataKey="receita_ads" name="Receita ADS" stroke="hsl(210 100% 50%)" fill="url(#receitaAdsGradient)" strokeWidth={2} />
+              </AreaChart>
+            ) : (
+              <AreaChart data={timeSeriesData}>
+                <defs>
+                  <linearGradient id="organicoGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="hsl(var(--success))" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="hsl(var(--success))" stopOpacity={0.05} />
+                  </linearGradient>
+                  <linearGradient id="pagoGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="hsl(210 100% 50%)" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="hsl(210 100% 50%)" stopOpacity={0.05} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis dataKey="date" tick={{ fontSize: 11 }} className="text-muted-foreground" />
+                <YAxis tickFormatter={formatCurrency} tick={{ fontSize: 11 }} className="text-muted-foreground" />
+                <Tooltip
+                  formatter={(value: number) => formatCurrency(value)}
+                  labelFormatter={(label) => `Data: ${label}`}
+                  contentStyle={{
+                    backgroundColor: 'hsl(var(--background))',
+                    border: '1px solid hsl(var(--border))',
+                    borderRadius: '8px',
+                  }}
+                />
+                <Legend />
+                <Area type="monotone" dataKey="organico" name="Orgânico" stackId="revenue" stroke="hsl(var(--success))" fill="url(#organicoGradient)" strokeWidth={2} />
+                <Area type="monotone" dataKey="receita_ads" name="Publicidade" stackId="revenue" stroke="hsl(210 100% 50%)" fill="url(#pagoGradient)" strokeWidth={2} />
+                <Area type="monotone" dataKey="gasto" name="Gasto ADS" stroke="hsl(var(--destructive))" fill="none" strokeWidth={2} strokeDasharray="5 3" />
+              </AreaChart>
+            )}
           </ResponsiveContainer>
         </CardContent>
       </Card>
