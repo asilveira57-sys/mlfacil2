@@ -7,11 +7,29 @@ const corsHeaders = {
 
 const ML_APP_ID = Deno.env.get('ML_APP_ID')!;
 const ML_SECRET_KEY = Deno.env.get('ML_SECRET_KEY')!;
-const BATCH_SIZE = 10; // Parallel requests per batch
-const BATCH_DELAY = 300; // Delay between batches
+const BATCH_SIZE = 10;
+const BATCH_DELAY = 300;
+const TODAY_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function getDateRange(dateFrom: string, dateTo: string): string[] {
+  const dates: string[] = [];
+  const start = new Date(dateFrom + 'T00:00:00Z');
+  const end = new Date(dateTo + 'T00:00:00Z');
+  for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+    dates.push(d.toISOString().slice(0, 10));
+  }
+  return dates;
+}
+
+function getTodayBRT(): string {
+  const now = new Date();
+  // BRT = UTC-3
+  const brt = new Date(now.getTime() - 3 * 60 * 60 * 1000);
+  return brt.toISOString().slice(0, 10);
 }
 
 Deno.serve(async (req) => {
@@ -43,9 +61,7 @@ Deno.serve(async (req) => {
     // ML API Access Gate
     const { assertMlApiAccess } = await import("../_shared/ml-api-gate.ts");
     const gate = await assertMlApiAccess(supabase, user.id);
-    if (!gate.allowed) {
-      return gate.response!;
-    }
+    if (!gate.allowed) return gate.response!;
 
     const body = await req.json().catch(() => ({}));
     const { seller_id, date_from, date_to } = body;
@@ -57,54 +73,115 @@ Deno.serve(async (req) => {
     }
 
     const startTime = Date.now();
-    console.log(`[ads-period-metrics] Fetching metrics for ${seller_id} from ${date_from} to ${date_to}`);
+    const today = getTodayBRT();
+    const allDates = getDateRange(date_from, date_to);
 
-    // Get ML account tokens
-    const { data: account, error: accError } = await supabase
-      .from('ml_accounts')
-      .select('access_token, refresh_token, token_expires_at, country_id')
-      .eq('ml_user_id', seller_id)
-      .eq('user_id', user.id)
-      .single();
+    console.log(`[ads-period-metrics] Cache-first for ${seller_id}: ${allDates.length} days (${date_from} to ${date_to})`);
 
-    if (accError || !account) {
-      return new Response(JSON.stringify({ error: 'Account not found' }), {
-        status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+    // 1. Fetch cached days from DB
+    const { data: cachedRows } = await supabase
+      .from('ads_period_cache')
+      .select('*')
+      .eq('seller_id', seller_id)
+      .gte('metric_date', date_from)
+      .lte('metric_date', date_to);
+
+    const cachedMap = new Map<string, any>();
+    for (const row of cachedRows || []) {
+      cachedMap.set(row.metric_date, row);
     }
 
-    const siteId = account.country_id || 'MLB';
-
-    // Refresh token if expired
-    let accessToken = account.access_token;
-    if (new Date(account.token_expires_at) < new Date()) {
-      accessToken = await refreshToken(supabase, seller_id, user.id, account.refresh_token);
-      if (!accessToken) {
-        return new Response(JSON.stringify({ error: 'Failed to refresh token' }), {
-          status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+    // 2. Identify missing dates + today (always refetch if stale)
+    const missingDates: string[] = [];
+    for (const date of allDates) {
+      const cached = cachedMap.get(date);
+      if (!cached) {
+        missingDates.push(date);
+      } else if (date === today) {
+        // Refetch today if older than TTL
+        const fetchedAge = Date.now() - new Date(cached.fetched_at).getTime();
+        if (fetchedAge > TODAY_CACHE_TTL_MS) {
+          missingDates.push(date);
+        }
       }
     }
 
-    // Discover advertiser_id
-    const advertiserId = await getAdvertiserId(accessToken, seller_id);
+    console.log(`[ads-period-metrics] Cached: ${cachedMap.size}, Missing: ${missingDates.length} in ${Date.now() - startTime}ms`);
 
-    // Fetch campaigns and discover items in parallel
-    const [campaignsData, allItems] = await Promise.all([
-      fetchCampaigns(accessToken, siteId, advertiserId || seller_id, date_from, date_to),
-      discoverItems(accessToken, seller_id),
-    ]);
-    
-    console.log(`[ads-period-metrics] Fetched ${campaignsData.length} campaigns, ${allItems.length} items discovered in ${Date.now() - startTime}ms`);
+    // 3. Fetch missing dates from ML API
+    if (missingDates.length > 0) {
+      // Get ML account tokens
+      const { data: account } = await supabase
+        .from('ml_accounts')
+        .select('access_token, refresh_token, token_expires_at, country_id')
+        .eq('ml_user_id', seller_id)
+        .eq('user_id', user.id)
+        .single();
 
-    // Fetch metrics for all items in parallel batches
-    const itemsWithMetrics = await fetchItemMetricsBatch(accessToken, allItems, date_from, date_to);
-    console.log(`[ads-period-metrics] Fetched metrics for ${itemsWithMetrics.length} items in ${Date.now() - startTime}ms`);
+      if (!account) {
+        return new Response(JSON.stringify({ error: 'Account not found' }), {
+          status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
 
-    // Aggregate summary
-    const result = buildResult(campaignsData, itemsWithMetrics, date_from, date_to);
+      let accessToken = account.access_token;
+      if (new Date(account.token_expires_at) < new Date()) {
+        accessToken = await refreshToken(supabase, seller_id, user.id, account.refresh_token);
+        if (!accessToken) {
+          return new Response(JSON.stringify({ error: 'Failed to refresh token' }), {
+            status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
 
-    console.log(`[ads-period-metrics] Done in ${Date.now() - startTime}ms: spent=${result.total_spent}, revenue=${result.total_revenue}, items=${itemsWithMetrics.length}`);
+      const siteId = account.country_id || 'MLB';
+      const advertiserId = await getAdvertiserId(accessToken, seller_id);
+
+      // Fetch each missing day and cache it
+      for (let i = 0; i < missingDates.length; i += 3) {
+        const batch = missingDates.slice(i, i + 3);
+        const batchResults = await Promise.all(
+          batch.map(date => fetchDayMetrics(accessToken, siteId, advertiserId || seller_id, seller_id, date))
+        );
+        
+        // Save to cache
+        for (let j = 0; j < batch.length; j++) {
+          const date = batch[j];
+          const dayData = batchResults[j];
+          const cacheRow = {
+            seller_id,
+            user_id: user.id,
+            metric_date: date,
+            total_spent: dayData.total_spent,
+            total_revenue: dayData.total_revenue,
+            total_clicks: dayData.total_clicks,
+            total_impressions: dayData.total_impressions,
+            total_conversions: dayData.total_conversions,
+            items_data: dayData.items,
+            campaigns_data: dayData.campaigns,
+            fetched_at: new Date().toISOString(),
+          };
+
+          await supabase
+            .from('ads_period_cache')
+            .upsert(cacheRow, { onConflict: 'seller_id,metric_date' });
+
+          cachedMap.set(date, cacheRow);
+        }
+
+        if (i + 3 < missingDates.length) await sleep(500);
+      }
+    }
+
+    console.log(`[ads-period-metrics] All data ready in ${Date.now() - startTime}ms`);
+
+    // 4. Aggregate all days
+    const result = aggregateFromCache(Array.from(cachedMap.values()).filter(r => {
+      const d = r.metric_date;
+      return d >= date_from && d <= date_to;
+    }), date_from, date_to);
+
+    console.log(`[ads-period-metrics] Done in ${Date.now() - startTime}ms: spent=${result.total_spent}, revenue=${result.total_revenue}`);
 
     return new Response(JSON.stringify(result), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -118,19 +195,99 @@ Deno.serve(async (req) => {
   }
 });
 
-function buildResult(campaignsData: any[], itemsData: any[], date_from: string, date_to: string) {
+function aggregateFromCache(rows: any[], dateFrom: string, dateTo: string) {
   let total_spent = 0, total_revenue = 0, total_clicks = 0, total_impressions = 0, total_conversions = 0;
+  const allItems = new Map<string, any>();
+  const allCampaigns = new Map<string, any>();
 
-  for (const item of itemsData) {
-    const m = item.metrics || {};
-    total_spent += m.cost || m.spent || 0;
-    total_revenue += m.total_amount || m.revenue || 0;
-    total_clicks += m.clicks || 0;
-    total_impressions += m.prints || m.impressions || 0;
-    total_conversions += m.conversions || 0;
+  for (const row of rows) {
+    total_spent += Number(row.total_spent) || 0;
+    total_revenue += Number(row.total_revenue) || 0;
+    total_clicks += Number(row.total_clicks) || 0;
+    total_impressions += Number(row.total_impressions) || 0;
+    total_conversions += Number(row.total_conversions) || 0;
+
+    // Aggregate items across days
+    const items = row.items_data || [];
+    for (const item of items) {
+      const key = item.item_id || item.id;
+      if (!key) continue;
+      const existing = allItems.get(key) || { item_id: key, title: item.title, status: item.status, spent: 0, revenue: 0, clicks: 0, impressions: 0, conversions: 0 };
+      existing.spent += item.spent || 0;
+      existing.revenue += item.revenue || 0;
+      existing.clicks += item.clicks || 0;
+      existing.impressions += item.impressions || 0;
+      existing.conversions += item.conversions || 0;
+      allItems.set(key, existing);
+    }
+
+    // Aggregate campaigns across days
+    const campaigns = row.campaigns_data || [];
+    for (const c of campaigns) {
+      const key = c.ml_campaign_id || c.id;
+      if (!key) continue;
+      const existing = allCampaigns.get(key) || { ml_campaign_id: key, name: c.name, status: c.status, spent: 0, revenue: 0, clicks: 0, impressions: 0, conversions: 0 };
+      existing.spent += c.spent || 0;
+      existing.revenue += c.revenue || 0;
+      existing.clicks += c.clicks || 0;
+      existing.impressions += c.impressions || 0;
+      existing.conversions += c.conversions || 0;
+      allCampaigns.set(key, existing);
+    }
   }
 
-  // If items have no metrics, try campaigns
+  const items = Array.from(allItems.values()).map(item => ({
+    ...item,
+    acos: item.revenue > 0 ? item.spent / item.revenue : null,
+    roas: item.spent > 0 ? item.revenue / item.spent : null,
+  }));
+
+  const campaigns = Array.from(allCampaigns.values());
+
+  let products_at_loss = 0, products_scalable = 0;
+  for (const item of items) {
+    if (item.acos !== null && item.acos > 0.30) products_at_loss++;
+    if (item.roas !== null && item.roas > 3 && item.conversions > 0) products_scalable++;
+  }
+
+  return {
+    total_spent, total_revenue, total_clicks, total_impressions, total_conversions,
+    avg_acos: total_revenue > 0 ? (total_spent / total_revenue) * 100 : 0,
+    avg_roas: total_spent > 0 ? total_revenue / total_spent : 0,
+    avg_cpc: total_clicks > 0 ? total_spent / total_clicks : 0,
+    avg_tacos: total_revenue > 0 ? (total_spent / total_revenue) * 100 : 0,
+    products_at_loss, products_scalable,
+    campaigns, items, date_from: dateFrom, date_to: dateTo,
+  };
+}
+
+// Fetch metrics for a single day
+async function fetchDayMetrics(accessToken: string, siteId: string, advertiserId: string, sellerId: string, date: string) {
+  const [campaignsData, allItems] = await Promise.all([
+    fetchCampaigns(accessToken, siteId, advertiserId, date, date),
+    discoverItems(accessToken, sellerId),
+  ]);
+
+  const itemsWithMetrics = await fetchItemMetricsBatch(accessToken, allItems, date, date);
+
+  let total_spent = 0, total_revenue = 0, total_clicks = 0, total_impressions = 0, total_conversions = 0;
+  
+  const items = itemsWithMetrics.map(item => {
+    const m = item.metrics || {};
+    const spent = m.cost || m.spent || 0;
+    const revenue = m.total_amount || m.revenue || 0;
+    const clicks = m.clicks || 0;
+    const impressions = m.prints || m.impressions || 0;
+    const conversions = m.conversions || 0;
+    total_spent += spent;
+    total_revenue += revenue;
+    total_clicks += clicks;
+    total_impressions += impressions;
+    total_conversions += conversions;
+    return { item_id: item.item_id || item.id, title: item.title, status: item.status, spent, revenue, clicks, impressions, conversions };
+  });
+
+  // Fallback to campaign metrics if items have no data
   if (total_spent === 0 && campaignsData.length > 0) {
     for (const c of campaignsData) {
       const m = c.metrics || {};
@@ -140,22 +297,6 @@ function buildResult(campaignsData: any[], itemsData: any[], date_from: string, 
       total_impressions += m.prints || m.impressions || 0;
       total_conversions += m.conversions || 0;
     }
-  }
-
-  const avg_acos = total_revenue > 0 ? (total_spent / total_revenue) * 100 : 0;
-  const avg_roas = total_spent > 0 ? total_revenue / total_spent : 0;
-  const avg_cpc = total_clicks > 0 ? total_spent / total_clicks : 0;
-  const avg_tacos = total_revenue > 0 ? (total_spent / total_revenue) * 100 : 0;
-
-  let products_at_loss = 0, products_scalable = 0;
-  for (const item of itemsData) {
-    const m = item.metrics || {};
-    const spent = m.cost || m.spent || 0;
-    const revenue = m.total_amount || m.revenue || 0;
-    const acos = revenue > 0 ? spent / revenue : 0;
-    const roas = spent > 0 ? revenue / spent : 0;
-    if (acos > 0.30) products_at_loss++;
-    if (roas > 3 && (m.conversions || 0) > 0) products_scalable++;
   }
 
   const campaigns = campaignsData.map(c => {
@@ -172,30 +313,7 @@ function buildResult(campaignsData: any[], itemsData: any[], date_from: string, 
     };
   });
 
-  const items = itemsData.map(item => {
-    const m = item.metrics || {};
-    const spent = m.cost || m.spent || 0;
-    const revenue = m.total_amount || m.revenue || 0;
-    return {
-      item_id: item.item_id || item.id,
-      title: item.title || null,
-      status: item.status,
-      spent,
-      revenue,
-      clicks: m.clicks || 0,
-      impressions: m.prints || m.impressions || 0,
-      conversions: m.conversions || 0,
-      acos: revenue > 0 ? spent / revenue : null,
-      roas: spent > 0 ? revenue / spent : null,
-    };
-  });
-
-  return {
-    total_spent, total_revenue, total_clicks, total_impressions, total_conversions,
-    avg_acos, avg_roas, avg_cpc, avg_tacos,
-    products_at_loss, products_scalable,
-    campaigns, items, date_from, date_to,
-  };
+  return { total_spent, total_revenue, total_clicks, total_impressions, total_conversions, items, campaigns };
 }
 
 async function getAdvertiserId(accessToken: string, sellerId: string): Promise<string | null> {
@@ -210,9 +328,7 @@ async function getAdvertiserId(accessToken: string, sellerId: string): Promise<s
       return String(advertisers[0].advertiser_id || advertisers[0].id || sellerId);
     }
     return sellerId;
-  } catch {
-    return sellerId;
-  }
+  } catch { return sellerId; }
 }
 
 async function refreshToken(supabase: any, sellerId: string, userId: string, refreshTokenValue: string): Promise<string | null> {
@@ -236,9 +352,7 @@ async function refreshToken(supabase: any, sellerId: string, userId: string, ref
       token_expires_at: expiresAt,
     }).eq('ml_user_id', sellerId).eq('user_id', userId);
     return data.access_token;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 async function fetchCampaigns(accessToken: string, siteId: string, sellerId: string, dateFrom: string, dateTo: string) {
@@ -246,7 +360,6 @@ async function fetchCampaigns(accessToken: string, siteId: string, sellerId: str
   const allCampaigns: any[] = [];
   let offset = 0;
   const limit = 100;
-
   try {
     while (true) {
       const url = `https://api.mercadolibre.com/marketplace/advertising/${siteId}/advertisers/${sellerId}/product_ads/campaigns/search?date_from=${dateFrom}&date_to=${dateTo}&metrics=${metrics}&offset=${offset}&limit=${limit}`;
@@ -270,12 +383,10 @@ async function fetchCampaigns(accessToken: string, siteId: string, sellerId: str
   return allCampaigns;
 }
 
-// Discover all ads (without metrics) - fast
 async function discoverItems(accessToken: string, sellerId: string) {
   const allItems: any[] = [];
   let offset = 0;
   const limit = 100;
-
   try {
     while (true) {
       const url = `https://api.mercadolibre.com/advertising/product_ads/ads/search?user_id=${sellerId}&offset=${offset}&limit=${limit}`;
@@ -296,10 +407,8 @@ async function discoverItems(accessToken: string, sellerId: string) {
   return allItems;
 }
 
-// Fetch metrics for items in parallel batches of BATCH_SIZE
 async function fetchItemMetricsBatch(accessToken: string, items: any[], dateFrom: string, dateTo: string) {
   const results: any[] = [];
-  
   for (let i = 0; i < items.length; i += BATCH_SIZE) {
     const batch = items.slice(i, i + BATCH_SIZE);
     const batchResults = await Promise.all(
@@ -317,18 +426,11 @@ async function fetchItemMetricsBatch(accessToken: string, items: any[], dateFrom
           }
           await resp.text();
           return { ...item, metrics: {} };
-        } catch {
-          return { ...item, metrics: {} };
-        }
+        } catch { return { ...item, metrics: {} }; }
       })
     );
     results.push(...batchResults);
-    
-    // Delay between batches to respect rate limits
-    if (i + BATCH_SIZE < items.length) {
-      await sleep(BATCH_DELAY);
-    }
+    if (i + BATCH_SIZE < items.length) await sleep(BATCH_DELAY);
   }
-  
   return results;
 }
