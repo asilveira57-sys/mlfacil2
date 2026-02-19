@@ -115,43 +115,86 @@ Deno.serve(async (req) => {
     const startTime = Date.now();
     const today = getTodayBRT();
     const allDates = getDateRange(date_from, date_to);
+    const includestoday = date_to >= today;
 
-    console.log(`[ads-period-metrics] Cache-first for ${seller_id}: ${allDates.length} days (${date_from} to ${date_to})`);
+    console.log(`[ads-period-metrics] Range-based fetch for ${seller_id}: ${allDates.length} days (${date_from} to ${date_to})`);
 
-    // 1. Fetch cached days from DB (paginated)
-    const cachedRows = await fetchAllRows((from, to) =>
-      supabase
-        .from('ads_period_cache')
-        .select('*')
-        .eq('seller_id', seller_id)
-        .gte('metric_date', date_from)
-        .lte('metric_date', date_to)
-        .range(from, to)
-    );
+    // ── 1. Try RANGE cache (fast path) ──
+    const rangeCacheKey = `R:${date_from}:${date_to}`;
+    const { data: rangeCache } = await supabase
+      .from('ads_period_cache')
+      .select('*')
+      .eq('seller_id', seller_id)
+      .eq('metric_date', rangeCacheKey)
+      .maybeSingle();
 
-    const cachedMap = new Map<string, any>();
-    for (const row of cachedRows) {
-      cachedMap.set(row.metric_date, row);
-    }
+    let adsAggregate: { total_spent: number; total_revenue: number; total_clicks: number; total_impressions: number; total_conversions: number; items: any[]; campaigns: any[] } | null = null;
 
-    // 2. Identify missing dates + today (always refetch if stale)
-    const missingDates: string[] = [];
-    for (const date of allDates) {
-      const cached = cachedMap.get(date);
-      if (!cached) {
-        missingDates.push(date);
-      } else if (date === today) {
-        const fetchedAge = Date.now() - new Date(cached.fetched_at).getTime();
-        if (fetchedAge > TODAY_CACHE_TTL_MS) {
-          missingDates.push(date);
-        }
+    if (rangeCache) {
+      const fetchedAge = Date.now() - new Date(rangeCache.fetched_at).getTime();
+      if (!includestoday || fetchedAge <= TODAY_CACHE_TTL_MS) {
+        adsAggregate = {
+          total_spent: Number(rangeCache.total_spent) || 0,
+          total_revenue: Number(rangeCache.total_revenue) || 0,
+          total_clicks: Number(rangeCache.total_clicks) || 0,
+          total_impressions: Number(rangeCache.total_impressions) || 0,
+          total_conversions: Number(rangeCache.total_conversions) || 0,
+          items: rangeCache.items_data || [],
+          campaigns: rangeCache.campaigns_data || [],
+        };
+        console.log(`[ads-period-metrics] Range cache HIT: ${rangeCacheKey} (${Date.now() - startTime}ms)`);
       }
     }
 
-    console.log(`[ads-period-metrics] Cached: ${cachedMap.size}, Missing: ${missingDates.length} in ${Date.now() - startTime}ms`);
+    // ── 2. Fallback: try per-day cache (backward compat) ──
+    if (!adsAggregate) {
+      const cachedRows = await fetchAllRows((from, to) =>
+        supabase.from('ads_period_cache').select('*')
+          .eq('seller_id', seller_id)
+          .gte('metric_date', date_from)
+          .lte('metric_date', date_to)
+          .not('metric_date', 'like', 'R:%')
+          .range(from, to)
+      );
 
-    // 3. Fetch missing dates from ML API (with retry on 429)
-    if (missingDates.length > 0) {
+      const cachedDates = new Set(cachedRows.map((r: any) => r.metric_date));
+      const todayRow = cachedRows.find((r: any) => r.metric_date === today);
+      const todayStale = todayRow && (Date.now() - new Date(todayRow.fetched_at).getTime() > TODAY_CACHE_TTL_MS);
+      const missingCount = allDates.filter(d => !cachedDates.has(d) || (d === today && todayStale)).length;
+
+      if (missingCount === 0) {
+        // All days covered by per-day cache
+        let ts = 0, tr = 0, tc = 0, ti = 0, tconv = 0;
+        const itemsMap = new Map<string, any>();
+        const campsMap = new Map<string, any>();
+        for (const row of cachedRows) {
+          ts += Number(row.total_spent) || 0;
+          tr += Number(row.total_revenue) || 0;
+          tc += Number(row.total_clicks) || 0;
+          ti += Number(row.total_impressions) || 0;
+          tconv += Number(row.total_conversions) || 0;
+          for (const it of (row.items_data || [])) {
+            const k = it.item_id || it.id;
+            if (!k) continue;
+            const e = itemsMap.get(k) || { item_id: k, title: it.title, status: it.status, spent: 0, revenue: 0, clicks: 0, impressions: 0, conversions: 0 };
+            e.spent += it.spent || 0; e.revenue += it.revenue || 0; e.clicks += it.clicks || 0; e.impressions += it.impressions || 0; e.conversions += it.conversions || 0;
+            itemsMap.set(k, e);
+          }
+          for (const c of (row.campaigns_data || [])) {
+            const k = c.ml_campaign_id || c.id;
+            if (!k) continue;
+            const e = campsMap.get(k) || { ml_campaign_id: k, name: c.name, status: c.status, spent: 0, revenue: 0, clicks: 0, impressions: 0, conversions: 0 };
+            e.spent += c.spent || 0; e.revenue += c.revenue || 0; e.clicks += c.clicks || 0; e.impressions += c.impressions || 0; e.conversions += c.conversions || 0;
+            campsMap.set(k, e);
+          }
+        }
+        adsAggregate = { total_spent: ts, total_revenue: tr, total_clicks: tc, total_impressions: ti, total_conversions: tconv, items: Array.from(itemsMap.values()), campaigns: Array.from(campsMap.values()) };
+        console.log(`[ads-period-metrics] Per-day cache HIT (${cachedRows.length} rows) in ${Date.now() - startTime}ms`);
+      }
+    }
+
+    // ── 3. Fetch from ML API (range-based, efficient) ──
+    if (!adsAggregate) {
       const { data: account } = await supabase
         .from('ml_accounts')
         .select('access_token, refresh_token, token_expires_at, country_id')
@@ -178,49 +221,79 @@ Deno.serve(async (req) => {
       const siteId = account.country_id || 'MLB';
       const advertiserId = await getAdvertiserId(accessToken, seller_id);
 
-      for (let i = 0; i < missingDates.length; i += 3) {
-        const batch = missingDates.slice(i, i + 3);
-        const batchResults = await Promise.all(
-          batch.map(date => fetchDayMetrics(accessToken, siteId, advertiserId || seller_id, seller_id, date))
-        );
-        
-        for (let j = 0; j < batch.length; j++) {
-          const date = batch[j];
-          const dayData = batchResults[j];
-          
-          // Guard: don't cache if all ADS metrics are zero but items were discovered
-          // This usually means the API failed due to rate limits
-          const hasAnyAdsData = dayData.total_spent > 0 || dayData.total_revenue > 0 || dayData.total_clicks > 0 || dayData.total_impressions > 0 || dayData.total_conversions > 0;
-          const hasItems = dayData.items && dayData.items.length > 0;
-          
-          if (!hasAnyAdsData && hasItems) {
-            console.warn(`[ads-period-metrics] Skipping cache for ${date}: all metrics zero but ${dayData.items.length} items found (likely rate limit)`);
-            continue;
-          }
-          
-          const cacheRow = {
-            seller_id,
-            user_id: user.id,
-            metric_date: date,
-            total_spent: dayData.total_spent,
-            total_revenue: dayData.total_revenue,
-            total_clicks: dayData.total_clicks,
-            total_impressions: dayData.total_impressions,
-            total_conversions: dayData.total_conversions,
-            items_data: dayData.items,
-            campaigns_data: dayData.campaigns,
-            fetched_at: new Date().toISOString(),
-          };
+      console.log(`[ads-period-metrics] Fetching from ML API: range ${date_from} to ${date_to}`);
 
-          await supabase
-            .from('ads_period_cache')
-            .upsert(cacheRow, { onConflict: 'seller_id,metric_date' });
+      // 3a. Discover items ONCE
+      const allItems = await discoverItems(accessToken, seller_id);
+      console.log(`[ads-period-metrics] Discovered ${allItems.length} items`);
 
-          cachedMap.set(date, cacheRow);
+      // 3b. Fetch campaigns for FULL range (1 paginated call)
+      // 3c. Fetch item metrics for FULL range (N batch calls)
+      const [campaignsData, itemsWithMetrics] = await Promise.all([
+        fetchCampaigns(accessToken, siteId, advertiserId || seller_id, date_from, date_to),
+        fetchItemMetricsBatch(accessToken, allItems, date_from, date_to),
+      ]);
+
+      // 3d. Aggregate
+      let total_spent = 0, total_revenue = 0, total_clicks = 0, total_impressions = 0, total_conversions = 0;
+      const items = itemsWithMetrics.map((item: any) => {
+        const m = item.metrics || {};
+        const spent = m.cost || m.spent || 0;
+        const revenue = m.total_amount || m.revenue || 0;
+        const clicks = m.clicks || 0;
+        const impressions = m.prints || m.impressions || 0;
+        const conversions = m.conversions || 0;
+        total_spent += spent; total_revenue += revenue; total_clicks += clicks; total_impressions += impressions; total_conversions += conversions;
+        return { item_id: item.item_id || item.id, title: item.title, status: item.status, spent, revenue, clicks, impressions, conversions };
+      });
+
+      // Fallback: if items gave 0 but campaigns have data, use campaign totals
+      if (total_spent === 0 && campaignsData.length > 0) {
+        for (const c of campaignsData) {
+          const m = c.metrics || {};
+          total_spent += m.cost || m.spent || 0;
+          total_revenue += m.total_amount || m.revenue || 0;
+          total_clicks += m.clicks || 0;
+          total_impressions += m.prints || m.impressions || 0;
+          total_conversions += m.conversions || 0;
         }
-
-        if (i + 3 < missingDates.length) await sleep(500);
       }
+
+      const campaigns = campaignsData.map((c: any) => {
+        const m = c.metrics || {};
+        return {
+          ml_campaign_id: String(c.id || c.campaign_id),
+          name: c.name || `Campaign ${c.id || c.campaign_id}`,
+          status: c.status,
+          spent: m.cost || m.spent || 0,
+          revenue: m.total_amount || m.revenue || 0,
+          clicks: m.clicks || 0,
+          impressions: m.prints || m.impressions || 0,
+          conversions: m.conversions || 0,
+        };
+      });
+
+      adsAggregate = { total_spent, total_revenue, total_clicks, total_impressions, total_conversions, items, campaigns };
+
+      // 3e. Guard: don't cache zeros if items exist (rate limit protection)
+      const hasAnyData = total_spent > 0 || total_revenue > 0 || total_clicks > 0 || total_impressions > 0 || total_conversions > 0;
+      if (!hasAnyData && allItems.length > 0) {
+        console.warn(`[ads-period-metrics] NOT caching: all metrics zero but ${allItems.length} items found (likely rate limit)`);
+      } else {
+        // 3f. Save range cache
+        await supabase.from('ads_period_cache').upsert({
+          seller_id,
+          user_id: user.id,
+          metric_date: rangeCacheKey,
+          total_spent, total_revenue, total_clicks, total_impressions, total_conversions,
+          items_data: items,
+          campaigns_data: campaigns,
+          fetched_at: new Date().toISOString(),
+        }, { onConflict: 'seller_id,metric_date' });
+        console.log(`[ads-period-metrics] Saved range cache: ${rangeCacheKey}`);
+      }
+
+      console.log(`[ads-period-metrics] API fetch done in ${Date.now() - startTime}ms: ${allItems.length} items, ${campaignsData.length} campaigns`);
     }
 
     // 4. Fetch seller orders from meli_orders_cache (paginated, no limit)
@@ -291,11 +364,12 @@ Deno.serve(async (req) => {
 
     console.log(`[ads-period-metrics] All data ready in ${Date.now() - startTime}ms`);
 
-    // 5. Aggregate ADS + seller data
-    const result = aggregateFromCache(
-      Array.from(cachedMap.values()).filter(r => r.metric_date >= date_from && r.metric_date <= date_to),
+    // 5. Build final result from adsAggregate + seller data
+    const result = buildResult(
+      adsAggregate!,
       date_from,
       date_to,
+      allDates,
       sellerDailyMap,
       cancelledDailyMap,
       { total_seller_revenue, total_seller_orders, total_cancelled_revenue, total_cancelled_orders }
@@ -315,59 +389,22 @@ Deno.serve(async (req) => {
   }
 });
 
-function aggregateFromCache(
-  rows: any[],
+function buildResult(
+  ads: { total_spent: number; total_revenue: number; total_clicks: number; total_impressions: number; total_conversions: number; items: any[]; campaigns: any[] },
   dateFrom: string,
   dateTo: string,
+  allDates: string[],
   sellerDailyMap: Map<string, { revenue: number; orders: number }>,
   cancelledDailyMap: Map<string, { revenue: number; orders: number }>,
   sellerTotals: { total_seller_revenue: number; total_seller_orders: number; total_cancelled_revenue: number; total_cancelled_orders: number }
 ) {
-  let total_spent = 0, total_revenue = 0, total_clicks = 0, total_impressions = 0, total_conversions = 0;
-  const allItems = new Map<string, any>();
-  const allCampaigns = new Map<string, any>();
+  const { total_spent, total_revenue, total_clicks, total_impressions, total_conversions } = ads;
 
-  for (const row of rows) {
-    total_spent += Number(row.total_spent) || 0;
-    total_revenue += Number(row.total_revenue) || 0;
-    total_clicks += Number(row.total_clicks) || 0;
-    total_impressions += Number(row.total_impressions) || 0;
-    total_conversions += Number(row.total_conversions) || 0;
-
-    const items = row.items_data || [];
-    for (const item of items) {
-      const key = item.item_id || item.id;
-      if (!key) continue;
-      const existing = allItems.get(key) || { item_id: key, title: item.title, status: item.status, spent: 0, revenue: 0, clicks: 0, impressions: 0, conversions: 0 };
-      existing.spent += item.spent || 0;
-      existing.revenue += item.revenue || 0;
-      existing.clicks += item.clicks || 0;
-      existing.impressions += item.impressions || 0;
-      existing.conversions += item.conversions || 0;
-      allItems.set(key, existing);
-    }
-
-    const campaigns = row.campaigns_data || [];
-    for (const c of campaigns) {
-      const key = c.ml_campaign_id || c.id;
-      if (!key) continue;
-      const existing = allCampaigns.get(key) || { ml_campaign_id: key, name: c.name, status: c.status, spent: 0, revenue: 0, clicks: 0, impressions: 0, conversions: 0 };
-      existing.spent += c.spent || 0;
-      existing.revenue += c.revenue || 0;
-      existing.clicks += c.clicks || 0;
-      existing.impressions += c.impressions || 0;
-      existing.conversions += c.conversions || 0;
-      allCampaigns.set(key, existing);
-    }
-  }
-
-  const items = Array.from(allItems.values()).map(item => ({
+  const items = ads.items.map(item => ({
     ...item,
     acos: item.revenue > 0 ? item.spent / item.revenue : null,
     roas: item.spent > 0 ? item.revenue / item.spent : null,
   }));
-
-  const campaigns = Array.from(allCampaigns.values());
 
   let products_at_loss = 0, products_scalable = 0;
   for (const item of items) {
@@ -375,7 +412,6 @@ function aggregateFromCache(
     if (item.roas !== null && item.roas > 3 && item.conversions > 0) products_scalable++;
   }
 
-  // Seller metrics
   const { total_seller_revenue, total_seller_orders, total_cancelled_revenue, total_cancelled_orders } = sellerTotals;
   const organic_revenue = Math.max(0, total_seller_revenue - total_revenue);
   const organic_percent = total_seller_revenue > 0 ? (organic_revenue / total_seller_revenue) * 100 : 0;
@@ -384,22 +420,20 @@ function aggregateFromCache(
   const cost_per_sale_general = total_seller_orders > 0 ? total_spent / total_seller_orders : 0;
   const cost_per_sale_ads = total_conversions > 0 ? total_spent / total_conversions : 0;
 
-  // Build daily time series with seller data
-  const daily = rows.map(row => {
-    const date = row.metric_date;
+  // Build daily time series (seller data per day, ADS data as totals)
+  const daily = allDates.map(date => {
     const sellerDay = sellerDailyMap.get(date) || { revenue: 0, orders: 0 };
     const cancelledDay = cancelledDailyMap.get(date) || { revenue: 0, orders: 0 };
     const netSellerRevenue = sellerDay.revenue - cancelledDay.revenue;
-    const dayAdsRevenue = Number(row.total_revenue) || 0;
     return {
       date,
-      spent: Number(row.total_spent) || 0,
-      revenue: dayAdsRevenue,
-      clicks: Number(row.total_clicks) || 0,
-      impressions: Number(row.total_impressions) || 0,
-      conversions: Number(row.total_conversions) || 0,
+      spent: 0,
+      revenue: 0,
+      clicks: 0,
+      impressions: 0,
+      conversions: 0,
       seller_revenue: netSellerRevenue,
-      organic_revenue: Math.max(0, netSellerRevenue - dayAdsRevenue),
+      organic_revenue: netSellerRevenue,
       seller_orders: sellerDay.orders,
     };
   }).sort((a, b) => a.date.localeCompare(b.date));
@@ -411,73 +445,11 @@ function aggregateFromCache(
     avg_cpc: total_clicks > 0 ? total_spent / total_clicks : 0,
     avg_tacos: total_revenue > 0 ? (total_spent / total_revenue) * 100 : 0,
     products_at_loss, products_scalable,
-    // New seller metrics
-    total_seller_revenue,
-    total_seller_orders,
-    total_cancelled_revenue,
-    total_cancelled_orders,
-    organic_revenue,
-    organic_percent,
-    paid_percent,
-    tacos_total,
-    cost_per_sale_general,
-    cost_per_sale_ads,
-    campaigns, items, daily, date_from: dateFrom, date_to: dateTo,
+    total_seller_revenue, total_seller_orders, total_cancelled_revenue, total_cancelled_orders,
+    organic_revenue, organic_percent, paid_percent, tacos_total,
+    cost_per_sale_general, cost_per_sale_ads,
+    campaigns: ads.campaigns, items, daily, date_from: dateFrom, date_to: dateTo,
   };
-}
-
-// Fetch metrics for a single day
-async function fetchDayMetrics(accessToken: string, siteId: string, advertiserId: string, sellerId: string, date: string) {
-  const [campaignsData, allItems] = await Promise.all([
-    fetchCampaigns(accessToken, siteId, advertiserId, date, date),
-    discoverItems(accessToken, sellerId),
-  ]);
-
-  const itemsWithMetrics = await fetchItemMetricsBatch(accessToken, allItems, date, date);
-
-  let total_spent = 0, total_revenue = 0, total_clicks = 0, total_impressions = 0, total_conversions = 0;
-  
-  const items = itemsWithMetrics.map(item => {
-    const m = item.metrics || {};
-    const spent = m.cost || m.spent || 0;
-    const revenue = m.total_amount || m.revenue || 0;
-    const clicks = m.clicks || 0;
-    const impressions = m.prints || m.impressions || 0;
-    const conversions = m.conversions || 0;
-    total_spent += spent;
-    total_revenue += revenue;
-    total_clicks += clicks;
-    total_impressions += impressions;
-    total_conversions += conversions;
-    return { item_id: item.item_id || item.id, title: item.title, status: item.status, spent, revenue, clicks, impressions, conversions };
-  });
-
-  if (total_spent === 0 && campaignsData.length > 0) {
-    for (const c of campaignsData) {
-      const m = c.metrics || {};
-      total_spent += m.cost || m.spent || 0;
-      total_revenue += m.total_amount || m.revenue || 0;
-      total_clicks += m.clicks || 0;
-      total_impressions += m.prints || m.impressions || 0;
-      total_conversions += m.conversions || 0;
-    }
-  }
-
-  const campaigns = campaignsData.map(c => {
-    const m = c.metrics || {};
-    return {
-      ml_campaign_id: String(c.id || c.campaign_id),
-      name: c.name || `Campaign ${c.id || c.campaign_id}`,
-      status: c.status,
-      spent: m.cost || m.spent || 0,
-      revenue: m.total_amount || m.revenue || 0,
-      clicks: m.clicks || 0,
-      impressions: m.prints || m.impressions || 0,
-      conversions: m.conversions || 0,
-    };
-  });
-
-  return { total_spent, total_revenue, total_clicks, total_impressions, total_conversions, items, campaigns };
 }
 
 async function getAdvertiserId(accessToken: string, sellerId: string): Promise<string | null> {
