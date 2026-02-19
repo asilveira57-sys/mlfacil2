@@ -262,9 +262,7 @@ export function useAdsSyncState(sellerId?: string) {
   return { syncState, loading, triggerSync };
 }
 
-export function useAdsMetricsSummary(sellerId?: string): AdsMetricsSummary {
-  const { items } = useAdsItems(sellerId);
-
+export function useAdsMetricsSummary(items: AdsItem[]): AdsMetricsSummary {
   return useMemo(() => {
     const total_spent = items.reduce((sum, i) => sum + (i.spent || 0), 0);
     const total_revenue = items.reduce((sum, i) => sum + (i.revenue_from_ads || 0), 0);
