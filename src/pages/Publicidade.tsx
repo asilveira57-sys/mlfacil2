@@ -117,7 +117,7 @@ export default function Publicidade() {
   const { syncState, triggerSync } = useAdsSyncState(sellerId || undefined);
   
   // Period-based metrics from ML API (real-time)
-  const { summary: periodSummary, loading: periodLoading, error: periodError } = useAdsPeriodMetrics(
+  const { summary: periodSummary, dailyMetrics: periodDaily, loading: periodLoading, error: periodError } = useAdsPeriodMetrics(
     sellerId || undefined,
     dateFrom,
     dateTo,
@@ -282,7 +282,7 @@ export default function Publicidade() {
             {/* Charts and Alerts Row */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <div className="lg:col-span-2">
-                <AdsSpendRevenueChart metrics={metrics} campaigns={campaigns} />
+                <AdsSpendRevenueChart metrics={metrics} campaigns={campaigns} periodDaily={periodDaily} />
               </div>
               <div>
                 <AdsAlertsPanel

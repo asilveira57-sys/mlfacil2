@@ -3,8 +3,15 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import type { AdsMetricsSummary } from '@/types/ads';
 
+export interface PeriodDailyPoint {
+  date: string;
+  spent: number;
+  revenue: number;
+}
+
 interface PeriodMetricsResult {
   summary: AdsMetricsSummary;
+  dailyMetrics: PeriodDailyPoint[];
   loading: boolean;
   error: string | null;
 }
@@ -29,6 +36,7 @@ export function useAdsPeriodMetrics(
   dateTo?: string,
 ): PeriodMetricsResult {
   const [summary, setSummary] = useState<AdsMetricsSummary>(emptySummary);
+  const [dailyMetrics, setDailyMetrics] = useState<PeriodDailyPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
@@ -81,6 +89,7 @@ export function useAdsPeriodMetrics(
 
       cacheRef.current.set(cacheKey, result);
       setSummary(result);
+      setDailyMetrics(Array.isArray(data.daily) ? data.daily : []);
     } catch (err: any) {
       if (controller.signal.aborted) return;
       const msg = err?.message || 'Erro ao buscar métricas';
@@ -101,5 +110,5 @@ export function useAdsPeriodMetrics(
     };
   }, [fetchMetrics]);
 
-  return { summary, loading, error };
+  return { summary, dailyMetrics, loading, error };
 }

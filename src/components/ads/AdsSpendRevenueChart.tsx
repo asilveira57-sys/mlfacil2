@@ -13,14 +13,25 @@ import {
   Legend,
 } from 'recharts';
 import { AdsDailyMetric, AdsCampaign } from '@/types/ads';
+import { PeriodDailyPoint } from '@/hooks/useAdsPeriodMetrics';
 
 interface AdsSpendRevenueChartProps {
   metrics: AdsDailyMetric[];
   campaigns?: AdsCampaign[];
+  periodDaily?: PeriodDailyPoint[];
 }
 
-export function AdsSpendRevenueChart({ metrics, campaigns }: AdsSpendRevenueChartProps) {
+export function AdsSpendRevenueChart({ metrics, campaigns, periodDaily }: AdsSpendRevenueChartProps) {
   const timeSeriesData = useMemo(() => {
+    // Prefer periodDaily from cache if available
+    if (periodDaily && periodDaily.length > 0) {
+      return periodDaily.map(d => ({
+        date: new Date(d.date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+        gasto: d.spent,
+        receita: d.revenue,
+      }));
+    }
+    // Fallback to ads_daily_metrics
     const byDate = new Map<string, { spent: number; revenue: number }>();
     for (const m of metrics) {
       const existing = byDate.get(m.metric_date) || { spent: 0, revenue: 0 };
@@ -36,7 +47,7 @@ export function AdsSpendRevenueChart({ metrics, campaigns }: AdsSpendRevenueChar
         receita: values.revenue,
       }))
       .sort((a, b) => a.date.localeCompare(b.date));
-  }, [metrics]);
+  }, [metrics, periodDaily]);
 
   const campaignBarData = useMemo(() => {
     if (!campaigns || campaigns.length === 0) return [];
