@@ -1,69 +1,93 @@
 
+# Melhorias no Modulo ADS - Campanhas
 
-# Corrigir Filtro "Envios de Hoje" - Separar Postagem vs Vendas
-
-## Problema
-O filtro "Envios de hoje" esta usando a data de venda (`created_at_meli`) como fallback, mostrando apenas pedidos vendidos hoje. O correto e mostrar todos os pedidos que precisam ser despachados hoje (prazo de postagem hoje ou atrasados), independente de quando foram vendidos.
+## Problemas Identificados
+1. Campanhas desativadas exibidas como "Ativa" - o `mapStatus` ja foi corrigido, mas campanhas antigas no banco ainda podem ter status errado. A sincronizacao precisa tambem buscar campanhas com todos os status (nao apenas `active,paused`).
+2. Limite de 50 campanhas na tabela - a tabela exibe todas de uma vez sem paginacao.
+3. Falta de colunas CPC e TACOS na tabela principal.
+4. Sem pesquisa, ordenacao ou paginacao.
+5. Barra de navegacao entre guias com muito espaco.
 
 ## Solucao
 
-### 1. Corrigir a funcao SQL `get_shipping_orders`
+### 1. Edge Function: Sincronizar TODOS os status
 
-Alterar o bloco `today_dispatch` para remover o filtro de `created_at_meli` do fallback. A logica correta:
-- Se `estimated_handling_limit` existe: mostrar se o prazo e hoje ou esta atrasado
-- Se `estimated_handling_limit` e NULL: mostrar se o envio tem status ativo (`ready_to_ship`, `handling`, `pending`) sem restringir por data de venda
+No `fetchCampaigns`, a API ja busca todas as campanhas. Porem no `fetchItems`, o parametro `status=active,paused` exclui itens com outros status. Corrigir para incluir todos os status ou remover o filtro de status.
 
-Remover a linha `AND o.created_at_meli >= v_today_start` do fallback, pois pedidos vendidos ha dias podem ter prazo de despacho hoje.
+Arquivo: `supabase/functions/ads-sync/index.ts`
+- Linha 390: mudar `status=active,paused` para incluir todos os status possiveis, ou remover o filtro
 
-### 2. Adicionar filtro "Hoje" (vendas) separado
+### 2. Tabela de Campanhas: Layout compacto + novas colunas
 
-Adicionar um novo periodo `today_sales` nos filtros do frontend que filtra por `created_at_meli` do dia atual. Isso da ao usuario dois botoes distintos:
-- **Envios de hoje** = postagem/despacho do dia (filtro de shipment)
-- **Hoje** = vendas realizadas hoje (filtro de data)
+Arquivo: `src/components/ads/AdsCampaignsTable.tsx`
 
-### 3. Atualizar o frontend
+Refatorar completamente a tabela:
+- **Colunas mais compactas**: usar `text-xs`, padding reduzido (`px-2 py-1`)
+- **Novas colunas**: CPC (calculado: spent/clicks) e TACOS (calculado: spent/revenue * 100)
+- **Pesquisa**: campo de busca no topo filtrando por nome, tipo, SKU ou MLB
+- **Ordenacao por coluna**: clicar no header ordena asc/desc por aquela metrica
+- **Paginacao**: 10 campanhas por pagina com navegacao prev/next
+- **Responsividade**: overflow-x-auto para telas menores
 
-**`src/hooks/useShippingLabels.ts`**:
-- Adicionar `today_sales` ao tipo `PeriodFilter`
-- No `getDateRange`, tratar `today_sales` como filtro de data do dia atual (inicio e fim do dia)
+### 3. Calculos de CPC e TACOS na tabela principal
 
-**`src/components/shipping/ShippingFilters.tsx`**:
-- Adicionar botao "Hoje" na lista de periodos, posicionado entre "Todos" e "Envios de hoje"
+CPC e TACOS ja existem no `AdsCampaignProducts` (nivel produto). Para o nivel campanha:
+- **CPC** = spent_total / clicks (precisa agregar clicks dos items da campanha, ou usar metrics do raw_data)
+- **TACOS** = (spent_total / revenue) * 100
 
-**Arquivos de traducao** (`en`, `pt-BR`, `es`):
-- Adicionar chave `today_sales` com "Hoje" / "Today" / "Hoy"
+Usar os dados de `raw_data.metrics` que ja contem `clicks`, `cost`, `total_amount`.
+
+### 4. Barra de navegacao entre guias
+
+Substituir o `TabsList grid-cols-8` por um layout horizontal com scroll, usando `flex` e `overflow-x-auto` para caber melhor em telas menores e ter espacamento adequado.
 
 ---
 
 ## Detalhes Tecnicos
 
-### Migracao SQL
+### Arquivos Modificados
 
-```sql
--- Corrigir fallback do today_dispatch: remover filtro de created_at_meli
--- Fallback para shipments sem deadline: mostrar se status ativo, sem restringir data de venda
-AND (
-  p_period_type != 'today_dispatch'
-  OR (
-    (s.estimated_handling_limit IS NOT NULL AND s.estimated_handling_limit <= v_today_end)
-    OR
-    (s.estimated_handling_limit IS NULL 
-     AND s.shipment_status IN ('ready_to_ship','handling','pending'))
-  )
-)
+**`supabase/functions/ads-sync/index.ts`**
+- Remover filtro `status=active,paused` do `fetchItems` (linha ~390) para sincronizar todos os itens independente do status
+
+**`src/components/ads/AdsCampaignsTable.tsx`** (refatoracao principal)
+- Adicionar estado: `searchQuery`, `sortColumn`, `sortDirection`, `currentPage`
+- Adicionar barra de pesquisa com `Input` (filtra por `name`, `campaign_type`, `ml_campaign_id`)
+- Adicionar headers clicaveis com indicador de direcao (setas)
+- Colunas ordenáveis: Campanha, Status, Orcamento, Gasto, Receita, CPC, ACOS, TACOS, ROAS
+- Adicionar logica de paginacao (10 por pagina) com botoes Anterior/Proximo e indicador de pagina
+- Adicionar colunas CPC e TACOS calculadas a partir de `raw_data.metrics`
+- Reduzir padding e font-size para layout compacto (`text-xs`, `px-2 py-1.5`)
+- Atualizar `colSpan` da linha expandida para refletir o novo numero de colunas
+
+**`src/pages/Publicidade.tsx`**
+- Alterar `TabsList` de `grid grid-cols-8` para `flex overflow-x-auto` com scroll horizontal
+- Ajustar espacamento dos `TabsTrigger`
+
+### Logica de Ordenacao
+
+```text
+sortColumn: 'name' | 'status' | 'budget' | 'spent' | 'revenue' | 'cpc' | 'acos' | 'tacos' | 'roas'
+sortDirection: 'asc' | 'desc'
+
+Pipeline: campaigns -> filter(search) -> sort(column, direction) -> paginate(page, 10)
 ```
 
-### Mudancas no Frontend
+### Logica de Pesquisa
 
-- `PeriodFilter`: `'all' | 'today_sales' | 'today' | '7d' | '15d' | '30d' | 'custom'`
-- `PERIOD_KEYS` no filtro: adicionar `{ value: 'today_sales', labelKey: 'today_sales' }` entre "Todos" e "Envios de hoje"
-- `getDateRange` para `today_sales`: retorna inicio e fim do dia atual em Brasilia
+Filtro case-insensitive por:
+- `campaign.name`
+- `campaign.campaign_type`
+- `campaign.ml_campaign_id`
 
-### Arquivos Modificados
-- **Migracao SQL** (nova) - corrigir funcao `get_shipping_orders`
-- `src/hooks/useShippingLabels.ts` - adicionar `today_sales`, ajustar tipo e logica
-- `src/components/shipping/ShippingFilters.tsx` - adicionar botao "Hoje"
-- `src/locales/pt-BR/shipping.json` - adicionar `"today_sales": "Hoje"`
-- `src/locales/en/shipping.json` - adicionar `"today_sales": "Today"`
-- `src/locales/es/shipping.json` - adicionar `"today_sales": "Hoy"`
+### Calculo CPC e TACOS (nivel campanha)
 
+```text
+metrics = campaign.raw_data?.metrics
+clicks = metrics?.clicks || 0
+spent = metrics?.cost || campaign.spent_total || 0
+revenue = metrics?.total_amount || 0
+
+CPC = clicks > 0 ? spent / clicks : 0
+TACOS = revenue > 0 ? (spent / revenue) * 100 : 0
+```
