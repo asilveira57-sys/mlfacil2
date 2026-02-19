@@ -168,7 +168,7 @@ export default function Publicidade() {
       <div className="p-4 lg:p-6 space-y-6">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <div className="flex items-center justify-between flex-wrap gap-4">
-            <TabsList className="grid w-full max-w-4xl grid-cols-8">
+            <TabsList className="flex w-full max-w-4xl overflow-x-auto">
               <TabsTrigger value="dashboard" className="flex items-center gap-2">
                 <LayoutDashboard className="h-4 w-4" />
                 <span className="hidden sm:inline">Dashboard</span>

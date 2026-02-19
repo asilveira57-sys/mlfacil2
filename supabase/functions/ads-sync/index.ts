@@ -387,7 +387,7 @@ async function fetchItems(accessToken: string, _siteId: string, sellerId: string
 
   try {
     while (true) {
-      const url = `https://api.mercadolibre.com/advertising/product_ads/ads/search?user_id=${sellerId}&status=active,paused&offset=${offset}&limit=${limit}`;
+      const url = `https://api.mercadolibre.com/advertising/product_ads/ads/search?user_id=${sellerId}&offset=${offset}&limit=${limit}`;
       console.log(`[ads-sync] Fetching items from: ${url}`);
 
       const response = await fetch(url, { 
