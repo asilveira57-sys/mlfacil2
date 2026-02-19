@@ -148,6 +148,8 @@ export interface AdsMetricsSummary {
   total_conversions: number;
   avg_acos: number;
   avg_roas: number;
+  avg_cpc: number;
+  avg_tacos: number;
   products_at_loss: number;
   products_scalable: number;
 }

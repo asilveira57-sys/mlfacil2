@@ -276,6 +276,8 @@ export function useAdsMetricsSummary(sellerId?: string, dateFrom?: string, dateT
 
     const avg_acos = total_revenue > 0 ? (total_spent / total_revenue) * 100 : 0;
     const avg_roas = total_spent > 0 ? total_revenue / total_spent : 0;
+    const avg_cpc = total_clicks > 0 ? total_spent / total_clicks : 0;
+    const avg_tacos = total_revenue > 0 ? (total_spent / total_revenue) * 100 : 0;
 
     // Products at loss (ACOS > 30%)
     const products_at_loss = items.filter(i => (i.acos || 0) > 0.30).length;
@@ -290,6 +292,8 @@ export function useAdsMetricsSummary(sellerId?: string, dateFrom?: string, dateT
       total_conversions,
       avg_acos,
       avg_roas,
+      avg_cpc,
+      avg_tacos,
       products_at_loss,
       products_scalable,
     };
