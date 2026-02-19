@@ -15,6 +15,19 @@ export function AdsKpiCards({ summary }: AdsKpiCardsProps) {
 
   const hasSellerData = summary.total_seller_revenue > 0;
 
+  const ticketMedioGeral = summary.total_seller_orders > 0
+    ? summary.total_seller_revenue / summary.total_seller_orders
+    : 0;
+
+  const organicOrders = Math.max(0, summary.total_seller_orders - summary.total_conversions);
+  const ticketMedioOrganico = organicOrders > 0
+    ? summary.organic_revenue / organicOrders
+    : 0;
+
+  const ticketMedioAds = summary.total_conversions > 0
+    ? summary.total_revenue / summary.total_conversions
+    : 0;
+
   // Block 1 - Business Overview
   const businessCards = [
     {
@@ -23,8 +36,8 @@ export function AdsKpiCards({ summary }: AdsKpiCardsProps) {
       icon: ShoppingCart,
       color: 'text-primary',
       bg: 'bg-primary/10',
-      subtitle: hasSellerData ? `${formatPercent(summary.organic_percent)} orgânico` : undefined,
-      badge: hasSellerData ? `${summary.total_seller_orders} pedidos` : undefined,
+      subtitle: hasSellerData ? `Ticket médio: ${formatCurrency(ticketMedioGeral)}` : undefined,
+      badge: hasSellerData ? `${summary.total_seller_orders} pedidos · ${formatPercent(summary.organic_percent)} orgânico` : undefined,
     },
     {
       title: 'Receita Orgânica',
@@ -32,7 +45,9 @@ export function AdsKpiCards({ summary }: AdsKpiCardsProps) {
       icon: Leaf,
       color: 'text-success',
       bg: 'bg-success/10',
-      subtitle: hasSellerData ? formatPercent(summary.organic_percent) : 'Sem dados',
+      subtitle: hasSellerData
+        ? `${organicOrders} pedidos · Ticket: ${formatCurrency(ticketMedioOrganico)}`
+        : 'Sem dados',
     },
     {
       title: 'Receita via ADS',
@@ -40,7 +55,9 @@ export function AdsKpiCards({ summary }: AdsKpiCardsProps) {
       icon: TrendingUp,
       color: 'text-blue-500',
       bg: 'bg-blue-500/10',
-      subtitle: hasSellerData ? formatPercent(summary.paid_percent) : undefined,
+      subtitle: hasSellerData
+        ? `${summary.total_conversions} pedidos · Ticket: ${formatCurrency(ticketMedioAds)}`
+        : undefined,
     },
     {
       title: 'TACOS Geral',
@@ -79,11 +96,13 @@ export function AdsKpiCards({ summary }: AdsKpiCardsProps) {
     },
     {
       title: 'Custo/Venda ADS',
-      value: formatCurrency(summary.cost_per_sale_ads),
+      value: summary.total_conversions > 0
+        ? formatCurrency(summary.total_spent / summary.total_conversions)
+        : '—',
       icon: MousePointerClick,
       color: 'text-blue-500',
       bg: 'bg-blue-500/10',
-      subtitle: 'ADS ÷ Conversões',
+      subtitle: `Gasto ÷ ${summary.total_conversions} conversões`,
     },
   ];
 
