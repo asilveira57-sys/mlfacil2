@@ -1,99 +1,95 @@
 
-# Melhorias no Dashboard ADS
 
-## Resumo das mudancas
+# Plano: Filtros de Data Funcionais no Dashboard ADS
 
-1. **KPI Cards mais compactos** - Reduzir padding/espacamento e adicionar 3 novos cards (TACOS Campanha, TACOS Total, CPC Medio)
-2. **Filtro de periodo** - Adicionar barra de filtros 7d, 14d, 30d, 60d, 90d e Personalizado no dashboard
-3. **Grafico Gasto x Receita** - Alimentar com dados agregados dos `ads_items` em vez de depender do `ads_daily_metrics` (que esta vazio)
-4. **Remover botao Sincronizar do header** - Remover de `headerContent` no PageContainer
-5. **Adicionar Sincronizar na aba Campanhas** - Colocar ao lado da barra de pesquisa
+## Problema Identificado
+
+A tabela `ads_items` armazena **totais acumulados dos ultimos 30 dias** vindos da API do Mercado Livre. Nao existe granularidade diaria nessa tabela -- todos os registros mostram o mesmo valor independente do periodo selecionado. A tabela `ads_daily_metrics` existe mas esta **vazia** (0 registros).
+
+O sync atual (edge function `ads-sync`) busca metricas com `date_from` e `date_to` fixos em 30 dias e grava um unico registro por campanha em `ads_daily_metrics` (na data de hoje), perdendo a informacao diaria.
+
+## Solucao Proposta
+
+Criar uma **nova edge function** (`ads-period-metrics`) que consulta a API do Mercado Livre em tempo real com o periodo selecionado pelo usuario, retornando as metricas agregadas. Os KPIs do dashboard serao alimentados por essa funcao em vez de dados estaticos.
+
+### Etapa 1: Edge Function `ads-period-metrics`
+
+Nova funcao backend que:
+- Recebe `seller_id`, `date_from`, `date_to`
+- Autentica o usuario e obtem o token ML
+- Chama a API de campanhas e items do ML com o periodo solicitado (mesmos endpoints que o `ads-sync` ja usa, mas com datas dinamicas)
+- Retorna metricas agregadas: gasto, receita, cliques, impressoes, conversoes, ACOS, ROAS, CPC
+
+```text
+Frontend (periodo: 7d)
+    |
+    v
+Edge Function ads-period-metrics
+    |-- date_from=2026-02-12, date_to=2026-02-19
+    |
+    v
+ML API /product_ads/campaigns/search?date_from=...&date_to=...
+ML API /product_ads/items/{id}?date_from=...&date_to=...
+    |
+    v
+Retorna { total_spent, total_revenue, total_clicks, ... }
+```
+
+### Etapa 2: Novo Hook `useAdsPeriodMetrics`
+
+Hook React que:
+- Chama a edge function `ads-period-metrics` quando o periodo muda
+- Retorna um `AdsMetricsSummary` compativel com o componente `AdsKpiCards`
+- Mostra estado de loading enquanto busca
+- Faz cache do resultado para evitar chamadas repetidas ao trocar abas
+
+### Etapa 3: Atualizar Dashboard
+
+- `AdsKpiCards` passa a usar os dados do `useAdsPeriodMetrics` (metricas do periodo) em vez do `useAdsMetricsSummary` (totais cumulativos)
+- Os cards de "Campanhas Ativas/Pausadas" e "Produtos Anunciados" continuam usando dados locais (contagem, nao depende de periodo)
+- O grafico de Gasto vs Receita continua usando `ads_daily_metrics` + fallback por campanha
+
+### Etapa 4: Melhorar o Sync para Popular `ads_daily_metrics`
+
+Modificar a funcao `ads-sync` para buscar metricas com granularidade diaria (iterando dia a dia ou usando endpoint de breakdown) e popular a tabela `ads_daily_metrics` corretamente. Isso permitira que o grafico de serie temporal tambem funcione com filtros de data.
 
 ---
 
 ## Detalhes Tecnicos
 
-### 1. AdsKpiCards - Layout compacto + novos cards
+### Edge Function `ads-period-metrics`
 
-**Arquivo:** `src/components/ads/AdsKpiCards.tsx`
-
-- Reduzir padding de `p-4` para `p-2.5`
-- Reduzir fonte do valor de `text-xl` para `text-lg`
-- Adicionar ao `AdsMetricsSummary` os campos `avg_cpc` e `avg_tacos`
-- Adicionar 3 novos cards:
-  - **CPC Medio**: `total_spent / total_clicks`
-  - **TACOS Campanha**: igual ao ACOS medio (gasto ADS / receita ADS)
-  - **TACOS Total**: `total_spent / (total_revenue + receita_organica)` - como nao temos receita organica no modulo ADS, calcular como `total_spent / receita_total_meli` (usando dados de vendas)
-- Mudar grid para `lg:grid-cols-4` com 2 linhas para caber mais cards
-
-### 2. Filtro de periodo no Dashboard
-
-**Arquivo:** `src/pages/Publicidade.tsx`
-
-- Substituir o calculo fixo de `thirtyDaysAgo` por um estado `datePeriod` com opcoes: `7d`, `14d`, `30d`, `60d`, `90d`, `custom`
-- Adicionar componente de filtro (botoes tipo pills) logo acima dos KPI cards
-- Para "Personalizado": mostrar 2 date pickers (de/ate)
-- O `dateFrom` e `dateTo` sao recalculados dinamicamente com base no periodo selecionado
-- Passar esses valores para `useAdsMetricsSummary`, `useAdsDailyMetrics` e o grafico
-
-### 3. Grafico Gasto x Receita - usar dados reais
-
-**Arquivo:** `src/components/ads/AdsSpendRevenueChart.tsx`
-
-O grafico depende de `ads_daily_metrics` que esta vazio. Alternativa: aceitar tambem dados agregados dos items.
-
-**Arquivo:** `src/pages/Publicidade.tsx`
-
-- Criar dados do grafico a partir dos `ads_items` (agrupando por data de `synced_at` ou usando o `spent_total` e `revenue_from_ads` agregados)
-- Alternativa mais simples: passar os dados do `summary` como fallback quando `metrics` esta vazio, mostrando pelo menos o total acumulado como um ponto no grafico
-
-Na pratica, como nao temos serie temporal nos items, a melhor abordagem e:
-- Usar os `ads_items` com seus valores de `spent` e `revenue_from_ads` para mostrar um grafico de barras por campanha (top 10 campanhas) em vez de serie temporal quando `ads_daily_metrics` esta vazio
-
-### 4. Remover Sincronizar do header global
-
-**Arquivo:** `src/pages/Publicidade.tsx`
-
-- Remover o `<Button>Sincronizar</Button>` do `headerContent`
-- Manter apenas o badge de alertas no header (se houver)
-
-### 5. Adicionar Sincronizar na aba Campanhas
-
-**Arquivo:** `src/pages/Publicidade.tsx` (aba campaigns) e `src/components/ads/AdsCampaignsTable.tsx`
-
-- Na aba Campanhas, ao lado do titulo "Todas as Campanhas" e da barra de pesquisa, adicionar um botao compacto de sincronizacao
-- Passar `triggerSync` e `syncState` como props para o `AdsCampaignsTable` ou colocar direto no `CardHeader` da aba Campanhas
-
-### 6. Atualizar tipo AdsMetricsSummary
-
-**Arquivo:** `src/types/ads.ts`
-
-Adicionar campos:
 ```text
-avg_cpc: number;
-avg_tacos: number;
+POST /ads-period-metrics
+Body: { seller_id, date_from, date_to }
+Response: {
+  total_spent, total_revenue, total_clicks,
+  total_impressions, total_conversions,
+  avg_acos, avg_roas, avg_cpc, avg_tacos,
+  products_at_loss, products_scalable,
+  campaigns: [{ name, spent, revenue, clicks, ... }],
+  items: [{ item_id, title, spent, revenue, acos, roas, ... }]
+}
 ```
 
-### 7. Atualizar useAdsMetricsSummary
+A funcao reutiliza a logica existente de `ads-sync` (refresh de token, endpoints da API ML) sem duplicar codigo, importando helpers compartilhados.
 
-**Arquivo:** `src/hooks/useAds.ts`
+### Hook `useAdsPeriodMetrics`
 
-Calcular os novos campos:
-```text
-avg_cpc = total_clicks > 0 ? total_spent / total_clicks : 0
-avg_tacos = total_revenue > 0 ? (total_spent / total_revenue) * 100 : 0
-```
+- Parametros: `sellerId`, `dateFrom`, `dateTo`
+- Usa `useCallback` com debounce para evitar chamadas excessivas ao mudar periodo
+- Retorna `{ summary, items, campaigns, loading, error }`
 
-Tornar o hook responsivo ao `dateFrom`/`dateTo` filtrando items por periodo (se possivel via `synced_at`).
+### Mudancas em `Publicidade.tsx`
 
----
+- Substituir `useAdsMetricsSummary(enrichedItems)` por `useAdsPeriodMetrics(sellerId, dateFrom, dateTo)`
+- Os KPI cards recebem `periodSummary` em vez de `summary`
+- A tabela de campanhas no dashboard tambem usa dados do periodo
 
-## Arquivos Modificados
+### Impacto
 
-| Arquivo | Mudanca |
-|---------|---------|
-| `src/types/ads.ts` | Adicionar `avg_cpc`, `avg_tacos` ao `AdsMetricsSummary` |
-| `src/hooks/useAds.ts` | Calcular `avg_cpc` e `avg_tacos` no summary |
-| `src/components/ads/AdsKpiCards.tsx` | Layout compacto, 3 novos cards |
-| `src/pages/Publicidade.tsx` | Filtro de periodo, remover sync do header, adicionar sync na aba campanhas, grafico fallback |
-| `src/components/ads/AdsSpendRevenueChart.tsx` | Aceitar fallback de dados de campanhas quando metrics vazio |
+- Sem migracao de banco necessaria (tabelas ja existem)
+- KPIs passam a refletir o periodo selecionado exatamente como no Mercado Livre
+- Performance aceitavel (chamada API ML leva 1-3 segundos)
+- Fallback para dados cumulativos se a chamada falhar
+
