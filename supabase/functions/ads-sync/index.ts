@@ -326,37 +326,56 @@ async function refreshToken(supabase: any, sellerId: string, userId: string, ref
 }
 
 async function fetchCampaigns(accessToken: string, siteId: string, sellerId: string, dateFrom: string, dateTo: string) {
-  // Product Ads API v2 endpoint
+  // Product Ads API v2 endpoint with pagination
   const metrics = 'clicks,prints,cost,cpc,acos,roas,total_amount';
-  const url = `https://api.mercadolibre.com/marketplace/advertising/${siteId}/advertisers/${sellerId}/product_ads/campaigns/search?date_from=${dateFrom}&date_to=${dateTo}&metrics=${metrics}`;
-  
-  console.log(`[ads-sync] Fetching campaigns from: ${url}`);
+  const allCampaigns: any[] = [];
+  let offset = 0;
+  const limit = 100;
 
   try {
-    const response = await fetch(url, { 
-      headers: { 
-        'Authorization': `Bearer ${accessToken}`,
-        'api-version': '2',
-      } 
-    });
+    while (true) {
+      const url = `https://api.mercadolibre.com/marketplace/advertising/${siteId}/advertisers/${sellerId}/product_ads/campaigns/search?date_from=${dateFrom}&date_to=${dateTo}&metrics=${metrics}&offset=${offset}&limit=${limit}`;
+      console.log(`[ads-sync] Fetching campaigns from: ${url}`);
 
-    console.log(`[ads-sync] Campaigns response status: ${response.status}`);
+      const response = await fetch(url, { 
+        headers: { 
+          'Authorization': `Bearer ${accessToken}`,
+          'api-version': '2',
+        } 
+      });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.warn(`[ads-sync] Campaigns fetch failed: ${response.status} - ${errorText}`);
-      return { campaigns: [] };
+      console.log(`[ads-sync] Campaigns response status: ${response.status}`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.warn(`[ads-sync] Campaigns fetch failed: ${response.status} - ${errorText}`);
+        break;
+      }
+
+      const data = await response.json();
+      console.log(`[ads-sync] Campaigns page response (offset=${offset}):`, JSON.stringify(data).slice(0, 500));
+      
+      // Handle different response structures
+      const campaigns = data.results || data.campaigns || data || [];
+      const results = Array.isArray(campaigns) ? campaigns : [];
+      if (results.length === 0) break;
+
+      allCampaigns.push(...results);
+
+      const total = data.paging?.total || data.total || 0;
+      offset += limit;
+      if (total > 0 && offset >= total) break;
+      // Safety: if no paging info and we got less than limit, assume done
+      if (!data.paging && !data.total && results.length < limit) break;
+
+      await sleep(RATE_LIMIT_DELAY);
     }
 
-    const data = await response.json();
-    console.log(`[ads-sync] Campaigns raw response:`, JSON.stringify(data).slice(0, 500));
-    
-    // Handle different response structures
-    const campaigns = data.results || data.campaigns || data || [];
-    return { campaigns: Array.isArray(campaigns) ? campaigns : [] };
+    console.log(`[ads-sync] Total campaigns fetched: ${allCampaigns.length}`);
+    return { campaigns: allCampaigns };
   } catch (error) {
     console.error('[ads-sync] fetchCampaigns error:', error);
-    return { campaigns: [] };
+    return { campaigns: allCampaigns };
   }
 }
 
@@ -540,10 +559,12 @@ function mapStatus(mlStatus: string): string {
     enabled: 'active',
     paused: 'paused',
     disabled: 'paused',
+    stopped: 'paused',
     ended: 'ended',
     finished: 'ended',
+    deleted: 'ended',
   };
-  return statusMap[mlStatus?.toLowerCase()] || 'active';
+  return statusMap[mlStatus?.toLowerCase()] || 'paused';
 }
 
 function sleep(ms: number): Promise<void> {
