@@ -1,109 +1,124 @@
 
-# Cache de Metricas Diarias de ADS
+# Metricas Organico vs Publicidade com Protecoes
 
-## Problema Atual
+## Resumo
 
-Cada vez que o usuario muda o filtro de data (7d, 30d, 90d), a edge function `ads-period-metrics` faz chamadas em tempo real para a API do ML buscando metricas de **todos os itens** (165+), levando ~30 segundos. A tabela `ads_daily_metrics` existe mas tem **0 registros**.
+Cruzar dados de vendas totais (`meli_orders_cache`) com dados de ADS (`ads_period_cache`) para calcular metricas de organico vs publicidade, TACOS geral e custo por venda. Todas as consultas com paginacao automatica (sem limite de 1000 registros) e tratamento de rate limit na API do ML.
 
-## Estrategia: Cache por Dia no Banco
+## Protecoes Aplicadas
 
-Dados de dias passados **nunca mudam**. Podemos buscar da API apenas uma vez e guardar permanentemente. Apenas o dia de hoje precisa ser atualizado.
-
-```text
-Requisicao: 90 dias
-    |
-    v
-1. Buscar no banco: dias ja cacheados (ex: 85 dias)
-2. Buscar da API: apenas dias faltantes (ex: 5 dias)
-3. Salvar novos dias no banco
-4. Retornar tudo agregado
-    |
-    v
-Tempo: ~2s (banco) + ~3s (5 dias da API) = ~5s
-Proxima vez mesmo periodo: ~2s (tudo do banco)
-```
-
-## Mudancas Tecnicas
-
-### 1. Nova Tabela: `ads_period_cache`
-
-Tabela simplificada para cache de metricas agregadas por dia/seller (sem dependencia de campaign_id que a `ads_daily_metrics` exige como FK):
-
-```text
-ads_period_cache
-- seller_id (text)
-- user_id (uuid)
-- metric_date (date)
-- total_spent (numeric)
-- total_revenue (numeric)
-- total_clicks (integer)
-- total_impressions (integer)
-- total_conversions (integer)
-- items_data (jsonb) -- detalhes por item
-- campaigns_data (jsonb) -- detalhes por campanha
-- fetched_at (timestamptz)
-- UNIQUE(seller_id, metric_date)
-```
-
-Motivo de nao usar `ads_daily_metrics`: ela exige `campaign_id` (FK obrigatorio), fragmentando os dados por campanha. O cache precisa ser agregado por dia.
-
-### 2. Edge Function `ads-period-metrics` (Refatorar)
-
-Nova logica:
-
-1. Recebe `seller_id`, `date_from`, `date_to`
-2. Busca no `ads_period_cache` todos os dias do periodo
-3. Identifica dias faltantes (nunca cacheados) + dia de hoje (sempre refetch)
-4. Para dias faltantes: busca da API ML **apenas esses dias**, um a um ou em lote
-5. Salva novos dias no cache
-6. Agrega todos os dias e retorna o resultado
-
-Logica de invalidacao:
-- Dias anteriores a hoje: cache permanente (dados nao mudam)
-- Dia de hoje: sempre refetch (dados podem mudar ao longo do dia)
-- TTL opcional de 1h para dia de hoje (evitar chamadas excessivas)
-
-### 3. Backfill Inicial (Edge Function `ads-backfill-cache`)
-
-Nova edge function que:
-- Busca os ultimos 365 dias, dia a dia
-- Processa em lotes de 7 dias por execucao (respeitar timeout de 50s)
-- Usa estado resumivel (`ads_backfill_state`) para continuar de onde parou
-- Pode ser disparado manualmente ou via cron diario
-
-### 4. Hook Frontend (Ajustar `useAdsPeriodMetrics`)
-
-Sem mudancas na interface do hook. A melhoria e transparente -- o backend responde mais rapido porque usa cache.
-
-## Fluxo Apos Implementacao
-
-```text
-PRIMEIRA VEZ (backfill):
-  cron/manual -> ads-backfill-cache
-  Dia 1: busca dias 1-7 da API, salva no cache
-  Dia 2: busca dias 8-14, salva...
-  ...ate 365 dias
-
-USO DIARIO:
-  Usuario seleciona "90d"
-  -> Edge function busca 90 dias do banco (~100ms)
-  -> Refetch apenas hoje da API (~3s)
-  -> Retorna em ~3s total
-
-  Usuario muda para "30d"
-  -> Tudo no banco, retorna em ~500ms
-```
-
-## Resultado Esperado
-
-- Primeira carga apos backfill: **2-3 segundos** (vs 30s atual)
-- Troca de filtro com dados cacheados: **menos de 1 segundo**
-- Dados historicos precisos e permanentes
-- Apenas o dia corrente consulta a API ML
+1. **Rate Limit (429)**: Todas as chamadas a API do ML passam por `fetchWithRetry()` com backoff exponencial (ate 3 tentativas)
+2. **Sem limite de registros**: Todas as consultas ao banco usam `fetchAllRows()` com paginacao automatica via `.range()`
+3. **Tratamento de erro robusto**: try/catch em todas as chamadas externas, fallback para zero quando dados indisponiveis
 
 ## Arquivos Afetados
 
-1. **Nova migracao SQL**: criar tabela `ads_period_cache` com RLS
-2. **`supabase/functions/ads-period-metrics/index.ts`**: refatorar para usar cache-first
-3. **Novo `supabase/functions/ads-backfill-cache/index.ts`**: backfill de 365 dias com estado resumivel
-4. **`src/hooks/useAdsPeriodMetrics.ts`**: sem mudancas (transparente)
+### 1. Edge Function `ads-period-metrics/index.ts` (Refatorar)
+
+Mudancas:
+- Adicionar `fetchWithRetry()` para todas as chamadas a API do ML (campanhas, itens, metricas)
+- Adicionar `fetchAllRows()` local para consultas ao banco sem limite de 1000
+- Apos agregar dados ADS do cache, consultar `meli_orders_cache`:
+  - Buscar pedidos `paid` no periodo (com paginacao)
+  - Buscar pedidos `cancelled/refunded` no periodo (para receita liquida)
+  - Agrupar por dia para serie temporal
+- Calcular novos campos na resposta:
+  - `total_seller_revenue` (faturamento liquido = paid - cancelled)
+  - `total_seller_orders` (pedidos pagos)
+  - `organic_revenue` (seller - ads)
+  - `organic_percent` / `paid_percent`
+  - `tacos_total` (gasto ADS / faturamento total)
+  - `cost_per_sale_general` (gasto / pedidos totais)
+  - `cost_per_sale_ads` (gasto / conversoes ADS)
+- Daily time series inclui: `seller_revenue`, `organic_revenue`, `seller_orders`
+
+### 2. Tipo `AdsMetricsSummary` em `src/types/ads.ts`
+
+Adicionar campos:
+```
+total_seller_revenue: number
+total_seller_orders: number
+total_cancelled_revenue: number
+total_cancelled_orders: number
+organic_revenue: number
+organic_percent: number
+paid_percent: number
+tacos_total: number
+cost_per_sale_general: number
+cost_per_sale_ads: number
+```
+
+### 3. Hook `useAdsPeriodMetrics.ts`
+
+- Ampliar `PeriodDailyPoint` com `seller_revenue`, `organic_revenue`, `seller_orders`
+- Mapear novos campos da resposta para o `AdsMetricsSummary`
+- Atualizar `emptySummary` com novos campos zerados
+
+### 4. KPI Cards `AdsKpiCards.tsx`
+
+Reorganizar em 2 blocos visuais (12 cards no total):
+
+**Bloco 1 - Visao do Negocio (4 cards):**
+- Faturamento Total (liquido, com badge "X% organico")
+- Receita Organica
+- Receita via ADS
+- TACOS Geral (gasto / faturamento total)
+
+**Bloco 2 - Performance ADS (4 cards):**
+- Gasto Total
+- ROAS Medio
+- Custo por Venda (geral)
+- Custo por Venda (ADS)
+
+**Bloco 3 - Detalhes (4 cards):**
+- CPC Medio
+- ACOS Medio
+- No Prejuizo
+- Escalaveis
+
+### 5. Grafico `AdsSpendRevenueChart.tsx`
+
+- Adicionar toggle com 2 visualizacoes:
+  - "Gasto vs Receita" (atual)
+  - "Organico vs Publicidade" (area empilhada com organico + ADS + linha de gasto)
+- Terceira serie "Faturamento Total" no grafico existente
+- `PeriodDailyPoint` atualizado com `seller_revenue` e `organic_revenue`
+
+### 6. Pagina `Publicidade.tsx`
+
+- Sem mudancas estruturais, apenas passa os novos dados que ja vem do hook
+
+## Fluxo de Dados
+
+```text
+Frontend (30d) -> ads-period-metrics
+  |
+  |-- 1. ads_period_cache (paginado, sem limite)
+  |-- 2. meli_orders_cache WHERE paid (paginado, sem limite)
+  |-- 3. meli_orders_cache WHERE cancelled (paginado, sem limite)
+  |-- 4. ML API so para dias faltantes (com retry 429)
+  |
+  v
+Agrega: organico = seller_revenue - ads_revenue
+Retorna tudo em uma unica chamada (~2s se tudo cacheado)
+```
+
+## Detalhes Tecnicos
+
+### fetchWithRetry (Rate Limit)
+```text
+Para cada chamada a API do ML:
+1. Faz a requisicao
+2. Se status 429: espera retry-after * (attempt+1) segundos
+3. Tenta ate 3 vezes com backoff
+4. Se falhar, retorna ultimo response
+```
+
+### fetchAllRows (Paginacao DB)
+```text
+Para cada consulta ao banco:
+1. Busca .range(0, 999)
+2. Se retornou 1000 rows, busca .range(1000, 1999)
+3. Repete ate retornar menos que 1000
+4. Concatena tudo e retorna
+```
