@@ -503,13 +503,20 @@ async function fetchCampaigns(accessToken: string, siteId: string, sellerId: str
   const allCampaigns: any[] = [];
   let offset = 0;
   const limit = 100;
+  let okCount = 0, failCount = 0;
   try {
     while (true) {
       const url = `https://api.mercadolibre.com/marketplace/advertising/${siteId}/advertisers/${sellerId}/product_ads/campaigns/search?date_from=${dateFrom}&date_to=${dateTo}&metrics=${metrics}&offset=${offset}&limit=${limit}`;
       const response = await fetchWithRetry(url, {
         headers: { 'Authorization': `Bearer ${accessToken}`, 'api-version': '2' },
       });
-      if (!response.ok) { await response.text(); break; }
+      if (!response.ok) {
+        const body = await response.text();
+        console.warn(`[fetchCampaigns] HTTP ${response.status}: ${body.slice(0, 200)}`);
+        failCount++;
+        break;
+      }
+      okCount++;
       const data = await response.json();
       const results = Array.isArray(data.results || data.campaigns || data) ? (data.results || data.campaigns || data) : [];
       if (results.length === 0) break;
@@ -523,6 +530,7 @@ async function fetchCampaigns(accessToken: string, siteId: string, sellerId: str
   } catch (error) {
     console.error('[ads-period-metrics] fetchCampaigns error:', error);
   }
+  console.log(`[fetchCampaigns] Done: ${okCount} ok, ${failCount} failed, ${allCampaigns.length} campaigns`);
   return allCampaigns;
 }
 
@@ -552,6 +560,8 @@ async function discoverItems(accessToken: string, sellerId: string) {
 
 async function fetchItemMetricsBatch(accessToken: string, items: any[], dateFrom: string, dateTo: string) {
   const results: any[] = [];
+  let okCount = 0, failCount = 0;
+  const failStatuses: Record<number, number> = {};
   for (let i = 0; i < items.length; i += BATCH_SIZE) {
     const batch = items.slice(i, i + BATCH_SIZE);
     const batchResults = await Promise.all(
@@ -564,16 +574,23 @@ async function fetchItemMetricsBatch(accessToken: string, items: any[], dateFrom
             headers: { 'Authorization': `Bearer ${accessToken}`, 'api-version': '2' },
           });
           if (resp.ok) {
+            okCount++;
             const data = await resp.json();
             return { ...item, ...data, metrics: data.metrics || {} };
           }
-          await resp.text();
+          const body = await resp.text();
+          failCount++;
+          failStatuses[resp.status] = (failStatuses[resp.status] || 0) + 1;
+          if (failCount <= 3) {
+            console.warn(`[fetchItemMetrics] HTTP ${resp.status} for ${itemId}: ${body.slice(0, 200)}`);
+          }
           return { ...item, metrics: {} };
-        } catch { return { ...item, metrics: {} }; }
+        } catch { failCount++; return { ...item, metrics: {} }; }
       })
     );
     results.push(...batchResults);
     if (i + BATCH_SIZE < items.length) await sleep(BATCH_DELAY);
   }
+  console.log(`[fetchItemMetrics] Done: ${okCount} ok, ${failCount} failed out of ${items.length}. Fail statuses: ${JSON.stringify(failStatuses)}`);
   return results;
 }
