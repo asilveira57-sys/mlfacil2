@@ -6301,7 +6301,7 @@ export type Database = {
             foreignKeyName: "module_tag_assignments_module_id_fkey"
             columns: ["module_id"]
             isOneToOne: false
-            referencedRelation: "system_modules_legacy"
+            referencedRelation: "system_modules"
             referencedColumns: ["id"]
           },
           {
