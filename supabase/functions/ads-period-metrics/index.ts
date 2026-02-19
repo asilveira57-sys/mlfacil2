@@ -250,6 +250,16 @@ function aggregateFromCache(rows: any[], dateFrom: string, dateTo: string) {
     if (item.roas !== null && item.roas > 3 && item.conversions > 0) products_scalable++;
   }
 
+  // Build daily time series for charts
+  const daily = rows.map(row => ({
+    date: row.metric_date,
+    spent: Number(row.total_spent) || 0,
+    revenue: Number(row.total_revenue) || 0,
+    clicks: Number(row.total_clicks) || 0,
+    impressions: Number(row.total_impressions) || 0,
+    conversions: Number(row.total_conversions) || 0,
+  })).sort((a, b) => a.date.localeCompare(b.date));
+
   return {
     total_spent, total_revenue, total_clicks, total_impressions, total_conversions,
     avg_acos: total_revenue > 0 ? (total_spent / total_revenue) * 100 : 0,
@@ -257,7 +267,7 @@ function aggregateFromCache(rows: any[], dateFrom: string, dateTo: string) {
     avg_cpc: total_clicks > 0 ? total_spent / total_clicks : 0,
     avg_tacos: total_revenue > 0 ? (total_spent / total_revenue) * 100 : 0,
     products_at_loss, products_scalable,
-    campaigns, items, date_from: dateFrom, date_to: dateTo,
+    campaigns, items, daily, date_from: dateFrom, date_to: dateTo,
   };
 }
 
