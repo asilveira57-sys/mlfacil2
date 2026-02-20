@@ -7,6 +7,7 @@ import { AccountSwitcher } from "./AccountSwitcher";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { Separator } from "@/components/ui/separator";
 import { NotificationBell } from "@/components/notifications";
+import { OfficialChannelIcon } from "@/components/official-channel";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { useRefreshPolicy } from "@/contexts/RefreshPolicyContext";
 import { Button } from "@/components/ui/button";
@@ -127,6 +128,7 @@ export function AppShellLayout() {
                   </TooltipContent>
                 </Tooltip>
                 <LanguageSwitcher variant="compact" />
+                <OfficialChannelIcon />
                 <NotificationBell sellerId={sellerId} />
                 <AccountSwitcher />
                 {headerState.headerContent}
