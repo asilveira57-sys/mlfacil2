@@ -1,19 +1,13 @@
-import { useState, useMemo, lazy, Suspense } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
-  User, Shield, Activity, Wrench, Globe, Bell, Clock,
-  Users, Palette, LayoutTemplate, ShieldCheck, FileCheck,
-  Download, Key, Webhook, FileText, CreditCard, Receipt,
-  History, Building2, MessageSquare, BookOpen, Headphones,
-  Settings, Sun, Image, Star, LucideIcon, ChevronDown,
+  User, Shield, Activity, Globe, Bell,
+  Users, Palette, LayoutTemplate, ShieldCheck,
+  Wrench, CreditCard, Receipt, Building2,
+  Headphones, MessageSquare, Settings, LucideIcon,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageContainer } from "@/components/layout/PageContainer";
-import { useConfigMenu, ConfigMenuGroup, ConfigMenuItem } from "@/hooks/useConfigMenu";
 
-// Existing components mapped by slug
 import SettingsProfile from "@/components/settings/SettingsProfile";
 import SettingsBilling from "@/components/settings/SettingsBilling";
 import SettingsCompanies from "@/components/settings/SettingsCompanies";
@@ -28,38 +22,31 @@ import { SettingsPrivacy } from "@/components/settings/SettingsPrivacy";
 import { SettingsAccessProfiles } from "@/components/settings/SettingsAccessProfiles";
 import { SettingsDailyMessage } from "@/components/settings/SettingsDailyMessage";
 
-// Icon registry
-const ICON_MAP: Record<string, LucideIcon> = {
-  User, Shield, Activity, Wrench, Globe, Bell, Clock,
-  Users, Palette, LayoutTemplate, ShieldCheck, FileCheck,
-  Download, Key, Webhook, FileText, CreditCard, Receipt,
-  History, Building2, MessageSquare, BookOpen, Headphones,
-  Settings, Sun, Image, Star,
-};
-
-function getIcon(key: string): LucideIcon {
-  return ICON_MAP[key] || Settings;
+interface SettingsTab {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  component: React.ComponentType | null;
 }
 
-// Map slugs to existing components
-const COMPONENT_MAP: Record<string, React.ComponentType> = {
-  'perfil': SettingsProfile,
-  'idioma': SettingsLanguage,
-  'colaboradores': CollaboratorsCard,
-  'perfis-acesso': SettingsAccessProfiles,
-  'personalizacao': SettingsCustomization,
-  'cores': SettingsCustomization,
-  'aparencia': SettingsTemplates,
-  'tema': SettingsTemplates,
-  'privacidade-lgpd': SettingsPrivacy,
-  'consentimentos': SettingsPrivacy,
-  'utilidades': SettingsUtilities,
-  'plano': SettingsPlan,
-  'faturamento': SettingsBilling,
-  'empresas-contas': SettingsCompanies,
-  'abrir-chamado': SettingsSupport,
-  'mensagem-do-dia': SettingsDailyMessage,
-};
+const settingsTabs: SettingsTab[] = [
+  { id: "perfil", label: "Perfil", icon: User, component: SettingsProfile },
+  { id: "seguranca", label: "Segurança", icon: Shield, component: null },
+  { id: "sessoes-ativas", label: "Sessões", icon: Activity, component: null },
+  { id: "idioma", label: "Idioma", icon: Globe, component: SettingsLanguage },
+  { id: "notificacoes", label: "Notificações", icon: Bell, component: null },
+  { id: "colaboradores", label: "Colaboradores", icon: Users, component: CollaboratorsCard },
+  { id: "perfis-acesso", label: "Perfis de Acesso", icon: ShieldCheck, component: SettingsAccessProfiles },
+  { id: "personalizacao", label: "Personalização", icon: Palette, component: SettingsCustomization },
+  { id: "aparencia", label: "Aparência", icon: LayoutTemplate, component: SettingsTemplates },
+  { id: "privacidade-lgpd", label: "Privacidade", icon: ShieldCheck, component: SettingsPrivacy },
+  { id: "utilidades", label: "Utilidades", icon: Wrench, component: SettingsUtilities },
+  { id: "plano", label: "Plano", icon: CreditCard, component: SettingsPlan },
+  { id: "faturamento", label: "Faturamento", icon: Receipt, component: SettingsBilling },
+  { id: "empresas-contas", label: "Empresas", icon: Building2, component: SettingsCompanies },
+  { id: "abrir-chamado", label: "Suporte", icon: Headphones, component: SettingsSupport },
+  { id: "mensagem-do-dia", label: "Msg do Dia", icon: MessageSquare, component: SettingsDailyMessage },
+];
 
 function PlaceholderContent({ name }: { name: string }) {
   return (
@@ -75,142 +62,38 @@ function PlaceholderContent({ name }: { name: string }) {
 
 export function SettingsLayout() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeSlug = searchParams.get('section') || 'perfil';
-  const { menuGroups, isLoading } = useConfigMenu();
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const activeSlug = searchParams.get("section") || "perfil";
 
   const setActiveSlug = (slug: string) => {
     setSearchParams({ section: slug }, { replace: true });
   };
 
-  const isGroupOpen = (id: string) => openGroups[id] !== false;
-  const toggleGroup = (id: string) => {
-    setOpenGroups(prev => ({ ...prev, [id]: !isGroupOpen(id) }));
-  };
-
-  // Find active item name
-  const activeItemName = useMemo(() => {
-    for (const group of menuGroups) {
-      for (const item of group.items) {
-        if (item.slug === activeSlug) return item.name;
-        for (const child of item.children) {
-          if (child.slug === activeSlug) return child.name;
-          for (const sub of child.children) {
-            if (sub.slug === activeSlug) return sub.name;
-          }
-        }
-      }
-    }
-    return 'Configurações';
-  }, [menuGroups, activeSlug]);
-
-  const ActiveComponent = COMPONENT_MAP[activeSlug];
-
-  const renderMenuItem = (item: ConfigMenuItem, depth: number = 0) => {
-    const Icon = getIcon(item.icon);
-    const hasChildren = item.children.length > 0;
-    const isActive = item.slug === activeSlug;
-
-    if (hasChildren) {
-      const isOpen = isGroupOpen(item.id);
-      return (
-        <div key={item.id}>
-          <Collapsible open={isOpen} onOpenChange={() => toggleGroup(item.id)}>
-            <CollapsibleTrigger className={cn(
-              "flex items-center gap-2 w-full px-3 py-2 text-sm rounded-md transition-colors",
-              "hover:bg-accent/50 text-muted-foreground hover:text-foreground",
-              depth > 0 && "pl-8 text-xs"
-            )}>
-              <Icon className="h-4 w-4 shrink-0" />
-              <span className="flex-1 text-left truncate">{item.name}</span>
-              <ChevronDown className={cn(
-                "h-3.5 w-3.5 transition-transform duration-200",
-                isOpen && "rotate-180"
-              )} />
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <div className={cn("ml-4 border-l border-border pl-1 mt-0.5 space-y-0.5", depth > 0 && "ml-6")}>
-                {item.children.map(child => renderMenuItem(child, depth + 1))}
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
-        </div>
-      );
-    }
-
-    return (
-      <button
-        key={item.id}
-        onClick={() => setActiveSlug(item.slug)}
-        className={cn(
-          "flex items-center gap-2 w-full px-3 py-2 text-sm rounded-md transition-colors text-left",
-          isActive
-            ? "bg-primary/10 text-primary font-medium"
-            : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-          depth > 0 && "pl-8 text-xs",
-          depth > 1 && "pl-12 text-xs"
-        )}
-      >
-        <Icon className="h-4 w-4 shrink-0" />
-        <span className="truncate">{item.name}</span>
-      </button>
-    );
-  };
-
-  const renderGroup = (group: ConfigMenuGroup) => {
-    const Icon = getIcon(group.icon);
-    const isOpen = isGroupOpen(group.id);
-
-    return (
-      <div key={group.id} className="mb-1">
-        <Collapsible open={isOpen !== false} onOpenChange={() => toggleGroup(group.id)}>
-          <CollapsibleTrigger className={cn(
-            "flex items-center gap-2 w-full px-3 py-2 text-xs font-semibold uppercase tracking-wider rounded-md transition-colors",
-            "text-muted-foreground hover:text-foreground hover:bg-accent/30"
-          )}>
-            <Icon className="h-4 w-4 shrink-0" />
-            <span className="flex-1 text-left">{group.name}</span>
-            <ChevronDown className={cn(
-              "h-3 w-3 transition-transform duration-200",
-              (isOpen !== false) && "rotate-180"
-            )} />
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <div className="mt-0.5 space-y-0.5 pl-1">
-              {group.items.map(item => renderMenuItem(item))}
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
-      </div>
-    );
-  };
+  const activeTab = settingsTabs.find((t) => t.id === activeSlug) || settingsTabs[0];
+  const ActiveComponent = activeTab.component;
 
   return (
     <PageContainer title="Configurações" subtitle="Gerencie sua conta e preferências">
-      <div className="flex gap-6 max-w-7xl mx-auto px-4 py-6">
-        {/* Vertical sidebar menu */}
-        <aside className="w-64 shrink-0 hidden md:block">
-          <div className="sticky top-20">
-            <ScrollArea className="h-[calc(100vh-10rem)]">
-              <nav className="space-y-1 pr-2">
-                {isLoading ? (
-                  <div className="px-3 py-4 text-xs text-muted-foreground">Carregando menu...</div>
-                ) : (
-                  menuGroups.map(renderGroup)
-                )}
-              </nav>
-            </ScrollArea>
-          </div>
-        </aside>
+      <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
+        <Tabs value={activeSlug} onValueChange={setActiveSlug}>
+          <TabsList className="h-auto p-1 flex flex-wrap gap-1 bg-muted/50">
+            {settingsTabs.map((tab) => (
+              <TabsTrigger
+                key={tab.id}
+                value={tab.id}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+              >
+                <tab.icon className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">{tab.label}</span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
 
-        {/* Content area */}
-        <main className="flex-1 min-w-0">
-          {ActiveComponent ? (
-            <ActiveComponent />
-          ) : (
-            <PlaceholderContent name={activeItemName} />
-          )}
-        </main>
+        {ActiveComponent ? (
+          <ActiveComponent />
+        ) : (
+          <PlaceholderContent name={activeTab.label} />
+        )}
       </div>
     </PageContainer>
   );
