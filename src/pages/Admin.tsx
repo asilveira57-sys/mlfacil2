@@ -22,6 +22,7 @@ import {
   ClipboardList,
   History,
   Palette,
+  Radio,
 } from 'lucide-react';
 import { AdminDashboard } from './admin/AdminDashboard';
 import { AdminOnboarding } from './admin/AdminOnboarding';
@@ -42,10 +43,12 @@ import { AdminRatings } from './admin/AdminRatings';
 import { AdminGlobalMetrics } from './admin/AdminGlobalMetrics';
 import Retrospectiva from './Retrospectiva';
 import { AdminVisualIdentity } from '@/components/admin/AdminVisualIdentity';
+import { AdminCanalOficial } from './admin/AdminCanalOficial';
 
 const adminTabs = [
   { id: '', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'onboarding', label: 'Primeiros Passos', icon: Rocket },
+  { id: 'canal-oficial', label: 'Canal Oficial', icon: Radio },
   { id: 'usuarios', label: 'Usuários', icon: Users },
   { id: 'perfis', label: 'Perfis', icon: Shield },
   { id: 'colaboradores', label: 'Colaboradores', icon: Users },
@@ -110,6 +113,7 @@ export default function Admin() {
         <Routes>
           <Route index element={<AdminDashboard />} />
           <Route path="onboarding" element={<AdminOnboarding />} />
+          <Route path="canal-oficial" element={<AdminCanalOficial />} />
           <Route path="usuarios" element={<AdminUsers />} />
           <Route path="perfis" element={<AdminAccessProfiles />} />
           <Route path="colaboradores" element={<AdminCollaboratorsPlaceholder />} />
