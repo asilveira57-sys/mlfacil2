@@ -10117,6 +10117,104 @@ export type Database = {
           },
         ]
       }
+      sandbox_company_snapshot: {
+        Row: {
+          acos_medio: number | null
+          company_id: string
+          created_at: string
+          cutoff_coleta_time: string | null
+          cutoff_flex_time: string | null
+          estoque_critico: number | null
+          etiquetas_pendentes: number | null
+          faturamento_ads_semana: number | null
+          gasto_ads_semana: number | null
+          id: string
+          mediacoes_abertas: number | null
+          nf_pendentes: number | null
+          pedidos_envio: number | null
+          pedidos_semana: number | null
+          perguntas_pendentes: number | null
+          pos_venda_pendente: number | null
+          produto_mais_vendido: string | null
+          reclamacoes_abertas: number | null
+          reclamacoes_aguardando: number | null
+          roas_medio: number | null
+          seller_id: string
+          snapshot_error: string | null
+          snapshot_status: string | null
+          ticket_medio: number | null
+          total_vendas_semana: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          acos_medio?: number | null
+          company_id: string
+          created_at?: string
+          cutoff_coleta_time?: string | null
+          cutoff_flex_time?: string | null
+          estoque_critico?: number | null
+          etiquetas_pendentes?: number | null
+          faturamento_ads_semana?: number | null
+          gasto_ads_semana?: number | null
+          id?: string
+          mediacoes_abertas?: number | null
+          nf_pendentes?: number | null
+          pedidos_envio?: number | null
+          pedidos_semana?: number | null
+          perguntas_pendentes?: number | null
+          pos_venda_pendente?: number | null
+          produto_mais_vendido?: string | null
+          reclamacoes_abertas?: number | null
+          reclamacoes_aguardando?: number | null
+          roas_medio?: number | null
+          seller_id: string
+          snapshot_error?: string | null
+          snapshot_status?: string | null
+          ticket_medio?: number | null
+          total_vendas_semana?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          acos_medio?: number | null
+          company_id?: string
+          created_at?: string
+          cutoff_coleta_time?: string | null
+          cutoff_flex_time?: string | null
+          estoque_critico?: number | null
+          etiquetas_pendentes?: number | null
+          faturamento_ads_semana?: number | null
+          gasto_ads_semana?: number | null
+          id?: string
+          mediacoes_abertas?: number | null
+          nf_pendentes?: number | null
+          pedidos_envio?: number | null
+          pedidos_semana?: number | null
+          perguntas_pendentes?: number | null
+          pos_venda_pendente?: number | null
+          produto_mais_vendido?: string | null
+          reclamacoes_abertas?: number | null
+          reclamacoes_aguardando?: number | null
+          roas_medio?: number | null
+          seller_id?: string
+          snapshot_error?: string | null
+          snapshot_status?: string | null
+          ticket_medio?: number | null
+          total_vendas_semana?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sandbox_company_snapshot_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       seller_category_eligibility: {
         Row: {
           api_attempts_count: number
