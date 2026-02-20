@@ -3493,6 +3493,39 @@ export type Database = {
         }
         Relationships: []
       }
+      daily_messages: {
+        Row: {
+          ativa: boolean
+          created_at: string
+          id: string
+          ordem_rotacao: number | null
+          referencia: string | null
+          tema: string
+          texto: string
+          updated_at: string
+        }
+        Insert: {
+          ativa?: boolean
+          created_at?: string
+          id?: string
+          ordem_rotacao?: number | null
+          referencia?: string | null
+          tema: string
+          texto: string
+          updated_at?: string
+        }
+        Update: {
+          ativa?: boolean
+          created_at?: string
+          id?: string
+          ordem_rotacao?: number | null
+          referencia?: string | null
+          tema?: string
+          texto?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       dynamic_feature_flags: {
         Row: {
           feature_key: string
@@ -6094,6 +6127,106 @@ export type Database = {
             columns: ["parent_id"]
             isOneToOne: false
             referencedRelation: "menu_items_legacy"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      message_ai_suggestions: {
+        Row: {
+          admin_notes: string | null
+          approved_at: string | null
+          created_at: string
+          id: string
+          referencia: string | null
+          rejected_at: string | null
+          status: string
+          tema: string
+          texto: string
+        }
+        Insert: {
+          admin_notes?: string | null
+          approved_at?: string | null
+          created_at?: string
+          id?: string
+          referencia?: string | null
+          rejected_at?: string | null
+          status?: string
+          tema: string
+          texto: string
+        }
+        Update: {
+          admin_notes?: string | null
+          approved_at?: string | null
+          created_at?: string
+          id?: string
+          referencia?: string | null
+          rejected_at?: string | null
+          status?: string
+          tema?: string
+          texto?: string
+        }
+        Relationships: []
+      }
+      message_daily_log: {
+        Row: {
+          created_at: string
+          data_exibicao: string
+          id: string
+          message_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          data_exibicao: string
+          id?: string
+          message_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          data_exibicao?: string
+          id?: string
+          message_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_daily_log_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "daily_messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      message_interactions: {
+        Row: {
+          created_at: string
+          id: string
+          liked: boolean
+          message_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          liked?: boolean
+          message_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          liked?: boolean
+          message_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_interactions_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "daily_messages"
             referencedColumns: ["id"]
           },
         ]
@@ -11093,6 +11226,24 @@ export type Database = {
         }
         Relationships: []
       }
+      system_settings: {
+        Row: {
+          key: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value: Json
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: Json
+        }
+        Relationships: []
+      }
       task_checklists: {
         Row: {
           created_at: string
@@ -12039,6 +12190,33 @@ export type Database = {
           enabled?: boolean
           feature_key?: string
           id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_message_preferences: {
+        Row: {
+          created_at: string
+          exibir_mensagem: boolean
+          permitir_gerar_card: boolean
+          tema_preferido: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          exibir_mensagem?: boolean
+          permitir_gerar_card?: boolean
+          tema_preferido?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          exibir_mensagem?: boolean
+          permitir_gerar_card?: boolean
+          tema_preferido?: string | null
           updated_at?: string
           user_id?: string
         }
