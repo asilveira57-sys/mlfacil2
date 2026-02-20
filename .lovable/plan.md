@@ -1,133 +1,116 @@
 
-
-# Plano de Reorganizacao do Menu e Correcoes
+# Configuracoes do Seller: Menu Vertical para Horizontal (Estilo Admin)
 
 ## Resumo
 
-Este plano aborda 6 solicitacoes de limpeza e reorganizacao do menu lateral e do painel Admin.
+Transformar a pagina de Configuracoes (/settings) de menu vertical lateral para navegacao por abas horizontais, seguindo o mesmo padrao ja implementado no Admin.
 
 ---
 
-## 1. Admin: Eliminar submenu vertical, manter tudo na horizontal
+## Estrutura atual do menu vertical
 
-**Problema**: O Admin tem muitos subitens no menu lateral (sidebar), gerando scroll excessivo e atrapalhando o trabalho.
-
-**Solucao**:
-- Desativar (`is_active = false`) todos os modulos filhos do Admin na tabela `system_modules` (admin.dashboard, admin.settings, admin.users, etc.)
-- O item "Admin" raiz fica com `route = '/admin'` como link direto (sem expandir submenu)
-- Todas as opcoes continuam acessiveis pelas tabs horizontais ja existentes em `Admin.tsx`
-- Adicionar ao `Admin.tsx` as tabs que faltam (se houver alguma rota no banco que nao esteja nas tabs)
-
-**Verificacao cruzada** - Tabs horizontais atuais vs modulos no banco:
-
-| Modulo no banco | Tab horizontal | Status |
-|---|---|---|
-| Dashboard Admin (/admin) | Dashboard | OK |
-| Configuracoes (/admin/configuracoes) | Configuracoes | OK |
-| Perfis e Permissoes (/admin/perfis) | Perfis | OK |
-| Colaboradores (/admin/colaboradores) | Nao existe | ADICIONAR |
-| Auditoria e Logs (/admin/logs) | Nao existe | ADICIONAR |
-| Usuarios (/admin/usuarios) | Usuarios | OK |
-| Planos (/admin/planos) | Planos | OK |
-| Pagamentos (/admin/pagamentos) | Pagamentos | OK |
-| Blog (/admin/blog) | Blog | OK |
-| SEO (/admin/seo) | SEO | OK |
-| Menu Builder (/admin/menu-builder) | Menu | OK |
-| Feature Flags (/admin/feature-flags) | Nao existe | REMOVER (ver item 2) |
-| Tags (/admin/tags) | Tags | OK |
-| Fila NFS-e (/admin/faturamento) | Fila NFS-e | OK |
-| Tiny/Olist (/admin/erp) | Tiny/Olist | OK |
-
-Serao adicionadas as tabs "Colaboradores" e "Auditoria" ao `Admin.tsx` com componentes placeholder.
-
----
-
-## 2. Feature Flags: Explicacao e remocao
-
-**O que sao**: Feature Flags sao "interruptores" que permitem ligar/desligar funcionalidades do sistema para usuarios ou grupos especificos sem precisar fazer deploy. Exemplo: ativar um modulo beta so para testadores.
-
-**Situacao atual**: Existe um registro no banco (`admin.feature_flags` com rota `/admin/feature-flags`), mas nao existe nenhum componente ou rota registrada no `Admin.tsx` para renderizar essa pagina. Por isso, ao clicar, nada acontece.
-
-**Acao**: Desativar o modulo no banco (`is_active = false`). Se no futuro voce quiser usar, basta reativar e criar a interface.
-
----
-
-## 3. Retrospectiva: Mover para Admin
-
-**Acao**:
-- Desativar `marketplace.retrospectiva` no menu lateral (`is_active = false`)
-- Adicionar tab "Retrospectiva" no `Admin.tsx` com rota `/admin/retrospectiva`
-- Criar uma `Route` para `/admin/retrospectiva` apontando para o componente `Retrospectiva` existente
-- A pagina continua funcionando, mas so acessivel pelo painel Admin
-
----
-
-## 4. Marketplace: Separar Mercado Livre e Shopee
-
-**Estrutura proposta no menu lateral**:
+O menu atual possui 5 grupos com subitens aninhados (ate 3 niveis):
 
 ```text
-Marketplace
-  +-- Mercado Livre (expande submenu atual)
-  |     +-- Vendas
-  |     |     +-- Etiquetas de Envio
-  |     +-- Anuncios
-  |     +-- Crescimento
-  |     +-- Inteligencia
-  |     +-- Financeiro
-  +-- Shopee [badge "Em breve"]
+MINHA CONTA
+  Perfil
+  Seguranca
+  Sessoes Ativas
+  Preferencias
+    Idioma
+    Notificacoes
+    Fuso Horario
+    Mensagem do Dia
+
+EQUIPE
+  Colaboradores
+  Perfis de Acesso
+
+SISTEMA
+  Personalizacao (Cores, Logotipo, Nome da Empresa)
+  Aparencia (Tema Claro/Escuro)
+  Privacidade e LGPD (Consentimentos, Exportacao de Dados)
+  Utilidades (Chaves de API, Webhooks, Logs)
+
+FINANCEIRO
+  Plano
+  Faturamento
+  Historico de Pagamentos
+  Empresas e Contas
+
+SUPORTE
+  Abrir Chamado
+  Base de Conhecimento
+  Status do Sistema
 ```
 
-**Acao**:
-- Criar modulo `marketplace.mercadolivre` (grupo intermediario, sem rota, com icone Store)
-- Reparentar todos os grupos atuais (Vendas, Anuncios, Crescimento, etc.) como filhos de `marketplace.mercadolivre`
-- Criar modulo `marketplace.shopee` com `status = 'coming_soon'` e sem rota
-
 ---
 
-## 5. Pedidos e Etiquetas: Limpeza
+## Nova estrutura: Abas horizontais
 
-**Problemas identificados**:
-- "Pedidos" (`marketplace.sales.orders`, rota `/vendas`) da erro 404 (nao existe componente)
-- "Envios" deveria chamar "Etiquetas de Envio"
-- "Gerar Etiqueta" (`operacional.labels.generate`) aponta para `/shipping-labels` (mesmo que Envios) -- redundante
+Cada item folha (com rota ou componente) vira uma aba horizontal. Itens pais sem rota (como "Preferencias", "Personalizacao") serao achatados -- seus filhos sobem como abas diretas.
 
-**Acoes**:
-- Desativar `marketplace.sales.orders` (Pedidos) -- `is_active = false`
-- Renomear `marketplace.sales.shipping` de "Envios" para "Etiquetas de Envio"
-- Desativar `operacional.labels.generate` (Gerar Etiqueta) por ser redundante com "Etiquetas de Envio"
-- Manter `operacional.labels.header` (Config. Cabecalho) ativo
+Abas propostas (agrupadas visualmente por separador ou ordem logica):
 
----
+| Aba | Slug | Componente |
+|---|---|---|
+| Perfil | perfil | SettingsProfile |
+| Seguranca | seguranca | Placeholder |
+| Sessoes | sessoes-ativas | Placeholder |
+| Idioma | idioma | SettingsLanguage |
+| Notificacoes | notificacoes | Placeholder |
+| Colaboradores | colaboradores | CollaboratorsCard |
+| Perfis de Acesso | perfis-acesso | SettingsAccessProfiles |
+| Personalizacao | personalizacao | SettingsCustomization |
+| Aparencia | aparencia | SettingsTemplates |
+| Privacidade | privacidade-lgpd | SettingsPrivacy |
+| Utilidades | utilidades | SettingsUtilities |
+| Plano | plano | SettingsPlan |
+| Faturamento | faturamento | SettingsBilling |
+| Empresas | empresas-contas | SettingsCompanies |
+| Suporte | abrir-chamado | SettingsSupport |
+| Msg do Dia | mensagem-do-dia | SettingsDailyMessage |
 
-## 6. Visualizador ZPL: Renomear
-
-**Acao**: Renomear `ferramentas.zpl_viewer` de "Visualizador ZPL" para "Etiqueta ZPL" no banco. A posicao no menu fica como esta (voce ajusta depois).
+Itens sem componente (Fuso Horario, Chaves de API, Webhooks, Logs, Historico Pagamentos, Base de Conhecimento, Status do Sistema, Nome da Empresa, Logotipo, Exportacao de Dados, Consentimentos, Tema) nao precisam de aba separada -- ja sao cobertos pelos componentes pais (ex: "Utilidades" ja inclui Chaves API/Webhooks/Logs, "Personalizacao" ja inclui Cores/Logotipo).
 
 ---
 
 ## Detalhes tecnicos
 
-### Migracao SQL (uma unica migracao)
+### Alteracao em SettingsLayout.tsx
 
-1. **Admin filhos** - SET `is_active = false` para todos os `system_modules` com `parent_module_id = 'a0000000-...-000000000001'`
-2. **Admin raiz** - SET `route = '/admin'` no modulo `admin` (id `a0000000-...-000000000001`)
-3. **Feature Flags** - ja coberto pelo passo 1
-4. **Retrospectiva** - SET `is_active = false` em `marketplace.retrospectiva`
-5. **Marketplace ML** - INSERT novo modulo `marketplace.mercadolivre`, UPDATE `parent_module_id` dos grupos atuais
-6. **Marketplace Shopee** - INSERT novo modulo `marketplace.shopee` com `status = 'coming_soon'`
-7. **Pedidos** - SET `is_active = false` em `marketplace.sales.orders`
-8. **Envios** - UPDATE `name` para "Etiquetas de Envio" em `marketplace.sales.shipping`
-9. **Gerar Etiqueta** - SET `is_active = false` em `operacional.labels.generate`
-10. **ZPL** - UPDATE `name` para "Etiqueta ZPL" em `ferramentas.zpl_viewer`
+1. **Remover** o menu vertical lateral (aside com ScrollArea e toda a logica de renderizacao de grupos/itens colapsaveis)
+2. **Substituir** por um bloco de abas horizontais usando `Tabs`/`TabsList`/`TabsTrigger` (mesmo padrao do Admin.tsx)
+3. Cada aba usa icone + label, e ao clicar altera o `searchParams` `section`
+4. O conteudo renderiza o componente mapeado pela aba ativa (mesma logica atual do COMPONENT_MAP)
+5. A barra de abas tera `overflow-x-auto` para scroll horizontal em telas menores
 
-### Alteracoes em codigo
+### Codigo sera inspirado no Admin.tsx
 
-- **`Admin.tsx`**: Adicionar tabs "Colaboradores", "Auditoria", "Retrospectiva" com rotas e componentes (placeholder para Colaboradores/Auditoria, componente existente para Retrospectiva)
-- **`App.tsx`**: Nenhuma alteracao necessaria (rotas admin ja usam wildcard `/admin/*`)
-- **`DynamicSidebar.tsx`**: Nenhuma alteracao necessaria (ja consome dados dinamicos do banco)
+```text
+const settingsTabs = [
+  { id: 'perfil', label: 'Perfil', icon: User },
+  { id: 'seguranca', label: 'Seguranca', icon: Shield },
+  ...
+];
+
+<Tabs value={activeSlug}>
+  <TabsList className="h-auto p-1 flex flex-wrap gap-1">
+    {settingsTabs.map(tab => (
+      <TabsTrigger onClick={() => setActiveSlug(tab.id)} ...>
+        <tab.icon /> {tab.label}
+      </TabsTrigger>
+    ))}
+  </TabsList>
+</Tabs>
+
+{ActiveComponent ? <ActiveComponent /> : <PlaceholderContent />}
+```
+
+### Sem alteracao no banco de dados
+
+Os dados em `config_menu_groups` e `config_menu_items` permanecem intactos. O `useConfigMenu` hook continua disponivel, mas o SettingsLayout nao precisara mais consumi-lo -- as abas serao definidas estaticamente no componente (mesmo padrao do Admin.tsx), o que e mais simples e previsivel.
 
 ### Nenhuma rota sera perdida
 
-Todas as rotas atuais do Admin continuam funcionando via tabs horizontais. A unica rota removida e `/admin/feature-flags` que nunca funcionou.
-
+Todas as rotas existentes continuam funcionando via o parametro `?section=slug`. Os componentes mapeados permanecem os mesmos.
