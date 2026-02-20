@@ -1,8 +1,17 @@
-import { DollarSign, Megaphone, AlertTriangle, Package, Clock } from 'lucide-react';
+import { DollarSign, Megaphone, AlertTriangle, Package, Clock, CheckCircle2, AlertCircle } from 'lucide-react';
 import type { SandboxSnapshot } from '@/hooks/useSandboxSnapshots';
 
 interface Props {
   snapshots: SandboxSnapshot[];
+}
+
+function formatRelativeTime(dateStr: string): string {
+  const diffMin = Math.floor((Date.now() - new Date(dateStr).getTime()) / 60000);
+  if (diffMin < 1) return 'agora';
+  if (diffMin < 60) return `há ${diffMin}min`;
+  const h = Math.floor(diffMin / 60);
+  if (h < 24) return `há ${h}h`;
+  return `há ${Math.floor(h / 24)}d`;
 }
 
 export function SandboxGlobalSummary({ snapshots }: Props) {
@@ -11,7 +20,7 @@ export function SandboxGlobalSummary({ snapshots }: Props) {
   const totalReclamacoes = snapshots.reduce((s, c) => s + (c.reclamacoes_abertas || 0), 0);
   const totalEtiquetas = snapshots.reduce((s, c) => s + (c.etiquetas_pendentes || 0), 0);
 
-  // Find closest cutoff across all companies
+  // Find closest cutoff
   const now = new Date();
   const cutoffs = snapshots
     .map(s => s.cutoff_flex_time || s.cutoff_coleta_time)
@@ -26,6 +35,14 @@ export function SandboxGlobalSummary({ snapshots }: Props) {
     .sort((a, b) => a.getTime() - b.getTime());
 
   const closestCutoff = cutoffs[0];
+
+  // Last update (most recent snapshot)
+  const lastUpdate = snapshots.reduce((latest, snap) => {
+    const t = new Date(snap.updated_at);
+    return t > latest ? t : latest;
+  }, new Date(0));
+
+  const isStale = (Date.now() - lastUpdate.getTime()) > 30 * 60 * 1000;
 
   const items = [
     {
@@ -63,20 +80,36 @@ export function SandboxGlobalSummary({ snapshots }: Props) {
   ];
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 p-4 rounded-lg bg-muted/40 border border-border mb-6">
-      {items.map((item) => (
-        <div key={item.label} className="flex items-center gap-3">
-          <div className={`p-2 rounded-md ${item.accent ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground'}`}>
-            <item.icon className="h-4 w-4" />
+    <div className="rounded-lg bg-muted/40 border border-border px-4 py-3">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+        {items.map((item) => (
+          <div key={item.label} className="flex items-center gap-2.5 min-w-0">
+            <div className={`p-1.5 rounded-md flex-shrink-0 ${item.accent ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground'}`}>
+              <item.icon className="h-3.5 w-3.5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] text-muted-foreground truncate leading-tight">{item.label}</p>
+              <p className={`text-sm font-bold leading-tight ${item.accent ? 'text-destructive' : 'text-foreground'}`}>
+                {item.value}
+              </p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <p className="text-xs text-muted-foreground truncate">{item.label}</p>
-            <p className={`text-sm font-bold ${item.accent ? 'text-destructive' : 'text-foreground'}`}>
-              {item.value}
-            </p>
-          </div>
+        ))}
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Last update status */}
+        <div className={`flex items-center gap-1.5 text-xs flex-shrink-0 ${isStale ? 'text-yellow-500' : 'text-muted-foreground'}`}>
+        {isStale
+            ? <AlertCircle className="h-3 w-3" />
+            : <CheckCircle2 className="h-3 w-3 text-primary" />
+          }
+          <span>
+            {isStale ? 'Atualização atrasada' : `Atualizado ${formatRelativeTime(lastUpdate.toISOString())}`}
+          </span>
         </div>
-      ))}
+      </div>
     </div>
   );
 }
