@@ -284,7 +284,7 @@ export function DynamicSidebar() {
     <>
       <Sidebar collapsible="icon" className="border-r border-sidebar-border">
         <SidebarHeader className="border-b border-sidebar-border p-4">
-          <div className="flex items-center gap-3">
+          <Link to="/inicio" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
             <div className="w-8 h-8 bg-gradient-to-br from-primary to-primary/80 rounded-lg flex items-center justify-center shrink-0">
               <BarChart3 className="w-4 h-4 text-primary-foreground" />
             </div>
@@ -294,7 +294,7 @@ export function DynamicSidebar() {
                 <p className="text-[10px] text-sidebar-foreground/60 truncate">Analytics Pro</p>
               </div>
             )}
-          </div>
+          </Link>
         </SidebarHeader>
 
         <SidebarContent className="px-2">
