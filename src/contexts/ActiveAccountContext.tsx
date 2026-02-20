@@ -13,6 +13,7 @@ export interface ActiveAccount {
   isActive: boolean;
   provider: 'mercadolivre';
   status: ConnectionStatus;
+  companyId: string | null;
   // Extended tracking
   lastApiOkAt?: string;
   lastApiErrorCode?: string;
@@ -68,6 +69,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
       isActive: acc.isActive,
       provider: acc.provider,
       status: acc.status,
+      companyId: acc.companyId ?? null,
       lastApiOkAt: acc.lastApiOkAt,
       lastApiErrorCode: acc.lastApiErrorCode,
       consecutiveFailures: acc.consecutiveFailures,
@@ -124,6 +126,7 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
         {
           user_id: userId,
           active_marketplace_account_id: accountId,
+          active_company_id: account?.companyId || null,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'user_id' }

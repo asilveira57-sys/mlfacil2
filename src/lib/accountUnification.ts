@@ -25,6 +25,7 @@ export interface UnifiedMarketplaceAccount {
   provider: 'mercadolivre';
   status: ConnectionStatus;
   isActive: boolean;
+  companyId: string | null; // ml_accounts.company_id
   accessToken?: string;
   refreshToken?: string;
   expiresAt?: string;
@@ -332,6 +333,7 @@ function mapMlAccountToUnified(row: Record<string, unknown>): UnifiedMarketplace
     provider: 'mercadolivre',
     status: connectionStatus,
     isActive,
+    companyId: (row.company_id as string | null) ?? null,
     accessToken: row.access_token as string | undefined,
     refreshToken: row.refresh_token as string | undefined,
     expiresAt: row.token_expires_at as string | undefined,
