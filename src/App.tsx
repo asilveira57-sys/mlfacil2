@@ -43,6 +43,7 @@ import AdTimelineRadar from "./pages/AdTimelineRadar";
 import AdTimelineDetail from "./pages/AdTimelineDetail";
 import AdActionsCenter from "./pages/AdActionsCenter";
 import Seed from "./pages/Seed";
+import Sandbox from "./pages/Sandbox";
 import FreightManagement from "./pages/FreightManagement";
 import Precificacao from "./pages/Precificacao";
 import Comissoes from "./pages/Comissoes";
@@ -189,6 +190,7 @@ const App = () => {
                   <Route path="/seed" element={<Seed />} />
                   <Route path="/seed/:itemId" element={<Seed />} />
                   <Route path="/seed/sementes" element={<Seed />} />
+                  <Route path="/sandbox" element={<Sandbox />} />
                   <Route path="/frete" element={<FreightManagement />} />
                   <Route path="/precificacao" element={<Precificacao />} />
                   <Route path="/comissoes" element={<Comissoes />} />
