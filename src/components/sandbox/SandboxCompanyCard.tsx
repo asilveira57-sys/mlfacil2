@@ -1,154 +1,335 @@
-import { useMemo } from 'react';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { useState, useMemo, useCallback } from 'react';
+import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Separator } from '@/components/ui/separator';
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle,
+} from '@/components/ui/sheet';
 import {
   Clock, Package, FileText, MessageCircle, Truck,
   AlertTriangle, MessageSquare, Scale,
   DollarSign, ShoppingCart, TrendingUp, Star,
-  Megaphone, ExternalLink,
+  Megaphone, ExternalLink, ChevronRight, AlertCircle,
 } from 'lucide-react';
 import { getCompanyColor } from '@/lib/companyColors';
 import type { SandboxSnapshot } from '@/hooks/useSandboxSnapshots';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '@/integrations/supabase/client';
 
 interface Props {
   snapshot: SandboxSnapshot;
 }
 
-function CutoffDisplay({ label, time }: { label: string; time: string | null }) {
-  if (!time) return (
-    <div className="flex items-center gap-2 text-muted-foreground text-xs">
-      <span>{label}:</span>
-      <span className="font-mono">--:--</span>
-    </div>
-  );
+// ── Utilities ──────────────────────────────────────────────────────────────
+function formatRelativeTime(dateStr: string): string {
+  const diffMin = Math.floor((Date.now() - new Date(dateStr).getTime()) / 60000);
+  if (diffMin < 1) return 'agora';
+  if (diffMin < 60) return `${diffMin}m`;
+  const h = Math.floor(diffMin / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
+}
 
-  const now = new Date();
+function getCutoffColorClass(time: string | null): string {
+  if (!time) return 'text-muted-foreground';
   const [h, m] = time.split(':').map(Number);
   const cutoff = new Date();
   cutoff.setHours(h, m, 0, 0);
-  const diffMs = cutoff.getTime() - now.getTime();
-  const diffMin = diffMs / 60000;
+  const diffMin = (cutoff.getTime() - Date.now()) / 60000;
+  if (diffMin <= 0) return 'text-destructive';
+  if (diffMin <= 60) return 'text-[hsl(var(--warning))]';
+  return 'text-[hsl(var(--success,142_72%_29%))]';
+}
 
-  let colorClass = 'text-green-500';
-  if (diffMin <= 0) colorClass = 'text-destructive';
-  else if (diffMin <= 60) colorClass = 'text-yellow-500';
+function fmt(v: number) {
+  return v.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+function fmtCurrency(v: number) {
+  return `R$ ${fmt(v)}`;
+}
+
+async function logEvent(action: string, meta: Record<string, unknown> = {}) {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from('system_logs').insert({
+      level: 'info',
+      system_area: 'sandbox',
+      action,
+      message: `Sandbox: ${action}`,
+      meta_json: { user_id: user.id, ...meta },
+    });
+  } catch { /* fire-and-forget */ }
+}
+
+// ── Sub-components ──────────────────────────────────────────────────────────
+function CutoffBadge({ label, time }: { label: string; time: string | null }) {
+  const colorClass = useMemo(() => getCutoffColorClass(time), [time]);
+  const isUrgent = useMemo(() => {
+    if (!time) return false;
+    const [h, m] = time.split(':').map(Number);
+    const cutoff = new Date();
+    cutoff.setHours(h, m, 0, 0);
+    return (cutoff.getTime() - Date.now()) / 60000 <= 60;
+  }, [time]);
 
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-xs text-muted-foreground">{label}:</span>
-      <span className={`font-mono text-lg font-bold tabular-nums ${colorClass}`}>
-        {time}
+    <div className="flex flex-col items-center flex-1">
+      <span className="text-[9px] text-muted-foreground uppercase tracking-wider">{label}</span>
+      <span className={`font-mono text-base font-bold tabular-nums leading-tight ${colorClass} ${isUrgent ? 'animate-pulse' : ''}`}>
+        {time || '--:--'}
       </span>
     </div>
   );
 }
 
-function MetricItem({ icon: Icon, label, value, alert, onClick }: {
+function MetricRow({
+  icon: Icon, label, value, alert, onClick,
+}: {
   icon: any; label: string; value: number | string; alert?: boolean; onClick?: () => void;
 }) {
   return (
     <button
       onClick={onClick}
-      className="flex items-center gap-2 p-1.5 rounded-md hover:bg-muted/50 transition-colors text-left w-full"
+      className={`flex items-center justify-between w-full py-0.5 px-1 rounded text-left transition-colors ${onClick ? 'hover:bg-muted/60 cursor-pointer' : 'cursor-default'}`}
     >
-      <Icon className={`h-3.5 w-3.5 flex-shrink-0 ${alert ? 'text-destructive' : 'text-muted-foreground'}`} />
-      <span className="text-xs text-muted-foreground truncate flex-1">{label}</span>
-      <span className={`text-sm font-bold tabular-nums ${alert ? 'text-destructive' : 'text-foreground'}`}>
-        {value}
-      </span>
-      {alert && <Badge variant="destructive" className="text-[10px] px-1 py-0">!</Badge>}
+      <div className="flex items-center gap-1.5 min-w-0">
+        <Icon className={`h-3 w-3 flex-shrink-0 ${alert ? 'text-destructive' : 'text-muted-foreground'}`} />
+        <span className={`text-xs truncate ${alert ? 'font-medium text-foreground' : 'text-muted-foreground'}`}>
+          {label}
+        </span>
+      </div>
+      <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+        <span className={`text-sm font-bold tabular-nums ${alert ? 'text-destructive' : 'text-foreground'}`}>
+          {value}
+        </span>
+        {alert && typeof value === 'number' && value > 0 && (
+          <span className="w-1.5 h-1.5 rounded-full bg-destructive flex-shrink-0" />
+        )}
+      </div>
     </button>
   );
 }
 
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-0.5 mt-1">
+      {children}
+    </p>
+  );
+}
+
+// ── Main Component ───────────────────────────────────────────────────────────
 export function SandboxCompanyCard({ snapshot }: Props) {
   const navigate = useNavigate();
+  const [sheetOpen, setSheetOpen] = useState(false);
   const color = useMemo(() => getCompanyColor(snapshot.color_key || 'blue'), [snapshot.color_key]);
-  const hasReclamacao = (snapshot.reclamacoes_abertas || 0) > 0;
 
-  const fmt = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-  const fmtCurrency = (v: number) => `R$ ${fmt(v)}`;
+  const hasReclamacao = (snapshot.reclamacoes_abertas || 0) > 0;
+  const hasUrgente = hasReclamacao || (snapshot.etiquetas_pendentes || 0) > 0 || (snapshot.perguntas_pendentes || 0) > 0;
+  const isStale = (Date.now() - new Date(snapshot.updated_at).getTime()) > 30 * 60 * 1000;
+
+  const openSheet = useCallback(() => {
+    setSheetOpen(true);
+    logEvent('card_expanded', { company_id: snapshot.company_id, seller_id: snapshot.seller_id });
+  }, [snapshot.company_id, snapshot.seller_id]);
+
+  const handleNavigate = useCallback((route: string, indicator: string) => {
+    logEvent('indicator_click', { company_id: snapshot.company_id, indicator, route });
+    navigate(route);
+  }, [snapshot.company_id, navigate]);
 
   return (
-    <Card className={`overflow-hidden transition-shadow hover:shadow-lg ${hasReclamacao ? 'ring-1 ring-destructive/30' : ''}`}>
-      {/* Color bar */}
-      <div className="h-1.5" style={{ backgroundColor: color.hex }} />
+    <>
+      {/* ── COMPACT CARD ── */}
+      <Card
+        onClick={openSheet}
+        className={`overflow-hidden cursor-pointer transition-all hover:shadow-md select-none
+          ${hasReclamacao ? 'ring-1 ring-destructive/40' : ''}
+          ${hasUrgente && !hasReclamacao ? 'ring-1 ring-yellow-500/30' : ''}`}
+      >
+        {/* Color bar */}
+        <div className="h-1" style={{ backgroundColor: color.hex }} />
 
-      <CardHeader className="pb-2 pt-3 px-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-sm truncate" style={{ color: color.hex }}>
-            {snapshot.company_name}
-          </h3>
-          <span className="text-[10px] text-muted-foreground">
-            {new Date(snapshot.updated_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-          </span>
+        {/* Header */}
+        <div className="px-3 py-2 flex items-center justify-between border-b border-border/40">
+          <div className="flex items-center gap-2 min-w-0">
+            <h3 className="font-semibold text-xs truncate" style={{ color: color.hex }}>
+              {snapshot.company_name}
+            </h3>
+            {hasReclamacao && (
+              <AlertCircle className="h-3 w-3 text-destructive flex-shrink-0" />
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {isStale && (
+              <span className="text-[9px] text-[hsl(var(--warning))] font-medium">⚠ atrasado</span>
+            )}
+            <span className="text-[10px] text-muted-foreground">
+              {formatRelativeTime(snapshot.updated_at)}
+            </span>
+          </div>
         </div>
-      </CardHeader>
 
-      <CardContent className="px-4 pb-4 space-y-3">
-        {/* BLOCO 1 — HORA DE CORTE */}
-        <div className="p-2 rounded-md bg-muted/30 border border-border/50">
+        {/* Cutoff block */}
+        <div className="px-3 py-2 border-b border-border/40 bg-muted/20">
           <div className="flex items-center gap-1.5 mb-1">
-            <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Hora de Corte</span>
+            <Clock className="h-2.5 w-2.5 text-muted-foreground" />
+            <span className="text-[9px] uppercase tracking-widest font-bold text-muted-foreground">
+              Hora de Corte
+            </span>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <CutoffDisplay label="Flex" time={snapshot.cutoff_flex_time} />
-            <CutoffDisplay label="Coleta" time={snapshot.cutoff_coleta_time} />
+          <div className="flex gap-2">
+            <CutoffBadge label="Flex" time={snapshot.cutoff_flex_time} />
+            <div className="w-px bg-border/50" />
+            <CutoffBadge label="Coleta" time={snapshot.cutoff_coleta_time} />
           </div>
         </div>
 
-        {/* BLOCO 2 — OPERAÇÃO DO DIA */}
-        <div className="space-y-0.5">
-          <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Operação</p>
-          <MetricItem icon={Package} label="Etiquetas pend." value={snapshot.etiquetas_pendentes} alert={snapshot.etiquetas_pendentes > 0} onClick={() => navigate('/shipping-labels')} />
-          <MetricItem icon={FileText} label="NF pendentes" value={snapshot.nf_pendentes} alert={snapshot.nf_pendentes > 0} />
-          <MetricItem icon={Truck} label="Aguard. envio" value={snapshot.pedidos_envio} alert={snapshot.pedidos_envio > 5} onClick={() => navigate('/shipping-labels')} />
-          <MetricItem icon={MessageCircle} label="Perguntas" value={snapshot.perguntas_pendentes} alert={snapshot.perguntas_pendentes > 0} onClick={() => navigate('/perguntas')} />
+        {/* Operation block */}
+        <div className="px-3 py-1.5 border-b border-border/40">
+          <SectionLabel>Operação</SectionLabel>
+          <MetricRow icon={Package} label="Etiquetas" value={snapshot.etiquetas_pendentes} alert={snapshot.etiquetas_pendentes > 0} />
+          <MetricRow icon={FileText} label="NF pendentes" value={snapshot.nf_pendentes} alert={snapshot.nf_pendentes > 0} />
+          <MetricRow icon={Truck} label="Aguard. envio" value={snapshot.pedidos_envio} alert={snapshot.pedidos_envio > 5} />
         </div>
 
-        {/* BLOCO 3 — RECLAMAÇÕES E PÓS-VENDA */}
-        <div className="space-y-0.5">
-          <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Pós-Venda</p>
-          <MetricItem icon={AlertTriangle} label="Reclamações" value={snapshot.reclamacoes_abertas} alert={snapshot.reclamacoes_abertas > 0} />
-          <MetricItem icon={MessageSquare} label="Aguard. resposta" value={snapshot.reclamacoes_aguardando} alert={snapshot.reclamacoes_aguardando > 0} />
-          <MetricItem icon={MessageSquare} label="Pós-venda pend." value={snapshot.pos_venda_pendente} alert={snapshot.pos_venda_pendente > 0} onClick={() => navigate('/mensagens')} />
-          <MetricItem icon={Scale} label="Mediações" value={snapshot.mediacoes_abertas} alert={snapshot.mediacoes_abertas > 0} />
-        </div>
-
-        {/* BLOCO 4 — COMERCIAL DA SEMANA */}
-        <div className="space-y-0.5">
-          <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Comercial</p>
-          <MetricItem icon={DollarSign} label="Faturamento" value={fmtCurrency(Number(snapshot.total_vendas_semana))} onClick={() => navigate('/dashboard')} />
-          <MetricItem icon={ShoppingCart} label="Pedidos" value={snapshot.pedidos_semana} />
-          <MetricItem icon={TrendingUp} label="Ticket médio" value={fmtCurrency(Number(snapshot.ticket_medio))} />
-          {snapshot.produto_mais_vendido && (
-            <MetricItem icon={Star} label="Top produto" value={snapshot.produto_mais_vendido.substring(0, 25)} />
+        {/* Service block */}
+        <div className="px-3 py-1.5">
+          <SectionLabel>Atendimento</SectionLabel>
+          <MetricRow icon={MessageCircle} label="Perguntas" value={snapshot.perguntas_pendentes} alert={snapshot.perguntas_pendentes > 0} />
+          <MetricRow icon={AlertTriangle} label="Reclamações" value={snapshot.reclamacoes_abertas} alert={snapshot.reclamacoes_abertas > 0} />
+          <MetricRow icon={MessageSquare} label="Pós-venda" value={snapshot.pos_venda_pendente} alert={snapshot.pos_venda_pendente > 0} />
+          {snapshot.mediacoes_abertas > 0 && (
+            <MetricRow icon={Scale} label="Mediações" value={snapshot.mediacoes_abertas} alert />
           )}
         </div>
 
-        {/* BLOCO 5 — ADS ESSENCIAL */}
-        <div className="space-y-0.5">
-          <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">ADS</p>
-          <MetricItem icon={Megaphone} label="Gasto" value={fmtCurrency(Number(snapshot.gasto_ads_semana))} onClick={() => navigate('/publicidade')} />
-          <MetricItem icon={DollarSign} label="Faturamento ADS" value={fmtCurrency(Number(snapshot.faturamento_ads_semana))} />
-          <MetricItem icon={TrendingUp} label="ACOS" value={`${Number(snapshot.acos_medio).toFixed(1)}%`} alert={Number(snapshot.acos_medio) > 30} />
-          <MetricItem icon={TrendingUp} label="ROAS" value={`${Number(snapshot.roas_medio).toFixed(2)}x`} />
+        {/* Expand hint */}
+        <div className="px-3 py-1.5 border-t border-border/30 bg-muted/10 flex items-center justify-center gap-1">
+          <span className="text-[10px] text-muted-foreground/60">ADS e comercial</span>
+          <ChevronRight className="h-2.5 w-2.5 text-muted-foreground/50" />
         </div>
+      </Card>
 
-        {/* Link to open full dashboard */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full text-xs gap-1"
-          onClick={() => navigate('/dashboard')}
-        >
-          <ExternalLink className="h-3 w-3" />
-          Abrir Dashboard
-        </Button>
-      </CardContent>
-    </Card>
+      {/* ── SHEET EXPANDED ── */}
+      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+        <SheetContent className="flex flex-col p-0">
+          {/* Sheet header */}
+          <div className="px-6 pt-6 pb-4 border-b border-border" style={{ borderTop: `3px solid ${color.hex}` }}>
+            <SheetHeader>
+              <SheetTitle className="flex items-center gap-2 text-base pr-6" style={{ color: color.hex }}>
+                {snapshot.company_name}
+              </SheetTitle>
+              <p className="text-xs text-muted-foreground">
+                Atualizado {formatRelativeTime(snapshot.updated_at)}
+                {isStale && <span className="text-[hsl(var(--warning))] ml-1">· Atualização atrasada</span>}
+              </p>
+            </SheetHeader>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
+            {/* Cutoff */}
+            <div>
+              <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1">
+                <Clock className="h-3 w-3" /> Hora de Corte
+              </h4>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: 'Flex', time: snapshot.cutoff_flex_time },
+                  { label: 'Coleta/Places', time: snapshot.cutoff_coleta_time },
+                ].map(({ label, time }) => {
+                  const colorClass = getCutoffColorClass(time);
+                  return (
+                    <div key={label} className="p-3 rounded-lg bg-muted/30 border border-border/50 text-center">
+                      <p className="text-[9px] text-muted-foreground uppercase mb-1">{label}</p>
+                      <p className={`font-mono text-2xl font-bold tabular-nums ${colorClass}`}>{time || '--:--'}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Operação + Atendimento */}
+            <div>
+              <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">Operação & Atendimento</h4>
+              <div className="space-y-0.5">
+                <MetricRow icon={Package} label="Etiquetas pendentes" value={snapshot.etiquetas_pendentes} alert={snapshot.etiquetas_pendentes > 0} onClick={() => handleNavigate('/shipping-labels', 'etiquetas')} />
+                <MetricRow icon={FileText} label="NF pendentes" value={snapshot.nf_pendentes} alert={snapshot.nf_pendentes > 0} />
+                <MetricRow icon={Truck} label="Aguardando envio" value={snapshot.pedidos_envio} alert={snapshot.pedidos_envio > 5} onClick={() => handleNavigate('/shipping-labels', 'envio')} />
+                <MetricRow icon={MessageCircle} label="Perguntas" value={snapshot.perguntas_pendentes} alert={snapshot.perguntas_pendentes > 0} onClick={() => handleNavigate('/perguntas', 'perguntas')} />
+                <MetricRow icon={AlertTriangle} label="Reclamações abertas" value={snapshot.reclamacoes_abertas} alert={snapshot.reclamacoes_abertas > 0} />
+                <MetricRow icon={MessageSquare} label="Reclamações aguardando" value={snapshot.reclamacoes_aguardando} alert={snapshot.reclamacoes_aguardando > 0} />
+                <MetricRow icon={MessageSquare} label="Pós-venda pendente" value={snapshot.pos_venda_pendente} alert={snapshot.pos_venda_pendente > 0} onClick={() => handleNavigate('/mensagens', 'pos-venda')} />
+                {snapshot.mediacoes_abertas > 0 && (
+                  <MetricRow icon={Scale} label="Mediações" value={snapshot.mediacoes_abertas} alert />
+                )}
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Comercial da semana */}
+            <div>
+              <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">Comercial — Semana</h4>
+              <div className="space-y-0.5">
+                <MetricRow icon={DollarSign} label="Faturamento" value={fmtCurrency(Number(snapshot.total_vendas_semana))} onClick={() => handleNavigate('/dashboard', 'faturamento')} />
+                <MetricRow icon={ShoppingCart} label="Pedidos" value={snapshot.pedidos_semana} />
+                <MetricRow icon={TrendingUp} label="Ticket médio" value={fmtCurrency(Number(snapshot.ticket_medio))} />
+                {snapshot.produto_mais_vendido && (
+                  <MetricRow icon={Star} label="Top produto" value={snapshot.produto_mais_vendido.substring(0, 28)} />
+                )}
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* ADS */}
+            <div>
+              <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">ADS — Semana</h4>
+              <div className="space-y-0.5">
+                <MetricRow icon={Megaphone} label="Gasto" value={fmtCurrency(Number(snapshot.gasto_ads_semana))} onClick={() => handleNavigate('/publicidade', 'ads-gasto')} />
+                <MetricRow icon={DollarSign} label="Faturamento ADS" value={fmtCurrency(Number(snapshot.faturamento_ads_semana))} />
+                <MetricRow
+                  icon={TrendingUp}
+                  label="ACOS médio"
+                  value={`${Number(snapshot.acos_medio).toFixed(1)}%`}
+                  alert={Number(snapshot.acos_medio) > 30}
+                />
+                <MetricRow icon={TrendingUp} label="ROAS médio" value={`${Number(snapshot.roas_medio).toFixed(2)}x`} />
+              </div>
+            </div>
+          </div>
+
+          {/* Shortcuts */}
+          <div className="px-6 py-4 border-t border-border bg-muted/20">
+            <p className="text-[9px] uppercase tracking-widest font-bold text-muted-foreground mb-2">Atalhos</p>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { label: 'Etiquetas', route: '/shipping-labels', icon: Package },
+                { label: 'Perguntas', route: '/perguntas', icon: MessageCircle },
+                { label: 'Dashboard', route: '/dashboard', icon: TrendingUp },
+                { label: 'Publicidade', route: '/publicidade', icon: Megaphone },
+              ].map(({ label, route, icon: Icon }) => (
+                <Button
+                  key={label}
+                  variant="outline"
+                  size="sm"
+                  className="text-xs gap-1.5 justify-start"
+                  onClick={() => { handleNavigate(route, label.toLowerCase()); setSheetOpen(false); }}
+                >
+                  <Icon className="h-3 w-3" />
+                  {label}
+                  <ExternalLink className="h-2.5 w-2.5 ml-auto opacity-50" />
+                </Button>
+              ))}
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+    </>
   );
 }

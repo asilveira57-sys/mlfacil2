@@ -1,3 +1,4 @@
+import { useEffect, useCallback } from 'react';
 import { useSandboxSnapshots } from '@/hooks/useSandboxSnapshots';
 import { SandboxGlobalSummary } from '@/components/sandbox/SandboxGlobalSummary';
 import { SandboxCompanyCard } from '@/components/sandbox/SandboxCompanyCard';
@@ -7,15 +8,54 @@ import { supabase } from '@/integrations/supabase/client';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
+// ── Smart grid logic ─────────────────────────────────────────────────────────
+function getGridClass(count: number): string {
+  if (count === 1) return 'grid-cols-1 max-w-md mx-auto';
+  if (count === 2) return 'grid-cols-2';
+  if (count === 3) return 'grid-cols-3';
+  if (count === 4) return 'grid-cols-2';
+  // 5: use 6-column grid so first 3 = 2/6 each, last 2 = 3/6 each (centered)
+  if (count === 5) return 'grid-cols-6';
+  return 'grid-cols-3'; // 6, 7, 8, 9+
+}
+
+function getItemClass(index: number, total: number): string {
+  if (total === 5) {
+    return index < 3 ? 'col-span-2' : 'col-span-3';
+  }
+  return '';
+}
+
+async function logSandboxEvent(action: string, meta: Record<string, unknown> = {}) {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from('system_logs').insert({
+      level: 'info',
+      system_area: 'sandbox',
+      action,
+      message: `Sandbox: ${action}`,
+      meta_json: { user_id: user.id, ...meta },
+    });
+  } catch { /* fail-safe */ }
+}
+
 export default function Sandbox() {
   const { data: snapshots = [], isLoading, refetch } = useSandboxSnapshots();
   const [refreshing, setRefreshing] = useState(false);
 
-  const handleRefresh = async () => {
+  // Log page access on mount
+  useEffect(() => {
+    logSandboxEvent('page_access');
+  }, []);
+
+  const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+
+      logSandboxEvent('manual_refresh_start', { companies: snapshots.length });
 
       const { error } = await supabase.functions.invoke('sandbox-snapshot-refresh', {
         body: { user_id: user.id },
@@ -24,33 +64,17 @@ export default function Sandbox() {
       if (error) throw error;
       await refetch();
       toast.success('Sandbox atualizado!');
+      logSandboxEvent('manual_refresh_success', { companies: snapshots.length });
     } catch (e: any) {
       toast.error('Erro ao atualizar: ' + (e.message || 'Erro desconhecido'));
+      logSandboxEvent('manual_refresh_error', { error: e.message });
     } finally {
       setRefreshing(false);
     }
+  }, [snapshots.length, refetch]);
 
-    // Log access
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase.from('system_logs').insert({
-          level: 'info',
-          system_area: 'sandbox',
-          action: 'manual_refresh',
-          message: 'Manual sandbox refresh triggered',
-          meta_json: { user_id: user.id },
-        });
-      }
-    } catch {}
-  };
-
-  // Determine grid columns based on count
   const count = snapshots.length;
-  let gridClass = 'grid gap-4 ';
-  if (count === 1) gridClass += 'grid-cols-1 max-w-2xl mx-auto';
-  else if (count === 2) gridClass += 'grid-cols-1 sm:grid-cols-2';
-  else gridClass += 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3';
+  const gridClass = getGridClass(count);
 
   return (
     <div className="p-4 md:p-6 space-y-4">
@@ -92,9 +116,11 @@ export default function Sandbox() {
       ) : (
         <>
           <SandboxGlobalSummary snapshots={snapshots} />
-          <div className={gridClass}>
-            {snapshots.map((snap) => (
-              <SandboxCompanyCard key={snap.id} snapshot={snap} />
+          <div className={`grid gap-3 ${gridClass}`}>
+            {snapshots.map((snap, i) => (
+              <div key={snap.id} className={getItemClass(i, count)}>
+                <SandboxCompanyCard snapshot={snap} />
+              </div>
             ))}
           </div>
         </>
