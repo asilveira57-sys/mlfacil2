@@ -58,6 +58,7 @@ import PoliticaPrivacidade from "./pages/PoliticaPrivacidade";
 import PoliticaCookies from "./pages/PoliticaCookies";
 import Lgpd from "./pages/Lgpd";
 import NotFound from "./pages/NotFound";
+import SocialCalendar from "./pages/SocialCalendar";
 import { ZplViewerTool, TrendsLiteTool, PricingSimulatorTool, CommissionsTool } from "./pages/tools";
 import { AdminRoute } from "./components/auth/AdminRoute";
 
@@ -195,6 +196,7 @@ const App = () => {
                   <Route path="/sandbox" element={<Sandbox />} />
                   <Route path="/frete" element={<FreightManagement />} />
                   <Route path="/precificacao" element={<Precificacao />} />
+                  <Route path="/calendario-social" element={<SocialCalendar />} />
                   <Route path="/comissoes" element={<Comissoes />} />
                   <Route path="/retrospectiva" element={<Retrospectiva />} />
                   {/* Products module */}

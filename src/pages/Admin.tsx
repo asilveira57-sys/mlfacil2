@@ -23,6 +23,7 @@ import {
   History,
   Palette,
   Radio,
+  CalendarDays,
 } from 'lucide-react';
 import { AdminDashboard } from './admin/AdminDashboard';
 import { AdminOnboarding } from './admin/AdminOnboarding';
@@ -44,11 +45,13 @@ import { AdminGlobalMetrics } from './admin/AdminGlobalMetrics';
 import Retrospectiva from './Retrospectiva';
 import { AdminVisualIdentity } from '@/components/admin/AdminVisualIdentity';
 import { AdminCanalOficial } from './admin/AdminCanalOficial';
+import { AdminSocialCalendar } from './admin/AdminSocialCalendar';
 
 const adminTabs = [
   { id: '', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'onboarding', label: 'Primeiros Passos', icon: Rocket },
   { id: 'canal-oficial', label: 'Canal Oficial', icon: Radio },
+  { id: 'calendario-social', label: 'Calendário Social', icon: CalendarDays },
   { id: 'usuarios', label: 'Usuários', icon: Users },
   { id: 'perfis', label: 'Perfis', icon: Shield },
   { id: 'colaboradores', label: 'Colaboradores', icon: Users },
@@ -112,6 +115,7 @@ export default function Admin() {
         {/* Content */}
         <Routes>
           <Route index element={<AdminDashboard />} />
+          <Route path="calendario-social" element={<AdminSocialCalendar />} />
           <Route path="onboarding" element={<AdminOnboarding />} />
           <Route path="canal-oficial" element={<AdminCanalOficial />} />
           <Route path="usuarios" element={<AdminUsers />} />
