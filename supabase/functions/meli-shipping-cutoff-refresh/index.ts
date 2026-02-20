@@ -125,21 +125,32 @@ Deno.serve(async (req) => {
 
       const normalized = normalizeShippingCutoff(flexData, colectaData);
 
-      // 6. Build safe source_payload (no tokens!)
+      // 6. Build safe source_payload (no tokens!) — capture full structure for debugging
       const safePayload: any = {};
       if (flexData) {
         safePayload.flex_keys = Object.keys(flexData);
         const modesList = flexData?.shipping_modes || flexData?.modes || [];
         safePayload.flex_modes_count = Array.isArray(modesList) ? modesList.length : 0;
-        safePayload.flex_mode_names = Array.isArray(modesList) ? modesList.map((m: any) => m?.mode || m?.name || 'unknown') : [];
-        // Capture mode structures for debugging (top-level keys only)
-        safePayload.flex_mode_structures = Array.isArray(modesList) ? modesList.map((m: any) => Object.keys(m || {})) : [];
-        if (flexData?.me2_enablers) safePayload.me2_enablers_keys = Object.keys(flexData.me2_enablers);
-        // Capture option key if present (may contain cutoff)
-        if (flexData?.option) safePayload.option_keys = Object.keys(flexData.option);
-        // Capture services/logistics keys
-        if (flexData?.services) safePayload.services_sample = Array.isArray(flexData.services) ? flexData.services.slice(0, 3).map((s: any) => ({ id: s?.id, name: s?.name })) : Object.keys(flexData.services);
-        if (flexData?.logistics) safePayload.logistics_keys = Object.keys(flexData.logistics);
+        // Capture first 3 modes raw (truncated) for debugging
+        if (Array.isArray(modesList)) {
+          safePayload.flex_modes_raw = modesList.slice(0, 3).map((m: any) => {
+            if (typeof m === 'string') return m;
+            if (typeof m === 'object' && m !== null) {
+              // Capture top-level fields (no nested data)
+              const summary: any = {};
+              for (const k of Object.keys(m).slice(0, 15)) {
+                const v = m[k];
+                summary[k] = typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' ? v : typeof v;
+              }
+              return summary;
+            }
+            return String(m);
+          });
+        }
+        if (flexData?.me2_enablers) safePayload.me2_enablers = typeof flexData.me2_enablers === 'object' ? JSON.stringify(flexData.me2_enablers).substring(0, 500) : String(flexData.me2_enablers);
+        if (flexData?.option) safePayload.option_raw = typeof flexData.option === 'object' ? JSON.stringify(flexData.option).substring(0, 500) : String(flexData.option);
+        if (flexData?.services) safePayload.services_count = Array.isArray(flexData.services) ? flexData.services.length : 'not_array';
+        if (flexData?.logistics) safePayload.logistics_raw = JSON.stringify(flexData.logistics).substring(0, 500);
       }
       if (colectaData) {
         safePayload.colecta_keys = Object.keys(colectaData);
