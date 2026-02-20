@@ -143,20 +143,14 @@ export function useNotePins({ workspaceId, moduleKey, companyId }: UseNotePinsOp
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Não autenticado');
 
-      let query = supabase
+      // Delete ALL pins for this note in this module/workspace regardless of company_id
+      // This ensures unpin always works even if company_id context changed
+      const { error } = await supabase
         .from('note_pins')
         .delete()
         .eq('note_id', noteId)
         .eq('module_key', moduleKey)
         .eq('workspace_id', workspaceId!);
-
-      if (safeCompanyId) {
-        query = query.eq('company_id', safeCompanyId);
-      } else {
-        query = query.is('company_id', null);
-      }
-
-      const { error } = await query;
       if (error) throw error;
 
       // Log event
