@@ -46,6 +46,7 @@ import Seed from "./pages/Seed";
 import FreightManagement from "./pages/FreightManagement";
 import Precificacao from "./pages/Precificacao";
 import Comissoes from "./pages/Comissoes";
+import Retrospectiva from "./pages/Retrospectiva";
 import Consultoria from "./pages/Consultoria";
 import ModuloDetalhe from "./pages/ModuloDetalhe";
 import ProductsPage from "./pages/ProductsPage";
@@ -191,6 +192,7 @@ const App = () => {
                   <Route path="/frete" element={<FreightManagement />} />
                   <Route path="/precificacao" element={<Precificacao />} />
                   <Route path="/comissoes" element={<Comissoes />} />
+                  <Route path="/retrospectiva" element={<Retrospectiva />} />
                   {/* Products module */}
                   <Route path="/produtos" element={<ProductsPage />} />
                   <Route path="/produtos/:id" element={<ProductDetailPage />} />
