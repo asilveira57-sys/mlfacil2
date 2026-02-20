@@ -10889,39 +10889,111 @@ export type Database = {
         }
         Relationships: []
       }
+      shipping_cutoff_locks: {
+        Row: {
+          company_id: string
+          date_ref: string
+          expires_at: string
+          id: string
+          lock_key: string
+          locked_at: string
+          locked_by_user_id: string | null
+          seller_id: string
+          status: string
+        }
+        Insert: {
+          company_id: string
+          date_ref: string
+          expires_at: string
+          id?: string
+          lock_key: string
+          locked_at?: string
+          locked_by_user_id?: string | null
+          seller_id: string
+          status?: string
+        }
+        Update: {
+          company_id?: string
+          date_ref?: string
+          expires_at?: string
+          id?: string
+          lock_key?: string
+          locked_at?: string
+          locked_by_user_id?: string | null
+          seller_id?: string
+          status?: string
+        }
+        Relationships: []
+      }
       shipping_cutoff_logs: {
         Row: {
           action: string
           company_id: string | null
           created_at: string
+          endpoint_name: string | null
           error_message: string | null
           execution_time_ms: number | null
+          http_status: number | null
           id: string
           payload_summary: Json | null
           seller_id: string | null
           status: string
+          step: string
+          trace_id: string | null
         }
         Insert: {
           action: string
           company_id?: string | null
           created_at?: string
+          endpoint_name?: string | null
           error_message?: string | null
           execution_time_ms?: number | null
+          http_status?: number | null
           id?: string
           payload_summary?: Json | null
           seller_id?: string | null
           status?: string
+          step?: string
+          trace_id?: string | null
         }
         Update: {
           action?: string
           company_id?: string | null
           created_at?: string
+          endpoint_name?: string | null
           error_message?: string | null
           execution_time_ms?: number | null
+          http_status?: number | null
           id?: string
           payload_summary?: Json | null
           seller_id?: string | null
           status?: string
+          step?: string
+          trace_id?: string | null
+        }
+        Relationships: []
+      }
+      shipping_cutoff_manual_rate_limit: {
+        Row: {
+          company_id: string
+          cooldown_minutes: number
+          id: string
+          last_manual_refresh_at: string
+          seller_id: string
+        }
+        Insert: {
+          company_id: string
+          cooldown_minutes?: number
+          id?: string
+          last_manual_refresh_at: string
+          seller_id: string
+        }
+        Update: {
+          company_id?: string
+          cooldown_minutes?: number
+          id?: string
+          last_manual_refresh_at?: string
+          seller_id?: string
         }
         Relationships: []
       }

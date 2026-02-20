@@ -210,5 +210,8 @@ verify_jwt = false
 [functions.generate-message-suggestions]
 verify_jwt = false
 
-[functions.shipping-cutoff]
+[functions.meli-shipping-cutoff-get]
+verify_jwt = false
+
+[functions.meli-shipping-cutoff-refresh]
 verify_jwt = false

@@ -15,6 +15,7 @@ interface ShippingCutoffCardProps {
   error: string | null;
   onRefresh: () => void;
   canRefresh: boolean;
+  zoneDetails?: Array<{ zone: string; cutoff: string }> | null;
 }
 
 export function ShippingCutoffCard({
@@ -24,6 +25,7 @@ export function ShippingCutoffCard({
   error,
   onRefresh,
   canRefresh,
+  zoneDetails,
 }: ShippingCutoffCardProps) {
   const [zoneModalOpen, setZoneModalOpen] = useState(false);
 
@@ -48,8 +50,11 @@ export function ShippingCutoffCard({
 
   if (!data && !error) return null;
 
-  const isError = data?.status === 'error' || (!data && !!error);
-  const isPartial = data?.status === 'partial';
+  const meta = data?.meta;
+  const flex = data?.flex;
+  const colecta = data?.colecta;
+  const isError = meta?.status === 'error' || (!data && !!error);
+  const isPartial = meta?.status === 'partial';
 
   return (
     <>
@@ -70,19 +75,19 @@ export function ShippingCutoffCard({
                 {isError ? (
                   <p className="text-xs text-destructive flex items-center gap-1 mt-0.5">
                     <AlertTriangle className="h-3 w-3" />
-                    {error || data?.error_message || 'Erro ao buscar dados'}
+                    {error || meta?.message || 'Não foi possível buscar a hora de corte agora.'}
                   </p>
                 ) : (
                   <div className="flex items-center gap-4 mt-1 flex-wrap">
                     {/* Flex */}
                     <CutoffItem
                       label="Flex"
-                      enabled={data?.flex_enabled ?? false}
-                      cutoffType={data?.flex_cutoff_type}
-                      cutoffTime={data?.flex_cutoff_time}
-                      zoneFirst={data?.flex_zone_summary_first}
-                      zoneLast={data?.flex_zone_summary_last}
-                      hasZones={data?.flex_cutoff_type === 'by_zone'}
+                      enabled={flex?.enabled ?? false}
+                      cutoffType={flex?.cutoff_type}
+                      cutoffTime={flex?.cutoff_time}
+                      zoneFirst={flex?.zone_summary_first}
+                      zoneLast={flex?.zone_summary_last}
+                      hasZones={flex?.cutoff_type === 'by_zone'}
                       onShowZones={() => setZoneModalOpen(true)}
                     />
 
@@ -90,11 +95,11 @@ export function ShippingCutoffCard({
 
                     {/* Coleta */}
                     <ColectaItem
-                      enabled={data?.colecta_enabled ?? false}
-                      cutoffTime={data?.colecta_cutoff_time}
-                      windowFrom={data?.colecta_window_from}
-                      windowTo={data?.colecta_window_to}
-                      calculated={data?.colecta_cutoff_calculated ?? false}
+                      enabled={colecta?.enabled ?? false}
+                      cutoffTime={colecta?.cutoff_time}
+                      windowFrom={colecta?.window_from}
+                      windowTo={colecta?.window_to}
+                      calculated={colecta?.cutoff_calculated ?? false}
                     />
                   </div>
                 )}
@@ -103,9 +108,9 @@ export function ShippingCutoffCard({
 
             {/* Right - Refresh */}
             <div className="flex items-center gap-2 shrink-0">
-              {data?.fetched_at && (
+              {meta?.fetched_at && (
                 <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                  Atualizado às {format(new Date(data.fetched_at), 'HH:mm')}
+                  Atualizado às {format(new Date(meta.fetched_at), 'HH:mm')}
                 </span>
               )}
               {canRefresh && (
@@ -117,15 +122,15 @@ export function ShippingCutoffCard({
                   className="h-7 px-2 text-xs"
                 >
                   <RefreshCw className={cn("h-3 w-3 mr-1", isRefreshing && "animate-spin")} />
-                  Atualizar
+                  Atualizar agora
                 </Button>
               )}
             </div>
           </div>
 
           {isPartial && (
-            <p className="text-[10px] text-accent-foreground/80 mt-1">
-              ⚠️ Dados parciais — algumas informações podem estar indisponíveis.
+            <p className="text-[10px] text-muted-foreground mt-1">
+              ⚠️ {meta?.message || 'Alguns dados não vieram agora.'}
             </p>
           )}
         </CardContent>
@@ -144,7 +149,7 @@ export function ShippingCutoffCard({
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 max-h-60 overflow-y-auto">
-            {data?.flex_zone_details?.map((zone, i) => (
+            {zoneDetails?.map((zone, i) => (
               <div
                 key={i}
                 className="flex items-center justify-between py-1.5 px-2 rounded bg-muted/50"
@@ -155,7 +160,7 @@ export function ShippingCutoffCard({
                 </span>
               </div>
             ))}
-            {(!data?.flex_zone_details || data.flex_zone_details.length === 0) && (
+            {(!zoneDetails || zoneDetails.length === 0) && (
               <p className="text-sm text-muted-foreground text-center py-4">
                 Nenhuma zona encontrada.
               </p>
@@ -168,23 +173,11 @@ export function ShippingCutoffCard({
 }
 
 function CutoffItem({
-  label,
-  enabled,
-  cutoffType,
-  cutoffTime,
-  zoneFirst,
-  zoneLast,
-  hasZones,
-  onShowZones,
+  label, enabled, cutoffType, cutoffTime, zoneFirst, zoneLast, hasZones, onShowZones,
 }: {
-  label: string;
-  enabled: boolean;
-  cutoffType: string | null | undefined;
-  cutoffTime: string | null | undefined;
-  zoneFirst: string | null | undefined;
-  zoneLast: string | null | undefined;
-  hasZones: boolean;
-  onShowZones: () => void;
+  label: string; enabled: boolean; cutoffType: string | null | undefined;
+  cutoffTime: string | null | undefined; zoneFirst: string | null | undefined;
+  zoneLast: string | null | undefined; hasZones: boolean; onShowZones: () => void;
 }) {
   if (!enabled) {
     return (
@@ -203,10 +196,7 @@ function CutoffItem({
         {' – '}
         <span className="font-mono font-semibold">{zoneLast}</span>
         {' '}
-        <button
-          onClick={onShowZones}
-          className="text-primary hover:underline text-[11px] ml-0.5"
-        >
+        <button onClick={onShowZones} className="text-primary hover:underline text-[11px] ml-0.5">
           Ver detalhes
         </button>
       </span>
@@ -221,17 +211,10 @@ function CutoffItem({
 }
 
 function ColectaItem({
-  enabled,
-  cutoffTime,
-  windowFrom,
-  windowTo,
-  calculated,
+  enabled, cutoffTime, windowFrom, windowTo, calculated,
 }: {
-  enabled: boolean;
-  cutoffTime: string | null | undefined;
-  windowFrom: string | null | undefined;
-  windowTo: string | null | undefined;
-  calculated: boolean;
+  enabled: boolean; cutoffTime: string | null | undefined;
+  windowFrom: string | null | undefined; windowTo: string | null | undefined; calculated: boolean;
 }) {
   if (!enabled) {
     return (

@@ -1,27 +1,38 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useUserContext } from '@/hooks/useUserContext';
 
-export interface CutoffData {
-  id: string;
-  company_id: string;
-  seller_id: string;
-  date_ref: string;
-  flex_enabled: boolean;
-  flex_cutoff_type: string | null;
-  flex_cutoff_time: string | null;
-  flex_zone_summary_first: string | null;
-  flex_zone_summary_last: string | null;
-  flex_zone_details: Array<{ zone: string; cutoff: string }> | null;
-  colecta_enabled: boolean;
-  colecta_cutoff_time: string | null;
-  colecta_window_from: string | null;
-  colecta_window_to: string | null;
-  colecta_cutoff_calculated: boolean;
-  fetched_at: string;
-  expires_at: string;
+export interface CutoffFlexData {
+  enabled: boolean;
+  cutoff_type: string | null;
+  cutoff_time: string | null;
+  zone_summary_first: string | null;
+  zone_summary_last: string | null;
+  zone_details_count: number;
+}
+
+export interface CutoffColectaData {
+  enabled: boolean;
+  cutoff_time: string | null;
+  window_from: string | null;
+  window_to: string | null;
+  cutoff_calculated: boolean;
+}
+
+export interface CutoffMeta {
   status: 'ok' | 'partial' | 'error';
-  error_message: string | null;
+  fetched_at: string | null;
+  expires_at: string | null;
+  timezone: string;
+  message: string | null;
+}
+
+export interface CutoffData {
+  flex: CutoffFlexData;
+  colecta: CutoffColectaData;
+  meta: CutoffMeta;
+  // Raw cache data for zone details modal
+  _raw?: any;
 }
 
 interface UseShippingCutoffOptions {
@@ -29,22 +40,59 @@ interface UseShippingCutoffOptions {
   mlUserId: string | null;
 }
 
+const BC_CHANNEL = 'shipping_cutoff_refresh';
+
 export function useShippingCutoff({ sellerId, mlUserId }: UseShippingCutoffOptions) {
   const [data, setData] = useState<CutoffData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { activeCompanyId } = useUserContext();
+  const bcRef = useRef<BroadcastChannel | null>(null);
+  const refreshingRef = useRef(false);
+
+  // BroadcastChannel for cross-tab anti-concurrency
+  useEffect(() => {
+    try {
+      const bc = new BroadcastChannel(BC_CHANNEL);
+      bcRef.current = bc;
+
+      bc.onmessage = (event) => {
+        const msg = event.data;
+        if (msg.type === 'shipping_cutoff_refresh_started' && msg.sellerId === sellerId) {
+          setIsRefreshing(true);
+        }
+        if (msg.type === 'shipping_cutoff_refresh_finished' && msg.sellerId === sellerId) {
+          setIsRefreshing(false);
+          if (msg.data) {
+            setData(msg.data);
+            setError(null);
+          }
+        }
+      };
+
+      return () => { bc.close(); bcRef.current = null; };
+    } catch {
+      // BroadcastChannel not supported
+      return;
+    }
+  }, [sellerId]);
 
   const fetchCutoff = useCallback(async (forceRefresh = false) => {
     if (!activeCompanyId || !sellerId || !mlUserId) return;
+    if (refreshingRef.current && forceRefresh) return;
 
     const setter = forceRefresh ? setIsRefreshing : setIsLoading;
     setter(true);
     setError(null);
 
+    if (forceRefresh) {
+      refreshingRef.current = true;
+      bcRef.current?.postMessage({ type: 'shipping_cutoff_refresh_started', sellerId });
+    }
+
     try {
-      const { data: result, error: fnError } = await supabase.functions.invoke('shipping-cutoff', {
+      const { data: result, error: fnError } = await supabase.functions.invoke('meli-shipping-cutoff-get', {
         body: {
           company_id: activeCompanyId,
           seller_id: sellerId,
@@ -53,9 +101,7 @@ export function useShippingCutoff({ sellerId, mlUserId }: UseShippingCutoffOptio
         },
       });
 
-      if (fnError) {
-        throw new Error(fnError.message || 'Erro ao buscar hora de corte');
-      }
+      if (fnError) throw new Error(fnError.message || 'Erro ao buscar hora de corte');
 
       if (result?.error) {
         if (result.error === 'rate_limited') {
@@ -66,18 +112,29 @@ export function useShippingCutoff({ sellerId, mlUserId }: UseShippingCutoffOptio
         return;
       }
 
-      if (result?.data) {
-        setData(result.data as CutoffData);
+      // Result is already normalized { flex, colecta, meta }
+      if (result?.flex || result?.colecta || result?.meta) {
+        const parsed: CutoffData = {
+          flex: result.flex,
+          colecta: result.colecta,
+          meta: result.meta,
+          _raw: result._raw,
+        };
+        setData(parsed);
+
+        if (forceRefresh) {
+          bcRef.current?.postMessage({ type: 'shipping_cutoff_refresh_finished', sellerId, data: parsed });
+        }
       }
     } catch (e: any) {
       console.error('[ShippingCutoff] Error:', e);
       setError(e.message || 'Erro inesperado');
     } finally {
       setter(false);
+      if (forceRefresh) refreshingRef.current = false;
     }
   }, [activeCompanyId, sellerId, mlUserId]);
 
-  // Auto-fetch on mount
   useEffect(() => {
     if (sellerId && mlUserId && activeCompanyId) {
       fetchCutoff(false);
@@ -86,11 +143,5 @@ export function useShippingCutoff({ sellerId, mlUserId }: UseShippingCutoffOptio
 
   const refresh = useCallback(() => fetchCutoff(true), [fetchCutoff]);
 
-  return {
-    data,
-    isLoading,
-    isRefreshing,
-    error,
-    refresh,
-  };
+  return { data, isLoading, isRefreshing, error, refresh };
 }
