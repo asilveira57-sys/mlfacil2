@@ -152,16 +152,33 @@ export function useUpsertSystemRating() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ userId, stars, comment }: { userId: string; stars: number; comment?: string }) => {
-      const { data, error } = await supabase
+      // Check if rating already exists
+      const { data: existing } = await supabase
         .from('system_ratings')
-        .upsert(
-          { user_id: userId, stars, comment: comment || null },
-          { onConflict: 'user_id' }
-        )
         .select('id')
-        .single();
-      if (error) throw error;
-      return data;
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (existing) {
+        // Update existing
+        const { data, error } = await supabase
+          .from('system_ratings')
+          .update({ stars, comment: comment || null })
+          .eq('user_id', userId)
+          .select('id')
+          .single();
+        if (error) throw error;
+        return data;
+      } else {
+        // Insert new
+        const { data, error } = await supabase
+          .from('system_ratings')
+          .insert({ user_id: userId, stars, comment: comment || null })
+          .select('id')
+          .single();
+        if (error) throw error;
+        return data;
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['system-rating-stats'] });
