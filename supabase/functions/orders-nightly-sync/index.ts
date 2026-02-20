@@ -340,6 +340,7 @@ serve(async (req) => {
               user_id: account.user_id,
               seller_id: account.ml_user_id,
               order_id: orderId,
+              pack_id: order.pack_id ? order.pack_id.toString() : null,
               created_at_meli: order.date_created,
               order_status: order.status,
               shipment_id: order.shipping?.id?.toString() || null,

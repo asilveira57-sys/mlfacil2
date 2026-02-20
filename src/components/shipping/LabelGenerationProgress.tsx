@@ -68,20 +68,21 @@ export function LabelGenerationProgress({ progress }: LabelGenerationProgressPro
       
       {progress.status === 'processing' && (
         <div className="space-y-2">
-          {/* Progress bar container */}
+          {/* Indeterminate progress bar */}
           <div className="h-3 w-full bg-primary-foreground/20 rounded-full overflow-hidden">
-            {/* Progress bar fill */}
             <div 
-              className="h-full bg-primary-foreground rounded-full transition-all duration-500 ease-out"
-              style={{ width: `${percentage}%` }}
+              className="h-full bg-primary-foreground rounded-full animate-pulse"
+              style={{ width: '100%', opacity: 0.7 }}
             />
           </div>
           
           {/* Progress info */}
-          <div className="flex justify-between text-xs opacity-80">
-            <span>{progress.completed_batches}/{progress.total_batches} lotes</span>
-            <span>{percentage}%</span>
-          </div>
+          {progress.total_batches > 1 && (
+            <div className="flex justify-between text-xs opacity-80">
+              <span>{progress.completed_batches}/{progress.total_batches} lotes</span>
+              <span>{percentage}%</span>
+            </div>
+          )}
         </div>
       )}
 
