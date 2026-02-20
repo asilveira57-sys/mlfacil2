@@ -3668,6 +3668,48 @@ export type Database = {
           },
         ]
       }
+      feedback_display_rules: {
+        Row: {
+          cooldown_days: number
+          created_at: string
+          enabled: boolean
+          id: string
+          kind: string
+          min_days_since_first_use: number
+          min_events: number
+          module_slug: string | null
+          only_after_first_renewal: boolean
+          only_after_paid: boolean
+          updated_at: string
+        }
+        Insert: {
+          cooldown_days?: number
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          kind: string
+          min_days_since_first_use?: number
+          min_events?: number
+          module_slug?: string | null
+          only_after_first_renewal?: boolean
+          only_after_paid?: boolean
+          updated_at?: string
+        }
+        Update: {
+          cooldown_days?: number
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          kind?: string
+          min_days_since_first_use?: number
+          min_events?: number
+          module_slug?: string | null
+          only_after_first_renewal?: boolean
+          only_after_paid?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
       financial_concept_map: {
         Row: {
           bucket: string
@@ -6604,6 +6646,45 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      module_feedback: {
+        Row: {
+          comment: string | null
+          created_at: string
+          id: string
+          module_slug: string
+          rating: number
+          seller_id: string
+          status: string
+          tags: string[] | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          comment?: string | null
+          created_at?: string
+          id?: string
+          module_slug: string
+          rating: number
+          seller_id: string
+          status?: string
+          tags?: string[] | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          comment?: string | null
+          created_at?: string
+          id?: string
+          module_slug?: string
+          rating?: number
+          seller_id?: string
+          status?: string
+          tags?: string[] | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       module_rating_stats: {
         Row: {
@@ -11715,6 +11796,42 @@ export type Database = {
           },
         ]
       }
+      system_feedback: {
+        Row: {
+          comment: string | null
+          created_at: string
+          id: string
+          nps: number | null
+          rating: number
+          seller_id: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          comment?: string | null
+          created_at?: string
+          id?: string
+          nps?: number | null
+          rating: number
+          seller_id: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          comment?: string | null
+          created_at?: string
+          id?: string
+          nps?: number | null
+          rating?: number
+          seller_id?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       system_logs: {
         Row: {
           action: string
@@ -12369,6 +12486,69 @@ export type Database = {
           },
         ]
       }
+      testimonials: {
+        Row: {
+          avatar_url: string | null
+          company_name: string | null
+          consent_granted_at: string | null
+          consent_requested_at: string | null
+          consent_status: string | null
+          created_at: string
+          display_name: string
+          featured: boolean
+          id: string
+          published: boolean
+          published_at: string | null
+          quote: string
+          rating: number | null
+          role: string | null
+          seller_id: string
+          source: string
+          source_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          company_name?: string | null
+          consent_granted_at?: string | null
+          consent_requested_at?: string | null
+          consent_status?: string | null
+          created_at?: string
+          display_name: string
+          featured?: boolean
+          id?: string
+          published?: boolean
+          published_at?: string | null
+          quote: string
+          rating?: number | null
+          role?: string | null
+          seller_id: string
+          source?: string
+          source_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          avatar_url?: string | null
+          company_name?: string | null
+          consent_granted_at?: string | null
+          consent_requested_at?: string | null
+          consent_status?: string | null
+          created_at?: string
+          display_name?: string
+          featured?: boolean
+          id?: string
+          published?: boolean
+          published_at?: string | null
+          quote?: string
+          rating?: number | null
+          role?: string | null
+          seller_id?: string
+          source?: string
+          source_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       trend_alerts: {
         Row: {
           alert_data: Json | null
@@ -12967,6 +13147,48 @@ export type Database = {
           tema_preferido?: string | null
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      user_module_usage: {
+        Row: {
+          actions_count: number
+          created_at: string
+          first_seen_at: string
+          id: string
+          last_action_at: string | null
+          last_seen_at: string
+          module_slug: string
+          seller_id: string
+          updated_at: string
+          user_id: string
+          views_count: number
+        }
+        Insert: {
+          actions_count?: number
+          created_at?: string
+          first_seen_at?: string
+          id?: string
+          last_action_at?: string | null
+          last_seen_at?: string
+          module_slug: string
+          seller_id: string
+          updated_at?: string
+          user_id: string
+          views_count?: number
+        }
+        Update: {
+          actions_count?: number
+          created_at?: string
+          first_seen_at?: string
+          id?: string
+          last_action_at?: string | null
+          last_seen_at?: string
+          module_slug?: string
+          seller_id?: string
+          updated_at?: string
+          user_id?: string
+          views_count?: number
         }
         Relationships: []
       }
@@ -13887,6 +14109,15 @@ export type Database = {
       start_user_trial: {
         Args: { p_plan_code?: string; p_user_id: string }
         Returns: string
+      }
+      track_module_usage: {
+        Args: {
+          p_is_action?: boolean
+          p_module_slug: string
+          p_seller_id: string
+          p_user_id: string
+        }
+        Returns: undefined
       }
       update_onboarding_state: {
         Args: {

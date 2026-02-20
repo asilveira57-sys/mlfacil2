@@ -27,7 +27,6 @@ import { SettingsTemplates } from "@/components/settings/SettingsTemplates";
 import { SettingsPrivacy } from "@/components/settings/SettingsPrivacy";
 import { SettingsAccessProfiles } from "@/components/settings/SettingsAccessProfiles";
 import { SettingsDailyMessage } from "@/components/settings/SettingsDailyMessage";
-import { SettingsRatings } from "@/components/settings/SettingsRatings";
 
 // Icon registry
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -60,7 +59,6 @@ const COMPONENT_MAP: Record<string, React.ComponentType> = {
   'empresas-contas': SettingsCompanies,
   'abrir-chamado': SettingsSupport,
   'mensagem-do-dia': SettingsDailyMessage,
-  'avaliacoes': SettingsRatings,
 };
 
 function PlaceholderContent({ name }: { name: string }) {
