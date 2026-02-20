@@ -9826,6 +9826,57 @@ export type Database = {
           },
         ]
       }
+      retrospective_reports: {
+        Row: {
+          company_name: string | null
+          created_at: string
+          error_message: string | null
+          id: string
+          json_snapshot: Json
+          logo_url: string | null
+          pdf_url: string | null
+          periodo_fim: string
+          periodo_inicio: string
+          seller_id: string
+          status: string
+          tipo: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          company_name?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          json_snapshot?: Json
+          logo_url?: string | null
+          pdf_url?: string | null
+          periodo_fim: string
+          periodo_inicio: string
+          seller_id: string
+          status?: string
+          tipo: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          company_name?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          json_snapshot?: Json
+          logo_url?: string | null
+          pdf_url?: string | null
+          periodo_fim?: string
+          periodo_inicio?: string
+          seller_id?: string
+          status?: string
+          tipo?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       role_menu_permissions: {
         Row: {
           can_edit: boolean
@@ -13309,6 +13360,15 @@ export type Database = {
       ensure_workspace: { Args: { p_user_id: string }; Returns: Json }
       generate_blog_slug: { Args: { title: string }; Returns: string }
       generate_category_slug: { Args: { name: string }; Returns: string }
+      generate_retrospective_snapshot: {
+        Args: {
+          p_periodo_fim: string
+          p_periodo_inicio: string
+          p_seller_id: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
       get_admin_dashboard_stats: { Args: never; Returns: Json }
       get_or_create_ml_account: {
         Args: {
