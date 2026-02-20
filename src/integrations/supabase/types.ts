@@ -10808,6 +10808,123 @@ export type Database = {
           },
         ]
       }
+      shipping_cutoff_cache: {
+        Row: {
+          colecta_cutoff_calculated: boolean
+          colecta_cutoff_time: string | null
+          colecta_enabled: boolean
+          colecta_window_from: string | null
+          colecta_window_to: string | null
+          company_id: string
+          created_at: string
+          date_ref: string
+          error_message: string | null
+          expires_at: string
+          fetched_at: string
+          flex_cutoff_time: string | null
+          flex_cutoff_type: string | null
+          flex_enabled: boolean
+          flex_zone_details: Json | null
+          flex_zone_summary_first: string | null
+          flex_zone_summary_last: string | null
+          id: string
+          provider: string
+          seller_id: string
+          source_payload: Json | null
+          status: string
+          timezone: string
+          updated_at: string
+        }
+        Insert: {
+          colecta_cutoff_calculated?: boolean
+          colecta_cutoff_time?: string | null
+          colecta_enabled?: boolean
+          colecta_window_from?: string | null
+          colecta_window_to?: string | null
+          company_id: string
+          created_at?: string
+          date_ref: string
+          error_message?: string | null
+          expires_at: string
+          fetched_at?: string
+          flex_cutoff_time?: string | null
+          flex_cutoff_type?: string | null
+          flex_enabled?: boolean
+          flex_zone_details?: Json | null
+          flex_zone_summary_first?: string | null
+          flex_zone_summary_last?: string | null
+          id?: string
+          provider?: string
+          seller_id: string
+          source_payload?: Json | null
+          status?: string
+          timezone?: string
+          updated_at?: string
+        }
+        Update: {
+          colecta_cutoff_calculated?: boolean
+          colecta_cutoff_time?: string | null
+          colecta_enabled?: boolean
+          colecta_window_from?: string | null
+          colecta_window_to?: string | null
+          company_id?: string
+          created_at?: string
+          date_ref?: string
+          error_message?: string | null
+          expires_at?: string
+          fetched_at?: string
+          flex_cutoff_time?: string | null
+          flex_cutoff_type?: string | null
+          flex_enabled?: boolean
+          flex_zone_details?: Json | null
+          flex_zone_summary_first?: string | null
+          flex_zone_summary_last?: string | null
+          id?: string
+          provider?: string
+          seller_id?: string
+          source_payload?: Json | null
+          status?: string
+          timezone?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      shipping_cutoff_logs: {
+        Row: {
+          action: string
+          company_id: string | null
+          created_at: string
+          error_message: string | null
+          execution_time_ms: number | null
+          id: string
+          payload_summary: Json | null
+          seller_id: string | null
+          status: string
+        }
+        Insert: {
+          action: string
+          company_id?: string | null
+          created_at?: string
+          error_message?: string | null
+          execution_time_ms?: number | null
+          id?: string
+          payload_summary?: Json | null
+          seller_id?: string | null
+          status?: string
+        }
+        Update: {
+          action?: string
+          company_id?: string | null
+          created_at?: string
+          error_message?: string | null
+          execution_time_ms?: number | null
+          id?: string
+          payload_summary?: Json | null
+          seller_id?: string | null
+          status?: string
+        }
+        Relationships: []
+      }
       site_content: {
         Row: {
           chave: string

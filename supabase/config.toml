@@ -209,3 +209,6 @@ verify_jwt = false
 
 [functions.generate-message-suggestions]
 verify_jwt = false
+
+[functions.shipping-cutoff]
+verify_jwt = false
