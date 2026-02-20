@@ -10962,6 +10962,45 @@ export type Database = {
           },
         ]
       }
+      system_logs: {
+        Row: {
+          action: string
+          company_id: string | null
+          created_at: string
+          id: string
+          level: string
+          message: string | null
+          meta_json: Json
+          success: boolean
+          system_area: string
+          user_id: string | null
+        }
+        Insert: {
+          action: string
+          company_id?: string | null
+          created_at?: string
+          id?: string
+          level?: string
+          message?: string | null
+          meta_json?: Json
+          success?: boolean
+          system_area: string
+          user_id?: string | null
+        }
+        Update: {
+          action?: string
+          company_id?: string | null
+          created_at?: string
+          id?: string
+          level?: string
+          message?: string | null
+          meta_json?: Json
+          success?: boolean
+          system_area?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       system_modules: {
         Row: {
           created_at: string
@@ -12874,6 +12913,19 @@ export type Database = {
           p_old_value?: Json
           p_target_id?: string
           p_target_table?: string
+        }
+        Returns: string
+      }
+      register_system_log: {
+        Args: {
+          p_action: string
+          p_company_id?: string
+          p_level: string
+          p_message?: string
+          p_meta_json?: Json
+          p_success?: boolean
+          p_system_area: string
+          p_user_id?: string
         }
         Returns: string
       }
