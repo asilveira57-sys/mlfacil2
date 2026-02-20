@@ -3478,6 +3478,121 @@ export type Database = {
         }
         Relationships: []
       }
+      consultant_tip_interactions: {
+        Row: {
+          created_at: string | null
+          id: string
+          tip_id: string
+          tipo_interacao: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          tip_id: string
+          tipo_interacao: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          tip_id?: string
+          tipo_interacao?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "consultant_tip_interactions_tip_id_fkey"
+            columns: ["tip_id"]
+            isOneToOne: false
+            referencedRelation: "consultant_tips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      consultant_tip_views: {
+        Row: {
+          id: string
+          tip_id: string
+          user_id: string
+          viewed_at: string | null
+        }
+        Insert: {
+          id?: string
+          tip_id: string
+          user_id: string
+          viewed_at?: string | null
+        }
+        Update: {
+          id?: string
+          tip_id?: string
+          user_id?: string
+          viewed_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "consultant_tip_views_tip_id_fkey"
+            columns: ["tip_id"]
+            isOneToOne: false
+            referencedRelation: "consultant_tips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      consultant_tips: {
+        Row: {
+          ativa: boolean | null
+          categoria: string | null
+          conteudo_json: Json
+          created_at: string | null
+          created_by: string | null
+          fixada_dashboard: boolean | null
+          id: string
+          modulo_relacionado: string | null
+          nivel: string | null
+          slug: string
+          tags: string[] | null
+          tipo: string
+          titulo: string
+          updated_at: string | null
+          versao: number | null
+        }
+        Insert: {
+          ativa?: boolean | null
+          categoria?: string | null
+          conteudo_json?: Json
+          created_at?: string | null
+          created_by?: string | null
+          fixada_dashboard?: boolean | null
+          id?: string
+          modulo_relacionado?: string | null
+          nivel?: string | null
+          slug: string
+          tags?: string[] | null
+          tipo: string
+          titulo: string
+          updated_at?: string | null
+          versao?: number | null
+        }
+        Update: {
+          ativa?: boolean | null
+          categoria?: string | null
+          conteudo_json?: Json
+          created_at?: string | null
+          created_by?: string | null
+          fixada_dashboard?: boolean | null
+          id?: string
+          modulo_relacionado?: string | null
+          nivel?: string | null
+          slug?: string
+          tags?: string[] | null
+          tipo?: string
+          titulo?: string
+          updated_at?: string | null
+          versao?: number | null
+        }
+        Relationships: []
+      }
       cookie_consents: {
         Row: {
           accepted_at: string
