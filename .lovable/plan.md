@@ -1,35 +1,34 @@
 
-# Integrar Avaliações de Módulos na Interface do Usuário
 
-## Problema
-Os componentes de avaliação (`ModuleRatingSummaryCard`, `SystemRatingSummaryCard`) foram criados mas nunca foram inseridos em nenhuma página visível ao usuário. Por isso, não há como avaliar módulos ou o sistema.
+## Plano: Corrigir gravacao de avaliacoes - solucao definitiva
 
-## Solução
+### Problema identificado
 
-Vamos adicionar as avaliações em **dois locais**:
+O erro "UPDATE requires a WHERE clause" ocorre porque:
 
-### 1. Página Início - Card de Avaliação do Sistema
-Na página Início (`src/pages/Home.tsx`), adicionar o `SystemRatingSummaryCard` para que o usuário possa avaliar o sistema como um todo. Ficará posicionado na parte inferior da página, após os quick actions.
+1. Ao inserir uma avaliacao em `system_ratings`, um trigger (`recalc_system_rating_stats`) dispara
+2. Esse trigger faz `UPDATE system_rating_stats SET ...` sem clausula WHERE (pois a tabela tem apenas 1 registro)
+3. Apesar de o trigger ter `SECURITY DEFINER` e `SET row_security TO off`, o RLS ativo na tabela `system_rating_stats` continua bloqueando a operacao no ambiente hospedado
+4. O mesmo problema existe para `module_rating_stats`
 
-### 2. Configurações - Seção "Avaliações"
-Criar um novo item no menu de Configurações chamado "Avaliações" (slug: `avaliacoes`) que conterá:
-- O card de avaliação geral do sistema (`SystemRatingSummaryCard`)
-- Uma lista dos módulos ativos com o card `ModuleRatingSummaryCard` para cada um, permitindo avaliar individualmente cada módulo
-- O centro de consentimentos (`SettingsConsentCenter`) para gerenciar permissões de depoimentos
+### Solucao
 
-### 3. Menu de Configurações - Novo item no banco de dados
-Inserir o item "Avaliações" na tabela `config_menu_items` para que apareça no menu lateral de Configurações.
+Desabilitar RLS nas tabelas de cache de estatisticas. Essas tabelas contem apenas dados agregados (media de estrelas, contagens) e sao escritas exclusivamente por triggers internos do banco. Nao ha risco de seguranca.
 
----
+### Alteracao necessaria
 
-## Detalhes Técnicos
+**Migracao SQL unica:**
 
-### Arquivos a criar:
-- `src/components/settings/SettingsRatings.tsx` - Página de configurações com avaliação do sistema + lista de módulos avaliáveis + consentimentos
+```sql
+-- Desabilitar RLS nas tabelas de cache de estatisticas
+ALTER TABLE public.system_rating_stats DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.module_rating_stats DISABLE ROW LEVEL SECURITY;
+```
 
-### Arquivos a modificar:
-- `src/components/settings/SettingsLayout.tsx` - Registrar o slug `avaliacoes` no `COMPONENT_MAP`
-- `src/pages/Home.tsx` - Adicionar `SystemRatingSummaryCard` na parte inferior
+### Detalhes tecnicos
 
-### Banco de dados:
-- Inserir novo item `config_menu_items` com slug `avaliacoes`, ícone `Star`, dentro do grupo de preferências ou como item de conta
+- Nenhuma alteracao em codigo da aplicacao
+- As politicas de RLS existentes nas tabelas-base (`system_ratings`, `module_ratings`) continuam intactas e protegendo os dados dos usuarios
+- Os triggers continuam funcionando normalmente, mas agora sem bloqueio ao atualizar as tabelas de cache
+- Esta abordagem elimina a dependencia de `SET row_security TO off` que nao funciona de forma confiavel no ambiente hospedado
+
