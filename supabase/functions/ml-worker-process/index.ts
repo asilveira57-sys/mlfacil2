@@ -603,6 +603,7 @@ async function processOrderEvent(
         user_id: integration.user_id,
         seller_id: event.ml_user_id,
         order_id: orderId,
+        pack_id: orderData.pack_id ? String(orderData.pack_id) : null,
         created_at_meli: orderData.date_created || new Date().toISOString(),
         order_status: orderStatus,
         shipment_id: shippingId,

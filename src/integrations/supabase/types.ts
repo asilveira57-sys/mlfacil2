@@ -5900,6 +5900,7 @@ export type Database = {
           order_comment: string | null
           order_id: string
           order_status: string | null
+          pack_id: string | null
           seller_id: string
           shipment_id: string | null
           total_amount: number | null
@@ -5917,6 +5918,7 @@ export type Database = {
           order_comment?: string | null
           order_id: string
           order_status?: string | null
+          pack_id?: string | null
           seller_id: string
           shipment_id?: string | null
           total_amount?: number | null
@@ -5934,6 +5936,7 @@ export type Database = {
           order_comment?: string | null
           order_id?: string
           order_status?: string | null
+          pack_id?: string | null
           seller_id?: string
           shipment_id?: string | null
           total_amount?: number | null

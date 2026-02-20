@@ -27,6 +27,7 @@ export interface HeaderPreferences {
 
 export interface OrderData {
   order_id: string;
+  pack_id?: string | null;
   shipment_id: string | null;
   buyer_name: string | null;
   order_comment: string | null;
@@ -89,7 +90,7 @@ function buildProductLines(
 
   // Format each item as "Nx SKU" or "Nx Title"
   const formattedItems = sortedItems.map(item => {
-    const displayText = item.sku || item.title_short || item.title || 'Item';
+    const displayText = item.title_short || item.title || item.sku || 'Item';
     const truncatedText = truncate(displayText, 25); // SKU/title max 25 chars
     return `${item.quantity}x ${truncatedText}`;
   });
@@ -231,9 +232,9 @@ export async function buildHeaderLines(
     lineContents.products = buildProductLines(items, prefs.max_product_lines);
   }
 
-  // Order ID line
+  // Order ID line (use pack_id if available, fallback to order_id)
   if (prefs.show_order_id) {
-    lineContents.order = [`Pedido: ${order.order_id}`];
+    lineContents.order = [`Pedido: ${order.pack_id || order.order_id}`];
   }
 
   // Shipment ID line
@@ -286,7 +287,7 @@ export async function buildHeaderLinesFromCache(
   // Load order data
   const { data: orderData, error: orderError } = await supabase
     .from('meli_orders_cache')
-    .select('order_id, shipment_id, buyer_name, order_comment')
+    .select('order_id, pack_id, shipment_id, buyer_name, order_comment')
     .eq('seller_id', sellerId)
     .eq('order_id', orderId)
     .maybeSingle();
@@ -310,6 +311,7 @@ export async function buildHeaderLinesFromCache(
 
   const order: OrderData = {
     order_id: orderData.order_id,
+    pack_id: orderData.pack_id,
     shipment_id: orderData.shipment_id,
     buyer_name: orderData.buyer_name,
     order_comment: orderData.order_comment,

@@ -1,0 +1,1 @@
+ALTER TABLE public.meli_orders_cache ADD COLUMN IF NOT EXISTS pack_id text;

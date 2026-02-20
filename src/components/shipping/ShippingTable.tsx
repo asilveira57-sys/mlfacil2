@@ -152,7 +152,7 @@ export function ShippingTable({
   }
 
   return (
-    <div className="border rounded-lg">
+    <div className="border rounded-lg overflow-auto max-h-[calc(100vh-360px)]">
       <Table>
         <TableHeader>
           <TableRow>
@@ -238,13 +238,13 @@ export function ShippingTable({
                 </TableCell>
                 <TableCell className="font-mono text-sm">
                   <span className="inline-flex items-center gap-1">
-                    {order.order_id}
+                    {(order as any).pack_id || order.order_id}
                     <button
-                      onClick={(e) => { e.stopPropagation(); handleCopy(order.order_id); }}
+                      onClick={(e) => { e.stopPropagation(); handleCopy((order as any).pack_id || order.order_id); }}
                       className="inline-flex items-center justify-center h-6 w-6 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
                       title="Copiar número do pedido"
                     >
-                      {copiedId === order.order_id ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                      {copiedId === ((order as any).pack_id || order.order_id) ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
                     </button>
                   </span>
                 </TableCell>

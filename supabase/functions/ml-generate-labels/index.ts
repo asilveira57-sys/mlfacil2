@@ -114,7 +114,7 @@ function buildProductLines(
   });
 
   const formatted = sorted.map(item => {
-    const text = truncate(item.sku || item.title_short || item.title || 'Item', 25);
+    const text = truncate(item.title_short || item.title || item.sku || 'Item', 25);
     return `${item.quantity}x ${text}`;
   });
 
@@ -710,7 +710,7 @@ serve(async (req) => {
 
           const { data: ordersData } = await supabaseAdmin
             .from('meli_orders_cache')
-            .select('order_id, shipment_id, buyer_name, order_comment')
+            .select('order_id, pack_id, shipment_id, buyer_name, order_comment')
             .eq('seller_id', seller_id)
             .in('order_id', validOrderIds);
 
@@ -746,7 +746,7 @@ serve(async (req) => {
             }));
 
             const lines = buildHeaderLinesForOrder(prefs, {
-              order_id: order.order_id,
+              order_id: order.pack_id || order.order_id,
               shipment_id: order.shipment_id,
               buyer_name: order.buyer_name,
               order_comment: order.order_comment,
