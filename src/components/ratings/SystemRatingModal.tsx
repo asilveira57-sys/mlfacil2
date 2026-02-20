@@ -98,7 +98,7 @@ export function SystemRatingModal({ open, onOpenChange, userId, userName, userCo
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Avaliar o Sistema</DialogTitle>
           <DialogDescription>Como você avalia o Marketplace Fácil?</DialogDescription>
