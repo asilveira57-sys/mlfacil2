@@ -27,6 +27,7 @@ import { DailyMessageCard } from "@/components/daily-message";
 import { useDailyMessage } from "@/hooks/useDailyMessage";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { SystemRatingSummaryCard } from "@/components/ratings/SystemRatingSummaryCard";
+import { FeedbackPromptCard } from "@/components/feedback";
 import {
   Dialog,
   DialogContent,
@@ -498,11 +499,20 @@ const Home = () => {
 
             {/* System Rating */}
             {user && (
-              <SystemRatingSummaryCard
-                userId={user.id}
-                userName={user.user_metadata?.full_name || user.email?.split("@")[0] || "Usuário"}
-                userCompany={user.user_metadata?.company}
-              />
+              <>
+                <SystemRatingSummaryCard
+                  userId={user.id}
+                  userName={user.user_metadata?.full_name || user.email?.split("@")[0] || "Usuário"}
+                  userCompany={user.user_metadata?.company}
+                />
+                {sellerId && (
+                  <FeedbackPromptCard
+                    kind="system"
+                    userId={user.id}
+                    sellerId={sellerId}
+                  />
+                )}
+              </>
             )}
           </>
         ) : (

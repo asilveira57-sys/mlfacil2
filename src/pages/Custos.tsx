@@ -19,11 +19,14 @@ import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { useCostSyncWatchdog } from '@/hooks/useCostSyncWatchdog';
 import { useCostWatchdogPreferences } from '@/hooks/useCostWatchdogPreferences';
 import { useCostDataPolling } from '@/hooks/useCostDataPolling';
+import { useModuleFeedbackIntegration } from '@/hooks/useModuleFeedbackIntegration';
+import { FeedbackPromptCard } from '@/components/feedback';
 
 export default function Custos() {
   const navigate = useNavigate();
   const { sellerId, activeAccount, accounts, setActiveAccount, loading: accountsLoading, initialized } = useActiveAccount();
   const [activeTab, setActiveTab] = useState('resumo');
+  const feedback = useModuleFeedbackIntegration('precificacao-custos');
   const [isCalculating, setIsCalculating] = useState(false);
   
   // Watchdog integration
@@ -248,6 +251,17 @@ export default function Custos() {
             <CostSettings sellerId={sellerId || ''} />
           </TabsContent>
         </Tabs>
+
+        {/* Feedback Prompt */}
+        {feedback.ready && (
+          <FeedbackPromptCard
+            kind="module"
+            moduleSlug="precificacao-custos"
+            moduleName="Precificação & Custos"
+            userId={feedback.userId!}
+            sellerId={feedback.sellerId!}
+          />
+        )}
       </main>
     </PageContainer>
   );
