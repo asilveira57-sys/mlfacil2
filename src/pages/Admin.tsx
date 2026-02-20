@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, lazy, Suspense } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -19,6 +19,8 @@ import {
   Globe,
   Menu,
   Star,
+  ClipboardList,
+  History,
 } from 'lucide-react';
 import { AdminDashboard } from './admin/AdminDashboard';
 import { AdminOnboarding } from './admin/AdminOnboarding';
@@ -37,12 +39,14 @@ import { AdminAccessProfiles } from './admin/AdminAccessProfiles';
 import { AdminDailyMessages } from './admin/AdminDailyMessages';
 import { AdminRatings } from './admin/AdminRatings';
 import { AdminGlobalMetrics } from './admin/AdminGlobalMetrics';
+import Retrospectiva from './Retrospectiva';
 
 const adminTabs = [
   { id: '', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'onboarding', label: 'Primeiros Passos', icon: Rocket },
   { id: 'usuarios', label: 'Usuários', icon: Users },
   { id: 'perfis', label: 'Perfis', icon: Shield },
+  { id: 'colaboradores', label: 'Colaboradores', icon: Users },
   { id: 'planos', label: 'Planos', icon: CreditCard },
   { id: 'pagamentos', label: 'Pagamentos', icon: Receipt },
   { id: 'tags', label: 'Tags', icon: Tags },
@@ -57,6 +61,8 @@ const adminTabs = [
   { id: 'mensagem-dia', label: 'Msg do Dia', icon: FileText },
   { id: 'avaliacoes', label: 'Avaliações', icon: Star },
   { id: 'global-metrics', label: 'Contador Global', icon: Globe },
+  { id: 'retrospectiva', label: 'Retrospectiva', icon: History },
+  { id: 'logs', label: 'Auditoria', icon: ClipboardList },
 ];
 
 export default function Admin() {
@@ -103,6 +109,7 @@ export default function Admin() {
           <Route path="onboarding" element={<AdminOnboarding />} />
           <Route path="usuarios" element={<AdminUsers />} />
           <Route path="perfis" element={<AdminAccessProfiles />} />
+          <Route path="colaboradores" element={<AdminCollaboratorsPlaceholder />} />
           <Route path="planos/*" element={<PlanosRedirect />} />
           <Route path="pagamentos" element={<AdminPayments />} />
           <Route path="tags" element={<AdminModuleTags />} />
@@ -117,6 +124,8 @@ export default function Admin() {
           <Route path="mensagem-dia" element={<AdminDailyMessages />} />
           <Route path="avaliacoes" element={<AdminRatings />} />
           <Route path="global-metrics" element={<AdminGlobalMetrics />} />
+          <Route path="retrospectiva" element={<Retrospectiva />} />
+          <Route path="logs" element={<AdminAuditPlaceholder />} />
         </Routes>
       </div>
     </PageContainer>
@@ -127,9 +136,27 @@ export default function Admin() {
 function PlanosRedirect() {
   const navigate = useNavigate();
   useEffect(() => {
-    // Use existing AdminPlanos component by redirecting
     navigate('/admin/planos', { replace: true });
   }, [navigate]);
-
   return null;
+}
+
+function AdminCollaboratorsPlaceholder() {
+  return (
+    <div className="text-center py-16 text-muted-foreground">
+      <Users className="h-12 w-12 mx-auto mb-4 opacity-40" />
+      <h3 className="text-lg font-medium mb-2">Colaboradores</h3>
+      <p>Gerenciamento de colaboradores em desenvolvimento.</p>
+    </div>
+  );
+}
+
+function AdminAuditPlaceholder() {
+  return (
+    <div className="text-center py-16 text-muted-foreground">
+      <ClipboardList className="h-12 w-12 mx-auto mb-4 opacity-40" />
+      <h3 className="text-lg font-medium mb-2">Auditoria e Logs</h3>
+      <p>Registro de atividades administrativas em desenvolvimento.</p>
+    </div>
+  );
 }
