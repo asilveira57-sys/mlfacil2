@@ -1,6 +1,19 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import {
+  logMessageViewed,
+  logMessageLiked,
+  logMessageUnliked,
+  logPreferencesUpdated,
+  logAdminMessageCreated,
+  logAdminMessageUpdated,
+  logAdminMessageToggled,
+  logAdminSignatureUpdated,
+  logAdminAiApproved,
+  logAdminAiRejected,
+} from '@/utils/dailyMessageLogger';
+import { getCachedUserId } from '@/hooks/useCurrentUserId';
 
 type DailyMessage = {
   id: string;
@@ -132,11 +145,13 @@ export function useDailyMessage(userId: string | undefined) {
           .delete()
           .eq('message_id', todayMessage.id)
           .eq('user_id', userId);
+        logMessageUnliked(userId, todayMessage.id);
       } else {
         await supabase.from('message_interactions').insert({
           user_id: userId,
           message_id: todayMessage.id,
         });
+        logMessageLiked(userId, todayMessage.id, todayMessage.tema);
       }
     },
     onSuccess: () => {
@@ -153,6 +168,7 @@ export function useDailyMessage(userId: string | undefined) {
         .from('user_message_preferences')
         .upsert({ user_id: userId, ...prefs }, { onConflict: 'user_id' });
       if (error) throw error;
+      logPreferencesUpdated(userId, prefs as Record<string, unknown>);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['message-preferences', userId] });
@@ -204,12 +220,22 @@ export function useAdminDailyMessages() {
 
   const upsertMessage = useMutation({
     mutationFn: async (msg: any) => {
+      const adminId = getCachedUserId();
       if (msg.id) {
-        const { error } = await supabase.from('daily_messages').update(msg).eq('id', msg.id);
-        if (error) throw error;
+        // Check if it's just a toggle
+        if (Object.keys(msg).length === 2 && 'ativa' in msg) {
+          const { error } = await supabase.from('daily_messages').update(msg).eq('id', msg.id);
+          if (error) throw error;
+          if (adminId) logAdminMessageToggled(adminId, msg.id, msg.ativa);
+        } else {
+          const { error } = await supabase.from('daily_messages').update(msg).eq('id', msg.id);
+          if (error) throw error;
+          if (adminId) logAdminMessageUpdated(adminId, msg.id, msg);
+        }
       } else {
-        const { error } = await supabase.from('daily_messages').insert(msg);
+        const { data, error } = await supabase.from('daily_messages').insert(msg).select('id').single();
         if (error) throw error;
+        if (adminId && data) logAdminMessageCreated(adminId, data.id, msg.tema);
       }
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-daily-messages'] }),
@@ -248,6 +274,8 @@ export function useAdminSignature() {
         .update({ value: { arroba: newArroba } as any, updated_at: new Date().toISOString() })
         .eq('key', 'mensagem_do_dia_signature');
       if (error) throw error;
+      const adminId = getCachedUserId();
+      if (adminId) logAdminSignatureUpdated(adminId, newArroba);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-signature'] });
@@ -275,7 +303,6 @@ export function useAdminAiSuggestions() {
 
   const approveSuggestion = useMutation({
     mutationFn: async (suggestion: any) => {
-      // Create daily_message
       const { error: insertErr } = await supabase.from('daily_messages').insert({
         tema: suggestion.tema,
         texto: suggestion.texto,
@@ -284,12 +311,14 @@ export function useAdminAiSuggestions() {
       });
       if (insertErr) throw insertErr;
 
-      // Mark as approved
       const { error: updateErr } = await supabase
         .from('message_ai_suggestions')
         .update({ status: 'aprovada', approved_at: new Date().toISOString() })
         .eq('id', suggestion.id);
       if (updateErr) throw updateErr;
+
+      const adminId = getCachedUserId();
+      if (adminId) logAdminAiApproved(adminId, suggestion.id, suggestion.tema);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-ai-suggestions'] });
@@ -304,6 +333,8 @@ export function useAdminAiSuggestions() {
         .update({ status: 'reprovada', rejected_at: new Date().toISOString(), admin_notes: notes || null })
         .eq('id', id);
       if (error) throw error;
+      const adminId = getCachedUserId();
+      if (adminId) logAdminAiRejected(adminId, id);
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-ai-suggestions'] }),
   });

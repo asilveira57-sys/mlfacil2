@@ -8,12 +8,14 @@ import {
 import { Button } from '@/components/ui/button';
 import { Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { logCardGenerated, logCardDownloaded } from '@/utils/dailyMessageLogger';
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  message: { texto: string; referencia: string | null };
+  message: { id?: string; texto: string; referencia: string | null };
   signature: string;
+  userId?: string;
 }
 
 type Template = 'white' | 'blue' | 'gradient';
@@ -27,7 +29,7 @@ const TEMPLATES: { id: Template; label: string }[] = [
 const CARD_W = 1080;
 const CARD_H = 1620;
 
-export function DailyMessageCardGenerator({ open, onOpenChange, message, signature }: Props) {
+export function DailyMessageCardGenerator({ open, onOpenChange, message, signature, userId }: Props) {
   const [template, setTemplate] = useState<Template>('white');
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -105,11 +107,17 @@ export function DailyMessageCardGenerator({ open, onOpenChange, message, signatu
     link.download = 'mensagem-do-dia.png';
     link.href = canvas.toDataURL('image/png');
     link.click();
+    if (userId && message.id) {
+      logCardDownloaded(userId, message.id);
+    }
   };
 
   // Draw on template change
   const handleOpen = () => {
     setTimeout(drawCard, 100);
+    if (userId && message.id) {
+      logCardGenerated(userId, message.id, template, !!signature);
+    }
   };
 
   return (

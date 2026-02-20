@@ -48,6 +48,8 @@ import {
 } from '@/hooks/useDailyMessage';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { logAdminAiSuggested } from '@/utils/dailyMessageLogger';
+import { getCachedUserId } from '@/hooks/useCurrentUserId';
 
 const TEMAS = [
   { value: 'empreendedorismo', label: 'Empreendedorismo' },
@@ -360,7 +362,8 @@ function SugestoesIATab() {
       });
       if (error) throw error;
       toast.success(`${data?.count || 0} sugestões geradas`);
-      // Refresh
+      const adminId = getCachedUserId();
+      if (adminId) logAdminAiSuggested(adminId, genTema, data?.count || 5);
       window.location.reload();
     } catch (err: any) {
       toast.error(err.message || 'Erro ao gerar sugestões');
