@@ -85,33 +85,43 @@ Deno.serve(async (req) => {
         }
       }
 
-      // 3. Fetch Flex data from ML API
+      // 3. Fetch Flex subscription data (has cutoff times)
       let flexData: any = null;
       let colectaData: any = null;
       const errorMessages: string[] = [];
 
-      const flexResult = await fetchWithRetry(
-        `https://api.mercadolibre.com/users/${mlUserId}/shipping_preferences`,
-        token, "flex_shipping_preferences", supabase, traceId, companyId, sellerId
+      // Try Flex subscription endpoint first (contains calculated_cutoff)
+      const flexSubResult = await fetchWithRetry(
+        `https://api.mercadolibre.com/shipping/flex/sites/MLB/users/${mlUserId}/subscriptions/v1`,
+        token, "flex_subscriptions", supabase, traceId, companyId, sellerId
       );
-      if (flexResult.ok) {
-        flexData = flexResult.data;
+      if (flexSubResult.ok) {
+        flexData = flexSubResult.data;
       } else {
-        errorMessages.push(flexResult.error!);
+        // Fallback: try shipping_preferences for basic mode info
+        const flexPrefResult = await fetchWithRetry(
+          `https://api.mercadolibre.com/users/${mlUserId}/shipping_preferences`,
+          token, "flex_shipping_preferences", supabase, traceId, companyId, sellerId
+        );
+        if (flexPrefResult.ok) {
+          flexData = { _from_preferences: true, ...flexPrefResult.data };
+        } else {
+          errorMessages.push(flexSubResult.error!);
+        }
       }
 
-      // 4. Fetch Coleta/Places data
+      // 4. Fetch Coleta/Places capacity data (has cutoff/processing times)
       const colectaResult = await fetchWithRetry(
-        `https://api.mercadolibre.com/users/${mlUserId}/shipping_options/pickup`,
-        token, "colecta_pickup", supabase, traceId, companyId, sellerId
+        `https://api.mercadolibre.com/users/${mlUserId}/capacity_middleend/xd_drop_off`,
+        token, "colecta_capacity", supabase, traceId, companyId, sellerId
       );
       if (colectaResult.ok) {
         colectaData = colectaResult.data;
       } else {
-        // Try alternative endpoint
+        // Try cross_docking logistic type
         const altResult = await fetchWithRetry(
-          `https://api.mercadolibre.com/shipments/handling_time/${mlUserId}`,
-          token, "colecta_handling_time", supabase, traceId, companyId, sellerId
+          `https://api.mercadolibre.com/users/${mlUserId}/capacity_middleend/cross_docking`,
+          token, "colecta_cross_docking", supabase, traceId, companyId, sellerId
         );
         if (altResult.ok) {
           colectaData = altResult.data;
@@ -125,32 +135,17 @@ Deno.serve(async (req) => {
 
       const normalized = normalizeShippingCutoff(flexData, colectaData);
 
-      // 6. Build safe source_payload (no tokens!) — capture full structure for debugging
+      // 6. Build safe source_payload (no tokens!)
       const safePayload: any = {};
       if (flexData) {
-        safePayload.flex_keys = Object.keys(flexData);
-        const modesList = flexData?.shipping_modes || flexData?.modes || [];
-        safePayload.flex_modes_count = Array.isArray(modesList) ? modesList.length : 0;
-        // Capture first 3 modes raw (truncated) for debugging
-        if (Array.isArray(modesList)) {
-          safePayload.flex_modes_raw = modesList.slice(0, 3).map((m: any) => {
-            if (typeof m === 'string') return m;
-            if (typeof m === 'object' && m !== null) {
-              // Capture top-level fields (no nested data)
-              const summary: any = {};
-              for (const k of Object.keys(m).slice(0, 15)) {
-                const v = m[k];
-                summary[k] = typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' ? v : typeof v;
-              }
-              return summary;
-            }
-            return String(m);
-          });
-        }
-        if (flexData?.me2_enablers) safePayload.me2_enablers = typeof flexData.me2_enablers === 'object' ? JSON.stringify(flexData.me2_enablers).substring(0, 500) : String(flexData.me2_enablers);
-        if (flexData?.option) safePayload.option_raw = typeof flexData.option === 'object' ? JSON.stringify(flexData.option).substring(0, 500) : String(flexData.option);
-        if (flexData?.services) safePayload.services_count = Array.isArray(flexData.services) ? flexData.services.length : 'not_array';
-        if (flexData?.logistics) safePayload.logistics_raw = JSON.stringify(flexData.logistics).substring(0, 500);
+        safePayload.flex_source = flexData._from_preferences ? 'preferences' : 'subscriptions';
+        safePayload.flex_keys = Object.keys(flexData).filter(k => k !== '_from_preferences');
+        if (flexData.delivery_ranges?.week) safePayload.flex_week_ranges_count = flexData.delivery_ranges.week.length;
+        if (flexData.availables?.cutoff) safePayload.flex_availables_cutoff = flexData.availables.cutoff;
+      }
+      if (colectaData) {
+        safePayload.colecta_keys = Object.keys(colectaData);
+        if (colectaData.processing_times) safePayload.colecta_days = Object.keys(colectaData.processing_times);
       }
       if (colectaData) {
         safePayload.colecta_keys = Object.keys(colectaData);
@@ -313,93 +308,117 @@ function normalizeShippingCutoff(flexData: any, colectaData: any) {
     colecta_window_to: null, colecta_cutoff_calculated: false,
   };
 
-  // Flex
-  if (flexData) {
-    const modes = flexData?.shipping_modes || flexData?.modes || [];
+  // Flex - from /shipping/flex/sites/MLB/users/{id}/subscriptions/v1
+  if (flexData && !flexData._from_preferences) {
+    // Flex subscription response has delivery_ranges with calculated_cutoff
+    const deliveryRanges = flexData?.delivery_ranges || {};
+    const weekRanges = deliveryRanges?.week || [];
     
-    // Try to find flex mode with multiple patterns
-    const flexMode = Array.isArray(modes)
-      ? modes.find((m: any) => {
-          const modeName = (m?.mode || '').toLowerCase();
-          const modeLabel = (m?.name || '').toLowerCase();
-          return modeName === 'me2' || modeName === 'me1' || modeName === 'custom'
-            || modeLabel.includes('flex') || modeLabel.includes('mercado envios')
-            || modeLabel.includes('full');
-        })
-      : null;
-
-    // Also check top-level cutoff from me2_enablers or option
-    const topLevelCutoff = flexData?.me2_enablers?.cutoff_time
-      || flexData?.option?.cutoff_time
-      || flexData?.cutoff_time
-      || flexData?.handling_time?.cutoff;
-
-    if (flexMode) {
+    if (Array.isArray(weekRanges) && weekRanges.length > 0) {
       result.flex_enabled = true;
-      const zones = flexMode?.shipping_zones || flexMode?.zones || [];
-      if (Array.isArray(zones) && zones.length > 0) {
-        const cutoffs = zones
-          .map((z: any) => ({ zone: z.name || z.zone_name || z.id || "Zona", cutoff: z.cutoff_time || z.cutoff || z.handling_time?.cutoff || null }))
-          .filter((z: any) => z.cutoff);
-
-        if (cutoffs.length > 1) {
+      
+      // Extract cutoff times from week ranges
+      const cutoffs = weekRanges
+        .filter((r: any) => r?.calculated_cutoff != null)
+        .map((r: any) => ({
+          zone: r?.from && r?.to ? `${r.from}:00-${r.to}:00` : "Geral",
+          cutoff: `${String(r.calculated_cutoff).padStart(2, "0")}:00`,
+          cutoff_hour: r.calculated_cutoff,
+        }));
+      
+      if (cutoffs.length > 1) {
+        // Check if cutoffs differ
+        const uniqueCutoffs = [...new Set(cutoffs.map((c: any) => c.cutoff_hour))];
+        if (uniqueCutoffs.length > 1) {
           result.flex_cutoff_type = "by_zone";
-          const sorted = cutoffs.sort((a: any, b: any) => (a.cutoff > b.cutoff ? 1 : -1));
+          const sorted = cutoffs.sort((a: any, b: any) => a.cutoff_hour - b.cutoff_hour);
           result.flex_zone_summary_first = sorted[0].cutoff;
           result.flex_zone_summary_last = sorted[sorted.length - 1].cutoff;
-          result.flex_zone_details = sorted;
-        } else if (cutoffs.length === 1) {
+          result.flex_zone_details = sorted.map((c: any) => ({ zone: c.zone, cutoff: c.cutoff }));
+        } else {
           result.flex_cutoff_type = "single";
           result.flex_cutoff_time = cutoffs[0].cutoff;
         }
+      } else if (cutoffs.length === 1) {
+        result.flex_cutoff_type = "single";
+        result.flex_cutoff_time = cutoffs[0].cutoff;
       }
-      if (!result.flex_cutoff_type) {
-        const directCutoff = flexMode.cutoff_time || flexMode.cutoff || flexMode.handling_time?.cutoff;
-        if (directCutoff) { result.flex_cutoff_type = "single"; result.flex_cutoff_time = directCutoff; }
-        else if (topLevelCutoff) { result.flex_cutoff_type = "single"; result.flex_cutoff_time = topLevelCutoff; }
-        else { result.flex_cutoff_type = "unknown"; }
+    }
+    
+    // Try availables.cutoff as fallback
+    if (!result.flex_cutoff_type) {
+      const availables = flexData?.availables;
+      if (availables?.cutoff && Array.isArray(availables.cutoff) && availables.cutoff.length > 0) {
+        result.flex_enabled = true;
+        const maxCutoff = Math.max(...availables.cutoff);
+        result.flex_cutoff_type = "single";
+        result.flex_cutoff_time = `${String(maxCutoff).padStart(2, "0")}:00`;
       }
-    } else if (topLevelCutoff) {
-      // No matching mode but top-level cutoff exists
-      result.flex_enabled = true;
-      result.flex_cutoff_type = "single";
-      result.flex_cutoff_time = topLevelCutoff;
-    } else if (Array.isArray(modes) && modes.length > 0) {
-      // Try to extract cutoff from ANY mode that has one
-      for (const m of modes) {
-        const cutoff = m?.cutoff_time || m?.cutoff || m?.handling_time?.cutoff;
-        if (cutoff) {
-          result.flex_enabled = true;
-          result.flex_cutoff_type = "single";
-          result.flex_cutoff_time = cutoff;
-          break;
-        }
+    }
+  } else if (flexData?._from_preferences) {
+    // Fallback: from shipping_preferences - limited info
+    const logistics = flexData?.logistics || [];
+    if (Array.isArray(logistics)) {
+      const me2 = logistics.find((l: any) => l?.mode === 'me2');
+      if (me2) {
+        result.flex_enabled = true;
+        result.flex_cutoff_type = "unknown";
+        // No cutoff info available from preferences endpoint
       }
     }
   }
 
-  // Coleta/Places
+  // Coleta/Places - from /users/{id}/capacity_middleend/xd_drop_off
   if (colectaData) {
-    const pickup = colectaData?.pickup || colectaData;
-    const cutoff = pickup?.cutoff_time || pickup?.cutoff;
-    const windowFrom = pickup?.window_from || pickup?.from;
-    const windowTo = pickup?.window_to || pickup?.to;
-
-    if (cutoff || windowFrom) {
-      result.colecta_enabled = true;
+    // capacity_middleend returns processing_times per day with cutoff
+    const today = getTodayDayName();
+    const processingTimes = colectaData?.processing_times;
+    const todayData = processingTimes?.[today] || processingTimes?.monday;
+    
+    if (todayData) {
+      const cutoff = todayData.cutoff;
+      const processingTime = todayData.processing_time;
+      
       if (cutoff) {
+        result.colecta_enabled = true;
         result.colecta_cutoff_time = cutoff;
-      } else if (windowFrom) {
-        result.colecta_window_from = windowFrom;
-        result.colecta_window_to = windowTo || null;
-        const [h, m] = windowFrom.split(":").map(Number);
-        result.colecta_cutoff_time = `${String(Math.max(0, h - 1)).padStart(2, "0")}:${String(m || 0).padStart(2, "0")}`;
+      } else if (processingTime) {
+        result.colecta_enabled = true;
+        // Estimated cutoff = current time check
+        result.colecta_cutoff_time = processingTime;
         result.colecta_cutoff_calculated = true;
+      }
+    }
+    
+    // Alternative: direct fields
+    if (!result.colecta_enabled) {
+      const pickup = colectaData?.pickup || colectaData;
+      const cutoff = pickup?.cutoff_time || pickup?.cutoff;
+      const windowFrom = pickup?.window_from || pickup?.from;
+      const windowTo = pickup?.window_to || pickup?.to;
+
+      if (cutoff || windowFrom) {
+        result.colecta_enabled = true;
+        if (cutoff) {
+          result.colecta_cutoff_time = cutoff;
+        } else if (windowFrom) {
+          result.colecta_window_from = windowFrom;
+          result.colecta_window_to = windowTo || null;
+          const [h, m] = windowFrom.split(":").map(Number);
+          result.colecta_cutoff_time = `${String(Math.max(0, h - 1)).padStart(2, "0")}:${String(m || 0).padStart(2, "0")}`;
+          result.colecta_cutoff_calculated = true;
+        }
       }
     }
   }
 
   return result;
+}
+
+function getTodayDayName(): string {
+  const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const spDate = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+  return days[spDate.getDay()];
 }
 
 // ==================== HELPERS ====================
