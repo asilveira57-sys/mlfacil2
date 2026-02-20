@@ -132,7 +132,14 @@ Deno.serve(async (req) => {
         const modesList = flexData?.shipping_modes || flexData?.modes || [];
         safePayload.flex_modes_count = Array.isArray(modesList) ? modesList.length : 0;
         safePayload.flex_mode_names = Array.isArray(modesList) ? modesList.map((m: any) => m?.mode || m?.name || 'unknown') : [];
+        // Capture mode structures for debugging (top-level keys only)
+        safePayload.flex_mode_structures = Array.isArray(modesList) ? modesList.map((m: any) => Object.keys(m || {})) : [];
         if (flexData?.me2_enablers) safePayload.me2_enablers_keys = Object.keys(flexData.me2_enablers);
+        // Capture option key if present (may contain cutoff)
+        if (flexData?.option) safePayload.option_keys = Object.keys(flexData.option);
+        // Capture services/logistics keys
+        if (flexData?.services) safePayload.services_sample = Array.isArray(flexData.services) ? flexData.services.slice(0, 3).map((s: any) => ({ id: s?.id, name: s?.name })) : Object.keys(flexData.services);
+        if (flexData?.logistics) safePayload.logistics_keys = Object.keys(flexData.logistics);
       }
       if (colectaData) {
         safePayload.colecta_keys = Object.keys(colectaData);
