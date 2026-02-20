@@ -11757,6 +11757,213 @@ export type Database = {
         }
         Relationships: []
       }
+      social_calendar_engagement_events: {
+        Row: {
+          created_at: string
+          event_id: string | null
+          event_type: string
+          id: string
+          metadata: Json | null
+          seller_id: string | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          event_id?: string | null
+          event_type: string
+          id?: string
+          metadata?: Json | null
+          seller_id?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          event_id?: string | null
+          event_type?: string
+          id?: string
+          metadata?: Json | null
+          seller_id?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      social_calendar_events: {
+        Row: {
+          category: string
+          country_code: string | null
+          created_at: string
+          description: string | null
+          event_date: string
+          id: string
+          is_active: boolean
+          source: string
+          tags: Json | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          category?: string
+          country_code?: string | null
+          created_at?: string
+          description?: string | null
+          event_date: string
+          id?: string
+          is_active?: boolean
+          source?: string
+          tags?: Json | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          country_code?: string | null
+          created_at?: string
+          description?: string | null
+          event_date?: string
+          id?: string
+          is_active?: boolean
+          source?: string
+          tags?: Json | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      social_calendar_saved_ideas: {
+        Row: {
+          chosen_template_id: string | null
+          created_at: string
+          custom_notes: string | null
+          custom_title: string | null
+          event_id: string | null
+          id: string
+          planned_date: string | null
+          seller_id: string | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          chosen_template_id?: string | null
+          created_at?: string
+          custom_notes?: string | null
+          custom_title?: string | null
+          event_id?: string | null
+          id?: string
+          planned_date?: string | null
+          seller_id?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          chosen_template_id?: string | null
+          created_at?: string
+          custom_notes?: string | null
+          custom_title?: string | null
+          event_id?: string | null
+          id?: string
+          planned_date?: string | null
+          seller_id?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "social_calendar_saved_ideas_chosen_template_id_fkey"
+            columns: ["chosen_template_id"]
+            isOneToOne: false
+            referencedRelation: "social_calendar_templates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "social_calendar_saved_ideas_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "social_calendar_events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      social_calendar_templates: {
+        Row: {
+          created_at: string
+          cta: string | null
+          event_category: string | null
+          format: string
+          hook: string
+          id: string
+          is_active: boolean
+          niche: string
+          script: string
+          tags: Json | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          cta?: string | null
+          event_category?: string | null
+          format?: string
+          hook: string
+          id?: string
+          is_active?: boolean
+          niche?: string
+          script: string
+          tags?: Json | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          cta?: string | null
+          event_category?: string | null
+          format?: string
+          hook?: string
+          id?: string
+          is_active?: boolean
+          niche?: string
+          script?: string
+          tags?: Json | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      social_calendar_user_preferences: {
+        Row: {
+          country_code: string
+          created_at: string
+          id: string
+          objective: string | null
+          preferred_formats: Json | null
+          selected_niches: Json | null
+          seller_id: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          country_code?: string
+          created_at?: string
+          id?: string
+          objective?: string | null
+          preferred_formats?: Json | null
+          selected_niches?: Json | null
+          seller_id?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          country_code?: string
+          created_at?: string
+          id?: string
+          objective?: string | null
+          preferred_formats?: Json | null
+          selected_niches?: Json | null
+          seller_id?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       subscriptions: {
         Row: {
           auto_renew: boolean | null
