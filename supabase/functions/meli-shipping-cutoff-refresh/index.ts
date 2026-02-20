@@ -130,10 +130,37 @@ Deno.serve(async (req) => {
         }
       }
 
-      // 5. Normalize
+      // 5. Get earliest handling deadline from cached shipments (most accurate cutoff source)
+      let shipmentCutoff: string | null = null;
+      try {
+        const todayStart = getDateRefSP() + "T00:00:00-03:00";
+        const todayEnd = getDateRefSP() + "T23:59:59-03:00";
+        const { data: earliestShipment } = await supabase
+          .from("meli_shipments_cache")
+          .select("estimated_handling_limit, logistic_type")
+          .eq("seller_id", mlUserId)
+          .in("shipment_status", ["ready_to_ship", "handling"])
+          .gte("estimated_handling_limit", todayStart)
+          .lte("estimated_handling_limit", todayEnd)
+          .order("estimated_handling_limit", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
+        if (earliestShipment?.estimated_handling_limit) {
+          // Convert to BRT time string
+          const deadline = new Date(earliestShipment.estimated_handling_limit);
+          const brtTime = deadline.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
+          shipmentCutoff = brtTime;
+          await log(supabase, { trace_id: traceId, company_id: companyId, seller_id: sellerId, action: "shipment_cutoff", status: "success", step: "earliest_deadline", execution_time_ms: Date.now() - startTime, payload_summary: { cutoff: brtTime, logistic: earliestShipment.logistic_type } });
+        }
+      } catch (e: any) {
+        console.error("Shipment cutoff lookup error:", e.message);
+      }
+
+      // 6. Normalize
       await log(supabase, { trace_id: traceId, company_id: companyId, seller_id: sellerId, action: "normalize", status: "success", step: "normalize_start", execution_time_ms: Date.now() - startTime });
 
-      const normalized = normalizeShippingCutoff(flexData, colectaData);
+      const normalized = normalizeShippingCutoff(flexData, colectaData, shipmentCutoff);
 
       // 6. Build safe source_payload (no tokens!)
       const safePayload: any = {};
@@ -305,13 +332,19 @@ async function fetchWithRetry(
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
 // ==================== NORMALIZE ====================
-function normalizeShippingCutoff(flexData: any, colectaData: any) {
+function normalizeShippingCutoff(flexData: any, colectaData: any, shipmentCutoff: string | null = null) {
   const result: Record<string, any> = {
     flex_enabled: false, flex_cutoff_type: null, flex_cutoff_time: null,
     flex_zone_summary_first: null, flex_zone_summary_last: null, flex_zone_details: null,
     colecta_enabled: false, colecta_cutoff_time: null, colecta_window_from: null,
     colecta_window_to: null, colecta_cutoff_calculated: false,
   };
+
+  // If we have a cutoff derived from actual shipment deadlines, use it as colecta/xd_drop_off cutoff
+  if (shipmentCutoff) {
+    result.colecta_enabled = true;
+    result.colecta_cutoff_time = shipmentCutoff;
+  }
 
   // Flex - from /shipping/flex/sites/MLB/users/{id}/subscriptions/v1
   if (flexData && !flexData._from_preferences) {
