@@ -1,73 +1,53 @@
 
-# Corrigir: Hora de Corte nao aparece
 
-## Problema Raiz
+## Corrigir o Loop de Aprovações e a Coleta "Não Disponível"
 
-O card de Hora de Corte nao aparece porque o hook `useShippingCutoff` depende de `activeCompanyId` vindo de `useUserContext()`, mas o campo `active_company_id` na tabela `user_context` esta **nulo** para o usuario logado.
+### Diagnóstico
 
-Fluxo atual:
-1. `useShippingCutoff` chama `useUserContext()` para obter `activeCompanyId`
-2. `activeCompanyId` retorna `null` (campo vazio no banco)
-3. O guard `if (!activeCompanyId || !sellerId || !mlUserId) return;` impede a chamada
-4. `data` permanece `null`, e o componente retorna `null` (invisivel)
+Identifiquei dois problemas claros:
 
-A conta ML (`ADECONEX.SP`) tem `company_id` preenchido no banco (`331c2e24-...`), mas esse valor nunca foi populado em `user_context`.
+1. **Loop de aprovações**: A cada mensagem, o sistema propunha deletar cache/rate-limit e pedia aprovação repetidamente. Isso consumia créditos sem progresso real. Vou parar esse ciclo agora.
 
-## Solucao
+2. **Coleta "não disponível"**: O cache mais recente mostra `colecta_enabled: false` e `colecta_cutoff_time: null`. Porém, existem envios reais na `meli_shipments_cache` com `estimated_handling_limit` para hoje (16:32, 17:52, 18:54...), todos do tipo `xd_drop_off`. O código que deveria capturar esses dados via query no banco **não está funcionando silenciosamente** - não há log `shipment_cutoff` no trace, o que indica que a query retornou vazio.
 
-Modificar o hook `useShippingCutoff` para **derivar o `company_id` diretamente da conta ML ativa** em vez de depender do `user_context`. Isso elimina a dependencia fragil e garante que funcione para todos os usuarios.
+**Causa raiz provável**: A query usa `.gte("estimated_handling_limit", "2026-02-20T00:00:00-03:00")` com string de timezone offset. O Supabase JS client em Deno pode não estar parseando corretamente esse formato. Além disso, o endpoint `flex_subscriptions` retorna HTTP 410 (deprecated), e o `capacity_middleend/xd_drop_off` retorna capacidades semanais (monday, tuesday...), não horários de corte diários.
 
-### Alteracoes
+### Solução
 
-**1. `src/hooks/useShippingCutoff.ts`**
-- Adicionar um novo parametro `companyId` na interface `UseShippingCutoffOptions`
-- Remover a dependencia de `useUserContext()` dentro do hook
-- Usar o `companyId` recebido diretamente como parametro
+#### 1. Corrigir a query de shipment cutoff (principal)
 
-**2. `src/pages/ShippingLabels.tsx`**
-- Buscar o `company_id` da conta ativa (`activeAccount`) que ja esta disponivel no contexto
-- Passar como parametro para `useShippingCutoff`
+Trocar o formato de data para ISO UTC puro (sem offset `-03:00`) que o Supabase JS client parseia corretamente:
 
-**3. `src/contexts/ActiveAccountContext.tsx`**
-- Expor `companyId` da conta ativa no contexto (o campo `company_id` ja existe em `ml_accounts` mas nao esta mapeado no tipo `ActiveAccount`)
+```text
+// De:
+const todayStart = getDateRefSP() + "T00:00:00-03:00";
+const todayEnd = getDateRefSP() + "T23:59:59-03:00";
 
-### Detalhes Tecnicos
-
-No `ActiveAccount` interface, adicionar o campo `companyId`:
-```typescript
-export interface ActiveAccount {
-  // ... campos existentes
-  companyId: string | null;
-}
+// Para: converter explicitamente para UTC
+const spDate = getDateRefSP(); // "2026-02-20"
+const todayStartUTC = spDate + "T03:00:00.000Z"; // 00:00 BRT = 03:00 UTC
+const todayEndUTC = new Date(new Date(spDate + "T03:00:00.000Z").getTime() + 24*60*60*1000 - 1).toISOString();
 ```
 
-No `loadAccounts`, mapear:
-```typescript
-companyId: acc.companyId ?? null,
-```
+#### 2. Adicionar log de debug para a query de shipments
 
-Sera necessario verificar se `accountUnification.ts` ja retorna esse campo e, se nao, adiciona-lo.
+Registrar o resultado da query (mesmo quando vazio) para diagnóstico futuro.
 
-No `useShippingCutoff`, a interface muda para:
-```typescript
-interface UseShippingCutoffOptions {
-  sellerId: string | null;
-  mlUserId: string | null;
-  companyId: string | null;
-}
-```
+#### 3. Remover endpoint deprecado `subscriptions/v1`
 
-E o hook usa `companyId` diretamente em vez de `useUserContext().activeCompanyId`.
+O endpoint Flex `subscriptions/v1` retorna 410 Gone. Remover essa chamada e usar apenas o fallback `shipping_preferences` que já funciona (retorna HTTP 200).
 
-Na pagina `ShippingLabels.tsx`:
-```typescript
-useShippingCutoff({
-  sellerId: activeAccount?.id || null,
-  mlUserId: sellerId || null,
-  companyId: activeAccount?.companyId || null,
-});
-```
+#### 4. Simplificar normalizacão de Coleta
 
-### Bonus: Corrigir `user_context` para o futuro
+A API `capacity_middleend/xd_drop_off` retorna capacidades semanais, não cutoff times. Remover a tentativa de extrair cutoff dali e depender exclusivamente dos `estimated_handling_limit` dos shipments reais (que é a fonte mais precisa, conforme já validamos).
 
-Tambem sera necessario garantir que o `active_company_id` seja populado no `user_context` quando o usuario seleciona uma conta, para que outros modulos que dependam dele funcionem. Isso sera feito no `persistActiveAccount` do `ActiveAccountContext`, derivando o `company_id` da conta selecionada.
+### Detalhes Tecnico
+
+**Arquivos a editar:**
+- `supabase/functions/meli-shipping-cutoff-refresh/index.ts` - Corrigir formato de datas UTC, remover endpoint deprecado, simplificar coleta
+
+**Sem necessidade de:**
+- Deletar cache manualmente (o sistema vai buscar dados frescos automaticamente quando o cache expirar ou via refresh)
+- Criar novas tabelas ou migrações
+- Alterar o frontend
+
