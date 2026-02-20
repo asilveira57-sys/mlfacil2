@@ -530,6 +530,7 @@ function DailyMessageSection({ userId }: { userId: string | undefined }) {
       preferences={preferences}
       onUpdatePreferences={(prefs) => updatePreferences.mutate(prefs)}
       showMessage={showMessage}
+      userId={userId}
     />
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -6,6 +6,7 @@ import { ThumbsUp, Download, Image as ImageIcon, Settings2 } from 'lucide-react'
 import { cn } from '@/lib/utils';
 import { DailyMessagePreferences } from './DailyMessagePreferences';
 import { DailyMessageCardGenerator } from './DailyMessageCardGenerator';
+import { logMessageViewed } from '@/utils/dailyMessageLogger';
 
 interface DailyMessageCardProps {
   message: { id: string; tema: string; texto: string; referencia: string | null } | null | undefined;
@@ -17,6 +18,7 @@ interface DailyMessageCardProps {
   preferences: any;
   onUpdatePreferences: (prefs: any) => void;
   showMessage: boolean;
+  userId?: string;
 }
 
 const TEMA_LABELS: Record<string, string> = {
@@ -38,9 +40,22 @@ export function DailyMessageCard({
   preferences,
   onUpdatePreferences,
   showMessage,
+  userId,
 }: DailyMessageCardProps) {
   const [showPrefs, setShowPrefs] = useState(false);
   const [showCardGen, setShowCardGen] = useState(false);
+
+  // Log view once per user per day (deduped in logMessageViewed)
+  useEffect(() => {
+    if (showMessage && message && userId) {
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+      logMessageViewed(userId, message.id, {
+        tema: message.tema,
+        data_exibicao: today,
+        origem: 'dashboard',
+      });
+    }
+  }, [showMessage, message?.id, userId]);
 
   if (!showMessage || !message) return null;
 
@@ -119,6 +134,7 @@ export function DailyMessageCard({
           onOpenChange={setShowCardGen}
           message={message}
           signature={signature}
+          userId={userId}
         />
       )}
     </>
