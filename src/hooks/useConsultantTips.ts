@@ -366,14 +366,16 @@ export function useAdminTipMutations() {
   const updateTip = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<ConsultantTip> & { id: string }) => {
       const { data: { user } } = await supabase.auth.getUser();
+      // Remove computed fields before updating
+      const { liked, saved, views_count, likes_count, saves_count, shares_count, ...safeUpdates } = updates as Record<string, unknown>;
       const { data, error } = await supabase
         .from('consultant_tips')
-        .update({ ...updates, versao: supabase.rpc as unknown as number })
+        .update(safeUpdates)
         .eq('id', id)
         .select()
         .single();
       if (error) throw error;
-      await logTipAction({ acao: 'UPDATE', user_id: user?.id, referencia_id: id, detalhes: updates as Record<string, unknown> });
+      await logTipAction({ acao: 'UPDATE', user_id: user?.id, referencia_id: id, detalhes: safeUpdates });
       return data;
     },
     onSuccess: invalidate,
