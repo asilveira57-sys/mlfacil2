@@ -13,7 +13,6 @@ import { OrderDetailsDrawer } from '@/components/shipping/OrderDetailsDrawer';
 import { ShippingCutoffCard } from '@/components/shipping/ShippingCutoffCard';
 import { useShippingCutoff } from '@/hooks/useShippingCutoff';
 import { useUserRole } from '@/hooks/useUserRole';
-import { useUserContext } from '@/hooks/useUserContext';
 import { supabase } from '@/integrations/supabase/client';
 
 import { useToast } from '@/hooks/use-toast';
@@ -30,7 +29,7 @@ export default function ShippingLabels() {
   const [selectedOrder, setSelectedOrder] = useState<ShippingOrder | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { isAdmin } = useUserRole();
-  const { activeCompanyId } = useUserContext();
+  const companyId = activeAccount?.companyId || null;
 
   // Shipping cutoff
   const {
@@ -42,16 +41,17 @@ export default function ShippingLabels() {
   } = useShippingCutoff({
     sellerId: activeAccount?.id || null,
     mlUserId: sellerId || null,
+    companyId: activeAccount?.companyId || null,
   });
 
   // Fetch zone details from cache when cutoff has by_zone flex
   const [zoneDetails, setZoneDetails] = useState<Array<{ zone: string; cutoff: string }> | null>(null);
   useEffect(() => {
-    if (cutoffData?.flex?.cutoff_type === 'by_zone' && cutoffData?.flex?.zone_details_count > 0 && activeCompanyId && sellerId) {
+    if (cutoffData?.flex?.cutoff_type === 'by_zone' && cutoffData?.flex?.zone_details_count > 0 && companyId && sellerId) {
       supabase
         .from('shipping_cutoff_cache')
         .select('flex_zone_details')
-        .eq('company_id', activeCompanyId)
+        .eq('company_id', companyId)
         .eq('seller_id', sellerId)
         .order('date_ref', { ascending: false })
         .limit(1)
@@ -64,7 +64,7 @@ export default function ShippingLabels() {
     } else {
       setZoneDetails(null);
     }
-  }, [cutoffData?.flex?.cutoff_type, cutoffData?.flex?.zone_details_count, activeCompanyId, sellerId]);
+  }, [cutoffData?.flex?.cutoff_type, cutoffData?.flex?.zone_details_count, companyId, sellerId]);
 
   const {
     orders,

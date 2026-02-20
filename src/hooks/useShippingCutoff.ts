@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { useUserContext } from '@/hooks/useUserContext';
 
 export interface CutoffFlexData {
   enabled: boolean;
@@ -38,16 +37,16 @@ export interface CutoffData {
 interface UseShippingCutoffOptions {
   sellerId: string | null;
   mlUserId: string | null;
+  companyId: string | null;
 }
 
 const BC_CHANNEL = 'shipping_cutoff_refresh';
 
-export function useShippingCutoff({ sellerId, mlUserId }: UseShippingCutoffOptions) {
+export function useShippingCutoff({ sellerId, mlUserId, companyId }: UseShippingCutoffOptions) {
   const [data, setData] = useState<CutoffData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { activeCompanyId } = useUserContext();
   const bcRef = useRef<BroadcastChannel | null>(null);
   const refreshingRef = useRef(false);
 
@@ -79,7 +78,7 @@ export function useShippingCutoff({ sellerId, mlUserId }: UseShippingCutoffOptio
   }, [sellerId]);
 
   const fetchCutoff = useCallback(async (forceRefresh = false) => {
-    if (!activeCompanyId || !sellerId || !mlUserId) return;
+    if (!companyId || !sellerId || !mlUserId) return;
     if (refreshingRef.current && forceRefresh) return;
 
     const setter = forceRefresh ? setIsRefreshing : setIsLoading;
@@ -94,7 +93,7 @@ export function useShippingCutoff({ sellerId, mlUserId }: UseShippingCutoffOptio
     try {
       const { data: result, error: fnError } = await supabase.functions.invoke('meli-shipping-cutoff-get', {
         body: {
-          company_id: activeCompanyId,
+          company_id: companyId,
           seller_id: sellerId,
           ml_user_id: mlUserId,
           force_refresh: forceRefresh,
@@ -133,13 +132,13 @@ export function useShippingCutoff({ sellerId, mlUserId }: UseShippingCutoffOptio
       setter(false);
       if (forceRefresh) refreshingRef.current = false;
     }
-  }, [activeCompanyId, sellerId, mlUserId]);
+  }, [companyId, sellerId, mlUserId]);
 
   useEffect(() => {
-    if (sellerId && mlUserId && activeCompanyId) {
+    if (sellerId && mlUserId && companyId) {
       fetchCutoff(false);
     }
-  }, [fetchCutoff, sellerId, mlUserId, activeCompanyId]);
+  }, [fetchCutoff, sellerId, mlUserId, companyId]);
 
   const refresh = useCallback(() => fetchCutoff(true), [fetchCutoff]);
 
