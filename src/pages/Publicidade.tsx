@@ -123,35 +123,10 @@ export default function Publicidade() {
     dateTo,
   );
   
-  // Use period metrics when available, merge with fallback ADS data when API returns zeros
+  // Use period metrics from edge function; fallback only on error
   const summary = useMemo(() => {
-    if (periodError) return fallbackSummary;
+    if (periodError && fallbackSummary.total_spent > 0) return fallbackSummary;
     if (periodLoading && fallbackSummary.total_spent > 0) return fallbackSummary;
-    
-    // If edge function returned zero ADS metrics but fallback has real data, merge them
-    if (periodSummary.total_spent === 0 && fallbackSummary.total_spent > 0) {
-      return {
-        ...periodSummary,                    // seller data (faturamento, orgânico)
-        total_spent: fallbackSummary.total_spent,
-        total_revenue: fallbackSummary.total_revenue,
-        total_clicks: fallbackSummary.total_clicks,
-        total_impressions: fallbackSummary.total_impressions,
-        total_conversions: fallbackSummary.total_conversions,
-        avg_acos: fallbackSummary.avg_acos,
-        avg_roas: fallbackSummary.avg_roas,
-        avg_cpc: fallbackSummary.avg_cpc,
-        products_at_loss: fallbackSummary.products_at_loss,
-        products_scalable: fallbackSummary.products_scalable,
-        // Recalculate cross-metrics
-        organic_revenue: Math.max(0, periodSummary.total_seller_revenue - fallbackSummary.total_revenue),
-        tacos_total: periodSummary.total_seller_revenue > 0 
-          ? (fallbackSummary.total_spent / periodSummary.total_seller_revenue) * 100 : 0,
-        cost_per_sale_general: periodSummary.total_seller_orders > 0 
-          ? fallbackSummary.total_spent / periodSummary.total_seller_orders : 0,
-        cost_per_sale_ads: fallbackSummary.total_conversions > 0 
-          ? fallbackSummary.total_spent / fallbackSummary.total_conversions : 0,
-      };
-    }
     return periodSummary;
   }, [periodError, periodLoading, periodSummary, fallbackSummary]);
 

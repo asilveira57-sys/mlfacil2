@@ -12,6 +12,10 @@ const BATCH_DELAY = 300;
 const TODAY_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 const PAGE_SIZE = 1000;
 
+// Valid ML API metric names (from official docs)
+const CAMPAIGN_METRICS = 'clicks,prints,cost,cpc,acos,roas,total_amount,direct_items_quantity,indirect_items_quantity,advertising_items_quantity,direct_amount,indirect_amount';
+const ITEM_METRICS = 'clicks,prints,cost,cpc,acos,roas,total_amount,direct_items_quantity,indirect_items_quantity,advertising_items_quantity,direct_amount,indirect_amount';
+
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -62,14 +66,24 @@ async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 3)
       const retryAfter = parseInt(response.headers.get('retry-after') || '2', 10);
       const waitMs = retryAfter * 1000 * (attempt + 1);
       console.warn(`[fetchWithRetry] 429 rate limit, waiting ${waitMs}ms (attempt ${attempt + 1}/${maxRetries})`);
-      await response.text(); // consume body
+      await response.text();
       await sleep(waitMs);
       continue;
     }
     return response;
   }
-  // Should never reach here, but fallback
   return fetch(url, options);
+}
+
+/** Extract normalized metrics from ML API response object */
+function extractMetrics(m: any): { spent: number; revenue: number; clicks: number; impressions: number; conversions: number } {
+  return {
+    spent: m.cost || m.spent || 0,
+    revenue: m.total_amount || m.revenue || 0,
+    clicks: m.clicks || 0,
+    impressions: m.prints || m.impressions || 0,
+    conversions: (m.advertising_items_quantity || 0) + (m.direct_items_quantity && !m.advertising_items_quantity ? (m.direct_items_quantity || 0) + (m.indirect_items_quantity || 0) : 0),
+  };
 }
 
 Deno.serve(async (req) => {
@@ -163,7 +177,6 @@ Deno.serve(async (req) => {
       const missingCount = allDates.filter(d => !cachedDates.has(d) || (d === today && todayStale)).length;
 
       if (missingCount === 0) {
-        // All days covered by per-day cache
         let ts = 0, tr = 0, tc = 0, ti = 0, tconv = 0;
         const itemsMap = new Map<string, any>();
         const campsMap = new Map<string, any>();
@@ -218,58 +231,54 @@ Deno.serve(async (req) => {
         }
       }
 
-      const siteId = account.country_id || 'MLB';
       const advertiserId = await getAdvertiserId(accessToken, seller_id);
 
-      console.log(`[ads-period-metrics] Fetching from ML API: range ${date_from} to ${date_to}`);
+      console.log(`[ads-period-metrics] Fetching from ML API: range ${date_from} to ${date_to}, advertiser=${advertiserId}`);
 
       // 3a. Discover items ONCE
       const allItems = await discoverItems(accessToken, seller_id);
       console.log(`[ads-period-metrics] Discovered ${allItems.length} items`);
 
-      // 3b. Fetch campaigns for FULL range (1 paginated call)
-      // 3c. Fetch item metrics for FULL range (N batch calls)
+      // 3b+3c. Fetch campaigns + item metrics in parallel
       const [campaignsData, itemsWithMetrics] = await Promise.all([
-        fetchCampaigns(accessToken, siteId, advertiserId || seller_id, date_from, date_to),
+        fetchCampaigns(accessToken, advertiserId || seller_id, date_from, date_to),
         fetchItemMetricsBatch(accessToken, allItems, date_from, date_to),
       ]);
 
       // 3d. Aggregate
       let total_spent = 0, total_revenue = 0, total_clicks = 0, total_impressions = 0, total_conversions = 0;
       const items = itemsWithMetrics.map((item: any) => {
-        const m = item.metrics || {};
-        const spent = m.cost || m.spent || 0;
-        const revenue = m.total_amount || m.revenue || 0;
-        const clicks = m.clicks || 0;
-        const impressions = m.prints || m.impressions || 0;
-        const conversions = m.conversions || 0;
-        total_spent += spent; total_revenue += revenue; total_clicks += clicks; total_impressions += impressions; total_conversions += conversions;
-        return { item_id: item.item_id || item.id, title: item.title, status: item.status, spent, revenue, clicks, impressions, conversions };
+        const m = item.metrics_summary || item.metrics || item;
+        const extracted = extractMetrics(m);
+        total_spent += extracted.spent;
+        total_revenue += extracted.revenue;
+        total_clicks += extracted.clicks;
+        total_impressions += extracted.impressions;
+        total_conversions += extracted.conversions;
+        return { item_id: item.item_id || item.id, title: item.title, status: item.status, ...extracted };
       });
 
       // Fallback: if items gave 0 but campaigns have data, use campaign totals
       if (total_spent === 0 && campaignsData.length > 0) {
         for (const c of campaignsData) {
-          const m = c.metrics || {};
-          total_spent += m.cost || m.spent || 0;
-          total_revenue += m.total_amount || m.revenue || 0;
-          total_clicks += m.clicks || 0;
-          total_impressions += m.prints || m.impressions || 0;
-          total_conversions += m.conversions || 0;
+          const m = c.metrics || c;
+          const extracted = extractMetrics(m);
+          total_spent += extracted.spent;
+          total_revenue += extracted.revenue;
+          total_clicks += extracted.clicks;
+          total_impressions += extracted.impressions;
+          total_conversions += extracted.conversions;
         }
       }
 
       const campaigns = campaignsData.map((c: any) => {
-        const m = c.metrics || {};
+        const m = c.metrics || c;
+        const extracted = extractMetrics(m);
         return {
           ml_campaign_id: String(c.id || c.campaign_id),
           name: c.name || `Campaign ${c.id || c.campaign_id}`,
           status: c.status,
-          spent: m.cost || m.spent || 0,
-          revenue: m.total_amount || m.revenue || 0,
-          clicks: m.clicks || 0,
-          impressions: m.prints || m.impressions || 0,
-          conversions: m.conversions || 0,
+          ...extracted,
         };
       });
 
@@ -278,10 +287,9 @@ Deno.serve(async (req) => {
       // 3e. Guard: don't cache zeros if items exist (rate limit protection)
       const hasAnyData = total_spent > 0 || total_revenue > 0 || total_clicks > 0 || total_impressions > 0 || total_conversions > 0;
       if (!hasAnyData && allItems.length > 0) {
-        console.warn(`[ads-period-metrics] NOT caching: all metrics zero but ${allItems.length} items found (likely rate limit)`);
+        console.warn(`[ads-period-metrics] NOT caching: all metrics zero but ${allItems.length} items found (likely rate limit or API error)`);
       } else {
         // 3f. Save range cache
-        // Delete old range cache for this seller+range, then insert new
         await supabase.from('ads_period_cache')
           .delete()
           .eq('seller_id', seller_id)
@@ -300,7 +308,7 @@ Deno.serve(async (req) => {
         console.log(`[ads-period-metrics] Saved range cache: ${rangeCacheKey}`);
       }
 
-      console.log(`[ads-period-metrics] API fetch done in ${Date.now() - startTime}ms: ${allItems.length} items, ${campaignsData.length} campaigns`);
+      console.log(`[ads-period-metrics] API fetch done in ${Date.now() - startTime}ms: ${allItems.length} items, ${campaignsData.length} campaigns, spent=${total_spent}, revenue=${total_revenue}, conversions=${total_conversions}`);
     }
 
     // 4. Fetch seller orders from meli_orders_cache (paginated, no limit)
@@ -382,7 +390,7 @@ Deno.serve(async (req) => {
       { total_seller_revenue, total_seller_orders, total_cancelled_revenue, total_cancelled_orders }
     );
 
-    console.log(`[ads-period-metrics] Done in ${Date.now() - startTime}ms: spent=${result.total_spent}, seller_revenue=${result.total_seller_revenue}`);
+    console.log(`[ads-period-metrics] Done in ${Date.now() - startTime}ms: spent=${result.total_spent}, revenue=${result.total_revenue}, conversions=${result.total_conversions}, seller_revenue=${result.total_seller_revenue}`);
 
     return new Response(JSON.stringify(result), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -427,7 +435,7 @@ function buildResult(
   const cost_per_sale_general = total_seller_orders > 0 ? total_spent / total_seller_orders : 0;
   const cost_per_sale_ads = total_conversions > 0 ? total_spent / total_conversions : 0;
 
-  // Build daily time series (seller data per day, ADS data as totals)
+  // Build daily time series
   const daily = allDates.map(date => {
     const sellerDay = sellerDailyMap.get(date) || { revenue: 0, orders: 0 };
     const cancelledDay = cancelledDailyMap.get(date) || { revenue: 0, orders: 0 };
@@ -498,21 +506,21 @@ async function refreshToken(supabase: any, sellerId: string, userId: string, ref
   } catch { return null; }
 }
 
-async function fetchCampaigns(accessToken: string, siteId: string, sellerId: string, dateFrom: string, dateTo: string) {
-  const metrics = 'clicks,prints,cost,cpc,acos,roas,total_amount,conversions';
+async function fetchCampaigns(accessToken: string, advertiserId: string, dateFrom: string, dateTo: string) {
   const allCampaigns: any[] = [];
   let offset = 0;
   const limit = 100;
   let okCount = 0, failCount = 0;
   try {
     while (true) {
-      const url = `https://api.mercadolibre.com/marketplace/advertising/${siteId}/advertisers/${sellerId}/product_ads/campaigns/search?date_from=${dateFrom}&date_to=${dateTo}&metrics=${metrics}&offset=${offset}&limit=${limit}`;
+      // Use the correct ML API endpoint for campaign search with metrics
+      const url = `https://api.mercadolibre.com/advertising/advertisers/${advertiserId}/product_ads/campaigns?date_from=${dateFrom}&date_to=${dateTo}&metrics=${CAMPAIGN_METRICS}&offset=${offset}&limit=${limit}`;
       const response = await fetchWithRetry(url, {
         headers: { 'Authorization': `Bearer ${accessToken}`, 'api-version': '2' },
       });
       if (!response.ok) {
         const body = await response.text();
-        console.warn(`[fetchCampaigns] HTTP ${response.status}: ${body.slice(0, 200)}`);
+        console.warn(`[fetchCampaigns] HTTP ${response.status}: ${body.slice(0, 300)}`);
         failCount++;
         break;
       }
@@ -567,16 +575,17 @@ async function fetchItemMetricsBatch(accessToken: string, items: any[], dateFrom
     const batchResults = await Promise.all(
       batch.map(async (item) => {
         const itemId = item.item_id || item.id;
-        if (!itemId) return { ...item, metrics: {} };
+        if (!itemId) return { ...item, metrics_summary: {} };
         try {
-          const url = `https://api.mercadolibre.com/advertising/product_ads/items/${itemId}?date_from=${dateFrom}&date_to=${dateTo}&metrics=clicks,prints,cost,cpc,acos,roas,total_amount,conversions`;
+          // Item detail endpoint with date range returns metrics_summary
+          const url = `https://api.mercadolibre.com/advertising/product_ads/items/${itemId}?date_from=${dateFrom}&date_to=${dateTo}&metrics=${ITEM_METRICS}`;
           const resp = await fetchWithRetry(url, {
             headers: { 'Authorization': `Bearer ${accessToken}`, 'api-version': '2' },
           });
           if (resp.ok) {
             okCount++;
             const data = await resp.json();
-            return { ...item, ...data, metrics: data.metrics || {} };
+            return { ...item, ...data, metrics_summary: data.metrics_summary || data.metrics || {} };
           }
           const body = await resp.text();
           failCount++;
@@ -584,8 +593,8 @@ async function fetchItemMetricsBatch(accessToken: string, items: any[], dateFrom
           if (failCount <= 3) {
             console.warn(`[fetchItemMetrics] HTTP ${resp.status} for ${itemId}: ${body.slice(0, 200)}`);
           }
-          return { ...item, metrics: {} };
-        } catch { failCount++; return { ...item, metrics: {} }; }
+          return { ...item, metrics_summary: {} };
+        } catch { failCount++; return { ...item, metrics_summary: {} }; }
       })
     );
     results.push(...batchResults);
