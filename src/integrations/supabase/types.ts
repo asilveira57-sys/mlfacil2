@@ -3448,6 +3448,36 @@ export type Database = {
           },
         ]
       }
+      consent_templates: {
+        Row: {
+          body: string
+          id: string
+          is_active: boolean | null
+          key: string
+          published_at: string | null
+          title: string
+          version: number
+        }
+        Insert: {
+          body: string
+          id?: string
+          is_active?: boolean | null
+          key: string
+          published_at?: string | null
+          title: string
+          version?: number
+        }
+        Update: {
+          body?: string
+          id?: string
+          is_active?: boolean | null
+          key?: string
+          published_at?: string | null
+          title?: string
+          version?: number
+        }
+        Relationships: []
+      }
       cookie_consents: {
         Row: {
           accepted_at: string
@@ -6461,6 +6491,100 @@ export type Database = {
           },
         ]
       }
+      module_rating_stats: {
+        Row: {
+          avg_stars: number | null
+          last_rating_at: string | null
+          module_id: string
+          ratings_count: number | null
+          stars_1: number | null
+          stars_2: number | null
+          stars_3: number | null
+          stars_4: number | null
+          stars_5: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          avg_stars?: number | null
+          last_rating_at?: string | null
+          module_id: string
+          ratings_count?: number | null
+          stars_1?: number | null
+          stars_2?: number | null
+          stars_3?: number | null
+          stars_4?: number | null
+          stars_5?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          avg_stars?: number | null
+          last_rating_at?: string | null
+          module_id?: string
+          ratings_count?: number | null
+          stars_1?: number | null
+          stars_2?: number | null
+          stars_3?: number | null
+          stars_4?: number | null
+          stars_5?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "module_rating_stats_module_id_fkey"
+            columns: ["module_id"]
+            isOneToOne: true
+            referencedRelation: "system_modules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      module_ratings: {
+        Row: {
+          comment: string | null
+          created_at: string | null
+          hidden_reason: string | null
+          id: string
+          is_hidden_by_admin: boolean | null
+          is_public: boolean | null
+          module_id: string
+          stars: number
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          comment?: string | null
+          created_at?: string | null
+          hidden_reason?: string | null
+          id?: string
+          is_hidden_by_admin?: boolean | null
+          is_public?: boolean | null
+          module_id: string
+          stars: number
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          comment?: string | null
+          created_at?: string | null
+          hidden_reason?: string | null
+          id?: string
+          is_hidden_by_admin?: boolean | null
+          is_public?: boolean | null
+          module_id?: string
+          stars?: number
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "module_ratings_module_id_fkey"
+            columns: ["module_id"]
+            isOneToOne: false
+            referencedRelation: "system_modules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       module_tag_assignments: {
         Row: {
           created_at: string
@@ -9109,6 +9233,59 @@ export type Database = {
           },
         ]
       }
+      public_testimonials: {
+        Row: {
+          candidate_id: string
+          channels: string[]
+          created_at: string | null
+          display_company: string | null
+          display_name: string | null
+          id: string
+          is_active: boolean | null
+          photo_url: string | null
+          published_at: string | null
+          stars: number
+          text: string
+          user_id: string
+        }
+        Insert: {
+          candidate_id: string
+          channels?: string[]
+          created_at?: string | null
+          display_company?: string | null
+          display_name?: string | null
+          id?: string
+          is_active?: boolean | null
+          photo_url?: string | null
+          published_at?: string | null
+          stars: number
+          text: string
+          user_id: string
+        }
+        Update: {
+          candidate_id?: string
+          channels?: string[]
+          created_at?: string | null
+          display_company?: string | null
+          display_name?: string | null
+          id?: string
+          is_active?: boolean | null
+          photo_url?: string | null
+          published_at?: string | null
+          stars?: number
+          text?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "public_testimonials_candidate_id_fkey"
+            columns: ["candidate_id"]
+            isOneToOne: true
+            referencedRelation: "testimonial_candidates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       public_trends_status: {
         Row: {
           coverage_highlights: number | null
@@ -9596,6 +9773,59 @@ export type Database = {
         }
         Relationships: []
       }
+      rating_consents: {
+        Row: {
+          accepted: boolean
+          accepted_at: string
+          consent_key: string
+          consent_version: number
+          created_at: string | null
+          id: string
+          ip_address: string | null
+          metadata: Json | null
+          source: string
+          template_id: string
+          user_agent: string | null
+          user_id: string
+        }
+        Insert: {
+          accepted: boolean
+          accepted_at?: string
+          consent_key: string
+          consent_version: number
+          created_at?: string | null
+          id?: string
+          ip_address?: string | null
+          metadata?: Json | null
+          source: string
+          template_id: string
+          user_agent?: string | null
+          user_id: string
+        }
+        Update: {
+          accepted?: boolean
+          accepted_at?: string
+          consent_key?: string
+          consent_version?: number
+          created_at?: string | null
+          id?: string
+          ip_address?: string | null
+          metadata?: Json | null
+          source?: string
+          template_id?: string
+          user_agent?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rating_consents_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "consent_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       role_menu_permissions: {
         Row: {
           can_edit: boolean
@@ -9857,6 +10087,42 @@ export type Database = {
           user_id?: string
           visit_date?: string
           visits_count?: number
+        }
+        Relationships: []
+      }
+      seller_public_profile_settings: {
+        Row: {
+          display_company: string | null
+          display_name: string | null
+          id: string
+          photo_url: string | null
+          show_company: boolean | null
+          show_name: boolean | null
+          show_photo: boolean | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          display_company?: string | null
+          display_name?: string | null
+          id?: string
+          photo_url?: string | null
+          show_company?: boolean | null
+          show_name?: boolean | null
+          show_photo?: boolean | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          display_company?: string | null
+          display_name?: string | null
+          id?: string
+          photo_url?: string | null
+          show_company?: boolean | null
+          show_name?: boolean | null
+          show_photo?: boolean | null
+          updated_at?: string | null
+          user_id?: string
         }
         Relationships: []
       }
@@ -11226,6 +11492,78 @@ export type Database = {
         }
         Relationships: []
       }
+      system_rating_stats: {
+        Row: {
+          avg_stars: number | null
+          id: string
+          last_rating_at: string | null
+          ratings_count: number | null
+          stars_1: number | null
+          stars_2: number | null
+          stars_3: number | null
+          stars_4: number | null
+          stars_5: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          avg_stars?: number | null
+          id?: string
+          last_rating_at?: string | null
+          ratings_count?: number | null
+          stars_1?: number | null
+          stars_2?: number | null
+          stars_3?: number | null
+          stars_4?: number | null
+          stars_5?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          avg_stars?: number | null
+          id?: string
+          last_rating_at?: string | null
+          ratings_count?: number | null
+          stars_1?: number | null
+          stars_2?: number | null
+          stars_3?: number | null
+          stars_4?: number | null
+          stars_5?: number | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      system_ratings: {
+        Row: {
+          comment: string | null
+          created_at: string | null
+          hidden_reason: string | null
+          id: string
+          is_hidden_by_admin: boolean | null
+          stars: number
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          comment?: string | null
+          created_at?: string | null
+          hidden_reason?: string | null
+          id?: string
+          is_hidden_by_admin?: boolean | null
+          stars: number
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          comment?: string | null
+          created_at?: string | null
+          hidden_reason?: string | null
+          id?: string
+          is_hidden_by_admin?: boolean | null
+          stars?: number
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       system_settings: {
         Row: {
           key: string
@@ -11620,6 +11958,59 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      testimonial_candidates: {
+        Row: {
+          admin_notes: string | null
+          consent_id: string | null
+          created_at: string | null
+          id: string
+          source_id: string
+          source_type: string
+          stars: number
+          status: string
+          suggested_channels: string[]
+          text: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          admin_notes?: string | null
+          consent_id?: string | null
+          created_at?: string | null
+          id?: string
+          source_id: string
+          source_type: string
+          stars: number
+          status?: string
+          suggested_channels?: string[]
+          text?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          admin_notes?: string | null
+          consent_id?: string | null
+          created_at?: string | null
+          id?: string
+          source_id?: string
+          source_type?: string
+          stars?: number
+          status?: string
+          suggested_channels?: string[]
+          text?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "testimonial_candidates_consent_id_fkey"
+            columns: ["consent_id"]
+            isOneToOne: false
+            referencedRelation: "rating_consents"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       trend_alerts: {
         Row: {

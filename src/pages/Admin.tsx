@@ -18,6 +18,7 @@ import {
   FileStack,
   Globe,
   Menu,
+  Star,
 } from 'lucide-react';
 import { AdminDashboard } from './admin/AdminDashboard';
 import { AdminOnboarding } from './admin/AdminOnboarding';
@@ -34,6 +35,7 @@ import AdminMenuBuilder from './admin/AdminMenuBuilder';
 import BlogAdmin from './BlogAdmin';
 import { AdminAccessProfiles } from './admin/AdminAccessProfiles';
 import { AdminDailyMessages } from './admin/AdminDailyMessages';
+import { AdminRatings } from './admin/AdminRatings';
 
 const adminTabs = [
   { id: '', label: 'Dashboard', icon: LayoutDashboard },
@@ -52,6 +54,7 @@ const adminTabs = [
   { id: 'configuracoes', label: 'Configurações', icon: Settings },
   { id: 'menu-builder', label: 'Menu', icon: Menu },
   { id: 'mensagem-dia', label: 'Msg do Dia', icon: FileText },
+  { id: 'avaliacoes', label: 'Avaliações', icon: Star },
 ];
 
 export default function Admin() {
@@ -110,6 +113,7 @@ export default function Admin() {
           <Route path="configuracoes" element={<AdminSettings />} />
           <Route path="menu-builder" element={<AdminMenuBuilder />} />
           <Route path="mensagem-dia" element={<AdminDailyMessages />} />
+          <Route path="avaliacoes" element={<AdminRatings />} />
         </Routes>
       </div>
     </PageContainer>
