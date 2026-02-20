@@ -7431,6 +7431,237 @@ export type Database = {
         }
         Relationships: []
       }
+      onboarding_flows: {
+        Row: {
+          aplicacao_perfis: string[] | null
+          aplicacao_planos: string[] | null
+          ativo: boolean
+          created_at: string
+          descricao: string | null
+          exigir_conclusao: boolean
+          id: string
+          nome: string
+          prioridade: number
+          slug: string
+          updated_at: string
+          versao: number
+        }
+        Insert: {
+          aplicacao_perfis?: string[] | null
+          aplicacao_planos?: string[] | null
+          ativo?: boolean
+          created_at?: string
+          descricao?: string | null
+          exigir_conclusao?: boolean
+          id?: string
+          nome: string
+          prioridade?: number
+          slug: string
+          updated_at?: string
+          versao?: number
+        }
+        Update: {
+          aplicacao_perfis?: string[] | null
+          aplicacao_planos?: string[] | null
+          ativo?: boolean
+          created_at?: string
+          descricao?: string | null
+          exigir_conclusao?: boolean
+          id?: string
+          nome?: string
+          prioridade?: number
+          slug?: string
+          updated_at?: string
+          versao?: number
+        }
+        Relationships: []
+      }
+      onboarding_step_events: {
+        Row: {
+          company_id: string
+          created_at: string
+          details: Json
+          evento: string
+          flow_id: string
+          flow_versao: number
+          id: string
+          ip: string | null
+          seller_id: string
+          step_id: string
+          step_ordem: number
+          user_agent: string | null
+          user_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          details?: Json
+          evento: string
+          flow_id: string
+          flow_versao: number
+          id?: string
+          ip?: string | null
+          seller_id: string
+          step_id: string
+          step_ordem: number
+          user_agent?: string | null
+          user_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          details?: Json
+          evento?: string
+          flow_id?: string
+          flow_versao?: number
+          id?: string
+          ip?: string | null
+          seller_id?: string
+          step_id?: string
+          step_ordem?: number
+          user_agent?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "onboarding_step_events_step_id_fkey"
+            columns: ["step_id"]
+            isOneToOne: false
+            referencedRelation: "onboarding_steps"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      onboarding_steps: {
+        Row: {
+          conteudo: string | null
+          created_at: string
+          cta_label: string | null
+          cta_route: string | null
+          flow_id: string
+          id: string
+          media_url: string | null
+          obrigatoria: boolean
+          ordem: number
+          tipo: string
+          titulo: string
+          updated_at: string
+          validacao_schema: Json | null
+          video_url: string | null
+        }
+        Insert: {
+          conteudo?: string | null
+          created_at?: string
+          cta_label?: string | null
+          cta_route?: string | null
+          flow_id: string
+          id?: string
+          media_url?: string | null
+          obrigatoria?: boolean
+          ordem: number
+          tipo: string
+          titulo: string
+          updated_at?: string
+          validacao_schema?: Json | null
+          video_url?: string | null
+        }
+        Update: {
+          conteudo?: string | null
+          created_at?: string
+          cta_label?: string | null
+          cta_route?: string | null
+          flow_id?: string
+          id?: string
+          media_url?: string | null
+          obrigatoria?: boolean
+          ordem?: number
+          tipo?: string
+          titulo?: string
+          updated_at?: string
+          validacao_schema?: Json | null
+          video_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "onboarding_steps_flow_id_fkey"
+            columns: ["flow_id"]
+            isOneToOne: false
+            referencedRelation: "onboarding_flows"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      onboarding_user_progress: {
+        Row: {
+          company_id: string
+          completed_at: string | null
+          consent_hash: string | null
+          created_at: string
+          flow_id: string
+          flow_versao: number
+          id: string
+          ip_fim: string | null
+          ip_inicio: string | null
+          origem: string | null
+          payload_respostas: Json
+          seller_id: string
+          started_at: string
+          status: string
+          step_atual: number
+          updated_at: string
+          user_agent: string | null
+          user_id: string
+        }
+        Insert: {
+          company_id: string
+          completed_at?: string | null
+          consent_hash?: string | null
+          created_at?: string
+          flow_id: string
+          flow_versao: number
+          id?: string
+          ip_fim?: string | null
+          ip_inicio?: string | null
+          origem?: string | null
+          payload_respostas?: Json
+          seller_id: string
+          started_at?: string
+          status?: string
+          step_atual?: number
+          updated_at?: string
+          user_agent?: string | null
+          user_id: string
+        }
+        Update: {
+          company_id?: string
+          completed_at?: string | null
+          consent_hash?: string | null
+          created_at?: string
+          flow_id?: string
+          flow_versao?: number
+          id?: string
+          ip_fim?: string | null
+          ip_inicio?: string | null
+          origem?: string | null
+          payload_respostas?: Json
+          seller_id?: string
+          started_at?: string
+          status?: string
+          step_atual?: number
+          updated_at?: string
+          user_agent?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "onboarding_user_progress_flow_id_fkey"
+            columns: ["flow_id"]
+            isOneToOne: false
+            referencedRelation: "onboarding_flows"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       operational_events: {
         Row: {
           company_id: string
@@ -12767,6 +12998,51 @@ export type Database = {
           source?: string
           source_id?: string | null
           updated_at?: string
+        }
+        Relationships: []
+      }
+      timeline_events: {
+        Row: {
+          company_id: string
+          created_at: string
+          event_payload: Json
+          event_title: string
+          event_type: string
+          id: string
+          ip: string | null
+          occurred_at: string
+          seller_id: string
+          source: string | null
+          user_agent: string | null
+          user_id: string | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          event_payload?: Json
+          event_title: string
+          event_type: string
+          id?: string
+          ip?: string | null
+          occurred_at: string
+          seller_id: string
+          source?: string | null
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          event_payload?: Json
+          event_title?: string
+          event_type?: string
+          id?: string
+          ip?: string | null
+          occurred_at?: string
+          seller_id?: string
+          source?: string | null
+          user_agent?: string | null
+          user_id?: string | null
         }
         Relationships: []
       }
