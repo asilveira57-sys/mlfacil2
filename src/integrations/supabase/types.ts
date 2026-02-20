@@ -11850,6 +11850,7 @@ export type Database = {
         Row: {
           avg_stars: number | null
           id: string
+          key: string
           last_rating_at: string | null
           ratings_count: number | null
           stars_1: number | null
@@ -11862,6 +11863,7 @@ export type Database = {
         Insert: {
           avg_stars?: number | null
           id?: string
+          key?: string
           last_rating_at?: string | null
           ratings_count?: number | null
           stars_1?: number | null
@@ -11874,6 +11876,7 @@ export type Database = {
         Update: {
           avg_stars?: number | null
           id?: string
+          key?: string
           last_rating_at?: string | null
           ratings_count?: number | null
           stars_1?: number | null
