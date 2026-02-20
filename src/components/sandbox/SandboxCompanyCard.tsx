@@ -10,7 +10,7 @@ import {
   Clock, Package, FileText, MessageCircle, Truck,
   AlertTriangle, MessageSquare, Scale,
   DollarSign, ShoppingCart, TrendingUp, Star,
-  Megaphone, ExternalLink, ChevronRight, AlertCircle,
+  Megaphone, ExternalLink, ChevronRight, AlertCircle, Zap,
 } from 'lucide-react';
 import { getCompanyColor } from '@/lib/companyColors';
 import type { SandboxSnapshot } from '@/hooks/useSandboxSnapshots';
@@ -19,6 +19,7 @@ import { supabase } from '@/integrations/supabase/client';
 
 interface Props {
   snapshot: SandboxSnapshot;
+  isQuickSyncing?: boolean;
 }
 
 // ── Utilities ──────────────────────────────────────────────────────────────
@@ -121,7 +122,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 }
 
 // ── Main Component ───────────────────────────────────────────────────────────
-export function SandboxCompanyCard({ snapshot }: Props) {
+export function SandboxCompanyCard({ snapshot, isQuickSyncing = false }: Props) {
   const navigate = useNavigate();
   const [sheetOpen, setSheetOpen] = useState(false);
   const color = useMemo(() => getCompanyColor(snapshot.color_key || 'blue'), [snapshot.color_key]);
@@ -163,7 +164,13 @@ export function SandboxCompanyCard({ snapshot }: Props) {
             )}
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0">
-            {isStale && (
+            {isQuickSyncing && (
+              <span className="flex items-center gap-0.5 text-[9px] text-primary font-medium">
+                <Zap className="h-2.5 w-2.5 animate-pulse" />
+                sync
+              </span>
+            )}
+            {isStale && !isQuickSyncing && (
               <span className="text-[9px] text-[hsl(var(--warning))] font-medium">⚠ atrasado</span>
             )}
             <span className="text-[10px] text-muted-foreground">

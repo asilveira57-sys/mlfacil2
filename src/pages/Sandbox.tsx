@@ -1,11 +1,11 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 import { useSandboxSnapshots } from '@/hooks/useSandboxSnapshots';
+import { useOperationalQuickSync, type QuickSyncStatus } from '@/hooks/useOperationalQuickSync';
 import { SandboxGlobalSummary } from '@/components/sandbox/SandboxGlobalSummary';
 import { SandboxCompanyCard } from '@/components/sandbox/SandboxCompanyCard';
-import { RefreshCw, LayoutGrid } from 'lucide-react';
+import { RefreshCw, LayoutGrid, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
-import { useState } from 'react';
 import { toast } from 'sonner';
 
 // ── Smart grid logic ─────────────────────────────────────────────────────────
@@ -44,6 +44,19 @@ export default function Sandbox() {
   const { data: snapshots = [], isLoading, refetch } = useSandboxSnapshots();
   const [refreshing, setRefreshing] = useState(false);
 
+  // Usar o primeiro snapshot para o quick sync (multi-empresa: itera internamente)
+  const firstSnap = snapshots[0] ?? null;
+
+  const { status: quickSyncStatus, triggerManualSync } = useOperationalQuickSync({
+    sellerId: firstSnap?.seller_id ?? null,
+    companyId: firstSnap?.company_id ?? null,
+    enabled: snapshots.length > 0,
+    onChangesDetected: () => {
+      refetch();
+      toast.success('Dados operacionais atualizados!', { duration: 2000 });
+    },
+  });
+
   // Log page access on mount
   useEffect(() => {
     logSandboxEvent('page_access');
@@ -62,7 +75,11 @@ export default function Sandbox() {
       });
 
       if (error) throw error;
+
+      // Também disparar quick sync imediato
+      await triggerManualSync();
       await refetch();
+
       toast.success('Sandbox atualizado!');
       logSandboxEvent('manual_refresh_success', { companies: snapshots.length });
     } catch (e: any) {
@@ -71,7 +88,7 @@ export default function Sandbox() {
     } finally {
       setRefreshing(false);
     }
-  }, [snapshots.length, refetch]);
+  }, [snapshots.length, refetch, triggerManualSync]);
 
   const count = snapshots.length;
   const gridClass = getGridClass(count);
@@ -89,16 +106,24 @@ export default function Sandbox() {
             </p>
           </div>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleRefresh}
-          disabled={refreshing}
-          className="gap-2"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-          Atualizar
-        </Button>
+
+        <div className="flex items-center gap-2">
+          {/* Quick sync status pill */}
+          {snapshots.length > 0 && (
+            <QuickSyncPill status={quickSyncStatus} onManualSync={triggerManualSync} />
+          )}
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="gap-2"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+            Atualizar
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -119,12 +144,51 @@ export default function Sandbox() {
           <div className={`grid gap-3 ${gridClass}`}>
             {snapshots.map((snap, i) => (
               <div key={snap.id} className={getItemClass(i, count)}>
-                <SandboxCompanyCard snapshot={snap} />
+                <SandboxCompanyCard
+                  snapshot={snap}
+                  isQuickSyncing={quickSyncStatus.isRunning}
+                />
               </div>
             ))}
           </div>
         </>
       )}
     </div>
+  );
+}
+
+// ── QuickSync status pill ────────────────────────────────────────────────────
+function QuickSyncPill({
+  status,
+  onManualSync,
+}: {
+  status: QuickSyncStatus;
+  onManualSync: () => void;
+}) {
+  if (status.isRunning) {
+    return (
+      <span className="flex items-center gap-1.5 text-[11px] text-primary font-medium px-2 py-1 bg-primary/10 rounded-full">
+        <Zap className="h-3 w-3 animate-pulse" />
+        Sincronizando...
+      </span>
+    );
+  }
+
+  if (status.inCooldown) {
+    return (
+      <span className="text-[11px] text-muted-foreground px-2 py-1 bg-muted/50 rounded-full">
+        Próx. sync em {status.secondsUntilCooldownEnd}s
+      </span>
+    );
+  }
+
+  return (
+    <button
+      onClick={onManualSync}
+      className="flex items-center gap-1.5 text-[11px] text-primary font-medium px-2 py-1 bg-primary/10 rounded-full hover:bg-primary/20 transition-colors"
+    >
+      <Zap className="h-3 w-3" />
+      Atualizar agora
+    </button>
   );
 }
