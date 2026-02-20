@@ -4003,6 +4003,117 @@ export type Database = {
         }
         Relationships: []
       }
+      global_metrics_aggregated: {
+        Row: {
+          acos_medio_global: number
+          created_at: string
+          id: string
+          is_public_ready: boolean
+          last_full_refresh_at: string | null
+          last_incremental_at: string | null
+          roas_medio_global: number
+          total_ads_faturamento: number
+          total_ads_spend: number
+          total_anuncios_ativos: number
+          total_etiquetas_impressas: number
+          total_importacoes_vendas: number
+          total_logs_sistema: number
+          total_pedidos: number
+          total_precificacoes_realizadas: number
+          total_produtos_cadastrados: number
+          total_sellers: number
+          total_sugestoes_compra_geradas: number
+          total_valor_vendido: number
+          updated_at: string
+        }
+        Insert: {
+          acos_medio_global?: number
+          created_at?: string
+          id?: string
+          is_public_ready?: boolean
+          last_full_refresh_at?: string | null
+          last_incremental_at?: string | null
+          roas_medio_global?: number
+          total_ads_faturamento?: number
+          total_ads_spend?: number
+          total_anuncios_ativos?: number
+          total_etiquetas_impressas?: number
+          total_importacoes_vendas?: number
+          total_logs_sistema?: number
+          total_pedidos?: number
+          total_precificacoes_realizadas?: number
+          total_produtos_cadastrados?: number
+          total_sellers?: number
+          total_sugestoes_compra_geradas?: number
+          total_valor_vendido?: number
+          updated_at?: string
+        }
+        Update: {
+          acos_medio_global?: number
+          created_at?: string
+          id?: string
+          is_public_ready?: boolean
+          last_full_refresh_at?: string | null
+          last_incremental_at?: string | null
+          roas_medio_global?: number
+          total_ads_faturamento?: number
+          total_ads_spend?: number
+          total_anuncios_ativos?: number
+          total_etiquetas_impressas?: number
+          total_importacoes_vendas?: number
+          total_logs_sistema?: number
+          total_pedidos?: number
+          total_precificacoes_realizadas?: number
+          total_produtos_cadastrados?: number
+          total_sellers?: number
+          total_sugestoes_compra_geradas?: number
+          total_valor_vendido?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      global_metrics_monthly_snapshot: {
+        Row: {
+          ano: number
+          created_at: string
+          id: string
+          mes: number
+          total_ads_faturamento: number
+          total_ads_spend: number
+          total_anuncios: number
+          total_etiquetas: number
+          total_pedidos: number
+          total_sellers: number
+          total_valor_vendido: number
+        }
+        Insert: {
+          ano: number
+          created_at?: string
+          id?: string
+          mes: number
+          total_ads_faturamento?: number
+          total_ads_spend?: number
+          total_anuncios?: number
+          total_etiquetas?: number
+          total_pedidos?: number
+          total_sellers?: number
+          total_valor_vendido?: number
+        }
+        Update: {
+          ano?: number
+          created_at?: string
+          id?: string
+          mes?: number
+          total_ads_faturamento?: number
+          total_ads_spend?: number
+          total_anuncios?: number
+          total_etiquetas?: number
+          total_pedidos?: number
+          total_sellers?: number
+          total_valor_vendido?: number
+        }
+        Relationships: []
+      }
       highlights_items: {
         Row: {
           created_at: string
