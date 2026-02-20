@@ -3,27 +3,9 @@ import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
-  LayoutDashboard, 
-  Rocket, 
-  Users,
-  Shield, 
-  CreditCard, 
-  Receipt, 
-  FileText, 
-  Search, 
-  Plug, 
-  Settings,
-  Tags,
-  Link2,
-  FileStack,
-  Globe,
-  Menu,
-  Star,
-  ClipboardList,
-  History,
-  Palette,
-  Radio,
-  CalendarDays,
+  LayoutDashboard, Rocket, Users, Shield, CreditCard, Receipt, FileText, 
+  Search, Plug, Settings, Tags, Link2, FileStack, Globe, Menu, Star,
+  ClipboardList, History, Palette, Radio, CalendarDays, Sparkles,
 } from 'lucide-react';
 import { AdminDashboard } from './admin/AdminDashboard';
 import { AdminOnboarding } from './admin/AdminOnboarding';
@@ -46,12 +28,14 @@ import Retrospectiva from './Retrospectiva';
 import { AdminVisualIdentity } from '@/components/admin/AdminVisualIdentity';
 import { AdminCanalOficial } from './admin/AdminCanalOficial';
 import { AdminSocialCalendar } from './admin/AdminSocialCalendar';
+import { AdminConsultantTips } from './admin/AdminConsultantTips';
 
 const adminTabs = [
   { id: '', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'onboarding', label: 'Primeiros Passos', icon: Rocket },
   { id: 'canal-oficial', label: 'Canal Oficial', icon: Radio },
   { id: 'calendario-social', label: 'Calendário Social', icon: CalendarDays },
+  { id: 'dica-consultor', label: 'Dica Consultor', icon: Sparkles },
   { id: 'usuarios', label: 'Usuários', icon: Users },
   { id: 'perfis', label: 'Perfis', icon: Shield },
   { id: 'colaboradores', label: 'Colaboradores', icon: Users },
@@ -138,6 +122,7 @@ export default function Admin() {
           <Route path="retrospectiva" element={<Retrospectiva />} />
           <Route path="logs" element={<AdminAuditPlaceholder />} />
           <Route path="identidade-visual" element={<AdminVisualIdentity />} />
+          <Route path="dica-consultor" element={<AdminConsultantTips />} />
         </Routes>
       </div>
     </PageContainer>

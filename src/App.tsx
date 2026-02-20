@@ -59,6 +59,8 @@ import PoliticaCookies from "./pages/PoliticaCookies";
 import Lgpd from "./pages/Lgpd";
 import NotFound from "./pages/NotFound";
 import SocialCalendar from "./pages/SocialCalendar";
+import ConsultantLibrary from "./pages/ConsultantLibrary";
+import PublicTipPage from "./pages/PublicTipPage";
 import { ZplViewerTool, TrendsLiteTool, PricingSimulatorTool, CommissionsTool } from "./pages/tools";
 import { AdminRoute } from "./components/auth/AdminRoute";
 
@@ -145,17 +147,14 @@ const App = () => {
                 <Route path="/blog" element={<Blog />} />
                 <Route path="/blog/:slug" element={<Blog />} />
                 <Route path="/blog/categoria/:slug" element={<Blog />} />
-                
-                {/* Consultoria */}
                 <Route path="/consultoria" element={<Consultoria />} />
                 <Route path="/termos-de-uso" element={<TermosDeUso />} />
                 <Route path="/politica-de-privacidade" element={<PoliticaPrivacidade />} />
                 <Route path="/politica-de-cookies" element={<PoliticaCookies />} />
                 <Route path="/lgpd" element={<Lgpd />} />
-                
-                {/* Module detail pages */}
                 <Route path="/modulo/:slug" element={<ModuloDetalhe />} />
-                
+                {/* Rota pública da dica de consultor */}
+                <Route path="/dica/:slug" element={<PublicTipPage />} />
                 {/* Public Tools routes (no shell) */}
                 <Route path="/ferramentas/zpl" element={<ZplViewerTool />} />
                 <Route path="/ferramentas/tendencias" element={<TrendsLiteTool />} />
@@ -195,6 +194,7 @@ const App = () => {
                   <Route path="/seed/sementes" element={<Seed />} />
                   <Route path="/sandbox" element={<Sandbox />} />
                   <Route path="/frete" element={<FreightManagement />} />
+                  <Route path="/biblioteca-dicas" element={<ConsultantLibrary />} />
                   <Route path="/precificacao" element={<Precificacao />} />
                   <Route path="/calendario-social" element={<SocialCalendar />} />
                   <Route path="/comissoes" element={<Comissoes />} />
