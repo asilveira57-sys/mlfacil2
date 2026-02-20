@@ -215,3 +215,6 @@ verify_jwt = false
 
 [functions.meli-shipping-cutoff-refresh]
 verify_jwt = false
+
+[functions.global-metrics-refresh]
+verify_jwt = false

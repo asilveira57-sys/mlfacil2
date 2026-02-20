@@ -36,6 +36,7 @@ import BlogAdmin from './BlogAdmin';
 import { AdminAccessProfiles } from './admin/AdminAccessProfiles';
 import { AdminDailyMessages } from './admin/AdminDailyMessages';
 import { AdminRatings } from './admin/AdminRatings';
+import { AdminGlobalMetrics } from './admin/AdminGlobalMetrics';
 
 const adminTabs = [
   { id: '', label: 'Dashboard', icon: LayoutDashboard },
@@ -55,6 +56,7 @@ const adminTabs = [
   { id: 'menu-builder', label: 'Menu', icon: Menu },
   { id: 'mensagem-dia', label: 'Msg do Dia', icon: FileText },
   { id: 'avaliacoes', label: 'Avaliações', icon: Star },
+  { id: 'global-metrics', label: 'Contador Global', icon: Globe },
 ];
 
 export default function Admin() {
@@ -114,6 +116,7 @@ export default function Admin() {
           <Route path="menu-builder" element={<AdminMenuBuilder />} />
           <Route path="mensagem-dia" element={<AdminDailyMessages />} />
           <Route path="avaliacoes" element={<AdminRatings />} />
+          <Route path="global-metrics" element={<AdminGlobalMetrics />} />
         </Routes>
       </div>
     </PageContainer>

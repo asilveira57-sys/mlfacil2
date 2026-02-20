@@ -13670,6 +13670,8 @@ export type Database = {
         Returns: Json
       }
       get_admin_dashboard_stats: { Args: never; Returns: Json }
+      get_global_ads_metrics: { Args: never; Returns: Json }
+      get_global_total_revenue: { Args: never; Returns: number }
       get_or_create_ml_account: {
         Args: {
           p_access_token?: string
