@@ -43,7 +43,7 @@ const DEFAULT_HEADER_PREFS = {
   line_order: ['customer', 'products', 'order', 'comment'],
   max_product_lines: 3,
   max_total_lines: 6,
-  font_size: 8,
+  font_size: 9,
 };
 
 // Sleep helper
@@ -104,7 +104,7 @@ function sanitize(text: string | null | undefined, maxLength = 90): string {
 function buildProductLines(
   items: { sku: string | null; title_short: string | null; title: string | null; quantity: number }[],
   maxProductLines: number,
-  maxLineLength = 45
+  maxLineLength = 58
 ): string[] {
   if (items.length === 0) return [];
 
@@ -114,7 +114,7 @@ function buildProductLines(
   });
 
   const formatted = sorted.map(item => {
-    const text = truncate(item.title_short || item.title || item.sku || 'Item', 25);
+    const text = truncate(item.title_short || item.title || item.sku || 'Item', 40);
     return `${item.quantity}x ${text}`;
   });
 
@@ -279,15 +279,13 @@ async function addHeadersToPdf(
     
     for (let j = 0; j < headerLines.length; j++) {
       const line = headerLines[j];
-      const isFirstLine = j === 0;
-      const currentFont = isFirstLine ? fontBold : font;
       
       newPage.drawText(line, {
         x: 8,
         y: textY,
         size: fontSize,
-        font: currentFont,
-        color: rgb(0.1, 0.1, 0.1),
+        font: fontBold,
+        color: rgb(0, 0, 0),
         maxWidth: origWidth - 16,
       });
       
@@ -299,9 +297,8 @@ async function addHeadersToPdf(
     newPage.drawLine({
       start: { x: 4, y: separatorY },
       end: { x: origWidth - 4, y: separatorY },
-      thickness: 0.5,
-      color: rgb(0.6, 0.6, 0.6),
-      dashArray: [3, 2],
+      thickness: 1.2,
+      color: rgb(0.2, 0.2, 0.2),
     });
   }
   
