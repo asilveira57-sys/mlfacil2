@@ -146,6 +146,11 @@ Deno.serve(async (req) => {
       if (colectaData) {
         safePayload.colecta_keys = Object.keys(colectaData);
         if (colectaData.processing_times) safePayload.colecta_days = Object.keys(colectaData.processing_times);
+        // Capture capacities structure for debugging
+        if (colectaData.capacities) {
+          const caps = colectaData.capacities;
+          safePayload.colecta_capacities_raw = JSON.stringify(caps).substring(0, 1000);
+        }
       }
       if (colectaData) {
         safePayload.colecta_keys = Object.keys(colectaData);
@@ -370,33 +375,60 @@ function normalizeShippingCutoff(flexData: any, colectaData: any) {
 
   // Coleta/Places - from /users/{id}/capacity_middleend/xd_drop_off
   if (colectaData) {
-    // capacity_middleend returns processing_times per day with cutoff
     const today = getTodayDayName();
-    const processingTimes = colectaData?.processing_times;
-    const todayData = processingTimes?.[today] || processingTimes?.monday;
     
-    if (todayData) {
-      const cutoff = todayData.cutoff;
-      const processingTime = todayData.processing_time;
-      
-      if (cutoff) {
-        result.colecta_enabled = true;
-        result.colecta_cutoff_time = cutoff;
-      } else if (processingTime) {
-        result.colecta_enabled = true;
-        // Estimated cutoff = current time check
-        result.colecta_cutoff_time = processingTime;
-        result.colecta_cutoff_calculated = true;
+    // Try capacities array (common response format from capacity_middleend)
+    const capacities = colectaData?.capacities;
+    if (Array.isArray(capacities) && capacities.length > 0) {
+      const todayDate = getDateRefSP();
+      const todayCap = capacities.find((c: any) => c?.date?.substring(0, 10) === todayDate) || capacities[0];
+
+      if (todayCap) {
+        const cutoff = todayCap.cutoff || todayCap.cutoff_time;
+        const schedule = todayCap.schedule || todayCap.shipping_schedule;
+        
+        if (cutoff) {
+          result.colecta_enabled = true;
+          result.colecta_cutoff_time = typeof cutoff === 'number' ? `${String(cutoff).padStart(2, "0")}:00` : cutoff;
+        } else if (schedule) {
+          const windowFrom = schedule.from || schedule.window_from;
+          const windowTo = schedule.to || schedule.window_to;
+          if (windowFrom) {
+            result.colecta_enabled = true;
+            result.colecta_window_from = windowFrom;
+            result.colecta_window_to = windowTo || null;
+            const [h, m] = String(windowFrom).split(":").map(Number);
+            result.colecta_cutoff_time = `${String(Math.max(0, h - 1)).padStart(2, "0")}:${String(m || 0).padStart(2, "0")}`;
+            result.colecta_cutoff_calculated = true;
+          }
+        }
       }
     }
     
-    // Alternative: direct fields
+    // Try processing_times per day
+    if (!result.colecta_enabled) {
+      const processingTimes = colectaData?.processing_times;
+      const todayData = processingTimes?.[today] || processingTimes?.monday;
+      if (todayData) {
+        const cutoff = todayData.cutoff;
+        const processingTime = todayData.processing_time;
+        if (cutoff) {
+          result.colecta_enabled = true;
+          result.colecta_cutoff_time = cutoff;
+        } else if (processingTime) {
+          result.colecta_enabled = true;
+          result.colecta_cutoff_time = processingTime;
+          result.colecta_cutoff_calculated = true;
+        }
+      }
+    }
+    
+    // Fallback: direct fields
     if (!result.colecta_enabled) {
       const pickup = colectaData?.pickup || colectaData;
       const cutoff = pickup?.cutoff_time || pickup?.cutoff;
       const windowFrom = pickup?.window_from || pickup?.from;
       const windowTo = pickup?.window_to || pickup?.to;
-
       if (cutoff || windowFrom) {
         result.colecta_enabled = true;
         if (cutoff) {
