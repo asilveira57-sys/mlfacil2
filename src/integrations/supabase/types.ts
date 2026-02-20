@@ -13320,6 +13320,132 @@ export type Database = {
         }
         Relationships: []
       }
+      visual_category_groups: {
+        Row: {
+          ativo: boolean
+          categorias_ml: string[]
+          created_at: string
+          gradiente_fim: string
+          gradiente_inicio: string
+          id: string
+          imagem_overlay_url: string | null
+          intensidade_padrao: number
+          nome: string
+          prioridade: number
+          slug: string
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          categorias_ml?: string[]
+          created_at?: string
+          gradiente_fim?: string
+          gradiente_inicio?: string
+          id?: string
+          imagem_overlay_url?: string | null
+          intensidade_padrao?: number
+          nome: string
+          prioridade?: number
+          slug: string
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          categorias_ml?: string[]
+          created_at?: string
+          gradiente_fim?: string
+          gradiente_inicio?: string
+          id?: string
+          imagem_overlay_url?: string | null
+          intensidade_padrao?: number
+          nome?: string
+          prioridade?: number
+          slug?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      visual_identity_logs: {
+        Row: {
+          categoria_detectada: string | null
+          created_at: string
+          detalhes: Json | null
+          grupo_visual_aplicado: string | null
+          id: string
+          modo_aplicado: string
+          origem: string
+          seller_id: string
+          user_id: string | null
+        }
+        Insert: {
+          categoria_detectada?: string | null
+          created_at?: string
+          detalhes?: Json | null
+          grupo_visual_aplicado?: string | null
+          id?: string
+          modo_aplicado: string
+          origem: string
+          seller_id: string
+          user_id?: string | null
+        }
+        Update: {
+          categoria_detectada?: string | null
+          created_at?: string
+          detalhes?: Json | null
+          grupo_visual_aplicado?: string | null
+          id?: string
+          modo_aplicado?: string
+          origem?: string
+          seller_id?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      visual_identity_settings: {
+        Row: {
+          aplicar_cards: boolean
+          aplicar_dashboard: boolean
+          aplicar_menu: boolean
+          categoria_detectada: string | null
+          created_at: string
+          grupo_visual_aplicado: string | null
+          grupo_visual_manual: string | null
+          id: string
+          intensidade_overlay: number
+          modo_identidade: string
+          seller_id: string
+          updated_at: string
+        }
+        Insert: {
+          aplicar_cards?: boolean
+          aplicar_dashboard?: boolean
+          aplicar_menu?: boolean
+          categoria_detectada?: string | null
+          created_at?: string
+          grupo_visual_aplicado?: string | null
+          grupo_visual_manual?: string | null
+          id?: string
+          intensidade_overlay?: number
+          modo_identidade?: string
+          seller_id: string
+          updated_at?: string
+        }
+        Update: {
+          aplicar_cards?: boolean
+          aplicar_dashboard?: boolean
+          aplicar_menu?: boolean
+          categoria_detectada?: string | null
+          created_at?: string
+          grupo_visual_aplicado?: string | null
+          grupo_visual_manual?: string | null
+          id?: string
+          intensidade_overlay?: number
+          modo_identidade?: string
+          seller_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       vouchers: {
         Row: {
           code: string

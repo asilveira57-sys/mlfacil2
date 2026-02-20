@@ -21,6 +21,7 @@ import {
   Star,
   ClipboardList,
   History,
+  Palette,
 } from 'lucide-react';
 import { AdminDashboard } from './admin/AdminDashboard';
 import { AdminOnboarding } from './admin/AdminOnboarding';
@@ -40,6 +41,7 @@ import { AdminDailyMessages } from './admin/AdminDailyMessages';
 import { AdminRatings } from './admin/AdminRatings';
 import { AdminGlobalMetrics } from './admin/AdminGlobalMetrics';
 import Retrospectiva from './Retrospectiva';
+import { AdminVisualIdentity } from '@/components/admin/AdminVisualIdentity';
 
 const adminTabs = [
   { id: '', label: 'Dashboard', icon: LayoutDashboard },
@@ -63,6 +65,7 @@ const adminTabs = [
   { id: 'global-metrics', label: 'Contador Global', icon: Globe },
   { id: 'retrospectiva', label: 'Retrospectiva', icon: History },
   { id: 'logs', label: 'Auditoria', icon: ClipboardList },
+  { id: 'identidade-visual', label: 'Identidade Visual', icon: Palette },
 ];
 
 export default function Admin() {
@@ -126,6 +129,7 @@ export default function Admin() {
           <Route path="global-metrics" element={<AdminGlobalMetrics />} />
           <Route path="retrospectiva" element={<Retrospectiva />} />
           <Route path="logs" element={<AdminAuditPlaceholder />} />
+          <Route path="identidade-visual" element={<AdminVisualIdentity />} />
         </Routes>
       </div>
     </PageContainer>
