@@ -4236,6 +4236,45 @@ export type Database = {
         }
         Relationships: []
       }
+      hot_orders_queue: {
+        Row: {
+          company_id: string
+          created_at: string
+          expires_at: string
+          id: string
+          last_checked_at: string | null
+          next_check_at: string
+          order_id: string
+          priority: number
+          seller_id: string
+          user_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          last_checked_at?: string | null
+          next_check_at?: string
+          order_id: string
+          priority?: number
+          seller_id: string
+          user_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          last_checked_at?: string | null
+          next_check_at?: string
+          order_id?: string
+          priority?: number
+          seller_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       integration_status: {
         Row: {
           config: Json
@@ -7392,6 +7431,42 @@ export type Database = {
         }
         Relationships: []
       }
+      operational_events: {
+        Row: {
+          company_id: string
+          created_at: string
+          event_type: string
+          id: string
+          metadata: Json | null
+          order_id: string
+          seller_id: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          event_type: string
+          id?: string
+          metadata?: Json | null
+          order_id: string
+          seller_id: string
+          status?: string
+          user_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          event_type?: string
+          id?: string
+          metadata?: Json | null
+          order_id?: string
+          seller_id?: string
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       order_cost_breakdown_cache: {
         Row: {
           adjustments: number | null
@@ -9963,6 +10038,54 @@ export type Database = {
           seller_id?: string
           signature_enabled?: boolean
           signature_template?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      quick_sync_state: {
+        Row: {
+          changes_found: number | null
+          company_id: string
+          cooldown_until: string | null
+          created_at: string
+          id: string
+          is_running: boolean
+          last_error: string | null
+          last_run_at: string | null
+          last_run_duration_ms: number | null
+          orders_checked: number | null
+          seller_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          changes_found?: number | null
+          company_id: string
+          cooldown_until?: string | null
+          created_at?: string
+          id?: string
+          is_running?: boolean
+          last_error?: string | null
+          last_run_at?: string | null
+          last_run_duration_ms?: number | null
+          orders_checked?: number | null
+          seller_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          changes_found?: number | null
+          company_id?: string
+          cooldown_until?: string | null
+          created_at?: string
+          id?: string
+          is_running?: boolean
+          last_error?: string | null
+          last_run_at?: string | null
+          last_run_duration_ms?: number | null
+          orders_checked?: number | null
+          seller_id?: string
           updated_at?: string
           user_id?: string
         }
