@@ -1,71 +1,56 @@
 
 
-## Corrigir Cabeçalhos nas Etiquetas: NF Sem Cabeçalho, Mapeamento Correto
+## Melhorar Qualidade e Aproveitamento do Cabecalho nas Etiquetas
 
-### Diagnostico
+### Problema Atual
 
-Analisei o PDF gerado e identifiquei a **causa raiz** de todos os problemas. E uma unica falha no mapeamento de paginas:
+1. **Titulo truncado**: O texto do produto esta limitado a 25 caracteres por item e 45 caracteres por linha. Com 100mm de largura (~283pt), usando fonte de 8pt (~4.5pt por caractere), cabem facilmente 55-60 caracteres por linha. Estamos desperdicando quase metade do espaco disponivel.
 
-**O bug**: A funcao `addHeadersToPdf` assume que cada pagina corresponde a um shipment (pagina 0 = shipment 0, pagina 1 = shipment 1...). Porem, a API do Mercado Livre retorna **2 paginas por envio**: a etiqueta de envio + a NF (DANFE). Com 8 envios, o PDF tem 16 paginas.
-
-O resultado:
-- Pagina 0 (etiqueta 1) recebe cabecalho do shipment 0 (correto por acaso)
-- Pagina 1 (NF 1) recebe cabecalho do shipment 1 (ERRADO - NF nao deve ter cabecalho, e o cabecalho e de outro pedido)
-- Pagina 2 (etiqueta 2) recebe cabecalho do shipment 2 (cabecalho trocado - deveria ser shipment 1)
-- Pagina 8+ (etiqueta 5 em diante) nao tem shipment correspondente, fica sem cabecalho
-
-Isso explica **todos** os 4 sintomas reportados:
-1. NF com cabecalho - porque paginas impares (NFs) recebem cabecalho
-2. Cabecalho trocado entre pedidos - o mapeamento 1:1 esta errado
-3. Etiquetas sem cabecalho - paginas alem do indice 7 nao tem shipment correspondente
-4. NF esticada/reduzida - o codigo adiciona 65pt de altura a TODAS as paginas, inclusive NFs
-
-**Sobre o comentario da venda 2000011596874365**: O campo `order_comment` esta NULL no cache. O campo `comments` da API do ML pode nao ser o campo correto para observacoes do comprador. Isso sera investigado separadamente.
+2. **Qualidade de impressao**: A linha separadora tem espessura de apenas 0.5pt, o texto usa cor cinza (0.1, 0.1, 0.1) em vez de preto puro, e apenas a primeira linha esta em negrito. Em impressoras termicas de 203dpi, linhas finas e texto leve ficam quase invisiveis.
 
 ### Solucao
 
-#### 1. Corrigir `addHeadersToPdf` para distinguir etiquetas de NFs
+#### 1. Ampliar limites de texto para usar toda a largura
 
-A logica sera:
-- Se o numero de paginas = 2x o numero de shipments: paginas vem em pares (etiqueta, NF)
-  - Paginas pares (0, 2, 4...): etiquetas - recebem cabecalho
-  - Paginas impares (1, 3, 5...): NFs - passam sem modificacao alguma (sem cabecalho, sem redimensionar)
-  - Mapeamento: `shipmentIds[Math.floor(i / 2)]`
-- Se o numero de paginas = numero de shipments: sem NF, mapeamento 1:1 (comportamento atual)
-- Fallback para outros casos: deteccao por dimensao da pagina (etiquetas ~283x425pt, NFs maiores)
+Alterar em **ambos** os arquivos (`buildHeaderLines.ts` e `ml-generate-labels/index.ts`):
 
-#### 2. NF sem redimensionar
+- `maxLineLength`: de 45 para 58 caracteres (aproveita ~95% da largura disponivel)
+- Truncamento de titulo individual: de 25 para 40 caracteres (permite titulos mais completos)
+- Quando houver mais de 1 produto, abreviar para caber na linha (manter logica de agrupamento com `|`)
 
-Paginas identificadas como NF serao copiadas com dimensoes originais intactas, sem adicionar os 65pt de altura do cabecalho.
+#### 2. Melhorar qualidade visual da impressao
+
+Alterar no `ml-generate-labels/index.ts` (funcao `addHeadersToPdf`):
+
+- **Todas as linhas em negrito** (usar `fontBold` para todo o texto, nao apenas a primeira linha) - texto em negrito tem tracos mais grossos que imprimem melhor em termicas
+- **Cor preta pura**: mudar de `rgb(0.1, 0.1, 0.1)` para `rgb(0, 0, 0)` - maximiza contraste
+- **Linha separadora mais grossa**: de 0.5pt para 1.2pt, cor de `rgb(0.6, 0.6, 0.6)` para `rgb(0.2, 0.2, 0.2)` - visivel mesmo em impressao de baixa qualidade
+- **Remover tracejado** da linha separadora (usar linha solida) - tracejado fica borrado em 203dpi
+
+#### 3. Ajustar `font_size` padrao
+
+O padrao atual e 8pt. Para impressoras termicas de 203dpi, 9pt oferece melhor legibilidade sem sacrificar espaco. Alterar `DEFAULT_HEADER_PREFS.font_size` de 8 para 9 em ambos os arquivos.
 
 ### Detalhes Tecnicos
 
-**Arquivo a editar**: `supabase/functions/ml-generate-labels/index.ts`
+**Arquivos a editar**:
+- `src/lib/buildHeaderLines.ts` - limites de texto e font_size padrao
+- `supabase/functions/ml-generate-labels/index.ts` - limites de texto, font_size padrao, e qualidade visual do PDF
 
-**Funcao `addHeadersToPdf`** (linhas 228-296) sera reescrita:
+**Mudancas especificas**:
 
 ```text
-// Detectar modo de paginacao
-const pagesPerShipment = pageCount === shipmentIds.length * 2 ? 2 : 1;
+buildProductLines (ambos arquivos):
+  maxLineLength: 45 -> 58
+  truncate individual: 25 -> 40
 
-for (let i = 0; i < pageCount; i++) {
-  const isNfPage = pagesPerShipment === 2 && i % 2 === 1;
-  
-  if (isNfPage) {
-    // NF: copiar sem modificacao
-    const newPage = resultPdf.addPage([origWidth, origHeight]);
-    newPage.drawPage(embeddedPage, { x: 0, y: 0 });
-    continue;
-  }
-  
-  // Etiqueta: calcular indice correto do shipment
-  const shipmentIndex = pagesPerShipment === 2 ? Math.floor(i / 2) : i;
-  const shipmentId = shipmentIndex < shipmentIds.length ? shipmentIds[shipmentIndex] : null;
-  const headerLines = shipmentId ? (headerDataMap.get(shipmentId) || []) : [];
-  
-  // ... adicionar cabecalho normalmente
-}
+DEFAULT_PREFERENCES / DEFAULT_HEADER_PREFS:
+  font_size: 8 -> 9
+
+addHeadersToPdf (edge function):
+  Todas as linhas: fontBold (em vez de apenas primeira)
+  Cor do texto: rgb(0, 0, 0)
+  Linha separadora: thickness 1.2, solid, rgb(0.2, 0.2, 0.2)
 ```
 
-**Sobre o comentario**: A investigacao do campo `order.comments` vs `order.notes` da API do ML sera tratada separadamente, pois requer analise da resposta real da API.
-
+Essas mudancas sao conservadoras e reversiveis. O vendedor pode ajustar o `font_size` nas preferencias de cabecalho para voltar a 8 ou tentar 10 conforme preferir.
