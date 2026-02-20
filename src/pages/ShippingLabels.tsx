@@ -10,6 +10,9 @@ import { ShippingTable } from '@/components/shipping/ShippingTable';
 import { ShippingPagination } from '@/components/shipping/ShippingPagination';
 import { BulkActionsBar } from '@/components/shipping/BulkActionsBar';
 import { OrderDetailsDrawer } from '@/components/shipping/OrderDetailsDrawer';
+import { ShippingCutoffCard } from '@/components/shipping/ShippingCutoffCard';
+import { useShippingCutoff } from '@/hooks/useShippingCutoff';
+import { useUserRole } from '@/hooks/useUserRole';
 
 import { useToast } from '@/hooks/use-toast';
 import { PageContainer } from '@/components/layout/PageContainer';
@@ -24,6 +27,19 @@ export default function ShippingLabels() {
   
   const [selectedOrder, setSelectedOrder] = useState<ShippingOrder | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const { isAdmin } = useUserRole();
+
+  // Shipping cutoff
+  const {
+    data: cutoffData,
+    isLoading: cutoffLoading,
+    isRefreshing: cutoffRefreshing,
+    error: cutoffError,
+    refresh: refreshCutoff,
+  } = useShippingCutoff({
+    sellerId: activeAccount?.id || null,
+    mlUserId: sellerId || null,
+  });
 
   const {
     orders,
@@ -114,6 +130,16 @@ export default function ShippingLabels() {
     >
       {/* Main Content */}
       <main className="container mx-auto px-4 py-6 space-y-6">
+        {/* Cutoff Card */}
+        <ShippingCutoffCard
+          data={cutoffData}
+          isLoading={cutoffLoading}
+          isRefreshing={cutoffRefreshing}
+          error={cutoffError}
+          onRefresh={refreshCutoff}
+          canRefresh={isAdmin}
+        />
+
         {/* Filters */}
         <ShippingFilters
           statusFilter={statusFilter}
