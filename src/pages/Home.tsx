@@ -26,6 +26,7 @@ import { PriorityInbox } from "@/components/notifications";
 import { DailyMessageCard } from "@/components/daily-message";
 import { useDailyMessage } from "@/hooks/useDailyMessage";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
+import { SystemRatingSummaryCard } from "@/components/ratings/SystemRatingSummaryCard";
 import {
   Dialog,
   DialogContent,
@@ -494,6 +495,15 @@ const Home = () => {
 
             {/* Quick Actions */}
             <DashboardQuickActions />
+
+            {/* System Rating */}
+            {user && (
+              <SystemRatingSummaryCard
+                userId={user.id}
+                userName={user.user_metadata?.full_name || user.email?.split("@")[0] || "Usuário"}
+                userCompany={user.user_metadata?.company}
+              />
+            )}
           </>
         ) : (
           /* Onboarding State */

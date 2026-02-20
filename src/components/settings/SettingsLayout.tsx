@@ -5,7 +5,7 @@ import {
   Users, Palette, LayoutTemplate, ShieldCheck, FileCheck,
   Download, Key, Webhook, FileText, CreditCard, Receipt,
   History, Building2, MessageSquare, BookOpen, Headphones,
-  Settings, Sun, Image, LucideIcon, ChevronDown,
+  Settings, Sun, Image, Star, LucideIcon, ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -27,6 +27,7 @@ import { SettingsTemplates } from "@/components/settings/SettingsTemplates";
 import { SettingsPrivacy } from "@/components/settings/SettingsPrivacy";
 import { SettingsAccessProfiles } from "@/components/settings/SettingsAccessProfiles";
 import { SettingsDailyMessage } from "@/components/settings/SettingsDailyMessage";
+import { SettingsRatings } from "@/components/settings/SettingsRatings";
 
 // Icon registry
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -34,7 +35,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Users, Palette, LayoutTemplate, ShieldCheck, FileCheck,
   Download, Key, Webhook, FileText, CreditCard, Receipt,
   History, Building2, MessageSquare, BookOpen, Headphones,
-  Settings, Sun, Image,
+  Settings, Sun, Image, Star,
 };
 
 function getIcon(key: string): LucideIcon {
@@ -59,6 +60,7 @@ const COMPONENT_MAP: Record<string, React.ComponentType> = {
   'empresas-contas': SettingsCompanies,
   'abrir-chamado': SettingsSupport,
   'mensagem-do-dia': SettingsDailyMessage,
+  'avaliacoes': SettingsRatings,
 };
 
 function PlaceholderContent({ name }: { name: string }) {
