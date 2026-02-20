@@ -66,11 +66,13 @@ export function useSandboxSnapshots() {
       const companyMap = new Map((companies || []).map(c => [c.id, c.display_name]));
       const colorMap = new Map((customizations || []).map(c => [c.company_id, c.color_key]));
 
-      return snapshots.map(s => ({
-        ...s,
-        company_name: companyMap.get(s.company_id) || 'Empresa',
-        color_key: colorMap.get(s.company_id) || 'blue',
-      }));
+      return snapshots
+        .filter(s => s.snapshot_status !== 'no_account')
+        .map(s => ({
+          ...s,
+          company_name: companyMap.get(s.company_id) || 'Empresa',
+          color_key: colorMap.get(s.company_id) || 'blue',
+        }));
     },
     staleTime: 2 * 60 * 1000, // 2 min
     refetchOnMount: true,

@@ -55,28 +55,34 @@ Deno.serve(async (req) => {
       });
     }
 
-    // 2. Get marketplace accounts linked to these companies
+    // 2. Get ml_accounts linked to these companies (primary source of truth)
     const companyIds = companies.map((c) => c.id);
-    const { data: accounts } = await supabase
+    const { data: mlAccounts } = await supabase
+      .from("ml_accounts")
+      .select("id, ml_user_id, company_id, nickname")
+      .eq("user_id", userId)
+      .eq("is_active", true);
+
+    // Build a map company_id -> seller_id using ml_accounts.company_id
+    const companySellerMap = new Map<string, string>();
+    (mlAccounts || []).forEach((a) => {
+      if (a.company_id && a.ml_user_id) {
+        companySellerMap.set(a.company_id, a.ml_user_id);
+      }
+    });
+
+    // Fallback: also check marketplace_accounts
+    const { data: marketplaceAccounts } = await supabase
       .from("marketplace_accounts")
       .select("id, company_id, external_user_id")
       .in("company_id", companyIds)
       .eq("is_active", true);
 
-    // Build a map company_id -> seller_id
-    const companySellerMap = new Map<string, string>();
-    (accounts || []).forEach((a) => {
-      if (a.company_id && a.external_user_id) {
+    (marketplaceAccounts || []).forEach((a) => {
+      if (a.company_id && a.external_user_id && !companySellerMap.has(a.company_id)) {
         companySellerMap.set(a.company_id, a.external_user_id);
       }
     });
-
-    // Also check ml_accounts for legacy mapping
-    const { data: mlAccounts } = await supabase
-      .from("ml_accounts")
-      .select("id, ml_user_id")
-      .eq("user_id", userId)
-      .eq("is_active", true);
 
     const now = new Date();
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -84,8 +90,7 @@ Deno.serve(async (req) => {
     const results: any[] = [];
 
     for (const company of companies) {
-      const sellerId = companySellerMap.get(company.id) ||
-        (mlAccounts && mlAccounts.length > 0 ? mlAccounts[0].ml_user_id : null);
+      const sellerId = companySellerMap.get(company.id) || null;
 
       if (!sellerId) {
         // No seller linked, create empty snapshot
