@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS daily_messages_unique_tema_texto ON daily_messages (tema, texto);
