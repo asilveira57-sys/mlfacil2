@@ -298,7 +298,21 @@ export function DynamicSidebar() {
         </SidebarHeader>
 
         <SidebarContent className="px-2">
-          {menuTree.map(rootItem => renderGroup(rootItem, 0))}
+          {menuTree.map(rootItem => {
+            // Root items with a route and no children → render as standalone leaf
+            if (rootItem.route && rootItem.children.length === 0) {
+              return (
+                <SidebarGroup key={rootItem.id}>
+                  <SidebarGroupContent>
+                    <SidebarMenu>
+                      {renderLeafItem(rootItem)}
+                    </SidebarMenu>
+                  </SidebarGroupContent>
+                </SidebarGroup>
+              );
+            }
+            return renderGroup(rootItem, 0);
+          })}
         </SidebarContent>
 
         <SidebarFooter className="border-t border-sidebar-border p-2">

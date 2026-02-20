@@ -169,9 +169,20 @@ export function useDailyMessage(userId: string | undefined) {
         .upsert({ user_id: userId, ...prefs }, { onConflict: 'user_id' });
       if (error) throw error;
       logPreferencesUpdated(userId, prefs as Record<string, unknown>);
+
+      // If theme changed, delete today's log so next fetch picks a message matching the new theme
+      if ('tema_preferido' in prefs) {
+        const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+        await supabase
+          .from('message_daily_log')
+          .delete()
+          .eq('user_id', userId)
+          .eq('data_exibicao', today);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['message-preferences', userId] });
+      queryClient.invalidateQueries({ queryKey: ['daily-message'] });
     },
   });
 
