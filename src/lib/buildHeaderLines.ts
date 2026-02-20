@@ -10,7 +10,7 @@ const DEFAULT_PREFERENCES = {
   line_order: ['customer', 'products', 'order', 'comment'],
   max_product_lines: 3,
   max_total_lines: 6,
-  font_size: 8,
+  font_size: 9,
 };
 
 export interface HeaderPreferences {
@@ -76,7 +76,7 @@ function sanitize(text: string | null | undefined, maxLength = 90): string {
 function buildProductLines(
   items: OrderItem[],
   maxProductLines: number,
-  maxLineLength = 45
+  maxLineLength = 58
 ): string[] {
   if (items.length === 0) return [];
 
@@ -91,7 +91,7 @@ function buildProductLines(
   // Format each item as "Nx SKU" or "Nx Title"
   const formattedItems = sortedItems.map(item => {
     const displayText = item.title_short || item.title || item.sku || 'Item';
-    const truncatedText = truncate(displayText, 25); // SKU/title max 25 chars
+    const truncatedText = truncate(displayText, 40); // SKU/title max 40 chars
     return `${item.quantity}x ${truncatedText}`;
   });
 
