@@ -140,7 +140,7 @@ async function upsertNotification(
 
   const category = type === "question" ? "qa_pending" : "post_sale_blocked";
   const priority = type === "question" ? "high" : "normal";
-  const actionUrl = type === "question" ? "/perguntas" : "/mensagens-pos-venda";
+  const actionUrl = type === "question" ? "/perguntas" : "/mensagens";
 
   const { data: existing } = await supabase
     .from("app_notifications")
