@@ -12,6 +12,7 @@ import { RouteChangeCleanup } from "@/components/layout/RouteChangeCleanup";
 import { AccountChangeInvalidator } from "@/components/layout/AccountChangeInvalidator";
 import { AppShellLayout } from "@/components/layout/AppShellLayout";
 import { OnboardingWizard } from "@/components/onboarding";
+import { WelcomeOnboardingGate } from "@/components/welcome";
 import { TrialExpiredPaywall, ModuleAccessGuard } from "@/components/access";
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { SeoHead } from "@/components/seo/SeoHead";
@@ -131,6 +132,7 @@ const App = () => {
               <AccountChangeInvalidator />
               <SeoHead />
               <OnboardingWizard />
+              <WelcomeOnboardingGate />
               <TrialExpiredPaywall />
               <ModuleAccessGuard>
               <Routes>
