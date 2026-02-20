@@ -6,10 +6,13 @@ import { RadiographyOverview } from "@/components/radiography/RadiographyOvervie
 import { RadiographyItemList } from "@/components/radiography/RadiographyItemList";
 import { RadiographyDetailDrawer } from "@/components/radiography/RadiographyDetailDrawer";
 import { PageContainer } from "@/components/layout/PageContainer";
+import { useModuleFeedbackIntegration } from "@/hooks/useModuleFeedbackIntegration";
+import { FeedbackPromptCard } from "@/components/feedback";
 
 export default function Radiografia() {
   // Use global active account from context
   const { sellerId } = useActiveAccount();
+  const feedback = useModuleFeedbackIntegration('radiografia-seed');
   
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -84,6 +87,17 @@ export default function Radiografia() {
               setSelectedItemId(null);
             }}
           />
+
+          {/* Feedback Prompt */}
+          {feedback.ready && (
+            <FeedbackPromptCard
+              kind="module"
+              moduleSlug="radiografia-seed"
+              moduleName="Radiografia"
+              userId={feedback.userId!}
+              sellerId={feedback.sellerId!}
+            />
+          )}
         </div>
       </div>
     </PageContainer>

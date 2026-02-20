@@ -7,6 +7,8 @@ import { useTrendsAutoLoad } from '@/hooks/useTrendsAutoLoad';
 import { useSellerCategories } from '@/hooks/useSellerCategories';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { performGlobalUiCleanup } from '@/lib/uiRouteCleanup';
+import { useModuleFeedbackIntegration } from '@/hooks/useModuleFeedbackIntegration';
+import { FeedbackPromptCard } from '@/components/feedback';
 
 // Components
 import { TrendsHeaderBar } from '@/components/trends/TrendsHeaderBar';
@@ -70,6 +72,7 @@ function TendenciasContent() {
   const { data: sellerCategories, isLoading: categoriesLoading } = useSellerCategories(state.selectedAccountId);
   
   const [isCollecting, setIsCollecting] = useState(false);
+  const feedback = useModuleFeedbackIntegration('tendencias-concorrencia');
 
   // Defensive cleanup in case a modal/portal stays mounted when the page unmounts.
   useEffect(() => {
@@ -293,6 +296,17 @@ function TendenciasContent() {
           isReloading={isReloading}
           snapshotDate={snapshotDate}
         />
+
+        {/* Feedback Prompt */}
+        {feedback.ready && (
+          <FeedbackPromptCard
+            kind="module"
+            moduleSlug="tendencias-concorrencia"
+            moduleName="Tendências & Concorrência"
+            userId={feedback.userId!}
+            sellerId={feedback.sellerId!}
+          />
+        )}
       </div>
     </PageContainer>
   );

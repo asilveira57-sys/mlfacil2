@@ -32,6 +32,8 @@ import {
 } from '@/hooks/useAds';
 import { useAdsPeriodMetrics } from '@/hooks/useAdsPeriodMetrics';
 import { AdsFilterState } from '@/types/ads';
+import { useModuleFeedbackIntegration } from '@/hooks/useModuleFeedbackIntegration';
+import { FeedbackPromptCard } from '@/components/feedback';
 import { 
   LayoutDashboard, 
   List, 
@@ -69,6 +71,7 @@ const periodDays: Record<string, number> = {
 export default function Publicidade() {
   const navigate = useNavigate();
   const { sellerId, activeAccount, loading: accountLoading, initialized } = useActiveAccount();
+  const feedback = useModuleFeedbackIntegration('gestao-anuncios');
   const [workspaceId, setWorkspaceId] = useState<string>();
   const [filters, setFilters] = useState<AdsFilterState>({});
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -464,6 +467,17 @@ export default function Publicidade() {
             <AdsConnectionsPanel sellerId={sellerId} />
           </TabsContent>
         </Tabs>
+
+        {/* Feedback Prompt */}
+        {feedback.ready && (
+          <FeedbackPromptCard
+            kind="module"
+            moduleSlug="gestao-anuncios"
+            moduleName="Gestão de Anúncios"
+            userId={feedback.userId!}
+            sellerId={feedback.sellerId!}
+          />
+        )}
       </div>
     </PageContainer>
   );

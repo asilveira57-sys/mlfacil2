@@ -9,6 +9,8 @@ import { DashboardModulesGrid } from "@/components/dashboard/DashboardModulesGri
 import { DashboardOnboarding } from "@/components/dashboard/DashboardOnboarding";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { useToast } from "@/hooks/use-toast";
+import { useModuleFeedbackIntegration } from "@/hooks/useModuleFeedbackIntegration";
+import { FeedbackPromptCard } from "@/components/feedback";
 
 const Dashboard = () => {
   const { t } = useTranslation();
@@ -18,6 +20,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
 
   const { activeAccount, sellerId, loading: accountLoading, initialized, refreshAccounts } = useActiveAccount();
+  const feedback = useModuleFeedbackIntegration('dashboard-analises');
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -125,6 +128,17 @@ const Dashboard = () => {
 
             {/* Modules Grid */}
             <DashboardModulesGrid />
+
+            {/* Feedback Prompt */}
+            {feedback.ready && (
+              <FeedbackPromptCard
+                kind="module"
+                moduleSlug="dashboard-analises"
+                moduleName="Dashboard & Análises"
+                userId={feedback.userId!}
+                sellerId={feedback.sellerId!}
+              />
+            )}
           </>
         ) : (
           <DashboardOnboarding onConnectML={handleConnectML} />
