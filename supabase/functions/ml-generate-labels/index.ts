@@ -237,17 +237,30 @@ async function addHeadersToPdf(
   const fontBold = await resultPdf.embedFont(StandardFonts.HelveticaBold);
   
   const pageCount = sourcePdf.getPageCount();
-  console.log(`Adding headers to ${pageCount} pages for ${shipmentIds.length} shipments`);
+  
+  // Detect pagination mode: ML API returns 2 pages per shipment (label + NF/DANFE)
+  const pagesPerShipment = pageCount === shipmentIds.length * 2 ? 2 : 1;
+  console.log(`Adding headers to ${pageCount} pages for ${shipmentIds.length} shipments (pagesPerShipment=${pagesPerShipment})`);
 
   for (let i = 0; i < pageCount; i++) {
     const embeddedPage = await resultPdf.embedPage(sourcePdf.getPage(i));
     const { width: origWidth, height: origHeight } = embeddedPage;
     
-    const shipmentId = i < shipmentIds.length ? shipmentIds[i] : null;
+    // In paired mode, odd pages are NF/DANFE - copy without any modification
+    const isNfPage = pagesPerShipment === 2 && i % 2 === 1;
+    if (isNfPage) {
+      const newPage = resultPdf.addPage([origWidth, origHeight]);
+      newPage.drawPage(embeddedPage, { x: 0, y: 0, width: origWidth, height: origHeight });
+      continue;
+    }
+    
+    // Calculate correct shipment index
+    const shipmentIndex = pagesPerShipment === 2 ? Math.floor(i / 2) : i;
+    const shipmentId = shipmentIndex < shipmentIds.length ? shipmentIds[shipmentIndex] : null;
     const headerLines = shipmentId ? (headerDataMap.get(shipmentId) || []) : [];
     
     if (headerLines.length === 0) {
-      // No header - use original dimensions
+      // No header data - copy with original dimensions
       const newPage = resultPdf.addPage([origWidth, origHeight]);
       newPage.drawPage(embeddedPage, { x: 0, y: 0, width: origWidth, height: origHeight });
       continue;
