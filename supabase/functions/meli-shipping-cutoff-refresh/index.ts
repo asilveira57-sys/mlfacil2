@@ -90,24 +90,15 @@ Deno.serve(async (req) => {
       let colectaData: any = null;
       const errorMessages: string[] = [];
 
-      // Try Flex subscription endpoint first (contains calculated_cutoff)
-      const flexSubResult = await fetchWithRetry(
-        `https://api.mercadolibre.com/shipping/flex/sites/MLB/users/${mlUserId}/subscriptions/v1`,
-        token, "flex_subscriptions", supabase, traceId, companyId, sellerId
+      // Flex: use shipping_preferences directly (subscriptions/v1 returns 410 Gone)
+      const flexPrefResult = await fetchWithRetry(
+        `https://api.mercadolibre.com/users/${mlUserId}/shipping_preferences`,
+        token, "flex_shipping_preferences", supabase, traceId, companyId, sellerId
       );
-      if (flexSubResult.ok) {
-        flexData = flexSubResult.data;
+      if (flexPrefResult.ok) {
+        flexData = { _from_preferences: true, ...flexPrefResult.data };
       } else {
-        // Fallback: try shipping_preferences for basic mode info
-        const flexPrefResult = await fetchWithRetry(
-          `https://api.mercadolibre.com/users/${mlUserId}/shipping_preferences`,
-          token, "flex_shipping_preferences", supabase, traceId, companyId, sellerId
-        );
-        if (flexPrefResult.ok) {
-          flexData = { _from_preferences: true, ...flexPrefResult.data };
-        } else {
-          errorMessages.push(flexSubResult.error!);
-        }
+        errorMessages.push(flexPrefResult.error!);
       }
 
       // 4. Fetch Coleta/Places capacity data (has cutoff/processing times)
@@ -131,30 +122,47 @@ Deno.serve(async (req) => {
       }
 
       // 5. Get earliest handling deadline from cached shipments (most accurate cutoff source)
+      // Use explicit UTC format to avoid Supabase JS client parsing issues with timezone offsets
       let shipmentCutoff: string | null = null;
       try {
-        const todayStart = getDateRefSP() + "T00:00:00-03:00";
-        const todayEnd = getDateRefSP() + "T23:59:59-03:00";
-        const { data: earliestShipment } = await supabase
+        const spDate = getDateRefSP(); // e.g. "2026-02-20"
+        const todayStartUTC = spDate + "T03:00:00.000Z"; // 00:00 BRT = 03:00 UTC
+        const todayEndUTC = new Date(new Date(spDate + "T03:00:00.000Z").getTime() + 24 * 60 * 60 * 1000 - 1).toISOString();
+
+        const { data: earliestShipment, error: shipErr } = await supabase
           .from("meli_shipments_cache")
-          .select("estimated_handling_limit, logistic_type")
+          .select("estimated_handling_limit, logistic_type, shipment_status")
           .eq("seller_id", mlUserId)
           .in("shipment_status", ["ready_to_ship", "handling"])
-          .gte("estimated_handling_limit", todayStart)
-          .lte("estimated_handling_limit", todayEnd)
+          .gte("estimated_handling_limit", todayStartUTC)
+          .lte("estimated_handling_limit", todayEndUTC)
           .order("estimated_handling_limit", { ascending: true })
           .limit(1)
           .maybeSingle();
 
+        // Always log result for diagnostics (even when empty)
+        await log(supabase, {
+          trace_id: traceId, company_id: companyId, seller_id: sellerId,
+          action: "shipment_cutoff", status: earliestShipment ? "success" : "empty",
+          step: "earliest_deadline", execution_time_ms: Date.now() - startTime,
+          payload_summary: {
+            query_range: `${todayStartUTC} .. ${todayEndUTC}`,
+            seller_queried: mlUserId,
+            found: !!earliestShipment,
+            error: shipErr?.message || null,
+            deadline: earliestShipment?.estimated_handling_limit || null,
+            logistic: earliestShipment?.logistic_type || null,
+          },
+        });
+
         if (earliestShipment?.estimated_handling_limit) {
-          // Convert to BRT time string
           const deadline = new Date(earliestShipment.estimated_handling_limit);
           const brtTime = deadline.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
           shipmentCutoff = brtTime;
-          await log(supabase, { trace_id: traceId, company_id: companyId, seller_id: sellerId, action: "shipment_cutoff", status: "success", step: "earliest_deadline", execution_time_ms: Date.now() - startTime, payload_summary: { cutoff: brtTime, logistic: earliestShipment.logistic_type } });
         }
       } catch (e: any) {
         console.error("Shipment cutoff lookup error:", e.message);
+        await log(supabase, { trace_id: traceId, company_id: companyId, seller_id: sellerId, action: "shipment_cutoff", status: "error", step: "earliest_deadline", execution_time_ms: Date.now() - startTime, error_message: e.message });
       }
 
       // 6. Normalize
@@ -406,74 +414,16 @@ function normalizeShippingCutoff(flexData: any, colectaData: any, shipmentCutoff
     }
   }
 
-  // Coleta/Places - from /users/{id}/capacity_middleend/xd_drop_off
-  if (colectaData) {
-    const today = getTodayDayName();
-    
-    // Try capacities array (common response format from capacity_middleend)
-    const capacities = colectaData?.capacities;
-    if (Array.isArray(capacities) && capacities.length > 0) {
-      const todayDate = getDateRefSP();
-      const todayCap = capacities.find((c: any) => c?.date?.substring(0, 10) === todayDate) || capacities[0];
-
-      if (todayCap) {
-        const cutoff = todayCap.cutoff || todayCap.cutoff_time;
-        const schedule = todayCap.schedule || todayCap.shipping_schedule;
-        
-        if (cutoff) {
-          result.colecta_enabled = true;
-          result.colecta_cutoff_time = typeof cutoff === 'number' ? `${String(cutoff).padStart(2, "0")}:00` : cutoff;
-        } else if (schedule) {
-          const windowFrom = schedule.from || schedule.window_from;
-          const windowTo = schedule.to || schedule.window_to;
-          if (windowFrom) {
-            result.colecta_enabled = true;
-            result.colecta_window_from = windowFrom;
-            result.colecta_window_to = windowTo || null;
-            const [h, m] = String(windowFrom).split(":").map(Number);
-            result.colecta_cutoff_time = `${String(Math.max(0, h - 1)).padStart(2, "0")}:${String(m || 0).padStart(2, "0")}`;
-            result.colecta_cutoff_calculated = true;
-          }
-        }
-      }
-    }
-    
-    // Try processing_times per day
-    if (!result.colecta_enabled) {
-      const processingTimes = colectaData?.processing_times;
-      const todayData = processingTimes?.[today] || processingTimes?.monday;
-      if (todayData) {
-        const cutoff = todayData.cutoff;
-        const processingTime = todayData.processing_time;
-        if (cutoff) {
-          result.colecta_enabled = true;
-          result.colecta_cutoff_time = cutoff;
-        } else if (processingTime) {
-          result.colecta_enabled = true;
-          result.colecta_cutoff_time = processingTime;
-          result.colecta_cutoff_calculated = true;
-        }
-      }
-    }
-    
-    // Fallback: direct fields
-    if (!result.colecta_enabled) {
-      const pickup = colectaData?.pickup || colectaData;
-      const cutoff = pickup?.cutoff_time || pickup?.cutoff;
-      const windowFrom = pickup?.window_from || pickup?.from;
-      const windowTo = pickup?.window_to || pickup?.to;
-      if (cutoff || windowFrom) {
-        result.colecta_enabled = true;
-        if (cutoff) {
-          result.colecta_cutoff_time = cutoff;
-        } else if (windowFrom) {
-          result.colecta_window_from = windowFrom;
-          result.colecta_window_to = windowTo || null;
-          const [h, m] = windowFrom.split(":").map(Number);
-          result.colecta_cutoff_time = `${String(Math.max(0, h - 1)).padStart(2, "0")}:${String(m || 0).padStart(2, "0")}`;
-          result.colecta_cutoff_calculated = true;
-        }
-      }
+  // Coleta/Places - shipmentCutoff (from actual shipment deadlines) is already set above.
+  // The capacity_middleend API returns weekly capacity limits, NOT cutoff times.
+  // Only use it as a last-resort fallback if we have no shipment-based cutoff.
+  if (!result.colecta_enabled && colectaData) {
+    // Try direct cutoff fields as fallback
+    const pickup = colectaData?.pickup || colectaData;
+    const cutoff = pickup?.cutoff_time || pickup?.cutoff;
+    if (cutoff) {
+      result.colecta_enabled = true;
+      result.colecta_cutoff_time = typeof cutoff === 'number' ? `${String(cutoff).padStart(2, "0")}:00` : cutoff;
     }
   }
 
