@@ -33,6 +33,7 @@ import { AdminPages } from './admin/AdminPages';
 import AdminMenuBuilder from './admin/AdminMenuBuilder';
 import BlogAdmin from './BlogAdmin';
 import { AdminAccessProfiles } from './admin/AdminAccessProfiles';
+import { AdminDailyMessages } from './admin/AdminDailyMessages';
 
 const adminTabs = [
   { id: '', label: 'Dashboard', icon: LayoutDashboard },
@@ -50,6 +51,7 @@ const adminTabs = [
   { id: 'integracoes', label: 'Integrações', icon: Plug },
   { id: 'configuracoes', label: 'Configurações', icon: Settings },
   { id: 'menu-builder', label: 'Menu', icon: Menu },
+  { id: 'mensagem-dia', label: 'Msg do Dia', icon: FileText },
 ];
 
 export default function Admin() {
@@ -107,6 +109,7 @@ export default function Admin() {
           <Route path="integracoes" element={<AdminIntegrations />} />
           <Route path="configuracoes" element={<AdminSettings />} />
           <Route path="menu-builder" element={<AdminMenuBuilder />} />
+          <Route path="mensagem-dia" element={<AdminDailyMessages />} />
         </Routes>
       </div>
     </PageContainer>

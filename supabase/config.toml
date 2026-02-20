@@ -206,3 +206,6 @@ verify_jwt = false
 
 [functions.competitor-seller-sync]
 verify_jwt = false
+
+[functions.generate-message-suggestions]
+verify_jwt = false

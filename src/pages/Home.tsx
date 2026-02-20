@@ -23,6 +23,8 @@ import { DashboardQuickActions } from "@/components/dashboard/DashboardQuickActi
 import { DashboardOnboarding } from "@/components/dashboard/DashboardOnboarding";
 import { TrialBanner } from "@/components/access/TrialBanner";
 import { PriorityInbox } from "@/components/notifications";
+import { DailyMessageCard } from "@/components/daily-message";
+import { useDailyMessage } from "@/hooks/useDailyMessage";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import {
   Dialog,
@@ -478,6 +480,9 @@ const Home = () => {
         {/* Trial Banner */}
         <TrialBanner />
 
+        {/* Daily Message */}
+        <DailyMessageSection userId={user?.id} />
+
         {/* Connected State */}
         {activeAccount ? (
           <>
@@ -498,5 +503,35 @@ const Home = () => {
     </PageContainer>
   );
 };
+
+function DailyMessageSection({ userId }: { userId: string | undefined }) {
+  const {
+    message,
+    isLoading,
+    likeCount,
+    userLiked,
+    toggleLike,
+    preferences,
+    updatePreferences,
+    signature,
+    showMessage,
+  } = useDailyMessage(userId);
+
+  if (isLoading || !showMessage || !message) return null;
+
+  return (
+    <DailyMessageCard
+      message={message}
+      likeCount={likeCount}
+      userLiked={userLiked}
+      onToggleLike={() => toggleLike.mutate()}
+      isLiking={toggleLike.isPending}
+      signature={signature}
+      preferences={preferences}
+      onUpdatePreferences={(prefs) => updatePreferences.mutate(prefs)}
+      showMessage={showMessage}
+    />
+  );
+}
 
 export default Home;
