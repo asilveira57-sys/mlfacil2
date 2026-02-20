@@ -53,7 +53,9 @@ export function ShippingCutoffCard({
   const meta = data?.meta;
   const flex = data?.flex;
   const colecta = data?.colecta;
-  const isError = meta?.status === 'error' || (!data && !!error);
+  // Only show error state if there's a client-side error OR status is error AND no data at all
+  const hasAnyData = flex?.enabled || colecta?.enabled;
+  const isError = (!data && !!error) || (meta?.status === 'error' && !hasAnyData && !!error);
   const isPartial = meta?.status === 'partial';
 
   return (

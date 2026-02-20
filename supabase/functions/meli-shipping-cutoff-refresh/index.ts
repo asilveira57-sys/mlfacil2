@@ -129,7 +129,10 @@ Deno.serve(async (req) => {
       const safePayload: any = {};
       if (flexData) {
         safePayload.flex_keys = Object.keys(flexData);
-        safePayload.flex_modes_count = Array.isArray(flexData?.shipping_modes || flexData?.modes) ? (flexData.shipping_modes || flexData.modes).length : 0;
+        const modesList = flexData?.shipping_modes || flexData?.modes || [];
+        safePayload.flex_modes_count = Array.isArray(modesList) ? modesList.length : 0;
+        safePayload.flex_mode_names = Array.isArray(modesList) ? modesList.map((m: any) => m?.mode || m?.name || 'unknown') : [];
+        if (flexData?.me2_enablers) safePayload.me2_enablers_keys = Object.keys(flexData.me2_enablers);
       }
       if (colectaData) {
         safePayload.colecta_keys = Object.keys(colectaData);
@@ -295,9 +298,23 @@ function normalizeShippingCutoff(flexData: any, colectaData: any) {
   // Flex
   if (flexData) {
     const modes = flexData?.shipping_modes || flexData?.modes || [];
+    
+    // Try to find flex mode with multiple patterns
     const flexMode = Array.isArray(modes)
-      ? modes.find((m: any) => m?.mode === "me2" || m?.name?.toLowerCase()?.includes("flex"))
+      ? modes.find((m: any) => {
+          const modeName = (m?.mode || '').toLowerCase();
+          const modeLabel = (m?.name || '').toLowerCase();
+          return modeName === 'me2' || modeName === 'me1' || modeName === 'custom'
+            || modeLabel.includes('flex') || modeLabel.includes('mercado envios')
+            || modeLabel.includes('full');
+        })
       : null;
+
+    // Also check top-level cutoff from me2_enablers or option
+    const topLevelCutoff = flexData?.me2_enablers?.cutoff_time
+      || flexData?.option?.cutoff_time
+      || flexData?.cutoff_time
+      || flexData?.handling_time?.cutoff;
 
     if (flexMode) {
       result.flex_enabled = true;
@@ -321,7 +338,24 @@ function normalizeShippingCutoff(flexData: any, colectaData: any) {
       if (!result.flex_cutoff_type) {
         const directCutoff = flexMode.cutoff_time || flexMode.cutoff || flexMode.handling_time?.cutoff;
         if (directCutoff) { result.flex_cutoff_type = "single"; result.flex_cutoff_time = directCutoff; }
+        else if (topLevelCutoff) { result.flex_cutoff_type = "single"; result.flex_cutoff_time = topLevelCutoff; }
         else { result.flex_cutoff_type = "unknown"; }
+      }
+    } else if (topLevelCutoff) {
+      // No matching mode but top-level cutoff exists
+      result.flex_enabled = true;
+      result.flex_cutoff_type = "single";
+      result.flex_cutoff_time = topLevelCutoff;
+    } else if (Array.isArray(modes) && modes.length > 0) {
+      // Try to extract cutoff from ANY mode that has one
+      for (const m of modes) {
+        const cutoff = m?.cutoff_time || m?.cutoff || m?.handling_time?.cutoff;
+        if (cutoff) {
+          result.flex_enabled = true;
+          result.flex_cutoff_type = "single";
+          result.flex_cutoff_time = cutoff;
+          break;
+        }
       }
     }
   }
