@@ -1,116 +1,51 @@
 
-# Configuracoes do Seller: Menu Vertical para Horizontal (Estilo Admin)
+# Correcao Urgente: Pop-up de Boas-Vindas Reaparecendo
 
-## Resumo
+## Problema Identificado
 
-Transformar a pagina de Configuracoes (/settings) de menu vertical lateral para navegacao por abas horizontais, seguindo o mesmo padrao ja implementado no Admin.
+A coluna `seller_id` na tabela `onboarding_user_progress` esta definida como tipo `uuid`, mas o valor passado pelo sistema e o ID numerico do Mercado Livre (ex: "123456789"), que nao e um UUID valido. Isso faz com que o `INSERT` falhe silenciosamente, nenhum progresso seja salvo, e o modal reapareça a cada carregamento de pagina.
 
----
+Confirmacao: a tabela `onboarding_user_progress` tem **zero registros** no banco.
 
-## Estrutura atual do menu vertical
+## Solucao
 
-O menu atual possui 5 grupos com subitens aninhados (ate 3 niveis):
+### 1. Alterar o tipo da coluna `seller_id` de `uuid` para `text`
 
-```text
-MINHA CONTA
-  Perfil
-  Seguranca
-  Sessoes Ativas
-  Preferencias
-    Idioma
-    Notificacoes
-    Fuso Horario
-    Mensagem do Dia
+Migracoes SQL necessarias:
+- Remover a constraint UNIQUE existente
+- Alterar a coluna `seller_id` de `uuid` para `text`
+- Recriar a constraint UNIQUE
 
-EQUIPE
-  Colaboradores
-  Perfis de Acesso
+Isso permite que o seller ID do Mercado Livre (string numerica) seja armazenado corretamente.
 
-SISTEMA
-  Personalizacao (Cores, Logotipo, Nome da Empresa)
-  Aparencia (Tema Claro/Escuro)
-  Privacidade e LGPD (Consentimentos, Exportacao de Dados)
-  Utilidades (Chaves de API, Webhooks, Logs)
+### 2. Corrigir codigo morto no hook `useStartOnboardingProgress`
 
-FINANCEIRO
-  Plano
-  Faturamento
-  Historico de Pagamentos
-  Empresas e Contas
+No arquivo `src/hooks/useWelcomeOnboarding.ts`, linhas 212-235 contem codigo que nunca executa porque esta apos um `return existing;` na linha 210. Esse codigo sera removido para limpeza.
 
-SUPORTE
-  Abrir Chamado
-  Base de Conhecimento
-  Status do Sistema
+### 3. Adicionar log de erro visivel no `startProgress`
+
+Adicionar tratamento de erro no `onError` do `startProgress.mutate` para que falhas futuras sejam visiveis no console, facilitando depuracao.
+
+## Detalhes Tecnicos
+
+### Migracao SQL
+```sql
+ALTER TABLE onboarding_user_progress
+  DROP CONSTRAINT onboarding_user_progress_company_id_seller_id_user_id_flow__key;
+
+ALTER TABLE onboarding_user_progress
+  ALTER COLUMN seller_id TYPE text USING seller_id::text;
+
+ALTER TABLE onboarding_user_progress
+  ADD CONSTRAINT onboarding_user_progress_company_id_seller_id_user_id_flow__key
+  UNIQUE (company_id, seller_id, user_id, flow_id, flow_versao);
 ```
 
----
+### Arquivo editado
+- `src/hooks/useWelcomeOnboarding.ts` - remover codigo morto (linhas 212-235) e adicionar error handler
 
-## Nova estrutura: Abas horizontais
-
-Cada item folha (com rota ou componente) vira uma aba horizontal. Itens pais sem rota (como "Preferencias", "Personalizacao") serao achatados -- seus filhos sobem como abas diretas.
-
-Abas propostas (agrupadas visualmente por separador ou ordem logica):
-
-| Aba | Slug | Componente |
-|---|---|---|
-| Perfil | perfil | SettingsProfile |
-| Seguranca | seguranca | Placeholder |
-| Sessoes | sessoes-ativas | Placeholder |
-| Idioma | idioma | SettingsLanguage |
-| Notificacoes | notificacoes | Placeholder |
-| Colaboradores | colaboradores | CollaboratorsCard |
-| Perfis de Acesso | perfis-acesso | SettingsAccessProfiles |
-| Personalizacao | personalizacao | SettingsCustomization |
-| Aparencia | aparencia | SettingsTemplates |
-| Privacidade | privacidade-lgpd | SettingsPrivacy |
-| Utilidades | utilidades | SettingsUtilities |
-| Plano | plano | SettingsPlan |
-| Faturamento | faturamento | SettingsBilling |
-| Empresas | empresas-contas | SettingsCompanies |
-| Suporte | abrir-chamado | SettingsSupport |
-| Msg do Dia | mensagem-do-dia | SettingsDailyMessage |
-
-Itens sem componente (Fuso Horario, Chaves de API, Webhooks, Logs, Historico Pagamentos, Base de Conhecimento, Status do Sistema, Nome da Empresa, Logotipo, Exportacao de Dados, Consentimentos, Tema) nao precisam de aba separada -- ja sao cobertos pelos componentes pais (ex: "Utilidades" ja inclui Chaves API/Webhooks/Logs, "Personalizacao" ja inclui Cores/Logotipo).
-
----
-
-## Detalhes tecnicos
-
-### Alteracao em SettingsLayout.tsx
-
-1. **Remover** o menu vertical lateral (aside com ScrollArea e toda a logica de renderizacao de grupos/itens colapsaveis)
-2. **Substituir** por um bloco de abas horizontais usando `Tabs`/`TabsList`/`TabsTrigger` (mesmo padrao do Admin.tsx)
-3. Cada aba usa icone + label, e ao clicar altera o `searchParams` `section`
-4. O conteudo renderiza o componente mapeado pela aba ativa (mesma logica atual do COMPONENT_MAP)
-5. A barra de abas tera `overflow-x-auto` para scroll horizontal em telas menores
-
-### Codigo sera inspirado no Admin.tsx
-
-```text
-const settingsTabs = [
-  { id: 'perfil', label: 'Perfil', icon: User },
-  { id: 'seguranca', label: 'Seguranca', icon: Shield },
-  ...
-];
-
-<Tabs value={activeSlug}>
-  <TabsList className="h-auto p-1 flex flex-wrap gap-1">
-    {settingsTabs.map(tab => (
-      <TabsTrigger onClick={() => setActiveSlug(tab.id)} ...>
-        <tab.icon /> {tab.label}
-      </TabsTrigger>
-    ))}
-  </TabsList>
-</Tabs>
-
-{ActiveComponent ? <ActiveComponent /> : <PlaceholderContent />}
-```
-
-### Sem alteracao no banco de dados
-
-Os dados em `config_menu_groups` e `config_menu_items` permanecem intactos. O `useConfigMenu` hook continua disponivel, mas o SettingsLayout nao precisara mais consumi-lo -- as abas serao definidas estaticamente no componente (mesmo padrao do Admin.tsx), o que e mais simples e previsivel.
-
-### Nenhuma rota sera perdida
-
-Todas as rotas existentes continuam funcionando via o parametro `?section=slug`. Os componentes mapeados permanecem os mesmos.
+### Resultado esperado
+- O pop-up de boas-vindas aparece **uma unica vez** para cada usuario
+- Ao clicar "Concluir", o progresso e salvo no banco com status `completed`
+- O modal nao reaparece apos recarregar a pagina
+- O botao "Ir para Configuracoes" continua navegando para `/settings` (configuracoes do sistema)
