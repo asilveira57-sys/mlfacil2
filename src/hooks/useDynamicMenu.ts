@@ -91,7 +91,7 @@ export function useDynamicMenu(): UseDynamicMenuReturn {
     const prune = (nodes: DynamicMenuItem[]): DynamicMenuItem[] => {
       return nodes.filter(n => {
         n.children = prune(n.children);
-        if (!n.route && n.children.length === 0) return false;
+        if (!n.route && n.children.length === 0 && n.status !== 'coming_soon') return false;
         return true;
       });
     };

@@ -52,7 +52,7 @@ export function DynamicSidebar() {
     setOpenGroups(prev => ({ ...prev, [key]: prev[key] === false ? true : (prev[key] === undefined ? false : !prev[key]) }));
   };
 
-  const isGroupOpen = (key: string) => openGroups[key] !== false;
+  const isGroupOpen = (key: string) => openGroups[key] === true;
 
   const isActive = (url: string | null) => {
     if (!url) return false;
