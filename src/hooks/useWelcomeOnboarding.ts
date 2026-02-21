@@ -208,34 +208,12 @@ export function useStartOnboardingProgress() {
 
       if (fetchErr) throw fetchErr;
       return existing;
-
-      // Log timeline event: onboarding_started
-      await supabase.from('timeline_events').insert({
-        company_id: companyId,
-        seller_id: sellerId,
-        user_id: userId,
-        event_type: 'onboarding_started',
-        event_title: 'Início no sistema (Boas-Vindas exibido)',
-        occurred_at: new Date().toISOString(),
-        ip,
-        user_agent: ua,
-        source: 'onboarding',
-        event_payload: {
-          flow_id: flow.id,
-          flow_versao: flow.versao,
-          flow_slug: flow.slug,
-          origem: 'web',
-        },
-      });
-
-      logOnboardingEvent('onboarding_modal_opened', userId, {
-        flow_id: flow.id, versao: flow.versao, company_id: companyId, seller_id: sellerId,
-      });
-
-      return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['onboarding-active-flow'] });
+    },
+    onError: (error) => {
+      console.error('[startOnboardingProgress] Falha ao salvar progresso:', error);
     },
   });
 }
