@@ -1,9 +1,10 @@
-import { useState, useCallback } from 'react';
-import { format, startOfMonth, endOfMonth, addMonths, subMonths, eachDayOfInterval, isSameMonth } from 'date-fns';
+import { useState, useCallback, useMemo } from 'react';
+import { format, startOfMonth, endOfMonth, addMonths, subMonths, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isToday, isSameDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, Lightbulb, Bookmark } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Lightbulb } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import {
   useCalendarEvents,
@@ -21,12 +22,22 @@ const CATEGORY_COLORS: Record<string, string> = {
   sazonal: 'bg-orange-500/15 text-orange-700 border-orange-200',
 };
 
+const CATEGORY_DOT: Record<string, string> = {
+  tematica: 'bg-blue-500',
+  feriado: 'bg-red-500',
+  comercial: 'bg-green-500',
+  sazonal: 'bg-orange-500',
+};
+
 const CATEGORY_LABELS: Record<string, string> = {
   tematica: 'Temática',
   feriado: 'Feriado',
   comercial: 'Comercial',
   sazonal: 'Sazonal',
 };
+
+const WEEKDAY_HEADERS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const MAX_VISIBLE_EVENTS = 2;
 
 export function SocialCalendarMainView() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -39,17 +50,27 @@ export function SocialCalendarMainView() {
   const { data: events = [], isLoading } = useCalendarEvents(currentMonth, countryCode);
 
   // Group events by date
-  const eventsByDate = events.reduce<Record<string, SocialCalendarEvent[]>>((acc, ev) => {
+  const eventsByDate = useMemo(() => events.reduce<Record<string, SocialCalendarEvent[]>>((acc, ev) => {
     const key = ev.event_date;
     if (!acc[key]) acc[key] = [];
     acc[key].push(ev);
     return acc;
-  }, {});
+  }, {}), [events]);
 
-  // Days in current month
-  const monthStart = startOfMonth(currentMonth);
-  const monthEnd = endOfMonth(currentMonth);
-  const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
+  // Build grid weeks
+  const weeks = useMemo(() => {
+    const monthStart = startOfMonth(currentMonth);
+    const monthEnd = endOfMonth(currentMonth);
+    const gridStart = startOfWeek(monthStart, { locale: ptBR });
+    const gridEnd = endOfWeek(monthEnd, { locale: ptBR });
+    const allDays = eachDayOfInterval({ start: gridStart, end: gridEnd });
+
+    const result: Date[][] = [];
+    for (let i = 0; i < allDays.length; i += 7) {
+      result.push(allDays.slice(i, i + 7));
+    }
+    return result;
+  }, [currentMonth]);
 
   const handleOpenIdeas = useCallback(async (event: SocialCalendarEvent) => {
     setSelectedEvent(event);
@@ -58,7 +79,7 @@ export function SocialCalendarMainView() {
   }, [userId]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Navigation */}
       <div className="flex items-center justify-between">
         <Button variant="outline" size="icon" onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}>
@@ -84,67 +105,108 @@ export function SocialCalendarMainView() {
       {isLoading ? (
         <div className="text-center py-8 text-muted-foreground animate-pulse text-sm">Carregando calendário...</div>
       ) : (
-        <div className="space-y-1 pb-16">
-          {days.map((day) => {
-            const dateKey = format(day, 'yyyy-MM-dd');
-            const dayEvents = eventsByDate[dateKey] ?? [];
-            const isToday = dateKey === format(new Date(), 'yyyy-MM-dd');
-            const hasEvents = dayEvents.length > 0;
-
-            return (
-              <div
-                key={dateKey}
-                className={cn(
-                  'border rounded-lg px-3 py-1.5 transition-colors',
-                  isToday ? 'border-primary/40 bg-primary/5' : 'border-border/50',
-                  !hasEvents && 'py-1 opacity-50'
-                )}
-              >
-                <div className="flex items-center gap-2">
-                  {/* Day number */}
-                  <div className={cn(
-                    'flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center font-semibold text-xs',
-                    isToday ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'
-                  )}>
-                    {format(day, 'd')}
-                  </div>
-
-                  {/* Day name */}
-                  <span className="text-xs text-muted-foreground capitalize w-16 shrink-0">
-                    {format(day, 'EEE', { locale: ptBR })}
-                  </span>
-
-                  {/* Events inline */}
-                  {!hasEvents ? (
-                    <span className="text-xs text-muted-foreground/40 italic">—</span>
-                  ) : (
-                    <div className="flex-1 min-w-0 flex flex-wrap items-center gap-x-4 gap-y-1">
-                      {dayEvents.map((ev) => (
-                        <div key={ev.id} className="flex items-center gap-1.5">
-                          <Badge
-                            variant="outline"
-                            className={cn('text-[10px] px-1.5 py-0 h-5 shrink-0', CATEGORY_COLORS[ev.category])}
-                          >
-                            {CATEGORY_LABELS[ev.category]}
-                          </Badge>
-                          <span className="text-xs font-medium truncate max-w-[200px]">{ev.title}</span>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 px-1.5 gap-0.5 text-[10px] shrink-0 text-muted-foreground hover:text-primary"
-                            onClick={() => handleOpenIdeas(ev)}
-                          >
-                            <Lightbulb className="h-3 w-3" />
-                            Ideias
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+        <div className="border rounded-lg overflow-hidden">
+          {/* Weekday headers */}
+          <div className="grid grid-cols-7 bg-muted/50">
+            {WEEKDAY_HEADERS.map((d) => (
+              <div key={d} className="text-center text-xs font-semibold text-muted-foreground py-2 border-b">
+                {d}
               </div>
-            );
-          })}
+            ))}
+          </div>
+
+          {/* Weeks */}
+          {weeks.map((week, wi) => (
+            <div key={wi} className="grid grid-cols-7">
+              {week.map((day) => {
+                const dateKey = format(day, 'yyyy-MM-dd');
+                const dayEvents = eventsByDate[dateKey] ?? [];
+                const inMonth = isSameMonth(day, currentMonth);
+                const today = isToday(day);
+                const visibleEvents = dayEvents.slice(0, MAX_VISIBLE_EVENTS);
+                const overflowCount = dayEvents.length - MAX_VISIBLE_EVENTS;
+
+                return (
+                  <div
+                    key={dateKey}
+                    className={cn(
+                      'min-h-[80px] border-b border-r p-1.5 flex flex-col gap-0.5 transition-colors',
+                      !inMonth && 'bg-muted/30',
+                      today && 'bg-primary/5',
+                    )}
+                  >
+                    {/* Day number */}
+                    <div className={cn(
+                      'w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold self-end',
+                      today && 'bg-primary text-primary-foreground',
+                      !today && inMonth && 'text-foreground',
+                      !today && !inMonth && 'text-muted-foreground/40',
+                    )}>
+                      {format(day, 'd')}
+                    </div>
+
+                    {/* Event badges – desktop */}
+                    <div className="hidden sm:flex flex-col gap-0.5 flex-1 min-w-0">
+                      {visibleEvents.map((ev) => (
+                        <button
+                          key={ev.id}
+                          onClick={() => handleOpenIdeas(ev)}
+                          className={cn(
+                            'text-[10px] leading-tight px-1.5 py-0.5 rounded border truncate text-left font-medium hover:opacity-80 transition-opacity',
+                            CATEGORY_COLORS[ev.category],
+                          )}
+                          title={ev.title}
+                        >
+                          {ev.title}
+                        </button>
+                      ))}
+
+                      {overflowCount > 0 && (
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <button className="text-[10px] text-muted-foreground hover:text-foreground font-medium text-left px-1">
+                              +{overflowCount} mais
+                            </button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-56 p-2 space-y-1" align="start">
+                            <p className="text-xs font-semibold text-muted-foreground mb-1">
+                              {format(day, "dd 'de' MMMM", { locale: ptBR })}
+                            </p>
+                            {dayEvents.map((ev) => (
+                              <button
+                                key={ev.id}
+                                onClick={() => handleOpenIdeas(ev)}
+                                className={cn(
+                                  'w-full text-xs px-2 py-1 rounded border truncate text-left font-medium hover:opacity-80 transition-opacity',
+                                  CATEGORY_COLORS[ev.category],
+                                )}
+                              >
+                                {ev.title}
+                              </button>
+                            ))}
+                          </PopoverContent>
+                        </Popover>
+                      )}
+                    </div>
+
+                    {/* Event dots – mobile */}
+                    {dayEvents.length > 0 && (
+                      <div className="flex sm:hidden gap-0.5 flex-wrap mt-auto">
+                        {dayEvents.slice(0, 4).map((ev) => (
+                          <button
+                            key={ev.id}
+                            onClick={() => handleOpenIdeas(ev)}
+                            className={cn('w-2 h-2 rounded-full', CATEGORY_DOT[ev.category])}
+                            title={ev.title}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
         </div>
       )}
 
