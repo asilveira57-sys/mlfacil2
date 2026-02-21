@@ -168,6 +168,7 @@ export function useStartOnboardingProgress() {
       const ip = await getUserIp();
       const ua = navigator.userAgent;
 
+      // Try to insert; if already exists, fetch the existing row
       const { data, error } = await supabase
         .from('onboarding_user_progress')
         .upsert({
@@ -190,6 +191,23 @@ export function useStartOnboardingProgress() {
         .maybeSingle();
 
       if (error) throw error;
+
+      // When ignoreDuplicates is true and row already exists, data is null.
+      // Fetch the existing progress row in that case.
+      if (data) return data;
+
+      const { data: existing, error: fetchErr } = await supabase
+        .from('onboarding_user_progress')
+        .select('*')
+        .eq('company_id', companyId)
+        .eq('seller_id', sellerId)
+        .eq('user_id', userId)
+        .eq('flow_id', flow.id)
+        .eq('flow_versao', flow.versao)
+        .maybeSingle();
+
+      if (fetchErr) throw fetchErr;
+      return existing;
 
       // Log timeline event: onboarding_started
       await supabase.from('timeline_events').insert({

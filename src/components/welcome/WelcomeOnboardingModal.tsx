@@ -195,7 +195,11 @@ export function WelcomeOnboardingModal({
     });
 
     if (isLast) {
-      if (!progressId) return;
+      if (!progressId) {
+        console.warn('[WelcomeOnboarding] progressId is null – closing modal as fallback');
+        onClose();
+        return;
+      }
       completeOnboarding.mutate(
         { progressId, flow, steps, userId, companyId, sellerId, payloadRespostas, startedAt },
         { onSuccess: onClose }
