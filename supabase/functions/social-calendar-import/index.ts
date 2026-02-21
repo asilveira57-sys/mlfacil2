@@ -91,6 +91,24 @@ const UN_INTERNATIONAL_DAYS = [
   { month: 12, day: 31, title: 'Réveillon', description: 'Virada do ano', tags: ['réveillon', 'ano-novo', 'celebração'] },
 ];
 
+// Feriados nacionais brasileiros (fallback quando a API não tem o ano)
+const BR_HOLIDAYS_FALLBACK = [
+  { month: 1, day: 1, localName: 'Confraternização Universal', name: "New Year's Day" },
+  { month: 2, day: 12, localName: 'Carnaval', name: 'Carnival' },
+  { month: 2, day: 13, localName: 'Carnaval', name: 'Carnival' },
+  { month: 4, day: 3, localName: 'Sexta-feira Santa', name: 'Good Friday' },
+  { month: 4, day: 5, localName: 'Páscoa', name: 'Easter Sunday' },
+  { month: 4, day: 21, localName: 'Tiradentes', name: 'Tiradentes' },
+  { month: 5, day: 1, localName: 'Dia do Trabalho', name: 'Labour Day' },
+  { month: 6, day: 4, localName: 'Corpus Christi', name: 'Corpus Christi' },
+  { month: 9, day: 7, localName: 'Independência do Brasil', name: 'Independence Day' },
+  { month: 10, day: 12, localName: 'Nossa Sra. Aparecida', name: 'Our Lady of Aparecida' },
+  { month: 11, day: 2, localName: 'Finados', name: "All Souls' Day" },
+  { month: 11, day: 15, localName: 'Proclamação da República', name: 'Republic Proclamation Day' },
+  { month: 11, day: 20, localName: 'Consciência Negra', name: 'Black Consciousness Day' },
+  { month: 12, day: 25, localName: 'Natal', name: 'Christmas Day' },
+];
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -145,25 +163,43 @@ Deno.serve(async (req) => {
       results.un_imported = unInserted;
     }
 
-    // ── B) Importar feriados Nager.Date ──
+    // ── B) Importar feriados ──
     if (action === 'import_holidays' || action === 'import_all') {
       const years = action === 'import_all' ? [year, year + 1] : [year];
       let holidayCount = 0;
 
       for (const y of years) {
-        const url = `https://date.nager.at/api/v3/PublicHolidays/${y}/${countryCode}`;
-        const resp = await fetch(url);
-        if (!resp.ok) {
-          console.error(`Nager API error: ${resp.status}`);
+        let holidays: Array<{ date: string; localName: string; name: string; countryCode: string }> = [];
+
+        // Tentar API Nager.Date primeiro
+        try {
+          const url = `https://date.nager.at/api/v3/PublicHolidays/${y}/${countryCode}`;
+          const resp = await fetch(url);
+          if (resp.ok) {
+            holidays = await resp.json();
+            console.log(`Nager API: ${holidays.length} feriados para ${y}/${countryCode}`);
+          } else {
+            console.warn(`Nager API retornou ${resp.status} para ${y}/${countryCode}, usando fallback`);
+          }
+        } catch (e) {
+          console.warn(`Nager API falhou: ${e}, usando fallback`);
+        }
+
+        // Fallback: feriados brasileiros hardcoded
+        if (holidays.length === 0 && countryCode === 'BR') {
+          console.log(`Usando feriados BR hardcoded para ${y}`);
+          holidays = BR_HOLIDAYS_FALLBACK.map((h) => ({
+            date: `${y}-${String(h.month).padStart(2, '0')}-${String(h.day).padStart(2, '0')}`,
+            localName: h.localName,
+            name: h.name,
+            countryCode: 'BR',
+          }));
+        }
+
+        if (holidays.length === 0) {
+          console.warn(`Nenhum feriado encontrado para ${y}/${countryCode}`);
           continue;
         }
-        const holidays = await resp.json() as Array<{
-          date: string;
-          localName: string;
-          name: string;
-          countryCode: string;
-          types: string[];
-        }>;
 
         const rows = holidays.map((h) => ({
           source: 'holiday_api',
@@ -184,7 +220,11 @@ Deno.serve(async (req) => {
               onConflict: 'source,event_date,title',
               ignoreDuplicates: true,
             });
-          if (!error) holidayCount += batch.length;
+          if (error) {
+            console.error(`Upsert error: ${error.message}`);
+          } else {
+            holidayCount += batch.length;
+          }
         }
       }
       results.holidays_imported = holidayCount;
