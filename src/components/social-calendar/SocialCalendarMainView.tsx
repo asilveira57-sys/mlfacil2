@@ -82,66 +82,65 @@ export function SocialCalendarMainView() {
       </div>
 
       {isLoading ? (
-        <div className="text-center py-16 text-muted-foreground animate-pulse">Carregando calendário...</div>
+        <div className="text-center py-8 text-muted-foreground animate-pulse text-sm">Carregando calendário...</div>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-1 pb-16">
           {days.map((day) => {
             const dateKey = format(day, 'yyyy-MM-dd');
             const dayEvents = eventsByDate[dateKey] ?? [];
             const isToday = dateKey === format(new Date(), 'yyyy-MM-dd');
+            const hasEvents = dayEvents.length > 0;
 
             return (
               <div
                 key={dateKey}
                 className={cn(
-                  'border rounded-xl p-3 transition-colors',
-                  isToday ? 'border-primary/40 bg-primary/5' : 'border-border bg-card',
-                  dayEvents.length === 0 && 'opacity-60'
+                  'border rounded-lg px-3 py-1.5 transition-colors',
+                  isToday ? 'border-primary/40 bg-primary/5' : 'border-border/50',
+                  !hasEvents && 'py-1 opacity-50'
                 )}
               >
-                <div className="flex items-start gap-3">
+                <div className="flex items-center gap-2">
                   {/* Day number */}
                   <div className={cn(
-                    'flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm',
-                    isToday ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                    'flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center font-semibold text-xs',
+                    isToday ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'
                   )}>
                     {format(day, 'd')}
                   </div>
 
-                  {/* Events for this day */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-muted-foreground mb-1 capitalize">
-                      {format(day, 'EEEE', { locale: ptBR })}
-                    </p>
-                    {dayEvents.length === 0 ? (
-                      <p className="text-xs text-muted-foreground/50 italic">Sem eventos</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {dayEvents.map((ev) => (
-                          <div key={ev.id} className="flex items-center justify-between gap-2 flex-wrap">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <Badge
-                                variant="outline"
-                                className={cn('text-xs shrink-0', CATEGORY_COLORS[ev.category])}
-                              >
-                                {CATEGORY_LABELS[ev.category]}
-                              </Badge>
-                              <span className="text-sm font-medium truncate">{ev.title}</span>
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 gap-1 text-xs shrink-0"
-                              onClick={() => handleOpenIdeas(ev)}
-                            >
-                              <Lightbulb className="h-3 w-3" />
-                              Ver ideias
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  {/* Day name */}
+                  <span className="text-xs text-muted-foreground capitalize w-16 shrink-0">
+                    {format(day, 'EEE', { locale: ptBR })}
+                  </span>
+
+                  {/* Events inline */}
+                  {!hasEvents ? (
+                    <span className="text-xs text-muted-foreground/40 italic">—</span>
+                  ) : (
+                    <div className="flex-1 min-w-0 flex flex-wrap items-center gap-x-4 gap-y-1">
+                      {dayEvents.map((ev) => (
+                        <div key={ev.id} className="flex items-center gap-1.5">
+                          <Badge
+                            variant="outline"
+                            className={cn('text-[10px] px-1.5 py-0 h-5 shrink-0', CATEGORY_COLORS[ev.category])}
+                          >
+                            {CATEGORY_LABELS[ev.category]}
+                          </Badge>
+                          <span className="text-xs font-medium truncate max-w-[200px]">{ev.title}</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-1.5 gap-0.5 text-[10px] shrink-0 text-muted-foreground hover:text-primary"
+                            onClick={() => handleOpenIdeas(ev)}
+                          >
+                            <Lightbulb className="h-3 w-3" />
+                            Ideias
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             );
