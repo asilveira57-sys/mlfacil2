@@ -1,101 +1,67 @@
 
-# Reorganizacao do Menu Lateral
+# Calendario Social em Grid
 
-## Problemas Identificados
+## O que muda
 
-1. **"Marketplace" como wrapper desnecessario** - adiciona um nivel de profundidade sem utilidade
-2. **Shopee e eliminado pela logica de poda** - o codigo remove grupos sem filhos com rotas, descartando o Shopee (coming_soon)
-3. **Menus abrem por padrao** - o estado inicial trata todos os grupos como abertos
-4. **Espacos vazios** - grupos podados parcialmente deixam lacunas visuais na renderizacao
+O layout atual e uma lista vertical de 28-31 linhas com scroll. Sera substituido por um **grid de calendario tradicional** (7 colunas x 5-6 linhas), onde cada celula representa um dia do mes. Dias com eventos mostram indicadores coloridos; ao clicar em um dia com eventos, abre o drawer de ideias.
 
-## Solucao
+## Como vai funcionar
 
-### 1. Alteracoes no Banco de Dados
+1. **Grid 7x6** - Dom a Sab em colunas, com os dias do mes preenchendo as celulas (incluindo dias do mes anterior/proximo para completar as semanas)
+2. **Celulas compactas** - Cada celula mostra o numero do dia e ate 2-3 badges de eventos. Se houver mais, mostra "+N"
+3. **Dia atual destacado** - Circulo com cor primaria no numero do dia
+4. **Clique no evento** - Abre o drawer lateral de ideias (comportamento atual preservado)
+5. **Dias sem eventos** - Celula mais discreta, sem badges
+6. **Popover ao clicar no dia** - Se o dia tem mais de um evento, mostra um popover listando todos antes de abrir o drawer
 
-- **Desativar "Marketplace"** (`is_active = false`) para remover o wrapper
-- **Promover "Mercado Livre" a raiz** (`parent_module_id = NULL`, `sort_order = 1`)
-- **Promover "Shopee" a raiz** (`parent_module_id = NULL`, `sort_order = 2`) com status `coming_soon`
-- **Criar submenu "Curva ABC" dentro do Shopee** como item filho com status `coming_soon`
-- **Reordenar os demais grupos raiz**: Operacional (3), Ferramentas (4), Sistema (5), Admin (6)
-
-Resultado da hierarquia:
+## Layout visual
 
 ```text
-Inicio (raiz, rota /inicio)
-Mercado Livre (raiz, grupo)
-  Painel
-    Dashboard
-  Vendas
-    Etiquetas de Envio
-  Anuncios
-    Linha do Tempo, Radiografia, Promocoes
-  Crescimento
-    ADS, Seed, Perguntas
-  Inteligencia
-    Tendencias, Mercado, Concorrencia, Curva ABC
-  Financeiro
-    Custos, Precificacao, Comissoes
-Shopee (raiz, grupo, coming_soon)
-  Curva ABC (coming_soon)
-Operacional (raiz, grupo)
-Ferramentas (raiz, grupo)
-Sistema (raiz, grupo)
-Admin (raiz, link direto)
+        Dom   Seg   Ter   Qua   Qui   Sex   Sab
+       +-----+-----+-----+-----+-----+-----+-----+
+  L1   | 26  | 27  | 28  | 29  | 30  | 31  |  1  |
+       |     |     |     |     |     |     |     |
+       +-----+-----+-----+-----+-----+-----+-----+
+  L2   |  2  |  3  |  4  |  5  |  6  |  7  |  8  |
+       |[Tem]|     |     |     |     |     |     |
+       +-----+-----+-----+-----+-----+-----+-----+
+  ...
+       +-----+-----+-----+-----+-----+-----+-----+
+  L5   | 23  | 24  | 25  | 26  | 27  | 28  |     |
+       |     |[Fer]|     |     |     |     |     |
+       +-----+-----+-----+-----+-----+-----+-----+
+
+  [Tem] = badge tematica    [Fer] = badge feriado
 ```
 
-### 2. Alteracoes no Codigo
+## Detalhes Tecnicos
 
-**Arquivo: `src/components/layout/DynamicSidebar.tsx`**
-- Alterar `isGroupOpen` para retornar `false` por padrao em vez de `true`
-- Linha atual: `openGroups[key] !== false` (aberto por padrao)
-- Nova logica: `openGroups[key] === true` (fechado por padrao)
+### Arquivo: `src/components/social-calendar/SocialCalendarMainView.tsx`
 
-**Arquivo: `src/hooks/useDynamicMenu.ts`**
-- Ajustar a funcao de poda (`prune`) para preservar grupos com status `coming_soon`, mesmo sem filhos com rotas
-- Logica atual remove qualquer no sem rota e sem filhos
-- Nova logica: manter nos com `status === 'coming_soon'` independente de filhos
+Reescrever o componente mantendo:
+- Hooks existentes (`useCalendarEvents`, `useCalendarPreferences`, `useCurrentUser`)
+- Navegacao mes anterior/proximo
+- Legenda de categorias
+- Drawer de ideias (`SocialCalendarIdeasDrawer`)
 
-### Detalhes Tecnicos
+Substituir a lista vertical por:
 
-**SQL de migracao:**
-```sql
--- Desativar Marketplace
-UPDATE system_modules SET is_active = false
-WHERE id = 'b0000000-0000-0000-0000-000000000001';
+1. **Calcular grid de semanas** usando `startOfWeek` e `endOfWeek` do `date-fns` para gerar 5-6 semanas completas (incluindo dias de padding do mes anterior/proximo)
+2. **Cabecalho** com dias da semana (Dom-Sab) usando `locale: ptBR`
+3. **Grid CSS** com `grid-cols-7` e altura minima por celula (`min-h-[80px]`)
+4. **Dentro de cada celula:**
+   - Numero do dia (destaque se hoje, opacidade reduzida se fora do mes)
+   - Ate 2 badges de eventos clicaveis (mostrando titulo truncado + cor da categoria)
+   - Indicador "+N" se houver mais de 2 eventos
+5. **Ao clicar em um badge de evento** - abre diretamente o drawer de ideias (mesmo comportamento atual)
+6. **Ao clicar no "+N"** - abre um Popover com a lista completa dos eventos do dia, cada um clicavel
 
--- Mercado Livre como raiz
-UPDATE system_modules
-SET parent_module_id = NULL, sort_order = 1
-WHERE id = 'b0000000-0000-0000-0000-000000000100';
+### Novas importacoes necessarias
 
--- Shopee como raiz
-UPDATE system_modules
-SET parent_module_id = NULL, sort_order = 2
-WHERE id = 'b0000000-0000-0000-0000-000000000200';
+- `startOfWeek`, `endOfWeek`, `isSameDay`, `isToday`, `getDay` do `date-fns`
+- `Popover`, `PopoverTrigger`, `PopoverContent` do `@radix-ui/react-popover` (ja instalado)
 
--- Criar Curva ABC dentro de Shopee
-INSERT INTO system_modules (id, key, name, layer, parent_module_id, sort_order, icon_key, route, is_active, status)
-VALUES ('b0000000-0000-0000-0000-000000000201', 'shopee.abc', 'Curva ABC', 'marketplace', 'b0000000-0000-0000-0000-000000000200', 1, 'BarChart3', NULL, true, 'coming_soon');
+### Responsividade
 
--- Reordenar raizes
-UPDATE system_modules SET sort_order = 3 WHERE id = 'c0000000-0000-0000-0000-000000000001'; -- Operacional
-UPDATE system_modules SET sort_order = 4 WHERE id = 'd0000000-0000-0000-0000-000000000001'; -- Ferramentas
-UPDATE system_modules SET sort_order = 5 WHERE id = 'e0000000-0000-0000-0000-000000000001'; -- Sistema
-UPDATE system_modules SET sort_order = 6 WHERE id = 'a0000000-0000-0000-0000-000000000001'; -- Admin
-```
-
-**Alteracao em `DynamicSidebar.tsx`** (1 linha):
-```typescript
-// De:
-const isGroupOpen = (key: string) => openGroups[key] !== false;
-// Para:
-const isGroupOpen = (key: string) => openGroups[key] === true;
-```
-
-**Alteracao em `useDynamicMenu.ts`** (funcao prune):
-```typescript
-// De:
-if (!n.route && n.children.length === 0) return false;
-// Para:
-if (!n.route && n.children.length === 0 && n.status !== 'coming_soon') return false;
-```
+- Em telas pequenas (mobile), as celulas reduzem para mostrar apenas o numero e um dot colorido indicando eventos
+- A legenda permanece acima do grid
