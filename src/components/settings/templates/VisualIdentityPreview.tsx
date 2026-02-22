@@ -76,10 +76,12 @@ export function CombinedPreview({
   resolvedTokens,
   group,
   intensity,
+  overlayUrl,
 }: {
   resolvedTokens: DesignTokens;
   group: VisualGroup | null;
   intensity: number;
+  overlayUrl?: string | null;
 }) {
   const bg = (resolvedTokens as any).background || '0 0% 100%';
   const card = (resolvedTokens as any).card || bg;
@@ -110,11 +112,11 @@ export function CombinedPreview({
       )}
 
       {/* Image overlay */}
-      {group?.imagem_overlay_url && (
+      {(group?.imagem_overlay_url || overlayUrl) && (
         <div
           className="absolute inset-0 pointer-events-none z-0 transition-opacity duration-500"
           style={{
-            backgroundImage: `url(${group.imagem_overlay_url})`,
+            backgroundImage: `url(${group?.imagem_overlay_url || overlayUrl})`,
             backgroundSize: 'cover',
             backgroundPosition: 'center',
             opacity: opacityValue * 0.5,

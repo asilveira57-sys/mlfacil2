@@ -158,7 +158,9 @@ function CategoryGroupsManager() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-visual-category-groups'] });
-      toast.success('Grupo atualizado');
+      queryClient.invalidateQueries({ queryKey: ['templates'] });
+      queryClient.invalidateQueries({ queryKey: ['theme-resolver'] });
+      toast.success('Grupo atualizado (template sincronizado)');
     },
   });
 
@@ -172,7 +174,9 @@ function CategoryGroupsManager() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-visual-category-groups'] });
-      toast.success('Grupo salvo');
+      queryClient.invalidateQueries({ queryKey: ['templates'] });
+      queryClient.invalidateQueries({ queryKey: ['theme-resolver'] });
+      toast.success('Grupo salvo (template sincronizado)');
     },
   });
 
@@ -239,6 +243,12 @@ function CategoryGroupsManager() {
                       : 'Nenhuma categoria mapeada'}
                   </p>
                 </div>
+                {/* Sync indicator */}
+                {group.ativo && (
+                  <p className="text-[10px] text-primary/70 mt-0.5">
+                    🔗 Sincronizado com template de aparência
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <Badge variant={group.ativo ? 'default' : 'secondary'} className="text-xs">

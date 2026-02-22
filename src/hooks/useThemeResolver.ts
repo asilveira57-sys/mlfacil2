@@ -107,9 +107,13 @@ function resolveTheme(
         break;
 
       case 'category':
-        if (category_key && rule.category_key === category_key && !baseRule) {
-          baseRule = rule;
-          chain.push(`Categoria: ${category_key} (prioridade ${rule.priority})`);
+        if (!baseRule && category_key) {
+          const matchesByKey = rule.category_key === category_key;
+          const matchesByMLB = rule.match_categories?.length > 0 && rule.match_categories.includes(category_key);
+          if (matchesByKey || matchesByMLB) {
+            baseRule = rule;
+            chain.push(`Categoria: ${rule.category_key || category_key} (prioridade ${rule.priority})${matchesByMLB ? ' [MLB]' : ''}`);
+          }
         }
         break;
 
@@ -140,6 +144,8 @@ function resolveTheme(
         start_day: null,
         end_month: null,
         end_day: null,
+        match_categories: [],
+        source_group_id: null,
         priority: 9999,
         is_enabled: true,
         created_at: '',

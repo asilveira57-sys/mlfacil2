@@ -138,6 +138,11 @@ export function TemplatesList({ onEdit }: TemplatesListProps) {
                             Sistema
                           </Badge>
                         )}
+                        {(template as any).source_group_id && (
+                          <Badge variant="outline" className="text-[10px] gap-1 border-primary/30 text-primary">
+                            🔗 Auto (Admin)
+                          </Badge>
+                        )}
                       </div>
                       {template.description && (
                         <p className="text-xs text-muted-foreground line-clamp-1">

@@ -15382,6 +15382,10 @@ export type Database = {
         Args: { p_plan_code?: string; p_user_id: string }
         Returns: string
       }
+      sync_visual_group_to_templates: {
+        Args: { p_group_id: string }
+        Returns: Json
+      }
       track_module_usage: {
         Args: {
           p_is_action?: boolean
