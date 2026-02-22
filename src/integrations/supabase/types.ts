@@ -2265,6 +2265,30 @@ export type Database = {
           },
         ]
       }
+      br_estados: {
+        Row: {
+          codigo_uf: number
+          created_at: string
+          nome: string
+          regiao: string | null
+          uf: string
+        }
+        Insert: {
+          codigo_uf: number
+          created_at?: string
+          nome: string
+          regiao?: string | null
+          uf: string
+        }
+        Update: {
+          codigo_uf?: number
+          created_at?: string
+          nome?: string
+          regiao?: string | null
+          uf?: string
+        }
+        Relationships: []
+      }
       br_feriados: {
         Row: {
           ano: number
@@ -2300,6 +2324,44 @@ export type Database = {
           uf?: string | null
         }
         Relationships: []
+      }
+      br_municipios: {
+        Row: {
+          capital: boolean
+          codigo_ibge: number
+          created_at: string
+          ddd: number | null
+          fuso_horario: string | null
+          nome: string
+          uf: string
+        }
+        Insert: {
+          capital?: boolean
+          codigo_ibge: number
+          created_at?: string
+          ddd?: number | null
+          fuso_horario?: string | null
+          nome: string
+          uf: string
+        }
+        Update: {
+          capital?: boolean
+          codigo_ibge?: number
+          created_at?: string
+          ddd?: number | null
+          fuso_horario?: string | null
+          nome?: string
+          uf?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "br_municipios_uf_fkey"
+            columns: ["uf"]
+            isOneToOne: false
+            referencedRelation: "br_estados"
+            referencedColumns: ["uf"]
+          },
+        ]
       }
       category_attribute_requirements: {
         Row: {
