@@ -2265,6 +2265,42 @@ export type Database = {
           },
         ]
       }
+      br_feriados: {
+        Row: {
+          ano: number
+          codigo_ibge: number | null
+          created_at: string
+          data: string
+          descricao: string | null
+          id: string
+          nome: string
+          tipo: string
+          uf: string | null
+        }
+        Insert: {
+          ano: number
+          codigo_ibge?: number | null
+          created_at?: string
+          data: string
+          descricao?: string | null
+          id?: string
+          nome: string
+          tipo: string
+          uf?: string | null
+        }
+        Update: {
+          ano?: number
+          codigo_ibge?: number | null
+          created_at?: string
+          data?: string
+          descricao?: string | null
+          id?: string
+          nome?: string
+          tipo?: string
+          uf?: string | null
+        }
+        Relationships: []
+      }
       category_attribute_requirements: {
         Row: {
           allowed_units: Json | null
@@ -12045,6 +12081,7 @@ export type Database = {
       }
       social_calendar_user_preferences: {
         Row: {
+          codigo_ibge: number | null
           country_code: string
           created_at: string
           id: string
@@ -12052,10 +12089,12 @@ export type Database = {
           preferred_formats: Json | null
           selected_niches: Json | null
           seller_id: string | null
+          uf: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
+          codigo_ibge?: number | null
           country_code?: string
           created_at?: string
           id?: string
@@ -12063,10 +12102,12 @@ export type Database = {
           preferred_formats?: Json | null
           selected_niches?: Json | null
           seller_id?: string | null
+          uf?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
+          codigo_ibge?: number | null
           country_code?: string
           created_at?: string
           id?: string
@@ -12074,6 +12115,7 @@ export type Database = {
           preferred_formats?: Json | null
           selected_niches?: Json | null
           seller_id?: string | null
+          uf?: string | null
           updated_at?: string
           user_id?: string
         }
