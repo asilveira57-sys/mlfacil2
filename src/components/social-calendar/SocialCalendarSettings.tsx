@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import {
@@ -9,7 +9,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 import { useCalendarPreferences, useSaveCalendarPreferences, UserPreferences } from '@/hooks/useSocialCalendar';
+import { useBrEstados, useBrMunicipios } from '@/hooks/useBrLocation';
 import { toast } from 'sonner';
 
 const NICHES = [
@@ -37,34 +39,46 @@ const OBJECTIVES = [
   { value: 'marca', label: '🏷️ Marca' },
 ];
 
-const COUNTRIES = [
-  { value: 'BR', label: '🇧🇷 Brasil' },
-  { value: 'AR', label: '🇦🇷 Argentina' },
-  { value: 'MX', label: '🇲🇽 México' },
-  { value: 'CO', label: '🇨🇴 Colômbia' },
-  { value: 'CL', label: '🇨🇱 Chile' },
-];
-
 export function SocialCalendarSettings() {
   const { data: prefs, isLoading } = useCalendarPreferences();
   const save = useSaveCalendarPreferences();
 
-  const [country, setCountry] = useState('BR');
+  // Location data
+  const { data: estados = [] } = useBrEstados();
+  const [uf, setUf] = useState<string>('');
+  const [codigoIbge, setCodigoIbge] = useState<number | null>(null);
+  const [munSearch, setMunSearch] = useState('');
+  const { data: municipios = [], isLoading: loadingMunicipios } = useBrMunicipios(uf || null);
+
   const [niches, setNiches] = useState<string[]>(['geral']);
   const [formats, setFormats] = useState<string[]>(['feed', 'stories']);
   const [objective, setObjective] = useState('engajamento');
 
   useEffect(() => {
     if (prefs) {
-      setCountry(prefs.country_code ?? 'BR');
+      setUf((prefs as any).uf ?? '');
+      setCodigoIbge((prefs as any).codigo_ibge ?? null);
       setNiches((prefs.selected_niches as string[]) ?? ['geral']);
       setFormats((prefs.preferred_formats as string[]) ?? ['feed', 'stories']);
       setObjective(prefs.objective ?? 'engajamento');
     }
   }, [prefs]);
 
+  // Filter municipios by search
+  const filteredMunicipios = useMemo(() => {
+    if (!munSearch.trim()) return municipios;
+    const term = munSearch.toLowerCase();
+    return municipios.filter((m) => m.nome.toLowerCase().includes(term));
+  }, [municipios, munSearch]);
+
   const toggleItem = (list: string[], setList: (v: string[]) => void, value: string) => {
     setList(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
+  };
+
+  const handleUfChange = (newUf: string) => {
+    setUf(newUf);
+    setCodigoIbge(null);
+    setMunSearch('');
   };
 
   const handleSave = () => {
@@ -77,32 +91,76 @@ export function SocialCalendarSettings() {
       return;
     }
     save.mutate({
-      country_code: country,
+      country_code: 'BR',
       selected_niches: niches,
       preferred_formats: formats,
       objective,
-    });
+      uf: uf || null,
+      codigo_ibge: codigoIbge,
+    } as any);
   };
 
   if (isLoading) return <div className="text-muted-foreground animate-pulse py-8 text-center">Carregando...</div>;
 
+  const selectedMunName = municipios.find((m) => m.codigo_ibge === codigoIbge)?.nome;
+
   return (
     <div className="max-w-lg space-y-6">
-      {/* Country */}
+      {/* Estado */}
       <div className="space-y-2">
-        <Label>País</Label>
-        <Select value={country} onValueChange={setCountry}>
+        <Label>Estado</Label>
+        <Select value={uf} onValueChange={handleUfChange}>
           <SelectTrigger>
-            <SelectValue />
+            <SelectValue placeholder="Selecione seu estado" />
           </SelectTrigger>
           <SelectContent>
-            {COUNTRIES.map((c) => (
-              <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+            {estados.map((e) => (
+              <SelectItem key={e.uf} value={e.uf}>{e.nome}</SelectItem>
             ))}
           </SelectContent>
         </Select>
-        <p className="text-xs text-muted-foreground">Usado para carregar feriados oficiais.</p>
+        <p className="text-xs text-muted-foreground">Feriados estaduais serão exibidos no calendário.</p>
       </div>
+
+      {/* Município */}
+      {uf && (
+        <div className="space-y-2">
+          <Label>Município</Label>
+          <Input
+            placeholder="Buscar município..."
+            value={munSearch}
+            onChange={(e) => setMunSearch(e.target.value)}
+            className="mb-1"
+          />
+          {loadingMunicipios ? (
+            <p className="text-xs text-muted-foreground animate-pulse">Carregando municípios...</p>
+          ) : (
+            <Select
+              value={codigoIbge ? String(codigoIbge) : ''}
+              onValueChange={(v) => setCodigoIbge(v ? Number(v) : null)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione seu município">
+                  {selectedMunName || 'Selecione seu município'}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent className="max-h-60">
+                {filteredMunicipios.slice(0, 100).map((m) => (
+                  <SelectItem key={m.codigo_ibge} value={String(m.codigo_ibge)}>
+                    {m.nome}{m.capital ? ' ⭐' : ''}
+                  </SelectItem>
+                ))}
+                {filteredMunicipios.length > 100 && (
+                  <div className="px-2 py-1 text-xs text-muted-foreground">
+                    Mostrando 100 de {filteredMunicipios.length}. Use a busca para filtrar.
+                  </div>
+                )}
+              </SelectContent>
+            </Select>
+          )}
+          <p className="text-xs text-muted-foreground">Feriados municipais serão exibidos no calendário.</p>
+        </div>
+      )}
 
       {/* Niches */}
       <div className="space-y-2">

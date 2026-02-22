@@ -1,9 +1,8 @@
 import { useState, useCallback, useMemo } from 'react';
-import { format, startOfMonth, endOfMonth, addMonths, subMonths, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isToday, isSameDay } from 'date-fns';
+import { format, startOfMonth, endOfMonth, addMonths, subMonths, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isToday } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, Lightbulb } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import {
@@ -13,6 +12,7 @@ import {
   logCalendarEngagement,
   SocialCalendarEvent,
 } from '@/hooks/useSocialCalendar';
+import { useBrFeriados, BrFeriado } from '@/hooks/useBrLocation';
 import { SocialCalendarIdeasDrawer } from './SocialCalendarIdeasDrawer';
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -39,6 +39,23 @@ const CATEGORY_LABELS: Record<string, string> = {
 const WEEKDAY_HEADERS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const MAX_VISIBLE_EVENTS = 2;
 
+/** Convert BrFeriado to SocialCalendarEvent for display */
+function feriadoToEvent(f: BrFeriado): SocialCalendarEvent {
+  return {
+    id: f.id,
+    source: 'br_feriados',
+    country_code: 'BR',
+    event_date: f.data,
+    title: f.nome,
+    description: f.descricao,
+    tags: [f.tipo.toLowerCase()],
+    category: 'feriado',
+    is_active: true,
+    created_at: '',
+    updated_at: '',
+  };
+}
+
 export function SocialCalendarMainView() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedEvent, setSelectedEvent] = useState<SocialCalendarEvent | null>(null);
@@ -47,15 +64,36 @@ export function SocialCalendarMainView() {
 
   const { data: preferences } = useCalendarPreferences();
   const countryCode = preferences?.country_code ?? 'BR';
+  const userUf = (preferences as any)?.uf as string | null | undefined;
+  const userCodigoIbge = (preferences as any)?.codigo_ibge as number | null | undefined;
+
   const { data: events = [], isLoading } = useCalendarEvents(currentMonth, countryCode);
+  const { data: brFeriados = [] } = useBrFeriados(currentMonth, userUf, userCodigoIbge);
+
+  // Merge events + feriados BR, deduplicate by title+date
+  const allEvents = useMemo(() => {
+    const feriadoEvents = brFeriados.map(feriadoToEvent);
+    const merged = [...events];
+    const existingKeys = new Set(events.map((e) => `${e.event_date}|${e.title.toLowerCase()}`));
+
+    for (const fe of feriadoEvents) {
+      const key = `${fe.event_date}|${fe.title.toLowerCase()}`;
+      if (!existingKeys.has(key)) {
+        merged.push(fe);
+        existingKeys.add(key);
+      }
+    }
+
+    return merged.sort((a, b) => a.event_date.localeCompare(b.event_date));
+  }, [events, brFeriados]);
 
   // Group events by date
-  const eventsByDate = useMemo(() => events.reduce<Record<string, SocialCalendarEvent[]>>((acc, ev) => {
+  const eventsByDate = useMemo(() => allEvents.reduce<Record<string, SocialCalendarEvent[]>>((acc, ev) => {
     const key = ev.event_date;
     if (!acc[key]) acc[key] = [];
     acc[key].push(ev);
     return acc;
-  }, {}), [events]);
+  }, {}), [allEvents]);
 
   // Build grid weeks
   const weeks = useMemo(() => {
