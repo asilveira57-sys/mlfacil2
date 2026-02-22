@@ -88,6 +88,8 @@ export function TemplateRulesPanel() {
       start_day: seasonal?.start_day ?? null,
       end_month: seasonal?.end_month ?? null,
       end_day: seasonal?.end_day ?? null,
+      match_categories: [],
+      source_group_id: null,
       is_enabled: true,
     }, {
       onSuccess: () => resetForm(),
@@ -260,45 +262,62 @@ export function TemplateRulesPanel() {
             </div>
           ) : (
             <div className="space-y-2">
-              {rules.map(rule => (
-                <div
-                  key={rule.id}
-                  className="flex items-center gap-3 p-3 border rounded-lg bg-card"
-                >
-                  <div className="bg-primary/10 rounded-md px-2 py-1 text-xs font-mono font-bold text-primary min-w-[40px] text-center">
-                    {rule.priority}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Badge variant="secondary" className="text-[10px]">
-                        {RULE_LABELS[rule.rule_type as RuleType] || rule.rule_type}
-                      </Badge>
-                      {rule.category_key && (
-                        <Badge variant="outline" className="text-[10px]">cat: {rule.category_key}</Badge>
-                      )}
-                      {rule.subcategory_key && (
-                        <Badge variant="outline" className="text-[10px]">sub: {rule.subcategory_key}</Badge>
-                      )}
-                      {rule.seasonal_key && (
-                        <Badge variant="outline" className="text-[10px]">
-                          {SEASONAL_PRESETS[rule.seasonal_key]?.emoji} {rule.seasonal_key}
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1 truncate">
-                      Template: {(rule as any).template?.name || rule.template_id}
-                    </p>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-destructive/70 hover:text-destructive"
-                    onClick={() => setDeleteId(rule.id)}
+              {rules.map(rule => {
+                const isAdminManaged = !!(rule as any).source_group_id;
+                return (
+                  <div
+                    key={rule.id}
+                    className={`flex items-center gap-3 p-3 border rounded-lg bg-card ${isAdminManaged ? 'border-primary/20 bg-primary/5' : ''}`}
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              ))}
+                    <div className="bg-primary/10 rounded-md px-2 py-1 text-xs font-mono font-bold text-primary min-w-[40px] text-center">
+                      {rule.priority}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge variant="secondary" className="text-[10px]">
+                          {RULE_LABELS[rule.rule_type as RuleType] || rule.rule_type}
+                        </Badge>
+                        {isAdminManaged && (
+                          <Badge variant="outline" className="text-[10px] border-primary/30 text-primary">
+                            🔗 Admin
+                          </Badge>
+                        )}
+                        {rule.category_key && (
+                          <Badge variant="outline" className="text-[10px]">cat: {rule.category_key}</Badge>
+                        )}
+                        {(rule as any).match_categories?.length > 0 && (
+                          <Badge variant="outline" className="text-[10px]">
+                            MLB: {(rule as any).match_categories.slice(0, 3).join(', ')}{(rule as any).match_categories.length > 3 ? '...' : ''}
+                          </Badge>
+                        )}
+                        {rule.subcategory_key && (
+                          <Badge variant="outline" className="text-[10px]">sub: {rule.subcategory_key}</Badge>
+                        )}
+                        {rule.seasonal_key && (
+                          <Badge variant="outline" className="text-[10px]">
+                            {SEASONAL_PRESETS[rule.seasonal_key]?.emoji} {rule.seasonal_key}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1 truncate">
+                        Template: {(rule as any).template?.name || rule.template_id}
+                      </p>
+                    </div>
+                    {isAdminManaged ? (
+                      <Badge variant="secondary" className="text-[10px] shrink-0">Somente leitura</Badge>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive/70 hover:text-destructive"
+                        onClick={() => setDeleteId(rule.id)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </CardContent>

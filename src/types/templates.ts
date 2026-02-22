@@ -3,12 +3,14 @@
 export interface Template {
   id: string;
   name: string;
+  slug: string | null;
   description: string | null;
   is_system_default: boolean;
   is_active: boolean;
   scope: TemplateScope;
   owner_workspace_id: string | null;
   created_by: string | null;
+  source_group_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -21,6 +23,9 @@ export interface TemplateVariant {
   variant_key: string; // 'light' | 'dark' | 'compact' | 'spacious'
   design_tokens: DesignTokens;
   preview_image_url: string | null;
+  overlay_url: string | null;
+  overlay_opacity: number;
+  intensity: number;
   created_at: string;
   updated_at: string;
 }
@@ -90,6 +95,8 @@ export interface TemplateRule {
   start_day: number | null;
   end_month: number | null;
   end_day: number | null;
+  match_categories: string[];
+  source_group_id: string | null;
   priority: number;
   is_enabled: boolean;
   created_at: string;

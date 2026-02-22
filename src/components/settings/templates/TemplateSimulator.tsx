@@ -47,8 +47,15 @@ function resolveForSimulator(
       baseRule = rule; chain.push(`Default global (p${rule.priority})`);
     } else if (rule.rule_type === 'subcategory' && subcategory_key && rule.subcategory_key === subcategory_key && !baseRule) {
       baseRule = rule; chain.push(`Subcategoria: ${subcategory_key} (p${rule.priority})`);
-    } else if (rule.rule_type === 'category' && category_key && rule.category_key === category_key && !baseRule) {
-      baseRule = rule; chain.push(`Categoria: ${category_key} (p${rule.priority})`);
+    } else if (rule.rule_type === 'category' && !baseRule) {
+      // Match by category_key OR by match_categories (MLB codes)
+      const matchesByKey = category_key && rule.category_key === category_key;
+      const matchesByMLB = category_key && (rule as any).match_categories?.length > 0 && 
+        (rule as any).match_categories.includes(category_key);
+      if (matchesByKey || matchesByMLB) {
+        baseRule = rule; 
+        chain.push(`Categoria: ${rule.category_key || category_key} (p${rule.priority})${matchesByMLB ? ' [MLB match]' : ''}`);
+      }
     } else if (rule.rule_type === 'seasonal' && !seasonalRule && isDateInRange(current_date, rule.start_month, rule.start_day, rule.end_month, rule.end_day)) {
       seasonalRule = rule; chain.push(`Sazonal: ${rule.seasonal_key}`);
     }
@@ -83,6 +90,10 @@ function resolveForSimulator(
     }
   }
 
+  // Get overlay info from resolved variant
+  const variantOverlayUrl = baseVar ? (baseVar as any).overlay_url : null;
+  const variantIntensity = baseVar ? (baseVar as any).intensity || 4 : 4;
+
   return {
     template: baseTpl,
     variant: baseVar,
@@ -91,6 +102,9 @@ function resolveForSimulator(
     seasonal_key: seasonalRule?.seasonal_key,
     chain,
     source: chain[0] || 'Não resolvido',
+    overlay_url: variantOverlayUrl,
+    overlay_intensity: variantIntensity,
+    source_group_id: baseRule?.source_group_id,
   };
 }
 
@@ -141,10 +155,23 @@ export function TemplateSimulator() {
     );
   }, [data, companyId, categoryKey, subcategoryKey, simDate, isDark]);
 
-  const selectedGroup = useMemo(() => {
-    if (!data || visualGroupSlug === 'none') return null;
-    return data.visualGroups.find(g => g.slug === visualGroupSlug) ?? null;
-  }, [data, visualGroupSlug]);
+  // Auto-select visual group when resolver matches a category with source_group_id
+  const effectiveGroup = useMemo(() => {
+    if (visualGroupSlug !== 'none' && data) {
+      return data.visualGroups.find(g => g.slug === visualGroupSlug) ?? null;
+    }
+    // Auto-detect from resolved result if it has a source_group_id
+    if (result?.source_group_id && data) {
+      return data.visualGroups.find(g => {
+        // Match by checking template's source_group_id
+        const matchingTemplate = data.templates.find(t => t.source_group_id === result.source_group_id);
+        return matchingTemplate && g.slug === matchingTemplate.slug?.replace('cat-', '');
+      }) ?? null;
+    }
+    return null;
+  }, [data, visualGroupSlug, result]);
+
+  const effectiveIntensity = visualGroupSlug !== 'none' ? visualIntensity : (result?.overlay_intensity || 4);
 
   return (
     <div className="space-y-6">
@@ -291,8 +318,9 @@ export function TemplateSimulator() {
               {result.resolved_tokens && (
                 <CombinedPreview
                   resolvedTokens={result.resolved_tokens}
-                  group={selectedGroup}
-                  intensity={visualIntensity}
+                  group={effectiveGroup}
+                  intensity={effectiveIntensity}
+                  overlayUrl={result.overlay_url}
                 />
               )}
             </div>
