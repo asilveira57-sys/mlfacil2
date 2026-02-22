@@ -6970,6 +6970,45 @@ export type Database = {
           },
         ]
       }
+      module_explanatory_cards: {
+        Row: {
+          ativo: boolean
+          conteudo: Json
+          created_at: string
+          id: string
+          module_slug: string
+          obrigatorio: boolean
+          ordem: number
+          tipo: string
+          titulo: string
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          conteudo?: Json
+          created_at?: string
+          id?: string
+          module_slug: string
+          obrigatorio?: boolean
+          ordem?: number
+          tipo: string
+          titulo: string
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          conteudo?: Json
+          created_at?: string
+          id?: string
+          module_slug?: string
+          obrigatorio?: boolean
+          ordem?: number
+          tipo?: string
+          titulo?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       module_feedback: {
         Row: {
           comment: string | null
@@ -14141,6 +14180,39 @@ export type Database = {
           tema_preferido?: string | null
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      user_module_card_views: {
+        Row: {
+          created_at: string
+          id: string
+          ip_address: string | null
+          module_slug: string
+          user_agent: string | null
+          user_id: string
+          visualizado: boolean
+          visualizado_em: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          ip_address?: string | null
+          module_slug: string
+          user_agent?: string | null
+          user_id: string
+          visualizado?: boolean
+          visualizado_em?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          ip_address?: string | null
+          module_slug?: string
+          user_agent?: string | null
+          user_id?: string
+          visualizado?: boolean
+          visualizado_em?: string | null
         }
         Relationships: []
       }

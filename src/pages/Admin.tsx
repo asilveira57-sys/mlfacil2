@@ -5,7 +5,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   LayoutDashboard, Rocket, Users, Shield, CreditCard, Receipt, FileText, 
   Search, Plug, Settings, Tags, Link2, FileStack, Globe, Menu, Star,
-  ClipboardList, History, Palette, Radio, CalendarDays, Sparkles,
+  ClipboardList, History, Palette, Radio, CalendarDays, Sparkles, Eye,
 } from 'lucide-react';
 import { AdminDashboard } from './admin/AdminDashboard';
 import { AdminOnboarding } from './admin/AdminOnboarding';
@@ -29,6 +29,7 @@ import { AdminVisualIdentity } from '@/components/admin/AdminVisualIdentity';
 import { AdminCanalOficial } from './admin/AdminCanalOficial';
 import { AdminSocialCalendar } from './admin/AdminSocialCalendar';
 import { AdminConsultantTips } from './admin/AdminConsultantTips';
+import { AdminExplanatoryCards } from './admin/AdminExplanatoryCards';
 
 const adminTabs = [
   { id: '', label: 'Dashboard', icon: LayoutDashboard },
@@ -56,6 +57,7 @@ const adminTabs = [
   { id: 'retrospectiva', label: 'Retrospectiva', icon: History },
   { id: 'logs', label: 'Auditoria', icon: ClipboardList },
   { id: 'identidade-visual', label: 'Identidade Visual', icon: Palette },
+  { id: 'cards-explicativos', label: 'Cards Explicativos', icon: Eye },
 ];
 
 export default function Admin() {
@@ -123,6 +125,7 @@ export default function Admin() {
           <Route path="logs" element={<AdminAuditPlaceholder />} />
           <Route path="identidade-visual" element={<AdminVisualIdentity />} />
           <Route path="dica-consultor" element={<AdminConsultantTips />} />
+          <Route path="cards-explicativos" element={<AdminExplanatoryCards />} />
         </Routes>
       </div>
     </PageContainer>

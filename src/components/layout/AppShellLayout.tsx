@@ -17,6 +17,7 @@ import { FloatingSupportButton } from "@/components/support/FloatingSupportButto
 import { HeaderUtilities } from "@/components/utilities";
 import { ModuleNotesOverlay } from "@/components/notes";
 import { useUtilitiesPreferences } from "@/hooks/useUtilitiesPreferences";
+import { GlobalExplanatoryCardGate } from "@/components/explanatory-cards/GlobalExplanatoryCardGate";
 
 // Context for page-level header customization
 interface PageHeaderContextType {
@@ -139,6 +140,7 @@ export function AppShellLayout() {
             <main className="flex-1 overflow-auto relative">
               <Outlet />
               <ModuleNotesOverlay companyId={sellerId} />
+              <GlobalExplanatoryCardGate />
             </main>
           </SidebarInset>
           <FloatingSupportButton visible={utilitiesPrefs.showSupportButton} />
