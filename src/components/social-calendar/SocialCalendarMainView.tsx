@@ -79,7 +79,7 @@ export function SocialCalendarMainView() {
   }, [userId]);
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 max-w-4xl mx-auto">
       {/* Navigation */}
       <div className="flex items-center justify-between">
         <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}>
@@ -130,7 +130,7 @@ export function SocialCalendarMainView() {
                   <div
                     key={dateKey}
                     className={cn(
-                      'min-h-[56px] border-b border-r p-1 flex flex-col gap-0.5 transition-colors',
+                      'min-h-[44px] border-b border-r p-0.5 flex flex-col gap-0.5 transition-colors',
                       !inMonth && 'bg-muted/30',
                       today && 'bg-primary/5',
                     )}
