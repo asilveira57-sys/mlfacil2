@@ -11147,6 +11147,50 @@ export type Database = {
         }
         Relationships: []
       }
+      seller_visual_preferences: {
+        Row: {
+          allow_category: boolean
+          allow_seasonal: boolean
+          created_at: string
+          fixed_template_id: string | null
+          mode: string
+          preferred_intensity: number
+          seller_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          allow_category?: boolean
+          allow_seasonal?: boolean
+          created_at?: string
+          fixed_template_id?: string | null
+          mode?: string
+          preferred_intensity?: number
+          seller_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          allow_category?: boolean
+          allow_seasonal?: boolean
+          created_at?: string
+          fixed_template_id?: string | null
+          mode?: string
+          preferred_intensity?: number
+          seller_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "seller_visual_preferences_fixed_template_id_fkey"
+            columns: ["fixed_template_id"]
+            isOneToOne: false
+            referencedRelation: "templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       send_aplus_candidates: {
         Row: {
           consecutive_periods: number | null
@@ -13291,9 +13335,11 @@ export type Database = {
           end_month: number | null
           id: string
           is_enabled: boolean
+          match_categories: string[] | null
           priority: number
           rule_type: string
           seasonal_key: string | null
+          source_group_id: string | null
           start_day: number | null
           start_month: number | null
           subcategory_key: string | null
@@ -13308,9 +13354,11 @@ export type Database = {
           end_month?: number | null
           id?: string
           is_enabled?: boolean
+          match_categories?: string[] | null
           priority?: number
           rule_type: string
           seasonal_key?: string | null
+          source_group_id?: string | null
           start_day?: number | null
           start_month?: number | null
           subcategory_key?: string | null
@@ -13325,9 +13373,11 @@ export type Database = {
           end_month?: number | null
           id?: string
           is_enabled?: boolean
+          match_categories?: string[] | null
           priority?: number
           rule_type?: string
           seasonal_key?: string | null
+          source_group_id?: string | null
           start_day?: number | null
           start_month?: number | null
           subcategory_key?: string | null
@@ -13335,6 +13385,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "template_rules_source_group_id_fkey"
+            columns: ["source_group_id"]
+            isOneToOne: false
+            referencedRelation: "visual_category_groups"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "template_rules_template_id_fkey"
             columns: ["template_id"]
@@ -13349,6 +13406,9 @@ export type Database = {
           created_at: string
           design_tokens: Json
           id: string
+          intensity: number | null
+          overlay_opacity: number | null
+          overlay_url: string | null
           preview_image_url: string | null
           template_id: string
           updated_at: string
@@ -13358,6 +13418,9 @@ export type Database = {
           created_at?: string
           design_tokens?: Json
           id?: string
+          intensity?: number | null
+          overlay_opacity?: number | null
+          overlay_url?: string | null
           preview_image_url?: string | null
           template_id: string
           updated_at?: string
@@ -13367,6 +13430,9 @@ export type Database = {
           created_at?: string
           design_tokens?: Json
           id?: string
+          intensity?: number | null
+          overlay_opacity?: number | null
+          overlay_url?: string | null
           preview_image_url?: string | null
           template_id?: string
           updated_at?: string
@@ -13393,6 +13459,8 @@ export type Database = {
           name: string
           owner_workspace_id: string | null
           scope: string
+          slug: string | null
+          source_group_id: string | null
           updated_at: string
         }
         Insert: {
@@ -13405,6 +13473,8 @@ export type Database = {
           name: string
           owner_workspace_id?: string | null
           scope?: string
+          slug?: string | null
+          source_group_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -13417,9 +13487,19 @@ export type Database = {
           name?: string
           owner_workspace_id?: string | null
           scope?: string
+          slug?: string | null
+          source_group_id?: string | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "templates_source_group_id_fkey"
+            columns: ["source_group_id"]
+            isOneToOne: false
+            referencedRelation: "visual_category_groups"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       testimonial_candidates: {
         Row: {
