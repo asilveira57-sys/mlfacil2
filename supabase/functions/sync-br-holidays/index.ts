@@ -59,6 +59,12 @@ Deno.serve(async (req) => {
     results.estados = estadosCount;
     console.log(`[sync-br-holidays] ${estadosCount} estados synced`);
 
+    // Build codigo_uf -> uf lookup
+    const codigoUfToUf: Record<number, string> = {};
+    for (const e of estadosJson) {
+      codigoUfToUf[e.codigo_uf] = e.uf;
+    }
+
     // ──────────────────────────────────────
     // 2. Sync municipios
     // ──────────────────────────────────────
@@ -72,7 +78,6 @@ Deno.serve(async (req) => {
       nome: string;
       capital: boolean;
       codigo_uf: number;
-      uf: string;
       ddd: number;
       fuso_horario: string;
     }> = await munRes.json();
@@ -83,10 +88,10 @@ Deno.serve(async (req) => {
         codigo_ibge: m.codigo_ibge,
         nome: m.nome,
         capital: m.capital ?? false,
-        uf: m.uf,
+        uf: codigoUfToUf[m.codigo_uf] ?? null,
         ddd: m.ddd ?? null,
         fuso_horario: m.fuso_horario ?? null,
-      }));
+      })).filter((m) => m.uf !== null); // skip if UF not found
       const { error } = await supabase
         .from("br_municipios")
         .upsert(batch, { onConflict: "codigo_ibge" });
@@ -101,7 +106,17 @@ Deno.serve(async (req) => {
 
     // ──────────────────────────────────────
     // 3. Sync feriados (nacional + estadual + municipal)
+    // Delete existing feriados for this year first, then batch insert
     // ──────────────────────────────────────
+    console.log(`[sync-br-holidays] Deleting existing feriados for ${ano}...`);
+    const { error: delError } = await supabase
+      .from("br_feriados")
+      .delete()
+      .eq("ano", ano);
+    if (delError) {
+      console.error("[sync-br-holidays] Delete error:", delError);
+    }
+
     const feriadoTypes = ["nacional", "estadual", "municipal"];
     let totalFeriados = 0;
 
@@ -142,23 +157,9 @@ Deno.serve(async (req) => {
       let typeCount = 0;
       for (let i = 0; i < parsed.length; i += BATCH_SIZE) {
         const batch = parsed.slice(i, i + BATCH_SIZE);
-        const { error } = await supabase.from("br_feriados").upsert(batch, {
-          onConflict: "idx_br_feriados_unique",
-          ignoreDuplicates: true,
-        });
+        const { error } = await supabase.from("br_feriados").insert(batch);
         if (error) {
-          console.error(`[sync-br-holidays] ${tipo} batch error:`, error);
-          // Try inserting one by one for this batch to skip duplicates
-          for (const row of batch) {
-            await supabase
-              .from("br_feriados")
-              .insert(row)
-              .then(({ error: e }) => {
-                if (e && !e.message?.includes("duplicate")) {
-                  console.error(`[sync-br-holidays] Single insert error:`, e);
-                }
-              });
-          }
+          console.error(`[sync-br-holidays] ${tipo} batch ${i} error:`, error);
         }
         typeCount += batch.length;
       }
