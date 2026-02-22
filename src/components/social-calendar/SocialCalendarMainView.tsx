@@ -79,24 +79,24 @@ export function SocialCalendarMainView() {
   }, [userId]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       {/* Navigation */}
       <div className="flex items-center justify-between">
-        <Button variant="outline" size="icon" onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}>
-          <ChevronLeft className="h-4 w-4" />
+        <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}>
+          <ChevronLeft className="h-3.5 w-3.5" />
         </Button>
-        <h2 className="text-xl font-semibold capitalize">
+        <h2 className="text-base font-semibold capitalize">
           {format(currentMonth, 'MMMM yyyy', { locale: ptBR })}
         </h2>
-        <Button variant="outline" size="icon" onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}>
-          <ChevronRight className="h-4 w-4" />
+        <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}>
+          <ChevronRight className="h-3.5 w-3.5" />
         </Button>
       </div>
 
       {/* Legend */}
-      <div className="flex flex-wrap gap-2 text-sm">
+      <div className="flex flex-wrap gap-1.5 text-sm">
         {Object.entries(CATEGORY_LABELS).map(([key, label]) => (
-          <span key={key} className={cn('px-2 py-0.5 rounded-full border text-xs font-medium', CATEGORY_COLORS[key])}>
+          <span key={key} className={cn('px-1.5 py-0 rounded-full border text-[10px] font-medium', CATEGORY_COLORS[key])}>
             {label}
           </span>
         ))}
@@ -109,7 +109,7 @@ export function SocialCalendarMainView() {
           {/* Weekday headers */}
           <div className="grid grid-cols-7 bg-muted/50">
             {WEEKDAY_HEADERS.map((d) => (
-              <div key={d} className="text-center text-xs font-semibold text-muted-foreground py-2 border-b">
+              <div key={d} className="text-center text-[10px] font-semibold text-muted-foreground py-1 border-b">
                 {d}
               </div>
             ))}
@@ -130,14 +130,14 @@ export function SocialCalendarMainView() {
                   <div
                     key={dateKey}
                     className={cn(
-                      'min-h-[80px] border-b border-r p-1.5 flex flex-col gap-0.5 transition-colors',
+                      'min-h-[56px] border-b border-r p-1 flex flex-col gap-0.5 transition-colors',
                       !inMonth && 'bg-muted/30',
                       today && 'bg-primary/5',
                     )}
                   >
                     {/* Day number */}
                     <div className={cn(
-                      'w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold self-end',
+                      'w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-semibold self-end',
                       today && 'bg-primary text-primary-foreground',
                       !today && inMonth && 'text-foreground',
                       !today && !inMonth && 'text-muted-foreground/40',
@@ -152,7 +152,7 @@ export function SocialCalendarMainView() {
                           key={ev.id}
                           onClick={() => handleOpenIdeas(ev)}
                           className={cn(
-                            'text-[10px] leading-tight px-1.5 py-0.5 rounded border truncate text-left font-medium hover:opacity-80 transition-opacity',
+                            'text-[9px] leading-tight px-1 py-px rounded border truncate text-left font-medium hover:opacity-80 transition-opacity',
                             CATEGORY_COLORS[ev.category],
                           )}
                           title={ev.title}
