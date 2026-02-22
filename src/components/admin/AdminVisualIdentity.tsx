@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -11,8 +11,9 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
-import { Palette, Eye, Sparkles, Trash2, Plus, Save, History, Loader2 } from 'lucide-react';
+import { Palette, Eye, Sparkles, Trash2, Plus, Save, History, Loader2, Upload, X, Image as ImageIcon } from 'lucide-react';
 import { toast } from 'sonner';
+import { useDropzone } from 'react-dropzone';
 import type { VisualCategoryGroup } from '@/hooks/useVisualIdentity';
 
 export function AdminVisualIdentity() {
@@ -36,6 +37,98 @@ export function AdminVisualIdentity() {
           <VisualIdentityLogs />
         </div>
       </div>
+    </div>
+  );
+}
+
+function OverlayImageField({ value, onChange }: { value: string | null; onChange: (url: string | null) => void }) {
+  const [uploading, setUploading] = useState(false);
+  const [mode, setMode] = useState<'upload' | 'url'>(value && value.startsWith('http') ? 'url' : 'upload');
+
+  const onDrop = useCallback(async (acceptedFiles: File[]) => {
+    const file = acceptedFiles[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const ext = file.name.split('.').pop();
+      const fileName = `overlay-${Date.now()}.${ext}`;
+      const filePath = `visual-identity/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('public-assets')
+        .upload(filePath, file, { upsert: true });
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('public-assets')
+        .getPublicUrl(filePath);
+
+      onChange(publicUrl);
+      toast.success('Imagem enviada!');
+    } catch (err) {
+      console.error('[OverlayImageField] upload error:', err);
+      toast.error('Erro ao enviar imagem');
+    } finally {
+      setUploading(false);
+    }
+  }, [onChange]);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: { 'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'] },
+    maxFiles: 1,
+    disabled: uploading,
+  });
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <Label className="text-xs">Imagem Overlay (opcional)</Label>
+        <div className="flex gap-1">
+          <Button type="button" variant={mode === 'upload' ? 'default' : 'outline'} size="sm" className="h-6 text-[10px] px-2" onClick={() => setMode('upload')}>
+            <Upload className="h-3 w-3 mr-1" /> Upload
+          </Button>
+          <Button type="button" variant={mode === 'url' ? 'default' : 'outline'} size="sm" className="h-6 text-[10px] px-2" onClick={() => setMode('url')}>
+            URL
+          </Button>
+        </div>
+      </div>
+
+      {mode === 'upload' ? (
+        <div
+          {...getRootProps()}
+          className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors ${isDragActive ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'} ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
+        >
+          <input {...getInputProps()} />
+          {uploading ? (
+            <div className="flex items-center justify-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-xs text-muted-foreground">Enviando...</span>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-1">
+              <Upload className="h-5 w-5 text-muted-foreground" />
+              <p className="text-xs text-muted-foreground">Arraste ou clique para enviar</p>
+            </div>
+          )}
+        </div>
+      ) : (
+        <Input
+          value={value || ''}
+          onChange={(e) => onChange(e.target.value || null)}
+          placeholder="https://..."
+        />
+      )}
+
+      {value && (
+        <div className="flex items-center gap-2 p-2 border rounded-lg bg-muted/30">
+          <img src={value} alt="Overlay preview" className="h-10 w-10 rounded object-cover" />
+          <span className="text-xs text-muted-foreground truncate flex-1">{value.split('/').pop()}</span>
+          <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => onChange(null)}>
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -229,14 +322,10 @@ function CategoryGroupsManager() {
                     className="mt-1"
                   />
                 </div>
-                <div>
-                  <Label className="text-xs">URL da Imagem Overlay (opcional)</Label>
-                  <Input
-                    value={editForm.imagem_overlay_url || ''}
-                    onChange={(e) => setEditForm((p) => ({ ...p, imagem_overlay_url: e.target.value || null }))}
-                    placeholder="https://..."
-                  />
-                </div>
+                <OverlayImageField
+                  value={editForm.imagem_overlay_url || null}
+                  onChange={(url) => setEditForm((p) => ({ ...p, imagem_overlay_url: url }))}
+                />
                 <div>
                   <Label className="text-xs">Categorias ML (separadas por vírgula)</Label>
                   <Input
