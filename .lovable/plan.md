@@ -1,83 +1,62 @@
 
-# Feriados Brasileiros com Localizacao - Implementacao
+# Plano: Integrar Identidade Visual ao Simulador de Aparência
 
-## Resumo
+## Problema Atual
 
-Importar feriados nacionais, estaduais e municipais do repositorio joaopbini/feriados-brasil, filtrados pela localizacao (estado + municipio) configurada pelo usuario.
+Os dois sistemas sao independentes e nao se comunicam:
+- **Aparencia (Templates)**: resolve cores e tokens CSS com base em regras de categoria/empresa/sazonal
+- **Identidade Visual**: aplica gradientes e imagens overlay com base no grupo visual da categoria ML
 
-## Etapas
+O Simulador de Aparencia so mostra os tokens resolvidos, mas nao mostra como ficaria o overlay visual (gradiente + imagem) aplicado. Isso impede que voce teste como "Casa e Decoracao" ficaria sem ser dessa categoria.
 
-### 1. Criar 3 novas tabelas no banco de dados
+## Solucao
 
-- **br_estados**: 27 registros (uf PK, codigo_uf, nome, latitude, longitude, regiao)
-- **br_municipios**: ~5.570 registros (codigo_ibge PK, nome, capital, uf FK, ddd, fuso_horario)
-- **br_feriados**: ~10.000 registros/ano (data, nome, tipo [NACIONAL/ESTADUAL/MUNICIPAL/FACULTATIVO], uf, codigo_ibge, ano)
-- Adicionar colunas `uf` e `codigo_ibge` na tabela `social_calendar_user_preferences`
-- RLS: SELECT para authenticated em todas as 3 tabelas
-- Indices: data, ano, tipo, uf, codigo_ibge para consultas rapidas
+Adicionar ao Simulador de Aparencia um seletor de **Grupo Visual** (da tabela `visual_category_groups`), permitindo visualizar o overlay completo junto com os tokens resolvidos.
 
-### 2. Edge Function `sync-br-holidays`
+## Alteracoes
 
-Funcao backend que busca os JSONs do GitHub e faz upsert no banco:
-- `dados/localizacao/estados/estados.json` -> br_estados
-- `dados/localizacao/municipios/municipios.json` -> br_municipios
-- `dados/feriados/nacional/json/{ano}.json` -> br_feriados
-- `dados/feriados/estadual/json/{ano}.json` -> br_feriados
-- `dados/feriados/municipal/json/{ano}.json` -> br_feriados
+### 1. Modificar `TemplateSimulator.tsx`
 
-Processamento em batches de 500 registros (sem limite de registros). Parse de datas DD/MM/YYYY para YYYY-MM-DD.
+- Buscar os `visual_category_groups` ativos junto com os dados de templates
+- Adicionar um `Select` para escolher o grupo visual (ex: "Casa e Decoracao", "Tecnologia", etc.)
+- Renderizar um preview combinado que mostra:
+  - Os tokens de cor resolvidos (como ja funciona)
+  - O overlay de gradiente + imagem do grupo selecionado, com controle de intensidade
+- Adicionar um slider de intensidade para simular diferentes niveis
 
-### 3. Hooks de dados (`useSocialCalendar.ts`)
+### 2. Preview Visual Integrado
 
-- `useBrEstados()`: busca todos os 27 estados da tabela br_estados
-- `useBrMunicipios(uf)`: busca municipios filtrados por UF (usando fetchAllRows para garantir sem limite)
-- `useBrFeriados(month, uf, codigoIbge)`: busca feriados do mes filtrados por:
-  - NACIONAL (sempre)
-  - ESTADUAL (se uf configurado)
-  - MUNICIPAL (se codigo_ibge configurado)
-  - Retorna como SocialCalendarEvent[] para merge no grid
-- Atualizar tipo UserPreferences para incluir uf e codigo_ibge
+O bloco de resultado do simulador passara a ter uma area de preview que combina:
+- Fundo com as cores do template resolvido (background, card, etc.)
+- Overlay de gradiente do grupo visual selecionado (com `mix-blend-mode: overlay`)
+- Overlay de imagem do grupo (com `mix-blend-mode: soft-light`), caso exista
+- Intensidade ajustavel via slider
 
-### 4. Tela de Configuracoes (`SocialCalendarSettings.tsx`)
+Isso replica exatamente o comportamento do `VisualOverlay` component, mas de forma isolada no simulador.
 
-Substituir o select de "Pais" por:
-- **Estado**: Select com os 27 estados ordenados por nome
-- **Municipio**: Select filtrado pelo estado, com campo de busca (sao ~600+ municipios por estado)
-- Ao trocar estado, municipio e resetado
-- Salvar uf e codigo_ibge nas preferencias
-
-### 5. Calendario (`SocialCalendarMainView.tsx`)
-
-- Usar o novo hook `useBrFeriados` para buscar feriados do mes
-- Mergear com eventos existentes (tematicas/comerciais/sazonais)
-- Feriados brasileiros aparecem com categoria `feriado` e cor vermelha
+---
 
 ## Detalhes Tecnicos
 
-### Estrutura dos dados do GitHub
-
-Feriados:
-```text
-{ "data": "DD/MM/YYYY", "nome": "...", "tipo": "NACIONAL|ESTADUAL|MUNICIPAL", "descricao": "...", "uf": "SP"|null, "codigo_ibge": 3550308|null }
+### Dados adicionais no query do simulador
+```
+// Adicionar ao queryFn existente:
+const groups = await supabase
+  .from('visual_category_groups')
+  .select('*')
+  .eq('ativo', true)
+  .order('prioridade');
 ```
 
-Municipios:
-```text
-{ "codigo_ibge": 3550308, "nome": "Sao Paulo", "capital": true, "codigo_uf": 35, "uf": "SP", "ddd": 11, ... }
-```
+### Novos controles na UI
+- `Select` com os grupos visuais disponíveis (slug como valor, nome como label, com preview de cor)
+- `Slider` de intensidade (1-10)
 
-### Volume e paginacao
+### Preview combinado
+Replicar a logica do `VisualOverlay` inline no simulador:
+- Gradiente com `opacity = intensidade/10` e `mixBlendMode: 'overlay'`
+- Imagem (se existir) com `opacity = intensidade/10 * 0.5` e `mixBlendMode: 'soft-light'`
+- Conteudo de exemplo por cima (titulo, badges, texto) usando as cores do template resolvido
 
-- br_municipios: ~5.570 registros -> usar fetchAllRows no hook
-- br_feriados por mes+filtro: tipicamente 11 nacionais + 3-5 estaduais + 2-4 municipais = ~18 registros (sem risco de limite)
-- Import total municipal: ~9.600 registros -> processados em batches de 500 na edge function
-
-### Arquivos a criar
-- `supabase/migrations/20260222100000_br_holidays_tables.sql`
-- `supabase/functions/sync-br-holidays/index.ts`
-- Entrada em `supabase/config.toml` para verify_jwt = false
-
-### Arquivos a modificar
-- `src/hooks/useSocialCalendar.ts` (novos hooks + tipo atualizado)
-- `src/components/social-calendar/SocialCalendarSettings.tsx` (selects UF/municipio)
-- `src/components/social-calendar/SocialCalendarMainView.tsx` (merge feriados BR)
+### Arquivos modificados
+- `src/components/settings/templates/TemplateSimulator.tsx` — unico arquivo a ser alterado
