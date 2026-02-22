@@ -105,12 +105,17 @@ function CardContent({ card }: { card: ExplanatoryCard }) {
   const c = card.conteudo as Record<string, unknown>;
 
   switch (card.tipo) {
-    case 'texto':
+    case 'texto': {
+      // Support both { texto: "..." } and { slides: [...] } formats
+      if (Array.isArray(c.slides)) {
+        return <CarouselContent slides={c.slides as unknown[]} titulo={card.titulo} />;
+      }
       return (
         <div className="prose prose-sm dark:prose-invert max-w-none">
           <p className="whitespace-pre-wrap">{String(c.texto ?? '')}</p>
         </div>
       );
+    }
 
     case 'imagem':
       return (
