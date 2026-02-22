@@ -10,6 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { fetchAllRows } from '@/lib/supabaseHelpers';
 import { TemplateMiniPreview, TemplateColorPreview } from './TemplateColorPreview';
+import { VisualIdentityControls, CombinedPreview } from './VisualIdentityPreview';
 import type { Template, TemplateVariant, TemplateRule, ThemeResolverInput, DesignTokens } from '@/types/templates';
 
 // Inline resolver
@@ -99,19 +100,26 @@ export function TemplateSimulator() {
   const [subcategoryKey, setSubcategoryKey] = useState('');
   const [simDate, setSimDate] = useState(new Date().toISOString().split('T')[0]);
   const [isDark, setIsDark] = useState(false);
+  const [visualGroupSlug, setVisualGroupSlug] = useState('none');
+  const [visualIntensity, setVisualIntensity] = useState(5);
 
   const { data, isLoading } = useQuery({
     queryKey: ['theme-resolver', 'simulator-data'],
     queryFn: async () => {
-      const [templates, variants, rules] = await Promise.all([
+      const [templates, variants, rules, groupsRes] = await Promise.all([
         fetchAllRows<Template>(supabase.from('templates').select('*')),
         fetchAllRows<TemplateVariant>(supabase.from('template_variants').select('*')),
         fetchAllRows<TemplateRule>(supabase.from('template_rules').select('*')),
+        supabase.from('visual_category_groups').select('slug,nome,gradiente_inicio,gradiente_fim,imagem_overlay_url,intensidade_padrao').eq('ativo', true).order('prioridade'),
       ]);
       return {
         templates,
         variants,
         rules,
+        visualGroups: (groupsRes.data ?? []) as Array<{
+          slug: string; nome: string; gradiente_inicio: string; gradiente_fim: string;
+          imagem_overlay_url: string | null; intensidade_padrao: number;
+        }>,
       };
     },
     staleTime: 60_000,
@@ -132,6 +140,11 @@ export function TemplateSimulator() {
       data.rules
     );
   }, [data, companyId, categoryKey, subcategoryKey, simDate, isDark]);
+
+  const selectedGroup = useMemo(() => {
+    if (!data || visualGroupSlug === 'none') return null;
+    return data.visualGroups.find(g => g.slug === visualGroupSlug) ?? null;
+  }, [data, visualGroupSlug]);
 
   return (
     <div className="space-y-6">
@@ -191,6 +204,19 @@ export function TemplateSimulator() {
                 </span>
               </div>
             </div>
+            {data && (
+              <VisualIdentityControls
+                groups={data.visualGroups}
+                selectedSlug={visualGroupSlug}
+                onSelectSlug={(slug) => {
+                  setVisualGroupSlug(slug);
+                  const g = data.visualGroups.find(gr => gr.slug === slug);
+                  if (g) setVisualIntensity(g.intensidade_padrao);
+                }}
+                intensity={visualIntensity}
+                onIntensityChange={setVisualIntensity}
+              />
+            )}
           </div>
 
           {/* Result */}
@@ -259,6 +285,15 @@ export function TemplateSimulator() {
                       ))}
                   </div>
                 </div>
+              )}
+
+              {/* Combined visual preview */}
+              {result.resolved_tokens && (
+                <CombinedPreview
+                  resolvedTokens={result.resolved_tokens}
+                  group={selectedGroup}
+                  intensity={visualIntensity}
+                />
               )}
             </div>
           ) : (
