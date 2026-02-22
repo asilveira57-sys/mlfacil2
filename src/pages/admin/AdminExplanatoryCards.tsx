@@ -8,7 +8,8 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Plus, Pencil, Trash2, RotateCcw, Eye } from 'lucide-react';
+import { Plus, Pencil, Trash2, RotateCcw, Eye, Play } from 'lucide-react';
+import { ExplanatoryCardModal } from '@/components/explanatory-cards/ExplanatoryCardModal';
 import { toast } from 'sonner';
 import {
   useAllExplanatoryCards,
@@ -58,6 +59,7 @@ export function AdminExplanatoryCards() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState<FormData>(emptyForm);
+  const [previewCards, setPreviewCards] = useState<ExplanatoryCard[] | null>(null);
 
   const openNew = () => {
     setForm(emptyForm);
@@ -174,6 +176,9 @@ export function AdminExplanatoryCards() {
                     )}
                   </div>
                   <div className="flex gap-1">
+                    <Button variant="ghost" size="icon" title="Preview" onClick={() => setPreviewCards([card])}>
+                      <Play className="h-4 w-4" />
+                    </Button>
                     <Button variant="ghost" size="icon" onClick={() => openEdit(card)}>
                       <Pencil className="h-4 w-4" />
                     </Button>
@@ -270,6 +275,15 @@ export function AdminExplanatoryCards() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* Preview modal */}
+      {previewCards && (
+        <ExplanatoryCardModal
+          cards={previewCards}
+          onComplete={() => setPreviewCards(null)}
+          onSkip={() => setPreviewCards(null)}
+          isRequired={false}
+        />
+      )}
     </div>
   );
 }
