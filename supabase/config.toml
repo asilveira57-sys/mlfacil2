@@ -218,3 +218,6 @@ verify_jwt = false
 
 [functions.global-metrics-refresh]
 verify_jwt = false
+
+[functions.promotion-agent-run]
+verify_jwt = false

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, MouseEvent as ReactMouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -69,6 +69,9 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { PromotionDetailModal } from '@/components/promotions/PromotionDetailModal';
+import { PromotionAgentBot } from '@/components/promotions/PromotionAgentBot';
+import { PromotionAgentConfig } from '@/components/promotions/PromotionAgentConfig';
+import { useAgentConfig } from '@/hooks/usePromotionAgent';
 
 export default function Promocoes() {
   const navigate = useNavigate();
@@ -79,6 +82,11 @@ export default function Promocoes() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncErrorCode, setSyncErrorCode] = useState<string | null>(null);
   const { createTask, creating } = usePromotionTasks();
+
+  // Agent state
+  const [agentDrawerOpen, setAgentDrawerOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const { data: agentConfig } = useAgentConfig(workspaceId, sellerId);
 
   // Search & filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -461,7 +469,7 @@ export default function Promocoes() {
 
   return (
     <PageContainer title="Promoções" subtitle="Central de Promoções">
-      <div className="p-6 space-y-6">
+      <div ref={containerRef} className="p-6 space-y-6 relative">
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-3">
@@ -1304,6 +1312,25 @@ function ProductPromotionCard({
           })}
         </div>
       </div>
-    </div>
+
+        {/* Agent Bot + Config Drawer */}
+        {workspaceId && sellerId && (
+          <>
+            <PromotionAgentBot
+              isEnabled={agentConfig?.is_enabled ?? false}
+              isRunning={false}
+              onClick={() => setAgentDrawerOpen(true)}
+              containerRef={containerRef as React.RefObject<HTMLElement>}
+            />
+            <PromotionAgentConfig
+              open={agentDrawerOpen}
+              onOpenChange={setAgentDrawerOpen}
+              workspaceId={workspaceId}
+              sellerId={sellerId}
+            />
+          </>
+        )}
+      </div>
+    </PageContainer>
   );
 }
