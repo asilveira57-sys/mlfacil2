@@ -83,6 +83,8 @@ export default function Promocoes() {
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [coParticipationFilter, setCoParticipationFilter] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [maxDiscountFilter, setMaxDiscountFilter] = useState<string>('');
 
   // Adhere/remove action state
   const [actionLoading, setActionLoading] = useState(false);
@@ -148,6 +150,33 @@ export default function Promocoes() {
 
   // Product search (cross-promotion)
   const { results: productResults, loading: productSearchLoading, refetch: refetchProductSearch } = useProductPromotionSearch(workspaceId, sellerId, searchQuery);
+
+  // Filtered product results (status, co-participation, discount)
+  const filteredProductResults = useMemo(() => {
+    return productResults.map(product => {
+      const filteredPromos = product.promotions.filter(promo => {
+        // Status filter
+        if (statusFilter === 'participating' && promo.item_status !== 'started') return false;
+        if (statusFilter === 'candidate' && promo.item_status !== 'candidate' && promo.item_status !== 'pending') return false;
+        
+        // Co-participation filter
+        if (coParticipationFilter && !(promo.meli_percentage && promo.meli_percentage > 0)) return false;
+        
+        // Discount filter
+        if (maxDiscountFilter) {
+          const pct = (promo.meli_percentage || 0) + (promo.seller_percentage || 0);
+          const pctFromPrice = promo.original_price && promo.promo_price && promo.original_price > 0
+            ? ((promo.original_price - promo.promo_price) / promo.original_price) * 100
+            : 0;
+          const discount = pct > 0 ? pct : pctFromPrice;
+          if (discount > Number(maxDiscountFilter)) return false;
+        }
+        
+        return true;
+      });
+      return { ...product, promotions: filteredPromos };
+    }).filter(product => product.promotions.length > 0);
+  }, [productResults, statusFilter, coParticipationFilter, maxDiscountFilter]);
 
   // Unique promotion types for filter dropdown
   const promotionTypes = useMemo(() => {
@@ -495,10 +524,29 @@ export default function Promocoes() {
             <TrendingUp className="h-4 w-4 text-success" />
             Co-participação ML
           </Button>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-[170px]">
+              <SelectValue placeholder="Status do item" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os status</SelectItem>
+              <SelectItem value="participating">Participando</SelectItem>
+              <SelectItem value="candidate">Participar</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
+            type="number"
+            placeholder="Desconto max %"
+            value={maxDiscountFilter}
+            onChange={(e) => setMaxDiscountFilter(e.target.value)}
+            className="w-[140px]"
+            min="0"
+            max="100"
+          />
         </div>
 
         {/* Product Search Results */}
-        {searchQuery.length >= 3 && (productSearchLoading || productResults.length > 0) && (
+        {searchQuery.length >= 3 && (productSearchLoading || filteredProductResults.length > 0) && (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
@@ -511,11 +559,11 @@ export default function Promocoes() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {productResults.length === 0 && !productSearchLoading ? (
-                <p className="text-sm text-muted-foreground text-center py-4">Nenhum produto encontrado em campanhas</p>
+              {filteredProductResults.length === 0 && !productSearchLoading ? (
+                <p className="text-sm text-muted-foreground text-center py-4">Nenhum produto encontrado com os filtros aplicados</p>
               ) : (
                 <div className="space-y-4">
-                  {productResults.map(product => (
+                  {filteredProductResults.map(product => (
                     <ProductPromotionCard 
                       key={product.item_id} 
                       product={product} 
