@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -91,6 +91,7 @@ export default function Promocoes() {
   const [selectedSearchItems, setSelectedSearchItems] = useState<Set<string>>(new Set());
   // Adhere/remove action state
   const [actionLoading, setActionLoading] = useState(false);
+  const actionJustFinishedRef = useRef(false);
   const [confirmAction, setConfirmAction] = useState<{
     action: 'adhere' | 'remove';
     items: { item_id: string; price?: number; offer_id?: string }[];
@@ -382,7 +383,10 @@ export default function Promocoes() {
       console.error('[Promocoes] Action error:', err);
     } finally {
       setActionLoading(false);
+      actionJustFinishedRef.current = true;
       setConfirmAction(null);
+      // Reset flag after a tick so Dialog onOpenChange propagation is ignored
+      setTimeout(() => { actionJustFinishedRef.current = false; }, 300);
     }
   };
 
@@ -775,8 +779,9 @@ export default function Promocoes() {
         <PromotionDetailModal
           promotion={selectedPromotion}
           onClose={() => {
-            // Don't close if confirmation dialog is open or action is in progress
-            if (confirmAction || actionLoading) return;
+            // Don't close if confirmation dialog is open, action is in progress,
+            // or an action just finished (AlertDialog close event propagation)
+            if (confirmAction || actionLoading || actionJustFinishedRef.current) return;
             setSelectedPromotion(null);
           }}
           items={selectedItems}

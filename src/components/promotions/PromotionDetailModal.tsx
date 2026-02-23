@@ -228,7 +228,7 @@ export function PromotionDetailModal({
   if (!promotion) return null;
 
   return (
-    <Dialog open={!!promotion} onOpenChange={() => onClose()}>
+    <Dialog open={!!promotion} onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="max-w-6xl w-[90vw] max-h-[90vh] flex flex-col p-0 gap-0">
         {/* Compact Header */}
         <div className="px-6 pt-4 pb-2 space-y-2">
