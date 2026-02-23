@@ -174,8 +174,13 @@ export function useEnrichedPromotionItems(
       const visual = visuals.get(item.item_id);
       const rawData = (item as unknown as Record<string, unknown>).raw_item_data as Record<string, unknown> | null;
       
+      // DEAL-specific prices from raw_item_data
+      const rawPrice = (rawData?.price as number) || null;
+      const suggestedPrice = (rawData?.suggested_discounted_price as number) || null;
+      const dealEffectivePrice = suggestedPrice || rawPrice;
+      
       // Best available final price
-      const finalPrice = item.promo_price || item.effective_price || null;
+      const finalPrice = item.promo_price || item.effective_price || dealEffectivePrice || null;
       
       // Compute discount with fallbacks
       let computedDiscount = item.discount_percent;
@@ -184,6 +189,8 @@ export function useEnrichedPromotionItems(
           computedDiscount = Math.round((1 - item.promo_price / item.original_price) * 100);
         } else if (item.effective_price && item.effective_price !== item.original_price) {
           computedDiscount = Math.round((1 - item.effective_price / item.original_price) * 100);
+        } else if (finalPrice && finalPrice !== item.original_price) {
+          computedDiscount = Math.round((1 - finalPrice / item.original_price) * 100);
         }
       }
 
