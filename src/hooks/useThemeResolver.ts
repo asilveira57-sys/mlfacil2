@@ -231,6 +231,7 @@ export function useThemeResolver(input: ThemeResolverInput) {
     resolved,
     isLoading,
     templates: resolverData?.templates || [],
+    variants: resolverData?.variants || [],
     rules: resolverData?.rules || [],
   };
 }
