@@ -1,86 +1,81 @@
 
-# Redesign do Painel de Configuracao do Agente
+# Ollie - Correcao da Busca de Produtos e Identidade Visual
 
-## Problema Atual
+## Problemas
 
-O painel do agente usa um Drawer lateral estreito (~480px) que sobrepoe a tela inteira, fica alinhado a esquerda, exige scroll, e os seletores de categoria/produto sao textareas manuais pouco praticos.
+1. **Busca de produtos nao funciona**: O `ProductSearchSelector` busca em `analyzed_items` (tabela vazia). Os dados reais estao em `meli_listings_cache` com 767+ produtos, contendo `item_id`, `title`, `sku`, `thumbnail`, `seller_id`.
 
-## Solucao
+2. **Nome e identidade**: O dialog ainda mostra "Agente de Adesao" com icone generico de Bot. Precisa ser "Agente de Adesao Ollie" com o robozinho 3D no header.
 
-### 1. Trocar Drawer por Dialog centralizado em 3 colunas
+3. **Execucao automatica**: O Ollie ja executa automaticamente apos cada `promotions-sync` (encadeado na edge function). Nao e necessario clicar "Executar agora" toda vez -- so para testes manuais.
 
-Substituir o componente `Drawer` (Vaul) por um `Dialog` (Radix) centralizado com largura maxima de ~1100px e altura maxima de ~85vh. O conteudo sera distribuido em 3 colunas separadas por linhas verticais (`border-r`):
+4. **Configuracao por empresa**: O Ollie ja e configurado por empresa (`workspace_id` + `seller_id`). Cada conta tem sua propria configuracao independente.
 
-```text
-+------------------------------+------------------------------+------------------------------+
-| COLUNA 1                     | COLUNA 2                     | COLUNA 3                     |
-| Status + Ativar/Desativar    | Escopo de Produtos           | Guardrails                   |
-| Executar agora               |   - Todos / Categoria / Item | Estoque minimo               |
-|                              |   - Seletor de categorias    | Margem minima                |
-| Regras de Desconto           |   - Buscador de produtos     | Aderir sem margem            |
-|   - Max seller %             |   - Lista de exclusao        |                              |
-|   - Min total %              |                              | Tipos de Campanha            |
-|   - Coparticipacao           |                              |   - SMART, DEAL, etc.        |
-|                              |                              |   - Aceitar unknown          |
-|                              |                              |                              |
-|                              |                              | Historico (ultimas execucoes)|
-+------------------------------+------------------------------+------------------------------+
-|                          [ Salvar Configuracao ]                                            |
-+--------------------------------------------------------------------------------------------+
-```
+---
 
-O fluxo do seller: coluna esquerda (regras basicas) -> coluna central (escopo) -> coluna direita (guardrails + historico) -> salvar.
+## Mudancas no arquivo `src/components/promotions/PromotionAgentConfig.tsx`
 
-### 2. Seletor de Categorias com dados reais do seller
+### A. Corrigir busca de produtos
 
-Quando o seller escolher escopo "Por categoria", em vez de um textarea manual, sera exibida uma lista com checkboxes usando os dados do hook `useSellerCategories(sellerId)` ja existente no sistema. Isso traz as categorias reais onde o seller vende, com nome legivel e GMV.
+Reescrever a funcao `search()` dentro de `ProductSearchSelector`:
 
-- Lista com checkbox + nome da categoria + badge com GMV
-- Categorias selecionadas ficam marcadas
-- Se nao houver categorias sincronizadas, exibir mensagem orientando sync
+- Trocar `analyzed_items` por `meli_listings_cache`
+- Filtrar por `seller_id` do seller atual
+- Buscar em 3 campos: `title`, `item_id` (MLB) e `sku`
+- Query: `.or('title.ilike.%q%,item_id.ilike.%q%,sku.ilike.%q%')`
+- Exibir SKU nos resultados quando disponivel
+- Atualizar tipo `ProductHit` para incluir `sku`
+- Atualizar placeholder para "Buscar por titulo, SKU ou MLB..."
 
-### 3. Buscador de Produtos com pesquisa
+### B. Renomear para Ollie
 
-Quando o seller escolher escopo "Por lista de itens", em vez de um textarea com MLBs:
+- Titulo do Dialog: "Agente de Adesao Ollie"
+- Manter descricao: "Adesao automatica a promocoes"
 
-- Campo de busca com debounce (3+ caracteres)
-- Buscar em `promotion_items_snapshots` (items candidatos) usando `ilike` no `item_id` e enriquecendo com dados da tabela (titulo, thumbnail, SKU)
-- Resultados em lista com checkbox, thumbnail, titulo e MLB
-- Items selecionados ficam como badges/chips removiveis abaixo do campo
-- Mesmo padrao para a "Lista de exclusao"
+### C. Mini-Ollie no header
 
-### 4. Responsividade
-
-Em telas menores (<768px), as 3 colunas empilham verticalmente com separadores horizontais, mantendo o scroll interno do dialog.
+Substituir o icone quadrado `<Bot>` por uma versao mini (40x40px) do robo 3D:
+- Esfera cromada com radial-gradient identico ao `PromotionAgentBot`
+- Olhos estaticos (pupilas centralizadas)
+- Antena com LED verde quando agente ativo
+- Sem drag, sem mouse tracking -- puramente decorativo
 
 ---
 
 ## Detalhes Tecnicos
 
-### Arquivo editado: `src/components/promotions/PromotionAgentConfig.tsx`
+### Query corrigida
 
-Mudancas principais:
+```typescript
+const { data: listings } = await supabase
+  .from('meli_listings_cache')
+  .select('item_id, title, sku, thumbnail')
+  .eq('seller_id', sellerId)
+  .or(`title.ilike.%${q}%,item_id.ilike.%${q}%,sku.ilike.%${q}%`)
+  .limit(20);
+```
 
-1. **Imports**: Trocar `Drawer/DrawerContent/DrawerHeader/DrawerTitle/DrawerDescription` por `Dialog/DialogContent/DialogHeader/DialogTitle/DialogDescription` de `@/components/ui/dialog`
+### Tipo atualizado
 
-2. **Layout**: O `DialogContent` tera `className="max-w-[1100px] w-[95vw] max-h-[85vh] p-0"` com grid interno `grid grid-cols-1 md:grid-cols-3`
+```typescript
+interface ProductHit {
+  item_id: string;
+  title: string | null;
+  thumbnail: string | null;
+  sku: string | null;
+}
+```
 
-3. **Coluna 1**: Status + Regras de Desconto (conteudo atual sem mudanca)
+### Respostas as duvidas do usuario
 
-4. **Coluna 2**: Escopo de Produtos
-   - Importar `useSellerCategories` de `@/hooks/useSellerCategories`
-   - Criar sub-componente `CategorySelector`: lista de checkboxes com categorias do seller
-   - Criar sub-componente `ProductSearchSelector`: input de busca + resultados com checkboxes + chips dos selecionados
-   - A busca de produtos usara query direta em `promotion_items_snapshots` com `ilike` por `item_id` e join com dados enriquecidos
+O plano tambem inclui adicionar texto informativo na UI:
+- Na secao "Executar agora": adicionar nota "O Ollie executa automaticamente apos cada sincronizacao de promocoes."
+- No header ou descricao: indicar que a configuracao e especifica para a conta selecionada.
 
-5. **Coluna 3**: Tipos de Campanha + Guardrails + Historico (conteudo atual reorganizado)
+---
 
-6. **Footer**: Botao "Salvar" full-width no rodape do dialog, fora das colunas
+## Resumo
 
-### Nenhum arquivo novo necessario
-
-Toda a mudanca e interna ao `PromotionAgentConfig.tsx`, reutilizando hooks existentes (`useSellerCategories`, busca em `promotion_items_snapshots`).
-
-### Props mantidas
-
-A interface `PromotionAgentConfigProps` continua identica - `open`, `onOpenChange`, `workspaceId`, `sellerId`.
+| Arquivo | Acao |
+|---------|------|
+| `src/components/promotions/PromotionAgentConfig.tsx` | Corrigir busca para `meli_listings_cache`, renomear para Ollie, adicionar mini-robo, notas informativas |
