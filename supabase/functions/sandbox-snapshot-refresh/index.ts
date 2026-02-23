@@ -138,22 +138,23 @@ Deno.serve(async (req) => {
         const topProduct = [...productMap.values()].sort((a, b) => b.qty - a.qty)[0]?.name || null;
 
         // === OPERAÇÃO ===
-        // Etiquetas pendentes: contar da print_queue (gerada) + shipments ready_to_ship
-        // A print_queue pode não ter todos os envios prontos, então combinamos ambas fontes
+        // Etiquetas pendentes: shipments com substatus 'ready_to_print' 
+        // (exatamente o que a página de Etiquetas mostra como "Para imprimir")
+        const { count: etiquetasReadyToPrint } = await supabase
+          .from("meli_shipments_cache")
+          .select("*", { count: "exact", head: true })
+          .eq("seller_id", sellerId)
+          .eq("shipment_status", "ready_to_ship")
+          .eq("shipment_substatus", "ready_to_print");
+
+        // Também contar da print queue como backup
         const { count: etiquetasNaFila } = await supabase
           .from("meli_print_queue")
           .select("*", { count: "exact", head: true })
           .eq("seller_id", sellerId)
           .eq("status", "gerada");
 
-        const { count: shipmentsReadyToShip } = await supabase
-          .from("meli_shipments_cache")
-          .select("*", { count: "exact", head: true })
-          .eq("seller_id", sellerId)
-          .eq("shipment_status", "ready_to_ship");
-
-        // Use the higher value between print queue and ready shipments
-        const etiquetasPend = Math.max(etiquetasNaFila || 0, shipmentsReadyToShip || 0);
+        const etiquetasPend = Math.max(etiquetasReadyToPrint || 0, etiquetasNaFila || 0);
 
         // Perguntas pendentes: qa_questions with status 'pending'
         const { count: perguntasPend } = await supabase
