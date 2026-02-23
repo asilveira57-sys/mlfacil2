@@ -7,6 +7,7 @@ import { NotificationBell } from "@/components/notifications";
 import { HeaderUtilities } from "@/components/utilities";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
+import { useApplyTheme } from "@/hooks/useApplyTheme";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -22,6 +23,7 @@ export function DashboardLayout({
   headerContent 
 }: DashboardLayoutProps) {
   const { sellerId } = useActiveAccount();
+  useApplyTheme();
   
   return (
     <SidebarProvider defaultOpen={true}>
