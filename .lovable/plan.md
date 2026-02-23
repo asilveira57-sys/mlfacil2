@@ -1,75 +1,46 @@
 
-# Adesao em Massa nos Resultados de Pesquisa por Produto
+# Corrigir Tarefas de Renovacao de Campanha
 
-## O que muda
+## Problemas Identificados
 
-Adicionar checkboxes de selecao e um botao de adesao em massa na secao "Resultados por Produto" da pesquisa, permitindo aderir dezenas/centenas de itens de uma vez sem clicar um por um.
-
-## Como vai funcionar
-
-1. Cada linha de campanha com status "candidato" (botao "Participar") ganha um checkbox ao lado
-2. Um header com "Selecionar todos candidatos" e contagem de selecionados aparece acima dos resultados
-3. Um botao "Aderir X Selecionados" aparece quando ha itens marcados
-4. Ao clicar, abre o mesmo dialog de confirmacao existente com o resumo da acao
+1. **Botao "Ver origem" desabilitado** - O botao na tela de detalhe da tarefa esta com `disabled` e nao navega para a campanha de origem
+2. **Responsavel mostra UUID** - Em vez do nome do usuario, aparece `433a4292...` (trecho do UUID)
+3. **Prazo nao definido** - A tarefa de renovacao nao recebe a data de finalizacao da campanha como prazo
 
 ## Alteracoes Tecnicas
 
-### Arquivo: `src/pages/Promocoes.tsx`
+### 1. `src/hooks/usePromotionTasks.ts` - Adicionar `due_at` e `assignee`
 
-**1. Novo estado para selecao em massa** (junto aos estados existentes):
+- Aceitar novo parametro opcional `endAt` (string ISO da data de fim da campanha) no `CreateTaskParams`
+- Para tarefas do tipo `expiring`, usar `endAt` como `due_at` da tarefa
+- Atribuir automaticamente o criador como responsavel (`assignee_user_id: user.id`)
 
-```typescript
-// Chave unica: "item_id::promotion_id" para identificar cada par item-campanha
-const [selectedSearchItems, setSelectedSearchItems] = useState<Set<string>>(new Set());
-```
+### 2. `src/components/tasks/TaskDetail.tsx` - Resolver nome do responsavel e ativar "Ver origem"
 
-**2. Funcoes auxiliares de selecao**:
+**Responsavel com nome:**
+- O componente ja recebe `members` (array de `WorkspaceMember`), porem esse tipo so tem `user_id`, sem nome
+- Buscar o `full_name` da tabela `profiles` para cada membro, usando um hook ou query interna
+- Exibir o nome no Select e nos comentarios/observadores em vez do UUID truncado
 
-```typescript
-// Extrair todos os candidatos filtraveis
-const allCandidateEntries = useMemo(() => {
-  return filteredProductResults.flatMap(product =>
-    product.promotions
-      .filter(p => p.item_status === 'candidate' || p.item_status === 'pending')
-      .map(p => ({
-        key: `${product.item_id}::${p.promotion_id}`,
-        item_id: product.item_id,
-        promotion_id: p.promotion_id,
-        promotion_type: p.promotion_type,
-        price: p.promo_price || p.original_price || undefined,
-        offer_id: p.offer_id || undefined,
-      }))
-  );
-}, [filteredProductResults]);
+**Botao "Ver origem" funcional:**
+- Quando `source_type === 'promotion'`, extrair `promotion_id` do `source_ref`
+- Navegar para `/promocoes` (a pagina de promocoes) ao clicar
+- Remover o atributo `disabled` quando houver `source_ref`
 
-const toggleSelectItem = (key: string) => { ... };
-const toggleSelectAll = () => { ... };
-```
+### 3. `src/pages/Promocoes.tsx` - Passar `endAt` ao criar tarefa
 
-**3. Header com selecao em massa** (dentro do CardContent, antes da lista de resultados):
+- Na chamada `handleCreateTask`, incluir o `end_at` da `selectedPromotion` como parametro
 
-- Checkbox "Selecionar todos candidatos (N)"
-- Badge mostrando "X selecionados"
-- Botao "Aderir X Selecionados" que agrupa por promotion_id e chama setConfirmAction
+### 4. `src/types/tasks.ts` - Estender `WorkspaceMember` (opcional)
 
-**4. Checkboxes nas linhas de campanha** (dentro de ProductPromotionCard):
+- Adicionar campo opcional `full_name?: string` ao tipo `WorkspaceMember` para suportar o nome resolvido
 
-- Passar selectedSearchItems e toggleSelectItem como props
-- Adicionar Checkbox ao lado de cada campanha candidata
-- Itens "Participando" ou com outro status nao ganham checkbox
-
-**5. Acao em massa**:
-
-Como cada item pode pertencer a campanhas diferentes, a adesao em massa agrupa por promotion_id e faz chamadas separadas para cada campanha. O dialog de confirmacao mostra:
-- Total de itens selecionados
-- Quantidade de campanhas distintas envolvidas
-
-**6. Limpar selecao** quando os filtros mudam ou apos acao concluida.
-
-### Resumo
+### Resumo de Arquivos
 
 | Arquivo | Alteracao |
 |---------|-----------|
-| `src/pages/Promocoes.tsx` | Estado de selecao, logica de toggle, header com "Selecionar todos" e "Aderir Selecionados", checkbox nas linhas candidatas do ProductPromotionCard |
-
-Nenhuma alteracao no backend — a adesao usa a mesma edge function `promotions-action` ja existente, chamada uma vez por campanha distinta nos itens selecionados.
+| `src/hooks/usePromotionTasks.ts` | Novo param `endAt`, setar `due_at` e `assignee_user_id` |
+| `src/pages/Promocoes.tsx` | Passar `selectedPromotion.end_at` no `handleCreateTask` |
+| `src/components/tasks/TaskDetail.tsx` | Buscar nomes dos membros via `profiles`, ativar botao "Ver origem" com navegacao para `/promocoes` |
+| `src/types/tasks.ts` | Adicionar `full_name?` ao `WorkspaceMember` |
+| `src/hooks/useWorkspace.ts` | Join com `profiles` ao buscar members para trazer `full_name` |
