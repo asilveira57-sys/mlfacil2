@@ -774,7 +774,11 @@ export default function Promocoes() {
         {/* Promotion Detail Modal */}
         <PromotionDetailModal
           promotion={selectedPromotion}
-          onClose={() => setSelectedPromotion(null)}
+          onClose={() => {
+            // Don't close if confirmation dialog is open or action is in progress
+            if (confirmAction || actionLoading) return;
+            setSelectedPromotion(null);
+          }}
           items={selectedItems}
           itemsLoading={itemsLoading}
           pendingItems={pendingItems}
