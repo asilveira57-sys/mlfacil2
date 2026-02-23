@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -86,6 +87,8 @@ export default function Promocoes() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [maxDiscountFilter, setMaxDiscountFilter] = useState<string>('');
 
+  // Bulk selection state for product search results
+  const [selectedSearchItems, setSelectedSearchItems] = useState<Set<string>>(new Set());
   // Adhere/remove action state
   const [actionLoading, setActionLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{
@@ -177,6 +180,83 @@ export default function Promocoes() {
       return { ...product, promotions: filteredPromos };
     }).filter(product => product.promotions.length > 0);
   }, [productResults, statusFilter, coParticipationFilter, maxDiscountFilter]);
+
+  // All candidate entries from filtered product results (for bulk selection)
+  const allCandidateEntries = useMemo(() => {
+    return filteredProductResults.flatMap(product =>
+      product.promotions
+        .filter(p => p.item_status === 'candidate' || p.item_status === 'pending')
+        .map(p => ({
+          key: `${product.item_id}::${p.promotion_id}`,
+          item_id: product.item_id,
+          promotion_id: p.promotion_id,
+          promotion_type: p.promotion_type,
+          price: p.promo_price || p.original_price || undefined,
+          offer_id: p.offer_id || undefined,
+          promotion_name: p.promotion_name,
+        }))
+    );
+  }, [filteredProductResults]);
+
+  // Clear selection when filters change
+  useEffect(() => {
+    setSelectedSearchItems(new Set());
+  }, [searchQuery, statusFilter, coParticipationFilter, maxDiscountFilter]);
+
+  const toggleSelectSearchItem = useCallback((key: string) => {
+    setSelectedSearchItems(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAllSearch = useCallback(() => {
+    setSelectedSearchItems(prev => {
+      if (prev.size === allCandidateEntries.length) return new Set();
+      return new Set(allCandidateEntries.map(e => e.key));
+    });
+  }, [allCandidateEntries]);
+
+  const handleBulkAdhere = useCallback(() => {
+    const selected = allCandidateEntries.filter(e => selectedSearchItems.has(e.key));
+    if (selected.length === 0) return;
+
+    // Group by promotion_id for the action
+    const grouped = new Map<string, typeof selected>();
+    for (const entry of selected) {
+      const group = grouped.get(entry.promotion_id) || [];
+      group.push(entry);
+      grouped.set(entry.promotion_id, group);
+    }
+
+    const campaignCount = grouped.size;
+
+    // If all items belong to same campaign, use single action
+    if (campaignCount === 1) {
+      const [promoId, items] = [...grouped.entries()][0];
+      const promoType = items[0].promotion_type;
+      setConfirmAction({
+        action: 'adhere',
+        items: items.map(i => ({ item_id: i.item_id, price: i.price, offer_id: i.offer_id })),
+        label: `Aderir ${items.length} item${items.length !== 1 ? 's' : ''} à campanha "${items[0].promotion_name || promoId}"`,
+        promotionId: promoId,
+        promotionType: promoType,
+      });
+    } else {
+      // Multiple campaigns — execute sequentially
+      const totalItems = selected.length;
+      setConfirmAction({
+        action: 'adhere',
+        items: selected.map(i => ({ item_id: i.item_id, price: i.price, offer_id: i.offer_id })),
+        label: `Aderir ${totalItems} itens em ${campaignCount} campanhas distintas`,
+        // We'll handle multi-campaign in the action handler
+        promotionId: '__bulk_multi__',
+        promotionType: '',
+      });
+    }
+  }, [allCandidateEntries, selectedSearchItems]);
 
   // Unique promotion types for filter dropdown
   const promotionTypes = useMemo(() => {
@@ -563,10 +643,43 @@ export default function Promocoes() {
                 <p className="text-sm text-muted-foreground text-center py-4">Nenhum produto encontrado com os filtros aplicados</p>
               ) : (
                 <div className="space-y-4">
+                  {/* Bulk selection header */}
+                  {allCandidateEntries.length > 0 && (
+                    <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          checked={selectedSearchItems.size === allCandidateEntries.length && allCandidateEntries.length > 0}
+                          onCheckedChange={toggleSelectAllSearch}
+                          aria-label="Selecionar todos candidatos"
+                        />
+                        <span className="text-sm font-medium">
+                          Selecionar todos candidatos ({allCandidateEntries.length})
+                        </span>
+                      </div>
+                      {selectedSearchItems.size > 0 && (
+                        <>
+                          <Badge variant="secondary" className="text-xs">
+                            {selectedSearchItems.size} selecionado{selectedSearchItems.size !== 1 ? 's' : ''}
+                          </Badge>
+                          <Button
+                            size="sm"
+                            className="gap-1.5 ml-auto"
+                            onClick={handleBulkAdhere}
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            Aderir {selectedSearchItems.size} Selecionado{selectedSearchItems.size !== 1 ? 's' : ''}
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  )}
+
                   {filteredProductResults.map(product => (
                     <ProductPromotionCard 
                       key={product.item_id} 
-                      product={product} 
+                      product={product}
+                      selectedItems={selectedSearchItems}
+                      onToggleSelect={toggleSelectSearchItem}
                       onDirectParticipate={(promoId, promoType, itemId, price, offerId, meta) => {
                         setConfirmAction({
                           action: 'adhere',
@@ -814,7 +927,58 @@ export default function Promocoes() {
               <Button
                 onClick={async () => {
                   if (confirmAction) {
-                    await handlePromotionAction(confirmAction.action, confirmAction.items, confirmAction.promotionId, confirmAction.promotionType);
+                    if (confirmAction.promotionId === '__bulk_multi__') {
+                      // Multi-campaign bulk adhere
+                      const selected = allCandidateEntries.filter(e => selectedSearchItems.has(e.key));
+                      const grouped = new Map<string, typeof selected>();
+                      for (const entry of selected) {
+                        const group = grouped.get(entry.promotion_id) || [];
+                        group.push(entry);
+                        grouped.set(entry.promotion_id, group);
+                      }
+                      setActionLoading(true);
+                      let totalSuccess = 0;
+                      let totalFailed = 0;
+                      for (const [promoId, items] of grouped) {
+                        const promoType = items[0].promotion_type;
+                        try {
+                          const result = await invokeEdgeFunction<{
+                            success_count: number;
+                            failed_count: number;
+                          }>('promotions-action', {
+                            body: {
+                              action: 'adhere',
+                              workspace_id: workspaceId,
+                              seller_id: sellerId,
+                              promotion_id: promoId,
+                              promotion_type: promoType,
+                              items: items.map(i => ({ item_id: i.item_id, price: i.price, offer_id: i.offer_id })),
+                            },
+                          });
+                          if (result.success && result.data) {
+                            totalSuccess += result.data.success_count || 0;
+                            totalFailed += result.data.failed_count || 0;
+                          } else {
+                            totalFailed += items.length;
+                          }
+                        } catch {
+                          totalFailed += items.length;
+                        }
+                      }
+                      setActionLoading(false);
+                      setConfirmAction(null);
+                      setSelectedSearchItems(new Set());
+                      if (totalFailed > 0) {
+                        toast.warning(`${totalSuccess} aderidos, ${totalFailed} falharam`);
+                      } else {
+                        toast.success(`${totalSuccess} itens aderidos com sucesso`);
+                      }
+                      await refetch();
+                      refetchProductSearch();
+                    } else {
+                      await handlePromotionAction(confirmAction.action, confirmAction.items, confirmAction.promotionId, confirmAction.promotionType);
+                      setSelectedSearchItems(new Set());
+                    }
                   }
                 }}
                 disabled={actionLoading}
@@ -979,9 +1143,13 @@ function PromotionStatusBadge({ status }: { status: string }) {
 
 function ProductPromotionCard({ 
   product, 
+  selectedItems,
+  onToggleSelect,
   onDirectParticipate 
 }: { 
-  product: ProductSearchResult; 
+  product: ProductSearchResult;
+  selectedItems: Set<string>;
+  onToggleSelect: (key: string) => void;
   onDirectParticipate: (promoId: string, promoType: string, itemId: string, price?: number, offerId?: string, meta?: {
     campaignName?: string;
     discountPercent?: number;
@@ -1065,28 +1233,35 @@ function ProductPromotionCard({
                   {promo.item_status === 'started' ? (
                     <Badge variant="default" className="text-xs">Participando</Badge>
                   ) : promo.item_status === 'candidate' || promo.item_status === 'pending' ? (
-                    <Button 
-                      size="sm" 
-                      variant="outline" 
-                      className="h-7 text-xs" 
-                      onClick={() => onDirectParticipate(
-                        promo.promotion_id, 
-                        promo.promotion_type, 
-                        product.item_id, 
-                        promo.promo_price || promo.original_price || undefined,
-                        promo.offer_id || undefined,
-                        {
-                          campaignName: promo.promotion_name || promo.promotion_id,
-                          discountPercent: discountPct > 0 ? discountPct : undefined,
-                          meliReduction: promo.feeReductionAmount || undefined,
-                          endDate: promo.end_at || undefined,
-                          originalPrice: promo.original_price || undefined,
-                          promoPrice: promo.promo_price || undefined,
-                        }
-                      )}
-                    >
-                      Participar
-                    </Button>
+                    <>
+                      <Checkbox
+                        checked={selectedItems.has(`${product.item_id}::${promo.promotion_id}`)}
+                        onCheckedChange={() => onToggleSelect(`${product.item_id}::${promo.promotion_id}`)}
+                        aria-label={`Selecionar para adesão`}
+                      />
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        className="h-7 text-xs" 
+                        onClick={() => onDirectParticipate(
+                          promo.promotion_id, 
+                          promo.promotion_type, 
+                          product.item_id, 
+                          promo.promo_price || promo.original_price || undefined,
+                          promo.offer_id || undefined,
+                          {
+                            campaignName: promo.promotion_name || promo.promotion_id,
+                            discountPercent: discountPct > 0 ? discountPct : undefined,
+                            meliReduction: promo.feeReductionAmount || undefined,
+                            endDate: promo.end_at || undefined,
+                            originalPrice: promo.original_price || undefined,
+                            promoPrice: promo.promo_price || undefined,
+                          }
+                        )}
+                      >
+                        Participar
+                      </Button>
+                    </>
                   ) : (
                     <Badge variant="secondary" className="text-xs">{promo.item_status}</Badge>
                   )}
