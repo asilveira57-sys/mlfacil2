@@ -261,7 +261,7 @@ export function TaskDetail({
                 <div className="flex items-center gap-1 text-sm">
                   <User className="h-4 w-4" />
                   {task.assignee_user_id
-                    ? task.assignee_user_id.slice(0, 8) + '...'
+                    ? (members.find(m => m.user_id === task.assignee_user_id)?.full_name || task.assignee_user_id.slice(0, 8) + '...')
                     : 'Nenhum'}
                 </div>
               </SelectTrigger>
@@ -269,7 +269,7 @@ export function TaskDetail({
                 <SelectItem value="none">Nenhum</SelectItem>
                 {members.map(member => (
                   <SelectItem key={member.user_id} value={member.user_id}>
-                    {member.user_id.slice(0, 8)}...
+                    {member.full_name || member.user_id.slice(0, 8) + '...'}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -288,10 +288,21 @@ export function TaskDetail({
                   {task.source_type}
                 </Badge>
                 <span className="text-sm text-muted-foreground">
-                  ID: {task.source_id || 'N/A'}
+                  {task.source_ref && (task.source_ref as any).promotion_name
+                    ? (task.source_ref as any).promotion_name
+                    : `ID: ${task.source_id || 'N/A'}`}
                 </span>
               </div>
-              <Button variant="outline" size="sm" disabled>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!task.source_type}
+                onClick={() => {
+                  if (task.source_type === 'promotion') {
+                    navigate('/promocoes');
+                  }
+                }}
+              >
                 <ExternalLink className="h-4 w-4 mr-1" />
                 Ver origem
               </Button>
@@ -424,7 +435,7 @@ export function TaskDetail({
                   {comments.map(comment => (
                     <div key={comment.id} className="border-l-2 pl-3 py-1">
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span>{comment.user_id.slice(0, 8)}...</span>
+                        <span>{members.find(m => m.user_id === comment.user_id)?.full_name || comment.user_id.slice(0, 8) + '...'}</span>
                         <span>•</span>
                         <span>
                           {format(new Date(comment.created_at), "dd/MM 'às' HH:mm")}
@@ -451,7 +462,7 @@ export function TaskDetail({
                   {watchers.map(watcher => (
                     <div key={watcher.id} className="flex items-center gap-2">
                       <User className="h-4 w-4" />
-                      <span className="text-sm">{watcher.user_id.slice(0, 8)}...</span>
+                      <span className="text-sm">{members.find(m => m.user_id === watcher.user_id)?.full_name || watcher.user_id.slice(0, 8) + '...'}</span>
                       {watcher.user_id === currentUserId && (
                         <Badge variant="secondary" className="text-xs">
                           Você

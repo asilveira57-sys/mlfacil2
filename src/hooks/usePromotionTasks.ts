@@ -9,6 +9,7 @@ interface CreateTaskParams {
   promotionName: string | null;
   itemId?: string;
   taskType: 'ineligible' | 'expiring' | 'review' | 'custom';
+  endAt?: string | null;
   customTitle?: string;
   customDescription?: string;
 }
@@ -97,6 +98,8 @@ export function usePromotionTasks() {
             item_id: params.itemId,
             seller_id: params.sellerId,
           },
+          due_at: params.endAt || null,
+          assignee_user_id: user.id,
           created_by_user_id: user.id,
         }]);
 
