@@ -46,7 +46,7 @@ export function usePromotionTasks() {
           case 'expiring':
             title = `Renovar promoção - ${params.promotionName || 'Promoção'}`;
             description = `A promoção "${params.promotionName}" está expirando em breve. Avalie se deve ser renovada.`;
-            priority = 'medium';
+            priority = 'urgent';
             tags.push('expiração');
             break;
           case 'review':
@@ -98,7 +98,11 @@ export function usePromotionTasks() {
             item_id: params.itemId,
             seller_id: params.sellerId,
           },
-          due_at: params.endAt || null,
+          due_at: params.endAt ? (() => {
+            const d = new Date(params.endAt);
+            d.setDate(d.getDate() + 1);
+            return d.toISOString();
+          })() : null,
           assignee_user_id: user.id,
           created_by_user_id: user.id,
         }]);
