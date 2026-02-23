@@ -1,62 +1,71 @@
 
-# Plano: Integrar Identidade Visual ao Simulador de Aparência
 
-## Problema Atual
+# Painel de Aparencia do Seller: Preview Visual + Aplicar Qualquer Template
 
-Os dois sistemas sao independentes e nao se comunicam:
-- **Aparencia (Templates)**: resolve cores e tokens CSS com base em regras de categoria/empresa/sazonal
-- **Identidade Visual**: aplica gradientes e imagens overlay com base no grupo visual da categoria ML
+## Problema identificado
 
-O Simulador de Aparencia so mostra os tokens resolvidos, mas nao mostra como ficaria o overlay visual (gradiente + imagem) aplicado. Isso impede que voce teste como "Casa e Decoracao" ficaria sem ser dessa categoria.
+O painel atual em Configuracoes > Aparencia:
+- **Nao mostra a imagem** de overlay do template (apenas cores em miniatura)
+- **Nao permite testar** um template que nao seja da sua categoria (ex: voce quer ver "Casa e Decoracao" mas sua conta nao e dessa categoria)
+- **Nao tem preview visual** antes de aplicar
+- O fluxo atual exige entender modos (auto/fixo/clean) sem ver o resultado
 
-## Solucao
+## Solucao proposta
 
-Adicionar ao Simulador de Aparencia um seletor de **Grupo Visual** (da tabela `visual_category_groups`), permitindo visualizar o overlay completo junto com os tokens resolvidos.
+Reescrever o `SellerAppearancePanel` com foco em **ver e aplicar**, sem complexidade desnecessaria.
 
-## Alteracoes
+### 1. Galeria de Templates com Preview Visual
 
-### 1. Modificar `TemplateSimulator.tsx`
+Substituir o dropdown de template fixo por uma **galeria de cards visuais** mostrando todos os templates ativos. Cada card tera:
 
-- Buscar os `visual_category_groups` ativos junto com os dados de templates
-- Adicionar um `Select` para escolher o grupo visual (ex: "Casa e Decoracao", "Tecnologia", etc.)
-- Renderizar um preview combinado que mostra:
-  - Os tokens de cor resolvidos (como ja funciona)
-  - O overlay de gradiente + imagem do grupo selecionado, com controle de intensidade
-- Adicionar um slider de intensidade para simular diferentes niveis
+- Nome do template
+- Mini-preview das cores (ja existe `TemplateMiniPreview`)
+- **Imagem de overlay** (thumbnail da `overlay_url` do variant, se existir)
+- Badge indicando se esta ativo no momento
+- Botao "Visualizar" e "Aplicar"
 
-### 2. Preview Visual Integrado
+### 2. Preview em tempo real
 
-O bloco de resultado do simulador passara a ter uma area de preview que combina:
-- Fundo com as cores do template resolvido (background, card, etc.)
-- Overlay de gradiente do grupo visual selecionado (com `mix-blend-mode: overlay`)
-- Overlay de imagem do grupo (com `mix-blend-mode: soft-light`), caso exista
-- Intensidade ajustavel via slider
+Ao clicar "Visualizar" em qualquer template:
+- Aplicar temporariamente os `design_tokens` do template via CSS variables (sem salvar)
+- Mostrar o overlay como apareceria na interface (preview inline no proprio painel)
+- Botao "Aplicar" para salvar como template fixo
+- Botao "Cancelar" para voltar ao tema atual
 
-Isso replica exatamente o comportamento do `VisualOverlay` component, mas de forma isolada no simulador.
+### 3. Simplificar o fluxo
 
----
+- Manter os 3 modos (Auto/Fixo/Limpo) mas em formato mais compacto
+- Quando usuario clica "Aplicar" em qualquer template da galeria, automaticamente muda para modo "Fixo" com aquele template
+- O slider de intensidade e toggles ficam em um accordion "Ajustes avancados"
 
-## Detalhes Tecnicos
+### 4. Detalhes tecnicos
 
-### Dados adicionais no query do simulador
-```
-// Adicionar ao queryFn existente:
-const groups = await supabase
-  .from('visual_category_groups')
-  .select('*')
-  .eq('ativo', true)
-  .order('prioridade');
-```
+**Arquivos a modificar:**
+- `src/components/settings/SellerAppearancePanel.tsx` -- reescrever com galeria + preview
+- `src/components/settings/templates/TemplateColorPreview.tsx` -- adicionar variante com imagem de overlay
 
-### Novos controles na UI
-- `Select` com os grupos visuais disponíveis (slug como valor, nome como label, com preview de cor)
-- `Slider` de intensidade (1-10)
+**Dados consumidos (sem novas queries):**
+- `useTemplatesList()` -- ja carrega todos os templates
+- `useThemeResolver` -- tema ativo atual (query existente com cache de 5min)
+- Buscar variants dos templates ativos com uma unica query adicional para pegar `overlay_url`
 
-### Preview combinado
-Replicar a logica do `VisualOverlay` inline no simulador:
-- Gradiente com `opacity = intensidade/10` e `mixBlendMode: 'overlay'`
-- Imagem (se existir) com `opacity = intensidade/10 * 0.5` e `mixBlendMode: 'soft-light'`
-- Conteudo de exemplo por cima (titulo, badges, texto) usando as cores do template resolvido
+**Preview temporario:**
+- Usar `applyDesignTokens()` (ja existe) para injetar tokens temporariamente
+- Estado local `previewingTemplateId` controla qual template esta em preview
+- Ao cancelar, reaplica os tokens do tema resolvido atual
 
-### Arquivos modificados
-- `src/components/settings/templates/TemplateSimulator.tsx` — unico arquivo a ser alterado
+**Fluxo de aplicar:**
+1. Usuario clica "Aplicar" no card do template
+2. `upsert` salva `mode: 'fixed'` + `fixed_template_id: <id>`
+3. `useApplyTheme` detecta mudanca e aplica automaticamente
+4. Overlay layer atualiza sozinha (ja consome `resolved.variant.overlay_url`)
+
+**Nenhuma mudanca de banco necessaria** -- usa `seller_visual_preferences` e `templates/template_variants` existentes.
+
+### 5. O que NAO sera alterado
+
+- Theme Resolver (continua igual)
+- VisualOverlayLayer (continua igual)
+- useApplyTheme (continua igual)
+- Nenhuma tabela nova ou migracao
+
