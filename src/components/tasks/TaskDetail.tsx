@@ -46,6 +46,14 @@ import {
 } from '@/types/tasks';
 import type { WorkspaceMember } from '@/types/tasks';
 
+/** Returns "First Last" from a full name, or just "First" if single word */
+function shortName(fullName: string | undefined, fallbackId: string): string {
+  if (!fullName) return fallbackId.slice(0, 8) + '...';
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length <= 2) return fullName;
+  return `${parts[0]} ${parts[parts.length - 1]}`;
+}
+
 interface TaskDetailProps {
   task: Task | null;
   checklists: TaskChecklist[];
@@ -261,7 +269,7 @@ export function TaskDetail({
                 <div className="flex items-center gap-1 text-sm">
                   <User className="h-4 w-4" />
                   {task.assignee_user_id
-                    ? (members.find(m => m.user_id === task.assignee_user_id)?.full_name || task.assignee_user_id.slice(0, 8) + '...')
+                    ? shortName(members.find(m => m.user_id === task.assignee_user_id)?.full_name, task.assignee_user_id)
                     : 'Nenhum'}
                 </div>
               </SelectTrigger>
@@ -269,7 +277,7 @@ export function TaskDetail({
                 <SelectItem value="none">Nenhum</SelectItem>
                 {members.map(member => (
                   <SelectItem key={member.user_id} value={member.user_id}>
-                    {member.full_name || member.user_id.slice(0, 8) + '...'}
+                    {shortName(member.full_name, member.user_id)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -435,7 +443,7 @@ export function TaskDetail({
                   {comments.map(comment => (
                     <div key={comment.id} className="border-l-2 pl-3 py-1">
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span>{members.find(m => m.user_id === comment.user_id)?.full_name || comment.user_id.slice(0, 8) + '...'}</span>
+                        <span>{shortName(members.find(m => m.user_id === comment.user_id)?.full_name, comment.user_id)}</span>
                         <span>•</span>
                         <span>
                           {format(new Date(comment.created_at), "dd/MM 'às' HH:mm")}
@@ -462,7 +470,7 @@ export function TaskDetail({
                   {watchers.map(watcher => (
                     <div key={watcher.id} className="flex items-center gap-2">
                       <User className="h-4 w-4" />
-                      <span className="text-sm">{members.find(m => m.user_id === watcher.user_id)?.full_name || watcher.user_id.slice(0, 8) + '...'}</span>
+                      <span className="text-sm">{shortName(members.find(m => m.user_id === watcher.user_id)?.full_name, watcher.user_id)}</span>
                       {watcher.user_id === currentUserId && (
                         <Badge variant="secondary" className="text-xs">
                           Você
