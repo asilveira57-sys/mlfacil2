@@ -138,12 +138,22 @@ Deno.serve(async (req) => {
         const topProduct = [...productMap.values()].sort((a, b) => b.qty - a.qty)[0]?.name || null;
 
         // === OPERAÇÃO ===
-        // Etiquetas pendentes: status 'gerada' (ready to print)
-        const { count: etiquetasPend } = await supabase
+        // Etiquetas pendentes: contar da print_queue (gerada) + shipments ready_to_ship
+        // A print_queue pode não ter todos os envios prontos, então combinamos ambas fontes
+        const { count: etiquetasNaFila } = await supabase
           .from("meli_print_queue")
           .select("*", { count: "exact", head: true })
           .eq("seller_id", sellerId)
           .eq("status", "gerada");
+
+        const { count: shipmentsReadyToShip } = await supabase
+          .from("meli_shipments_cache")
+          .select("*", { count: "exact", head: true })
+          .eq("seller_id", sellerId)
+          .eq("shipment_status", "ready_to_ship");
+
+        // Use the higher value between print queue and ready shipments
+        const etiquetasPend = Math.max(etiquetasNaFila || 0, shipmentsReadyToShip || 0);
 
         // Perguntas pendentes: qa_questions with status 'pending'
         const { count: perguntasPend } = await supabase
