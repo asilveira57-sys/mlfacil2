@@ -370,13 +370,54 @@ export default function Publicidade() {
           <TabsContent value="campaigns" className="space-y-6 mt-6">
             <Card>
               <CardHeader>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-3">
                   <div>
                     <CardTitle className="text-lg">Todas as Campanhas</CardTitle>
                     <CardDescription>
                       {campaigns.length} campanhas encontradas • {activeCampaigns} ativas
                     </CardDescription>
                   </div>
+                </div>
+                {/* Period Filter - same as dashboard */}
+                <div className="flex items-center gap-2 flex-wrap pt-2">
+                  {periodOptions.map(opt => (
+                    <Button
+                      key={opt.value}
+                      variant={datePeriod === opt.value ? 'default' : 'outline'}
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => setDatePeriod(opt.value)}
+                    >
+                      {opt.label}
+                    </Button>
+                  ))}
+                  {datePeriod === 'custom' && (
+                    <div className="flex items-center gap-1.5">
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button variant="outline" size="sm" className={cn("h-7 text-xs gap-1", !customFrom && "text-muted-foreground")}>
+                            <CalendarIcon className="h-3 w-3" />
+                            {customFrom ? format(customFrom, 'dd/MM/yy') : 'De'}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <Calendar mode="single" selected={customFrom} onSelect={setCustomFrom} className="p-3 pointer-events-auto" />
+                        </PopoverContent>
+                      </Popover>
+                      <span className="text-xs text-muted-foreground">→</span>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button variant="outline" size="sm" className={cn("h-7 text-xs gap-1", !customTo && "text-muted-foreground")}>
+                            <CalendarIcon className="h-3 w-3" />
+                            {customTo ? format(customTo, 'dd/MM/yy') : 'Até'}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <Calendar mode="single" selected={customTo} onSelect={setCustomTo} className="p-3 pointer-events-auto" />
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                  )}
                 </div>
               </CardHeader>
               <CardContent>
@@ -387,6 +428,8 @@ export default function Publicidade() {
                     campaigns={campaigns}
                     syncState={syncState}
                     onTriggerSync={triggerSync}
+                    dateFrom={dateFrom}
+                    dateTo={dateTo}
                   />
                 )}
               </CardContent>
