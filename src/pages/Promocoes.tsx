@@ -611,11 +611,15 @@ export default function Promocoes() {
             action: 'adhere',
             items: [{ item_id: item.item_id, price: item.finalPrice || item.original_price || undefined, offer_id: item.offer_id || undefined }],
             label: `Aderir item ${item.title || item.item_id} à promoção`,
+            promotionId: selectedPromotion?.promotion_id,
+            promotionType: selectedPromotion?.promotion_type,
           })}
           onRemove={(item: EnrichedPromotionItem) => setConfirmAction({
             action: 'remove',
             items: [{ item_id: item.item_id }],
             label: `Remover item ${item.title || item.item_id} da promoção`,
+            promotionId: selectedPromotion?.promotion_id,
+            promotionType: selectedPromotion?.promotion_type,
           })}
           onAdhereAll={() => setConfirmAction({
             action: 'adhere',
@@ -625,6 +629,8 @@ export default function Promocoes() {
               offer_id: i.offer_id || undefined,
             })),
             label: `Aderir ${pendingItems.length} itens candidatos à promoção`,
+            promotionId: selectedPromotion?.promotion_id,
+            promotionType: selectedPromotion?.promotion_type,
           })}
           onAdhereSelected={(selected: EnrichedPromotionItem[]) => setConfirmAction({
             action: 'adhere',
@@ -634,11 +640,15 @@ export default function Promocoes() {
               offer_id: i.offer_id || undefined,
             })),
             label: `Aderir ${selected.length} itens selecionados à promoção`,
+            promotionId: selectedPromotion?.promotion_id,
+            promotionType: selectedPromotion?.promotion_type,
           })}
           onRemoveSelected={(selected: EnrichedPromotionItem[]) => setConfirmAction({
             action: 'remove',
             items: selected.map(i => ({ item_id: i.item_id })),
             label: `Remover ${selected.length} itens selecionados da promoção`,
+            promotionId: selectedPromotion?.promotion_id,
+            promotionType: selectedPromotion?.promotion_type,
           })}
           onCreateTask={handleCreateTask}
         />
