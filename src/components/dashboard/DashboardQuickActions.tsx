@@ -31,9 +31,9 @@ export function DashboardQuickActions() {
           <Skeleton className="h-6 w-32 mb-1" />
           <Skeleton className="h-4 w-40" />
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-28" />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={i} className="h-24" />
           ))}
         </div>
       </div>
@@ -53,14 +53,14 @@ export function DashboardQuickActions() {
         </div>
       </div>
       
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {enabledShortcuts.map((shortcut) => {
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        {enabledShortcuts.slice(0, 5).map((shortcut) => {
           const IconComp = getIconComponent(shortcut.icon);
           
           return (
             <Card
               key={shortcut.key}
-              className="p-4 cursor-pointer transition-all duration-200 hover:shadow-md border-2 border-transparent hover:border-primary/20"
+              className="p-3 cursor-pointer transition-all duration-200 hover:shadow-md border-2 border-transparent hover:border-primary/20"
               style={{ 
                 backgroundColor: `${activeColor.hex}10`,
               }}
@@ -74,10 +74,10 @@ export function DashboardQuickActions() {
             >
               <div className="flex flex-col items-center text-center gap-3">
                 <div 
-                  className="w-12 h-12 rounded-xl flex items-center justify-center bg-background/80"
+                  className="w-10 h-10 rounded-xl flex items-center justify-center bg-background/80"
                 >
                   <IconComp 
-                    className="h-6 w-6"
+                    className="h-5 w-5"
                     style={{ color: activeColor.hex }}
                   />
                 </div>

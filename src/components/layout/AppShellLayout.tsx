@@ -95,7 +95,7 @@ export function AppShellLayout() {
       <SidebarProvider defaultOpen={true}>
         <div className="min-h-screen flex w-full bg-background">
           <DynamicSidebar />
-          <SidebarInset className="flex flex-col flex-1">
+          <SidebarInset className="flex flex-col flex-1 overflow-x-hidden">
             {/* Header */}
             <header className="sticky top-0 z-40 flex h-14 items-center gap-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4 lg:px-6">
               <SidebarTrigger className="-ml-1" />

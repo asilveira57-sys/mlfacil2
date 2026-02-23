@@ -477,7 +477,7 @@ const Home = () => {
       subtitle={t('home:subtitle')}
       headerContent={headerContent}
     >
-      <div className="p-4 lg:p-6 space-y-6">
+      <div className="p-4 lg:p-6 space-y-6 overflow-x-hidden">
         {/* Trial Banner */}
         <TrialBanner />
 
