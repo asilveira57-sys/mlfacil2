@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -6,67 +7,54 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { Skeleton } from '@/components/ui/skeleton';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
-  Palette, Wand2, Lock, Sparkles, LayoutTemplate, CalendarHeart,
-  FolderTree, CheckCircle2, Eye, Loader2,
+  Palette, Wand2, Lock, Sparkles, Eye, EyeOff, Check, ChevronDown,
+  CalendarHeart, FolderTree, Loader2, Settings2,
 } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 import { useSellerVisualPreferences, useSellerVisualPreferencesMutations, type SellerAppearanceMode } from '@/hooks/useSellerVisualPreferences';
-import { useThemeResolver } from '@/hooks/useThemeResolver';
+import { useThemeResolver, applyDesignTokens } from '@/hooks/useThemeResolver';
 import { useTemplatesList } from '@/hooks/useTemplates';
 import { useCurrentWorkspaceId } from '@/hooks/useCurrentWorkspaceId';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { TemplateMiniPreview, TemplateColorPreview } from './templates/TemplateColorPreview';
-import type { DesignTokens } from '@/types/templates';
+import type { DesignTokens, TemplateVariant, Template } from '@/types/templates';
+import { toast } from 'sonner';
 
-const MODE_CONFIG = {
-  auto: {
-    icon: Wand2,
-    title: 'Automático',
-    description: 'O sistema escolhe o melhor visual com base na sua categoria principal e sazonalidade.',
-    badge: 'Recomendado',
-    badgeVariant: 'default' as const,
-  },
-  fixed: {
-    icon: Lock,
-    title: 'Template Fixo',
-    description: 'Escolha manualmente qual template aplicar, ignorando regras automáticas.',
-    badge: null,
-    badgeVariant: 'outline' as const,
-  },
-  clean: {
-    icon: Sparkles,
-    title: 'Limpo',
-    description: 'Interface neutra sem overlays ou gradientes temáticos. Apenas a cor da empresa.',
-    badge: null,
-    badgeVariant: 'outline' as const,
-  },
-};
+// Fetch all variants for active templates (single query)
+function useAllVariants() {
+  return useQuery({
+    queryKey: ['templates', 'all-variants-light'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('template_variants')
+        .select('*')
+        .eq('variant_key', 'light');
+      if (error) throw error;
+      return data as TemplateVariant[];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+const MODE_OPTIONS: { key: SellerAppearanceMode; icon: typeof Wand2; label: string }[] = [
+  { key: 'auto', icon: Wand2, label: 'Automático' },
+  { key: 'fixed', icon: Lock, label: 'Fixo' },
+  { key: 'clean', icon: Sparkles, label: 'Limpo' },
+];
 
 export function SellerAppearancePanel() {
   const { mode, fixedTemplateId, allowSeasonal, allowCategory, preferredIntensity, isLoading } = useSellerVisualPreferences();
   const { upsert } = useSellerVisualPreferencesMutations();
   const { data: templates = [], isLoading: templatesLoading } = useTemplatesList();
+  const { data: variants = [], isLoading: variantsLoading } = useAllVariants();
   const { data: workspaceId } = useCurrentWorkspaceId();
   const { activeAccountId } = useActiveAccount();
 
-  const [localMode, setLocalMode] = useState<SellerAppearanceMode | null>(null);
-  const [localFixedId, setLocalFixedId] = useState<string | null>(null);
-  const [localSeasonal, setLocalSeasonal] = useState<boolean | null>(null);
-  const [localCategory, setLocalCategory] = useState<boolean | null>(null);
-  const [localIntensity, setLocalIntensity] = useState<number | null>(null);
+  const [previewingId, setPreviewingId] = useState<string | null>(null);
 
-  // Effective values (local overrides for unsaved changes)
-  const effectiveMode = localMode ?? mode;
-  const effectiveFixedId = localFixedId ?? fixedTemplateId;
-  const effectiveSeasonal = localSeasonal ?? allowSeasonal;
-  const effectiveCategory = localCategory ?? allowCategory;
-  const effectiveIntensity = localIntensity ?? preferredIntensity;
-
-  const hasChanges = localMode !== null || localFixedId !== null || localSeasonal !== null || localCategory !== null || localIntensity !== null;
-
-  const { resolved, isLoading: resolverLoading } = useThemeResolver({
+  const { resolved } = useThemeResolver({
     workspace_id: workspaceId,
     company_id: activeAccountId,
     current_date: new Date(),
@@ -74,46 +62,47 @@ export function SellerAppearancePanel() {
   });
 
   const activeTemplates = templates.filter(t => t.is_active);
+  const variantMap = new Map(variants.map(v => [v.template_id, v]));
 
-  const handleSave = () => {
-    const updates: Record<string, any> = {};
-    if (localMode !== null) updates.mode = localMode;
-    if (localFixedId !== null) updates.fixed_template_id = localFixedId;
-    if (localSeasonal !== null) updates.allow_seasonal = localSeasonal;
-    if (localCategory !== null) updates.allow_category = localCategory;
-    if (localIntensity !== null) updates.preferred_intensity = localIntensity;
+  // Apply preview tokens temporarily
+  useEffect(() => {
+    if (!previewingId) return;
+    const variant = variantMap.get(previewingId);
+    if (variant) {
+      applyDesignTokens(variant.design_tokens as DesignTokens);
+    }
+    return () => {
+      // Restore original tokens on cancel
+      if (resolved?.resolved_tokens) {
+        applyDesignTokens(resolved.resolved_tokens);
+      }
+    };
+  }, [previewingId]);
 
-    upsert.mutate(updates, {
-      onSuccess: () => {
-        setLocalMode(null);
-        setLocalFixedId(null);
-        setLocalSeasonal(null);
-        setLocalCategory(null);
-        setLocalIntensity(null);
-      },
-    });
+  const handleApply = (templateId: string) => {
+    upsert.mutate(
+      { mode: 'fixed', fixed_template_id: templateId },
+      { onSuccess: () => setPreviewingId(null) }
+    );
   };
 
-  const handleDiscard = () => {
-    setLocalMode(null);
-    setLocalFixedId(null);
-    setLocalSeasonal(null);
-    setLocalCategory(null);
-    setLocalIntensity(null);
+  const handleModeChange = (newMode: SellerAppearanceMode) => {
+    upsert.mutate({ mode: newMode });
   };
 
-  if (isLoading || templatesLoading) {
+  if (isLoading || templatesLoading || variantsLoading) {
     return (
-      <div className="space-y-4 max-w-3xl">
+      <div className="space-y-4 max-w-4xl">
         <Skeleton className="h-10 w-48" />
-        <Skeleton className="h-48" />
-        <Skeleton className="h-32" />
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+          {[1, 2, 3].map(i => <Skeleton key={i} className="h-56" />)}
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-6 max-w-4xl">
       {/* Header */}
       <div>
         <h2 className="text-xl font-semibold flex items-center gap-2">
@@ -121,207 +110,35 @@ export function SellerAppearancePanel() {
           Aparência
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Configure como o visual da sua interface é aplicado.
+          Visualize e aplique templates visuais na sua interface.
         </p>
       </div>
 
-      {/* Current resolved theme preview */}
-      {resolved && effectiveMode !== 'clean' && (
-        <Card className="border-primary/20 bg-primary/5">
-          <CardContent className="pt-5 pb-4">
-            <div className="flex items-start gap-4">
-              <TemplateMiniPreview
-                tokens={resolved.resolved_tokens}
-                className="w-28 h-18 flex-shrink-0"
-              />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <Eye className="h-4 w-4 text-primary" />
-                  <span className="text-sm font-medium">Visual ativo:</span>
-                  <span className="text-sm font-semibold">{resolved.template.name}</span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {resolved.resolution_source}
-                </p>
-                <TemplateColorPreview
-                  tokens={resolved.resolved_tokens}
-                  size="sm"
-                  className="mt-2 max-w-[200px]"
-                />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {/* Compact mode selector */}
+      <div className="flex gap-2">
+        {MODE_OPTIONS.map(({ key, icon: Icon, label }) => {
+          const isActive = mode === key;
+          return (
+            <Button
+              key={key}
+              variant={isActive ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => handleModeChange(key)}
+              disabled={upsert.isPending}
+              className="gap-1.5"
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {label}
+              {key === 'auto' && (
+                <Badge variant="secondary" className="text-[9px] h-4 ml-1">Recomendado</Badge>
+              )}
+            </Button>
+          );
+        })}
+      </div>
 
-      {/* Mode selection */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Modo de Aparência</CardTitle>
-          <CardDescription>
-            Escolha como o sistema determina seu visual
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <RadioGroup
-            value={effectiveMode}
-            onValueChange={(v) => setLocalMode(v as SellerAppearanceMode)}
-            className="space-y-3"
-          >
-            {(Object.entries(MODE_CONFIG) as [SellerAppearanceMode, typeof MODE_CONFIG['auto']][]).map(([key, config]) => {
-              const Icon = config.icon;
-              const isSelected = effectiveMode === key;
-
-              return (
-                <label
-                  key={key}
-                  className={`flex items-start gap-3 p-3.5 rounded-lg border-2 cursor-pointer transition-all ${
-                    isSelected
-                      ? 'border-primary bg-primary/5 shadow-sm'
-                      : 'border-border hover:border-muted-foreground/30'
-                  }`}
-                >
-                  <RadioGroupItem value={key} className="mt-0.5" />
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <Icon className={`h-4 w-4 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`} />
-                      <span className="font-medium text-sm">{config.title}</span>
-                      {config.badge && (
-                        <Badge variant={config.badgeVariant} className="text-[10px] h-5">
-                          {config.badge}
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                      {config.description}
-                    </p>
-                  </div>
-                </label>
-              );
-            })}
-          </RadioGroup>
-        </CardContent>
-      </Card>
-
-      {/* Fixed template selector */}
-      {effectiveMode === 'fixed' && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <LayoutTemplate className="h-4 w-4" />
-              Template Fixo
-            </CardTitle>
-            <CardDescription>
-              Selecione o template que será sempre aplicado
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {activeTemplates.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">
-                Nenhum template ativo disponível. Solicite ao administrador.
-              </p>
-            ) : (
-              <Select
-                value={effectiveFixedId || ''}
-                onValueChange={(v) => setLocalFixedId(v)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione um template..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {activeTemplates.map((t) => (
-                    <SelectItem key={t.id} value={t.id}>
-                      <div className="flex items-center gap-2">
-                        <span>{t.name}</span>
-                        {t.is_system_default && (
-                          <Badge variant="secondary" className="text-[10px] h-4">Padrão</Badge>
-                        )}
-                        {t.source_group_id && (
-                          <Badge variant="outline" className="text-[10px] h-4">Admin</Badge>
-                        )}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Controls (only for auto/fixed modes) */}
-      {effectiveMode !== 'clean' && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Controles</CardTitle>
-            <CardDescription>
-              Ajuste fino do comportamento visual
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Intensity slider */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label className="text-sm">Intensidade do Overlay</Label>
-                <span className="text-sm font-mono text-muted-foreground">
-                  {effectiveIntensity}/10
-                </span>
-              </div>
-              <Slider
-                min={1}
-                max={10}
-                step={1}
-                value={[effectiveIntensity]}
-                onValueChange={([v]) => setLocalIntensity(v)}
-                className="w-full"
-              />
-              <p className="text-xs text-muted-foreground">
-                Quanto maior, mais visível o gradiente e overlay na interface.
-              </p>
-            </div>
-
-            {/* Toggles */}
-            {effectiveMode === 'auto' && (
-              <>
-                <div className="flex items-center justify-between py-1">
-                  <div className="flex items-center gap-2">
-                    <CalendarHeart className="h-4 w-4 text-muted-foreground" />
-                    <div>
-                      <Label className="text-sm">Temas Sazonais</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Ex: Natal, Carnaval, Black Friday
-                      </p>
-                    </div>
-                  </div>
-                  <Switch
-                    checked={effectiveSeasonal}
-                    onCheckedChange={(v) => setLocalSeasonal(v)}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between py-1">
-                  <div className="flex items-center gap-2">
-                    <FolderTree className="h-4 w-4 text-muted-foreground" />
-                    <div>
-                      <Label className="text-sm">Visual por Categoria</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Tema automático baseado na categoria principal
-                      </p>
-                    </div>
-                  </div>
-                  <Switch
-                    checked={effectiveCategory}
-                    onCheckedChange={(v) => setLocalCategory(v)}
-                  />
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Clean mode info */}
-      {effectiveMode === 'clean' && (
+      {/* Clean mode notice */}
+      {mode === 'clean' && (
         <Card className="border-muted">
           <CardContent className="pt-5 pb-4">
             <div className="flex items-start gap-3">
@@ -329,8 +146,7 @@ export function SellerAppearancePanel() {
               <div>
                 <p className="text-sm font-medium">Modo Limpo ativado</p>
                 <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                  A interface usará apenas o tema base do sistema e a cor da sua empresa.
-                  Nenhum overlay visual, gradiente temático ou decoração sazonal será aplicado.
+                  Nenhum overlay visual ou gradiente temático será aplicado. Apenas a cor base do sistema.
                 </p>
               </div>
             </div>
@@ -338,27 +154,231 @@ export function SellerAppearancePanel() {
         </Card>
       )}
 
-      {/* Save bar */}
-      {hasChanges && (
-        <div className="sticky bottom-4 bg-card border border-border rounded-lg p-3 shadow-lg flex items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">
-            Alterações não salvas
-          </p>
-          <div className="flex gap-2">
-            <Button variant="ghost" size="sm" onClick={handleDiscard}>
-              Descartar
-            </Button>
-            <Button size="sm" onClick={handleSave} disabled={upsert.isPending}>
-              {upsert.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-1" />
-              ) : (
-                <CheckCircle2 className="h-4 w-4 mr-1" />
-              )}
-              Salvar
-            </Button>
+      {/* Active theme indicator */}
+      {resolved && mode !== 'clean' && (
+        <Card className="border-primary/20 bg-primary/5">
+          <CardContent className="pt-4 pb-3">
+            <div className="flex items-center gap-3">
+              <Eye className="h-4 w-4 text-primary" />
+              <span className="text-sm">
+                Visual ativo: <strong>{resolved.template.name}</strong>
+              </span>
+              <span className="text-xs text-muted-foreground">— {resolved.resolution_source}</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Template Gallery */}
+      {mode !== 'clean' && (
+        <div>
+          <h3 className="text-sm font-medium mb-3">Templates Disponíveis</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {activeTemplates.map(template => {
+              const variant = variantMap.get(template.id);
+              const tokens = variant?.design_tokens as DesignTokens | undefined;
+              const overlayUrl = variant?.overlay_url;
+              const isCurrentlyApplied = resolved?.template.id === template.id;
+              const isPreviewing = previewingId === template.id;
+              const isFixedSelected = mode === 'fixed' && fixedTemplateId === template.id;
+
+              return (
+                <TemplateCard
+                  key={template.id}
+                  template={template}
+                  tokens={tokens}
+                  overlayUrl={overlayUrl}
+                  isActive={isCurrentlyApplied || isFixedSelected}
+                  isPreviewing={isPreviewing}
+                  onPreview={() => setPreviewingId(isPreviewing ? null : template.id)}
+                  onApply={() => handleApply(template.id)}
+                  isApplying={upsert.isPending}
+                />
+              );
+            })}
           </div>
+          {activeTemplates.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-8">
+              Nenhum template ativo disponível.
+            </p>
+          )}
         </div>
       )}
+
+      {/* Advanced settings accordion */}
+      {mode !== 'clean' && (
+        <Collapsible>
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground">
+              <Settings2 className="h-4 w-4" />
+              Ajustes Avançados
+              <ChevronDown className="h-3 w-3" />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <Card className="mt-2">
+              <CardContent className="pt-5 space-y-6">
+                {/* Intensity slider */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm">Intensidade do Overlay</Label>
+                    <span className="text-sm font-mono text-muted-foreground">
+                      {preferredIntensity}/10
+                    </span>
+                  </div>
+                  <Slider
+                    min={1}
+                    max={10}
+                    step={1}
+                    value={[preferredIntensity]}
+                    onValueChange={([v]) => upsert.mutate({ preferred_intensity: v })}
+                    className="w-full"
+                  />
+                </div>
+
+                {/* Toggles for auto mode */}
+                {mode === 'auto' && (
+                  <>
+                    <div className="flex items-center justify-between py-1">
+                      <div className="flex items-center gap-2">
+                        <CalendarHeart className="h-4 w-4 text-muted-foreground" />
+                        <div>
+                          <Label className="text-sm">Temas Sazonais</Label>
+                          <p className="text-xs text-muted-foreground">Ex: Natal, Black Friday</p>
+                        </div>
+                      </div>
+                      <Switch
+                        checked={allowSeasonal}
+                        onCheckedChange={(v) => upsert.mutate({ allow_seasonal: v })}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between py-1">
+                      <div className="flex items-center gap-2">
+                        <FolderTree className="h-4 w-4 text-muted-foreground" />
+                        <div>
+                          <Label className="text-sm">Visual por Categoria</Label>
+                          <p className="text-xs text-muted-foreground">Tema automático por categoria</p>
+                        </div>
+                      </div>
+                      <Switch
+                        checked={allowCategory}
+                        onCheckedChange={(v) => upsert.mutate({ allow_category: v })}
+                      />
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
     </div>
+  );
+}
+
+// --- Template Card Component ---
+interface TemplateCardProps {
+  template: Template;
+  tokens?: DesignTokens;
+  overlayUrl?: string | null;
+  isActive: boolean;
+  isPreviewing: boolean;
+  onPreview: () => void;
+  onApply: () => void;
+  isApplying: boolean;
+}
+
+function TemplateCard({
+  template,
+  tokens,
+  overlayUrl,
+  isActive,
+  isPreviewing,
+  onPreview,
+  onApply,
+  isApplying,
+}: TemplateCardProps) {
+  return (
+    <Card
+      className={`overflow-hidden transition-all ${
+        isActive ? 'ring-2 ring-primary shadow-md' : ''
+      } ${isPreviewing ? 'ring-2 ring-amber-500 shadow-lg' : ''}`}
+    >
+      {/* Visual preview area */}
+      <div className="relative h-36 bg-muted/30 overflow-hidden">
+        {tokens && (
+          <TemplateMiniPreview tokens={tokens} className="absolute inset-0 w-full h-full rounded-none border-0" />
+        )}
+        {overlayUrl && (
+          <img
+            src={overlayUrl}
+            alt={`Overlay de ${template.name}`}
+            className="absolute inset-0 w-full h-full object-cover opacity-40 mix-blend-overlay"
+            loading="lazy"
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          />
+        )}
+        {/* Badges */}
+        <div className="absolute top-2 left-2 flex gap-1">
+          {isActive && (
+            <Badge className="text-[10px] h-5 bg-primary">
+              <Check className="h-3 w-3 mr-0.5" /> Ativo
+            </Badge>
+          )}
+          {isPreviewing && (
+            <Badge variant="outline" className="text-[10px] h-5 bg-accent text-accent-foreground border-accent">
+              <Eye className="h-3 w-3 mr-0.5" /> Preview
+            </Badge>
+          )}
+          {template.is_system_default && (
+            <Badge variant="secondary" className="text-[10px] h-5">Padrão</Badge>
+          )}
+        </div>
+      </div>
+
+      <CardContent className="pt-3 pb-3 space-y-2">
+        <div>
+          <p className="text-sm font-medium truncate">{template.name}</p>
+          {template.description && (
+            <p className="text-xs text-muted-foreground truncate">{template.description}</p>
+          )}
+        </div>
+
+        {/* Color bar */}
+        {tokens && (
+          <TemplateColorPreview tokens={tokens} size="sm" />
+        )}
+
+        {/* Actions */}
+        <div className="flex gap-2 pt-1">
+          <Button
+            variant={isPreviewing ? 'secondary' : 'outline'}
+            size="sm"
+            className="flex-1 text-xs h-8"
+            onClick={onPreview}
+          >
+            {isPreviewing ? (
+              <><EyeOff className="h-3 w-3 mr-1" /> Cancelar</>
+            ) : (
+              <><Eye className="h-3 w-3 mr-1" /> Visualizar</>
+            )}
+          </Button>
+          <Button
+            size="sm"
+            className="flex-1 text-xs h-8"
+            onClick={onApply}
+            disabled={isApplying || isActive}
+          >
+            {isApplying ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : isActive ? (
+              <><Check className="h-3 w-3 mr-1" /> Aplicado</>
+            ) : (
+              'Aplicar'
+            )}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
