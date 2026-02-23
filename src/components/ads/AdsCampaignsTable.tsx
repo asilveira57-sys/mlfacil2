@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useMemo } from 'react';
 import { MoreHorizontal, Pause, Play, TrendingUp, TrendingDown, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Search, ChevronLeft, RefreshCw } from 'lucide-react';
 import {
   Table,
@@ -19,20 +19,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { AdsCampaign, AdsSyncState } from '@/types/ads';
 import { AdsCampaignProducts } from './AdsCampaignProducts';
-import { supabase } from '@/integrations/supabase/client';
-import { fetchAllRows } from '@/lib/supabaseHelpers';
-
-interface AdsCampaignsTableProps {
-  campaigns: AdsCampaign[];
-  onSelectCampaign?: (campaign: AdsCampaign) => void;
-  syncState?: AdsSyncState | null;
-  onTriggerSync?: () => void;
-  dateFrom?: string;
-  dateTo?: string;
-}
-
-type SortColumn = 'name' | 'status' | 'budget' | 'spent' | 'revenue' | 'cpc' | 'acos' | 'tacos' | 'roas';
-type SortDirection = 'asc' | 'desc';
+import type { CampaignMetric } from '@/hooks/useAdsPeriodMetrics';
 
 interface CampaignPeriodMetrics {
   spent: number;
@@ -42,154 +29,44 @@ interface CampaignPeriodMetrics {
   conversions: number;
 }
 
-// Per-date campaign metrics from ads_period_cache
-interface DailyCampaignRow {
-  date: string;
-  campaigns: Record<string, CampaignPeriodMetrics>;
+interface AdsCampaignsTableProps {
+  campaigns: AdsCampaign[];
+  onSelectCampaign?: (campaign: AdsCampaign) => void;
+  syncState?: AdsSyncState | null;
+  onTriggerSync?: () => void;
+  dateFrom?: string;
+  dateTo?: string;
+  precomputedMetrics?: CampaignMetric[];
 }
 
-interface CampaignCacheEntry {
-  sellerId: string;
-  dateFrom: string;
-  dateTo: string;
-  dailyRows: DailyCampaignRow[];
-}
+type SortColumn = 'name' | 'status' | 'budget' | 'spent' | 'revenue' | 'cpc' | 'acos' | 'tacos' | 'roas';
+type SortDirection = 'asc' | 'desc';
 
-/**
- * Aggregate campaign metrics from cached daily rows for a given date range.
- * Filters dailyRows to [dateFrom, dateTo] and sums per ml_campaign_id.
- */
-function aggregateFromCache(
-  cache: CampaignCacheEntry,
-  dateFrom: string,
-  dateTo: string,
-  campaigns: AdsCampaign[],
-): Record<string, CampaignPeriodMetrics> {
-  const merged: Record<string, CampaignPeriodMetrics> = {};
-  for (const row of cache.dailyRows) {
-    if (row.date < dateFrom || row.date > dateTo) continue;
-    for (const [mlId, m] of Object.entries(row.campaigns)) {
-      if (!merged[mlId]) {
-        merged[mlId] = { spent: 0, revenue: 0, clicks: 0, impressions: 0, conversions: 0 };
-      }
-      merged[mlId].spent += m.spent;
-      merged[mlId].revenue += m.revenue;
-      merged[mlId].clicks += m.clicks;
-      merged[mlId].impressions += m.impressions;
-      merged[mlId].conversions += m.conversions;
-    }
-  }
-
-  // Map ml_campaign_id → internal campaign.id
-  const result: Record<string, CampaignPeriodMetrics> = {};
-  for (const [mlId, m] of Object.entries(merged)) {
-    const match = campaigns.find(c => c.ml_campaign_id === mlId);
-    if (match) result[match.id] = m;
-  }
-  return result;
-}
-
-export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTriggerSync, dateFrom, dateTo }: AdsCampaignsTableProps) {
+export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTriggerSync, dateFrom, dateTo, precomputedMetrics }: AdsCampaignsTableProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortColumn, setSortColumn] = useState<SortColumn>('spent');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [currentPage, setCurrentPage] = useState(0);
   const pageSize = 10;
-  const [periodMetrics, setPeriodMetrics] = useState<Record<string, CampaignPeriodMetrics>>({});
-  const [periodLoading, setPeriodLoading] = useState(false);
+
+  // Build a lookup map from precomputedMetrics (keyed by ml_campaign_id)
+  const periodMetrics = useMemo(() => {
+    if (!precomputedMetrics || precomputedMetrics.length === 0) return {};
+    const map: Record<string, CampaignPeriodMetrics> = {};
+    for (const cm of precomputedMetrics) {
+      map[cm.ml_campaign_id] = {
+        spent: cm.spent,
+        revenue: cm.revenue,
+        clicks: cm.clicks,
+        impressions: cm.impressions,
+        conversions: cm.conversions,
+      };
+    }
+    return map;
+  }, [precomputedMetrics]);
+
   const hasPeriodFilter = !!(dateFrom && dateTo);
-
-  // Cache: fetch 90 days once, derive shorter periods instantly
-  const cacheRef = useRef<CampaignCacheEntry | null>(null);
-
-  // Fetch the maximum range (90d) and cache all daily campaign data
-  const ensureCache = useCallback(async (sellerId: string, requestedFrom: string, requestedTo: string) => {
-    const cached = cacheRef.current;
-    // If cache covers the requested range, skip fetch
-    if (cached && cached.sellerId === sellerId && cached.dateFrom <= requestedFrom && cached.dateTo >= requestedTo) {
-      return cached;
-    }
-
-    // Always fetch 90 days to cover all preset periods
-    const today = new Date();
-    const maxFrom = new Date(today);
-    maxFrom.setDate(maxFrom.getDate() - 90);
-    const fetchFrom = maxFrom.toISOString().slice(0, 10);
-    const fetchTo = today.toISOString().slice(0, 10);
-
-    console.log(`[AdsCampaignsTable] Fetching campaign cache ${fetchFrom}→${fetchTo}`);
-
-    const { data: dailyRows } = await supabase
-      .from('ads_period_cache')
-      .select('metric_date, campaigns_data')
-      .eq('seller_id', sellerId)
-      .gte('metric_date', fetchFrom)
-      .lte('metric_date', fetchTo)
-      .is('range_key', null)
-      .order('metric_date', { ascending: true });
-
-    const parsed: DailyCampaignRow[] = [];
-    if (dailyRows) {
-      for (const row of dailyRows) {
-        const cd = row.campaigns_data as any[];
-        if (!Array.isArray(cd)) continue;
-        const campaigns: Record<string, CampaignPeriodMetrics> = {};
-        for (const c of cd) {
-          const key = String(c.ml_campaign_id);
-          if (!campaigns[key]) {
-            campaigns[key] = { spent: 0, revenue: 0, clicks: 0, impressions: 0, conversions: 0 };
-          }
-          campaigns[key].spent += c.spent || 0;
-          campaigns[key].revenue += c.revenue || 0;
-          campaigns[key].clicks += c.clicks || 0;
-          campaigns[key].impressions += c.impressions || 0;
-          campaigns[key].conversions += c.conversions || 0;
-        }
-        parsed.push({ date: row.metric_date, campaigns });
-      }
-    }
-
-    const entry: CampaignCacheEntry = { sellerId, dateFrom: fetchFrom, dateTo: fetchTo, dailyRows: parsed };
-    cacheRef.current = entry;
-    console.log(`[AdsCampaignsTable] Cached ${parsed.length} daily rows`);
-    return entry;
-  }, []);
-
-  // When period or campaigns change, derive from cache (instant) or fetch once
-  useEffect(() => {
-    if (!dateFrom || !dateTo || campaigns.length === 0) {
-      setPeriodMetrics({});
-      return;
-    }
-    const sellerId = campaigns[0]?.seller_id;
-    if (!sellerId) return;
-
-    // Try to derive from existing cache first (instant, no loading)
-    const cached = cacheRef.current;
-    if (cached && cached.sellerId === sellerId && cached.dateFrom <= dateFrom && cached.dateTo >= dateTo) {
-      const agg = aggregateFromCache(cached, dateFrom, dateTo, campaigns);
-      setPeriodMetrics(agg);
-      console.log(`[AdsCampaignsTable] Derived ${dateFrom}→${dateTo} from cache (instant)`);
-      return;
-    }
-
-    // Need to fetch — show loading briefly
-    let cancelled = false;
-    setPeriodLoading(true);
-    ensureCache(sellerId, dateFrom, dateTo).then(entry => {
-      if (cancelled) return;
-      const agg = aggregateFromCache(entry, dateFrom, dateTo, campaigns);
-      setPeriodMetrics(agg);
-      setPeriodLoading(false);
-    }).catch(err => {
-      if (cancelled) return;
-      console.error('[AdsCampaignsTable] period metrics error:', err);
-      setPeriodLoading(false);
-    });
-
-    return () => { cancelled = true; };
-  }, [dateFrom, dateTo, campaigns, ensureCache]);
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
@@ -213,9 +90,9 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTr
   };
 
   const getCampaignMetrics = (campaign: AdsCampaign) => {
-    // If we have period metrics, use those instead of lifetime raw_data
-    if (hasPeriodFilter && periodMetrics[campaign.id]) {
-      const pm = periodMetrics[campaign.id];
+    // Use precomputed metrics matched by ml_campaign_id
+    const pm = hasPeriodFilter ? periodMetrics[campaign.ml_campaign_id] : null;
+    if (pm) {
       const acos = pm.revenue > 0 ? (pm.spent / pm.revenue) * 100 : 0;
       const roas = pm.spent > 0 ? pm.revenue / pm.spent : 0;
       const cpc = pm.clicks > 0 ? pm.spent / pm.clicks : 0;
