@@ -103,6 +103,7 @@ export interface WorkspaceMember {
   workspace_id: string;
   user_id: string;
   role: WorkspaceRole;
+  full_name?: string;
   created_at: string;
 }
 

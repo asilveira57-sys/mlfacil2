@@ -106,7 +106,25 @@ export function useWorkspace(): UseWorkspaceResult {
           .order('name'),
       ]);
 
-      if (membersRes.data) setMembers(membersRes.data as WorkspaceMember[]);
+      if (membersRes.data) {
+        // Fetch profile names for members
+        const userIds = membersRes.data.map((m: any) => m.user_id);
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('user_id, full_name')
+          .in('user_id', userIds);
+        
+        const profileMap = new Map(
+          (profiles || []).map((p: any) => [p.user_id, p.full_name])
+        );
+        
+        const enrichedMembers = membersRes.data.map((m: any) => ({
+          ...m,
+          full_name: profileMap.get(m.user_id) || null,
+        }));
+        
+        setMembers(enrichedMembers as WorkspaceMember[]);
+      }
       if (accountsRes.data) setAccounts(accountsRes.data as WorkspaceAccount[]);
     };
 

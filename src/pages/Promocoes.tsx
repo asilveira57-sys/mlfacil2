@@ -400,6 +400,7 @@ export default function Promocoes() {
       promotionId: selectedPromotion.promotion_id,
       promotionName: selectedPromotion.promotion_name,
       taskType,
+      endAt: selectedPromotion.end_at || null,
     });
   };
 
