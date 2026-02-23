@@ -52,32 +52,81 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTr
   const [periodMetrics, setPeriodMetrics] = useState<Record<string, CampaignPeriodMetrics>>({});
   const hasPeriodFilter = !!(dateFrom && dateTo);
 
-  // Fetch daily metrics aggregated by campaign for the period
+  // Fetch period metrics from ads_period_cache (campaigns_data JSONB)
   useEffect(() => {
     if (!dateFrom || !dateTo || campaigns.length === 0) {
       setPeriodMetrics({});
       return;
     }
-    const campaignIds = campaigns.map(c => c.id);
     const fetchPeriod = async () => {
       try {
-        let query = supabase
-          .from('ads_daily_metrics')
-          .select('campaign_id, spent, revenue, clicks, impressions, conversions')
-          .gte('metric_date', dateFrom)
-          .lte('metric_date', dateTo)
-          .in('campaign_id', campaignIds);
-        const rows = await fetchAllRows<any>(query);
-        const agg: Record<string, CampaignPeriodMetrics> = {};
-        for (const r of rows) {
-          if (!agg[r.campaign_id]) {
-            agg[r.campaign_id] = { spent: 0, revenue: 0, clicks: 0, impressions: 0, conversions: 0 };
+        // ads_period_cache stores per-date rows with campaigns_data JSONB containing per-campaign metrics
+        // We look for the range_key that matches our period, or aggregate individual date rows
+        const sellerId = campaigns[0]?.seller_id;
+        if (!sellerId) return;
+
+        // Try range-based cache first (R:dateFrom:dateTo)
+        const rangeKey = `R:${dateFrom}:${dateTo}`;
+        const { data: rangeRow } = await supabase
+          .from('ads_period_cache')
+          .select('campaigns_data')
+          .eq('seller_id', sellerId)
+          .eq('range_key', rangeKey)
+          .maybeSingle();
+
+        let campaignsData: any[] = [];
+
+        if (rangeRow?.campaigns_data && Array.isArray(rangeRow.campaigns_data)) {
+          campaignsData = rangeRow.campaigns_data as any[];
+        } else {
+          // Fallback: aggregate individual daily rows
+          const { data: dailyRows } = await supabase
+            .from('ads_period_cache')
+            .select('campaigns_data')
+            .eq('seller_id', sellerId)
+            .gte('metric_date', dateFrom)
+            .lte('metric_date', dateTo)
+            .is('range_key', null);
+
+          if (dailyRows && dailyRows.length > 0) {
+            const merged: Record<string, CampaignPeriodMetrics> = {};
+            for (const row of dailyRows) {
+              const cd = row.campaigns_data as any[];
+              if (!Array.isArray(cd)) continue;
+              for (const c of cd) {
+                const key = String(c.ml_campaign_id);
+                if (!merged[key]) {
+                  merged[key] = { spent: 0, revenue: 0, clicks: 0, impressions: 0, conversions: 0 };
+                }
+                merged[key].spent += c.spent || 0;
+                merged[key].revenue += c.revenue || 0;
+                merged[key].clicks += c.clicks || 0;
+                merged[key].impressions += c.impressions || 0;
+                merged[key].conversions += c.conversions || 0;
+              }
+            }
+            campaignsData = Object.entries(merged).map(([id, m]) => ({
+              ml_campaign_id: id,
+              ...m,
+            }));
           }
-          agg[r.campaign_id].spent += r.spent || 0;
-          agg[r.campaign_id].revenue += r.revenue || 0;
-          agg[r.campaign_id].clicks += r.clicks || 0;
-          agg[r.campaign_id].impressions += r.impressions || 0;
-          agg[r.campaign_id].conversions += r.conversions || 0;
+        }
+
+        // Map by ml_campaign_id to our internal campaign.id
+        const agg: Record<string, CampaignPeriodMetrics> = {};
+        for (const c of campaignsData) {
+          const mlId = String(c.ml_campaign_id);
+          // Find matching campaign by ml_campaign_id
+          const match = campaigns.find(camp => camp.ml_campaign_id === mlId);
+          if (match) {
+            agg[match.id] = {
+              spent: c.spent || 0,
+              revenue: c.revenue || 0,
+              clicks: c.clicks || 0,
+              impressions: c.impressions || 0,
+              conversions: c.conversions || 0,
+            };
+          }
         }
         setPeriodMetrics(agg);
       } catch (err) {
