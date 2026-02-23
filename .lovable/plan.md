@@ -1,84 +1,75 @@
 
-# Filtros Avancados na Pesquisa de Produtos (Central de Promocoes)
+# Adesao em Massa nos Resultados de Pesquisa por Produto
 
-## Problemas Atuais
+## O que muda
 
-1. **Sem filtro de status nos resultados de produto**: Quando voce pesquisa um produto, aparecem todas as campanhas misturadas — "Participando" e "Participar" juntos, sem como separar.
-2. **Co-participacao nao filtra resultados de produto**: O botao "Co-participacao ML" so filtra a lista de campanhas abaixo, mas nao afeta os resultados da pesquisa por produto.
-3. **Sem filtro de desconto**: Nao existe como filtrar por percentual de desconto (ex: "mostrar apenas com desconto inferior a 10%").
+Adicionar checkboxes de selecao e um botao de adesao em massa na secao "Resultados por Produto" da pesquisa, permitindo aderir dezenas/centenas de itens de uma vez sem clicar um por um.
 
-## Solucao
+## Como vai funcionar
 
-Adicionar 3 novos filtros que se aplicam tanto a lista de campanhas quanto aos resultados de pesquisa por produto:
-
-### Filtro 1: Status do Item (Select)
-- "Todos os status" (padrao)
-- "Participando" — itens com `item_status === 'started'`
-- "Participar" — itens com `item_status === 'candidate' || 'pending'`
-
-### Filtro 2: Co-participacao ML (Botao toggle — ja existe, precisa funcionar nos resultados de produto)
-- Filtra para mostrar apenas promocoes que tem `meli_percentage > 0`
-
-### Filtro 3: Desconto Maximo (Input numerico)
-- Campo para digitar percentual maximo de desconto
-- Ex: digitar "10" mostra apenas itens com desconto ate 10%
+1. Cada linha de campanha com status "candidato" (botao "Participar") ganha um checkbox ao lado
+2. Um header com "Selecionar todos candidatos" e contagem de selecionados aparece acima dos resultados
+3. Um botao "Aderir X Selecionados" aparece quando ha itens marcados
+4. Ao clicar, abre o mesmo dialog de confirmacao existente com o resumo da acao
 
 ## Alteracoes Tecnicas
 
 ### Arquivo: `src/pages/Promocoes.tsx`
 
-**Novos estados de filtro** (junto aos existentes na linha 83-85):
+**1. Novo estado para selecao em massa** (junto aos estados existentes):
 
 ```typescript
-const [statusFilter, setStatusFilter] = useState<string>('all'); // 'all' | 'participating' | 'candidate'
-const [maxDiscountFilter, setMaxDiscountFilter] = useState<string>(''); // percentual maximo
+// Chave unica: "item_id::promotion_id" para identificar cada par item-campanha
+const [selectedSearchItems, setSelectedSearchItems] = useState<Set<string>>(new Set());
 ```
 
-**Filtro aplicado aos productResults** (novo useMemo apos linha 150):
+**2. Funcoes auxiliares de selecao**:
 
 ```typescript
-const filteredProductResults = useMemo(() => {
-  return productResults.map(product => {
-    const filteredPromos = product.promotions.filter(promo => {
-      // Status filter
-      if (statusFilter === 'participating' && promo.item_status !== 'started') return false;
-      if (statusFilter === 'candidate' && promo.item_status !== 'candidate' && promo.item_status !== 'pending') return false;
-      
-      // Co-participation filter
-      if (coParticipationFilter && !(promo.meli_percentage && promo.meli_percentage > 0)) return false;
-      
-      // Discount filter
-      if (maxDiscountFilter) {
-        const pct = (promo.meli_percentage || 0) + (promo.seller_percentage || 0);
-        const pctFromPrice = promo.original_price && promo.promo_price && promo.original_price > 0
-          ? ((promo.original_price - promo.promo_price) / promo.original_price) * 100
-          : 0;
-        const discount = pct > 0 ? pct : pctFromPrice;
-        if (discount > Number(maxDiscountFilter)) return false;
-      }
-      
-      return true;
-    });
-    return { ...product, promotions: filteredPromos };
-  }).filter(product => product.promotions.length > 0);
-}, [productResults, statusFilter, coParticipationFilter, maxDiscountFilter]);
+// Extrair todos os candidatos filtraveis
+const allCandidateEntries = useMemo(() => {
+  return filteredProductResults.flatMap(product =>
+    product.promotions
+      .filter(p => p.item_status === 'candidate' || p.item_status === 'pending')
+      .map(p => ({
+        key: `${product.item_id}::${p.promotion_id}`,
+        item_id: product.item_id,
+        promotion_id: p.promotion_id,
+        promotion_type: p.promotion_type,
+        price: p.promo_price || p.original_price || undefined,
+        offer_id: p.offer_id || undefined,
+      }))
+  );
+}, [filteredProductResults]);
+
+const toggleSelectItem = (key: string) => { ... };
+const toggleSelectAll = () => { ... };
 ```
 
-**Novos controles na barra de filtros** (apos o botao Co-participacao, linha 497):
+**3. Header com selecao em massa** (dentro do CardContent, antes da lista de resultados):
 
-```
-[Select: Status do item]     [Input: Desconto max %]
-```
+- Checkbox "Selecionar todos candidatos (N)"
+- Badge mostrando "X selecionados"
+- Botao "Aderir X Selecionados" que agrupa por promotion_id e chama setConfirmAction
 
-- Select com opcoes: "Todos os status", "Participando", "Participar"
-- Input numerico com placeholder "Desconto max %"
+**4. Checkboxes nas linhas de campanha** (dentro de ProductPromotionCard):
 
-**Renderizacao**: Trocar `productResults` por `filteredProductResults` na secao de resultados (linha 501-541).
+- Passar selectedSearchItems e toggleSelectItem como props
+- Adicionar Checkbox ao lado de cada campanha candidata
+- Itens "Participando" ou com outro status nao ganham checkbox
 
-### Resumo dos arquivos alterados
+**5. Acao em massa**:
+
+Como cada item pode pertencer a campanhas diferentes, a adesao em massa agrupa por promotion_id e faz chamadas separadas para cada campanha. O dialog de confirmacao mostra:
+- Total de itens selecionados
+- Quantidade de campanhas distintas envolvidas
+
+**6. Limpar selecao** quando os filtros mudam ou apos acao concluida.
+
+### Resumo
 
 | Arquivo | Alteracao |
 |---------|-----------|
-| `src/pages/Promocoes.tsx` | Novos estados, filtro de productResults, novos controles UI |
+| `src/pages/Promocoes.tsx` | Estado de selecao, logica de toggle, header com "Selecionar todos" e "Aderir Selecionados", checkbox nas linhas candidatas do ProductPromotionCard |
 
-Nenhuma alteracao no backend ou hook de busca — toda filtragem e feita client-side sobre os dados ja carregados.
+Nenhuma alteracao no backend — a adesao usa a mesma edge function `promotions-action` ja existente, chamada uma vez por campanha distinta nos itens selecionados.
