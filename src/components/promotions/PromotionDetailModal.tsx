@@ -288,7 +288,7 @@ export function PromotionDetailModal({
           <div className="flex items-center gap-2 flex-wrap">
             {selectedIds.size > 0 ? (
               <>
-                {selectedCandidates.length > 0 && promotion.status === 'started' && !isExpired && (
+                {selectedCandidates.length > 0 && (promotion.status === 'started' || promotion.status === 'pending') && !isExpired && (
                   <Button
                     size="sm"
                     className="gap-1.5"
@@ -321,7 +321,7 @@ export function PromotionDetailModal({
               </>
             ) : (
               <>
-                {pendingItems.length > 0 && promotion.status === 'started' && !isExpired && (
+                {pendingItems.length > 0 && (promotion.status === 'started' || promotion.status === 'pending') && !isExpired && (
                   <Button
                     size="sm"
                     className="gap-1.5"

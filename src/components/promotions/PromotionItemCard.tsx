@@ -182,7 +182,7 @@ export function PromotionItemCard({
       <div className="flex-shrink-0 flex flex-col items-end gap-1.5 min-w-[110px]">
         <ItemStatusBadge status={item.item_status} />
 
-        {item.item_status === 'candidate' && promotionStatus === 'started' && onAdhere && (
+        {item.item_status === 'candidate' && (promotionStatus === 'started' || promotionStatus === 'pending') && onAdhere && (
           <Button
             size="sm"
             variant="ghost"
