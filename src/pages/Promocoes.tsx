@@ -1007,6 +1007,23 @@ export default function Promocoes() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        {/* Agent Bot + Config Drawer */}
+        {workspaceId && sellerId && (
+          <>
+            <PromotionAgentBot
+              isEnabled={agentConfig?.is_enabled ?? false}
+              isRunning={false}
+              onClick={() => setAgentDrawerOpen(true)}
+              containerRef={containerRef as React.RefObject<HTMLElement>}
+            />
+            <PromotionAgentConfig
+              open={agentDrawerOpen}
+              onOpenChange={setAgentDrawerOpen}
+              workspaceId={workspaceId}
+              sellerId={sellerId}
+            />
+          </>
+        )}
       </div>
     </PageContainer>
   );
@@ -1312,25 +1329,6 @@ function ProductPromotionCard({
           })}
         </div>
       </div>
-
-        {/* Agent Bot + Config Drawer */}
-        {workspaceId && sellerId && (
-          <>
-            <PromotionAgentBot
-              isEnabled={agentConfig?.is_enabled ?? false}
-              isRunning={false}
-              onClick={() => setAgentDrawerOpen(true)}
-              containerRef={containerRef as React.RefObject<HTMLElement>}
-            />
-            <PromotionAgentConfig
-              open={agentDrawerOpen}
-              onOpenChange={setAgentDrawerOpen}
-              workspaceId={workspaceId}
-              sellerId={sellerId}
-            />
-          </>
-        )}
-      </div>
-    </PageContainer>
+    </div>
   );
 }
