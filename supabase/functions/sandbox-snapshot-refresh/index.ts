@@ -152,12 +152,12 @@ Deno.serve(async (req) => {
           .eq("seller_id", sellerId)
           .eq("status", "pending");
 
-        // Pedidos aguardando envio (paid/handling)
+        // Pedidos aguardando envio (from shipments cache, not orders)
         const { count: pedidosEnvio } = await supabase
-          .from("meli_orders_cache")
+          .from("meli_shipments_cache")
           .select("*", { count: "exact", head: true })
           .eq("seller_id", sellerId)
-          .in("order_status", ["paid", "handling"]);
+          .in("shipment_status", ["ready_to_ship", "handling", "pending"]);
 
         // === ADS ===
         const { data: adsData } = await supabase
