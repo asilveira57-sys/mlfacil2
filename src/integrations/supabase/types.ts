@@ -9812,6 +9812,127 @@ export type Database = {
         }
         Relationships: []
       }
+      promotion_agent_config: {
+        Row: {
+          accept_unknown_type: boolean
+          accepted_types: string[]
+          allow_when_margin_unknown: boolean
+          created_at: string
+          exclude_items: string[]
+          id: string
+          is_enabled: boolean
+          max_seller_discount: number
+          min_margin: number | null
+          min_stock: number
+          min_total_discount: number | null
+          require_copart: boolean
+          scope_categories: string[]
+          scope_items: string[]
+          scope_type: string
+          seller_id: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          accept_unknown_type?: boolean
+          accepted_types?: string[]
+          allow_when_margin_unknown?: boolean
+          created_at?: string
+          exclude_items?: string[]
+          id?: string
+          is_enabled?: boolean
+          max_seller_discount?: number
+          min_margin?: number | null
+          min_stock?: number
+          min_total_discount?: number | null
+          require_copart?: boolean
+          scope_categories?: string[]
+          scope_items?: string[]
+          scope_type?: string
+          seller_id: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          accept_unknown_type?: boolean
+          accepted_types?: string[]
+          allow_when_margin_unknown?: boolean
+          created_at?: string
+          exclude_items?: string[]
+          id?: string
+          is_enabled?: boolean
+          max_seller_discount?: number
+          min_margin?: number | null
+          min_stock?: number
+          min_total_discount?: number | null
+          require_copart?: boolean
+          scope_categories?: string[]
+          scope_items?: string[]
+          scope_type?: string
+          seller_id?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "promotion_agent_config_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      promotion_agent_logs: {
+        Row: {
+          details: Json
+          executed_at: string
+          id: string
+          items_adhered: number
+          items_failed: number
+          items_skipped: number
+          promotions_affected: number
+          run_id: string
+          seller_id: string
+          triggered_by: string
+          workspace_id: string
+        }
+        Insert: {
+          details?: Json
+          executed_at?: string
+          id?: string
+          items_adhered?: number
+          items_failed?: number
+          items_skipped?: number
+          promotions_affected?: number
+          run_id: string
+          seller_id: string
+          triggered_by?: string
+          workspace_id: string
+        }
+        Update: {
+          details?: Json
+          executed_at?: string
+          id?: string
+          items_adhered?: number
+          items_failed?: number
+          items_skipped?: number
+          promotions_affected?: number
+          run_id?: string
+          seller_id?: string
+          triggered_by?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "promotion_agent_logs_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       promotion_items_snapshots: {
         Row: {
           account_id: string | null

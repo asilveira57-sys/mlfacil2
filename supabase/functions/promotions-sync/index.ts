@@ -676,6 +676,21 @@ Deno.serve(async (req) => {
       log_id: logId,
     };
 
+    // Chain promotion-agent-run after successful sync
+    try {
+      const agentRunId = `sync-${logId || Date.now()}-${accountId}`;
+      console.log(`${logPrefix} Triggering promotion-agent-run (run_id=${agentRunId})`);
+      const agentRes = await fetch(`${supabaseUrl}/functions/v1/promotion-agent-run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${supabaseServiceKey}` },
+        body: JSON.stringify({ workspace_id: workspaceId, seller_id: accountId, triggered_by: 'promotions-sync', run_id: agentRunId }),
+      });
+      const agentText = await agentRes.text();
+      console.log(`${logPrefix} promotion-agent-run response: ${agentRes.status} ${agentText.substring(0, 200)}`);
+    } catch (agentErr) {
+      console.warn(`${logPrefix} promotion-agent-run chain failed (non-blocking):`, agentErr);
+    }
+
     return successResponse(result);
 
   } catch (error) {
