@@ -8,6 +8,7 @@ import { HeaderUtilities } from "@/components/utilities";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { useApplyTheme } from "@/hooks/useApplyTheme";
+import { VisualOverlayLayer } from "@/components/visual-identity/VisualOverlayLayer";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -27,7 +28,8 @@ export function DashboardLayout({
   
   return (
     <SidebarProvider defaultOpen={true}>
-      <div className="min-h-screen flex w-full bg-background">
+      <div className="min-h-screen flex w-full bg-background relative">
+        <VisualOverlayLayer />
         <AppSidebar />
         <SidebarInset className="flex flex-col flex-1">
           {/* Header */}
