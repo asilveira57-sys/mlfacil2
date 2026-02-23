@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { MoreHorizontal, Pause, Play, TrendingUp, TrendingDown, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Search, ChevronLeft, RefreshCw } from 'lucide-react';
 import {
   Table,
@@ -19,24 +19,73 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { AdsCampaign, AdsSyncState } from '@/types/ads';
 import { AdsCampaignProducts } from './AdsCampaignProducts';
+import { supabase } from '@/integrations/supabase/client';
+import { fetchAllRows } from '@/lib/supabaseHelpers';
 
 interface AdsCampaignsTableProps {
   campaigns: AdsCampaign[];
   onSelectCampaign?: (campaign: AdsCampaign) => void;
   syncState?: AdsSyncState | null;
   onTriggerSync?: () => void;
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 type SortColumn = 'name' | 'status' | 'budget' | 'spent' | 'revenue' | 'cpc' | 'acos' | 'tacos' | 'roas';
 type SortDirection = 'asc' | 'desc';
 
-export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTriggerSync }: AdsCampaignsTableProps) {
+interface CampaignPeriodMetrics {
+  spent: number;
+  revenue: number;
+  clicks: number;
+  impressions: number;
+  conversions: number;
+}
+
+export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTriggerSync, dateFrom, dateTo }: AdsCampaignsTableProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortColumn, setSortColumn] = useState<SortColumn>('spent');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [currentPage, setCurrentPage] = useState(0);
   const pageSize = 10;
+  const [periodMetrics, setPeriodMetrics] = useState<Record<string, CampaignPeriodMetrics>>({});
+  const hasPeriodFilter = !!(dateFrom && dateTo);
+
+  // Fetch daily metrics aggregated by campaign for the period
+  useEffect(() => {
+    if (!dateFrom || !dateTo || campaigns.length === 0) {
+      setPeriodMetrics({});
+      return;
+    }
+    const campaignIds = campaigns.map(c => c.id);
+    const fetchPeriod = async () => {
+      try {
+        let query = supabase
+          .from('ads_daily_metrics')
+          .select('campaign_id, spent, revenue, clicks, impressions, conversions')
+          .gte('metric_date', dateFrom)
+          .lte('metric_date', dateTo)
+          .in('campaign_id', campaignIds);
+        const rows = await fetchAllRows<any>(query);
+        const agg: Record<string, CampaignPeriodMetrics> = {};
+        for (const r of rows) {
+          if (!agg[r.campaign_id]) {
+            agg[r.campaign_id] = { spent: 0, revenue: 0, clicks: 0, impressions: 0, conversions: 0 };
+          }
+          agg[r.campaign_id].spent += r.spent || 0;
+          agg[r.campaign_id].revenue += r.revenue || 0;
+          agg[r.campaign_id].clicks += r.clicks || 0;
+          agg[r.campaign_id].impressions += r.impressions || 0;
+          agg[r.campaign_id].conversions += r.conversions || 0;
+        }
+        setPeriodMetrics(agg);
+      } catch (err) {
+        console.error('[AdsCampaignsTable] period metrics error:', err);
+      }
+    };
+    fetchPeriod();
+  }, [dateFrom, dateTo, campaigns]);
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
@@ -60,6 +109,17 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTr
   };
 
   const getCampaignMetrics = (campaign: AdsCampaign) => {
+    // If we have period metrics, use those instead of lifetime raw_data
+    if (hasPeriodFilter && periodMetrics[campaign.id]) {
+      const pm = periodMetrics[campaign.id];
+      const acos = pm.revenue > 0 ? (pm.spent / pm.revenue) * 100 : 0;
+      const roas = pm.spent > 0 ? pm.revenue / pm.spent : 0;
+      const cpc = pm.clicks > 0 ? pm.spent / pm.clicks : 0;
+      const tacos = pm.revenue > 0 ? (pm.spent / pm.revenue) * 100 : 0;
+      const budget = (campaign.raw_data?.budget as number) || campaign.daily_budget || null;
+      return { acos, roas, revenue: pm.revenue, budget, cpc, tacos, clicks: pm.clicks, spent: pm.spent };
+    }
+    // Fallback to lifetime metrics from raw_data
     const metrics = campaign.raw_data?.metrics as Record<string, number> | undefined;
     const spent = metrics?.cost || campaign.spent_total || 0;
     const revenue = metrics?.total_amount || 0;
