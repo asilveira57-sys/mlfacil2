@@ -189,15 +189,13 @@ Deno.serve(async (req) => {
       await supabase.from("operational_events").insert(events);
     }
 
-    // ── 7) Se houve mudanças → atualizar snapshot do sandbox imediatamente
-    if (changesFound > 0) {
-      try {
-        await supabase.functions.invoke("sandbox-snapshot-refresh", {
-          body: { user_id, seller_id, company_id, partial: true },
-        });
-      } catch (e) {
-        console.warn("[QuickSync] Sandbox refresh falhou:", e);
-      }
+    // ── 7) Atualizar snapshot do sandbox em TODA execução (garante contadores sincronizados)
+    try {
+      await supabase.functions.invoke("sandbox-snapshot-refresh", {
+        body: { user_id, seller_id, company_id, partial: true },
+      });
+    } catch (e) {
+      console.warn("[QuickSync] Sandbox refresh falhou:", e);
     }
 
     // ── 8) Remover pedidos expirados da fila

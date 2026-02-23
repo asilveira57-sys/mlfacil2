@@ -168,7 +168,8 @@ Deno.serve(async (req) => {
           .from("meli_shipments_cache")
           .select("*", { count: "exact", head: true })
           .eq("seller_id", sellerId)
-          .in("shipment_status", ["ready_to_ship", "handling", "pending"]);
+          .eq("shipment_status", "ready_to_ship")
+          .in("shipment_substatus", ["ready_to_print", "invoice_pending", "ready_to_pack"]);
 
         // === ADS ===
         const { data: adsData } = await supabase
