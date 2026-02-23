@@ -1,83 +1,37 @@
 
+# Corrigir Layout dos Acessos Rapidos na tela Inicio
 
-# Corrigir: Imagem do Template Nao Aparece (Bug Real)
+## Problemas identificados (da screenshot)
 
-## Problema encontrado
+1. Grid usa `xl:grid-cols-6` -- forca 6 colunas que estouram a area disponivel
+2. Cards muito largos empurram o ultimo para fora da tela, criando barra de rolagem horizontal
+3. O botao "Avaliar" e o card de avaliacao ficam escondidos abaixo dos cards que estouraram
+4. Nao ha protecao contra overflow horizontal no container principal
 
-O bug e claro: o seller salva `mode: fixed` + `fixed_template_id: "Casa e Decoracao"` na tabela `seller_visual_preferences`, mas o hook `useApplyTheme` **nunca le essa tabela**. Ele chama `useThemeResolver` que so consulta `template_rules` (categoria, sazonal, global_default).
+## Mudancas planejadas
 
-Como a conta do seller nao e da categoria `casa-decoracao`, o resolver cai no fallback `global_default` -- que e um template sem imagem de overlay. Resultado: a imagem nunca aparece.
+### 1. `src/components/dashboard/DashboardQuickActions.tsx`
+- Alterar grid de `xl:grid-cols-6` para `xl:grid-cols-5` (maximo 5 por linha)
+- Reduzir padding dos cards de `p-4` para `p-3`
+- Reduzir icone de `w-12 h-12` para `w-10 h-10` e icone de `h-6 w-6` para `h-5 w-5`
+- Limitar shortcuts exibidos a no maximo 5 (slice)
+- Alterar skeleton grid para tambem usar 5 colunas
 
-```text
-Fluxo ATUAL (quebrado):
+### 2. `src/components/layout/AppShellLayout.tsx`
+- Adicionar `overflow-x-hidden` no container principal (`SidebarInset` ou div pai) para proibir rolagem horizontal em toda a aplicacao
 
-Seller clica "Aplicar Casa e Decor"
-       |
-       v
-seller_visual_preferences.fixed_template_id = "Casa e Decor"  (salvo OK)
-       |
-       v
-useApplyTheme() -> useThemeResolver()  (NAO le seller_visual_preferences!)
-       |
-       v
-template_rules -> categoria nao bate -> fallback global_default (sem imagem)
-       |
-       v
-VisualOverlayLayer -> overlay_url = null -> NAO renderiza
-```
+### 3. `src/pages/Home.tsx`
+- Adicionar `overflow-x-hidden` no container do conteudo da pagina como camada extra de protecao
 
-## Solucao
+### 4. Verificar botao de avaliar
+- O `SmartSystemRatingCard` ja esta renderizado corretamente no codigo (linha 500-507 do Home.tsx)
+- O problema e que ele fica empurrado para baixo e fora da viewport visivel por causa do overflow horizontal dos cards acima
+- Ao corrigir o grid (itens 1-3), o card de avaliacao voltara a ficar visivel naturalmente
 
-Modificar `useApplyTheme` para respeitar as preferencias do seller:
+## Resumo das alteracoes por arquivo
 
-```text
-Fluxo CORRIGIDO:
-
-useApplyTheme()
-       |
-       v
-Le seller_visual_preferences (mode, fixed_template_id)
-       |
-       +-- mode = "fixed"?  -> Busca template + variant pelo fixed_template_id
-       |                       -> Aplica tokens + overlay diretamente
-       |
-       +-- mode = "clean"?  -> Nao aplica nada
-       |
-       +-- mode = "auto"?   -> Usa useThemeResolver normalmente (regras por categoria)
-```
-
-## Arquivos a modificar
-
-### 1. `src/hooks/useApplyTheme.ts`
-- Importar `useSellerVisualPreferences`
-- Quando `mode === 'fixed'` e `fixedTemplateId` existir:
-  - Buscar o template e variant diretamente (sem passar pelo resolver de regras)
-  - Montar o objeto `ResolvedTheme` com os dados corretos (incluindo `overlay_url`)
-  - Aplicar os `design_tokens` via CSS variables
-- Quando `mode === 'clean'`: nao aplicar nada
-- Quando `mode === 'auto'`: manter fluxo atual via `useThemeResolver`
-
-### 2. `src/components/visual-identity/VisualOverlayLayer.tsx`
-- Nenhuma mudanca estrutural necessaria
-- Ja consome `resolved.variant.overlay_url` corretamente
-- Vai funcionar automaticamente quando `useApplyTheme` retornar o template correto
-
-## Detalhes tecnicos
-
-O `useApplyTheme` vai usar os dados ja carregados pelo `useThemeResolver` (que traz todos os templates e variants em cache) para evitar queries extras. Quando `mode === 'fixed'`:
-
-1. Pega `fixedTemplateId` de `useSellerVisualPreferences`
-2. Busca o template correspondente na lista ja carregada
-3. Busca o variant `light` correspondente
-4. Monta `ResolvedTheme` com `resolution_source: "Preferencia fixa do seller"`
-5. Aplica tokens e retorna o `resolved` com `overlay_url` preenchido
-
-Isso corrige tanto as cores quanto a imagem de overlay -- tudo em uma unica mudanca no `useApplyTheme`.
-
-## O que NAO sera alterado
-
-- `useThemeResolver` -- continua funcionando igual para modo auto
-- `VisualOverlayLayer` -- ja esta correto, so precisa receber dados certos
-- `SellerAppearancePanel` -- ja salva corretamente
-- Nenhuma tabela ou migracao necessaria
-
+| Arquivo | Alteracao |
+|---------|-----------|
+| `DashboardQuickActions.tsx` | Grid 5 cols, cards menores, max 5 shortcuts |
+| `AppShellLayout.tsx` | `overflow-x-hidden` no container principal |
+| `Home.tsx` | `overflow-x-hidden` no wrapper do conteudo |
