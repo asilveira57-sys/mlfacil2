@@ -1,71 +1,83 @@
 
 
-# Painel de Aparencia do Seller: Preview Visual + Aplicar Qualquer Template
+# Corrigir: Imagem do Template Nao Aparece (Bug Real)
 
-## Problema identificado
+## Problema encontrado
 
-O painel atual em Configuracoes > Aparencia:
-- **Nao mostra a imagem** de overlay do template (apenas cores em miniatura)
-- **Nao permite testar** um template que nao seja da sua categoria (ex: voce quer ver "Casa e Decoracao" mas sua conta nao e dessa categoria)
-- **Nao tem preview visual** antes de aplicar
-- O fluxo atual exige entender modos (auto/fixo/clean) sem ver o resultado
+O bug e claro: o seller salva `mode: fixed` + `fixed_template_id: "Casa e Decoracao"` na tabela `seller_visual_preferences`, mas o hook `useApplyTheme` **nunca le essa tabela**. Ele chama `useThemeResolver` que so consulta `template_rules` (categoria, sazonal, global_default).
 
-## Solucao proposta
+Como a conta do seller nao e da categoria `casa-decoracao`, o resolver cai no fallback `global_default` -- que e um template sem imagem de overlay. Resultado: a imagem nunca aparece.
 
-Reescrever o `SellerAppearancePanel` com foco em **ver e aplicar**, sem complexidade desnecessaria.
+```text
+Fluxo ATUAL (quebrado):
 
-### 1. Galeria de Templates com Preview Visual
+Seller clica "Aplicar Casa e Decor"
+       |
+       v
+seller_visual_preferences.fixed_template_id = "Casa e Decor"  (salvo OK)
+       |
+       v
+useApplyTheme() -> useThemeResolver()  (NAO le seller_visual_preferences!)
+       |
+       v
+template_rules -> categoria nao bate -> fallback global_default (sem imagem)
+       |
+       v
+VisualOverlayLayer -> overlay_url = null -> NAO renderiza
+```
 
-Substituir o dropdown de template fixo por uma **galeria de cards visuais** mostrando todos os templates ativos. Cada card tera:
+## Solucao
 
-- Nome do template
-- Mini-preview das cores (ja existe `TemplateMiniPreview`)
-- **Imagem de overlay** (thumbnail da `overlay_url` do variant, se existir)
-- Badge indicando se esta ativo no momento
-- Botao "Visualizar" e "Aplicar"
+Modificar `useApplyTheme` para respeitar as preferencias do seller:
 
-### 2. Preview em tempo real
+```text
+Fluxo CORRIGIDO:
 
-Ao clicar "Visualizar" em qualquer template:
-- Aplicar temporariamente os `design_tokens` do template via CSS variables (sem salvar)
-- Mostrar o overlay como apareceria na interface (preview inline no proprio painel)
-- Botao "Aplicar" para salvar como template fixo
-- Botao "Cancelar" para voltar ao tema atual
+useApplyTheme()
+       |
+       v
+Le seller_visual_preferences (mode, fixed_template_id)
+       |
+       +-- mode = "fixed"?  -> Busca template + variant pelo fixed_template_id
+       |                       -> Aplica tokens + overlay diretamente
+       |
+       +-- mode = "clean"?  -> Nao aplica nada
+       |
+       +-- mode = "auto"?   -> Usa useThemeResolver normalmente (regras por categoria)
+```
 
-### 3. Simplificar o fluxo
+## Arquivos a modificar
 
-- Manter os 3 modos (Auto/Fixo/Limpo) mas em formato mais compacto
-- Quando usuario clica "Aplicar" em qualquer template da galeria, automaticamente muda para modo "Fixo" com aquele template
-- O slider de intensidade e toggles ficam em um accordion "Ajustes avancados"
+### 1. `src/hooks/useApplyTheme.ts`
+- Importar `useSellerVisualPreferences`
+- Quando `mode === 'fixed'` e `fixedTemplateId` existir:
+  - Buscar o template e variant diretamente (sem passar pelo resolver de regras)
+  - Montar o objeto `ResolvedTheme` com os dados corretos (incluindo `overlay_url`)
+  - Aplicar os `design_tokens` via CSS variables
+- Quando `mode === 'clean'`: nao aplicar nada
+- Quando `mode === 'auto'`: manter fluxo atual via `useThemeResolver`
 
-### 4. Detalhes tecnicos
+### 2. `src/components/visual-identity/VisualOverlayLayer.tsx`
+- Nenhuma mudanca estrutural necessaria
+- Ja consome `resolved.variant.overlay_url` corretamente
+- Vai funcionar automaticamente quando `useApplyTheme` retornar o template correto
 
-**Arquivos a modificar:**
-- `src/components/settings/SellerAppearancePanel.tsx` -- reescrever com galeria + preview
-- `src/components/settings/templates/TemplateColorPreview.tsx` -- adicionar variante com imagem de overlay
+## Detalhes tecnicos
 
-**Dados consumidos (sem novas queries):**
-- `useTemplatesList()` -- ja carrega todos os templates
-- `useThemeResolver` -- tema ativo atual (query existente com cache de 5min)
-- Buscar variants dos templates ativos com uma unica query adicional para pegar `overlay_url`
+O `useApplyTheme` vai usar os dados ja carregados pelo `useThemeResolver` (que traz todos os templates e variants em cache) para evitar queries extras. Quando `mode === 'fixed'`:
 
-**Preview temporario:**
-- Usar `applyDesignTokens()` (ja existe) para injetar tokens temporariamente
-- Estado local `previewingTemplateId` controla qual template esta em preview
-- Ao cancelar, reaplica os tokens do tema resolvido atual
+1. Pega `fixedTemplateId` de `useSellerVisualPreferences`
+2. Busca o template correspondente na lista ja carregada
+3. Busca o variant `light` correspondente
+4. Monta `ResolvedTheme` com `resolution_source: "Preferencia fixa do seller"`
+5. Aplica tokens e retorna o `resolved` com `overlay_url` preenchido
 
-**Fluxo de aplicar:**
-1. Usuario clica "Aplicar" no card do template
-2. `upsert` salva `mode: 'fixed'` + `fixed_template_id: <id>`
-3. `useApplyTheme` detecta mudanca e aplica automaticamente
-4. Overlay layer atualiza sozinha (ja consome `resolved.variant.overlay_url`)
+Isso corrige tanto as cores quanto a imagem de overlay -- tudo em uma unica mudanca no `useApplyTheme`.
 
-**Nenhuma mudanca de banco necessaria** -- usa `seller_visual_preferences` e `templates/template_variants` existentes.
+## O que NAO sera alterado
 
-### 5. O que NAO sera alterado
-
-- Theme Resolver (continua igual)
-- VisualOverlayLayer (continua igual)
-- useApplyTheme (continua igual)
-- Nenhuma tabela nova ou migracao
+- `useThemeResolver` -- continua funcionando igual para modo auto
+- `VisualOverlayLayer` -- ja esta correto, so precisa receber dados certos
+- `SellerAppearancePanel` -- ja salva corretamente
+- Nenhuma tabela ou migracao necessaria
 
