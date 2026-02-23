@@ -111,9 +111,20 @@ export function useOperationalQuickSync({
     }
   }, []);
 
+  // Keep stable refs for callbacks used inside intervals
+  const onChangesDetectedRef = useRef(onChangesDetected);
+  onChangesDetectedRef.current = onChangesDetected;
+
+  const sellerIdRef = useRef(sellerId);
+  sellerIdRef.current = sellerId;
+  const companyIdRef = useRef(companyId);
+  companyIdRef.current = companyId;
+
   // Executar o quick sync
   const runQuickSync = useCallback(async (manual = false) => {
-    if (!sellerId || !companyId || !enabled) return;
+    const sId = sellerIdRef.current;
+    const cId = companyIdRef.current;
+    if (!sId || !cId || !enabled) return;
     if (isRunningRef.current) return;
 
     // Verificar cooldown manual
@@ -138,11 +149,11 @@ export function useOperationalQuickSync({
 
       // Log: início da operação
       await logSandbox('quick_sync_triggered', {
-        seller_id: sellerId, company_id: companyId, manual,
+        seller_id: sId, company_id: cId, manual,
       });
 
       const { data, error } = await supabase.functions.invoke('operational-quick-sync', {
-        body: { seller_id: sellerId, company_id: companyId, user_id: user.id },
+        body: { seller_id: sId, company_id: cId, user_id: user.id },
       });
 
       if (error) throw error;
@@ -164,7 +175,7 @@ export function useOperationalQuickSync({
       updateCooldownCountdown(cooldownUntil);
 
       if ((result?.changes ?? 0) > 0) {
-        onChangesDetected?.();
+        onChangesDetectedRef.current?.();
       }
     } catch (err: any) {
       console.error('[QuickSync] Erro:', err);
@@ -177,7 +188,7 @@ export function useOperationalQuickSync({
     } finally {
       isRunningRef.current = false;
     }
-  }, [sellerId, companyId, enabled, updateCooldownCountdown, onChangesDetected]);
+  }, [enabled, updateCooldownCountdown]);
 
   // Setup: enfileirar pedidos ao montar + iniciar intervalo
   useEffect(() => {
@@ -210,7 +221,9 @@ export function useOperationalQuickSync({
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
     };
-  }, [sellerId, companyId, enabled, enqueueRecentOrders, runQuickSync]);
+    // Only re-run when seller/company/enabled actually change, not when callbacks change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sellerId, companyId, enabled]);
 
   // Disparo manual com feedback
   const triggerManualSync = useCallback(async () => {

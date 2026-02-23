@@ -47,14 +47,16 @@ export default function Sandbox() {
   // Usar o primeiro snapshot para o quick sync (multi-empresa: itera internamente)
   const firstSnap = snapshots[0] ?? null;
 
+  const onChangesDetected = useCallback(() => {
+    refetch();
+    toast.success('Dados operacionais atualizados!', { duration: 2000 });
+  }, [refetch]);
+
   const { status: quickSyncStatus, triggerManualSync } = useOperationalQuickSync({
     sellerId: firstSnap?.seller_id ?? null,
     companyId: firstSnap?.company_id ?? null,
     enabled: snapshots.length > 0,
-    onChangesDetected: () => {
-      refetch();
-      toast.success('Dados operacionais atualizados!', { duration: 2000 });
-    },
+    onChangesDetected,
   });
 
   // Log page access on mount
