@@ -23,7 +23,6 @@ Deno.serve(async (req) => {
     let userId = body.user_id;
 
     if (!userId) {
-      // Try JWT
       const authHeader = req.headers.get("authorization");
       if (authHeader) {
         const token = authHeader.replace("Bearer ", "");
@@ -55,7 +54,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // 2. Get ml_accounts linked to these companies (primary source of truth)
+    // 2. Get ml_accounts linked to these companies
     const companyIds = companies.map((c) => c.id);
     const { data: mlAccounts } = await supabase
       .from("ml_accounts")
@@ -63,15 +62,17 @@ Deno.serve(async (req) => {
       .eq("user_id", userId)
       .eq("is_active", true);
 
-    // Build a map company_id -> seller_id using ml_accounts.company_id
+    // Build maps: company_id -> ml_user_id (seller string) AND company_id -> ml_account.id (UUID)
     const companySellerMap = new Map<string, string>();
+    const companyAccountIdMap = new Map<string, string>();
     (mlAccounts || []).forEach((a) => {
       if (a.company_id && a.ml_user_id) {
         companySellerMap.set(a.company_id, a.ml_user_id);
+        companyAccountIdMap.set(a.company_id, a.id);
       }
     });
 
-    // Fallback: also check marketplace_accounts
+    // Fallback: marketplace_accounts
     const { data: marketplaceAccounts } = await supabase
       .from("marketplace_accounts")
       .select("id, company_id, external_user_id")
@@ -91,9 +92,9 @@ Deno.serve(async (req) => {
 
     for (const company of companies) {
       const sellerId = companySellerMap.get(company.id) || null;
+      const accountId = companyAccountIdMap.get(company.id) || null;
 
       if (!sellerId) {
-        // No seller linked, create empty snapshot
         results.push({
           company_id: company.id,
           user_id: userId,
@@ -114,20 +115,16 @@ Deno.serve(async (req) => {
 
         const pedidosSemana = salesData?.length || 0;
         const totalVendasSemana = (salesData || []).reduce(
-          (s, o) => s + Number(o.total_amount || 0),
-          0,
+          (s, o) => s + Number(o.total_amount || 0), 0,
         );
-        const ticketMedio = pedidosSemana > 0
-          ? totalVendasSemana / pedidosSemana
-          : 0;
+        const ticketMedio = pedidosSemana > 0 ? totalVendasSemana / pedidosSemana : 0;
 
-        // Top product (from items cache, last week)
+        // Top product
         const { data: topProducts } = await supabase
           .from("meli_order_items_cache")
           .select("title_short, title, quantity")
           .eq("seller_id", sellerId);
 
-        // Aggregate top product
         const productMap = new Map<string, { name: string; qty: number }>();
         (topProducts || []).forEach((item) => {
           const name = item.title_short || item.title || "?";
@@ -138,22 +135,29 @@ Deno.serve(async (req) => {
             productMap.set(name, { name, qty: item.quantity || 1 });
           }
         });
-        const topProduct = [...productMap.values()].sort((a, b) =>
-          b.qty - a.qty
-        )[0]?.name || null;
+        const topProduct = [...productMap.values()].sort((a, b) => b.qty - a.qty)[0]?.name || null;
 
         // === OPERAÇÃO ===
+        // Etiquetas pendentes: status 'gerada' (ready to print)
         const { count: etiquetasPend } = await supabase
           .from("meli_print_queue")
           .select("*", { count: "exact", head: true })
           .eq("seller_id", sellerId)
-          .eq("status", "pending");
+          .eq("status", "gerada");
 
+        // Perguntas pendentes: qa_questions with status 'pending'
         const { count: perguntasPend } = await supabase
-          .from("meli_questions_cache")
+          .from("qa_questions")
           .select("*", { count: "exact", head: true })
           .eq("seller_id", sellerId)
-          .eq("status", "UNANSWERED");
+          .eq("status", "pending");
+
+        // Pedidos aguardando envio (paid/handling)
+        const { count: pedidosEnvio } = await supabase
+          .from("meli_orders_cache")
+          .select("*", { count: "exact", head: true })
+          .eq("seller_id", sellerId)
+          .in("order_status", ["paid", "handling"]);
 
         // === ADS ===
         const { data: adsData } = await supabase
@@ -162,35 +166,30 @@ Deno.serve(async (req) => {
           .eq("seller_id", sellerId)
           .gte("metric_date", weekAgo.toISOString().split("T")[0]);
 
-        const gastoAds = (adsData || []).reduce(
-          (s, d) => s + Number(d.spent || 0),
-          0,
-        );
-        const fatAds = (adsData || []).reduce(
-          (s, d) => s + Number(d.revenue || 0),
-          0,
-        );
-        const acosValues = (adsData || []).filter((d) => d.acos != null).map(
-          (d) => Number(d.acos),
-        );
-        const roasValues = (adsData || []).filter((d) => d.roas != null).map(
-          (d) => Number(d.roas),
-        );
-        const acosMedio = acosValues.length > 0
-          ? acosValues.reduce((s, v) => s + v, 0) / acosValues.length
-          : 0;
-        const roasMedio = roasValues.length > 0
-          ? roasValues.reduce((s, v) => s + v, 0) / roasValues.length
-          : 0;
+        const gastoAds = (adsData || []).reduce((s, d) => s + Number(d.spent || 0), 0);
+        const fatAds = (adsData || []).reduce((s, d) => s + Number(d.revenue || 0), 0);
+        const acosValues = (adsData || []).filter((d) => d.acos != null).map((d) => Number(d.acos));
+        const roasValues = (adsData || []).filter((d) => d.roas != null).map((d) => Number(d.roas));
+        const acosMedio = acosValues.length > 0 ? acosValues.reduce((s, v) => s + v, 0) / acosValues.length : 0;
+        const roasMedio = roasValues.length > 0 ? roasValues.reduce((s, v) => s + v, 0) / roasValues.length : 0;
 
-        // === CUTOFF ===
-        const { data: cutoffData } = await supabase
-          .from("shipping_cutoff_cache")
-          .select("flex_cutoff_time, coleta_cutoff_time")
-          .eq("seller_id", sellerId)
-          .order("updated_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        // === CUTOFF (uses ml_account UUID as seller_id) ===
+        let cutoffFlex: string | null = null;
+        let cutoffColeta: string | null = null;
+
+        if (accountId) {
+          const { data: cutoffData } = await supabase
+            .from("shipping_cutoff_cache")
+            .select("flex_cutoff_time, colecta_cutoff_time")
+            .eq("seller_id", accountId)
+            .eq("status", "ok")
+            .order("updated_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          cutoffFlex = cutoffData?.flex_cutoff_time || null;
+          cutoffColeta = cutoffData?.colecta_cutoff_time || null;
+        }
 
         const snapshot = {
           company_id: company.id,
@@ -203,7 +202,7 @@ Deno.serve(async (req) => {
           etiquetas_pendentes: etiquetasPend || 0,
           nf_pendentes: 0,
           perguntas_pendentes: perguntasPend || 0,
-          pedidos_envio: 0,
+          pedidos_envio: pedidosEnvio || 0,
           reclamacoes_abertas: 0,
           reclamacoes_aguardando: 0,
           pos_venda_pendente: 0,
@@ -212,8 +211,8 @@ Deno.serve(async (req) => {
           faturamento_ads_semana: fatAds,
           acos_medio: acosMedio,
           roas_medio: roasMedio,
-          cutoff_flex_time: cutoffData?.flex_cutoff_time || null,
-          cutoff_coleta_time: cutoffData?.coleta_cutoff_time || null,
+          cutoff_flex_time: cutoffFlex,
+          cutoff_coleta_time: cutoffColeta,
           estoque_critico: 0,
           snapshot_status: "ok",
           snapshot_error: null,
@@ -222,10 +221,7 @@ Deno.serve(async (req) => {
 
         results.push(snapshot);
       } catch (err: any) {
-        console.error(
-          `[sandbox-refresh] Error for company ${company.id}:`,
-          err,
-        );
+        console.error(`[sandbox-refresh] Error for company ${company.id}:`, err);
         results.push({
           company_id: company.id,
           user_id: userId,
@@ -245,17 +241,13 @@ Deno.serve(async (req) => {
     }
 
     const executionTime = Date.now() - startTime;
-    console.log(
-      `[sandbox-refresh] Completed ${results.length} companies in ${executionTime}ms`,
-    );
+    console.log(`[sandbox-refresh] Completed ${results.length} companies in ${executionTime}ms`);
 
-    // Log
     await supabase.from("system_logs").insert({
       level: "info",
       system_area: "sandbox",
       action: "snapshot_refresh",
-      message:
-        `Sandbox snapshot refresh completed for ${results.length} companies in ${executionTime}ms`,
+      message: `Sandbox snapshot refresh completed for ${results.length} companies in ${executionTime}ms`,
       meta_json: {
         user_id: userId,
         companies_count: results.length,
