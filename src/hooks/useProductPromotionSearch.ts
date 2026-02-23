@@ -15,6 +15,8 @@ export interface ProductPromotionInfo {
   feeReductionAmount: number | null;
   start_at: string | null;
   end_at: string | null;
+  minDiscountedPrice: number | null;
+  maxDiscountedPrice: number | null;
 }
 
 export interface ProductSearchResult {
@@ -185,11 +187,16 @@ export function useProductPromotionSearch(
         const meliPct = (rawData?.meli_percentage as number) || null;
         const sellerPct = (rawData?.seller_percentage as number) || null;
         const rawPrice = (rawData?.price as number) || null;
-        const effectivePromoPrice = pi.promo_price || rawPrice;
+        // For DEAL promotions, use suggested_discounted_price or price from raw data
+        const dealPrice = (rawData?.suggested_discounted_price as number) || rawPrice;
+        const effectivePromoPrice = pi.promo_price || dealPrice;
         const offerId = (rawData?.offer_id as string) || null;
         const feeReduction = (meliPct && pi.original_price)
           ? pi.original_price * meliPct / 100
           : null;
+        // DEAL-specific: min/max discount range
+        const minDiscountedPrice = (rawData?.min_discounted_price as number) || null;
+        const maxDiscountedPrice = (rawData?.max_discounted_price as number) || null;
 
         if (!grouped.has(pi.item_id)) {
           const cachedVisual = listingsMap.get(pi.item_id);
@@ -216,6 +223,8 @@ export function useProductPromotionSearch(
           seller_percentage: sellerPct,
           start_at: promo?.start_at || null,
           end_at: promo?.end_at || null,
+          minDiscountedPrice,
+          maxDiscountedPrice,
         });
       }
 

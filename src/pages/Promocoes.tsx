@@ -1191,6 +1191,14 @@ function ProductPromotionCard({
               : 0;
             const discountPct = pctFromFields > 0 ? pctFromFields : pctFromPrice;
             
+            // DEAL discount range
+            const dealMinPct = promo.minDiscountedPrice && promo.original_price && promo.original_price > 0
+              ? ((promo.original_price - promo.maxDiscountedPrice!) / promo.original_price) * 100
+              : null;
+            const dealMaxPct = promo.maxDiscountedPrice && promo.original_price && promo.original_price > 0
+              ? ((promo.original_price - promo.minDiscountedPrice!) / promo.original_price) * 100
+              : null;
+            
             const endDate = promo.end_at ? new Date(promo.end_at) : null;
             const now = new Date();
             const daysLeft = endDate ? Math.ceil((endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : null;
@@ -1205,6 +1213,11 @@ function ProductPromotionCard({
                   
                   {discountPct > 0 && (
                     <span className="text-xs font-semibold text-primary shrink-0">{discountPct.toFixed(1)}% off</span>
+                  )}
+                  {discountPct === 0 && dealMinPct != null && dealMaxPct != null && (
+                    <span className="text-xs font-semibold text-primary shrink-0">
+                      {dealMinPct.toFixed(0)}–{dealMaxPct.toFixed(0)}% off
+                    </span>
                   )}
 
                   {promo.feeReductionAmount && promo.feeReductionAmount > 0 && (
@@ -1226,6 +1239,16 @@ function ProductPromotionCard({
                       <span className="line-through text-muted-foreground">R$ {promo.original_price.toFixed(2).replace('.', ',')}</span>
                       {' '}
                       <span className="font-semibold text-foreground">R$ {promo.promo_price.toFixed(2).replace('.', ',')}</span>
+                    </span>
+                  )}
+                  {/* DEAL: show price range when no exact promo price */}
+                  {promo.original_price && !promo.promo_price && promo.minDiscountedPrice != null && promo.maxDiscountedPrice != null && (
+                    <span className="text-xs shrink-0">
+                      <span className="line-through text-muted-foreground">R$ {promo.original_price.toFixed(2).replace('.', ',')}</span>
+                      {' '}
+                      <span className="font-medium text-muted-foreground">
+                        R$ {promo.minDiscountedPrice.toFixed(2).replace('.', ',')} – {promo.maxDiscountedPrice.toFixed(2).replace('.', ',')}
+                      </span>
                     </span>
                   )}
                 </div>
