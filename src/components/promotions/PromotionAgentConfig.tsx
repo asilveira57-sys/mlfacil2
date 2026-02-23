@@ -14,7 +14,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Bot, Play, Loader2, Clock, CheckCircle2, XCircle, AlertTriangle, ChevronDown, ChevronUp, Search, X } from 'lucide-react';
+import { Play, Loader2, Clock, CheckCircle2, XCircle, AlertTriangle, ChevronDown, ChevronUp, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -41,6 +41,42 @@ interface ProductHit {
   item_id: string;
   title: string | null;
   thumbnail: string | null;
+  sku: string | null;
+}
+
+/* ── Mini Ollie for header ── */
+function OllieMini({ isActive }: { isActive: boolean }) {
+  return (
+    <div className="relative w-10 h-10 shrink-0">
+      {/* Main sphere */}
+      <div
+        className="w-full h-full rounded-full"
+        style={{
+          background: isActive
+            ? 'radial-gradient(circle at 30% 25%, hsl(210 15% 95%), hsl(210 10% 70%) 40%, hsl(210 10% 45%) 70%, hsl(210 15% 30%))'
+            : 'radial-gradient(circle at 30% 25%, hsl(0 0% 85%), hsl(0 0% 60%) 40%, hsl(0 0% 40%) 70%, hsl(0 0% 28%))',
+          boxShadow: 'inset -4px -4px 8px hsl(0 0% 0% / 0.3), inset 2px 2px 4px hsl(0 0% 100% / 0.15), 0 3px 10px hsl(0 0% 0% / 0.3)',
+        }}
+      >
+        {/* Chrome highlight */}
+        <div className="absolute rounded-full" style={{ top: '8%', left: '18%', width: '35%', height: '20%', background: 'radial-gradient(ellipse, hsl(0 0% 100% / 0.6), transparent)', filter: 'blur(1px)' }} />
+        {/* Antenna */}
+        <div className="absolute" style={{ top: -7, left: '50%', transform: 'translateX(-50%)', width: 2, height: 9, background: isActive ? 'linear-gradient(to top, hsl(210 10% 50%), hsl(210 10% 70%))' : 'linear-gradient(to top, hsl(0 0% 45%), hsl(0 0% 60%))', borderRadius: 2 }}>
+          <div className="absolute rounded-full" style={{ top: -3, left: '50%', transform: 'translateX(-50%)', width: 5, height: 5, background: isActive ? 'radial-gradient(circle, hsl(142 71% 60%), hsl(142 71% 40%))' : 'radial-gradient(circle, hsl(0 0% 55%), hsl(0 0% 40%))', boxShadow: isActive ? '0 0 4px 1px hsl(142 71% 45% / 0.6)' : 'none' }} />
+        </div>
+        {/* Eyes */}
+        <div className="absolute flex gap-1.5" style={{ top: '32%', left: '50%', transform: 'translateX(-50%)' }}>
+          {[0, 1].map(i => (
+            <div key={i} className="rounded-full flex items-center justify-center" style={{ width: 10, height: 10, background: 'radial-gradient(circle at 40% 35%, hsl(0 0% 100%), hsl(0 0% 92%))', boxShadow: 'inset 0 1px 2px hsl(0 0% 0% / 0.15)' }}>
+              <div style={{ width: 4, height: 4, borderRadius: '50%', background: 'radial-gradient(circle at 35% 35%, hsl(210 80% 30%), hsl(210 100% 10%))' }} />
+            </div>
+          ))}
+        </div>
+        {/* Mouth */}
+        <div className="absolute rounded-full" style={{ bottom: '22%', left: '50%', transform: 'translateX(-50%)', width: '40%', height: 2, background: isActive ? 'linear-gradient(90deg, transparent, hsl(142 71% 55%), transparent)' : 'linear-gradient(90deg, transparent, hsl(0 0% 50%), transparent)' }} />
+      </div>
+    </div>
+  );
 }
 
 function ProductSearchSelector({
@@ -64,43 +100,22 @@ function ProductSearchSelector({
     if (!sellerId || q.length < 3) { setResults([]); return; }
     setSearching(true);
     try {
-      // promotion_items_snapshots has item_id but no title/thumbnail
-      // Try analyzed_items first for enriched data, fallback to snapshots
-      const { data: enriched } = await supabase
-        .from('analyzed_items')
-        .select('item_id, title, thumbnail')
-        .ilike('item_id', `%${q}%`)
+      const { data: listings } = await supabase
+        .from('meli_listings_cache')
+        .select('item_id, title, sku, thumbnail')
+        .eq('seller_id', sellerId)
+        .or(`title.ilike.%${q}%,item_id.ilike.%${q}%,sku.ilike.%${q}%`)
         .limit(20);
 
-      if (enriched && enriched.length > 0) {
-        // Deduplicate by item_id
-        const seen = new Set<string>();
-        const unique: ProductHit[] = [];
-        for (const row of enriched) {
-          if (!seen.has(row.item_id)) {
-            seen.add(row.item_id);
-            unique.push({ item_id: row.item_id, title: row.title, thumbnail: row.thumbnail });
-          }
+      const seen = new Set<string>();
+      const unique: ProductHit[] = [];
+      for (const row of (listings || [])) {
+        if (!seen.has(row.item_id)) {
+          seen.add(row.item_id);
+          unique.push({ item_id: row.item_id, title: row.title, thumbnail: row.thumbnail, sku: row.sku });
         }
-        setResults(unique);
-      } else {
-        // Fallback: search snapshots by item_id only
-        const { data: snapshots } = await supabase
-          .from('promotion_items_snapshots')
-          .select('item_id')
-          .eq('seller_id', sellerId)
-          .ilike('item_id', `%${q}%`)
-          .limit(20);
-        const seen = new Set<string>();
-        const unique: ProductHit[] = [];
-        for (const row of (snapshots || [])) {
-          if (!seen.has(row.item_id)) {
-            seen.add(row.item_id);
-            unique.push({ item_id: row.item_id, title: null, thumbnail: null });
-          }
-        }
-        setResults(unique);
       }
+      setResults(unique);
     } catch { setResults([]); }
     setSearching(false);
   }, [sellerId]);
@@ -158,7 +173,7 @@ function ProductSearchSelector({
                 )}
                 <div className="min-w-0 flex-1">
                   <p className="text-[11px] truncate">{item.title || item.item_id}</p>
-                  <p className="text-[10px] text-muted-foreground">{item.item_id}</p>
+                  <p className="text-[10px] text-muted-foreground">{item.item_id}{item.sku ? ` · SKU: ${item.sku}` : ''}</p>
                 </div>
               </button>
             ))}
@@ -223,12 +238,10 @@ export function PromotionAgentConfig({ open, onOpenChange, workspaceId, sellerId
         {/* Header */}
         <DialogHeader className="px-6 pt-5 pb-4 border-b">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Bot className="h-5 w-5 text-primary" />
-            </div>
+            <OllieMini isActive={isEnabled} />
             <div>
-              <DialogTitle>Agente de Adesão</DialogTitle>
-              <DialogDescription>Adesão automática a promoções</DialogDescription>
+              <DialogTitle>Agente de Adesão Ollie</DialogTitle>
+              <DialogDescription>Adesão automática a promoções · Configuração específica desta conta</DialogDescription>
             </div>
           </div>
         </DialogHeader>
@@ -257,10 +270,13 @@ export function PromotionAgentConfig({ open, onOpenChange, workspaceId, sellerId
                       <Switch checked={isEnabled} onCheckedChange={v => updateField('is_enabled', v)} />
                     </div>
                     {isEnabled && (
-                      <Button size="sm" variant="outline" onClick={handleManualRun} disabled={triggerRun.isPending}>
-                        {triggerRun.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Play className="h-3.5 w-3.5 mr-1.5" />}
-                        Executar agora
-                      </Button>
+                      <div className="space-y-1.5">
+                        <Button size="sm" variant="outline" onClick={handleManualRun} disabled={triggerRun.isPending}>
+                          {triggerRun.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Play className="h-3.5 w-3.5 mr-1.5" />}
+                          Executar agora
+                        </Button>
+                        <p className="text-[10px] text-muted-foreground">O Ollie executa automaticamente após cada sincronização de promoções.</p>
+                      </div>
                     )}
                   </div>
 
@@ -352,7 +368,7 @@ export function PromotionAgentConfig({ open, onOpenChange, workspaceId, sellerId
                       onChange={items => updateField('scope_items', items)}
                       sellerId={sellerId}
                       label="Selecione os produtos"
-                      placeholder="Buscar por título ou MLB..."
+                      placeholder="Buscar por título, SKU ou MLB..."
                     />
                   )}
 
@@ -364,7 +380,7 @@ export function PromotionAgentConfig({ open, onOpenChange, workspaceId, sellerId
                     onChange={items => updateField('exclude_items', items)}
                     sellerId={sellerId}
                     label="Lista de exclusão (nunca aderir)"
-                    placeholder="Buscar produto para excluir..."
+                    placeholder="Buscar por título, SKU ou MLB..."
                   />
                 </div>
               </ScrollArea>
