@@ -1,81 +1,79 @@
 
-# Ollie - Correcao da Busca de Produtos e Identidade Visual
+# Correcao de Performance: Campanhas com Cache Instantaneo
 
-## Problemas
+## Problema Raiz
 
-1. **Busca de produtos nao funciona**: O `ProductSearchSelector` busca em `analyzed_items` (tabela vazia). Os dados reais estao em `meli_listings_cache` com 767+ produtos, contendo `item_id`, `title`, `sku`, `thumbnail`, `seller_id`.
+Existem **dois problemas** causando a lentidao na aba Campanhas:
 
-2. **Nome e identidade**: O dialog ainda mostra "Agente de Adesao" com icone generico de Bot. Precisa ser "Agente de Adesao Ollie" com o robozinho 3D no header.
+1. **Edge function desnecessaria**: Toda vez que voce muda o periodo (7d, 14d, 30d...), o `useAdsPeriodMetrics` chama a edge function `ads-period-metrics` que faz requests para a API do Mercado Livre. Essa chamada roda **sempre**, mesmo quando voce esta na aba Campanhas e nao precisa dos dados do Dashboard.
 
-3. **Execucao automatica**: O Ollie ja executa automaticamente apos cada `promotions-sync` (encadeado na edge function). Nao e necessario clicar "Executar agora" toda vez -- so para testes manuais.
+2. **Cache vazio na tabela de campanhas**: O `AdsCampaignsTable` busca dados em `ads_period_cache` com `range_key IS NULL` (linhas diarias), mas essa tabela tem **0 registros diarios** -- entao nunca tem dados para derivar. A edge function ja retorna os dados de campanha (`campaigns` array), mas o hook `useAdsPeriodMetrics` simplesmente **descarta** esses dados.
 
-4. **Configuracao por empresa**: O Ollie ja e configurado por empresa (`workspace_id` + `seller_id`). Cada conta tem sua propria configuracao independente.
+## Solucao
 
----
+Reaproveitar os dados de campanha que a edge function JA retorna, passando-os diretamente para a tabela de campanhas. Zero chamadas extras, zero queries adicionais.
 
-## Mudancas no arquivo `src/components/promotions/PromotionAgentConfig.tsx`
+```text
+ANTES (lento):
+  Muda periodo
+    -> useAdsPeriodMetrics chama edge function (3-10s)
+    -> AdsCampaignsTable busca ads_period_cache (0 rows, inutil)
+    -> Tela fica travada
 
-### A. Corrigir busca de produtos
-
-Reescrever a funcao `search()` dentro de `ProductSearchSelector`:
-
-- Trocar `analyzed_items` por `meli_listings_cache`
-- Filtrar por `seller_id` do seller atual
-- Buscar em 3 campos: `title`, `item_id` (MLB) e `sku`
-- Query: `.or('title.ilike.%q%,item_id.ilike.%q%,sku.ilike.%q%')`
-- Exibir SKU nos resultados quando disponivel
-- Atualizar tipo `ProductHit` para incluir `sku`
-- Atualizar placeholder para "Buscar por titulo, SKU ou MLB..."
-
-### B. Renomear para Ollie
-
-- Titulo do Dialog: "Agente de Adesao Ollie"
-- Manter descricao: "Adesao automatica a promocoes"
-
-### C. Mini-Ollie no header
-
-Substituir o icone quadrado `<Bot>` por uma versao mini (40x40px) do robo 3D:
-- Esfera cromada com radial-gradient identico ao `PromotionAgentBot`
-- Olhos estaticos (pupilas centralizadas)
-- Antena com LED verde quando agente ativo
-- Sem drag, sem mouse tracking -- puramente decorativo
-
----
-
-## Detalhes Tecnicos
-
-### Query corrigida
-
-```typescript
-const { data: listings } = await supabase
-  .from('meli_listings_cache')
-  .select('item_id, title, sku, thumbnail')
-  .eq('seller_id', sellerId)
-  .or(`title.ilike.%${q}%,item_id.ilike.%${q}%,sku.ilike.%${q}%`)
-  .limit(20);
+DEPOIS (instantaneo):
+  Muda periodo
+    -> useAdsPeriodMetrics chama edge function 1x (com cache local para derivar)
+    -> Edge function retorna campaigns[] junto com summary
+    -> campaigns[] e passado diretamente para AdsCampaignsTable
+    -> Troca de periodo usa cache local = instantaneo
 ```
 
-### Tipo atualizado
+## Mudancas
 
+### 1. `src/hooks/useAdsPeriodMetrics.ts`
+- Extrair e cachear o array `campaigns` retornado pela edge function (campo `data.campaigns`)
+- Exportar `campaignsMetrics` como parte do retorno do hook
+- Na funcao `deriveFromDaily`, tambem derivar campanhas proporcionalmente (ou manter do cache pai)
+
+### 2. `src/pages/Publicidade.tsx`
+- Pegar `campaignsMetrics` do retorno de `useAdsPeriodMetrics`
+- Passar para `AdsCampaignsTable` via nova prop `precomputedMetrics`
+
+### 3. `src/components/ads/AdsCampaignsTable.tsx`
+- Adicionar prop `precomputedMetrics` (opcional)
+- Se `precomputedMetrics` estiver presente, usar diretamente em `getCampaignMetrics`
+- **Remover** toda a logica de `ensureCache`, `cacheRef`, `aggregateFromCache`, `DailyCampaignRow`, `CampaignCacheEntry` e o `useEffect` que busca `ads_period_cache`
+- Eliminar o estado `periodLoading` e `periodMetrics` internos (dados vem de cima)
+- Resultado: componente fica puro, sem queries proprias, instantaneo
+
+### Formato dos dados de campanha da edge function
+
+A edge function ja retorna por campanha:
 ```typescript
-interface ProductHit {
-  item_id: string;
-  title: string | null;
-  thumbnail: string | null;
-  sku: string | null;
+{
+  ml_campaign_id: string,
+  name: string,
+  spent: number,
+  revenue: number,
+  clicks: number,
+  impressions: number,
+  conversions: number
 }
 ```
 
-### Respostas as duvidas do usuario
+Isso e exatamente o que `getCampaignMetrics` precisa para calcular CPC, ACOS, TACOS e ROAS.
 
-O plano tambem inclui adicionar texto informativo na UI:
-- Na secao "Executar agora": adicionar nota "O Ollie executa automaticamente apos cada sincronizacao de promocoes."
-- No header ou descricao: indicar que a configuracao e especifica para a conta selecionada.
+## Resultado Esperado
 
----
+- Primeira carga: 1 unica chamada edge function (igual hoje)
+- Trocar de 30d para 7d/14d/60d: **instantaneo** (cache local do `useAdsPeriodMetrics` ja faz isso)
+- Zero queries extras na aba Campanhas
+- Zero spinning/loading ao trocar periodo
 
-## Resumo
+## Arquivos Modificados
 
 | Arquivo | Acao |
 |---------|------|
-| `src/components/promotions/PromotionAgentConfig.tsx` | Corrigir busca para `meli_listings_cache`, renomear para Ollie, adicionar mini-robo, notas informativas |
+| `src/hooks/useAdsPeriodMetrics.ts` | Extrair e cachear `campaigns` da resposta da edge function |
+| `src/pages/Publicidade.tsx` | Passar `campaignsMetrics` para `AdsCampaignsTable` |
+| `src/components/ads/AdsCampaignsTable.tsx` | Usar `precomputedMetrics`, remover fetch proprio de `ads_period_cache` |
