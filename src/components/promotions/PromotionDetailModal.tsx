@@ -99,6 +99,7 @@ export function PromotionDetailModal({
   // ===== Filter, Sort, Selection State =====
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [coParticipationFilter, setCoParticipationFilter] = useState(false);
   const [maxDiscountFilter, setMaxDiscountFilter] = useState<string>('');
   const [sortBy, setSortBy] = useState<SortOption>('status');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -107,6 +108,7 @@ export function PromotionDetailModal({
   useEffect(() => {
     setSearchQuery('');
     setStatusFilter('all');
+    setCoParticipationFilter(false);
     setMaxDiscountFilter('');
     setSortBy('status');
     setSelectedIds(new Set());
@@ -115,7 +117,7 @@ export function PromotionDetailModal({
   // Reset selection when filters change
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [searchQuery, statusFilter, maxDiscountFilter]);
+  }, [searchQuery, statusFilter, coParticipationFilter, maxDiscountFilter]);
 
   // ===== Filtered & Sorted Items =====
   const filteredItems = useMemo(() => {
@@ -134,6 +136,11 @@ export function PromotionDetailModal({
     // Status filter
     if (statusFilter !== 'all') {
       result = result.filter(i => i.item_status === statusFilter);
+    }
+
+    // Co-participation filter
+    if (coParticipationFilter) {
+      result = result.filter(i => i.meliPercentage && i.meliPercentage > 0);
     }
 
     // Max discount filter
@@ -167,7 +174,7 @@ export function PromotionDetailModal({
     });
 
     return result;
-  }, [items, searchQuery, statusFilter, maxDiscountFilter, sortBy]);
+  }, [items, searchQuery, statusFilter, coParticipationFilter, maxDiscountFilter, sortBy]);
 
   // ===== Selection Logic =====
   const allFilteredSelected = filteredItems.length > 0 && filteredItems.every(i => selectedIds.has(i.item_id));
@@ -434,6 +441,17 @@ export function PromotionDetailModal({
               max={100}
             />
           </div>
+
+          {/* Co-participation filter */}
+          <Button
+            variant={coParticipationFilter ? 'default' : 'outline'}
+            size="sm"
+            className="gap-1.5 h-8 text-xs"
+            onClick={() => setCoParticipationFilter(!coParticipationFilter)}
+          >
+            <TrendingUp className="h-3 w-3 text-success" />
+            Coparticipação ML
+          </Button>
 
           {/* Sort */}
           <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
