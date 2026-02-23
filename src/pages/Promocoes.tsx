@@ -244,7 +244,21 @@ export default function Promocoes() {
         toast.error(result.error || 'Erro ao executar ação');
       } else {
         const data = result.data;
-        if (data?.failed_count && data.failed_count > 0) {
+        // Check for expired promotion error
+        const hasExpiredError = data?.results?.some(
+          (r: { error?: string }) => r.error?.includes('PROMOTION_STATUS_OPT_IN')
+        );
+        
+        if (hasExpiredError && data?.success_count === 0) {
+          toast.error('Promoção encerrada no Mercado Livre. Sincronize para atualizar.');
+          // Refresh to update status but DON'T close the modal
+          await refetch();
+          await refetchItems();
+          refetchProductSearch();
+          setActionLoading(false);
+          setConfirmAction(null);
+          return; // Don't close selectedPromotion
+        } else if (data?.failed_count && data.failed_count > 0) {
           toast.warning(`${data.success_count} ok, ${data.failed_count} falharam`);
         } else {
           toast.success(`${action === 'adhere' ? 'Aderido' : 'Removido'}: ${data?.success_count || 0} itens`);

@@ -33,6 +33,7 @@ import {
   Search,
   ArrowUpDown,
   Trash2,
+  AlertTriangle,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -215,6 +216,8 @@ export function PromotionDetailModal({
     return Math.round(sum / withDiscount.length);
   }, [items]);
 
+  const isExpired = promotion ? !!(promotion.end_at && new Date(promotion.end_at) <= new Date()) : false;
+
   if (!promotion) return null;
 
   return (
@@ -273,11 +276,19 @@ export function PromotionDetailModal({
             </div>
           </div>
 
+          {/* Expired Alert */}
+          {isExpired && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-destructive/10 border border-destructive/30 text-destructive text-sm">
+              <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+              <span>Esta promoção já encerrou. Sincronize para atualizar os dados.</span>
+            </div>
+          )}
+
           {/* Actions Row */}
           <div className="flex items-center gap-2 flex-wrap">
             {selectedIds.size > 0 ? (
               <>
-                {selectedCandidates.length > 0 && promotion.status === 'started' && (
+                {selectedCandidates.length > 0 && promotion.status === 'started' && !isExpired && (
                   <Button
                     size="sm"
                     className="gap-1.5"
@@ -310,7 +321,7 @@ export function PromotionDetailModal({
               </>
             ) : (
               <>
-                {pendingItems.length > 0 && promotion.status === 'started' && (
+                {pendingItems.length > 0 && promotion.status === 'started' && !isExpired && (
                   <Button
                     size="sm"
                     className="gap-1.5"

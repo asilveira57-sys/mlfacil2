@@ -199,16 +199,25 @@ export function usePromotions(workspaceId: string | null, sellerId?: string | nu
   const now = new Date();
   const hours72FromNow = new Date(now.getTime() + 72 * 60 * 60 * 1000);
 
-  const activePromotions = promotions.filter(p => p.status === 'started');
+  const activePromotions = promotions.filter(p => {
+    if (p.status !== 'started') return false;
+    if (p.end_at && new Date(p.end_at) <= now) return false; // Expirou
+    return true;
+  });
   const pendingPromotions = promotions.filter(p => p.status === 'pending');
   
   const endingSoonPromotions = promotions.filter(p => {
     if (p.status !== 'started' || !p.end_at) return false;
     const endDate = new Date(p.end_at);
-    return endDate <= hours72FromNow && endDate > now;
+    if (endDate <= now) return false; // Já expirou
+    return endDate <= hours72FromNow;
   });
 
-  const finishedPromotions = promotions.filter(p => p.status === 'finished');
+  const finishedPromotions = promotions.filter(p => {
+    if (p.status === 'finished') return true;
+    if (p.status === 'started' && p.end_at && new Date(p.end_at) <= now) return true;
+    return false;
+  });
 
   return {
     promotions,
