@@ -1,37 +1,64 @@
 
-# Corrigir Layout dos Acessos Rapidos na tela Inicio
 
-## Problemas identificados (da screenshot)
+# Corrigir Hora de Corte e "Aguard. Envio" no Sandbox
 
-1. Grid usa `xl:grid-cols-6` -- forca 6 colunas que estouram a area disponivel
-2. Cards muito largos empurram o ultimo para fora da tela, criando barra de rolagem horizontal
-3. O botao "Avaliar" e o card de avaliacao ficam escondidos abaixo dos cards que estouraram
-4. Nao ha protecao contra overflow horizontal no container principal
+## Problema 1: Hora de Corte incorreta (13:32 vs 13:30, 16:38 vs 16:14)
 
-## Mudancas planejadas
+### Causa raiz
+O sistema esta usando o `estimated_handling_limit` do **envio individual mais proximo** como hora de corte. Esse campo e calculado como `hora_criacao_pedido + horas_manuseio`, resultando em horarios com minutos "quebrados" (ex: 16:32:35 UTC = 13:32 BRT).
 
-### 1. `src/components/dashboard/DashboardQuickActions.tsx`
-- Alterar grid de `xl:grid-cols-6` para `xl:grid-cols-5` (maximo 5 por linha)
-- Reduzir padding dos cards de `p-4` para `p-3`
-- Reduzir icone de `w-12 h-12` para `w-10 h-10` e icone de `h-6 w-6` para `h-5 w-5`
-- Limitar shortcuts exibidos a no maximo 5 (slice)
-- Alterar skeleton grid para tambem usar 5 colunas
+O Mercado Livre tem um horario de corte **fixo** por agencia/modalidade (ex: 13:30, 16:14) que e diferente do deadline por pedido. As APIs consultadas (`shipping_preferences` e `capacity_middleend/xd_drop_off`) nao retornam esse horario -- por isso o sistema faz fallback para o deadline do envio mais antigo.
 
-### 2. `src/components/layout/AppShellLayout.tsx`
-- Adicionar `overflow-x-hidden` no container principal (`SidebarInset` ou div pai) para proibir rolagem horizontal em toda a aplicacao
+### Solucao
+Consultar o endpoint correto da API do ML que retorna o horario de corte real da agencia: `/shipments/handling_time/users/{user_id}` ou extrair o `estimated_handling_limit` mais restritivo de forma arredondada. A abordagem mais confiavel e usar o endpoint `/users/{user_id}/shipping_options` que retorna os prazos reais por modalidade.
 
-### 3. `src/pages/Home.tsx`
-- Adicionar `overflow-x-hidden` no container do conteudo da pagina como camada extra de protecao
+Como alternativa imediata e pragmatica: arredondar o `estimated_handling_limit` para baixo ate o intervalo de 15 minutos mais proximo (ex: 13:32 vira 13:30, 16:38 vira 16:30). Porem isso ainda nao resolveria 16:38 -> 16:14.
 
-### 4. Verificar botao de avaliar
-- O `SmartSystemRatingCard` ja esta renderizado corretamente no codigo (linha 500-507 do Home.tsx)
-- O problema e que ele fica empurrado para baixo e fora da viewport visivel por causa do overflow horizontal dos cards acima
-- Ao corrigir o grid (itens 1-3), o card de avaliacao voltara a ficar visivel naturalmente
+A solucao definitiva e adicionar a consulta ao endpoint `/users/{ml_user_id}/shipping/handling_time` que retorna o cutoff real por tipo logistico.
 
-## Resumo das alteracoes por arquivo
+### Alteracoes
+**`supabase/functions/meli-shipping-cutoff-refresh/index.ts`**:
+- Adicionar chamada ao endpoint `/users/{ml_user_id}/shipping/handling_time` (ou equivalente que retorne o cutoff fixo da agencia)
+- Priorizar o horario retornado por esse endpoint sobre o `estimated_handling_limit` dos envios individuais
+- Manter o fallback atual (deadline do envio mais antigo) apenas quando a API nao retornar dados
+
+---
+
+## Problema 2: "Aguard. envio" mostrando 484 e 5501 (numeros irreais)
+
+### Causa raiz confirmada com dados
+A query no `sandbox-snapshot-refresh` conta **TODOS os pedidos pagos de todos os tempos**:
+
+```sql
+-- Query ATUAL (errada)
+SELECT count(*) FROM meli_orders_cache
+WHERE seller_id = '...' AND order_status IN ('paid', 'handling')
+-- Resultado: 484 para ADX SP, 5501 para Etiqueta Capixaba
+```
+
+Os dados reais de envios pendentes na `meli_shipments_cache` sao:
+- ADX SP: 16 ready_to_ship + 4 pending = **20** (nao 484)
+- Etiqueta Capixaba: 47 ready_to_ship + 29 pending = **76** (nao 5501)
+
+### Solucao
+Trocar a fonte de dados de `meli_orders_cache` para `meli_shipments_cache`, filtrando apenas envios com status ativo.
+
+### Alteracoes
+**`supabase/functions/sandbox-snapshot-refresh/index.ts`** (linhas 155-160):
+```
+-- ANTES (errado - conta todos os pedidos pagos historicos):
+FROM meli_orders_cache WHERE order_status IN ('paid', 'handling')
+
+-- DEPOIS (correto - conta apenas envios pendentes):
+FROM meli_shipments_cache WHERE shipment_status IN ('ready_to_ship', 'handling', 'pending')
+```
+
+---
+
+## Resumo das alteracoes
 
 | Arquivo | Alteracao |
 |---------|-----------|
-| `DashboardQuickActions.tsx` | Grid 5 cols, cards menores, max 5 shortcuts |
-| `AppShellLayout.tsx` | `overflow-x-hidden` no container principal |
-| `Home.tsx` | `overflow-x-hidden` no wrapper do conteudo |
+| `sandbox-snapshot-refresh/index.ts` | Trocar query "aguard. envio" de `meli_orders_cache` para `meli_shipments_cache` |
+| `meli-shipping-cutoff-refresh/index.ts` | Adicionar consulta ao endpoint ML de handling_time para obter cutoff real |
+
