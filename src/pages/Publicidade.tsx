@@ -120,7 +120,7 @@ export default function Publicidade() {
   const { syncState, triggerSync } = useAdsSyncState(sellerId || undefined);
   
   // Period-based metrics from ML API (real-time)
-  const { summary: periodSummary, dailyMetrics: periodDaily, loading: periodLoading, error: periodError } = useAdsPeriodMetrics(
+  const { summary: periodSummary, dailyMetrics: periodDaily, campaignsMetrics, loading: periodLoading, error: periodError } = useAdsPeriodMetrics(
     sellerId || undefined,
     dateFrom,
     dateTo,
@@ -430,6 +430,7 @@ export default function Publicidade() {
                     onTriggerSync={triggerSync}
                     dateFrom={dateFrom}
                     dateTo={dateTo}
+                    precomputedMetrics={campaignsMetrics}
                   />
                 )}
               </CardContent>

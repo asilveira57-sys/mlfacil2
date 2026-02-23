@@ -15,9 +15,20 @@ export interface PeriodDailyPoint {
   conversions: number;
 }
 
+export interface CampaignMetric {
+  ml_campaign_id: string;
+  name: string;
+  spent: number;
+  revenue: number;
+  clicks: number;
+  impressions: number;
+  conversions: number;
+}
+
 interface FullPeriodResponse {
   summary: AdsMetricsSummary;
   dailyMetrics: PeriodDailyPoint[];
+  campaigns: CampaignMetric[];
   dateFrom: string;
   dateTo: string;
 }
@@ -25,6 +36,7 @@ interface FullPeriodResponse {
 interface PeriodMetricsResult {
   summary: AdsMetricsSummary;
   dailyMetrics: PeriodDailyPoint[];
+  campaignsMetrics: CampaignMetric[];
   loading: boolean;
   error: string | null;
 }
@@ -55,24 +67,19 @@ const emptySummary: AdsMetricsSummary = {
 
 /**
  * Derive a subset period from cached daily data.
- * If we have 30d daily data and need 14d, filter and recompute.
  */
 function deriveFromDaily(cached: FullPeriodResponse, dateFrom: string, dateTo: string): FullPeriodResponse | null {
-  // Check if cached range covers requested range
   if (cached.dateFrom > dateFrom || cached.dateTo < dateTo) return null;
   
   const filteredDaily = cached.dailyMetrics.filter(d => d.date >= dateFrom && d.date <= dateTo);
   if (filteredDaily.length === 0) return null;
 
-  // Recompute seller totals from daily data
   let total_seller_revenue = 0, total_seller_orders = 0;
   for (const d of filteredDaily) {
     total_seller_revenue += d.seller_revenue || 0;
     total_seller_orders += d.seller_orders || 0;
   }
 
-  // ADS metrics: use proportional scaling from cached summary based on day count ratio
-  // Since we don't have per-day ADS data, we scale proportionally
   const totalDays = cached.dailyMetrics.length;
   const subsetDays = filteredDaily.length;
   const ratio = totalDays > 0 ? subsetDays / totalDays : 1;
@@ -112,7 +119,18 @@ function deriveFromDaily(cached: FullPeriodResponse, dateFrom: string, dateTo: s
     cost_per_sale_ads: total_conversions > 0 ? total_spent / total_conversions : 0,
   };
 
-  return { summary, dailyMetrics: filteredDaily, dateFrom, dateTo };
+  // Scale campaign metrics proportionally
+  const derivedCampaigns: CampaignMetric[] = cached.campaigns.map(c => ({
+    ml_campaign_id: c.ml_campaign_id,
+    name: c.name,
+    spent: c.spent * ratio,
+    revenue: c.revenue * ratio,
+    clicks: Math.round(c.clicks * ratio),
+    impressions: Math.round(c.impressions * ratio),
+    conversions: Math.round(c.conversions * ratio),
+  }));
+
+  return { summary, dailyMetrics: filteredDaily, campaigns: derivedCampaigns, dateFrom, dateTo };
 }
 
 export function useAdsPeriodMetrics(
@@ -122,10 +140,10 @@ export function useAdsPeriodMetrics(
 ): PeriodMetricsResult {
   const [summary, setSummary] = useState<AdsMetricsSummary>(emptySummary);
   const [dailyMetrics, setDailyMetrics] = useState<PeriodDailyPoint[]>([]);
+  const [campaignsMetrics, setCampaignsMetrics] = useState<CampaignMetric[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
-  // Cache stores full responses (summary + daily) keyed by sellerId:dateFrom:dateTo
   const cacheRef = useRef<Map<string, FullPeriodResponse>>(new Map());
   const abortRef = useRef<AbortController | null>(null);
 
@@ -139,11 +157,12 @@ export function useAdsPeriodMetrics(
     if (cached) {
       setSummary(cached.summary);
       setDailyMetrics(cached.dailyMetrics);
+      setCampaignsMetrics(cached.campaigns);
       setLoading(false);
       return;
     }
 
-    // 2. Try deriving from a larger cached period (superset)
+    // 2. Try deriving from a larger cached period
     for (const [, entry] of cacheRef.current) {
       if (entry.dateFrom <= dateFrom && entry.dateTo >= dateTo) {
         const derived = deriveFromDaily(entry, dateFrom, dateTo);
@@ -151,6 +170,7 @@ export function useAdsPeriodMetrics(
           cacheRef.current.set(cacheKey, derived);
           setSummary(derived.summary);
           setDailyMetrics(derived.dailyMetrics);
+          setCampaignsMetrics(derived.campaigns);
           setLoading(false);
           console.log(`[useAdsPeriodMetrics] Derived ${dateFrom}→${dateTo} from cached ${entry.dateFrom}→${entry.dateTo}`);
           return;
@@ -201,9 +221,24 @@ export function useAdsPeriodMetrics(
       };
 
       const daily = Array.isArray(data.daily) ? data.daily : [];
+      
+      // Extract campaigns from edge function response
+      const campaigns: CampaignMetric[] = Array.isArray(data.campaigns)
+        ? data.campaigns.map((c: any) => ({
+            ml_campaign_id: String(c.ml_campaign_id || c.campaign_id || ''),
+            name: c.name || '',
+            spent: c.spent || 0,
+            revenue: c.revenue || 0,
+            clicks: c.clicks || 0,
+            impressions: c.impressions || 0,
+            conversions: c.conversions || 0,
+          }))
+        : [];
+
       const fullResponse: FullPeriodResponse = {
         summary: result,
         dailyMetrics: daily,
+        campaigns,
         dateFrom,
         dateTo,
       };
@@ -211,6 +246,7 @@ export function useAdsPeriodMetrics(
       cacheRef.current.set(cacheKey, fullResponse);
       setSummary(result);
       setDailyMetrics(daily);
+      setCampaignsMetrics(campaigns);
     } catch (err: any) {
       if (controller.signal.aborted) return;
       const msg = err?.message || 'Erro ao buscar métricas';
@@ -230,5 +266,5 @@ export function useAdsPeriodMetrics(
     };
   }, [fetchMetrics]);
 
-  return { summary, dailyMetrics, loading, error };
+  return { summary, dailyMetrics, campaignsMetrics, loading, error };
 }
