@@ -71,6 +71,7 @@ interface MarketplaceAccount {
   nickname: string | null;
   email: string | null;
   is_active: boolean;
+  is_connected: boolean;
   token_expires_at: string | null;
   connection_status: 'connected' | 'attention' | 'disconnected' | 'revoked';
   last_api_ok_at: string | null;
@@ -142,7 +143,7 @@ const SettingsCompanies = () => {
       // Fetch ML accounts with company_id
       const { data: accountsData, error: accountsError } = await supabase
         .from("ml_accounts")
-        .select("id, ml_user_id, nickname, email, is_active, token_expires_at, connection_status, last_api_ok_at, last_api_error_code, consecutive_failures, updated_at, company_id")
+        .select("id, ml_user_id, nickname, email, is_active, is_connected, token_expires_at, connection_status, last_api_ok_at, last_api_error_code, consecutive_failures, updated_at, company_id")
         .eq("user_id", user.id)
         .order("is_active", { ascending: false });
 
@@ -333,11 +334,15 @@ const SettingsCompanies = () => {
       const { error } = await supabase
         .from("ml_accounts")
         .update({
-          access_token: '',
-          refresh_token: '',
-          token_expires_at: new Date(0).toISOString(),
+          access_token: null,
+          refresh_token: null,
+          token_expires_at: null,
           is_active: false,
+          is_connected: false,
           connection_status: 'disconnected',
+          revoked_at: new Date().toISOString(),
+          revoked_by: user.id,
+          revoke_reason: 'Desconexão manual pelo usuário',
           updated_at: new Date().toISOString(),
         })
         .eq("id", accountToDisconnect.id)
@@ -345,9 +350,32 @@ const SettingsCompanies = () => {
 
       if (error) throw error;
 
+      // Audit log
+      try {
+        await supabase.rpc('register_system_log', {
+          p_level: 'info',
+          p_system_area: 'ml_accounts',
+          p_action: 'disconnect',
+          p_user_id: user.id,
+          p_success: true,
+          p_message: `Conta ${accountToDisconnect.nickname || accountToDisconnect.ml_user_id} desconectada manualmente`,
+          p_meta_json: {
+            account_id: accountToDisconnect.id,
+            seller_id: accountToDisconnect.ml_user_id,
+            company_id: accountToDisconnect.company_id,
+            user_id: user.id,
+            reason: 'manual_disconnect',
+          },
+        });
+      } catch (_) { /* fail-safe */ }
+
       toast.success("Conta desconectada com sucesso");
       setShowDisconnectDialog(false);
       setAccountToDisconnect(null);
+      
+      // Clear caches
+      window.dispatchEvent(new CustomEvent('active_account_changed', { detail: { accountId: '', sellerId: '' } }));
+      window.dispatchEvent(new CustomEvent('clear_sales_cache'));
       
       fetchData();
       refreshActiveAccountContext();
@@ -432,6 +460,15 @@ const SettingsCompanies = () => {
   };
 
   const getAccountStatus = (account: MarketplaceAccount) => {
+    // is_connected=false is the definitive disconnected state
+    if (account.is_connected === false) {
+      return { 
+        label: "Desconectada", 
+        color: "bg-gray-500/10 text-gray-600 border-gray-200",
+        icon: XCircle,
+        needsReconnect: true,
+      };
+    }
     const status = account.connection_status || 'connected';
     
     switch (status) {

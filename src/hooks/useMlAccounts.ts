@@ -9,6 +9,7 @@ export interface MlAccount {
   nickname: string | null;
   email: string | null;
   is_active: boolean;
+  is_connected: boolean;
   access_token: string;
   refresh_token: string;
   token_expires_at: string;
@@ -49,7 +50,8 @@ export function useMlAccounts(options: UseMlAccountsOptions = {}) {
       // Only filter by connection_status if explicitly requested
       // Do NOT filter by is_active - that flag is for "enabled/disabled" not "selected"
       if (onlyConnected) {
-        query = query.in('connection_status', ['connected', 'attention']);
+        query = query.eq('is_connected', true)
+          .in('connection_status', ['connected', 'attention']);
       }
 
       const { data, error } = await query;
