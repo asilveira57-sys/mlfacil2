@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { auditLog } from '../_shared/audit-log.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -271,6 +272,11 @@ Deno.serve(async (req) => {
     }
 
     console.log(`[promotions-action] Done: ${successCount} success, ${failedCount} failed`);
+    if (failedCount > 0) {
+      await auditLog(supabase, { level: 'warn', area: 'promotions', action: `${action}_partial`, userId: null, success: false, message: `${action}: ${successCount} ok, ${failedCount} falhas`, meta: { seller_id, promotion_id, success_count: successCount, failed_count: failedCount } });
+    } else {
+      await auditLog(supabase, { level: 'info', area: 'promotions', action: `${action}_completed`, userId: null, success: true, message: `${action}: ${successCount} itens processados`, meta: { seller_id, promotion_id, success_count: successCount } });
+    }
 
     return new Response(
       JSON.stringify({
@@ -281,6 +287,12 @@ Deno.serve(async (req) => {
     );
   } catch (error) {
     console.error('[promotions-action] Unhandled error:', error);
+    try {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+      const svc = createClient(supabaseUrl, supabaseServiceKey);
+      await auditLog(svc, { level: 'error', area: 'promotions', action: 'unhandled_error', userId: null, success: false, message: String(error), meta: {} });
+    } catch (_) { /* fail-safe */ }
     return new Response(
       JSON.stringify({ ok: false, error: { code: 'INTERNAL_ERROR', message: String(error) } }),
       { status: 500, headers: corsHeaders }

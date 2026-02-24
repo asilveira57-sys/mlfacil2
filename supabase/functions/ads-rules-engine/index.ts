@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { auditLog } from '../_shared/audit-log.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -80,6 +81,7 @@ Deno.serve(async (req) => {
 
     if (action === 'evaluate') {
       const result = await evaluateRules(supabase, seller_id);
+      await auditLog(supabase, { level: 'info', area: 'ads_rules', action: 'evaluate_completed', userId: null, success: true, message: `Avaliação concluída: ${result.evaluated} regras, ${result.triggered} disparos, ${result.tasks_created} tarefas`, meta: { seller_id, ...result } });
       return new Response(
         JSON.stringify(result),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -93,6 +95,12 @@ Deno.serve(async (req) => {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('[ads-rules-engine] Error:', error);
+    try {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+      const svc = createClient(supabaseUrl, supabaseServiceKey);
+      await auditLog(svc, { level: 'error', area: 'ads_rules', action: 'evaluate_unhandled_error', userId: null, success: false, message: errorMessage, meta: {} });
+    } catch (_) { /* fail-safe */ }
     return new Response(
       JSON.stringify({ error: errorMessage }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

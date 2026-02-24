@@ -14,6 +14,7 @@
  */
 
 import { createClient, SupabaseClient } from 'npm:@supabase/supabase-js@2';
+import { auditLog } from '../_shared/audit-log.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -401,6 +402,7 @@ Deno.serve(async (req: Request) => {
   } catch (error) {
     console.error('[pricing-engine] Error:', error);
     const errMsg = error instanceof Error ? error.message : 'Erro interno';
+    await auditLog(supabase, { level: 'error', area: 'pricing', action: action || 'unknown', userId, success: false, message: errMsg, meta: {} });
     return respondError('INTERNAL_ERROR', errMsg, 500);
   }
 });
