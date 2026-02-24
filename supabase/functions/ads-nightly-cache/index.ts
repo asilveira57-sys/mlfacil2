@@ -213,6 +213,29 @@ Deno.serve(async (req) => {
               continue;
             }
 
+            // ── Sync campaign status to ads_campaigns table ──
+            if (campaigns.length > 0) {
+              const upsertRows = campaigns.map((c: any) => ({
+                seller_id: conn.seller_id,
+                user_id: conn.user_id,
+                ml_campaign_id: c.ml_campaign_id,
+                name: c.name,
+                status: c.status || 'paused',
+                synced_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              }));
+
+              const { error: upsertErr } = await supabase
+                .from('ads_campaigns')
+                .upsert(upsertRows, { onConflict: 'seller_id,ml_campaign_id', ignoreDuplicates: false });
+
+              if (upsertErr) {
+                console.warn(`[ads-nightly-cache] Failed to upsert campaign statuses for ${conn.seller_id}:`, upsertErr.message);
+              } else {
+                console.log(`[ads-nightly-cache] Synced ${campaigns.length} campaign statuses for ${conn.seller_id}`);
+              }
+            }
+
             // Don't cache zeros (likely rate limited)
             if (total_spent === 0 && total_revenue === 0 && total_clicks === 0) {
               console.warn(`[ads-nightly-cache] Skipping zero-data cache for ${conn.seller_id} ${days}d`);

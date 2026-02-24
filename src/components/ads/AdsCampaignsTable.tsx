@@ -36,8 +36,18 @@ interface AdsCampaignsTableProps {
 type SortColumn = 'name' | 'status' | 'budget' | 'spent' | 'revenue' | 'cpc' | 'acos' | 'tacos' | 'roas';
 type SortDirection = 'asc' | 'desc';
 
+type StatusFilter = 'all' | 'active' | 'paused' | 'ended';
+
+const statusFilterOptions: { value: StatusFilter; label: string }[] = [
+  { value: 'all', label: 'Todas' },
+  { value: 'active', label: 'Ativas' },
+  { value: 'paused', label: 'Pausadas' },
+  { value: 'ended', label: 'Encerradas' },
+];
+
 export function AdsCampaignsTable({ campaigns, onSelectCampaign, onOpenCampaignModal, syncState, onTriggerSync, dateFrom, dateTo, precomputedMetrics, sellerId }: AdsCampaignsTableProps) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [sortColumn, setSortColumn] = useState<SortColumn>('spent');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [currentPage, setCurrentPage] = useState(0);
@@ -103,15 +113,20 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, onOpenCampaignM
   };
 
   const processedData = useMemo(() => {
+    // Status filter first
+    const statusFiltered = statusFilter === 'all'
+      ? campaigns
+      : campaigns.filter(c => c.status === statusFilter);
+
     const query = searchQuery.toLowerCase().trim();
     const filtered = query
-      ? campaigns.filter(c => {
+      ? statusFiltered.filter(c => {
           const name = (c.name || '').toLowerCase();
           const type = (c.campaign_type || '').toLowerCase();
           const mlId = (c.ml_campaign_id || '').toLowerCase();
           return name.includes(query) || type.includes(query) || mlId.includes(query);
         })
-      : campaigns;
+      : statusFiltered;
 
     const sorted = [...filtered].sort((a, b) => {
       const mA = getCampaignMetrics(a);
@@ -139,7 +154,7 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, onOpenCampaignM
     const page = Math.min(currentPage, totalPages - 1);
     const paginated = sorted.slice(page * pageSize, (page + 1) * pageSize);
     return { filtered: sorted, paginated, totalPages, safePage: page, totalFiltered: sorted.length };
-  }, [campaigns, searchQuery, sortColumn, sortDirection, currentPage]);
+  }, [campaigns, searchQuery, statusFilter, sortColumn, sortDirection, currentPage]);
 
   const handleSort = (col: SortColumn) => {
     if (sortColumn === col) {
@@ -178,8 +193,8 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, onOpenCampaignM
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <div className="relative max-w-sm flex-1">
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative max-w-sm flex-1 min-w-[180px]">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Buscar campanha, tipo ou MLB..."
@@ -187,6 +202,24 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, onOpenCampaignM
             onChange={e => { setSearchQuery(e.target.value); setCurrentPage(0); }}
             className="pl-9 h-9 text-sm"
           />
+        </div>
+        <div className="flex items-center gap-1">
+          {statusFilterOptions.map(opt => (
+            <Button
+              key={opt.value}
+              variant={statusFilter === opt.value ? 'default' : 'outline'}
+              size="sm"
+              className="h-8 text-xs px-2.5"
+              onClick={() => { setStatusFilter(opt.value); setCurrentPage(0); }}
+            >
+              {opt.label}
+              {opt.value !== 'all' && (
+                <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px] font-normal">
+                  {campaigns.filter(c => c.status === opt.value).length}
+                </Badge>
+              )}
+            </Button>
+          ))}
         </div>
         {onTriggerSync && (
           <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs" onClick={onTriggerSync} disabled={syncState?.status === 'syncing'}>

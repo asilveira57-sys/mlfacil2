@@ -381,7 +381,7 @@ export default function Publicidade() {
                   <div>
                     <CardTitle className="text-lg">Todas as Campanhas</CardTitle>
                     <CardDescription>
-                      {campaigns.length} campanhas encontradas • {activeCampaigns} ativas
+                      {campaigns.length} campanhas encontradas • {activeCampaigns} ativas • {pausedCampaigns} pausadas
                     </CardDescription>
                   </div>
                 </div>
