@@ -9,6 +9,16 @@ const corsHeaders = {
 const ML_APP_ID = Deno.env.get('ML_APP_ID')!;
 const ML_SECRET_KEY = Deno.env.get('ML_SECRET_KEY')!;
 
+function decodeJwt(token: string): Record<string, unknown> | null {
+  try {
+    const payload = token.split('.')[1];
+    const decoded = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+}
+
 async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 3): Promise<Response> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const response = await fetch(url, options);
@@ -50,6 +60,15 @@ async function refreshToken(supabase: any, sellerId: string, userId: string, ref
 }
 
 type Action = 'pause_campaign' | 'activate_campaign' | 'pause_ad' | 'activate_ad' | 'add_ad' | 'remove_ad';
+
+function buildTokenMeta(accessToken: string) {
+  const decoded = decodeJwt(accessToken);
+  return {
+    ml_user_id: decoded?.user_id ?? null,
+    token_scope: decoded?.scope ?? null,
+    app_id: decoded?.app_id ?? null,
+  };
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -120,6 +139,10 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Decode JWT for diagnostics
+    const tokenMeta = buildTokenMeta(accessToken);
+    console.log(`[ads-campaign-manage] Token meta: ml_user_id=${tokenMeta.ml_user_id}, scope=${tokenMeta.token_scope}, app_id=${tokenMeta.app_id}`);
+
     const mlHeaders = {
       'Authorization': `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
@@ -152,7 +175,7 @@ Deno.serve(async (req) => {
         if (!mlResponse.ok) {
           let mlError = responseText;
           try { const parsed = JSON.parse(responseText); mlError = parsed.message || parsed.error || responseText; } catch {}
-          await auditLog(supabase, { level: 'error', area: 'ads_manage', action, userId: user.id, success: false, message: `ML API ${mlResponse.status}: ${mlError}`, meta: { seller_id, campaign_id, ml_status: mlResponse.status } });
+          await auditLog(supabase, { level: 'error', area: 'ads_manage', action, userId: user.id, success: false, message: `ML API ${mlResponse.status}: ${mlError}`, meta: { seller_id, campaign_id, item_id: null, ml_status: mlResponse.status, ml_error_body: responseText, ...tokenMeta } });
           return new Response(JSON.stringify({ 
             error: `ML API error: ${mlResponse.status}`, 
             details: mlError,
@@ -170,7 +193,7 @@ Deno.serve(async (req) => {
           .eq('ml_campaign_id', campaign_id)
           .eq('seller_id', seller_id);
 
-        await auditLog(supabase, { level: 'info', area: 'ads_manage', action, userId: user.id, success: true, message: `Campanha ${campaign_id} -> ${newStatus}`, meta: { seller_id, campaign_id, new_status: newStatus } });
+        await auditLog(supabase, { level: 'info', area: 'ads_manage', action, userId: user.id, success: true, message: `Campanha ${campaign_id} -> ${newStatus}`, meta: { seller_id, campaign_id, item_id: null, new_status: newStatus, ...tokenMeta } });
         result = { success: true, action, campaign_id, new_status: newStatus, ml_response: JSON.parse(responseText || '{}') };
         break;
       }
@@ -198,7 +221,7 @@ Deno.serve(async (req) => {
         if (!mlResponse.ok) {
           let mlError = adText;
           try { const parsed = JSON.parse(adText); mlError = parsed.message || parsed.error || adText; } catch {}
-          await auditLog(supabase, { level: 'error', area: 'ads_manage', action, userId: user.id, success: false, message: `ML API ${mlResponse.status}: ${mlError}`, meta: { seller_id, item_id, ml_status: mlResponse.status } });
+          await auditLog(supabase, { level: 'error', area: 'ads_manage', action, userId: user.id, success: false, message: `ML API ${mlResponse.status}: ${mlError}`, meta: { seller_id, item_id, campaign_id: campaign_id ?? null, ml_status: mlResponse.status, ml_error_body: adText, ...tokenMeta } });
           return new Response(JSON.stringify({ 
             error: `ML API error: ${mlResponse.status}`, 
             details: mlError,
@@ -215,7 +238,7 @@ Deno.serve(async (req) => {
           .eq('item_id', item_id)
           .eq('seller_id', seller_id);
 
-        await auditLog(supabase, { level: 'info', area: 'ads_manage', action, userId: user.id, success: true, message: `Anúncio ${item_id} -> ${newStatus}`, meta: { seller_id, item_id, new_status: newStatus } });
+        await auditLog(supabase, { level: 'info', area: 'ads_manage', action, userId: user.id, success: true, message: `Anúncio ${item_id} -> ${newStatus}`, meta: { seller_id, item_id, campaign_id: campaign_id ?? null, new_status: newStatus, ...tokenMeta } });
         result = { success: true, action, item_id, new_status: newStatus };
         break;
       }
@@ -241,7 +264,7 @@ Deno.serve(async (req) => {
         if (!mlResponse.ok) {
           let mlError = addText;
           try { const parsed = JSON.parse(addText); mlError = parsed.message || parsed.error || addText; } catch {}
-          await auditLog(supabase, { level: 'error', area: 'ads_manage', action, userId: user.id, success: false, message: `ML API ${mlResponse.status}: ${mlError}`, meta: { seller_id, campaign_id, item_id, ml_status: mlResponse.status } });
+          await auditLog(supabase, { level: 'error', area: 'ads_manage', action, userId: user.id, success: false, message: `ML API ${mlResponse.status}: ${mlError}`, meta: { seller_id, campaign_id, item_id, ml_status: mlResponse.status, ml_error_body: addText, ...tokenMeta } });
           return new Response(JSON.stringify({ 
             error: `ML API error: ${mlResponse.status}`, 
             details: mlError,
@@ -251,7 +274,7 @@ Deno.serve(async (req) => {
           });
         }
 
-        await auditLog(supabase, { level: 'info', area: 'ads_manage', action, userId: user.id, success: true, message: `Anúncio ${item_id} adicionado à campanha ${campaign_id}`, meta: { seller_id, campaign_id, item_id } });
+        await auditLog(supabase, { level: 'info', area: 'ads_manage', action, userId: user.id, success: true, message: `Anúncio ${item_id} adicionado à campanha ${campaign_id}`, meta: { seller_id, campaign_id, item_id, ...tokenMeta } });
         result = { success: true, action, campaign_id, item_id };
         break;
       }
@@ -276,7 +299,7 @@ Deno.serve(async (req) => {
         if (!mlResponse.ok && mlResponse.status !== 404) {
           let mlError = delText;
           try { const parsed = JSON.parse(delText); mlError = parsed.message || parsed.error || delText; } catch {}
-          await auditLog(supabase, { level: 'error', area: 'ads_manage', action, userId: user.id, success: false, message: `ML API ${mlResponse.status}: ${mlError}`, meta: { seller_id, item_id, ml_status: mlResponse.status } });
+          await auditLog(supabase, { level: 'error', area: 'ads_manage', action, userId: user.id, success: false, message: `ML API ${mlResponse.status}: ${mlError}`, meta: { seller_id, item_id, campaign_id: campaign_id ?? null, ml_status: mlResponse.status, ml_error_body: delText, ...tokenMeta } });
           return new Response(JSON.stringify({ 
             error: `ML API error: ${mlResponse.status}`, 
             details: mlError,
@@ -293,7 +316,7 @@ Deno.serve(async (req) => {
           .eq('item_id', item_id)
           .eq('seller_id', seller_id);
 
-        await auditLog(supabase, { level: 'info', area: 'ads_manage', action, userId: user.id, success: true, message: `Anúncio ${item_id} removido`, meta: { seller_id, item_id } });
+        await auditLog(supabase, { level: 'info', area: 'ads_manage', action, userId: user.id, success: true, message: `Anúncio ${item_id} removido`, meta: { seller_id, item_id, campaign_id: campaign_id ?? null, ...tokenMeta } });
         result = { success: true, action, item_id };
         break;
       }
