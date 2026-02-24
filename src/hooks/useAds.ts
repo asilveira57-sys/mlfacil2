@@ -325,10 +325,9 @@ export function useAdsMetricsSummary(items: AdsItem[]): AdsMetricsSummary {
 // Enrich items with promotion and margin data
 export function useEnrichedAdsItems(sellerId?: string, filters?: AdsFilterState) {
   const { items, loading } = useAdsItems(sellerId, filters);
-  const [enrichedItems, setEnrichedItems] = useState<EnrichedAdsItem[]>([]);
 
-  useEffect(() => {
-    const enriched: EnrichedAdsItem[] = items.map(item => {
+  const enrichedItems = useMemo<EnrichedAdsItem[]>(() => {
+    return items.map(item => {
       let situation: 'scale' | 'maintain' | 'adjust' | 'pause' = 'maintain';
       
       if ((item.roas || 0) > 3 && item.conversions > 0) {
@@ -346,8 +345,6 @@ export function useEnrichedAdsItems(sellerId?: string, filters?: AdsFilterState)
         margin_percent: undefined,
       };
     });
-
-    setEnrichedItems(enriched);
   }, [items]);
 
   return { items: enrichedItems, loading };
