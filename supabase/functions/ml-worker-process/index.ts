@@ -188,7 +188,7 @@ Deno.serve(async (req) => {
 
         // Check daily limit
         const featureFlags = integration.feature_flags || {};
-        const dailyLimit = featureFlags.daily_event_limit || 500;
+        const dailyLimit = featureFlags.daily_event_limit || 5000;
 
         // Reset counter if needed
         const resetAt = integration.daily_events_reset_at
