@@ -221,3 +221,6 @@ verify_jwt = false
 
 [functions.promotion-agent-run]
 verify_jwt = false
+
+[functions.mktpfacil-clone]
+verify_jwt = false

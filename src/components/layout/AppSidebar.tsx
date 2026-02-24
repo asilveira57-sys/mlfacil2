@@ -27,6 +27,7 @@ import {
   Calculator,
   Percent,
   Truck,
+  Copy,
 } from "lucide-react";
 import {
   Collapsible,
@@ -79,6 +80,7 @@ const mainNavItems: NavItem[] = [
   { titleKey: "nav:promotions", url: "/promocoes", icon: Tag, moduleId: "promocoes", moduleKey: "promocoes" },
   { titleKey: "nav:ads", url: "/publicidade", icon: Megaphone, moduleId: "publicidade", moduleKey: "mercado_ads" },
   { titleKey: "nav:timeline", url: "/anuncios/linha-do-tempo", icon: History, moduleId: "linha-do-tempo", moduleKey: "linha_do_tempo" },
+  { titleKey: "nav:clone_listing", url: "/anuncios/clonar", icon: Copy, moduleId: "clonar", moduleKey: "clonar" },
   { titleKey: "nav:post_sale", url: "/mensagens", icon: MessageSquareText, moduleId: "pos-venda", moduleKey: "pos_venda" },
   { titleKey: "nav:questions", url: "/perguntas", icon: MessageSquareText, moduleId: "perguntas", moduleKey: "perguntas" },
 ];
