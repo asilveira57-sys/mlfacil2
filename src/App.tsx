@@ -62,6 +62,7 @@ import SocialCalendar from "./pages/SocialCalendar";
 import ConsultantLibrary from "./pages/ConsultantLibrary";
 import PublicTipPage from "./pages/PublicTipPage";
 import { ZplViewerTool, TrendsLiteTool, PricingSimulatorTool, CommissionsTool } from "./pages/tools";
+import ClonarAnuncio from "./pages/ClonarAnuncio";
 import { AdminRoute } from "./components/auth/AdminRoute";
 
 // NOTE: GlobalWatchdogs removed to prevent background activity storms on tab focus.
@@ -188,6 +189,7 @@ const App = () => {
                   <Route path="/anuncios/linha-do-tempo" element={<AdTimelineRadar />} />
                   <Route path="/anuncios/linha-do-tempo/:itemId" element={<AdTimelineDetail />} />
                   <Route path="/anuncios/acoes" element={<AdActionsCenter />} />
+                  <Route path="/anuncios/clonar" element={<ClonarAnuncio />} />
                   {/* Seed routes */}
                   <Route path="/seed" element={<Seed />} />
                   <Route path="/seed/:itemId" element={<Seed />} />

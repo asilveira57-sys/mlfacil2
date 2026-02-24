@@ -6740,6 +6740,171 @@ export type Database = {
         }
         Relationships: []
       }
+      mktpfacil_clone_job_units: {
+        Row: {
+          created_at: string
+          destination_item_id: string | null
+          destination_permalink: string | null
+          error_code: string | null
+          error_message: string | null
+          id: string
+          job_id: string
+          retry_count: number
+          source_variation_id: string | null
+          status: string
+          unit_index: number
+          unit_snapshot_json: Json | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          destination_item_id?: string | null
+          destination_permalink?: string | null
+          error_code?: string | null
+          error_message?: string | null
+          id?: string
+          job_id: string
+          retry_count?: number
+          source_variation_id?: string | null
+          status?: string
+          unit_index?: number
+          unit_snapshot_json?: Json | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          destination_item_id?: string | null
+          destination_permalink?: string | null
+          error_code?: string | null
+          error_message?: string | null
+          id?: string
+          job_id?: string
+          retry_count?: number
+          source_variation_id?: string | null
+          status?: string
+          unit_index?: number
+          unit_snapshot_json?: Json | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mktpfacil_clone_job_units_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "mktpfacil_clone_history"
+            referencedColumns: ["job_id"]
+          },
+          {
+            foreignKeyName: "mktpfacil_clone_job_units_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "mktpfacil_clone_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mktpfacil_clone_jobs: {
+        Row: {
+          created_at: string
+          destination_account_id: string
+          finished_at: string | null
+          id: string
+          settings_json: Json
+          source_item_id: string
+          source_snapshot_json: Json | null
+          source_url: string | null
+          started_at: string | null
+          status: string
+          summary_json: Json | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          destination_account_id: string
+          finished_at?: string | null
+          id?: string
+          settings_json?: Json
+          source_item_id: string
+          source_snapshot_json?: Json | null
+          source_url?: string | null
+          started_at?: string | null
+          status?: string
+          summary_json?: Json | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          destination_account_id?: string
+          finished_at?: string | null
+          id?: string
+          settings_json?: Json
+          source_item_id?: string
+          source_snapshot_json?: Json | null
+          source_url?: string | null
+          started_at?: string | null
+          status?: string
+          summary_json?: Json | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mktpfacil_clone_jobs_destination_account_id_fkey"
+            columns: ["destination_account_id"]
+            isOneToOne: false
+            referencedRelation: "ml_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mktpfacil_clone_jobs_destination_account_id_fkey"
+            columns: ["destination_account_id"]
+            isOneToOne: false
+            referencedRelation: "unified_marketplace_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mktpfacil_system_logs: {
+        Row: {
+          context_json: Json | null
+          created_at: string
+          entity_id: string | null
+          entity_type: string
+          event_name: string
+          id: string
+          level: string
+          message: string | null
+          module: string
+          user_id: string
+        }
+        Insert: {
+          context_json?: Json | null
+          created_at?: string
+          entity_id?: string | null
+          entity_type: string
+          event_name: string
+          id?: string
+          level?: string
+          message?: string | null
+          module?: string
+          user_id: string
+        }
+        Update: {
+          context_json?: Json | null
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string
+          event_name?: string
+          id?: string
+          level?: string
+          message?: string | null
+          module?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       ml_accounts: {
         Row: {
           access_token: string
@@ -15056,6 +15221,44 @@ export type Database = {
           user_id: string | null
         }
         Relationships: []
+      }
+      mktpfacil_clone_history: {
+        Row: {
+          created_at: string | null
+          created_units: number | null
+          destination_account_id: string | null
+          destination_nickname: string | null
+          destination_seller_id: string | null
+          failed_units: number | null
+          finished_at: string | null
+          job_id: string | null
+          settings_json: Json | null
+          source_item_id: string | null
+          source_thumbnail: string | null
+          source_title: string | null
+          source_url: string | null
+          started_at: string | null
+          status: string | null
+          summary_json: Json | null
+          total_units: number | null
+          user_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mktpfacil_clone_jobs_destination_account_id_fkey"
+            columns: ["destination_account_id"]
+            isOneToOne: false
+            referencedRelation: "ml_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mktpfacil_clone_jobs_destination_account_id_fkey"
+            columns: ["destination_account_id"]
+            isOneToOne: false
+            referencedRelation: "unified_marketplace_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       priority_notifications: {
         Row: {
