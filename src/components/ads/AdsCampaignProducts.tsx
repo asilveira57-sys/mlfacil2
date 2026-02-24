@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { ChevronUp, Package, TrendingUp, TrendingDown, Pause, Play, Trash2, Loader2, BookOpen, Truck } from 'lucide-react';
+import { ChevronUp, Package, TrendingUp, TrendingDown, Pause, Play, Trash2, Loader2, BookOpen, Truck, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -34,7 +34,6 @@ interface CampaignProduct {
   roas: number;
   tacos: number;
   status: string;
-  // Enriched from listings cache
   isCatalog?: boolean;
   isFull?: boolean;
   outOfStock?: boolean;
@@ -48,9 +47,14 @@ interface AdsCampaignProductsProps {
   showActions?: boolean;
 }
 
+type ProductSortColumn = 'price' | 'spent' | 'revenue' | 'clicks' | 'cpc' | 'acos' | 'roas' | 'status';
+type SortDirection = 'asc' | 'desc';
+
 export function AdsCampaignProducts({ mlCampaignId, sellerId, onClose, showActions = false }: AdsCampaignProductsProps) {
   const [products, setProducts] = useState<CampaignProduct[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sortColumn, setSortColumn] = useState<ProductSortColumn>('spent');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const actions = useAdsCampaignActions(sellerId);
 
   useEffect(() => {
@@ -124,12 +128,46 @@ export function AdsCampaignProducts({ mlCampaignId, sellerId, onClose, showActio
         }
       }
 
-      mapped.sort((a, b) => b.spent - a.spent);
       setProducts(mapped);
       setLoading(false);
     };
     fetchProducts();
   }, [mlCampaignId, sellerId]);
+
+  const sortedProducts = useMemo(() => {
+    return [...products].sort((a, b) => {
+      let valA: number | string = 0;
+      let valB: number | string = 0;
+      switch (sortColumn) {
+        case 'price': valA = a.price; valB = b.price; break;
+        case 'spent': valA = a.spent; valB = b.spent; break;
+        case 'revenue': valA = a.revenue; valB = b.revenue; break;
+        case 'clicks': valA = a.clicks; valB = b.clicks; break;
+        case 'cpc': valA = a.cpc; valB = b.cpc; break;
+        case 'acos': valA = a.acos; valB = b.acos; break;
+        case 'roas': valA = a.roas; valB = b.roas; break;
+        case 'status': valA = a.status; valB = b.status; break;
+      }
+      if (typeof valA === 'string' && typeof valB === 'string') {
+        return sortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      }
+      return sortDirection === 'asc' ? (valA as number) - (valB as number) : (valB as number) - (valA as number);
+    });
+  }, [products, sortColumn, sortDirection]);
+
+  const handleSort = (col: ProductSortColumn) => {
+    if (sortColumn === col) {
+      setSortDirection(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(col);
+      setSortDirection('desc');
+    }
+  };
+
+  const SortIcon = ({ col }: { col: ProductSortColumn }) => {
+    if (sortColumn !== col) return <ArrowUpDown className="h-3 w-3 opacity-40" />;
+    return sortDirection === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />;
+  };
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
@@ -193,19 +231,35 @@ export function AdsCampaignProducts({ mlCampaignId, sellerId, onClose, showActio
           <TableHeader>
             <TableRow className="bg-muted/30">
               <TableHead className="min-w-[280px]">Produto</TableHead>
-              <TableHead className="text-right">Preço</TableHead>
-              <TableHead className="text-right">Gasto</TableHead>
-              <TableHead className="text-right">Receita</TableHead>
-              <TableHead className="text-right">Cliques</TableHead>
-              <TableHead className="text-right">CPC</TableHead>
-              <TableHead className="text-right">ACOS</TableHead>
-              <TableHead className="text-right">ROAS</TableHead>
-              <TableHead>Status</TableHead>
+              <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('price')}>
+                <span className="flex items-center justify-end gap-1">Preço <SortIcon col="price" /></span>
+              </TableHead>
+              <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('spent')}>
+                <span className="flex items-center justify-end gap-1">Gasto <SortIcon col="spent" /></span>
+              </TableHead>
+              <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('revenue')}>
+                <span className="flex items-center justify-end gap-1">Receita <SortIcon col="revenue" /></span>
+              </TableHead>
+              <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('clicks')}>
+                <span className="flex items-center justify-end gap-1">Cliques <SortIcon col="clicks" /></span>
+              </TableHead>
+              <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('cpc')}>
+                <span className="flex items-center justify-end gap-1">CPC <SortIcon col="cpc" /></span>
+              </TableHead>
+              <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('acos')}>
+                <span className="flex items-center justify-end gap-1">ACOS <SortIcon col="acos" /></span>
+              </TableHead>
+              <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('roas')}>
+                <span className="flex items-center justify-end gap-1">ROAS <SortIcon col="roas" /></span>
+              </TableHead>
+              <TableHead className="cursor-pointer select-none" onClick={() => handleSort('status')}>
+                <span className="flex items-center gap-1">Status <SortIcon col="status" /></span>
+              </TableHead>
               {showActions && <TableHead className="w-[100px]">Ações</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {products.map((product) => {
+            {sortedProducts.map((product) => {
               const isHighAcos = product.acos > 30;
               const isGoodRoas = product.roas >= 3;
               const isLoadingThis = actions.loading?.includes(product.item_id);
