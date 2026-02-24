@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { fetchAllRows } from '@/lib/supabaseHelpers';
+import { getAdsCacheStale, setAdsCache, adsCacheKey, ADS_CACHE_TTL } from '@/hooks/useAdsDataCache';
 import type {
   AdsCampaign,
   AdsAdGroup,
@@ -21,7 +22,15 @@ export function useAdsCampaigns(sellerId?: string) {
 
   const fetchCampaigns = useCallback(async () => {
     if (!sellerId) return;
-    setLoading(true);
+
+    const cacheKey = adsCacheKey(sellerId, 'campaigns');
+    const cached = getAdsCacheStale<AdsCampaign[]>(cacheKey);
+    if (cached) {
+      setCampaigns(cached.data);
+      if (!cached.isStale) { setLoading(false); return; }
+    }
+
+    if (!cached) setLoading(true);
     try {
       const data = await fetchAllRows<AdsCampaign>(
         supabase
@@ -31,6 +40,7 @@ export function useAdsCampaigns(sellerId?: string) {
           .order('spent_total', { ascending: false })
       );
       setCampaigns(data);
+      setAdsCache(cacheKey, data, ADS_CACHE_TTL.CAMPAIGNS);
     } catch (err) {
       console.error('[useAdsCampaigns] Error:', err);
       toast({ title: 'Erro ao carregar campanhas', variant: 'destructive' });
@@ -43,23 +53,6 @@ export function useAdsCampaigns(sellerId?: string) {
     fetchCampaigns();
   }, [fetchCampaigns]);
 
-  // DISABLED: Realtime subscription disabled in static mode
-  // Data only updates on manual refresh or page reload
-  // useEffect(() => {
-  //   if (!sellerId) return;
-  //   const channel = supabase
-  //     .channel(`ads-campaigns-${sellerId}`)
-  //     .on('postgres_changes', {
-  //       event: '*',
-  //       schema: 'public',
-  //       table: 'ads_campaigns',
-  //       filter: `seller_id=eq.${sellerId}`,
-  //     }, () => fetchCampaigns())
-  //     .subscribe();
-  //
-  //   return () => { supabase.removeChannel(channel); };
-  // }, [sellerId, fetchCampaigns]);
-
   return { campaigns, loading, refetch: fetchCampaigns };
 }
 
@@ -68,9 +61,23 @@ export function useAdsItems(sellerId?: string, filters?: AdsFilterState) {
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
+  // Build a stable filter key for cache
+  const filterKey = useMemo(() => {
+    if (!filters) return 'none';
+    return [filters.status, filters.acos_min, filters.acos_max, filters.roas_min, filters.roas_max].join('|');
+  }, [filters]);
+
   const fetchItems = useCallback(async () => {
     if (!sellerId) return;
-    setLoading(true);
+
+    const cacheKey = adsCacheKey(sellerId, 'items', filterKey);
+    const cached = getAdsCacheStale<AdsItem[]>(cacheKey);
+    if (cached) {
+      setItems(cached.data);
+      if (!cached.isStale) { setLoading(false); return; }
+    }
+
+    if (!cached) setLoading(true);
     try {
       let query = supabase
         .from('ads_items')
@@ -95,13 +102,14 @@ export function useAdsItems(sellerId?: string, filters?: AdsFilterState) {
 
       const data = await fetchAllRows<AdsItem>(query.order('spent', { ascending: false }));
       setItems(data);
+      setAdsCache(cacheKey, data, ADS_CACHE_TTL.ITEMS);
     } catch (err) {
       console.error('[useAdsItems] Error:', err);
       toast({ title: 'Erro ao carregar itens de ADS', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
-  }, [sellerId, filters, toast]);
+  }, [sellerId, filterKey, toast, filters]);
 
   useEffect(() => {
     fetchItems();
@@ -116,8 +124,16 @@ export function useAdsDailyMetrics(sellerId?: string, dateFrom?: string, dateTo?
 
   useEffect(() => {
     if (!sellerId) return;
+
+    const cacheKey = adsCacheKey(sellerId, 'daily', dateFrom || '', dateTo || '');
+    const cached = getAdsCacheStale<AdsDailyMetric[]>(cacheKey);
+    if (cached) {
+      setMetrics(cached.data);
+      if (!cached.isStale) { setLoading(false); return; }
+    }
+
     const fetchMetrics = async () => {
-      setLoading(true);
+      if (!cached) setLoading(true);
       try {
         let query = supabase
           .from('ads_daily_metrics')
@@ -130,6 +146,7 @@ export function useAdsDailyMetrics(sellerId?: string, dateFrom?: string, dateTo?
 
         const data = await fetchAllRows<AdsDailyMetric>(query);
         setMetrics(data);
+        setAdsCache(cacheKey, data, ADS_CACHE_TTL.DAILY_METRICS);
       } catch (err) {
         console.error('[useAdsDailyMetrics] Error:', err);
       } finally {
@@ -149,7 +166,15 @@ export function useAdsAlerts(sellerId?: string) {
 
   const fetchAlerts = useCallback(async () => {
     if (!sellerId) return;
-    setLoading(true);
+
+    const cacheKey = adsCacheKey(sellerId, 'alerts');
+    const cached = getAdsCacheStale<AdsAlert[]>(cacheKey);
+    if (cached) {
+      setAlerts(cached.data);
+      if (!cached.isStale) { setLoading(false); return; }
+    }
+
+    if (!cached) setLoading(true);
     try {
       const data = await fetchAllRows<AdsAlert>(
         supabase
@@ -160,6 +185,7 @@ export function useAdsAlerts(sellerId?: string) {
           .order('created_at', { ascending: false })
       );
       setAlerts(data);
+      setAdsCache(cacheKey, data, ADS_CACHE_TTL.ALERTS);
     } catch (err) {
       console.error('[useAdsAlerts] Error:', err);
     } finally {
@@ -194,23 +220,6 @@ export function useAdsAlerts(sellerId?: string) {
     fetchAlerts();
   }, [fetchAlerts]);
 
-  // DISABLED: Realtime subscription disabled in static mode
-  // Data only updates on manual refresh or page reload
-  // useEffect(() => {
-  //   if (!sellerId) return;
-  //   const channel = supabase
-  //     .channel(`ads-alerts-${sellerId}`)
-  //     .on('postgres_changes', {
-  //       event: 'INSERT',
-  //       schema: 'public',
-  //       table: 'ads_alerts',
-  //       filter: `seller_id=eq.${sellerId}`,
-  //     }, () => fetchAlerts())
-  //     .subscribe();
-  //
-  //   return () => { supabase.removeChannel(channel); };
-  // }, [sellerId, fetchAlerts]);
-
   const unreadCount = useMemo(() => alerts.filter(a => !a.is_read).length, [alerts]);
 
   return { alerts, loading, unreadCount, dismissAlert, markAsRead, refetch: fetchAlerts };
@@ -223,6 +232,14 @@ export function useAdsSyncState(sellerId?: string) {
 
   const fetchSyncState = useCallback(async () => {
     if (!sellerId) return;
+
+    const cacheKey = adsCacheKey(sellerId, 'syncState');
+    const cached = getAdsCacheStale<AdsSyncState | null>(cacheKey);
+    if (cached) {
+      setSyncState(cached.data);
+      if (!cached.isStale) { setLoading(false); return; }
+    }
+
     try {
       const { data, error } = await supabase
         .from('ads_sync_state')
@@ -232,6 +249,7 @@ export function useAdsSyncState(sellerId?: string) {
 
       if (error && error.code !== 'PGRST116') throw error;
       setSyncState(data as AdsSyncState);
+      setAdsCache(cacheKey, data, ADS_CACHE_TTL.SYNC_STATE);
     } catch (err) {
       console.error('[useAdsSyncState] Error:', err);
     } finally {
@@ -275,9 +293,7 @@ export function useAdsMetricsSummary(items: AdsItem[]): AdsMetricsSummary {
     const avg_cpc = total_clicks > 0 ? total_spent / total_clicks : 0;
     const avg_tacos = total_revenue > 0 ? (total_spent / total_revenue) * 100 : 0;
 
-    // Products at loss (ACOS > 30%)
     const products_at_loss = items.filter(i => (i.acos || 0) > 0.30).length;
-    // Products scalable (ROAS > 3)
     const products_scalable = items.filter(i => (i.roas || 0) > 3).length;
 
     return {
@@ -312,7 +328,6 @@ export function useEnrichedAdsItems(sellerId?: string, filters?: AdsFilterState)
   const [enrichedItems, setEnrichedItems] = useState<EnrichedAdsItem[]>([]);
 
   useEffect(() => {
-    // For now, compute situation based on ACOS/ROAS
     const enriched: EnrichedAdsItem[] = items.map(item => {
       let situation: 'scale' | 'maintain' | 'adjust' | 'pause' = 'maintain';
       
@@ -327,8 +342,8 @@ export function useEnrichedAdsItems(sellerId?: string, filters?: AdsFilterState)
       return {
         ...item,
         situation,
-        is_in_promotion: false, // TODO: cross with promotions
-        margin_percent: undefined, // TODO: cross with costs
+        is_in_promotion: false,
+        margin_percent: undefined,
       };
     });
 

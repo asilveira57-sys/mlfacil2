@@ -297,6 +297,14 @@ Deno.serve(async (req) => {
             .update({ daily_events_count: currentCount + 1 })
             .eq("id", integration.id);
 
+          // Invalidate ADS cache when orders or items change
+          if (event.topic === "orders_v2" || event.topic === "orders" || event.topic === "items") {
+            await supabase
+              .from("ads_sync_state")
+              .update({ last_error: `cache_stale:${new Date().toISOString()}` })
+              .eq("seller_id", event.ml_user_id);
+          }
+
           stats.success++;
         } else {
           await handleEventRetry(supabase, event, processResult.error || "Unknown error");

@@ -224,3 +224,6 @@ verify_jwt = false
 
 [functions.mktpfacil-clone]
 verify_jwt = false
+
+[functions.ads-nightly-cache]
+verify_jwt = false
