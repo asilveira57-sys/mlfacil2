@@ -490,6 +490,9 @@ export default function Publicidade() {
               onOpenChange={(open) => { if (!open) setModalCampaign(null); }}
               sellerId={sellerId}
               precomputedMetrics={campaignsMetrics}
+              parentDateFrom={dateFrom}
+              parentDateTo={dateTo}
+              parentPeriod={datePeriod}
               onStatusChange={() => {
                 setModalCampaign(null);
               }}

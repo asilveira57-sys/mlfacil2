@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { format, subDays } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
@@ -41,6 +41,9 @@ interface AdsCampaignDetailModalProps {
   sellerId: string;
   precomputedMetrics?: CampaignMetric[];
   onStatusChange?: () => void;
+  parentDateFrom?: string;
+  parentDateTo?: string;
+  parentPeriod?: string;
 }
 
 interface SearchResult {
@@ -52,6 +55,7 @@ interface SearchResult {
 
 export function AdsCampaignDetailModal({
   campaign, open, onOpenChange, sellerId, precomputedMetrics, onStatusChange,
+  parentDateFrom, parentDateTo, parentPeriod,
 }: AdsCampaignDetailModalProps) {
   const actions = useAdsCampaignActions(sellerId);
   const [searchQuery, setSearchQuery] = useState('');
@@ -59,7 +63,20 @@ export function AdsCampaignDetailModal({
   const [searching, setSearching] = useState(false);
   const [addingItem, setAddingItem] = useState<string | null>(null);
   const [productsKey, setProductsKey] = useState(0);
-  const [modalPeriod, setModalPeriod] = useState<ModalPeriod>('30d');
+  // Initialize modal period from parent period if it's a valid modal period
+  const initialPeriod = useMemo<ModalPeriod>(() => {
+    if (parentPeriod && ['7d', '14d', '30d', '60d'].includes(parentPeriod)) {
+      return parentPeriod as ModalPeriod;
+    }
+    if (parentPeriod === 'custom') return 'custom';
+    return '30d';
+  }, [parentPeriod]);
+  const [modalPeriod, setModalPeriod] = useState<ModalPeriod>(initialPeriod);
+
+  // Sync modal period when parent period changes (e.g. modal reopened)
+  useEffect(() => {
+    setModalPeriod(initialPeriod);
+  }, [initialPeriod]);
   const [customFrom, setCustomFrom] = useState<Date>();
   const [customTo, setCustomTo] = useState<Date>();
   const addSectionRef = useRef<HTMLDivElement>(null);
@@ -73,12 +90,18 @@ export function AdsCampaignDetailModal({
     return { dateFrom: format(subDays(today, days), 'yyyy-MM-dd'), dateTo: format(today, 'yyyy-MM-dd') };
   }, [modalPeriod, customFrom, customTo]);
 
-  // Fetch period metrics for this modal's date range
-  const { campaignsMetrics: modalCampaignsMetrics, loading: metricsLoading } = useAdsPeriodMetrics(
-    open ? sellerId : undefined,
-    open ? dateFrom : undefined,
-    open ? dateTo : undefined,
+  // Check if modal dates match parent dates — if so, reuse precomputedMetrics (already cached)
+  const matchesParent = parentDateFrom === dateFrom && parentDateTo === dateTo;
+
+  // Only fetch new metrics when dates differ from parent
+  const { campaignsMetrics: fetchedModalMetrics, loading: metricsLoading } = useAdsPeriodMetrics(
+    open && !matchesParent ? sellerId : undefined,
+    open && !matchesParent ? dateFrom : undefined,
+    open && !matchesParent ? dateTo : undefined,
   );
+
+  // Use parent data when dates match, otherwise use freshly fetched
+  const modalCampaignsMetrics = matchesParent ? (precomputedMetrics || []) : fetchedModalMetrics;
 
   if (!campaign) return null;
 
