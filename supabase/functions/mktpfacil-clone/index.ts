@@ -524,14 +524,33 @@ Deno.serve(async (req) => {
       const { item_id } = body;
       if (!item_id) return respond({ error: 'item_id é obrigatório' }, 400);
 
-      const snapshot = await loadSource(item_id);
-      await logEvent(supabase, userId, 'source', item_id, 'source_loaded', 'info', `Item ${item_id} carregado`, {
-        pictures_count: snapshot.pictures?.length || 0,
-        variations_count: snapshot.variations?.length || 0,
-        has_catalog: !!snapshot.catalog_product_id,
-      });
+      try {
+        const snapshot = await loadSource(item_id);
+        await logEvent(supabase, userId, 'source', item_id, 'source_loaded', 'info', `Item ${item_id} carregado`, {
+          pictures_count: snapshot.pictures?.length || 0,
+          variations_count: snapshot.variations?.length || 0,
+          has_catalog: !!snapshot.catalog_product_id,
+        });
 
-      return respond({ snapshot });
+        return respond({ snapshot });
+      } catch (loadErr) {
+        const errMsg = (loadErr as Error).message;
+        // Log to central audit table
+        try {
+          await supabase.rpc('register_system_log', {
+            p_level: 'error',
+            p_system_area: 'clone_anuncio',
+            p_action: 'load_source_error',
+            p_user_id: userId,
+            p_success: false,
+            p_message: errMsg,
+            p_meta: { item_id, action: 'load_source' },
+          });
+        } catch (_) { /* fail-safe */ }
+        // Also log to module-specific table
+        await logEvent(supabase, userId, 'source', item_id, 'source_load_error', 'error', errMsg);
+        return respond({ error: errMsg }, 200);
+      }
     }
 
     if (action === 'clone') {
@@ -541,8 +560,22 @@ Deno.serve(async (req) => {
 
     return respond({ error: `Ação desconhecida: ${action}` }, 400);
   } catch (err) {
+    const errMsg = (err as Error).message;
     console.error('[mktpfacil-clone] Error:', err);
-    // Return 200 with error in body so SDK doesn't mask the message
-    return respond({ error: (err as Error).message }, 200);
+    // Try to log to central audit table (best-effort, no supabase client available here in some cases)
+    try {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+      const svc = createClient(supabaseUrl, supabaseKey);
+      await svc.rpc('register_system_log', {
+        p_level: 'error',
+        p_system_area: 'clone_anuncio',
+        p_action: 'clone_unhandled_error',
+        p_success: false,
+        p_message: errMsg,
+        p_meta: {},
+      });
+    } catch (_) { /* fail-safe */ }
+    return respond({ error: errMsg }, 200);
   }
 });
