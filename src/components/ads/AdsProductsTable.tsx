@@ -1,21 +1,18 @@
-import { Package, TrendingUp, TrendingDown, Pause, Rocket, AlertTriangle, Tag } from 'lucide-react';
+import { Package, TrendingUp, TrendingDown, Pause, Rocket, AlertTriangle, Tag, BookOpen, Truck } from 'lucide-react';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { EnrichedAdsItem } from '@/types/ads';
+import { cn } from '@/lib/utils';
 
 interface AdsProductsTableProps {
   items: EnrichedAdsItem[];
   onSelectItem?: (item: EnrichedAdsItem) => void;
+  listingInfoMap?: Map<string, { isCatalog: boolean; isFull: boolean; outOfStock: boolean; listingStatus: string | null }>;
 }
 
-export function AdsProductsTable({ items, onSelectItem }: AdsProductsTableProps) {
+export function AdsProductsTable({ items, onSelectItem, listingInfoMap }: AdsProductsTableProps) {
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 
@@ -67,26 +64,48 @@ export function AdsProductsTable({ items, onSelectItem }: AdsProductsTableProps)
             const isHighAcos = acos > 30;
             const isGoodRoas = roas >= 3;
             const margin = item.margin_percent;
+            const info = listingInfoMap?.get(item.item_id);
+            const isDimmed = item.status === 'paused' || info?.outOfStock || info?.listingStatus === 'paused';
 
             return (
               <TableRow
                 key={item.id}
-                className="cursor-pointer hover:bg-muted/50"
+                className={cn("cursor-pointer hover:bg-muted/50", isDimmed && "opacity-50")}
                 onClick={() => onSelectItem?.(item)}
               >
                 <TableCell>
-                  <div className="max-w-[300px]">
-                    <p className="font-medium truncate">{item.title || item.item_id}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-xs text-muted-foreground">{item.item_id}</span>
-                      {item.is_in_promotion && (
-                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-warning/10 text-warning border-warning/30">
-                          <Tag className="h-2.5 w-2.5 mr-0.5" />
-                          Promoção
-                        </Badge>
-                      )}
+                    <div className="max-w-[300px]">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="font-medium truncate">{item.title || item.item_id}</p>
+                        {info?.isCatalog && (
+                          <Badge variant="outline" className="text-[9px] px-1 py-0 gap-0.5 border-primary/40 text-primary">
+                            <BookOpen className="h-2.5 w-2.5" />
+                            Catálogo
+                          </Badge>
+                        )}
+                        {info?.isFull && (
+                          <Badge variant="outline" className="text-[9px] px-1 py-0 gap-0.5 border-blue-500/40 text-blue-500">
+                            <Truck className="h-2.5 w-2.5" />
+                            Full
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-xs text-muted-foreground">{item.item_id}</span>
+                        {item.is_in_promotion && (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-warning/10 text-warning border-warning/30">
+                            <Tag className="h-2.5 w-2.5 mr-0.5" />
+                            Promoção
+                          </Badge>
+                        )}
+                        {info?.outOfStock && (
+                          <Badge variant="destructive" className="text-[9px] px-1 py-0">Sem Estoque</Badge>
+                        )}
+                        {info?.listingStatus === 'paused' && (
+                          <Badge variant="secondary" className="text-[9px] px-1 py-0">Pausado</Badge>
+                        )}
+                      </div>
                     </div>
-                  </div>
                 </TableCell>
                 <TableCell className="text-right">
                   <span className="font-medium">

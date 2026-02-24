@@ -31,9 +31,10 @@ interface AdsCampaignsTableProps {
   dateTo?: string;
   precomputedMetrics?: CampaignMetric[];
   sellerId?: string;
+  adCountMap?: Map<string, number>;
 }
 
-type SortColumn = 'name' | 'status' | 'budget' | 'spent' | 'revenue' | 'cpc' | 'acos' | 'tacos' | 'roas';
+type SortColumn = 'name' | 'status' | 'budget' | 'spent' | 'revenue' | 'cpc' | 'acos' | 'tacos' | 'roas' | 'ads_count';
 type SortDirection = 'asc' | 'desc';
 
 type StatusFilter = 'all' | 'active' | 'paused' | 'ended';
@@ -45,7 +46,7 @@ const statusFilterOptions: { value: StatusFilter; label: string }[] = [
   { value: 'ended', label: 'Encerradas' },
 ];
 
-export function AdsCampaignsTable({ campaigns, onSelectCampaign, onOpenCampaignModal, syncState, onTriggerSync, dateFrom, dateTo, precomputedMetrics, sellerId }: AdsCampaignsTableProps) {
+export function AdsCampaignsTable({ campaigns, onSelectCampaign, onOpenCampaignModal, syncState, onTriggerSync, dateFrom, dateTo, precomputedMetrics, sellerId, adCountMap }: AdsCampaignsTableProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [sortColumn, setSortColumn] = useState<SortColumn>('spent');
@@ -112,6 +113,12 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, onOpenCampaignM
     return rawId ? String(rawId) : campaign.ml_campaign_id;
   };
 
+  const getAdCount = (campaign: AdsCampaign): number => {
+    if (!adCountMap) return 0;
+    const mlId = getMlCampaignId(campaign);
+    return adCountMap.get(mlId) || adCountMap.get(campaign.ml_campaign_id) || 0;
+  };
+
   const processedData = useMemo(() => {
     // Status filter first
     const statusFiltered = statusFilter === 'all'
@@ -143,6 +150,7 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, onOpenCampaignM
         case 'acos': valA = mA.acos; valB = mB.acos; break;
         case 'tacos': valA = mA.tacos; valB = mB.tacos; break;
         case 'roas': valA = mA.roas; valB = mB.roas; break;
+        case 'ads_count': valA = getAdCount(a); valB = getAdCount(b); break;
       }
       if (typeof valA === 'string' && typeof valB === 'string') {
         return sortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
@@ -236,6 +244,11 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, onOpenCampaignM
               <TableHead className="px-2 py-1.5 cursor-pointer select-none" onClick={() => handleSort('name')}>
                 <span className="flex items-center gap-1 text-xs">Campanha <SortIcon col="name" /></span>
               </TableHead>
+              {adCountMap && (
+                <TableHead className="px-2 py-1.5 cursor-pointer select-none" onClick={() => handleSort('ads_count')}>
+                  <span className="flex items-center gap-1 text-xs">Anúncios <SortIcon col="ads_count" /></span>
+                </TableHead>
+              )}
               <TableHead className="px-2 py-1.5 cursor-pointer select-none" onClick={() => handleSort('status')}>
                 <span className="flex items-center gap-1 text-xs">Status <SortIcon col="status" /></span>
               </TableHead>
@@ -280,9 +293,17 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, onOpenCampaignM
                   <TableCell className="px-2 py-1.5">
                     <div>
                       <p className="font-medium text-xs truncate max-w-[200px]">{campaign.name}</p>
-                      <p className="text-[10px] text-muted-foreground">{campaign.campaign_type || 'product_ads'}</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {campaign.campaign_type || 'product_ads'}
+                        {adCountMap && ` • ${getAdCount(campaign)} anúncio${getAdCount(campaign) !== 1 ? 's' : ''}`}
+                      </p>
                     </div>
                   </TableCell>
+                  {adCountMap && (
+                    <TableCell className="px-2 py-1.5 text-center text-xs font-medium">
+                      {getAdCount(campaign)}
+                    </TableCell>
+                  )}
                   <TableCell className="px-2 py-1.5">{getStatusBadge(campaign.status)}</TableCell>
                   <TableCell className="px-2 py-1.5 text-right text-xs">
                     {budget ? `${formatCurrency(budget)}/dia` : '-'}
