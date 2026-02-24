@@ -30,6 +30,7 @@ import { AdminCanalOficial } from './admin/AdminCanalOficial';
 import { AdminSocialCalendar } from './admin/AdminSocialCalendar';
 import { AdminConsultantTips } from './admin/AdminConsultantTips';
 import { AdminExplanatoryCards } from './admin/AdminExplanatoryCards';
+import { AdminAuditLogs } from './admin/AdminAuditLogs';
 
 const adminTabs = [
   { id: '', label: 'Dashboard', icon: LayoutDashboard },
@@ -122,7 +123,7 @@ export default function Admin() {
           <Route path="avaliacoes" element={<AdminRatings />} />
           <Route path="global-metrics" element={<AdminGlobalMetrics />} />
           <Route path="retrospectiva" element={<Retrospectiva />} />
-          <Route path="logs" element={<AdminAuditPlaceholder />} />
+          <Route path="logs" element={<AdminAuditLogs />} />
           <Route path="identidade-visual" element={<AdminVisualIdentity />} />
           <Route path="dica-consultor" element={<AdminConsultantTips />} />
           <Route path="cards-explicativos" element={<AdminExplanatoryCards />} />
@@ -151,12 +152,3 @@ function AdminCollaboratorsPlaceholder() {
   );
 }
 
-function AdminAuditPlaceholder() {
-  return (
-    <div className="text-center py-16 text-muted-foreground">
-      <ClipboardList className="h-12 w-12 mx-auto mb-4 opacity-40" />
-      <h3 className="text-lg font-medium mb-2">Auditoria e Logs</h3>
-      <p>Registro de atividades administrativas em desenvolvimento.</p>
-    </div>
-  );
-}
