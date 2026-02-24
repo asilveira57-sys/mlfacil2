@@ -284,6 +284,29 @@ Deno.serve(async (req) => {
 
       adsAggregate = { total_spent, total_revenue, total_clicks, total_impressions, total_conversions, items, campaigns };
 
+      // ── Sync campaign status to ads_campaigns table ──
+      if (campaigns.length > 0) {
+        const upsertRows = campaigns.map((c: any) => ({
+          seller_id,
+          user_id: user.id,
+          ml_campaign_id: c.ml_campaign_id,
+          name: c.name,
+          status: c.status || 'paused',
+          synced_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }));
+
+        const { error: upsertErr } = await supabase
+          .from('ads_campaigns')
+          .upsert(upsertRows, { onConflict: 'seller_id,ml_campaign_id', ignoreDuplicates: false });
+
+        if (upsertErr) {
+          console.warn(`[ads-period-metrics] Failed to upsert campaign statuses:`, upsertErr.message);
+        } else {
+          console.log(`[ads-period-metrics] Synced ${campaigns.length} campaign statuses`);
+        }
+      }
+
       // 3e. Guard: don't cache zeros if items exist (rate limit protection)
       const hasAnyData = total_spent > 0 || total_revenue > 0 || total_clicks > 0 || total_impressions > 0 || total_conversions > 0;
       if (!hasAnyData && allItems.length > 0) {
