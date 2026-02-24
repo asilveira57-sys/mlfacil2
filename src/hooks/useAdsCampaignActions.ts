@@ -12,7 +12,7 @@ interface ActionResult {
 }
 
 export function useAdsCampaignActions(sellerId?: string) {
-  const [loading, setLoading] = useState<string | null>(null); // tracks which action is loading
+  const [loading, setLoading] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const executeAction = useCallback(async (
@@ -35,7 +35,26 @@ export function useAdsCampaignActions(sellerId?: string) {
       });
 
       if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.details || data.error);
+
+      // Check for PADS-specific error codes from the edge function
+      if (data?.error) {
+        const errorCode = data.error_code;
+        if (errorCode === 'PADS_NOT_ENABLED') {
+          return {
+            success: false,
+            error: data.details || 'Produto Ads não habilitado. Ative em "Meu perfil > Publicidade" no Mercado Livre.',
+            details: 'PADS_NOT_ENABLED',
+          };
+        }
+        if (errorCode === 'PADS_WRITE_DENIED') {
+          return {
+            success: false,
+            error: data.details || 'Permissão de escrita recusada. Reconecte sua conta do Mercado Livre.',
+            details: 'PADS_WRITE_DENIED',
+          };
+        }
+        throw new Error(data.details || data.error);
+      }
 
       // Invalidate relevant queries
       queryClient.invalidateQueries({ queryKey: ['ads-campaigns'] });
@@ -55,6 +74,10 @@ export function useAdsCampaignActions(sellerId?: string) {
     const result = await executeAction('pause_campaign', { campaign_id: campaignId });
     if (result.success) {
       toast.success('Campanha pausada com sucesso');
+    } else if (result.details === 'PADS_NOT_ENABLED') {
+      toast.error('Produto Ads não habilitado', { description: result.error, duration: 8000 });
+    } else if (result.details === 'PADS_WRITE_DENIED') {
+      toast.error('Permissão de escrita recusada', { description: result.error, duration: 8000 });
     } else {
       toast.error('Erro ao pausar campanha', { description: result.error });
     }
@@ -65,6 +88,10 @@ export function useAdsCampaignActions(sellerId?: string) {
     const result = await executeAction('activate_campaign', { campaign_id: campaignId });
     if (result.success) {
       toast.success('Campanha ativada com sucesso');
+    } else if (result.details === 'PADS_NOT_ENABLED') {
+      toast.error('Produto Ads não habilitado', { description: result.error, duration: 8000 });
+    } else if (result.details === 'PADS_WRITE_DENIED') {
+      toast.error('Permissão de escrita recusada', { description: result.error, duration: 8000 });
     } else {
       toast.error('Erro ao ativar campanha', { description: result.error });
     }
@@ -75,6 +102,10 @@ export function useAdsCampaignActions(sellerId?: string) {
     const result = await executeAction('pause_ad', { item_id: itemId });
     if (result.success) {
       toast.success('Anúncio pausado com sucesso');
+    } else if (result.details === 'PADS_NOT_ENABLED') {
+      toast.error('Produto Ads não habilitado', { description: result.error, duration: 8000 });
+    } else if (result.details === 'PADS_WRITE_DENIED') {
+      toast.error('Permissão de escrita recusada', { description: result.error, duration: 8000 });
     } else {
       toast.error('Erro ao pausar anúncio', { description: result.error });
     }
@@ -85,6 +116,10 @@ export function useAdsCampaignActions(sellerId?: string) {
     const result = await executeAction('activate_ad', { item_id: itemId });
     if (result.success) {
       toast.success('Anúncio ativado com sucesso');
+    } else if (result.details === 'PADS_NOT_ENABLED') {
+      toast.error('Produto Ads não habilitado', { description: result.error, duration: 8000 });
+    } else if (result.details === 'PADS_WRITE_DENIED') {
+      toast.error('Permissão de escrita recusada', { description: result.error, duration: 8000 });
     } else {
       toast.error('Erro ao ativar anúncio', { description: result.error });
     }
@@ -95,6 +130,10 @@ export function useAdsCampaignActions(sellerId?: string) {
     const result = await executeAction('add_ad', { campaign_id: campaignId, item_id: itemId });
     if (result.success) {
       toast.success('Produto adicionado à campanha');
+    } else if (result.details === 'PADS_NOT_ENABLED') {
+      toast.error('Produto Ads não habilitado', { description: result.error, duration: 8000 });
+    } else if (result.details === 'PADS_WRITE_DENIED') {
+      toast.error('Permissão de escrita recusada', { description: result.error, duration: 8000 });
     } else {
       toast.error('Erro ao adicionar produto', { description: result.error });
     }
@@ -105,6 +144,10 @@ export function useAdsCampaignActions(sellerId?: string) {
     const result = await executeAction('remove_ad', { item_id: itemId });
     if (result.success) {
       toast.success('Produto removido da campanha');
+    } else if (result.details === 'PADS_NOT_ENABLED') {
+      toast.error('Produto Ads não habilitado', { description: result.error, duration: 8000 });
+    } else if (result.details === 'PADS_WRITE_DENIED') {
+      toast.error('Permissão de escrita recusada', { description: result.error, duration: 8000 });
     } else {
       toast.error('Erro ao remover produto', { description: result.error });
     }
