@@ -1,126 +1,68 @@
 
 
-# Cache Persistente e Abertura Instantanea do Modulo ADS
+# Sincronizacao de Status de Campanhas com Mercado Livre + Filtro Ativa/Pausada
 
-## Problema Atual
+## Problema
 
-Toda vez que o usuario entra em `/publicidade`, **6 hooks disparam queries simultaneas** ao banco e a Edge Function `ads-period-metrics` (que chama a API do ML). Mesmo com cache no banco (`ads_period_cache`), a Edge Function leva 3-8 segundos por causa de:
+1. **Status desatualizado**: A ultima sincronizacao foi em 18/02. Desde entao, campanhas foram pausadas no ML mas nosso banco ainda mostra como `active`. De 31 campanhas, o ML mostra 7 ativas e 25 pausadas, mas o sistema mostra 29 ativas e 2 pausadas.
 
-1. **Autenticacao + token refresh** a cada chamada
-2. **Queries ao banco** para verificar cache, buscar orders, etc.
-3. **Nenhum cache no frontend** entre navegacoes -- os hooks usam `useState` com `useEffect`, perdendo tudo ao sair da pagina
-4. **6 hooks independentes** (`useAdsCampaigns`, `useAdsDailyMetrics`, `useAdsAlerts`, `useEnrichedAdsItems`, `useAdsSyncState`, `useAdsPeriodMetrics`) todos fazendo fetch ao montar
+2. **Sem filtro de status**: A tabela de campanhas nao tem filtro para mostrar apenas Ativas ou Pausadas.
 
-## Solucao: Cache Persistente em 3 Camadas
+3. **Causa raiz**: O `ads-sync` (unico responsavel por atualizar status no banco) so roda quando o usuario clica "Sinc" manualmente. O `ads-period-metrics` busca metricas mas NAO atualiza o campo `status` das campanhas no banco. O `ads-nightly-cache` busca dados da API com `status=active,paused` mas salva apenas em `ads_period_cache`, nao em `ads_campaigns`.
 
-```text
-Camada 1: Memory Cache (useRef/Map)    -- 0ms, dura enquanto app aberta
-Camada 2: ads_period_cache (banco)     -- ~200ms, TTL 1h (hoje) / 24h (historico)
-Camada 3: ML API (fetch real)          -- 3-8s, so na madrugada ou cache miss
-```
+## Solucao
 
-### Parte A: Hook Unificado com Cache Persistente (Frontend)
+### Parte 1: Nightly Cache atualiza status das campanhas
 
-**Arquivo novo**: `src/hooks/useAdsDataCache.ts`
+Modificar `supabase/functions/ads-nightly-cache/index.ts` para, alem de cachear metricas, **atualizar o status** das campanhas na tabela `ads_campaigns` com base na resposta da API do ML.
 
-- Cache em `Map` global (fora do React, persiste entre navegacoes de tabs)
-- Chaves: `{sellerId}:{period}:{tab}` (ex: `66043362:30d:dashboard`)
-- TTL: 15 minutos para dados do periodo, 5 minutos para campanhas/produtos
-- Ao entrar no ADS, renderiza dados do cache **imediatamente** (0ms) e dispara refresh em background
-- Pattern: **stale-while-revalidate**
+Mudanca:
+- Apos receber a lista de campanhas da API, fazer `upsert` no `ads_campaigns` com o status atualizado
+- Isso garante que toda madrugada os status ficam sincronizados automaticamente
 
-Hooks afetados:
-- `useAdsCampaigns` -- leitura do banco, adicionar cache em memoria
-- `useAdsPeriodMetrics` -- ja tem `cacheRef` mas e um `useRef` que morre ao desmontar; migrar para `Map` global
-- `useEnrichedAdsItems` -- depende de `useAdsItems`, adicionar cache
-- `useAdsDailyMetrics` -- adicionar cache
-- `useAdsAlerts` -- adicionar cache (TTL curto: 2min)
+### Parte 2: ads-period-metrics tambem atualiza status
 
-### Parte B: Prefetch ao Entrar no Modulo (Frontend)
+Modificar `supabase/functions/ads-period-metrics/index.ts` para, ao buscar campanhas da API do ML, tambem fazer update do status no `ads_campaigns`. Assim, mesmo durante o dia, ao trocar de periodo no frontend, os status sao atualizados.
 
-**Arquivo modificado**: `src/pages/Publicidade.tsx`
+### Parte 3: Filtro de Status na tabela de campanhas
 
-- Ao montar a pagina, disparar prefetch dos 3 tabs (Dashboard, Campanhas, Produtos) em paralelo
-- Usar o cache global para que ao clicar em outra tab, os dados ja estejam prontos
-- Mostrar skeleton apenas na primeira vez (sem cache); depois, mostrar dados antigos + indicador de "atualizando"
+Modificar `src/components/ads/AdsCampaignsTable.tsx` para adicionar um filtro de status (Todas / Ativas / Pausadas / Encerradas) acima da tabela, ao lado do campo de busca.
 
-### Parte C: Background Nightly Sync para ADS (Backend)
+### Parte 4: Contagem correta no header
 
-**Arquivo novo**: `supabase/functions/ads-nightly-cache/index.ts`
-
-Edge Function que roda na madrugada (via cron ou scheduler existente):
-- Para cada conta ativa com ADS, pre-calcula e salva no `ads_period_cache` os periodos padrao (7d, 14d, 30d, 60d, 90d)
-- Inclui tratamento de rate limit (retry com backoff exponencial, ja existente no `fetchWithRetry`)
-- Salva com `range_key` para que o `ads-period-metrics` encontre cache quente ao ser chamado
-
-### Parte D: Webhook de Invalidacao (Backend)
-
-**Arquivo modificado**: `supabase/functions/ml-worker-process/index.ts`
-
-- Quando o worker processa webhooks de tipo `items` ou `orders`, invalidar o cache ADS do seller afetado
-- Inserir flag `ads_cache_stale = true` no `ads_sync_state` para que o frontend saiba que precisa atualizar
-- O frontend detecta o flag via polling leve (a cada 60s) e faz refresh silencioso
+Atualizar o header em `src/pages/Publicidade.tsx` para mostrar a contagem de ativas E pausadas (ja existe `activeCampaigns` e `pausedCampaigns`, so falta exibir pausadas).
 
 ---
 
 ## Detalhamento Tecnico
 
-### 1. Cache Global em Memoria (`useAdsDataCache.ts`)
+### Arquivo: `supabase/functions/ads-nightly-cache/index.ts`
+
+Apos buscar campanhas da API (linha ~195), adicionar um loop que faz upsert no `ads_campaigns`:
 
 ```text
-const adsMemoryCache = new Map<string, {data, cachedAt, ttl}>()
-
-Funcoes exportadas:
-- getAdsCache(key) -> data | null
-- setAdsCache(key, data, ttl)
-- clearAdsCacheForSeller(sellerId)
+Para cada campanha retornada pela API:
+  - Extrair id, name, status, budget
+  - Upsert em ads_campaigns com onConflict: 'seller_id,ml_campaign_id'
+  - Atualizar: status, name, daily_budget, synced_at
 ```
 
-### 2. Refatoracao do `useAdsPeriodMetrics.ts`
+### Arquivo: `supabase/functions/ads-period-metrics/index.ts`
 
-- Substituir `cacheRef = useRef(new Map())` por cache global
-- Adicionar leitura do `ads_period_cache` do banco como fallback antes de chamar a Edge Function
-- Pattern: memoria -> banco -> Edge Function -> ML API
+Na funcao que busca campanhas da ML API, apos receber a resposta, fazer batch update do status no `ads_campaigns`.
 
-### 3. Nova Edge Function `ads-nightly-cache`
+### Arquivo: `src/components/ads/AdsCampaignsTable.tsx`
 
-```text
-Para cada seller ativo:
-  Para cada periodo [7d, 14d, 30d, 60d, 90d]:
-    1. Calcular date_from/date_to
-    2. Buscar metricas da ML API (com rate limit handling)
-    3. Upsert em ads_period_cache com range_key
-    4. Sleep entre sellers para respeitar rate limits
-```
+- Adicionar estado `statusFilter: 'all' | 'active' | 'paused' | 'ended'`
+- Adicionar botoes de filtro (chips) ao lado da barra de busca: "Todas", "Ativas", "Pausadas", "Encerradas"
+- Filtrar `campaigns` pelo status antes de aplicar busca textual e ordenacao
 
-### 4. Invalidacao via Worker
+### Arquivo: `src/pages/Publicidade.tsx`
 
-No `ml-worker-process`, apos processar `orders_v2` ou `items`:
-```text
-UPDATE ads_sync_state SET cache_stale_at = now() WHERE seller_id = X
-```
-
-O frontend verifica `cache_stale_at > last_local_refresh` e faz refresh silencioso.
-
----
+- No `CardDescription`, mostrar tambem pausadas: `{campaigns.length} campanhas encontradas - {activeCampaigns} ativas - {pausedCampaigns} pausadas`
 
 ## Resultado Esperado
 
-| Cenario | Antes | Depois |
-|---------|-------|--------|
-| Primeira abertura do dia | 5-8s (ML API) | 200ms (banco, pre-cached pela madrugada) |
-| Trocar tab (Dashboard -> Campanhas) | 3-5s (refetch) | 0ms (cache em memoria) |
-| Voltar ao ADS apos navegar outro modulo | 5-8s | 0ms (cache em memoria, TTL 15min) |
-| Dados de ontem | 5-8s | 0ms (cache permanente, nunca muda) |
-
-## Arquivos a Criar/Modificar
-
-| Arquivo | Acao |
-|---------|------|
-| `src/hooks/useAdsDataCache.ts` | **Criar** - Cache global em memoria |
-| `src/hooks/useAdsPeriodMetrics.ts` | **Modificar** - Usar cache global + leitura do banco |
-| `src/hooks/useAds.ts` | **Modificar** - Adicionar cache em memoria nos hooks |
-| `src/pages/Publicidade.tsx` | **Modificar** - Prefetch paralelo + stale-while-revalidate |
-| `supabase/functions/ads-nightly-cache/index.ts` | **Criar** - Sync noturno de cache |
-| `supabase/functions/ml-worker-process/index.ts` | **Modificar** - Flag de invalidacao |
-
+- Status das campanhas atualizados automaticamente toda madrugada e a cada consulta de metricas
+- Filtro visual de Ativa/Pausada na tabela de campanhas
+- Contagens corretas no header
