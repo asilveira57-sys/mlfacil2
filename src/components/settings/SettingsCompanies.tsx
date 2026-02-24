@@ -333,9 +333,9 @@ const SettingsCompanies = () => {
       const { error } = await supabase
         .from("ml_accounts")
         .update({
-          access_token: null,
-          refresh_token: null,
-          token_expires_at: null,
+          access_token: '',
+          refresh_token: '',
+          token_expires_at: new Date(0).toISOString(),
           is_active: false,
           connection_status: 'disconnected',
           updated_at: new Date().toISOString(),
