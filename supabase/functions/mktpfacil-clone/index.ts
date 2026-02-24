@@ -90,8 +90,15 @@ async function loadSource(itemId: string) {
   // 1. Fetch item (public)
   const itemRes = await fetchWithRetry(`https://api.mercadolibre.com/items/${itemId}?include_attributes=all`);
   if (!itemRes.ok) {
+    const status = itemRes.status;
+    if (status === 404) {
+      throw new Error(`Anúncio ${itemId} não encontrado. Verifique se o ID está correto. IDs do tipo MLBU (catálogo) não são suportados — use o link completo do anúncio para que o MLB seja extraído automaticamente.`);
+    }
+    if (status === 403) {
+      throw new Error(`Anúncio ${itemId} está bloqueado por políticas do Mercado Livre. Isso pode ocorrer com produtos de catálogo restrito. Tente outro anúncio.`);
+    }
     const err = await itemRes.text();
-    throw new Error(`Falha ao buscar item ${itemId}: ${itemRes.status} - ${err}`);
+    throw new Error(`Falha ao buscar item ${itemId} (HTTP ${status}). Tente novamente em alguns instantes.`);
   }
   const item = await itemRes.json();
 
@@ -535,6 +542,7 @@ Deno.serve(async (req) => {
     return respond({ error: `Ação desconhecida: ${action}` }, 400);
   } catch (err) {
     console.error('[mktpfacil-clone] Error:', err);
-    return respond({ error: (err as Error).message }, 500);
+    // Return 200 with error in body so SDK doesn't mask the message
+    return respond({ error: (err as Error).message }, 200);
   }
 });
