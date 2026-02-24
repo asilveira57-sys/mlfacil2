@@ -9,14 +9,65 @@ const corsHeaders = {
 const ML_APP_ID = Deno.env.get('ML_APP_ID')!;
 const ML_SECRET_KEY = Deno.env.get('ML_SECRET_KEY')!;
 
-function decodeJwt(token: string): Record<string, unknown> | null {
+/** Fetch real token diagnostics from ML API (never logs the access_token itself) */
+async function fetchTokenDiagnostics(accessToken: string): Promise<{
+  ml_user_id: string | null;
+  app_id: string | null;
+  token_scope: string | null;
+  site_id: string | null;
+  me_status: number | null;
+  token_info_status: number | null;
+  me_error?: string;
+  token_info_error?: string;
+}> {
+  const result = {
+    ml_user_id: null as string | null,
+    app_id: null as string | null,
+    token_scope: null as string | null,
+    site_id: null as string | null,
+    me_status: null as number | null,
+    token_info_status: null as number | null,
+    me_error: undefined as string | undefined,
+    token_info_error: undefined as string | undefined,
+  };
+
+  // 1) GET /users/me
   try {
-    const payload = token.split('.')[1];
-    const decoded = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
-    return JSON.parse(decoded);
-  } catch {
-    return null;
+    const meResp = await fetch('https://api.mercadolibre.com/users/me', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    result.me_status = meResp.status;
+    if (meResp.ok) {
+      const me = await meResp.json();
+      result.ml_user_id = String(me.id ?? '');
+      result.site_id = me.site_id ?? null;
+    } else {
+      result.me_error = (await meResp.text()).substring(0, 300);
+    }
+  } catch (e) {
+    result.me_error = e instanceof Error ? e.message : 'fetch_failed';
   }
+
+  // 2) Token introspection — ML doesn't have a standard endpoint;
+  //    use /oauth/token/info or /applications/{app_id} as fallback.
+  //    Trying the undocumented /oauth/token/info first.
+  try {
+    const infoResp = await fetch('https://api.mercadolibre.com/oauth/token/info', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    result.token_info_status = infoResp.status;
+    if (infoResp.ok) {
+      const info = await infoResp.json();
+      result.app_id = String(info.application_id ?? info.app_id ?? info.client_id ?? '');
+      result.token_scope = Array.isArray(info.scopes) ? info.scopes.join(' ') : (info.scope ?? null);
+    } else {
+      result.token_info_error = (await infoResp.text()).substring(0, 300);
+    }
+  } catch (e) {
+    result.token_info_error = e instanceof Error ? e.message : 'fetch_failed';
+  }
+
+  return result;
 }
 
 async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 3): Promise<Response> {
@@ -61,14 +112,7 @@ async function refreshToken(supabase: any, sellerId: string, userId: string, ref
 
 type Action = 'pause_campaign' | 'activate_campaign' | 'pause_ad' | 'activate_ad' | 'add_ad' | 'remove_ad';
 
-function buildTokenMeta(accessToken: string) {
-  const decoded = decodeJwt(accessToken);
-  return {
-    ml_user_id: decoded?.user_id ?? null,
-    token_scope: decoded?.scope ?? null,
-    app_id: decoded?.app_id ?? null,
-  };
-}
+// removed — tokenMeta now fetched async via fetchTokenDiagnostics
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -139,9 +183,9 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Decode JWT for diagnostics
-    const tokenMeta = buildTokenMeta(accessToken);
-    console.log(`[ads-campaign-manage] Token meta: ml_user_id=${tokenMeta.ml_user_id}, scope=${tokenMeta.token_scope}, app_id=${tokenMeta.app_id}`);
+    // Fetch real token diagnostics from ML API
+    const tokenMeta = await fetchTokenDiagnostics(accessToken);
+    console.log(`[ads-campaign-manage] Token diagnostics: ml_user_id=${tokenMeta.ml_user_id}, site_id=${tokenMeta.site_id}, app_id=${tokenMeta.app_id}, scope=${tokenMeta.token_scope}, me_status=${tokenMeta.me_status}, token_info_status=${tokenMeta.token_info_status}`);
 
     const mlHeaders = {
       'Authorization': `Bearer ${accessToken}`,
