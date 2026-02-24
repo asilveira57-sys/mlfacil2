@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { auditLog } from '../_shared/audit-log.ts';
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -106,6 +107,7 @@ serve(async (req) => {
         provider_mode: providerMode, status: "error", response_payload: mpData,
         error_message: "Failed to create checkout",
       });
+      await auditLog(supabase, { level: 'error', area: 'billing', action: 'checkout_error', userId, success: false, message: `Falha ao criar checkout MP (${providerMode})`, meta: { plan_price_id, provider_mode: providerMode, mp_response: mpData } });
       return new Response(JSON.stringify({ error: "Falha ao criar checkout", details: mpData }), 
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 });
     }
@@ -116,12 +118,20 @@ serve(async (req) => {
       response_payload: { id: mpData.id, init_point: initPoint },
     });
 
+    await auditLog(supabase, { level: 'info', area: 'billing', action: 'checkout_created', userId, success: true, message: `Checkout ${providerMode} criado com sucesso`, meta: { plan_price_id, provider_mode: providerMode, provider_id: mpData.id } });
+
     return new Response(JSON.stringify({ status: "created", init_point: initPoint, provider_mode: providerMode, provider_id: mpData.id }), 
       { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
     console.error("[billing-checkout] Error:", errorMessage);
+    try {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+      const svc = createClient(supabaseUrl, supabaseServiceKey);
+      await auditLog(svc, { level: 'error', area: 'billing', action: 'checkout_unhandled_error', userId: null, success: false, message: errorMessage, meta: {} });
+    } catch (_) { /* fail-safe */ }
     return new Response(JSON.stringify({ error: errorMessage }), 
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 });
   }

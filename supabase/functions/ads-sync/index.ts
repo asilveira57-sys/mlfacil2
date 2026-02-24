@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { auditLog } from '../_shared/audit-log.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -232,6 +233,8 @@ Deno.serve(async (req) => {
     // Update sync state to completed
     await updateSyncState(supabase, user.id, seller_id, 'completed', null, campaignsSynced, itemsSynced);
 
+    await auditLog(supabase, { level: 'info', area: 'ads_sync', action: 'sync_completed', userId: user.id, success: true, message: `Sync concluída: ${campaignsSynced} campanhas, ${itemsSynced} itens`, meta: { seller_id, campaigns_synced: campaignsSynced, items_synced: itemsSynced } });
+
     console.log(`[ads-sync] Completed: ${campaignsSynced} campaigns, ${itemsSynced} items`);
 
     return new Response(JSON.stringify({
@@ -245,6 +248,12 @@ Deno.serve(async (req) => {
   } catch (error: unknown) {
     console.error('[ads-sync] Error:', error);
     const message = error instanceof Error ? error.message : 'Unknown error';
+    try {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+      const svc = createClient(supabaseUrl, supabaseServiceKey);
+      await auditLog(svc, { level: 'error', area: 'ads_sync', action: 'sync_unhandled_error', userId: null, success: false, message, meta: {} });
+    } catch (_) { /* fail-safe */ }
     return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

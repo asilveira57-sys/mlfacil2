@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { auditLog } from '../_shared/audit-log.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -536,17 +537,7 @@ Deno.serve(async (req) => {
       } catch (loadErr) {
         const errMsg = (loadErr as Error).message;
         // Log to central audit table
-        try {
-          await supabase.rpc('register_system_log', {
-            p_level: 'error',
-            p_system_area: 'clone_anuncio',
-            p_action: 'load_source_error',
-            p_user_id: userId,
-            p_success: false,
-            p_message: errMsg,
-            p_meta: { item_id, action: 'load_source' },
-          });
-        } catch (_) { /* fail-safe */ }
+        await auditLog(supabase, { level: 'error', area: 'clone_anuncio', action: 'load_source_error', userId, success: false, message: errMsg, meta: { item_id, action: 'load_source' } });
         // Also log to module-specific table
         await logEvent(supabase, userId, 'source', item_id, 'source_load_error', 'error', errMsg);
         return respond({ error: errMsg }, 200);
@@ -567,14 +558,7 @@ Deno.serve(async (req) => {
       const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
       const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
       const svc = createClient(supabaseUrl, supabaseKey);
-      await svc.rpc('register_system_log', {
-        p_level: 'error',
-        p_system_area: 'clone_anuncio',
-        p_action: 'clone_unhandled_error',
-        p_success: false,
-        p_message: errMsg,
-        p_meta: {},
-      });
+      await auditLog(svc, { level: 'error', area: 'clone_anuncio', action: 'clone_unhandled_error', userId: null, success: false, message: errMsg, meta: {} });
     } catch (_) { /* fail-safe */ }
     return respond({ error: errMsg }, 200);
   }

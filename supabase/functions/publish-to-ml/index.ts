@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { auditLog } from '../_shared/audit-log.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -247,7 +248,6 @@ serve(async (req) => {
       if (!mlResponse.ok) {
         console.error('[publish-to-ml] ML API Error:', mlResult);
 
-        // Parse ML error
         const errorMessage = mlResult.message || mlResult.error || 'Erro ao publicar no Mercado Livre';
         const errorCause = mlResult.cause?.[0]?.message || mlResult.cause?.[0]?.code || '';
 
@@ -267,6 +267,8 @@ serve(async (req) => {
           .update({ status: 'error' })
           .eq('id', productRecordId);
 
+        await auditLog(supabase, { level: 'error', area: 'publish', action: 'publish_ml_api_error', userId: user.id, success: false, message: `ML API ${mlResponse.status}: ${errorMessage}`, meta: { product_record_id: productRecordId, ml_account_id: mlAccountId, ml_status: mlResponse.status, error_cause: errorCause } });
+
         return new Response(
           JSON.stringify({
             success: false,
@@ -280,6 +282,7 @@ serve(async (req) => {
 
       // Success!
       console.log('[publish-to-ml] Published successfully:', mlResult.id);
+      await auditLog(supabase, { level: 'info', area: 'publish', action: 'publish_success', userId: user.id, success: true, message: `Anúncio publicado: ${mlResult.id}`, meta: { product_record_id: productRecordId, ml_account_id: mlAccountId, published_item_id: mlResult.id } });
 
       await supabase
         .from('ml_publication_jobs')
@@ -328,6 +331,10 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('[publish-to-ml] Error:', error);
+    try {
+      const svc = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '');
+      await auditLog(svc, { level: 'error', area: 'publish', action: 'publish_unhandled_error', userId: null, success: false, message: error instanceof Error ? error.message : 'Erro desconhecido', meta: {} });
+    } catch (_) { /* fail-safe */ }
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : 'Erro desconhecido' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
