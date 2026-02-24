@@ -13,11 +13,12 @@ import { AdsCampaignProducts } from './AdsCampaignProducts';
 import { useAdsCampaignActions } from '@/hooks/useAdsCampaignActions';
 import { useAdsPeriodMetrics } from '@/hooks/useAdsPeriodMetrics';
 import type { CampaignMetric } from '@/hooks/useAdsPeriodMetrics';
+import { getAdsCache, adsCacheKey } from '@/hooks/useAdsDataCache';
 import { cn } from '@/lib/utils';
 import {
   Pause, Play, TrendingUp, TrendingDown, DollarSign,
   MousePointerClick, Target, BarChart3, Search, Plus,
-  Loader2, CalendarIcon,
+  Loader2, CalendarIcon, Check,
 } from 'lucide-react';
 
 type ModalPeriod = '7d' | '14d' | '30d' | '60d' | 'custom';
@@ -216,17 +217,27 @@ export function AdsCampaignDetailModal({
 
         {/* Period Filter */}
         <div className="flex items-center gap-2 flex-wrap mt-1">
-          {modalPeriodOptions.map(opt => (
-            <Button
-              key={opt.value}
-              variant={modalPeriod === opt.value ? 'default' : 'outline'}
-              size="sm"
-              className="h-6 text-[11px] px-2"
-              onClick={() => setModalPeriod(opt.value)}
-            >
-              {opt.label}
-            </Button>
-          ))}
+          {modalPeriodOptions.map(opt => {
+            const hasCached = opt.value !== 'custom' && opt.value !== modalPeriod && (() => {
+              const days = modalPeriodDays[opt.value];
+              if (!days) return false;
+              const from = format(subDays(new Date(), days), 'yyyy-MM-dd');
+              const to = format(new Date(), 'yyyy-MM-dd');
+              return !!getAdsCache(adsCacheKey(sellerId, 'period', from, to));
+            })();
+            return (
+              <Button
+                key={opt.value}
+                variant={modalPeriod === opt.value ? 'default' : 'outline'}
+                size="sm"
+                className="h-6 text-[11px] px-2 gap-1"
+                onClick={() => setModalPeriod(opt.value)}
+              >
+                {opt.label}
+                {hasCached && <span className="h-1.5 w-1.5 rounded-full bg-success inline-block" />}
+              </Button>
+            );
+          })}
           {modalPeriod === 'custom' && (
             <div className="flex items-center gap-1">
               <Popover>

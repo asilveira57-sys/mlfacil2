@@ -31,6 +31,7 @@ import {
   useAdsSyncState,
 } from '@/hooks/useAds';
 import { useAdsPeriodMetrics } from '@/hooks/useAdsPeriodMetrics';
+import { getAdsCache, setAdsCache, adsCacheKey, ADS_CACHE_TTL } from '@/hooks/useAdsDataCache';
 import { AdsFilterState } from '@/types/ads';
 import { useModuleFeedbackIntegration } from '@/hooks/useModuleFeedbackIntegration';
 import { FeedbackPromptCard } from '@/components/feedback';
@@ -158,6 +159,54 @@ export default function Publicidade() {
     dateTo,
   );
   
+  // Background preload common periods (7d, 14d) for instant modal switching
+  useEffect(() => {
+    if (!sellerId || periodLoading) return;
+    const today = new Date();
+    const periodsToPreload = ['7d', '14d'].filter(p => p !== datePeriod);
+    
+    Promise.allSettled(
+      periodsToPreload.map(async (period) => {
+        const days = periodDays[period];
+        const from = format(subDays(today, days), 'yyyy-MM-dd');
+        const to = format(today, 'yyyy-MM-dd');
+        const cacheKey = adsCacheKey(sellerId, 'period', from, to);
+        
+        if (getAdsCache(cacheKey)) return; // Already cached
+        
+        console.log(`[Publicidade] Preloading ${period} metrics in background`);
+        const { data, error } = await supabase.functions.invoke('ads-period-metrics', {
+          body: { seller_id: sellerId, date_from: from, date_to: to },
+        });
+        if (error || !data) return;
+        
+        const fullResponse = {
+          summary: {
+            total_spent: data.total_spent || 0, total_revenue: data.total_revenue || 0,
+            total_clicks: data.total_clicks || 0, total_impressions: data.total_impressions || 0,
+            total_conversions: data.total_conversions || 0, avg_acos: data.avg_acos || 0,
+            avg_roas: data.avg_roas || 0, avg_cpc: data.avg_cpc || 0, avg_tacos: data.avg_tacos || 0,
+            products_at_loss: data.products_at_loss || 0, products_scalable: data.products_scalable || 0,
+            total_seller_revenue: data.total_seller_revenue || 0, total_seller_orders: data.total_seller_orders || 0,
+            total_cancelled_revenue: data.total_cancelled_revenue || 0, total_cancelled_orders: data.total_cancelled_orders || 0,
+            organic_revenue: data.organic_revenue || 0, organic_percent: data.organic_percent || 0,
+            paid_percent: data.paid_percent || 0, tacos_total: data.tacos_total || 0,
+            cost_per_sale_general: data.cost_per_sale_general || 0, cost_per_sale_ads: data.cost_per_sale_ads || 0,
+          },
+          dailyMetrics: Array.isArray(data.daily) ? data.daily : [],
+          campaigns: Array.isArray(data.campaigns) ? data.campaigns.map((c: any) => ({
+            ml_campaign_id: String(c.ml_campaign_id || c.campaign_id || ''),
+            name: c.name || '', spent: c.spent || 0, revenue: c.revenue || 0,
+            clicks: c.clicks || 0, impressions: c.impressions || 0, conversions: c.conversions || 0,
+          })) : [],
+          dateFrom: from, dateTo: to,
+        };
+        setAdsCache(cacheKey, fullResponse, ADS_CACHE_TTL.PERIOD_METRICS);
+        console.log(`[Publicidade] Preloaded ${period} metrics`);
+      })
+    ).catch(() => {}); // Silently ignore errors
+  }, [sellerId, periodLoading, datePeriod]);
+
   // Use period metrics from edge function; fallback only on error
   const summary = useMemo(() => {
     if (periodError && fallbackSummary.total_spent > 0) return fallbackSummary;

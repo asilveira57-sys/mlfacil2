@@ -165,8 +165,8 @@ export function AdsCampaignProducts({ mlCampaignId, sellerId, onClose, showActio
   };
 
   const SortIcon = ({ col }: { col: ProductSortColumn }) => {
-    if (sortColumn !== col) return <ArrowUpDown className="h-3 w-3 opacity-40" />;
-    return sortDirection === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />;
+    if (sortColumn !== col) return <ArrowUpDown className="h-3 w-3 opacity-60" />;
+    return sortDirection === 'asc' ? <ArrowUp className="h-3 w-3 text-primary" /> : <ArrowDown className="h-3 w-3 text-primary" />;
   };
 
   const formatCurrency = (value: number) =>
@@ -231,28 +231,28 @@ export function AdsCampaignProducts({ mlCampaignId, sellerId, onClose, showActio
           <TableHeader>
             <TableRow className="bg-muted/30">
               <TableHead className="min-w-[280px]">Produto</TableHead>
-              <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('price')}>
+              <TableHead className="text-right cursor-pointer select-none hover:text-foreground transition-colors" onClick={() => handleSort('price')}>
                 <span className="flex items-center justify-end gap-1">Preço <SortIcon col="price" /></span>
               </TableHead>
-              <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('spent')}>
+              <TableHead className="text-right cursor-pointer select-none hover:text-foreground transition-colors" onClick={() => handleSort('spent')}>
                 <span className="flex items-center justify-end gap-1">Gasto <SortIcon col="spent" /></span>
               </TableHead>
-              <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('revenue')}>
+              <TableHead className="text-right cursor-pointer select-none hover:text-foreground transition-colors" onClick={() => handleSort('revenue')}>
                 <span className="flex items-center justify-end gap-1">Receita <SortIcon col="revenue" /></span>
               </TableHead>
-              <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('clicks')}>
+              <TableHead className="text-right cursor-pointer select-none hover:text-foreground transition-colors" onClick={() => handleSort('clicks')}>
                 <span className="flex items-center justify-end gap-1">Cliques <SortIcon col="clicks" /></span>
               </TableHead>
-              <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('cpc')}>
+              <TableHead className="text-right cursor-pointer select-none hover:text-foreground transition-colors" onClick={() => handleSort('cpc')}>
                 <span className="flex items-center justify-end gap-1">CPC <SortIcon col="cpc" /></span>
               </TableHead>
-              <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('acos')}>
+              <TableHead className="text-right cursor-pointer select-none hover:text-foreground transition-colors" onClick={() => handleSort('acos')}>
                 <span className="flex items-center justify-end gap-1">ACOS <SortIcon col="acos" /></span>
               </TableHead>
-              <TableHead className="text-right cursor-pointer select-none" onClick={() => handleSort('roas')}>
+              <TableHead className="text-right cursor-pointer select-none hover:text-foreground transition-colors" onClick={() => handleSort('roas')}>
                 <span className="flex items-center justify-end gap-1">ROAS <SortIcon col="roas" /></span>
               </TableHead>
-              <TableHead className="cursor-pointer select-none" onClick={() => handleSort('status')}>
+              <TableHead className="cursor-pointer select-none hover:text-foreground transition-colors" onClick={() => handleSort('status')}>
                 <span className="flex items-center gap-1">Status <SortIcon col="status" /></span>
               </TableHead>
               {showActions && <TableHead className="w-[100px]">Ações</TableHead>}
