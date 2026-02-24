@@ -52,14 +52,14 @@ function fmtCurrency(v: number) {
 
 async function logEvent(action: string, meta: Record<string, unknown> = {}) {
   try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
     await supabase.from('system_logs').insert({
       level: 'info',
       system_area: 'sandbox',
       action,
       message: `Sandbox: ${action}`,
-      meta_json: { user_id: user.id, ...meta },
+      meta_json: { user_id: session.user.id, ...meta },
     });
   } catch { /* fire-and-forget */ }
 }
