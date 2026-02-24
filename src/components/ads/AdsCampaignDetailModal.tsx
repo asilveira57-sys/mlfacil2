@@ -1,0 +1,245 @@
+import { useState } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
+import { supabase } from '@/integrations/supabase/client';
+import { AdsCampaign } from '@/types/ads';
+import { AdsCampaignProducts } from './AdsCampaignProducts';
+import { useAdsCampaignActions } from '@/hooks/useAdsCampaignActions';
+import type { CampaignMetric } from '@/hooks/useAdsPeriodMetrics';
+import {
+  Pause,
+  Play,
+  TrendingUp,
+  TrendingDown,
+  DollarSign,
+  MousePointerClick,
+  Target,
+  BarChart3,
+  Search,
+  Plus,
+  Loader2,
+} from 'lucide-react';
+
+interface AdsCampaignDetailModalProps {
+  campaign: AdsCampaign | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  sellerId: string;
+  precomputedMetrics?: CampaignMetric[];
+  onStatusChange?: () => void;
+}
+
+interface SearchResult {
+  item_id: string;
+  title: string;
+  thumbnail: string | null;
+  price: number;
+}
+
+export function AdsCampaignDetailModal({
+  campaign,
+  open,
+  onOpenChange,
+  sellerId,
+  precomputedMetrics,
+  onStatusChange,
+}: AdsCampaignDetailModalProps) {
+  const actions = useAdsCampaignActions(sellerId);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [addingItem, setAddingItem] = useState<string | null>(null);
+  const [productsKey, setProductsKey] = useState(0);
+
+  if (!campaign) return null;
+
+  const mlCampaignId = campaign.raw_data?.id ? String(campaign.raw_data.id) : campaign.ml_campaign_id;
+
+  // Find precomputed metrics for this campaign
+  const pm = precomputedMetrics?.find(
+    m => String(m.ml_campaign_id) === String(mlCampaignId) || String(m.ml_campaign_id) === campaign.ml_campaign_id,
+  );
+
+  const spent = pm?.spent || 0;
+  const revenue = pm?.revenue || 0;
+  const clicks = pm?.clicks || 0;
+  const acos = revenue > 0 ? (spent / revenue) * 100 : 0;
+  const roas = spent > 0 ? revenue / spent : 0;
+  const cpc = clicks > 0 ? spent / clicks : 0;
+  const tacos = revenue > 0 ? (spent / revenue) * 100 : 0;
+
+  const formatCurrency = (v: number) =>
+    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
+
+  const handleToggleCampaign = async () => {
+    if (campaign.status === 'active') {
+      await actions.pauseCampaign(mlCampaignId);
+    } else {
+      await actions.activateCampaign(mlCampaignId);
+    }
+    onStatusChange?.();
+  };
+
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) return;
+    setSearching(true);
+    try {
+      const query = searchQuery.trim();
+      const { data } = await supabase
+        .from('meli_listings_cache')
+        .select('item_id, title, thumbnail, price')
+        .eq('seller_id', sellerId)
+        .or(`item_id.ilike.%${query}%,title.ilike.%${query}%,sku.ilike.%${query}%`)
+        .limit(10);
+
+      setSearchResults(
+        (data || []).map(d => ({
+          item_id: d.item_id,
+          title: d.title || d.item_id,
+          thumbnail: d.thumbnail,
+          price: d.price || 0,
+        })),
+      );
+    } catch (err) {
+      console.error('Search error:', err);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleAddProduct = async (itemId: string) => {
+    setAddingItem(itemId);
+    await actions.addAd(mlCampaignId, itemId);
+    setAddingItem(null);
+    setProductsKey(k => k + 1);
+  };
+
+  const kpiCards = [
+    { label: 'Gasto', value: formatCurrency(spent), icon: DollarSign, color: 'text-destructive' },
+    { label: 'Receita', value: formatCurrency(revenue), icon: TrendingUp, color: 'text-success' },
+    { label: 'CPC', value: formatCurrency(cpc), icon: MousePointerClick, color: 'text-foreground' },
+    { label: 'ACOS', value: `${acos.toFixed(1)}%`, icon: Target, color: acos > 30 ? 'text-destructive' : 'text-success' },
+    { label: 'TACOS', value: `${tacos.toFixed(1)}%`, icon: BarChart3, color: tacos > 30 ? 'text-destructive' : 'text-success' },
+    { label: 'ROAS', value: `${roas.toFixed(2)}x`, icon: TrendingUp, color: roas >= 3 ? 'text-success' : 'text-warning' },
+  ];
+
+  const isToggling = actions.loading?.includes('campaign');
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <DialogTitle className="text-lg truncate">{campaign.name}</DialogTitle>
+              <Badge
+                variant={campaign.status === 'active' ? 'default' : 'secondary'}
+                className="text-[10px] shrink-0"
+              >
+                {campaign.status === 'active' ? 'Ativa' : campaign.status === 'paused' ? 'Pausada' : campaign.status}
+              </Badge>
+            </div>
+            <Button
+              variant={campaign.status === 'active' ? 'destructive' : 'default'}
+              size="sm"
+              className="gap-1.5 shrink-0"
+              onClick={handleToggleCampaign}
+              disabled={isToggling}
+            >
+              {isToggling ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : campaign.status === 'active' ? (
+                <><Pause className="h-4 w-4" /> Pausar</>
+              ) : (
+                <><Play className="h-4 w-4" /> Ativar</>
+              )}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            {campaign.campaign_type || 'product_ads'} • ID: {mlCampaignId}
+          </p>
+        </DialogHeader>
+
+        {/* KPI Cards */}
+        <div className="grid grid-cols-3 md:grid-cols-6 gap-2 mt-2">
+          {kpiCards.map(kpi => (
+            <Card key={kpi.label} className="border-border/50">
+              <CardContent className="p-3 text-center">
+                <kpi.icon className={`h-4 w-4 mx-auto mb-1 ${kpi.color}`} />
+                <p className={`text-sm font-bold ${kpi.color}`}>{kpi.value}</p>
+                <p className="text-[10px] text-muted-foreground">{kpi.label}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        {/* Products Table */}
+        <div className="mt-4">
+          <h3 className="text-sm font-semibold mb-2">Produtos da Campanha</h3>
+          <AdsCampaignProducts
+            key={productsKey}
+            mlCampaignId={mlCampaignId}
+            sellerId={sellerId}
+            onClose={() => {}}
+            showActions
+          />
+        </div>
+
+        {/* Search to add product */}
+        <div className="mt-4 border-t pt-4">
+          <h3 className="text-sm font-semibold mb-2">Adicionar Produto</h3>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por título, MLB ou SKU..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSearch()}
+                className="pl-9 h-9 text-sm"
+              />
+            </div>
+            <Button size="sm" className="h-9" onClick={handleSearch} disabled={searching}>
+              {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Buscar'}
+            </Button>
+          </div>
+
+          {searchResults.length > 0 && (
+            <div className="mt-2 border rounded-md divide-y max-h-[200px] overflow-y-auto">
+              {searchResults.map(item => (
+                <div key={item.item_id} className="flex items-center gap-3 p-2 hover:bg-muted/50">
+                  {item.thumbnail ? (
+                    <img src={item.thumbnail} alt="" className="h-8 w-8 rounded object-cover border" />
+                  ) : (
+                    <div className="h-8 w-8 rounded border bg-muted" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium truncate">{item.title}</p>
+                    <p className="text-[10px] text-muted-foreground">{item.item_id} • {formatCurrency(item.price)}</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs gap-1"
+                    onClick={() => handleAddProduct(item.item_id)}
+                    disabled={addingItem === item.item_id}
+                  >
+                    {addingItem === item.item_id ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <><Plus className="h-3 w-3" /> Adicionar</>
+                    )}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

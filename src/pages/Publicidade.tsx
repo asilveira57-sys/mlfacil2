@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format, subDays } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
@@ -51,7 +51,9 @@ import {
 import { AdsBudgetSimulator } from '@/components/ads/AdsBudgetSimulator';
 import { AdsAiConsultant } from '@/components/ads/AdsAiConsultant';
 import { AdsConnectionsPanel } from '@/components/ads/AdsConnectionsPanel';
+import { AdsCampaignDetailModal } from '@/components/ads/AdsCampaignDetailModal';
 import { cn } from '@/lib/utils';
+import type { AdsCampaign } from '@/types/ads';
 
 type DatePeriod = '7d' | '14d' | '30d' | '60d' | '90d' | 'custom';
 
@@ -78,6 +80,11 @@ export default function Publicidade() {
   const [datePeriod, setDatePeriod] = useState<DatePeriod>('30d');
   const [customFrom, setCustomFrom] = useState<Date>();
   const [customTo, setCustomTo] = useState<Date>();
+  const [modalCampaign, setModalCampaign] = useState<AdsCampaign | null>(null);
+
+  const handleOpenCampaignModal = useCallback((campaign: AdsCampaign) => {
+    setModalCampaign(campaign);
+  }, []);
 
   const { dateFrom, dateTo } = useMemo(() => {
     const today = new Date();
@@ -431,10 +438,24 @@ export default function Publicidade() {
                     dateFrom={dateFrom}
                     dateTo={dateTo}
                     precomputedMetrics={campaignsMetrics}
+                    sellerId={sellerId}
+                    onOpenCampaignModal={handleOpenCampaignModal}
                   />
                 )}
               </CardContent>
             </Card>
+
+            {/* Campaign Detail Modal */}
+            <AdsCampaignDetailModal
+              campaign={modalCampaign}
+              open={!!modalCampaign}
+              onOpenChange={(open) => { if (!open) setModalCampaign(null); }}
+              sellerId={sellerId}
+              precomputedMetrics={campaignsMetrics}
+              onStatusChange={() => {
+                setModalCampaign(null);
+              }}
+            />
           </TabsContent>
 
           {/* Products Tab */}

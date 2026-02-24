@@ -14,3 +14,4 @@ export { AdsExecutiveReport } from './AdsExecutiveReport';
 export { AdsBudgetSimulator } from './AdsBudgetSimulator';
 export { AdsAiConsultant } from './AdsAiConsultant';
 export { AdsConnectionsPanel } from './AdsConnectionsPanel';
+export { AdsCampaignDetailModal } from './AdsCampaignDetailModal';

@@ -1,24 +1,16 @@
 import React, { useState, useMemo } from 'react';
-import { MoreHorizontal, Pause, Play, TrendingUp, TrendingDown, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Search, ChevronLeft, RefreshCw } from 'lucide-react';
+import { MoreHorizontal, Pause, Play, TrendingUp, TrendingDown, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Search, ChevronLeft, RefreshCw, Loader2 } from 'lucide-react';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { AdsCampaign, AdsSyncState } from '@/types/ads';
-import { AdsCampaignProducts } from './AdsCampaignProducts';
+import { useAdsCampaignActions } from '@/hooks/useAdsCampaignActions';
 import type { CampaignMetric } from '@/hooks/useAdsPeriodMetrics';
 
 interface CampaignPeriodMetrics {
@@ -32,35 +24,33 @@ interface CampaignPeriodMetrics {
 interface AdsCampaignsTableProps {
   campaigns: AdsCampaign[];
   onSelectCampaign?: (campaign: AdsCampaign) => void;
+  onOpenCampaignModal?: (campaign: AdsCampaign) => void;
   syncState?: AdsSyncState | null;
   onTriggerSync?: () => void;
   dateFrom?: string;
   dateTo?: string;
   precomputedMetrics?: CampaignMetric[];
+  sellerId?: string;
 }
 
 type SortColumn = 'name' | 'status' | 'budget' | 'spent' | 'revenue' | 'cpc' | 'acos' | 'tacos' | 'roas';
 type SortDirection = 'asc' | 'desc';
 
-export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTriggerSync, dateFrom, dateTo, precomputedMetrics }: AdsCampaignsTableProps) {
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+export function AdsCampaignsTable({ campaigns, onSelectCampaign, onOpenCampaignModal, syncState, onTriggerSync, dateFrom, dateTo, precomputedMetrics, sellerId }: AdsCampaignsTableProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortColumn, setSortColumn] = useState<SortColumn>('spent');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [currentPage, setCurrentPage] = useState(0);
   const pageSize = 10;
+  const actions = useAdsCampaignActions(sellerId);
 
-  // Build a lookup map from precomputedMetrics (keyed by ml_campaign_id)
   const periodMetrics = useMemo(() => {
     if (!precomputedMetrics || precomputedMetrics.length === 0) return {};
     const map: Record<string, CampaignPeriodMetrics> = {};
     for (const cm of precomputedMetrics) {
       map[cm.ml_campaign_id] = {
-        spent: cm.spent,
-        revenue: cm.revenue,
-        clicks: cm.clicks,
-        impressions: cm.impressions,
-        conversions: cm.conversions,
+        spent: cm.spent, revenue: cm.revenue, clicks: cm.clicks,
+        impressions: cm.impressions, conversions: cm.conversions,
       };
     }
     return map;
@@ -73,14 +63,10 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTr
 
   const getStatusBadge = (status: string) => {
     const variants: Record<string, 'default' | 'secondary' | 'destructive'> = {
-      active: 'default',
-      paused: 'secondary',
-      ended: 'destructive',
+      active: 'default', paused: 'secondary', ended: 'destructive',
     };
     const labels: Record<string, string> = {
-      active: 'Ativa',
-      paused: 'Pausada',
-      ended: 'Encerrada',
+      active: 'Ativa', paused: 'Pausada', ended: 'Encerrada',
     };
     return (
       <Badge variant={variants[status] || 'secondary'} className="text-[10px] px-1.5 py-0">
@@ -90,7 +76,6 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTr
   };
 
   const getCampaignMetrics = (campaign: AdsCampaign) => {
-    // Use precomputed metrics matched by ml_campaign_id
     const pm = hasPeriodFilter ? periodMetrics[campaign.ml_campaign_id] : null;
     if (pm) {
       const acos = pm.revenue > 0 ? (pm.spent / pm.revenue) * 100 : 0;
@@ -100,7 +85,6 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTr
       const budget = (campaign.raw_data?.budget as number) || campaign.daily_budget || null;
       return { acos, roas, revenue: pm.revenue, budget, cpc, tacos, clicks: pm.clicks, spent: pm.spent };
     }
-    // Fallback to lifetime metrics from raw_data
     const metrics = campaign.raw_data?.metrics as Record<string, number> | undefined;
     const spent = metrics?.cost || campaign.spent_total || 0;
     const revenue = metrics?.total_amount || 0;
@@ -118,11 +102,8 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTr
     return rawId ? String(rawId) : campaign.ml_campaign_id;
   };
 
-  // Filter, sort, paginate
   const processedData = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
-
-    // Filter
     const filtered = query
       ? campaigns.filter(c => {
           const name = (c.name || '').toLowerCase();
@@ -132,13 +113,11 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTr
         })
       : campaigns;
 
-    // Sort
     const sorted = [...filtered].sort((a, b) => {
       const mA = getCampaignMetrics(a);
       const mB = getCampaignMetrics(b);
       let valA: number | string = 0;
       let valB: number | string = 0;
-
       switch (sortColumn) {
         case 'name': valA = a.name.toLowerCase(); valB = b.name.toLowerCase(); break;
         case 'status': valA = a.status; valB = b.status; break;
@@ -150,7 +129,6 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTr
         case 'tacos': valA = mA.tacos; valB = mB.tacos; break;
         case 'roas': valA = mA.roas; valB = mB.roas; break;
       }
-
       if (typeof valA === 'string' && typeof valB === 'string') {
         return sortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
       }
@@ -160,7 +138,6 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTr
     const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
     const page = Math.min(currentPage, totalPages - 1);
     const paginated = sorted.slice(page * pageSize, (page + 1) * pageSize);
-
     return { filtered: sorted, paginated, totalPages, safePage: page, totalFiltered: sorted.length };
   }, [campaigns, searchQuery, sortColumn, sortDirection, currentPage]);
 
@@ -179,6 +156,16 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTr
     return sortDirection === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />;
   };
 
+  const handleToggleCampaign = async (campaign: AdsCampaign, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const mlId = getMlCampaignId(campaign);
+    if (campaign.status === 'active') {
+      await actions.pauseCampaign(mlId);
+    } else {
+      await actions.activateCampaign(mlId);
+    }
+  };
+
   if (campaigns.length === 0) {
     return (
       <div className="text-center py-12 text-muted-foreground">
@@ -191,7 +178,6 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTr
 
   return (
     <div className="space-y-3">
-      {/* Search + Sync */}
       <div className="flex items-center gap-2">
         <div className="relative max-w-sm flex-1">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -203,13 +189,7 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTr
           />
         </div>
         {onTriggerSync && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-9 gap-1.5 text-xs"
-            onClick={onTriggerSync}
-            disabled={syncState?.status === 'syncing'}
-          >
+          <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs" onClick={onTriggerSync} disabled={syncState?.status === 'syncing'}>
             <RefreshCw className={`h-3.5 w-3.5 ${syncState?.status === 'syncing' ? 'animate-spin' : ''}`} />
             Sinc
           </Button>
@@ -220,7 +200,6 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTr
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[28px] px-1"></TableHead>
               <TableHead className="px-2 py-1.5 cursor-pointer select-none" onClick={() => handleSort('name')}>
                 <span className="flex items-center gap-1 text-xs">Campanha <SortIcon col="name" /></span>
               </TableHead>
@@ -256,124 +235,84 @@ export function AdsCampaignsTable({ campaigns, onSelectCampaign, syncState, onTr
               const { acos, roas, revenue, budget, cpc, tacos, spent } = getCampaignMetrics(campaign);
               const isHighAcos = acos > 30;
               const isGoodRoas = roas >= 3;
-              const isExpanded = expandedId === campaign.id;
+              const mlId = getMlCampaignId(campaign);
+              const isToggling = actions.loading?.includes(mlId);
 
               return (
-                <React.Fragment key={campaign.id}>
-                  <TableRow
-                    className="cursor-pointer hover:bg-muted/50"
-                    onClick={() => setExpandedId(isExpanded ? null : campaign.id)}
-                  >
-                    <TableCell className="px-1 py-1.5">
-                      {isExpanded ? (
-                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                      ) : (
-                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                      )}
-                    </TableCell>
-                    <TableCell className="px-2 py-1.5">
-                      <div>
-                        <p className="font-medium text-xs truncate max-w-[200px]">{campaign.name}</p>
-                        <p className="text-[10px] text-muted-foreground">
-                          {campaign.campaign_type || 'product_ads'}
-                        </p>
-                      </div>
-                    </TableCell>
-                    <TableCell className="px-2 py-1.5">{getStatusBadge(campaign.status)}</TableCell>
-                    <TableCell className="px-2 py-1.5 text-right text-xs">
-                      {budget ? `${formatCurrency(budget)}/dia` : '-'}
-                    </TableCell>
-                    <TableCell className="px-2 py-1.5 text-right text-xs font-medium">
-                      {formatCurrency(spent)}
-                    </TableCell>
-                    <TableCell className="px-2 py-1.5 text-right text-xs font-medium text-success">
-                      {formatCurrency(revenue)}
-                    </TableCell>
-                    <TableCell className="px-2 py-1.5 text-right text-xs">
-                      {formatCurrency(cpc)}
-                    </TableCell>
-                    <TableCell className="px-2 py-1.5 text-right text-xs">
-                      <span className={`flex items-center justify-end gap-0.5 ${isHighAcos ? 'text-destructive' : 'text-success'}`}>
-                        {isHighAcos ? <TrendingDown className="h-3 w-3" /> : <TrendingUp className="h-3 w-3" />}
-                        {acos.toFixed(1)}%
-                      </span>
-                    </TableCell>
-                    <TableCell className="px-2 py-1.5 text-right text-xs">
-                      <span className={tacos > 30 ? 'text-destructive' : 'text-success'}>
-                        {tacos.toFixed(1)}%
-                      </span>
-                    </TableCell>
-                    <TableCell className="px-2 py-1.5 text-right text-xs">
-                      <span className={`font-medium ${isGoodRoas ? 'text-success' : 'text-warning'}`}>
-                        {roas.toFixed(2)}x
-                      </span>
-                    </TableCell>
-                    <TableCell className="px-1 py-1.5">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                          <Button variant="ghost" size="icon" className="h-7 w-7">
-                            <MoreHorizontal className="h-3.5 w-3.5" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem>
-                            {campaign.status === 'active' ? (
-                              <><Pause className="h-4 w-4 mr-2" /> Pausar</>
-                            ) : (
-                              <><Play className="h-4 w-4 mr-2" /> Ativar</>
-                            )}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => setExpandedId(isExpanded ? null : campaign.id)}>
-                            <TrendingUp className="h-4 w-4 mr-2" /> Ver produtos
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                  {isExpanded && (
-                    <TableRow key={`${campaign.id}-products`}>
-                      <TableCell colSpan={11} className="p-0">
-                        <AdsCampaignProducts
-                          mlCampaignId={getMlCampaignId(campaign)}
-                          sellerId={campaign.seller_id}
-                          onClose={() => setExpandedId(null)}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </React.Fragment>
+                <TableRow
+                  key={campaign.id}
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => onOpenCampaignModal?.(campaign)}
+                >
+                  <TableCell className="px-2 py-1.5">
+                    <div>
+                      <p className="font-medium text-xs truncate max-w-[200px]">{campaign.name}</p>
+                      <p className="text-[10px] text-muted-foreground">{campaign.campaign_type || 'product_ads'}</p>
+                    </div>
+                  </TableCell>
+                  <TableCell className="px-2 py-1.5">{getStatusBadge(campaign.status)}</TableCell>
+                  <TableCell className="px-2 py-1.5 text-right text-xs">
+                    {budget ? `${formatCurrency(budget)}/dia` : '-'}
+                  </TableCell>
+                  <TableCell className="px-2 py-1.5 text-right text-xs font-medium">{formatCurrency(spent)}</TableCell>
+                  <TableCell className="px-2 py-1.5 text-right text-xs font-medium text-success">{formatCurrency(revenue)}</TableCell>
+                  <TableCell className="px-2 py-1.5 text-right text-xs">{formatCurrency(cpc)}</TableCell>
+                  <TableCell className="px-2 py-1.5 text-right text-xs">
+                    <span className={`flex items-center justify-end gap-0.5 ${isHighAcos ? 'text-destructive' : 'text-success'}`}>
+                      {isHighAcos ? <TrendingDown className="h-3 w-3" /> : <TrendingUp className="h-3 w-3" />}
+                      {acos.toFixed(1)}%
+                    </span>
+                  </TableCell>
+                  <TableCell className="px-2 py-1.5 text-right text-xs">
+                    <span className={tacos > 30 ? 'text-destructive' : 'text-success'}>{tacos.toFixed(1)}%</span>
+                  </TableCell>
+                  <TableCell className="px-2 py-1.5 text-right text-xs">
+                    <span className={`font-medium ${isGoodRoas ? 'text-success' : 'text-warning'}`}>{roas.toFixed(2)}x</span>
+                  </TableCell>
+                  <TableCell className="px-1 py-1.5">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                        <Button variant="ghost" size="icon" className="h-7 w-7">
+                          <MoreHorizontal className="h-3.5 w-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onClick={(e) => handleToggleCampaign(campaign, e as unknown as React.MouseEvent)}
+                          disabled={!!isToggling}
+                        >
+                          {isToggling ? (
+                            <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Processando...</>
+                          ) : campaign.status === 'active' ? (
+                            <><Pause className="h-4 w-4 mr-2" /> Pausar</>
+                          ) : (
+                            <><Play className="h-4 w-4 mr-2" /> Ativar</>
+                          )}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onOpenCampaignModal?.(campaign); }}>
+                          <TrendingUp className="h-4 w-4 mr-2" /> Ver detalhes
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </TableCell>
+                </TableRow>
               );
             })}
           </TableBody>
         </Table>
       </div>
 
-      {/* Pagination */}
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>
           {processedData.totalFiltered} campanha{processedData.totalFiltered !== 1 ? 's' : ''}
           {searchQuery && ` (filtrado de ${campaigns.length})`}
         </span>
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-xs"
-            disabled={processedData.safePage === 0}
-            onClick={() => setCurrentPage(p => p - 1)}
-          >
+          <Button variant="outline" size="sm" className="h-7 text-xs" disabled={processedData.safePage === 0} onClick={() => setCurrentPage(p => p - 1)}>
             <ChevronLeft className="h-3 w-3 mr-1" /> Anterior
           </Button>
-          <span>
-            {processedData.safePage + 1} / {processedData.totalPages}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-xs"
-            disabled={processedData.safePage >= processedData.totalPages - 1}
-            onClick={() => setCurrentPage(p => p + 1)}
-          >
+          <span>{processedData.safePage + 1} / {processedData.totalPages}</span>
+          <Button variant="outline" size="sm" className="h-7 text-xs" disabled={processedData.safePage >= processedData.totalPages - 1} onClick={() => setCurrentPage(p => p + 1)}>
             Próximo <ChevronRight className="h-3 w-3 ml-1" />
           </Button>
         </div>
