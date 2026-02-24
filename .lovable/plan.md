@@ -1,127 +1,78 @@
 
-# Mega Plano de Melhorias do Modulo ADS
+# Otimizacao do Cache de Periodos no Modal + Confirmacao de Ordenacao
 
-## Resumo das Mudancas
+## Problema
 
-6 melhorias para tornar o modulo ADS mais informativo e visual, alinhado com o que o Mercado Livre mostra.
+1. **Cache nao aproveitado**: Quando o usuario abre o modal com 30d e troca para 7d, o sistema faz uma nova chamada a API do ML (~20s) porque 7d nunca foi carregado antes. O cache global funciona por range exato de datas, entao 30d e 7d sao chaves diferentes.
 
----
+2. **Ordenacao de colunas no modal**: Ja esta implementada em `AdsCampaignProducts.tsx` com headers clicaveis e icones de sort. Possivelmente o usuario nao percebeu ou os headers nao estao visualmente claros o suficiente.
 
-## 1. Contagem de Anuncios por Campanha na Tabela
+## Solucao
 
-**Onde**: Coluna "Campanha" em `AdsCampaignsTable.tsx`
+### Parte 1: Pre-carregamento de periodos comuns
 
-Onde hoje aparece `product_ads` abaixo do nome da campanha, exibir tambem a contagem de anuncios. Exemplo:
+Quando a aba Campanhas carrega os dados de 30d, disparar em background (sem bloquear a UI) chamadas para os periodos mais usados (7d, 14d) para que ja estejam no cache quando o usuario abrir o modal e trocar de periodo.
 
-```
-1803 Delivery 6R
-product_ads - 13 anuncios
-```
+**Arquivo**: `src/pages/Publicidade.tsx`
 
-**Como obter**: Fazer um COUNT por campanha via join `ads_items` agrupando por `campaign_id` no `raw_data`. Criar um hook ou query auxiliar que retorna `Map<ml_campaign_id, number>` e passar para a tabela. Alternativamente, contar no frontend a partir dos items ja carregados no `useAdsItems`.
+- Adicionar um `useEffect` que, apos o primeiro carregamento do periodo principal, dispara `supabase.functions.invoke('ads-period-metrics')` em background para 7d e 14d
+- Salvar os resultados no cache global usando `setAdsCache` com a mesma chave que `useAdsPeriodMetrics` usaria
+- Nao bloquear UI, nao mostrar loading - puramente background
 
----
+### Parte 2: Feedback visual de cache no modal
 
-## 2. Ordenacao por Quantidade de Anuncios
+No modal, quando o periodo ja esta em cache, a troca e instantanea. Quando nao esta, mostrar um indicador mais claro de que os dados estao sendo carregados.
 
-**Onde**: `AdsCampaignsTable.tsx`
+**Arquivo**: `src/components/ads/AdsCampaignDetailModal.tsx`
 
-Adicionar coluna de sort `ads_count` no tipo `SortColumn`. Ao clicar no header ou usar os filtros, ordenar por mais ou menos anuncios por campanha. Os chips de filtro de status ja existem; a ordenacao sera pelo header da coluna (clicavel como as demais).
+- Ao lado dos botoes de periodo, indicar com um pequeno icone de check quais periodos ja tem cache disponivel
+- Isso ajuda o usuario a entender quais trocas serao instantaneas
 
----
+### Parte 3: Headers de ordenacao mais visiveis no modal
 
-## 3. Filtro de Data dentro do Modal
+Tornar os headers de ordenacao da tabela de produtos no modal mais evidentes visualmente.
 
-**Onde**: `AdsCampaignDetailModal.tsx`
+**Arquivo**: `src/components/ads/AdsCampaignProducts.tsx`
 
-Adicionar seletor de periodo (7d, 14d, 30d, personalizado) no topo do modal, ao lado do titulo. Ao mudar o periodo, recalcular os KPIs e a tabela de produtos daquela campanha para o periodo selecionado. Usar os `precomputedMetrics` filtrados pelo periodo escolhido.
-
----
-
-## 4. Botao de Adicionar Anuncio no Modal (Ja Existe)
-
-O modal ja tem a secao "Adicionar Produto" com busca e botao. Vou apenas tornar mais visivel: adicionar um botao `+ Adicionar Anuncio` ao lado do titulo "Produtos da Campanha" que faz scroll ate a secao de busca, ou abre um mini-formulario inline.
-
----
-
-## 5. Tags de Catalogo e Full nos Anuncios
-
-**Onde**: `AdsCampaignProducts.tsx` (modal) e `AdsProductsTable.tsx` (tab Produtos)
-
-Para cada anuncio, cruzar o `item_id` com a tabela `meli_listings_cache` para buscar:
-- `catalog_product_id` != null -> Tag **Catalogo**
-- `logistic_type` = 'fulfillment' -> Tag **Full**
-
-Exibir as tags como badges ao lado do titulo do produto.
-
----
-
-## 6. Anuncios Pausados ou Sem Estoque Acinzentados
-
-**Onde**: `AdsCampaignProducts.tsx` e `AdsProductsTable.tsx`
-
-Para cada produto:
-- Se `status = 'paused'` -> linha com `opacity-50` e badge "Pausado"
-- Se `available_quantity = 0` no `meli_listings_cache` -> linha com `opacity-50` e badge "Sem Estoque"
-
-Cruzar com `meli_listings_cache` para pegar `available_quantity` e `status` do anuncio.
+- Adicionar `hover:text-foreground` nos headers para dar feedback visual
+- Manter os icones de seta ja existentes mas com opacidade maior
 
 ---
 
 ## Detalhamento Tecnico
 
-### Arquivos a Modificar
-
-| Arquivo | Mudanca |
-|---------|---------|
-| `src/components/ads/AdsCampaignsTable.tsx` | Adicionar contagem de anuncios por campanha na coluna "Campanha", novo sortColumn `ads_count` |
-| `src/components/ads/AdsCampaignDetailModal.tsx` | Seletor de periodo (7d/14d/30d/custom), botao "+ Adicionar" visivel no header de produtos |
-| `src/components/ads/AdsCampaignProducts.tsx` | Cruzar com `meli_listings_cache` para tags Catalogo/Full, acinzentar pausados/sem estoque |
-| `src/pages/Publicidade.tsx` | Passar contagem de anuncios por campanha como prop para `AdsCampaignsTable` |
-
-### Estrategia de Cruzamento com meli_listings_cache
-
-Na `AdsCampaignProducts`, apos buscar os items de `ads_items`, fazer uma segunda query:
+### Pre-carregamento em Publicidade.tsx
 
 ```text
-SELECT item_id, catalog_product_id, logistic_type, available_quantity, status
-FROM meli_listings_cache
-WHERE seller_id = ? AND item_id IN (lista_de_item_ids)
+useEffect para preload de periodos:
+  - Dispara quando sellerId muda ou quando periodLoading termina (primeiro load concluido)
+  - Para cada periodo em [7d, 14d] que NAO seja o periodo atual:
+    - Calcular dateFrom/dateTo
+    - Verificar se ja existe no cache via getAdsCache(adsCacheKey(...))
+    - Se nao existir, chamar supabase.functions.invoke('ads-period-metrics') em background
+    - Salvar resultado no cache via setAdsCache()
+  - Usar Promise.allSettled para nao bloquear
+  - Silenciar erros (console.log apenas)
 ```
 
-Isso retorna em ~50ms e permite enriquecer cada produto com as tags e status de estoque.
+### Indicador de cache no modal
 
-### Contagem de Anuncios por Campanha
-
-Na `Publicidade.tsx`, apos carregar `items` do `useEnrichedAdsItems`, computar um `Map<campaign_id, number>`:
+Adicionar uma funcao que verifica se um periodo tem dados em cache:
 
 ```text
-const adCountMap = useMemo(() => {
-  const map = new Map<string, number>();
-  for (const item of items) {
-    const cId = String(item.raw_data?.campaign_id || '');
-    map.set(cId, (map.get(cId) || 0) + 1);
-  }
-  return map;
-}, [items]);
+const hasCacheForPeriod = (period: ModalPeriod): boolean => {
+  if (period === 'custom') return false;
+  const days = modalPeriodDays[period];
+  const from = format(subDays(new Date(), days), 'yyyy-MM-dd');
+  const to = format(new Date(), 'yyyy-MM-dd');
+  const key = adsCacheKey(sellerId, 'period', from, to);
+  return !!getAdsCache(key);
+};
+
+// No botao de periodo, adicionar indicador visual:
+// Ponto verde se cache existe, nada se nao
 ```
 
-Passar como prop para `AdsCampaignsTable`.
+### Headers mais visiveis
 
-### Seletor de Periodo no Modal
-
-Reutilizar o mesmo pattern de periodo da pagina principal (7d, 14d, 30d, custom). Ao mudar, filtrar os `precomputedMetrics` para o periodo selecionado ou, se nao houver dados pre-computados, chamar a Edge Function `ads-period-metrics` para o periodo.
-
-### Visual dos Anuncios Acinzentados
-
-```text
-<TableRow className={cn(
-  "hover:bg-muted/40",
-  (product.status === 'paused' || product.outOfStock) && "opacity-50"
-)}>
-  ...
-  {product.isCatalog && <Badge variant="outline" className="text-[9px]">Catalogo</Badge>}
-  {product.isFull && <Badge variant="outline" className="text-[9px] border-blue-500 text-blue-500">Full</Badge>}
-  {product.status === 'paused' && <Badge variant="secondary" className="text-[9px]">Pausado</Badge>}
-  {product.outOfStock && <Badge variant="destructive" className="text-[9px]">Sem Estoque</Badge>}
-```
+Adicionar classes `hover:text-foreground transition-colors` nos `TableHead` clicaveis do modal, e aumentar a opacidade dos icones de sort inativos de `opacity-40` para `opacity-60`.
