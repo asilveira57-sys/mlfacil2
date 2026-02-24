@@ -25,6 +25,7 @@ export interface UnifiedMarketplaceAccount {
   provider: 'mercadolivre';
   status: ConnectionStatus;
   isActive: boolean;
+  isConnected: boolean;
   companyId: string | null; // ml_accounts.company_id
   accessToken?: string;
   refreshToken?: string;
@@ -267,11 +268,13 @@ export async function updateAccountStatus(
   status: ConnectionStatus
 ): Promise<boolean> {
   const isActive = status === 'connected' || status === 'attention';
+  const isConnected = status !== 'disconnected' && status !== 'revoked';
 
   const { error } = await supabase
     .from('ml_accounts')
     .update({
       is_active: isActive,
+      is_connected: isConnected,
       connection_status: status,
       updated_at: new Date().toISOString(),
     })
@@ -333,6 +336,7 @@ function mapMlAccountToUnified(row: Record<string, unknown>): UnifiedMarketplace
     provider: 'mercadolivre',
     status: connectionStatus,
     isActive,
+    isConnected: (row.is_connected as boolean) ?? true,
     companyId: (row.company_id as string | null) ?? null,
     accessToken: row.access_token as string | undefined,
     refreshToken: row.refresh_token as string | undefined,
@@ -353,8 +357,10 @@ function mapMlAccountToUnified(row: Record<string, unknown>): UnifiedMarketplace
  */
 export async function validateSellerAccess(sellerId: string): Promise<boolean> {
   const account = await getAccountBySellerId(sellerId);
-  // FIX #3: Accept 'attention' status (token being refreshed) to prevent module lockouts
-  return account !== null && (account.status === 'connected' || account.status === 'attention');
+  // Must be connected AND have valid connection status
+  return account !== null 
+    && account.isConnected !== false
+    && (account.status === 'connected' || account.status === 'attention');
 }
 
 /**

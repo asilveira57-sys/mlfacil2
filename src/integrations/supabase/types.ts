@@ -6907,7 +6907,7 @@ export type Database = {
       }
       ml_accounts: {
         Row: {
-          access_token: string
+          access_token: string | null
           company_id: string | null
           connection_status: string | null
           consecutive_failures: number | null
@@ -6916,19 +6916,23 @@ export type Database = {
           email: string | null
           id: string
           is_active: boolean | null
+          is_connected: boolean
           last_api_error_at: string | null
           last_api_error_code: string | null
           last_api_ok_at: string | null
           last_token_refresh_at: string | null
           ml_user_id: string
           nickname: string | null
-          refresh_token: string
-          token_expires_at: string
+          refresh_token: string | null
+          revoke_reason: string | null
+          revoked_at: string | null
+          revoked_by: string | null
+          token_expires_at: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
-          access_token: string
+          access_token?: string | null
           company_id?: string | null
           connection_status?: string | null
           consecutive_failures?: number | null
@@ -6937,19 +6941,23 @@ export type Database = {
           email?: string | null
           id?: string
           is_active?: boolean | null
+          is_connected?: boolean
           last_api_error_at?: string | null
           last_api_error_code?: string | null
           last_api_ok_at?: string | null
           last_token_refresh_at?: string | null
           ml_user_id: string
           nickname?: string | null
-          refresh_token: string
-          token_expires_at: string
+          refresh_token?: string | null
+          revoke_reason?: string | null
+          revoked_at?: string | null
+          revoked_by?: string | null
+          token_expires_at?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
-          access_token?: string
+          access_token?: string | null
           company_id?: string | null
           connection_status?: string | null
           consecutive_failures?: number | null
@@ -6958,14 +6966,18 @@ export type Database = {
           email?: string | null
           id?: string
           is_active?: boolean | null
+          is_connected?: boolean
           last_api_error_at?: string | null
           last_api_error_code?: string | null
           last_api_ok_at?: string | null
           last_token_refresh_at?: string | null
           ml_user_id?: string
           nickname?: string | null
-          refresh_token?: string
-          token_expires_at?: string
+          refresh_token?: string | null
+          revoke_reason?: string | null
+          revoked_at?: string | null
+          revoked_by?: string | null
+          token_expires_at?: string | null
           updated_at?: string
           user_id?: string
         }
