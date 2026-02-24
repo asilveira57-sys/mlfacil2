@@ -61,7 +61,11 @@ async function fetchDiagnostics(accessToken: string, mlUserId?: string): Promise
   const userId = result.ml_user_id || mlUserId;
   if (userId) {
     try {
-      const padsUrl = `https://api.mercadolibre.com/advertising/advertisers?user_id=${userId}`;
+      const padsParams = { user_id: userId, product_id: 'PADS' };
+      const padsUrl = `https://api.mercadolibre.com/advertising/advertisers?user_id=${padsParams.user_id}&product_id=${padsParams.product_id}`;
+      result.pads_endpoint = padsUrl;
+      result.pads_http_method = 'GET';
+      result.pads_request_params = padsParams;
       const padsResp = await fetch(padsUrl, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
@@ -136,8 +140,13 @@ function buildErrorResponse(mlStatus: number, mlError: string, responseText: str
   let userMessage = mlError;
   let errorCode = 'ML_API_ERROR';
 
+  // PADS preflight error (>= 400 but not 404)
+  if (diag.pads_advertisers_status !== null && diag.pads_advertisers_status >= 400 && diag.pads_advertisers_status !== 404) {
+    userMessage = `Erro no preflight PADS (HTTP ${diag.pads_advertisers_status}). Verifique se sua conta possui o Produto Ads habilitado.`;
+    errorCode = 'PADS_PREFLIGHT_ERROR';
+  }
   // PADS not enabled (404 from advertisers endpoint)
-  if (diag.pads_advertisers_status === 404) {
+  else if (diag.pads_advertisers_status === 404) {
     userMessage = 'O Produto Ads (Product Ads) não está habilitado para esta conta do Mercado Livre. Acesse "Meu perfil > Publicidade" no Mercado Livre para ativá-lo.';
     errorCode = 'PADS_NOT_ENABLED';
   }
@@ -160,6 +169,7 @@ function buildErrorResponse(mlStatus: number, mlError: string, responseText: str
     ml_error_body: responseText.substring(0, 500),
     pads_advertisers_status: diag.pads_advertisers_status,
     pads_advertisers_count: diag.pads_advertisers_count,
+    pads_advertisers_error_body: diag.pads_advertisers_error_body,
   };
 }
 
@@ -256,6 +266,9 @@ Deno.serve(async (req) => {
       pads_advertisers_count: diag.pads_advertisers_count,
       pads_advertisers_sample: diag.pads_advertisers_sample,
       pads_advertisers_error_body: diag.pads_advertisers_error_body,
+      pads_endpoint: diag.pads_endpoint,
+      pads_http_method: diag.pads_http_method,
+      pads_request_params: diag.pads_request_params,
     };
 
     let mlResponse: Response;
