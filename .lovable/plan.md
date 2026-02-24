@@ -1,68 +1,127 @@
 
+# Mega Plano de Melhorias do Modulo ADS
 
-# Sincronizacao de Status de Campanhas com Mercado Livre + Filtro Ativa/Pausada
+## Resumo das Mudancas
 
-## Problema
+6 melhorias para tornar o modulo ADS mais informativo e visual, alinhado com o que o Mercado Livre mostra.
 
-1. **Status desatualizado**: A ultima sincronizacao foi em 18/02. Desde entao, campanhas foram pausadas no ML mas nosso banco ainda mostra como `active`. De 31 campanhas, o ML mostra 7 ativas e 25 pausadas, mas o sistema mostra 29 ativas e 2 pausadas.
+---
 
-2. **Sem filtro de status**: A tabela de campanhas nao tem filtro para mostrar apenas Ativas ou Pausadas.
+## 1. Contagem de Anuncios por Campanha na Tabela
 
-3. **Causa raiz**: O `ads-sync` (unico responsavel por atualizar status no banco) so roda quando o usuario clica "Sinc" manualmente. O `ads-period-metrics` busca metricas mas NAO atualiza o campo `status` das campanhas no banco. O `ads-nightly-cache` busca dados da API com `status=active,paused` mas salva apenas em `ads_period_cache`, nao em `ads_campaigns`.
+**Onde**: Coluna "Campanha" em `AdsCampaignsTable.tsx`
 
-## Solucao
+Onde hoje aparece `product_ads` abaixo do nome da campanha, exibir tambem a contagem de anuncios. Exemplo:
 
-### Parte 1: Nightly Cache atualiza status das campanhas
+```
+1803 Delivery 6R
+product_ads - 13 anuncios
+```
 
-Modificar `supabase/functions/ads-nightly-cache/index.ts` para, alem de cachear metricas, **atualizar o status** das campanhas na tabela `ads_campaigns` com base na resposta da API do ML.
+**Como obter**: Fazer um COUNT por campanha via join `ads_items` agrupando por `campaign_id` no `raw_data`. Criar um hook ou query auxiliar que retorna `Map<ml_campaign_id, number>` e passar para a tabela. Alternativamente, contar no frontend a partir dos items ja carregados no `useAdsItems`.
 
-Mudanca:
-- Apos receber a lista de campanhas da API, fazer `upsert` no `ads_campaigns` com o status atualizado
-- Isso garante que toda madrugada os status ficam sincronizados automaticamente
+---
 
-### Parte 2: ads-period-metrics tambem atualiza status
+## 2. Ordenacao por Quantidade de Anuncios
 
-Modificar `supabase/functions/ads-period-metrics/index.ts` para, ao buscar campanhas da API do ML, tambem fazer update do status no `ads_campaigns`. Assim, mesmo durante o dia, ao trocar de periodo no frontend, os status sao atualizados.
+**Onde**: `AdsCampaignsTable.tsx`
 
-### Parte 3: Filtro de Status na tabela de campanhas
+Adicionar coluna de sort `ads_count` no tipo `SortColumn`. Ao clicar no header ou usar os filtros, ordenar por mais ou menos anuncios por campanha. Os chips de filtro de status ja existem; a ordenacao sera pelo header da coluna (clicavel como as demais).
 
-Modificar `src/components/ads/AdsCampaignsTable.tsx` para adicionar um filtro de status (Todas / Ativas / Pausadas / Encerradas) acima da tabela, ao lado do campo de busca.
+---
 
-### Parte 4: Contagem correta no header
+## 3. Filtro de Data dentro do Modal
 
-Atualizar o header em `src/pages/Publicidade.tsx` para mostrar a contagem de ativas E pausadas (ja existe `activeCampaigns` e `pausedCampaigns`, so falta exibir pausadas).
+**Onde**: `AdsCampaignDetailModal.tsx`
+
+Adicionar seletor de periodo (7d, 14d, 30d, personalizado) no topo do modal, ao lado do titulo. Ao mudar o periodo, recalcular os KPIs e a tabela de produtos daquela campanha para o periodo selecionado. Usar os `precomputedMetrics` filtrados pelo periodo escolhido.
+
+---
+
+## 4. Botao de Adicionar Anuncio no Modal (Ja Existe)
+
+O modal ja tem a secao "Adicionar Produto" com busca e botao. Vou apenas tornar mais visivel: adicionar um botao `+ Adicionar Anuncio` ao lado do titulo "Produtos da Campanha" que faz scroll ate a secao de busca, ou abre um mini-formulario inline.
+
+---
+
+## 5. Tags de Catalogo e Full nos Anuncios
+
+**Onde**: `AdsCampaignProducts.tsx` (modal) e `AdsProductsTable.tsx` (tab Produtos)
+
+Para cada anuncio, cruzar o `item_id` com a tabela `meli_listings_cache` para buscar:
+- `catalog_product_id` != null -> Tag **Catalogo**
+- `logistic_type` = 'fulfillment' -> Tag **Full**
+
+Exibir as tags como badges ao lado do titulo do produto.
+
+---
+
+## 6. Anuncios Pausados ou Sem Estoque Acinzentados
+
+**Onde**: `AdsCampaignProducts.tsx` e `AdsProductsTable.tsx`
+
+Para cada produto:
+- Se `status = 'paused'` -> linha com `opacity-50` e badge "Pausado"
+- Se `available_quantity = 0` no `meli_listings_cache` -> linha com `opacity-50` e badge "Sem Estoque"
+
+Cruzar com `meli_listings_cache` para pegar `available_quantity` e `status` do anuncio.
 
 ---
 
 ## Detalhamento Tecnico
 
-### Arquivo: `supabase/functions/ads-nightly-cache/index.ts`
+### Arquivos a Modificar
 
-Apos buscar campanhas da API (linha ~195), adicionar um loop que faz upsert no `ads_campaigns`:
+| Arquivo | Mudanca |
+|---------|---------|
+| `src/components/ads/AdsCampaignsTable.tsx` | Adicionar contagem de anuncios por campanha na coluna "Campanha", novo sortColumn `ads_count` |
+| `src/components/ads/AdsCampaignDetailModal.tsx` | Seletor de periodo (7d/14d/30d/custom), botao "+ Adicionar" visivel no header de produtos |
+| `src/components/ads/AdsCampaignProducts.tsx` | Cruzar com `meli_listings_cache` para tags Catalogo/Full, acinzentar pausados/sem estoque |
+| `src/pages/Publicidade.tsx` | Passar contagem de anuncios por campanha como prop para `AdsCampaignsTable` |
+
+### Estrategia de Cruzamento com meli_listings_cache
+
+Na `AdsCampaignProducts`, apos buscar os items de `ads_items`, fazer uma segunda query:
 
 ```text
-Para cada campanha retornada pela API:
-  - Extrair id, name, status, budget
-  - Upsert em ads_campaigns com onConflict: 'seller_id,ml_campaign_id'
-  - Atualizar: status, name, daily_budget, synced_at
+SELECT item_id, catalog_product_id, logistic_type, available_quantity, status
+FROM meli_listings_cache
+WHERE seller_id = ? AND item_id IN (lista_de_item_ids)
 ```
 
-### Arquivo: `supabase/functions/ads-period-metrics/index.ts`
+Isso retorna em ~50ms e permite enriquecer cada produto com as tags e status de estoque.
 
-Na funcao que busca campanhas da ML API, apos receber a resposta, fazer batch update do status no `ads_campaigns`.
+### Contagem de Anuncios por Campanha
 
-### Arquivo: `src/components/ads/AdsCampaignsTable.tsx`
+Na `Publicidade.tsx`, apos carregar `items` do `useEnrichedAdsItems`, computar um `Map<campaign_id, number>`:
 
-- Adicionar estado `statusFilter: 'all' | 'active' | 'paused' | 'ended'`
-- Adicionar botoes de filtro (chips) ao lado da barra de busca: "Todas", "Ativas", "Pausadas", "Encerradas"
-- Filtrar `campaigns` pelo status antes de aplicar busca textual e ordenacao
+```text
+const adCountMap = useMemo(() => {
+  const map = new Map<string, number>();
+  for (const item of items) {
+    const cId = String(item.raw_data?.campaign_id || '');
+    map.set(cId, (map.get(cId) || 0) + 1);
+  }
+  return map;
+}, [items]);
+```
 
-### Arquivo: `src/pages/Publicidade.tsx`
+Passar como prop para `AdsCampaignsTable`.
 
-- No `CardDescription`, mostrar tambem pausadas: `{campaigns.length} campanhas encontradas - {activeCampaigns} ativas - {pausedCampaigns} pausadas`
+### Seletor de Periodo no Modal
 
-## Resultado Esperado
+Reutilizar o mesmo pattern de periodo da pagina principal (7d, 14d, 30d, custom). Ao mudar, filtrar os `precomputedMetrics` para o periodo selecionado ou, se nao houver dados pre-computados, chamar a Edge Function `ads-period-metrics` para o periodo.
 
-- Status das campanhas atualizados automaticamente toda madrugada e a cada consulta de metricas
-- Filtro visual de Ativa/Pausada na tabela de campanhas
-- Contagens corretas no header
+### Visual dos Anuncios Acinzentados
+
+```text
+<TableRow className={cn(
+  "hover:bg-muted/40",
+  (product.status === 'paused' || product.outOfStock) && "opacity-50"
+)}>
+  ...
+  {product.isCatalog && <Badge variant="outline" className="text-[9px]">Catalogo</Badge>}
+  {product.isFull && <Badge variant="outline" className="text-[9px] border-blue-500 text-blue-500">Full</Badge>}
+  {product.status === 'paused' && <Badge variant="secondary" className="text-[9px]">Pausado</Badge>}
+  {product.outOfStock && <Badge variant="destructive" className="text-[9px]">Sem Estoque</Badge>}
+```
