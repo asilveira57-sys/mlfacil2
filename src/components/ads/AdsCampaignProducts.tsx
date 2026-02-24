@@ -1,18 +1,21 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { ChevronUp, Package, TrendingUp, TrendingDown, Pause, Play, Trash2, Loader2 } from 'lucide-react';
+import { ChevronUp, Package, TrendingUp, TrendingDown, Pause, Play, Trash2, Loader2, BookOpen, Truck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { useAdsCampaignActions } from '@/hooks/useAdsCampaignActions';
+import { cn } from '@/lib/utils';
+
+interface ListingInfo {
+  catalog_product_id: string | null;
+  logistic_type: string | null;
+  available_quantity: number | null;
+  status: string | null;
+}
 
 interface CampaignProduct {
   id: string;
@@ -31,6 +34,11 @@ interface CampaignProduct {
   roas: number;
   tacos: number;
   status: string;
+  // Enriched from listings cache
+  isCatalog?: boolean;
+  isFull?: boolean;
+  outOfStock?: boolean;
+  listingStatus?: string | null;
 }
 
 interface AdsCampaignProductsProps {
@@ -85,6 +93,37 @@ export function AdsCampaignProducts({ mlCampaignId, sellerId, onClose, showActio
         };
       });
 
+      // Enrich with listing cache data
+      const itemIds = mapped.map(p => p.item_id);
+      if (itemIds.length > 0) {
+        const { data: listingsData } = await supabase
+          .from('meli_listings_cache')
+          .select('item_id, catalog_product_id, logistic_type, available_quantity, status')
+          .eq('seller_id', sellerId)
+          .in('item_id', itemIds);
+
+        if (listingsData) {
+          const listingMap = new Map<string, ListingInfo>();
+          for (const l of listingsData) {
+            listingMap.set(l.item_id, {
+              catalog_product_id: l.catalog_product_id,
+              logistic_type: l.logistic_type,
+              available_quantity: l.available_quantity,
+              status: l.status,
+            });
+          }
+          for (const p of mapped) {
+            const info = listingMap.get(p.item_id);
+            if (info) {
+              p.isCatalog = !!info.catalog_product_id;
+              p.isFull = info.logistic_type === 'fulfillment';
+              p.outOfStock = info.available_quantity === 0;
+              p.listingStatus = info.status;
+            }
+          }
+        }
+      }
+
       mapped.sort((a, b) => b.spent - a.spent);
       setProducts(mapped);
       setLoading(false);
@@ -101,7 +140,6 @@ export function AdsCampaignProducts({ mlCampaignId, sellerId, onClose, showActio
     } else {
       await actions.activateAd(product.item_id);
     }
-    // Update local state optimistically
     setProducts(prev => prev.map(p => 
       p.item_id === product.item_id 
         ? { ...p, status: product.status === 'active' ? 'paused' : 'active' }
@@ -171,9 +209,10 @@ export function AdsCampaignProducts({ mlCampaignId, sellerId, onClose, showActio
               const isHighAcos = product.acos > 30;
               const isGoodRoas = product.roas >= 3;
               const isLoadingThis = actions.loading?.includes(product.item_id);
+              const isDimmed = product.status === 'paused' || product.outOfStock || product.listingStatus === 'paused';
 
               return (
-                <TableRow key={product.id} className="hover:bg-muted/40">
+                <TableRow key={product.id} className={cn("hover:bg-muted/40", isDimmed && "opacity-50")}>
                   <TableCell>
                     <div className="flex items-center gap-3">
                       {product.thumbnail ? (
@@ -184,7 +223,21 @@ export function AdsCampaignProducts({ mlCampaignId, sellerId, onClose, showActio
                         </div>
                       )}
                       <div className="min-w-0">
-                        <p className="font-medium text-sm truncate max-w-[220px]">{product.title}</p>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="font-medium text-sm truncate max-w-[180px]">{product.title}</p>
+                          {product.isCatalog && (
+                            <Badge variant="outline" className="text-[9px] px-1 py-0 gap-0.5 border-primary/40 text-primary">
+                              <BookOpen className="h-2.5 w-2.5" />
+                              Catálogo
+                            </Badge>
+                          )}
+                          {product.isFull && (
+                            <Badge variant="outline" className="text-[9px] px-1 py-0 gap-0.5 border-blue-500/40 text-blue-500">
+                              <Truck className="h-2.5 w-2.5" />
+                              Full
+                            </Badge>
+                          )}
+                        </div>
                         <div className="flex items-center gap-2 mt-0.5">
                           <span className="text-[11px] text-muted-foreground">{product.item_id}</span>
                           {product.sku && (
@@ -211,17 +264,23 @@ export function AdsCampaignProducts({ mlCampaignId, sellerId, onClose, showActio
                     </span>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={product.status === 'active' ? 'default' : 'secondary'} className="text-[10px]">
-                      {product.status === 'active' ? 'Ativo' : 'Pausado'}
-                    </Badge>
+                    <div className="flex flex-col gap-0.5">
+                      <Badge variant={product.status === 'active' ? 'default' : 'secondary'} className="text-[10px] w-fit">
+                        {product.status === 'active' ? 'Ativo' : 'Pausado'}
+                      </Badge>
+                      {product.outOfStock && (
+                        <Badge variant="destructive" className="text-[9px] w-fit">Sem Estoque</Badge>
+                      )}
+                      {product.listingStatus === 'paused' && product.status !== 'paused' && (
+                        <Badge variant="secondary" className="text-[9px] w-fit">Anúncio Pausado</Badge>
+                      )}
+                    </div>
                   </TableCell>
                   {showActions && (
                     <TableCell>
                       <div className="flex items-center gap-1">
                         <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
+                          variant="ghost" size="icon" className="h-7 w-7"
                           onClick={() => handleToggleAd(product)}
                           disabled={!!isLoadingThis}
                           title={product.status === 'active' ? 'Pausar' : 'Ativar'}
@@ -235,8 +294,7 @@ export function AdsCampaignProducts({ mlCampaignId, sellerId, onClose, showActio
                           )}
                         </Button>
                         <Button
-                          variant="ghost"
-                          size="icon"
+                          variant="ghost" size="icon"
                           className="h-7 w-7 text-destructive hover:text-destructive"
                           onClick={() => handleRemoveAd(product)}
                           disabled={!!isLoadingThis}

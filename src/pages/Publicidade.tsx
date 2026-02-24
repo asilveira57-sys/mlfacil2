@@ -125,6 +125,31 @@ export default function Publicidade() {
   const { items: enrichedItems, loading: itemsLoading } = useEnrichedAdsItems(sellerId || undefined, filters);
   const fallbackSummary = useAdsMetricsSummary(enrichedItems);
   const { syncState, triggerSync } = useAdsSyncState(sellerId || undefined);
+
+  // Listing cache enrichment for Products tab (Catalog/Full/Stock)
+  const [listingInfoMap, setListingInfoMap] = useState<Map<string, { isCatalog: boolean; isFull: boolean; outOfStock: boolean; listingStatus: string | null }>>(new Map());
+  useEffect(() => {
+    if (!sellerId || enrichedItems.length === 0) return;
+    const itemIds = enrichedItems.map(i => i.item_id);
+    supabase
+      .from('meli_listings_cache')
+      .select('item_id, catalog_product_id, logistic_type, available_quantity, status')
+      .eq('seller_id', sellerId)
+      .in('item_id', itemIds)
+      .then(({ data }) => {
+        if (!data) return;
+        const map = new Map<string, { isCatalog: boolean; isFull: boolean; outOfStock: boolean; listingStatus: string | null }>();
+        for (const l of data) {
+          map.set(l.item_id, {
+            isCatalog: !!l.catalog_product_id,
+            isFull: l.logistic_type === 'fulfillment',
+            outOfStock: l.available_quantity === 0,
+            listingStatus: l.status,
+          });
+        }
+        setListingInfoMap(map);
+      });
+  }, [sellerId, enrichedItems]);
   
   // Period-based metrics from ML API (real-time)
   const { summary: periodSummary, dailyMetrics: periodDaily, campaignsMetrics, loading: periodLoading, error: periodError } = useAdsPeriodMetrics(
@@ -142,6 +167,18 @@ export default function Publicidade() {
 
   const activeCampaigns = campaigns.filter(c => c.status === 'active').length;
   const pausedCampaigns = campaigns.filter(c => c.status === 'paused').length;
+
+  // Compute ad count per campaign from enriched items
+  const adCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const item of enrichedItems) {
+      const cId = String((item.raw_data as Record<string, unknown>)?.campaign_id || '');
+      if (cId) {
+        map.set(cId, (map.get(cId) || 0) + 1);
+      }
+    }
+    return map;
+  }, [enrichedItems]);
   const loading = accountLoading || !initialized;
 
   // Header without sync button
@@ -440,6 +477,7 @@ export default function Publicidade() {
                     precomputedMetrics={campaignsMetrics}
                     sellerId={sellerId}
                     onOpenCampaignModal={handleOpenCampaignModal}
+                    adCountMap={adCountMap}
                   />
                 )}
               </CardContent>
@@ -494,7 +532,7 @@ export default function Publicidade() {
                 {itemsLoading ? (
                   <Skeleton className="h-[400px] m-4" />
                 ) : (
-                  <AdsProductsTable items={enrichedItems} />
+                  <AdsProductsTable items={enrichedItems} listingInfoMap={listingInfoMap} />
                 )}
               </CardContent>
             </Card>

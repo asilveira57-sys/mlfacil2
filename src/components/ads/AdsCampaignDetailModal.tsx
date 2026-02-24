@@ -1,28 +1,38 @@
-import { useState } from 'react';
+import { useState, useMemo, useRef, useCallback } from 'react';
+import { format, subDays } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { supabase } from '@/integrations/supabase/client';
 import { AdsCampaign } from '@/types/ads';
 import { AdsCampaignProducts } from './AdsCampaignProducts';
 import { useAdsCampaignActions } from '@/hooks/useAdsCampaignActions';
+import { useAdsPeriodMetrics } from '@/hooks/useAdsPeriodMetrics';
 import type { CampaignMetric } from '@/hooks/useAdsPeriodMetrics';
+import { cn } from '@/lib/utils';
 import {
-  Pause,
-  Play,
-  TrendingUp,
-  TrendingDown,
-  DollarSign,
-  MousePointerClick,
-  Target,
-  BarChart3,
-  Search,
-  Plus,
-  Loader2,
+  Pause, Play, TrendingUp, TrendingDown, DollarSign,
+  MousePointerClick, Target, BarChart3, Search, Plus,
+  Loader2, CalendarIcon,
 } from 'lucide-react';
+
+type ModalPeriod = '7d' | '14d' | '30d' | '60d' | 'custom';
+
+const modalPeriodOptions: { value: ModalPeriod; label: string }[] = [
+  { value: '7d', label: '7d' },
+  { value: '14d', label: '14d' },
+  { value: '30d', label: '30d' },
+  { value: '60d', label: '60d' },
+  { value: 'custom', label: 'Custom' },
+];
+
+const modalPeriodDays: Record<string, number> = {
+  '7d': 7, '14d': 14, '30d': 30, '60d': 60,
+};
 
 interface AdsCampaignDetailModalProps {
   campaign: AdsCampaign | null;
@@ -41,12 +51,7 @@ interface SearchResult {
 }
 
 export function AdsCampaignDetailModal({
-  campaign,
-  open,
-  onOpenChange,
-  sellerId,
-  precomputedMetrics,
-  onStatusChange,
+  campaign, open, onOpenChange, sellerId, precomputedMetrics, onStatusChange,
 }: AdsCampaignDetailModalProps) {
   const actions = useAdsCampaignActions(sellerId);
   const [searchQuery, setSearchQuery] = useState('');
@@ -54,13 +59,34 @@ export function AdsCampaignDetailModal({
   const [searching, setSearching] = useState(false);
   const [addingItem, setAddingItem] = useState<string | null>(null);
   const [productsKey, setProductsKey] = useState(0);
+  const [modalPeriod, setModalPeriod] = useState<ModalPeriod>('30d');
+  const [customFrom, setCustomFrom] = useState<Date>();
+  const [customTo, setCustomTo] = useState<Date>();
+  const addSectionRef = useRef<HTMLDivElement>(null);
+
+  const { dateFrom, dateTo } = useMemo(() => {
+    const today = new Date();
+    if (modalPeriod === 'custom' && customFrom && customTo) {
+      return { dateFrom: format(customFrom, 'yyyy-MM-dd'), dateTo: format(customTo, 'yyyy-MM-dd') };
+    }
+    const days = modalPeriodDays[modalPeriod] || 30;
+    return { dateFrom: format(subDays(today, days), 'yyyy-MM-dd'), dateTo: format(today, 'yyyy-MM-dd') };
+  }, [modalPeriod, customFrom, customTo]);
+
+  // Fetch period metrics for this modal's date range
+  const { campaignsMetrics: modalCampaignsMetrics, loading: metricsLoading } = useAdsPeriodMetrics(
+    open ? sellerId : undefined,
+    open ? dateFrom : undefined,
+    open ? dateTo : undefined,
+  );
 
   if (!campaign) return null;
 
   const mlCampaignId = campaign.raw_data?.id ? String(campaign.raw_data.id) : campaign.ml_campaign_id;
 
-  // Find precomputed metrics for this campaign
-  const pm = precomputedMetrics?.find(
+  // Use modal-specific metrics if available, fallback to parent precomputed
+  const activeMetrics = modalCampaignsMetrics.length > 0 ? modalCampaignsMetrics : precomputedMetrics;
+  const pm = activeMetrics?.find(
     m => String(m.ml_campaign_id) === String(mlCampaignId) || String(m.ml_campaign_id) === campaign.ml_campaign_id,
   );
 
@@ -95,13 +121,10 @@ export function AdsCampaignDetailModal({
         .eq('seller_id', sellerId)
         .or(`item_id.ilike.%${query}%,title.ilike.%${query}%,sku.ilike.%${query}%`)
         .limit(10);
-
       setSearchResults(
         (data || []).map(d => ({
-          item_id: d.item_id,
-          title: d.title || d.item_id,
-          thumbnail: d.thumbnail,
-          price: d.price || 0,
+          item_id: d.item_id, title: d.title || d.item_id,
+          thumbnail: d.thumbnail, price: d.price || 0,
         })),
       );
     } catch (err) {
@@ -116,6 +139,10 @@ export function AdsCampaignDetailModal({
     await actions.addAd(mlCampaignId, itemId);
     setAddingItem(null);
     setProductsKey(k => k + 1);
+  };
+
+  const scrollToAdd = () => {
+    addSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   const kpiCards = [
@@ -164,6 +191,49 @@ export function AdsCampaignDetailModal({
           </p>
         </DialogHeader>
 
+        {/* Period Filter */}
+        <div className="flex items-center gap-2 flex-wrap mt-1">
+          {modalPeriodOptions.map(opt => (
+            <Button
+              key={opt.value}
+              variant={modalPeriod === opt.value ? 'default' : 'outline'}
+              size="sm"
+              className="h-6 text-[11px] px-2"
+              onClick={() => setModalPeriod(opt.value)}
+            >
+              {opt.label}
+            </Button>
+          ))}
+          {modalPeriod === 'custom' && (
+            <div className="flex items-center gap-1">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className={cn("h-6 text-[11px] px-2 gap-1", !customFrom && "text-muted-foreground")}>
+                    <CalendarIcon className="h-3 w-3" />
+                    {customFrom ? format(customFrom, 'dd/MM/yy') : 'De'}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar mode="single" selected={customFrom} onSelect={setCustomFrom} className="p-3 pointer-events-auto" />
+                </PopoverContent>
+              </Popover>
+              <span className="text-[10px] text-muted-foreground">→</span>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className={cn("h-6 text-[11px] px-2 gap-1", !customTo && "text-muted-foreground")}>
+                    <CalendarIcon className="h-3 w-3" />
+                    {customTo ? format(customTo, 'dd/MM/yy') : 'Até'}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar mode="single" selected={customTo} onSelect={setCustomTo} className="p-3 pointer-events-auto" />
+                </PopoverContent>
+              </Popover>
+            </div>
+          )}
+          {metricsLoading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+        </div>
+
         {/* KPI Cards */}
         <div className="grid grid-cols-3 md:grid-cols-6 gap-2 mt-2">
           {kpiCards.map(kpi => (
@@ -179,7 +249,12 @@ export function AdsCampaignDetailModal({
 
         {/* Products Table */}
         <div className="mt-4">
-          <h3 className="text-sm font-semibold mb-2">Produtos da Campanha</h3>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold">Produtos da Campanha</h3>
+            <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={scrollToAdd}>
+              <Plus className="h-3 w-3" /> Adicionar Anúncio
+            </Button>
+          </div>
           <AdsCampaignProducts
             key={productsKey}
             mlCampaignId={mlCampaignId}
@@ -190,7 +265,7 @@ export function AdsCampaignDetailModal({
         </div>
 
         {/* Search to add product */}
-        <div className="mt-4 border-t pt-4">
+        <div className="mt-4 border-t pt-4" ref={addSectionRef}>
           <h3 className="text-sm font-semibold mb-2">Adicionar Produto</h3>
           <div className="flex gap-2">
             <div className="relative flex-1">
@@ -222,9 +297,7 @@ export function AdsCampaignDetailModal({
                     <p className="text-[10px] text-muted-foreground">{item.item_id} • {formatCurrency(item.price)}</p>
                   </div>
                   <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-xs gap-1"
+                    size="sm" variant="outline" className="h-7 text-xs gap-1"
                     onClick={() => handleAddProduct(item.item_id)}
                     disabled={addingItem === item.item_id}
                   >
