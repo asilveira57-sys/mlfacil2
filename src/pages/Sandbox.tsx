@@ -28,14 +28,14 @@ function getItemClass(index: number, total: number): string {
 
 async function logSandboxEvent(action: string, meta: Record<string, unknown> = {}) {
   try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
     await supabase.from('system_logs').insert({
       level: 'info',
       system_area: 'sandbox',
       action,
       message: `Sandbox: ${action}`,
-      meta_json: { user_id: user.id, ...meta },
+      meta_json: { user_id: session.user.id, ...meta },
     });
   } catch { /* fail-safe */ }
 }
@@ -67,13 +67,13 @@ export default function Sandbox() {
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) return;
 
       logSandboxEvent('manual_refresh_start', { companies: snapshots.length });
 
       const { error } = await supabase.functions.invoke('sandbox-snapshot-refresh', {
-        body: { user_id: user.id },
+        body: { user_id: session.user.id },
       });
 
       if (error) throw error;

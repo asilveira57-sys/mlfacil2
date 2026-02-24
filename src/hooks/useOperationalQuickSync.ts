@@ -144,8 +144,9 @@ export function useOperationalQuickSync({
     setStatus(prev => ({ ...prev, isRunning: true }));
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) return;
+      const user = session.user;
 
       // Log: início da operação
       await logSandbox('quick_sync_triggered', {
@@ -197,8 +198,9 @@ export function useOperationalQuickSync({
     let mounted = true;
 
     const init = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user || !mounted) return;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user || !mounted) return;
+      const user = session.user;
 
       // Enfileirar pedidos recentes imediatamente
       await enqueueRecentOrders(user.id, sellerId, companyId);
@@ -239,14 +241,14 @@ export function useOperationalQuickSync({
 // ── Logging helper ──────────────────────────────────────────────────────────
 async function logSandbox(action: string, meta: Record<string, unknown> = {}) {
   try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
     await supabase.from('system_logs').insert({
       level: 'info',
       system_area: 'operational_quick_sync',
       action,
       message: `QuickSync: ${action}`,
-      meta_json: { user_id: user.id, ...meta },
+      meta_json: { user_id: session.user.id, ...meta },
       success: !action.includes('error'),
     });
   } catch { /* fail-safe */ }
