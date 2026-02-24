@@ -149,12 +149,14 @@ Deno.serve(async (req) => {
         console.log(`[ads-campaign-manage] ML response ${mlResponse.status}: ${responseText.substring(0, 500)}`);
 
         if (!mlResponse.ok) {
+          let mlError = responseText;
+          try { const parsed = JSON.parse(responseText); mlError = parsed.message || parsed.error || responseText; } catch {}
           return new Response(JSON.stringify({ 
             error: `ML API error: ${mlResponse.status}`, 
-            details: responseText,
+            details: mlError,
             ml_status: mlResponse.status,
           }), {
-            status: mlResponse.status >= 500 ? 502 : mlResponse.status, 
+            status: 200, 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
@@ -191,11 +193,13 @@ Deno.serve(async (req) => {
         console.log(`[ads-campaign-manage] ML response ${mlResponse.status}: ${adText.substring(0, 500)}`);
 
         if (!mlResponse.ok) {
+          let mlError = adText;
+          try { const parsed = JSON.parse(adText); mlError = parsed.message || parsed.error || adText; } catch {}
           return new Response(JSON.stringify({ 
             error: `ML API error: ${mlResponse.status}`, 
-            details: adText,
+            details: mlError,
           }), {
-            status: mlResponse.status >= 500 ? 502 : mlResponse.status,
+            status: 200,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
@@ -230,11 +234,13 @@ Deno.serve(async (req) => {
         console.log(`[ads-campaign-manage] ML response ${mlResponse.status}: ${addText.substring(0, 500)}`);
 
         if (!mlResponse.ok) {
+          let mlError = addText;
+          try { const parsed = JSON.parse(addText); mlError = parsed.message || parsed.error || addText; } catch {}
           return new Response(JSON.stringify({ 
             error: `ML API error: ${mlResponse.status}`, 
-            details: addText,
+            details: mlError,
           }), {
-            status: mlResponse.status >= 500 ? 502 : mlResponse.status,
+            status: 200,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
@@ -261,11 +267,13 @@ Deno.serve(async (req) => {
         console.log(`[ads-campaign-manage] ML response ${mlResponse.status}: ${delText.substring(0, 500)}`);
 
         if (!mlResponse.ok && mlResponse.status !== 404) {
+          let mlError = delText;
+          try { const parsed = JSON.parse(delText); mlError = parsed.message || parsed.error || delText; } catch {}
           return new Response(JSON.stringify({ 
             error: `ML API error: ${mlResponse.status}`, 
-            details: delText,
+            details: mlError,
           }), {
-            status: mlResponse.status >= 500 ? 502 : mlResponse.status,
+            status: 200,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
