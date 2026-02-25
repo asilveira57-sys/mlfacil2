@@ -4446,12 +4446,86 @@ export type Database = {
         }
         Relationships: []
       }
+      help_article_feedback: {
+        Row: {
+          article_id: string
+          created_at: string
+          id: string
+          session_id: string | null
+          user_id: string | null
+          vote: boolean
+        }
+        Insert: {
+          article_id: string
+          created_at?: string
+          id?: string
+          session_id?: string | null
+          user_id?: string | null
+          vote: boolean
+        }
+        Update: {
+          article_id?: string
+          created_at?: string
+          id?: string
+          session_id?: string | null
+          user_id?: string | null
+          vote?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "help_article_feedback_article_id_fkey"
+            columns: ["article_id"]
+            isOneToOne: false
+            referencedRelation: "help_articles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      help_article_modules: {
+        Row: {
+          article_id: string
+          created_at: string
+          id: string
+          module_id: string
+        }
+        Insert: {
+          article_id: string
+          created_at?: string
+          id?: string
+          module_id: string
+        }
+        Update: {
+          article_id?: string
+          created_at?: string
+          id?: string
+          module_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "help_article_modules_article_id_fkey"
+            columns: ["article_id"]
+            isOneToOne: false
+            referencedRelation: "help_articles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "help_article_modules_module_id_fkey"
+            columns: ["module_id"]
+            isOneToOne: false
+            referencedRelation: "system_modules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       help_articles: {
         Row: {
+          auto_generated: boolean
           category_id: string
           content: string
           created_at: string
+          helpful_count: number
           id: string
+          not_helpful_count: number
           published: boolean
           slug: string
           summary: string | null
@@ -4460,10 +4534,13 @@ export type Database = {
           views: number
         }
         Insert: {
+          auto_generated?: boolean
           category_id: string
           content: string
           created_at?: string
+          helpful_count?: number
           id?: string
+          not_helpful_count?: number
           published?: boolean
           slug: string
           summary?: string | null
@@ -4472,10 +4549,13 @@ export type Database = {
           views?: number
         }
         Update: {
+          auto_generated?: boolean
           category_id?: string
           content?: string
           created_at?: string
+          helpful_count?: number
           id?: string
+          not_helpful_count?: number
           published?: boolean
           slug?: string
           summary?: string | null
@@ -4519,6 +4599,35 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      help_feedback_logs: {
+        Row: {
+          article_id: string
+          created_at: string
+          id: string
+          vote: boolean
+        }
+        Insert: {
+          article_id: string
+          created_at?: string
+          id?: string
+          vote: boolean
+        }
+        Update: {
+          article_id?: string
+          created_at?: string
+          id?: string
+          vote?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "help_feedback_logs_article_id_fkey"
+            columns: ["article_id"]
+            isOneToOne: false
+            referencedRelation: "help_articles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       highlights_items: {
         Row: {

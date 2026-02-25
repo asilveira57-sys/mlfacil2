@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { ArrowLeft, BookOpen, Eye, Clock } from "lucide-react";
+import ArticleFeedback from "@/components/help/ArticleFeedback";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
@@ -132,6 +133,10 @@ export default function CentralDeAjudaArtigo() {
             <div className="prose-sm">{renderContent(article.content)}</div>
           </CardContent>
         </Card>
+
+        <div className="mt-6">
+          <ArticleFeedback articleId={article.id} articleTitle={article.title} />
+        </div>
 
         <div className="mt-8 text-center">
           <Link to="/central-de-ajuda">

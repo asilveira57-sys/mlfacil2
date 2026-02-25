@@ -14,10 +14,11 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, RefreshCw, Pencil, Trash2, Eye, BookOpen, FolderOpen } from "lucide-react";
+import { Plus, RefreshCw, Pencil, Trash2, Eye, BookOpen, FolderOpen, ThumbsUp, ThumbsDown } from "lucide-react";
 
 export default function AdminCentralDeAjuda() {
   const [tab, setTab] = useState<"articles" | "categories">("articles");
+  const [sortBy, setSortBy] = useState<"recent" | "best" | "worst">("recent");
 
   // Categories
   const { data: categories = [], refetch: refetchCats } = useQuery({
@@ -181,33 +182,65 @@ export default function AdminCentralDeAjuda() {
                   <TableHead>Título</TableHead>
                   <TableHead>Categoria</TableHead>
                   <TableHead>Views</TableHead>
+                  <TableHead>
+                    <button className="flex items-center gap-1 text-xs" onClick={() => setSortBy(s => s === "best" ? "worst" : s === "worst" ? "recent" : "best")}>
+                      Aprovação {sortBy === "best" ? "↑" : sortBy === "worst" ? "↓" : ""}
+                    </button>
+                  </TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Data</TableHead>
                   <TableHead>Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {articles.map((a: any) => (
-                  <TableRow key={a.id}>
-                    <TableCell className="font-medium text-sm max-w-[200px] truncate">{a.title}</TableCell>
-                    <TableCell className="text-xs">{(a as any).help_categories?.name || "—"}</TableCell>
-                    <TableCell className="text-xs flex items-center gap-1"><Eye className="h-3 w-3" /> {a.views}</TableCell>
-                    <TableCell>
-                      <Switch checked={a.published} onCheckedChange={(v) => togglePublished(a.id, v)} />
-                    </TableCell>
-                    <TableCell className="text-xs whitespace-nowrap">{format(new Date(a.created_at), "dd/MM/yyyy", { locale: ptBR })}</TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <Button variant="ghost" size="icon" onClick={() => { setArtForm({ id: a.id, category_id: a.category_id, title: a.title, slug: a.slug, summary: a.summary || "", content: a.content, published: a.published }); setArtDialog(true); }}>
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" onClick={() => deleteArt(a.id)}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {[...articles]
+                  .sort((a: any, b: any) => {
+                    if (sortBy === "best") {
+                      return (b.helpful_count - b.not_helpful_count) - (a.helpful_count - a.not_helpful_count);
+                    }
+                    if (sortBy === "worst") {
+                      return (a.helpful_count - a.not_helpful_count) - (b.helpful_count - b.not_helpful_count);
+                    }
+                    return 0; // keep original (recent) order
+                  })
+                  .map((a: any) => {
+                    const total = (a.helpful_count || 0) + (a.not_helpful_count || 0);
+                    const rate = total > 0 ? Math.round(((a.helpful_count || 0) / total) * 100) : null;
+                    return (
+                      <TableRow key={a.id}>
+                        <TableCell className="font-medium text-sm max-w-[200px] truncate">{a.title}</TableCell>
+                        <TableCell className="text-xs">{(a as any).help_categories?.name || "—"}</TableCell>
+                        <TableCell className="text-xs"><span className="flex items-center gap-1"><Eye className="h-3 w-3" /> {a.views}</span></TableCell>
+                        <TableCell className="text-xs">
+                          {total > 0 ? (
+                            <span className="flex items-center gap-1.5">
+                              <ThumbsUp className="h-3 w-3 text-green-600" /> {a.helpful_count}
+                              <ThumbsDown className="h-3 w-3 text-red-500" /> {a.not_helpful_count}
+                              <Badge variant={rate! >= 70 ? "default" : "destructive"} className="text-[10px] ml-1">
+                                {rate}%
+                              </Badge>
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Switch checked={a.published} onCheckedChange={(v) => togglePublished(a.id, v)} />
+                        </TableCell>
+                        <TableCell className="text-xs whitespace-nowrap">{format(new Date(a.created_at), "dd/MM/yyyy", { locale: ptBR })}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            <Button variant="ghost" size="icon" onClick={() => { setArtForm({ id: a.id, category_id: a.category_id, title: a.title, slug: a.slug, summary: a.summary || "", content: a.content, published: a.published }); setArtDialog(true); }}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => deleteArt(a.id)}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
               </TableBody>
             </Table>
           </div>
