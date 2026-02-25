@@ -23,8 +23,8 @@ export function LandingFooter() {
     suporte: [
       { labelKey: "home.footer.col2.link1", label: t('footer.col2.link1'), href: "#faq" },
       { labelKey: "home.footer.col2.link2", label: t('footer.col2.link2'), href: "#" },
-      { labelKey: "home.footer.col2.link3", label: t('footer.col2.link3'), href: "#" },
-      { labelKey: "home.footer.col2.link4", label: t('footer.col2.link4'), href: "#faq" }
+      { labelKey: "home.footer.col2.link3", label: "Contato", href: "/contato" },
+      { labelKey: "home.footer.col2.link4", label: "Status", href: "/status" }
     ],
     legal: [
       { labelKey: "home.footer.col3.link1", label: t('footer.col3.link1'), href: "/termos-de-uso" },
