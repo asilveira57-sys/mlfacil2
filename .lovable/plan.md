@@ -1,102 +1,95 @@
 
-# Corrigir Bug de Log de Auditoria e Padronizar Logging Central
+## Diagnosis
 
-## Problema Identificado
+### Issue 1: "Envios de hoje" showing 4 instead of 7
 
-O parametro esta errado: a funcao `logToAudit` passa `p_meta` mas a RPC `register_system_log` espera `p_meta_json`. Isso faz a chamada falhar silenciosamente (catch vazio), e nenhum log e gravado.
+The RPC `get_shipping_orders` filters "today dispatch" orders using:
 
-O mesmo bug existe em 2 edge functions:
-- `ads-campaign-manage` (linha 62): `p_meta` em vez de `p_meta_json`
-- `mktpfacil-clone` (linhas 547 e 576): `p_meta` em vez de `p_meta_json`
-
-Alem disso, a grande maioria das edge functions criticas nao tem nenhum logging centralizado (ads-sync, ads-rules-engine, pricing-engine, billing-checkout, etc.).
-
-## Solucao
-
-### Parte 1: Criar helper compartilhado `_shared/audit-log.ts`
-
-Criar um utilitario reutilizavel que encapsula a chamada correta a `register_system_log`, evitando que o erro de parametro se repita.
-
-```text
-// supabase/functions/_shared/audit-log.ts
-export async function auditLog(supabase, params: {
-  level: string,
-  area: string,
-  action: string,
-  userId?: string | null,
-  success: boolean,
-  message: string,
-  meta?: Record<string, unknown>
-}) {
-  try {
-    await supabase.rpc('register_system_log', {
-      p_level: params.level,
-      p_system_area: params.area,
-      p_action: params.action,
-      p_user_id: params.userId || null,
-      p_success: params.success,
-      p_message: params.message,
-      p_meta_json: params.meta || {},   // <-- nome correto
-    });
-  } catch (_) { /* fail-safe */ }
-}
+```sql
+s.estimated_handling_limit <= v_today_end
 ```
 
-### Parte 2: Corrigir `ads-campaign-manage`
+Where `v_today_end` = end of today in BRT = `2026-02-26 03:00:00 UTC`.
 
-- Substituir a funcao `logToAudit` local pelo import do `auditLog` compartilhado
-- Isso corrige automaticamente o parametro `p_meta` -> `p_meta_json`
-- Todas as 10 chamadas existentes serao atualizadas
+The 7 `ready_to_print` orders for the seller break down as:
+- **3 orders** have `estimated_handling_limit` set to **Feb 26 BRT** (tomorrow) -- e.g. `2026-02-26 07:03 BRT`, `16:28 BRT`, `16:36 BRT`. These are **excluded** because they exceed `v_today_end`.
+- **4 orders** have `estimated_handling_limit = NULL` -- these are **included** via the fallback clause.
 
-### Parte 3: Corrigir `mktpfacil-clone`
+Result: only 4 show. But Mercado Livre shows all 7 as "envios de hoje" because the seller must act TODAY to meet tomorrow's deadline.
 
-- Substituir as 2 chamadas diretas a `register_system_log` pelo import de `auditLog`
-- Corrige o parametro `p_meta` -> `p_meta_json`
+**Fix**: Extend the handling limit window by 1 day:
 
-### Parte 4: Adicionar logging as edge functions criticas sem auditoria
+```sql
+s.estimated_handling_limit <= v_today_end + interval '1 day'
+```
 
-Adicionar auditoria centralizada (erro + sucesso) as seguintes funcoes prioritarias:
+### Issue 2: Cutoff time not appearing
 
-| Edge Function | Area | O que registrar |
-|---|---|---|
-| `ads-sync` | ads_sync | Inicio/fim da sync, erros de API |
-| `ads-rules-engine` | ads_rules | Regras executadas, acoes tomadas, erros |
-| `pricing-engine` | pricing | Calculos executados, erros |
-| `billing-checkout` | billing | Checkout iniciado, sucesso/falha |
-| `promotions-action` | promotions | Acoes de promocao, erros |
-| `publish-to-ml` | publish | Publicacao de anuncio, erros |
+The logs reveal:
+1. **`handling_time` API** returns **404** (endpoint not available for this seller type)
+2. **Shipment-based fallback** searches `estimated_handling_limit` within today's BRT window (`03:00 UTC – 02:59 UTC`), but all handling limits fall on Feb 26 UTC (outside the window). Result: **no cutoff found**.
+3. **`shipping_preferences`** returns successfully but contains no cutoff time data (only `flex_enabled = true`, `cutoff_type = "unknown"`)
+4. **`capacity_middleend`** returns successfully but contains capacity data, not cutoff times
 
-Para cada funcao, o padrao sera:
-1. Importar `auditLog` do `_shared/audit-log.ts`
-2. Adicionar chamada no catch global (erro nao tratado)
-3. Adicionar chamada nos pontos de erro de API externa
-4. Adicionar chamada de sucesso no fluxo principal
+**Fix**: Extend the shipment-based fallback search window to include tomorrow's deadlines (same root cause as Issue 1), and extract the earliest deadline as a usable cutoff reference.
 
 ---
 
-## Detalhamento Tecnico
+## Implementation Plan
 
-### Arquivo novo: `supabase/functions/_shared/audit-log.ts`
+### Step 1 -- Fix the `get_shipping_orders` RPC (database migration)
 
-Helper com interface simples que mapeia corretamente para os parametros da RPC.
+Update the "today_dispatch" filter clause from:
 
-### Arquivo modificado: `supabase/functions/ads-campaign-manage/index.ts`
+```sql
+s.estimated_handling_limit <= v_today_end
+```
 
-- Remover funcao `logToAudit` local (linhas 53-64)
-- Importar `auditLog` do shared
-- Substituir todas as chamadas `logToAudit(supabase, level, action, userId, success, msg, meta)` por `auditLog(supabase, { level, area: 'ads_manage', action, userId, success, message: msg, meta })`
+To:
 
-### Arquivo modificado: `supabase/functions/mktpfacil-clone/index.ts`
+```sql
+s.estimated_handling_limit < v_today_end + interval '1 day'
+```
 
-- Importar `auditLog` do shared
-- Substituir as 2 chamadas diretas a `supabase.rpc('register_system_log', { p_meta: ... })` por `auditLog(supabase, { ... meta: ... })`
+This captures orders whose deadline is today or tomorrow (in BRT), matching ML's behavior of showing "envios de hoje" for orders the seller must prepare now.
 
-### Arquivos modificados (adicionar logging): 6 edge functions
+### Step 2 -- Fix the cutoff refresh edge function
 
-Para cada uma, adicionar:
-- Import do `auditLog`
-- `auditLog` no catch global
-- `auditLog` nos pontos de erro criticos
-- `auditLog` de sucesso no fluxo principal
+In `meli-shipping-cutoff-refresh/index.ts`, extend the shipment-based cutoff fallback search window:
 
-Redeploy de todas as funcoes modificadas.
+Change the query range from today-only:
+```
+todayStartUTC .. todayEndUTC  (24h window)
+```
+To today + tomorrow:
+```
+todayStartUTC .. tomorrowEndUTC  (48h window)
+```
+
+This ensures the earliest `estimated_handling_limit` (e.g., Feb 26 07:03 BRT) is found and used as the colecta cutoff time.
+
+### Step 3 -- Deploy and audit log
+
+- Deploy the updated edge function
+- Add a `system_logs` entry documenting the fix
+- Verify the RPC returns 7 orders for "today_dispatch"
+- Verify the cutoff cache gets populated with a time value
+
+### Technical Details
+
+```text
+Root cause diagram:
+
+ML "Envios de hoje" = orders seller must act on TODAY
+  └─ includes orders with deadline TOMORROW (dispatch today to meet it)
+
+System "Envios de hoje" filter:
+  └─ only includes handling_limit <= end-of-today-BRT
+  └─ MISSES orders with handling_limit = tomorrow-BRT
+
+Same gap affects cutoff extraction:
+  └─ searches handling_limit within today-BRT only
+  └─ finds nothing → cutoff = NULL → "—" in UI
+```
+
+No changes to RLS policies, no changes to table structure. Only the RPC function and one edge function are modified.
