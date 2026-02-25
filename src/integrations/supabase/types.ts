@@ -4446,6 +4446,80 @@ export type Database = {
         }
         Relationships: []
       }
+      help_articles: {
+        Row: {
+          category_id: string
+          content: string
+          created_at: string
+          id: string
+          published: boolean
+          slug: string
+          summary: string | null
+          title: string
+          updated_at: string
+          views: number
+        }
+        Insert: {
+          category_id: string
+          content: string
+          created_at?: string
+          id?: string
+          published?: boolean
+          slug: string
+          summary?: string | null
+          title: string
+          updated_at?: string
+          views?: number
+        }
+        Update: {
+          category_id?: string
+          content?: string
+          created_at?: string
+          id?: string
+          published?: boolean
+          slug?: string
+          summary?: string | null
+          title?: string
+          updated_at?: string
+          views?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "help_articles_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "help_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      help_categories: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          slug: string
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          slug: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          slug?: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       highlights_items: {
         Row: {
           created_at: string
@@ -15839,6 +15913,10 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      increment_help_article_views: {
+        Args: { p_article_id: string }
+        Returns: undefined
       }
       increment_voucher_usage: {
         Args: { voucher_id: string }
