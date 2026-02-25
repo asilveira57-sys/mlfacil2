@@ -92,7 +92,7 @@ export default function ClonarAnuncio() {
   });
 
   // ============================================
-  // Load source item
+  // Load source item — fetch from BROWSER to avoid PolicyAgent 403
   // ============================================
   const handleLoadItem = useCallback(async () => {
     setError(null);
@@ -105,11 +105,10 @@ export default function ClonarAnuncio() {
       return;
     }
 
-    // Generate correlation_id
     const corrId = crypto.randomUUID().substring(0, 8);
     setCorrelationId(corrId);
 
-    // Log UI click to system_logs
+    // Log UI click
     try {
       await supabase.rpc('register_system_log', {
         p_level: 'info',
@@ -124,18 +123,107 @@ export default function ClonarAnuncio() {
 
     setLoading(true);
     try {
-      const { data, error: fnError } = await supabase.functions.invoke('mktpfacil-clone', {
-        body: { action: 'load_source', item_id: itemId, correlation_id: corrId, source_input_raw: sourceUrl },
-      });
+      // ---- BROWSER FETCH (bypasses edge PolicyAgent) ----
+      const itemUrl = `https://api.mercadolibre.com/items/${itemId}?include_attributes=all`;
+      const descUrl = `https://api.mercadolibre.com/items/${itemId}/description`;
 
-      if (fnError) throw new Error(fnError.message || 'Erro ao carregar anúncio');
-      if (data?.error) throw new Error(data.error);
-      if (!data?.snapshot) throw new Error('Resposta inválida do servidor');
+      const [itemRes, descRes] = await Promise.allSettled([
+        fetch(itemUrl, { headers: { Accept: 'application/json' } }),
+        fetch(descUrl, { headers: { Accept: 'application/json' } }),
+      ]);
 
-      // Update correlation_id from server if returned
-      if (data.correlation_id) setCorrelationId(data.correlation_id);
+      // Check if CORS blocked us (TypeError = network/CORS error)
+      if (itemRes.status === 'rejected') {
+        const isCors = itemRes.reason instanceof TypeError;
+        if (isCors) {
+          setError('O Mercado Livre bloqueou a leitura direta no navegador (CORS). Tentando modo alternativo via servidor...');
+          // Fallback to edge function
+          const { data, error: fnError } = await supabase.functions.invoke('mktpfacil-clone', {
+            body: { action: 'load_source', item_id: itemId, correlation_id: corrId, source_input_raw: sourceUrl },
+          });
+          if (fnError) throw new Error(fnError.message || 'Erro ao carregar anúncio');
+          if (data?.error) throw new Error(data.error);
+          if (!data?.snapshot) throw new Error('Resposta inválida do servidor');
+          setSnapshot(data.snapshot as SourceSnapshot);
+          setError(null); // clear CORS warning since fallback worked
+          return;
+        }
+        throw new Error(`Erro de rede ao buscar item: ${itemRes.reason?.message || 'desconhecido'}`);
+      }
 
-      setSnapshot(data.snapshot as SourceSnapshot);
+      const itemResponse = itemRes.value;
+      if (!itemResponse.ok) {
+        const body = await itemResponse.text().catch(() => '');
+        throw new Error(`Falha ao carregar (HTTP ${itemResponse.status}): ${body.substring(0, 300)}`);
+      }
+
+      const item = await itemResponse.json();
+
+      // Description (optional, may fail)
+      let description = '';
+      if (descRes.status === 'fulfilled' && descRes.value.ok) {
+        const descData = await descRes.value.json().catch(() => null);
+        description = descData?.plain_text || descData?.text || '';
+      }
+
+      // Build snapshot from browser data
+      const pictures = (item.pictures || []).map((p: any, i: number) => ({
+        id: p.id || `pic_${i}`,
+        url: (p.secure_url || p.url || '').replace(/^http:\/\//i, 'https://'),
+        secure_url: (p.secure_url || p.url || '').replace(/^http:\/\//i, 'https://'),
+      }));
+
+      const snap: SourceSnapshot = {
+        item_id: item.id || itemId,
+        title: item.title || '',
+        description,
+        price: item.price || 0,
+        currency_id: item.currency_id || 'BRL',
+        available_quantity: item.available_quantity || 1,
+        condition: item.condition || 'new',
+        category_id: item.category_id || '',
+        listing_type_id: item.listing_type_id || 'gold_special',
+        pictures,
+        attributes: (item.attributes || []).map((a: any) => ({
+          id: a.id,
+          name: a.name,
+          value_name: a.value_name,
+        })),
+        variations: (item.variations || []).map((v: any) => ({
+          id: v.id,
+          attribute_combinations: v.attribute_combinations || [],
+          available_quantity: v.available_quantity || 0,
+          price: v.price || item.price || 0,
+          picture_ids: v.picture_ids || [],
+        })),
+        seller_id: String(item.seller_id || ''),
+        thumbnail: item.thumbnail,
+        catalog_product_id: item.catalog_product_id,
+        catalog_listing: item.catalog_listing,
+      };
+
+      setSnapshot(snap);
+
+      // Log success
+      try {
+        await supabase.rpc('register_system_log', {
+          p_level: 'info',
+          p_system_area: 'clone_anuncio',
+          p_action: 'ml_browser_fetch_result',
+          p_user_id: null,
+          p_success: true,
+          p_message: `Browser fetch OK: ${itemId}`,
+          p_meta_json: {
+            correlation_id: corrId,
+            endpoint: itemUrl,
+            http_status: itemResponse.status,
+            pictures_count: pictures.length,
+            has_description: description.length > 0,
+            snippet: item.title?.substring(0, 100),
+          },
+        });
+      } catch (_) { /* fail-safe */ }
+
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Erro desconhecido';
       setError(msg);
