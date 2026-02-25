@@ -63,6 +63,7 @@ import ConsultantLibrary from "./pages/ConsultantLibrary";
 import PublicTipPage from "./pages/PublicTipPage";
 import { ZplViewerTool, TrendsLiteTool, PricingSimulatorTool, CommissionsTool } from "./pages/tools";
 import ClonarAnuncio from "./pages/ClonarAnuncio";
+import SystemStatus from "./pages/SystemStatus";
 import { AdminRoute } from "./components/auth/AdminRoute";
 
 // NOTE: GlobalWatchdogs removed to prevent background activity storms on tab focus.
@@ -161,6 +162,7 @@ const App = () => {
                 <Route path="/ferramentas/tendencias" element={<TrendsLiteTool />} />
                 <Route path="/ferramentas/precificacao" element={<PricingSimulatorTool />} />
                 <Route path="/ferramentas/comissoes" element={<CommissionsTool />} />
+                <Route path="/status" element={<SystemStatus />} />
 
                 {/* Dashboard routes (with persistent shell) */}
                 <Route element={<AppShellLayout />}>
