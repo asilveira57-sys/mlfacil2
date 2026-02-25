@@ -77,6 +77,7 @@ export default function ClonarAnuncio() {
   const [loading, setLoading] = useState(false);
   const [snapshot, setSnapshot] = useState<SourceSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [correlationId, setCorrelationId] = useState<string | null>(null);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [cloning, setCloning] = useState(false);
   const [activeTab, setActiveTab] = useState<'clone' | 'history'>('clone');
@@ -96,6 +97,7 @@ export default function ClonarAnuncio() {
   const handleLoadItem = useCallback(async () => {
     setError(null);
     setSnapshot(null);
+    setCorrelationId(null);
 
     const itemId = extractMeliId(sourceUrl);
     if (!itemId) {
@@ -103,15 +105,35 @@ export default function ClonarAnuncio() {
       return;
     }
 
+    // Generate correlation_id
+    const corrId = crypto.randomUUID().substring(0, 8);
+    setCorrelationId(corrId);
+
+    // Log UI click to system_logs
+    try {
+      await supabase.rpc('register_system_log', {
+        p_level: 'info',
+        p_system_area: 'clone_anuncio',
+        p_action: 'ui_click_carregar',
+        p_user_id: null,
+        p_success: true,
+        p_message: `Usuário clicou Carregar para ${itemId}`,
+        p_meta_json: { correlation_id: corrId, input_raw: sourceUrl, item_id: itemId },
+      });
+    } catch (_) { /* fail-safe */ }
+
     setLoading(true);
     try {
       const { data, error: fnError } = await supabase.functions.invoke('mktpfacil-clone', {
-        body: { action: 'load_source', item_id: itemId },
+        body: { action: 'load_source', item_id: itemId, correlation_id: corrId, source_input_raw: sourceUrl },
       });
 
       if (fnError) throw new Error(fnError.message || 'Erro ao carregar anúncio');
       if (data?.error) throw new Error(data.error);
       if (!data?.snapshot) throw new Error('Resposta inválida do servidor');
+
+      // Update correlation_id from server if returned
+      if (data.correlation_id) setCorrelationId(data.correlation_id);
 
       setSnapshot(data.snapshot as SourceSnapshot);
     } catch (err: unknown) {
@@ -228,6 +250,25 @@ export default function ClonarAnuncio() {
                       {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Carregar'}
                     </Button>
                   </div>
+                  {/* Correlation ID display */}
+                  {correlationId && (
+                    <div className="flex items-center justify-between gap-2 p-2 rounded-md bg-muted/50 text-xs">
+                      <span className="text-muted-foreground">
+                        Execução: <code className="font-mono font-medium text-foreground">{correlationId}</code>
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 text-xs gap-1"
+                        onClick={() => {
+                          window.open(`/admin/logs?area=clone_anuncio&search=${correlationId}`, '_blank');
+                        }}
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        Ver logs desta execução
+                      </Button>
+                    </div>
+                  )}
 
                   {error && (
                     <Alert variant="destructive">

@@ -67,9 +67,9 @@ async function logEvent(
   level: 'info' | 'warn' | 'error',
   message: string,
   context: Record<string, unknown> = {}
-) {
+): Promise<{ ok: boolean; error?: string }> {
   try {
-    await supabase.from('mktpfacil_system_logs').insert({
+    const { error } = await supabase.from('mktpfacil_system_logs').insert({
       user_id: userId,
       module: 'anuncios_clonar',
       entity_type: entityType,
@@ -79,8 +79,15 @@ async function logEvent(
       message,
       context_json: context,
     });
-  } catch (_) {
-    // fail-safe: never block main flow
+    if (error) {
+      console.error('LOG_INSERT_FAILED', { eventName, error: error.message, correlation_id: context.correlation_id });
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  } catch (err) {
+    const msg = (err as Error).message;
+    console.error('LOG_INSERT_FAILED', { eventName, err: msg, correlation_id: context.correlation_id });
+    return { ok: false, error: msg };
   }
 }
 
@@ -92,24 +99,32 @@ async function logEvent(
  * Fetch puro e isolado — NÃO usa mlClient, NÃO usa axios, NÃO usa supabase.functions.invoke.
  * Apenas fetch nativo do Deno, sem nenhum header de autorização.
  */
-async function mlPublicFetchItem(itemId: string, supabase: any, userId: string): Promise<any> {
+async function mlPublicFetchItem(itemId: string, supabase: any, userId: string, correlationId: string): Promise<any> {
   const url = `https://api.mercadolibre.com/items/${itemId}?include_attributes=all`;
+
+  // (B) log antes do fetch
+  await logEvent(supabase, userId, 'source', itemId, 'ml_request_prepare', 'info',
+    `Preparing public fetch for ${itemId}`, {
+      correlation_id: correlationId,
+      endpoint: url,
+      used_token: false,
+    });
+
   const start = Date.now();
 
   const response = await fetch(url, {
     method: 'GET',
-    headers: {
-      'Accept': 'application/json',
-    },
+    headers: { 'Accept': 'application/json' },
   });
 
   const body = await response.text();
   const elapsed = Date.now() - start;
 
-  // Log detalhado para diagnóstico
-  await logEvent(supabase, userId, 'source', itemId, 'ml_public_fetch', 'info',
+  // (C) log depois do fetch
+  await logEvent(supabase, userId, 'source', itemId, 'ml_request_result',
+    response.ok ? 'info' : 'error',
     `Public fetch ${itemId}: HTTP ${response.status} in ${elapsed}ms`, {
-      action: 'ml_public_fetch',
+      correlation_id: correlationId,
       endpoint: url,
       used_token: false,
       http_status: response.status,
@@ -130,82 +145,104 @@ async function mlPublicFetchItem(itemId: string, supabase: any, userId: string):
   return JSON.parse(body);
 }
 
-async function loadSource(itemId: string, supabase: any, userId: string) {
-  // 1. Fetch item via fetch público isolado
-  const item = await mlPublicFetchItem(itemId, supabase, userId);
+async function loadSource(itemId: string, supabase: any, userId: string, correlationId: string, sourceInputRaw?: string) {
+  let outcome = 'error';
+  const logResults: Record<string, boolean> = {};
 
-  // 2. Fetch description (public)
-  let description = '';
   try {
-    const descRes = await fetch(`https://api.mercadolibre.com/items/${itemId}/description`, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' },
-    });
-    if (descRes.ok) {
-      const descData = await descRes.json();
-      description = descData.plain_text || descData.text || '';
-    }
-  } catch (_) {
-    // Description not available publicly - continue
-  }
+    // (A) log de entrada
+    const enterLog = await logEvent(supabase, userId, 'source', itemId, 'load_source_enter', 'info',
+      `load_source started for ${itemId}`, {
+        correlation_id: correlationId,
+        item_id: itemId,
+        source_input_raw: sourceInputRaw || itemId,
+      });
+    logResults.load_source_enter = enterLog.ok;
 
-  // 3. Fetch category name
-  let categoryName = '';
-  try {
-    if (item.category_id) {
-      const catRes = await fetch(`https://api.mercadolibre.com/categories/${item.category_id}`, {
+    // 1. Fetch item via fetch público isolado
+    const item = await mlPublicFetchItem(itemId, supabase, userId, correlationId);
+
+    // 2. Fetch description (public)
+    let description = '';
+    try {
+      const descRes = await fetch(`https://api.mercadolibre.com/items/${itemId}/description`, {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
       });
-      if (catRes.ok) {
-        const catData = await catRes.json();
-        categoryName = catData.name || '';
+      if (descRes.ok) {
+        const descData = await descRes.json();
+        description = descData.plain_text || descData.text || '';
       }
-    }
-  } catch (_) {}
+    } catch (_) {}
 
-  // 4. Build snapshot
-  const snapshot = {
-    item_id: item.id,
-    title: item.title || '',
-    description,
-    price: item.price || 0,
-    currency_id: item.currency_id || 'BRL',
-    available_quantity: item.available_quantity || 0,
-    condition: item.condition || 'new',
-    category_id: item.category_id || '',
-    category_name: categoryName,
-    listing_type_id: item.listing_type_id || 'gold_special',
-    pictures: (item.pictures || []).map((p: any) => ({
-      id: p.id,
-      url: p.url || p.secure_url,
-      secure_url: p.secure_url || p.url,
-    })),
-    attributes: (item.attributes || []).map((a: any) => ({
-      id: a.id,
-      name: a.name,
-      value_id: a.value_id,
-      value_name: a.value_name,
-    })),
-    variations: (item.variations || []).map((v: any) => ({
-      id: v.id,
-      attribute_combinations: (v.attribute_combinations || []).map((ac: any) => ({
-        id: ac.id,
-        name: ac.name,
-        value_id: ac.value_id,
-        value_name: ac.value_name,
+    // 3. Fetch category name
+    let categoryName = '';
+    try {
+      if (item.category_id) {
+        const catRes = await fetch(`https://api.mercadolibre.com/categories/${item.category_id}`, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+        });
+        if (catRes.ok) {
+          const catData = await catRes.json();
+          categoryName = catData.name || '';
+        }
+      }
+    } catch (_) {}
+
+    // 4. Build snapshot
+    const snapshot = {
+      item_id: item.id,
+      title: item.title || '',
+      description,
+      price: item.price || 0,
+      currency_id: item.currency_id || 'BRL',
+      available_quantity: item.available_quantity || 0,
+      condition: item.condition || 'new',
+      category_id: item.category_id || '',
+      category_name: categoryName,
+      listing_type_id: item.listing_type_id || 'gold_special',
+      pictures: (item.pictures || []).map((p: any) => ({
+        id: p.id,
+        url: p.url || p.secure_url,
+        secure_url: p.secure_url || p.url,
       })),
-      available_quantity: v.available_quantity || 0,
-      price: v.price || item.price || 0,
-      picture_ids: v.picture_ids || [],
-    })),
-    seller_id: String(item.seller_id || ''),
-    thumbnail: item.thumbnail || item.secure_thumbnail || '',
-    catalog_product_id: item.catalog_product_id || null,
-    catalog_listing: item.catalog_listing || false,
-  };
+      attributes: (item.attributes || []).map((a: any) => ({
+        id: a.id,
+        name: a.name,
+        value_id: a.value_id,
+        value_name: a.value_name,
+      })),
+      variations: (item.variations || []).map((v: any) => ({
+        id: v.id,
+        attribute_combinations: (v.attribute_combinations || []).map((ac: any) => ({
+          id: ac.id,
+          name: ac.name,
+          value_id: ac.value_id,
+          value_name: ac.value_name,
+        })),
+        available_quantity: v.available_quantity || 0,
+        price: v.price || item.price || 0,
+        picture_ids: v.picture_ids || [],
+      })),
+      seller_id: String(item.seller_id || ''),
+      thumbnail: item.thumbnail || item.secure_thumbnail || '',
+      catalog_product_id: item.catalog_product_id || null,
+      catalog_listing: item.catalog_listing || false,
+    };
 
-  return snapshot;
+    outcome = 'success';
+    return { snapshot, logResults };
+  } finally {
+    // (D) log no finally (sempre executa)
+    const finallyLog = await logEvent(supabase, userId, 'source', itemId, 'load_source_finally', 'info',
+      `load_source finished: ${outcome}`, {
+        correlation_id: correlationId,
+        outcome,
+        log_insert_results: logResults,
+      });
+    logResults.load_source_finally = finallyLog.ok;
+  }
 }
 
 // ============================================
@@ -559,25 +596,25 @@ Deno.serve(async (req) => {
     const { action } = body;
 
     if (action === 'load_source') {
-      const { item_id } = body;
+      const { item_id, correlation_id, source_input_raw } = body;
       if (!item_id) return respond({ error: 'item_id é obrigatório' }, 400);
+      const corrId = correlation_id || crypto.randomUUID().substring(0, 8);
 
       try {
-        const snapshot = await loadSource(item_id, supabase, userId);
+        const { snapshot, logResults } = await loadSource(item_id, supabase, userId, corrId, source_input_raw);
         await logEvent(supabase, userId, 'source', item_id, 'source_loaded', 'info', `Item ${item_id} carregado`, {
+          correlation_id: corrId,
           pictures_count: snapshot.pictures?.length || 0,
           variations_count: snapshot.variations?.length || 0,
           has_catalog: !!snapshot.catalog_product_id,
         });
 
-        return respond({ snapshot });
+        return respond({ snapshot, correlation_id: corrId, log_insert_results: logResults });
       } catch (loadErr) {
         const errMsg = (loadErr as Error).message;
-        // Log to central audit table
-        await auditLog(supabase, { level: 'error', area: 'clone_anuncio', action: 'load_source_error', userId, success: false, message: errMsg, meta: { item_id, action: 'load_source' } });
-        // Also log to module-specific table
-        await logEvent(supabase, userId, 'source', item_id, 'source_load_error', 'error', errMsg);
-        return respond({ error: errMsg }, 200);
+        await auditLog(supabase, { level: 'error', area: 'clone_anuncio', action: 'load_source_error', userId, success: false, message: errMsg, meta: { item_id, correlation_id: corrId } });
+        await logEvent(supabase, userId, 'source', item_id, 'source_load_error', 'error', errMsg, { correlation_id: corrId });
+        return respond({ error: errMsg, correlation_id: corrId }, 200);
       }
     }
 
