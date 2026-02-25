@@ -146,103 +146,139 @@ async function mlPublicFetchItem(itemId: string, supabase: any, userId: string, 
 }
 
 async function loadSource(itemId: string, supabase: any, userId: string, correlationId: string, sourceInputRaw?: string) {
-  let outcome = 'error';
-  const logResults: Record<string, boolean> = {};
+  const totalStart = Date.now();
+
+  // === STEP 1: Diagnostic — 2 fetches, 1 log ===
+  let siteStatus = 0;
+  let siteSnippet = '';
+  let itemStatus = 0;
+  let itemSnippet = '';
 
   try {
-    // (A) log de entrada
-    const enterLog = await logEvent(supabase, userId, 'source', itemId, 'load_source_enter', 'info',
-      `load_source started for ${itemId}`, {
-        correlation_id: correlationId,
-        item_id: itemId,
-        source_input_raw: sourceInputRaw || itemId,
-      });
-    logResults.load_source_enter = enterLog.ok;
+    const siteRes = await fetch('https://api.mercadolibre.com/sites/MLB', {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+    });
+    siteStatus = siteRes.status;
+    const siteBody = await siteRes.text();
+    siteSnippet = siteBody.substring(0, 200);
+  } catch (e) {
+    siteSnippet = `FETCH_ERROR: ${(e as Error).message}`;
+  }
 
-    // 1. Fetch item via fetch público isolado
-    const item = await mlPublicFetchItem(itemId, supabase, userId, correlationId);
+  try {
+    const itemRes = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+    });
+    itemStatus = itemRes.status;
+    const itemBody = await itemRes.text();
+    itemSnippet = itemBody.substring(0, 400);
+  } catch (e) {
+    itemSnippet = `FETCH_ERROR: ${(e as Error).message}`;
+  }
 
-    // 2. Fetch description (public)
-    let description = '';
-    try {
-      const descRes = await fetch(`https://api.mercadolibre.com/items/${itemId}/description`, {
+  const elapsedTotal = Date.now() - totalStart;
+
+  // Write single diagnostic log
+  await logEvent(supabase, userId, 'source', itemId, 'load_source_diag', 'info',
+    `Diag: site=${siteStatus} item=${itemStatus} elapsed=${elapsedTotal}ms`, {
+      correlation_id: correlationId,
+      item_id: itemId,
+      site_status: siteStatus,
+      site_snippet: siteSnippet,
+      item_status: itemStatus,
+      item_snippet: itemSnippet,
+      used_token: false,
+      elapsed_ms_total: elapsedTotal,
+    });
+
+  // If item fetch failed, throw with details for UI
+  if (itemStatus !== 200) {
+    throw new Error(`Falha ao carregar (HTTP ${itemStatus}): ${itemSnippet}`);
+  }
+
+  // === STEP 2: Parse item from successful fetch — re-fetch with attributes ===
+  const fullRes = await fetch(`https://api.mercadolibre.com/items/${itemId}?include_attributes=all`, {
+    method: 'GET',
+    headers: { 'Accept': 'application/json' },
+  });
+  if (!fullRes.ok) {
+    throw new Error(`Falha ao carregar detalhes (HTTP ${fullRes.status})`);
+  }
+  const item = await fullRes.json();
+
+  // Fetch description (public)
+  let description = '';
+  try {
+    const descRes = await fetch(`https://api.mercadolibre.com/items/${itemId}/description`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+    });
+    if (descRes.ok) {
+      const descData = await descRes.json();
+      description = descData.plain_text || descData.text || '';
+    }
+  } catch (_) {}
+
+  // Fetch category name
+  let categoryName = '';
+  try {
+    if (item.category_id) {
+      const catRes = await fetch(`https://api.mercadolibre.com/categories/${item.category_id}`, {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
       });
-      if (descRes.ok) {
-        const descData = await descRes.json();
-        description = descData.plain_text || descData.text || '';
+      if (catRes.ok) {
+        const catData = await catRes.json();
+        categoryName = catData.name || '';
       }
-    } catch (_) {}
+    }
+  } catch (_) {}
 
-    // 3. Fetch category name
-    let categoryName = '';
-    try {
-      if (item.category_id) {
-        const catRes = await fetch(`https://api.mercadolibre.com/categories/${item.category_id}`, {
-          method: 'GET',
-          headers: { 'Accept': 'application/json' },
-        });
-        if (catRes.ok) {
-          const catData = await catRes.json();
-          categoryName = catData.name || '';
-        }
-      }
-    } catch (_) {}
+  // Build snapshot
+  const snapshot = {
+    item_id: item.id,
+    title: item.title || '',
+    description,
+    price: item.price || 0,
+    currency_id: item.currency_id || 'BRL',
+    available_quantity: item.available_quantity || 0,
+    condition: item.condition || 'new',
+    category_id: item.category_id || '',
+    category_name: categoryName,
+    listing_type_id: item.listing_type_id || 'gold_special',
+    pictures: (item.pictures || []).map((p: any) => ({
+      id: p.id,
+      url: p.url || p.secure_url,
+      secure_url: p.secure_url || p.url,
+    })),
+    attributes: (item.attributes || []).map((a: any) => ({
+      id: a.id,
+      name: a.name,
+      value_id: a.value_id,
+      value_name: a.value_name,
+    })),
+    variations: (item.variations || []).map((v: any) => ({
+      id: v.id,
+      attribute_combinations: (v.attribute_combinations || []).map((ac: any) => ({
+        id: ac.id,
+        name: ac.name,
+        value_id: ac.value_id,
+        value_name: ac.value_name,
+      })),
+      available_quantity: v.available_quantity || 0,
+      price: v.price || item.price || 0,
+      picture_ids: v.picture_ids || [],
+    })),
+    seller_id: String(item.seller_id || ''),
+    thumbnail: item.thumbnail || item.secure_thumbnail || '',
+    catalog_product_id: item.catalog_product_id || null,
+    catalog_listing: item.catalog_listing || false,
+  };
 
-    // 4. Build snapshot
-    const snapshot = {
-      item_id: item.id,
-      title: item.title || '',
-      description,
-      price: item.price || 0,
-      currency_id: item.currency_id || 'BRL',
-      available_quantity: item.available_quantity || 0,
-      condition: item.condition || 'new',
-      category_id: item.category_id || '',
-      category_name: categoryName,
-      listing_type_id: item.listing_type_id || 'gold_special',
-      pictures: (item.pictures || []).map((p: any) => ({
-        id: p.id,
-        url: p.url || p.secure_url,
-        secure_url: p.secure_url || p.url,
-      })),
-      attributes: (item.attributes || []).map((a: any) => ({
-        id: a.id,
-        name: a.name,
-        value_id: a.value_id,
-        value_name: a.value_name,
-      })),
-      variations: (item.variations || []).map((v: any) => ({
-        id: v.id,
-        attribute_combinations: (v.attribute_combinations || []).map((ac: any) => ({
-          id: ac.id,
-          name: ac.name,
-          value_id: ac.value_id,
-          value_name: ac.value_name,
-        })),
-        available_quantity: v.available_quantity || 0,
-        price: v.price || item.price || 0,
-        picture_ids: v.picture_ids || [],
-      })),
-      seller_id: String(item.seller_id || ''),
-      thumbnail: item.thumbnail || item.secure_thumbnail || '',
-      catalog_product_id: item.catalog_product_id || null,
-      catalog_listing: item.catalog_listing || false,
-    };
-
-    outcome = 'success';
-    return { snapshot, logResults };
-  } finally {
-    // (D) log no finally (sempre executa)
-    const finallyLog = await logEvent(supabase, userId, 'source', itemId, 'load_source_finally', 'info',
-      `load_source finished: ${outcome}`, {
-        correlation_id: correlationId,
-        outcome,
-        log_insert_results: logResults,
-      });
-    logResults.load_source_finally = finallyLog.ok;
-  }
+  const logResults = { load_source_diag: true };
+  return { snapshot, logResults };
 }
 
 // ============================================
