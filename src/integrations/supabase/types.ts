@@ -4491,6 +4491,44 @@ export type Database = {
         }
         Relationships: []
       }
+      incidents_log: {
+        Row: {
+          created_at: string
+          description: string
+          id: string
+          resolved_at: string | null
+          service_id: string
+          started_at: string
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string
+          id?: string
+          resolved_at?: string | null
+          service_id: string
+          started_at?: string
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          id?: string
+          resolved_at?: string | null
+          service_id?: string
+          started_at?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "incidents_log_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "system_status_services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       integration_status: {
         Row: {
           config: Json
@@ -13392,6 +13430,71 @@ export type Database = {
           key?: string
           updated_at?: string
           value?: Json
+        }
+        Relationships: []
+      }
+      system_status_logs: {
+        Row: {
+          changed_by: string | null
+          created_at: string
+          id: string
+          new_status: string
+          previous_status: string
+          service_id: string
+        }
+        Insert: {
+          changed_by?: string | null
+          created_at?: string
+          id?: string
+          new_status: string
+          previous_status: string
+          service_id: string
+        }
+        Update: {
+          changed_by?: string | null
+          created_at?: string
+          id?: string
+          new_status?: string
+          previous_status?: string
+          service_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "system_status_logs_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "system_status_services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      system_status_services: {
+        Row: {
+          created_at: string
+          id: string
+          last_checked: string
+          message: string | null
+          service_name: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          last_checked?: string
+          message?: string | null
+          service_name: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          last_checked?: string
+          message?: string | null
+          service_name?: string
+          status?: string
+          updated_at?: string
         }
         Relationships: []
       }
