@@ -53,7 +53,7 @@ export function OnboardingSync({
         {/* Welcome Message */}
         <div className="space-y-2">
           <h2 className="text-2xl font-bold text-foreground">
-            {isDone ? "Tudo pronto!" : "Bem-vindo ao ML Analyzer Pro!"}
+            {isDone ? "Tudo pronto!" : "Bem-vindo ao MKTP Fácil!"}
           </h2>
           {sellerNickname && (
             <p className="text-muted-foreground">

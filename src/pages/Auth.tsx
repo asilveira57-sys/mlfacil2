@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BarChart3, TrendingUp, Target, Zap } from "lucide-react";
+import { BarChart3, DollarSign, LayoutDashboard, Settings2 } from "lucide-react";
 
 const Auth = () => {
   const { t, i18n } = useTranslation();
@@ -81,13 +81,13 @@ const Auth = () => {
             <div className="w-12 h-12 bg-accent rounded-xl flex items-center justify-center">
               <BarChart3 className="w-7 h-7" />
             </div>
-            <h1 className="text-3xl font-bold">ML Analyzer Pro</h1>
+            <h1 className="text-3xl font-bold">MKTP Fácil</h1>
           </div>
           
           <div className="space-y-8">
             <div className="flex items-start gap-4">
               <div className="w-10 h-10 bg-primary-light/20 rounded-lg flex items-center justify-center flex-shrink-0 mt-1">
-                <Target className="w-5 h-5" />
+                <DollarSign className="w-5 h-5" />
               </div>
               <div>
                 <h3 className="text-xl font-semibold mb-2">{t('auth:features.complete_analysis_title')}</h3>
@@ -99,7 +99,7 @@ const Auth = () => {
             
             <div className="flex items-start gap-4">
               <div className="w-10 h-10 bg-primary-light/20 rounded-lg flex items-center justify-center flex-shrink-0 mt-1">
-                <TrendingUp className="w-5 h-5" />
+                <LayoutDashboard className="w-5 h-5" />
               </div>
               <div>
                 <h3 className="text-xl font-semibold mb-2">{t('auth:features.ranking_title')}</h3>
@@ -111,7 +111,7 @@ const Auth = () => {
             
             <div className="flex items-start gap-4">
               <div className="w-10 h-10 bg-primary-light/20 rounded-lg flex items-center justify-center flex-shrink-0 mt-1">
-                <Zap className="w-5 h-5" />
+                <Settings2 className="w-5 h-5" />
               </div>
               <div>
                 <h3 className="text-xl font-semibold mb-2">{t('auth:features.integration_title')}</h3>
@@ -136,7 +136,7 @@ const Auth = () => {
               <div className="w-12 h-12 bg-primary rounded-xl flex items-center justify-center">
                 <BarChart3 className="w-7 h-7 text-primary-foreground" />
               </div>
-              <h1 className="text-3xl font-bold text-foreground">ML Analyzer Pro</h1>
+              <h1 className="text-3xl font-bold text-foreground">MKTP Fácil</h1>
             </div>
           </div>
 
