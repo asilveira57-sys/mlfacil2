@@ -15384,6 +15384,8 @@ export type Database = {
           description: string | null
           features: Json | null
           is_campaign: boolean | null
+          max_sales: number | null
+          min_sales: number | null
           mode: string | null
           mode_order: number | null
           mp_checkout_url: string | null
