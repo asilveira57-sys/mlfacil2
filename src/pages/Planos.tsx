@@ -12,6 +12,7 @@ import { useTierPlans, formatPriceBRL, type PricingMode, type BillingCycle } fro
 import { usePlanCta } from "@/hooks/usePlanCta";
 import { useBillingCheckout } from "@/hooks/useBillingPlans";
 import { useUserAccess } from "@/contexts/UserAccessContext";
+import { useUserSalesVolume } from "@/hooks/useUserSalesVolume";
 import { EditableText } from "@/components/admin/EditableText";
 import { toast } from "sonner";
 import { 
@@ -54,6 +55,7 @@ const Planos = () => {
   const { checkout, loading: checkoutLoading } = useBillingCheckout();
   const { isAuthenticated, trialActive, trialExpired, flags } = useUserAccess();
   const { getCtaConfig, handleCtaClick } = usePlanCta();
+  const { totalSales30d } = useUserSalesVolume();
 
   // Initialize from URL params
   const initialMode = mapUrlMode(searchParams.get('mode'));
@@ -168,6 +170,19 @@ const Planos = () => {
 
         {/* Volume Plans Section */}
         <div className="bg-muted/50 pt-6 pb-6">
+          {/* Sales volume warning for authenticated users */}
+          {isAuthenticated && totalSales30d > 0 && (
+            <div className="max-w-5xl mx-auto px-4 mb-4">
+              <div className="flex items-center gap-2 bg-primary/5 border border-primary/20 rounded-lg px-4 py-2.5">
+                <Info className="w-4 h-4 text-primary flex-shrink-0" />
+                <p className="text-xs text-foreground">
+                  Seu volume total nos últimos 30 dias: <strong>{totalSales30d} vendas</strong>. 
+                  Planos com franquia inferior estão bloqueados.
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="text-center mb-5">
             <h2 className="text-lg md:text-xl font-bold text-foreground mb-2">
               {t('planos.volume_title')}
@@ -244,6 +259,7 @@ const Planos = () => {
                       mode={paymentMode}
                       period={paymentMode === 'assinatura' ? 'mensal' : billingCycle}
                       highlighted={isHighlighted}
+                      userTotalSales={isAuthenticated ? totalSales30d : 0}
                     />
                   );
                 })}
@@ -257,6 +273,7 @@ const Planos = () => {
                       plan={plan}
                       mode={paymentMode}
                       period={paymentMode === 'assinatura' ? 'mensal' : billingCycle}
+                      userTotalSales={isAuthenticated ? totalSales30d : 0}
                     />
                   ))}
                 </div>
