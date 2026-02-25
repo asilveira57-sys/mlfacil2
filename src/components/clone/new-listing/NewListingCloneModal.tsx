@@ -24,7 +24,7 @@ import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { TabStep, RawSnapshot, DraftPayload, CATALOG_FORCING_ATTRIBUTES, Attribute } from './types';
-import { useCloneDraft } from './useCloneDraft';
+import { useCloneDraft, parseInput, ParseResult } from './useCloneDraft';
 import { ReferenceTab, ContentTab, LogisticsTab, PublishTab } from './tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
@@ -59,6 +59,7 @@ export function NewListingCloneModal({ open, onOpenChange }: NewListingCloneModa
   const [success, setSuccess] = useState(false);
   const [createdItemId, setCreatedItemId] = useState<string | undefined>();
   const [authExpired, setAuthExpired] = useState(false);
+  const [currentParseResult, setCurrentParseResult] = useState<ParseResult | null>(null);
   
   // Reset ao fechar
   useEffect(() => {
@@ -72,6 +73,7 @@ export function NewListingCloneModal({ open, onOpenChange }: NewListingCloneModa
       setSuccess(false);
       setCreatedItemId(undefined);
       setAuthExpired(false);
+      setCurrentParseResult(null);
       resetDraft();
     }
   }, [open, resetDraft]);
@@ -83,12 +85,36 @@ export function NewListingCloneModal({ open, onOpenChange }: NewListingCloneModa
     }
   }, [draft?.draft_payload]);
   
-  // Buscar dados do anúncio de referência
+  // Buscar dados do anúncio de referência usando o parser inteligente
   const handleFetchReference = async () => {
-    const result = await fetchReference(sourceUrl);
+    const parsed = parseInput(sourceUrl);
+    setCurrentParseResult(parsed);
+    
+    if (parsed.decision === 'none') {
+      setError('Não foi possível identificar o ID do anúncio. Cole um link ou ID válido (MLB...)');
+      return;
+    }
+    
+    if (parsed.decision === 'mlbu_only') {
+      // Não buscar automaticamente - exibir UI para o usuário informar o MLB
+      return;
+    }
+    
+    // Temos um MLB - buscar normalmente
+    const mlbId = parsed.mlb_id!;
+    const result = await fetchReference(mlbId, 'MLB');
     if (result) {
       setSnapshot(result);
-      // Criar rascunho automaticamente
+      await createDraft(sourceUrl, result);
+    }
+  };
+  
+  // Handler para MLB manual (quando só MLBU foi detectado)
+  const handleManualMlbSubmit = async (mlbId: string) => {
+    console.log('[CloneParser] step=request_user_item_choice manual_mlb=', mlbId, 'mlbu=', currentParseResult?.mlbu_id);
+    const result = await fetchReference(mlbId, 'MLB');
+    if (result) {
+      setSnapshot(result);
       await createDraft(sourceUrl, result);
     }
   };
@@ -472,6 +498,8 @@ export function NewListingCloneModal({ open, onOpenChange }: NewListingCloneModa
                   error={draftError}
                   onFetch={handleFetchReference}
                   onContinue={handleContinueFromReference}
+                  parseResult={currentParseResult}
+                  onManualMlbSubmit={handleManualMlbSubmit}
                 />
               </TabsContent>
               
