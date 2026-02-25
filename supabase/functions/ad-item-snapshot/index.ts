@@ -55,30 +55,29 @@ async function logStep(supabase: any, params: {
 }
 
 // ============================================================================
-// INSTRUMENTED ML REQUEST — logs each HTTP call individually
+// ML PUBLIC FETCH — NEVER sends Authorization header
+// This is the ONLY function used for load_source reads.
 // ============================================================================
-async function instrumentedFetch(
+async function mlPublicFetch(
   supabase: any,
   userId: string,
   params: {
     attempt: string;
     endpoint: string;
-    method?: string;
-    used_token: boolean;
-    accessToken?: string;
     item_id: string;
     source_input_raw?: string;
     timeout?: number;
   }
 ): Promise<{ ok: boolean; status: number; data?: any; body_text?: string; elapsed_ms: number }> {
   const t0 = Date.now();
-  const method = params.method || 'GET';
-  const headers: Record<string, string> = {};
-  if (params.used_token && params.accessToken) {
-    headers["Authorization"] = `Bearer ${params.accessToken}`;
-  }
+  const method = 'GET';
 
-  // === LOG: ml_request_prepare (before calling) ===
+  // Explicit neutral headers — NO Authorization, NO cookies
+  const headers: Record<string, string> = {
+    'Accept': 'application/json',
+  };
+
+  // === LOG: ml_request_prepare ===
   await logStep(supabase, {
     user_id: userId,
     action: 'ml_request_prepare',
@@ -87,15 +86,20 @@ async function instrumentedFetch(
       attempt: params.attempt,
       endpoint: params.endpoint,
       method,
-      used_token: params.used_token,
-      headers_sanitized: params.used_token ? { Authorization: 'Bearer ***' } : {},
+      used_token: false,
+      headers_sanitized: { Accept: 'application/json' },
       item_id: params.item_id,
       source_input_raw: params.source_input_raw,
     },
   });
 
   try {
-    const fetchOptions: RequestInit = { method, headers };
+    const fetchOptions: RequestInit = {
+      method,
+      headers,
+      // Ensure no credentials are sent
+      credentials: 'omit' as any,
+    };
     if (params.timeout) {
       fetchOptions.signal = AbortSignal.timeout(params.timeout);
     }
@@ -107,7 +111,7 @@ async function instrumentedFetch(
     let data: any = undefined;
     try { data = JSON.parse(bodyText); } catch { data = undefined; }
 
-    // === LOG: ml_request_result (ALWAYS, even on 200) ===
+    // === LOG: ml_request_result (ALWAYS) ===
     await logStep(supabase, {
       user_id: userId,
       action: 'ml_request_result',
@@ -118,7 +122,7 @@ async function instrumentedFetch(
         attempt: params.attempt,
         endpoint: params.endpoint,
         method,
-        used_token: params.used_token,
+        used_token: false,
         http_status: response.status,
         duration_ms: elapsed_ms,
         response_body_snippet: bodyText.slice(0, 2000),
@@ -141,7 +145,7 @@ async function instrumentedFetch(
         attempt: params.attempt,
         endpoint: params.endpoint,
         method,
-        used_token: params.used_token,
+        used_token: false,
         http_status: 0,
         duration_ms: elapsed_ms,
         response_body_snippet: e.message,
@@ -156,28 +160,144 @@ async function instrumentedFetch(
 }
 
 // ============================================================================
-// RESOLUÇÃO DE MLBU → MLB
+// AUTHENTICATED FETCH — Only for diagnostic (attempt B) or own-item enrichment
 // ============================================================================
-async function resolveMLBUtoMLB(mlbuId: string, accessToken?: string): Promise<{
-  ok: boolean; itemId?: string; error?: string; productData?: any;
-}> {
-  console.log(`[ad-item-snapshot] Resolving MLBU: ${mlbuId}`);
-  const headers: Record<string, string> = {};
-  if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
-
-  const productResponse = await fetch(`https://api.mercadolibre.com/products/${mlbuId}`, { headers });
-  if (!productResponse.ok) {
-    const numericPart = mlbuId.replace(/^MLBU/i, '');
-    const mlbId = `MLB${numericPart}`;
-    const mlbResponse = await fetch(`https://api.mercadolibre.com/products/${mlbId}`, { headers });
-    if (!mlbResponse.ok) return { ok: false, error: `Produto de catálogo não encontrado: ${mlbuId}` };
-    const productData = await mlbResponse.json();
-    if (productData.buy_box_winner?.item_id) return { ok: true, itemId: productData.buy_box_winner.item_id, productData };
-    return { ok: false, error: "Catálogo sem vendedor ativo (buy_box vazio)", productData };
+async function mlAuthenticatedFetch(
+  supabase: any,
+  userId: string,
+  params: {
+    attempt: string;
+    endpoint: string;
+    accessToken: string;
+    item_id: string;
+    source_input_raw?: string;
+    timeout?: number;
   }
-  const productData = await productResponse.json();
-  if (productData.buy_box_winner?.item_id) return { ok: true, itemId: productData.buy_box_winner.item_id, productData };
-  return { ok: false, error: "Catálogo sem vendedor ativo (buy_box vazio)", productData };
+): Promise<{ ok: boolean; status: number; data?: any; body_text?: string; elapsed_ms: number }> {
+  const t0 = Date.now();
+  const method = 'GET';
+
+  const headers: Record<string, string> = {
+    'Accept': 'application/json',
+    'Authorization': `Bearer ${params.accessToken}`,
+  };
+
+  await logStep(supabase, {
+    user_id: userId,
+    action: 'ml_request_prepare',
+    message: `Preparando ${method} ${params.endpoint} (COM TOKEN)`,
+    meta: {
+      attempt: params.attempt,
+      endpoint: params.endpoint,
+      method,
+      used_token: true,
+      headers_sanitized: { Authorization: 'Bearer ***', Accept: 'application/json' },
+      item_id: params.item_id,
+      source_input_raw: params.source_input_raw,
+    },
+  });
+
+  try {
+    const fetchOptions: RequestInit = { method, headers };
+    if (params.timeout) {
+      fetchOptions.signal = AbortSignal.timeout(params.timeout);
+    }
+
+    const response = await fetch(params.endpoint, fetchOptions);
+    const elapsed_ms = Date.now() - t0;
+    const bodyText = await response.text().catch(() => "");
+
+    let data: any = undefined;
+    try { data = JSON.parse(bodyText); } catch { data = undefined; }
+
+    await logStep(supabase, {
+      user_id: userId,
+      action: 'ml_request_result',
+      level: response.ok ? 'info' : 'error',
+      success: response.ok,
+      message: `${method} ${new URL(params.endpoint).pathname} → ${response.status} (TOKEN)`,
+      meta: {
+        attempt: params.attempt,
+        endpoint: params.endpoint,
+        method,
+        used_token: true,
+        http_status: response.status,
+        duration_ms: elapsed_ms,
+        response_body_snippet: bodyText.slice(0, 2000),
+        error: !response.ok,
+        item_id: params.item_id,
+        source_input_raw: params.source_input_raw,
+      },
+    });
+
+    return { ok: response.ok, status: response.status, data, body_text: bodyText.slice(0, 2000), elapsed_ms };
+  } catch (e: any) {
+    const elapsed_ms = Date.now() - t0;
+    await logStep(supabase, {
+      user_id: userId,
+      action: 'ml_request_result',
+      level: 'error',
+      success: false,
+      message: `${method} ${params.endpoint} NETWORK_ERROR (TOKEN)`,
+      meta: {
+        attempt: params.attempt,
+        endpoint: params.endpoint,
+        method,
+        used_token: true,
+        http_status: 0,
+        duration_ms: elapsed_ms,
+        response_body_snippet: e.message,
+        error: true,
+        item_id: params.item_id,
+        source_input_raw: params.source_input_raw,
+        stack_trace: e.stack?.slice(0, 2000),
+      },
+    });
+    return { ok: false, status: 0, body_text: e.message, elapsed_ms };
+  }
+}
+
+// ============================================================================
+// RESOLUÇÃO DE MLBU → MLB (always public, no token)
+// ============================================================================
+async function resolveMLBUtoMLB(
+  supabase: any,
+  userId: string,
+  mlbuId: string
+): Promise<{ ok: boolean; itemId?: string; error?: string; productData?: any }> {
+  console.log(`[ad-item-snapshot] Resolving MLBU (PUBLIC): ${mlbuId}`);
+
+  // Try /products/{MLBU} — PUBLIC, no token
+  const productResult = await mlPublicFetch(supabase, userId, {
+    attempt: 'MLBU_resolve_public',
+    endpoint: `https://api.mercadolibre.com/products/${mlbuId}`,
+    item_id: mlbuId,
+  });
+
+  if (productResult.ok && productResult.data?.buy_box_winner?.item_id) {
+    return { ok: true, itemId: productResult.data.buy_box_winner.item_id, productData: productResult.data };
+  }
+
+  // Try with MLB prefix instead of MLBU
+  const numericPart = mlbuId.replace(/^MLBU/i, '');
+  const mlbId = `MLB${numericPart}`;
+  const mlbResult = await mlPublicFetch(supabase, userId, {
+    attempt: 'MLBU_resolve_public_alt',
+    endpoint: `https://api.mercadolibre.com/products/${mlbId}`,
+    item_id: mlbuId,
+  });
+
+  if (mlbResult.ok && mlbResult.data?.buy_box_winner?.item_id) {
+    return { ok: true, itemId: mlbResult.data.buy_box_winner.item_id, productData: mlbResult.data };
+  }
+
+  // Both failed
+  const bestData = productResult.data || mlbResult.data;
+  if (bestData?.buy_box_winner === null || bestData?.buy_box_winner === undefined) {
+    return { ok: false, error: "Catálogo sem vendedor ativo (buy_box vazio)", productData: bestData };
+  }
+
+  return { ok: false, error: `Produto de catálogo não encontrado: ${mlbuId}`, productData: bestData };
 }
 
 // ============================================================================
@@ -230,7 +350,6 @@ function processAllPictures(pictures: any[], thumbnail?: string) {
   return { processed, source: 'api_full' as const };
 }
 
-// Build a compact final_reason from attempt + status + body hint
 function buildFinalReason(attempt: string, status: number, bodySnippet?: string): string {
   let hint = '';
   if (bodySnippet) {
@@ -242,6 +361,9 @@ function buildFinalReason(attempt: string, status: number, bodySnippet?: string)
   return `${attempt}_${status}${hint}`;
 }
 
+// ============================================================================
+// MAIN HANDLER
+// ============================================================================
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -290,7 +412,7 @@ serve(async (req) => {
     await logStep(supabase, {
       user_id: user.id,
       action: 'load_source_start',
-      message: 'Iniciando leitura do anúncio de origem',
+      message: 'Iniciando leitura do anúncio de origem (PÚBLICO, sem token)',
       meta: {
         source_input_raw: source_input_raw || item_id,
         item_id: normalizedId,
@@ -302,25 +424,18 @@ serve(async (req) => {
     });
 
     // =========================================================================
-    // ETAPA 1: Resolver MLBU para MLB
+    // ETAPA 1: Resolver MLBU para MLB (PUBLIC — sem token)
     // =========================================================================
     if (id_type === 'MLBU' || /^MLBU/i.test(normalizedId)) {
-      let accessTokenForResolution: string | undefined;
-      if (seller_id) {
-        const { data: mlAccount } = await supabase
-          .from("ml_accounts").select("access_token")
-          .eq("ml_user_id", String(seller_id)).eq("user_id", user.id).maybeSingle();
-        accessTokenForResolution = mlAccount?.access_token || undefined;
-      }
-      const resolution = await resolveMLBUtoMLB(normalizedId, accessTokenForResolution);
+      const resolution = await resolveMLBUtoMLB(supabase, user.id, normalizedId);
       if (!resolution.ok) {
         await logStep(supabase, {
           user_id: user.id, action: 'load_source_error', level: 'error', success: false,
           message: 'Falha ao carregar anúncio',
           meta: {
             item_id: normalizedId, final_reason: 'MLBU_resolution_failed',
-            best_http_status: 404, endpoint_relevant: `/products/${normalizedId}`,
-            used_token_in_best_attempt: !!accessTokenForResolution,
+            final_http_status: 404, final_endpoint: `/products/${normalizedId}`,
+            used_token: false,
             elapsed_ms: Date.now() - t0Global,
           },
         });
@@ -339,7 +454,7 @@ serve(async (req) => {
     }
 
     // =========================================================================
-    // ETAPA 2: Buscar credenciais ML (para tentativa B)
+    // ETAPA 2: Buscar credenciais ML (para tentativa B diagnóstica apenas)
     // =========================================================================
     let mlAccount: { access_token: string | null; ml_user_id: string } | null = null;
     if (ml_account_id) {
@@ -359,13 +474,13 @@ serve(async (req) => {
     }
 
     // =========================================================================
-    // ETAPA 3: TENTATIVA A — API pública (sem token)
+    // ETAPA 3A: TENTATIVA A — API pública (SEM TOKEN — obrigatório)
     // =========================================================================
     const itemEndpoint = `https://api.mercadolibre.com/items/${resolvedItemId}`;
     const descEndpoint = `https://api.mercadolibre.com/items/${resolvedItemId}/description`;
 
-    const attemptA = await instrumentedFetch(supabase, user.id, {
-      attempt: 'A_public', endpoint: itemEndpoint, used_token: false,
+    const attemptA = await mlPublicFetch(supabase, user.id, {
+      attempt: 'A_public', endpoint: itemEndpoint,
       item_id: resolvedItemId, source_input_raw: source_input_raw || item_id,
     });
 
@@ -381,9 +496,9 @@ serve(async (req) => {
       itemData = attemptA.data;
       fetchMethod = 'public';
 
-      // Fetch description (public)
-      const descResult = await instrumentedFetch(supabase, user.id, {
-        attempt: 'A_public_desc', endpoint: descEndpoint, used_token: false,
+      // Fetch description (also public, no token)
+      const descResult = await mlPublicFetch(supabase, user.id, {
+        attempt: 'A_public_desc', endpoint: descEndpoint,
         item_id: resolvedItemId, source_input_raw: source_input_raw || item_id,
         timeout: 10000,
       });
@@ -393,55 +508,47 @@ serve(async (req) => {
       }
       captureLog.description_captured = !!description;
       captureLog.description_source = descriptionSource;
-
-      // If own item, try auth for richer data
-      const isOwnItem = mlAccount?.ml_user_id && String(itemData.seller_id) === String(mlAccount.ml_user_id);
-      if (isOwnItem && mlAccount?.access_token) {
-        const authItem = await instrumentedFetch(supabase, user.id, {
-          attempt: 'A_public_own_auth', endpoint: itemEndpoint, used_token: true,
-          accessToken: mlAccount.access_token, item_id: resolvedItemId,
-        });
-        if (authItem.ok && authItem.data) {
-          itemData = authItem.data;
-          fetchMethod = 'authenticated';
-          // Also fetch desc with auth
-          const authDesc = await instrumentedFetch(supabase, user.id, {
-            attempt: 'A_public_own_auth_desc', endpoint: descEndpoint, used_token: true,
-            accessToken: mlAccount.access_token, item_id: resolvedItemId,
-          });
-          if (authDesc.ok && authDesc.data) {
-            description = authDesc.data.plain_text || authDesc.data.text || '';
-            descriptionSource = 'api_authenticated';
-            captureLog.description_captured = true;
-            captureLog.description_source = 'api_authenticated';
-          }
-        }
-      }
     }
 
     // =========================================================================
-    // ETAPA 3B: TENTATIVA B — Token diagnostic (se A falhou)
+    // ETAPA 3B: TENTATIVA B — Token diagnostic (APENAS se A falhou)
+    // Apenas para diagnosticar se o bloqueio é por policy do ML.
+    // Nunca usado como fonte principal de dados para load_source.
     // =========================================================================
     if (!itemData && mlAccount?.access_token && [401, 403, 404].includes(attemptA.status)) {
       console.log(`[ad-item-snapshot] Attempt A failed (${attemptA.status}), trying B_token_diagnostic`);
 
-      const attemptB = await instrumentedFetch(supabase, user.id, {
-        attempt: 'B_token_diagnostic', endpoint: itemEndpoint, used_token: true,
+      const attemptB = await mlAuthenticatedFetch(supabase, user.id, {
+        attempt: 'B_token_diagnostic', endpoint: itemEndpoint,
         accessToken: mlAccount.access_token, item_id: resolvedItemId,
         source_input_raw: source_input_raw || item_id,
       });
 
       if (attemptB.ok && attemptB.data) {
-        // Token diagnostic succeeded — use data
+        // Token diagnostic succeeded — use data but LOG that we had to use token
         itemData = attemptB.data;
         fetchMethod = 'authenticated';
         bestAttemptStatus = attemptB.status;
         bestAttemptBody = attemptB.body_text || '';
         bestAttemptName = 'B_token_diagnostic';
 
-        // Fetch desc with token
-        const descB = await instrumentedFetch(supabase, user.id, {
-          attempt: 'B_token_diagnostic_desc', endpoint: descEndpoint, used_token: true,
+        // Log security alert: public failed but token worked
+        await logStep(supabase, {
+          user_id: user.id,
+          action: 'security_alert_token_needed',
+          level: 'warn',
+          message: `Item ${resolvedItemId} requer token (público bloqueado HTTP ${attemptA.status})`,
+          meta: {
+            item_id: resolvedItemId,
+            public_status: attemptA.status,
+            token_status: attemptB.status,
+            public_body_snippet: attemptA.body_text?.slice(0, 500),
+          },
+        });
+
+        // Fetch desc with token too
+        const descB = await mlAuthenticatedFetch(supabase, user.id, {
+          attempt: 'B_token_diagnostic_desc', endpoint: descEndpoint,
           accessToken: mlAccount.access_token, item_id: resolvedItemId,
         });
         if (descB.ok && descB.data) {
@@ -451,7 +558,6 @@ serve(async (req) => {
         captureLog.description_captured = !!description;
         captureLog.description_source = descriptionSource;
       } else {
-        // B also failed — update best attempt info if more informative
         if (attemptB.status > 0) {
           bestAttemptStatus = attemptB.status;
           bestAttemptBody = attemptB.body_text || '';
@@ -472,21 +578,21 @@ serve(async (req) => {
 
       if (cachedItem) {
         await logStep(supabase, {
-          user_id: user.id, action: 'ml_request', message: 'Cache fallback hit',
-          meta: { attempt: 'C_cache_fallback', item_id: resolvedItemId, cache_found: true },
+          user_id: user.id, action: 'ml_request_result', message: 'Cache fallback hit',
+          meta: { attempt: 'C_cache_fallback', item_id: resolvedItemId, cache_found: true, used_token: false },
         });
 
-        // Try one more public fetch
-        const retryPublic = await instrumentedFetch(supabase, user.id, {
-          attempt: 'C_cache_retry_public', endpoint: itemEndpoint, used_token: false,
+        // Retry public one more time
+        const retryPublic = await mlPublicFetch(supabase, user.id, {
+          attempt: 'C_cache_retry_public', endpoint: itemEndpoint,
           item_id: resolvedItemId,
         });
 
         if (retryPublic.ok && retryPublic.data) {
           itemData = retryPublic.data;
           fetchMethod = 'public';
-          const descRetry = await instrumentedFetch(supabase, user.id, {
-            attempt: 'C_cache_retry_desc', endpoint: descEndpoint, used_token: false,
+          const descRetry = await mlPublicFetch(supabase, user.id, {
+            attempt: 'C_cache_retry_desc', endpoint: descEndpoint,
             item_id: resolvedItemId, timeout: 10000,
           });
           if (descRetry.ok && descRetry.data) {
@@ -526,14 +632,12 @@ serve(async (req) => {
           final_endpoint: itemEndpoint,
           best_error_body_snippet: bestAttemptBody?.slice(0, 2000),
           used_token: bestAttemptName.includes('B_token'),
-          endpoint_relevant: itemEndpoint,
           elapsed_ms: Date.now() - t0Global,
           source_input_raw: source_input_raw || item_id,
           stack_trace: null,
         },
       });
 
-      // Extract a short message from the body for the UI
       let uiMessage = `Falha ao carregar (HTTP ${bestAttemptStatus})`;
       if (bestAttemptBody) {
         try {
@@ -624,6 +728,7 @@ serve(async (req) => {
       meta: {
         item_id: resolvedItemId,
         fetch_method: fetchMethod,
+        used_token: fetchMethod === 'authenticated',
         pictures: captureLog.pictures_count,
         description_captured: captureLog.description_captured,
         dimensions_captured: captureLog.dimensions_captured,
@@ -638,7 +743,6 @@ serve(async (req) => {
 
   } catch (error: any) {
     console.error(`[ad-item-snapshot] Error:`, error);
-    // Try to log the unhandled error
     try {
       const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
       const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
