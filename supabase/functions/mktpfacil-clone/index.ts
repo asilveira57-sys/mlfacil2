@@ -659,6 +659,93 @@ Deno.serve(async (req) => {
       return respond(result);
     }
 
+    if (action === 'publish_item') {
+      const { destination_account_id, payload, correlation_id: corrId, source_item_id, draft_id } = body;
+      if (!destination_account_id || !payload) return respond({ error: 'destination_account_id e payload são obrigatórios' }, 400);
+
+      await logEvent(supabase, userId, 'publish', source_item_id || 'unknown', 'publish_item_attempt', 'info', 'Publicação direta iniciada', { correlation_id: corrId });
+
+      // Get token
+      const { data: account, error: accErr } = await supabase
+        .from('ml_accounts')
+        .select('id, ml_user_id, access_token, refresh_token, token_expires_at')
+        .eq('id', destination_account_id)
+        .single();
+
+      if (accErr || !account) {
+        return respond({ error: 'Conta destino não encontrada', status: 'error', correlation_id: corrId });
+      }
+
+      let accessToken = account.access_token;
+      if (new Date(account.token_expires_at) < new Date()) {
+        try {
+          const refreshRes = await supabase.functions.invoke('ml-token-refresh', { body: { account_id: account.id } });
+          if (refreshRes.data?.access_token) accessToken = refreshRes.data.access_token;
+          else throw new Error('Refresh falhou');
+        } catch (err) {
+          return respond({ error: `Token expirado: ${(err as Error).message}`, status: 'error', correlation_id: corrId });
+        }
+      }
+
+      // Remove forbidden fields
+      const cleanPayload = { ...payload };
+      for (const field of FORBIDDEN_BODY_FIELDS) {
+        delete cleanPayload[field];
+      }
+
+      // POST to ML
+      try {
+        const createRes = await fetchWithRetry('https://api.mercadolibre.com/items', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(cleanPayload),
+        });
+
+        const createData = await createRes.json();
+
+        if (!createRes.ok) {
+          await logEvent(supabase, userId, 'publish', source_item_id || 'unknown', 'publish_item_error', 'error',
+            `POST /items falhou: HTTP ${createRes.status}`, { correlation_id: corrId, http_status: createRes.status, error_body: createData });
+
+          return respond({
+            status: 'error',
+            error: createData?.message || createData?.error || 'Erro na publicação',
+            error_body: createData,
+            http_status: createRes.status,
+            correlation_id: corrId,
+          });
+        }
+
+        // Success - set description if available
+        const newItemId = createData.id;
+        if (cleanPayload.description?.plain_text) {
+          try {
+            await fetchWithRetry(`https://api.mercadolibre.com/items/${newItemId}/description`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ plain_text: cleanPayload.description.plain_text }),
+            });
+          } catch (_) { /* description is optional */ }
+        }
+
+        await logEvent(supabase, userId, 'publish', newItemId, 'publish_item_success', 'info',
+          `Item publicado: ${newItemId}`, { correlation_id: corrId, item_id: newItemId, permalink: createData.permalink });
+
+        return respond({
+          status: 'success',
+          item_id: newItemId,
+          id: newItemId,
+          permalink: createData.permalink,
+          correlation_id: corrId,
+        });
+
+      } catch (publishErr) {
+        const errMsg = (publishErr as Error).message;
+        await logEvent(supabase, userId, 'publish', source_item_id || 'unknown', 'publish_item_network_error', 'error', errMsg, { correlation_id: corrId });
+        return respond({ error: errMsg, status: 'error', correlation_id: corrId });
+      }
+    }
+
     return respond({ error: `Ação desconhecida: ${action}` }, 400);
   } catch (err) {
     const errMsg = (err as Error).message;

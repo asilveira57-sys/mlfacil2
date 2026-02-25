@@ -2546,6 +2546,7 @@ export type Database = {
       clone_drafts: {
         Row: {
           captured_at: string
+          correlation_id: string | null
           created_at: string
           created_item_id: string | null
           draft_payload: Json
@@ -2564,6 +2565,7 @@ export type Database = {
         }
         Insert: {
           captured_at?: string
+          correlation_id?: string | null
           created_at?: string
           created_item_id?: string | null
           draft_payload?: Json
@@ -2582,6 +2584,7 @@ export type Database = {
         }
         Update: {
           captured_at?: string
+          correlation_id?: string | null
           created_at?: string
           created_item_id?: string | null
           draft_payload?: Json
