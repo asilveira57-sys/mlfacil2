@@ -22,7 +22,7 @@ export function LandingFooter() {
     ],
     suporte: [
       { labelKey: "home.footer.col2.link1", label: t('footer.col2.link1'), href: "#faq" },
-      { labelKey: "home.footer.col2.link2", label: t('footer.col2.link2'), href: "#" },
+      { labelKey: "home.footer.col2.link2", label: "Central de Ajuda", href: "/central-de-ajuda" },
       { labelKey: "home.footer.col2.link3", label: "Contato", href: "/contato" },
       { labelKey: "home.footer.col2.link4", label: "Status", href: "/status" }
     ],
