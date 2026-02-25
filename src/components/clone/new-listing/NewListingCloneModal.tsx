@@ -103,7 +103,7 @@ export function NewListingCloneModal({ open, onOpenChange }: NewListingCloneModa
     
     // Temos um MLB - buscar normalmente
     const mlbId = parsed.mlb_id!;
-    const result = await fetchReference(mlbId, 'MLB');
+    const result = await fetchReference(mlbId, 'MLB', sourceUrl);
     if (result) {
       setSnapshot(result);
       await createDraft(sourceUrl, result);
@@ -113,7 +113,7 @@ export function NewListingCloneModal({ open, onOpenChange }: NewListingCloneModa
   // Handler para MLB manual (quando só MLBU foi detectado)
   const handleManualMlbSubmit = async (mlbId: string) => {
     console.log('[CloneParser] step=request_user_item_choice manual_mlb=', mlbId, 'mlbu=', currentParseResult?.mlbu_id);
-    const result = await fetchReference(mlbId, 'MLB');
+    const result = await fetchReference(mlbId, 'MLB', sourceUrl);
     if (result) {
       setSnapshot(result);
       await createDraft(sourceUrl, result);

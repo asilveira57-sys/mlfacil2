@@ -139,7 +139,7 @@ export function useCloneDraft() {
   const [error, setError] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<LoadErrorDetail | null>(null);
   
-  const fetchReference = useCallback(async (itemId: string, idType: 'MLB' | 'MLBU' = 'MLB'): Promise<RawSnapshot | null> => {
+  const fetchReference = useCallback(async (itemId: string, idType: 'MLB' | 'MLBU' = 'MLB', sourceInputRaw?: string): Promise<RawSnapshot | null> => {
     if (!activeAccount?.sellerId) {
       setError('Selecione uma conta do Mercado Livre');
       return null;
@@ -157,6 +157,7 @@ export function useCloneDraft() {
           item_id: itemId, 
           id_type: idType,
           seller_id: activeAccount.sellerId,
+          source_input_raw: sourceInputRaw || itemId,
         },
       });
       
@@ -173,7 +174,7 @@ export function useCloneDraft() {
           http_status: data?.http_status,
           ml_error: data?.message || data?.error || 'Erro desconhecido',
           error_body_snippet: data?.error_body_snippet,
-          load_mode: data?.load_mode || 'public_api',
+          load_mode: data?.load_mode || data?.final_reason || 'public_api',
         };
         setErrorDetail(detail);
         
