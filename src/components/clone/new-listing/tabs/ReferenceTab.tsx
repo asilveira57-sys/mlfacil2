@@ -4,9 +4,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, Link, Search, AlertCircle, CheckCircle2, Info, ImageIcon, FileText, Ruler, Package } from 'lucide-react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Loader2, Link, Search, AlertCircle, CheckCircle2, Info, ImageIcon, FileText, Ruler, Package, ChevronDown } from 'lucide-react';
 import { RawSnapshot } from '../types';
-import { ParseResult, parseInput } from '../useCloneDraft';
+import { ParseResult, LoadErrorDetail } from '../useCloneDraft';
 
 interface ReferenceTabProps {
   sourceUrl: string;
@@ -14,11 +15,10 @@ interface ReferenceTabProps {
   snapshot: RawSnapshot | null;
   loading: boolean;
   error: string | null;
+  errorDetail: LoadErrorDetail | null;
   onFetch: () => void;
   onContinue: () => void;
-  /** Set when parser detects MLBU-only (no MLB in URL) */
   parseResult: ParseResult | null;
-  /** Called when user provides manual MLB for MLBU fallback */
   onManualMlbSubmit: (mlbId: string) => void;
 }
 
@@ -28,12 +28,14 @@ export function ReferenceTab({
   snapshot,
   loading,
   error,
+  errorDetail,
   onFetch,
   onContinue,
   parseResult,
   onManualMlbSubmit,
 }: ReferenceTabProps) {
   const [manualMlbId, setManualMlbId] = useState('');
+  const [showTechLog, setShowTechLog] = useState(false);
 
   const handlePaste = async () => {
     try {
@@ -76,34 +78,58 @@ export function ReferenceTab({
             />
           </div>
           <div className="flex gap-2 flex-shrink-0">
-            <Button
-              variant="outline"
-              onClick={handlePaste}
-              disabled={loading}
-            >
+            <Button variant="outline" onClick={handlePaste} disabled={loading}>
               Colar
             </Button>
-            <Button
-              onClick={onFetch}
-              disabled={loading || !sourceUrl.trim()}
-            >
+            <Button onClick={onFetch} disabled={loading || !sourceUrl.trim()}>
               {loading ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Buscando...
-                </>
+                <><Loader2 className="h-4 w-4 animate-spin mr-2" />Buscando...</>
               ) : (
-                <>
-                  <Search className="h-4 w-4 mr-2" />
-                  Buscar
-                </>
+                <><Search className="h-4 w-4 mr-2" />Buscar</>
               )}
             </Button>
           </div>
         </div>
       </div>
       
-      {error && (
+      {/* Detailed error block */}
+      {error && errorDetail && (
+        <div className="border border-destructive/50 rounded-lg p-4 space-y-3 bg-destructive/5">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-5 w-5 text-destructive mt-0.5 flex-shrink-0" />
+            <div className="space-y-1 flex-1">
+              <h4 className="font-medium text-destructive">Falha ao carregar anúncio</h4>
+              <div className="text-sm space-y-0.5">
+                <p><span className="text-muted-foreground">Item:</span> {errorDetail.item_id}</p>
+                {errorDetail.http_status && (
+                  <p><span className="text-muted-foreground">Status HTTP:</span> {errorDetail.http_status}</p>
+                )}
+                <p><span className="text-muted-foreground">Erro:</span> {errorDetail.ml_error}</p>
+                <p><span className="text-muted-foreground">Modo tentado:</span> {errorDetail.load_mode}</p>
+              </div>
+            </div>
+          </div>
+          
+          {errorDetail.error_body_snippet && (
+            <Collapsible open={showTechLog} onOpenChange={setShowTechLog}>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="sm" className="gap-1 text-xs">
+                  <ChevronDown className={`h-3 w-3 transition-transform ${showTechLog ? 'rotate-180' : ''}`} />
+                  Abrir Log Técnico
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-40 mt-2 whitespace-pre-wrap break-all">
+                  {errorDetail.error_body_snippet}
+                </pre>
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+        </div>
+      )}
+      
+      {/* Simple error (no detail) */}
+      {error && !errorDetail && (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>{error}</AlertDescription>
@@ -130,7 +156,7 @@ export function ReferenceTab({
                 Produto de catálogo detectado (MLBU)
               </h4>
               <p className="text-sm text-muted-foreground">
-                Link de catálogo detectado (<strong>{parseResult.mlbu_id}</strong>). 
+                Link de catálogo detectado (<strong>{parseResult?.mlbu_id}</strong>). 
                 Selecione qual anúncio (<strong>MLB…</strong>) deve ser usado como origem.
               </p>
               <p className="text-sm text-muted-foreground">
@@ -152,11 +178,7 @@ export function ReferenceTab({
               onClick={handleManualSubmit}
               disabled={loading || !/^MLB\d{8,}$/i.test(manualMlbId.trim().replace(/-/g, ''))}
             >
-              {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : (
-                <Search className="h-4 w-4 mr-2" />
-              )}
+              {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
               Carregar
             </Button>
           </div>
@@ -176,15 +198,9 @@ export function ReferenceTab({
             <div className="flex-1 min-w-0 space-y-2">
               <h4 className="font-medium line-clamp-2">{snapshot.title}</h4>
               <div className="flex flex-wrap gap-2">
-                <Badge variant="secondary">
-                  R$ {snapshot.price?.toFixed(2)}
-                </Badge>
-                <Badge variant="outline">
-                  {snapshot.available_quantity} disponível(is)
-                </Badge>
-                <Badge variant="outline">
-                  {snapshot.condition === 'new' ? 'Novo' : 'Usado'}
-                </Badge>
+                <Badge variant="secondary">R$ {snapshot.price?.toFixed(2)}</Badge>
+                <Badge variant="outline">{snapshot.available_quantity} disponível(is)</Badge>
+                <Badge variant="outline">{snapshot.condition === 'new' ? 'Novo' : 'Usado'}</Badge>
                 {snapshot.is_catalog_source && (
                   <Badge variant="destructive" className="gap-1">
                     <AlertCircle className="h-3 w-3" />
@@ -227,19 +243,13 @@ export function ReferenceTab({
                     <p className="font-medium text-foreground">Identificadores encontrados:</p>
                     <div className="flex flex-wrap gap-2 mt-1">
                       {snapshot.captured_gtin && (
-                        <Badge variant="outline" className="text-xs">
-                          GTIN: {snapshot.captured_gtin}
-                        </Badge>
+                        <Badge variant="outline" className="text-xs">GTIN: {snapshot.captured_gtin}</Badge>
                       )}
                       {snapshot.captured_ean && snapshot.captured_ean !== snapshot.captured_gtin && (
-                        <Badge variant="outline" className="text-xs">
-                          EAN: {snapshot.captured_ean}
-                        </Badge>
+                        <Badge variant="outline" className="text-xs">EAN: {snapshot.captured_ean}</Badge>
                       )}
                       {snapshot.captured_sku && (
-                        <Badge variant="outline" className="text-xs">
-                          SKU: {snapshot.captured_sku}
-                        </Badge>
+                        <Badge variant="outline" className="text-xs">SKU: {snapshot.captured_sku}</Badge>
                       )}
                     </div>
                   </div>
@@ -304,10 +314,7 @@ export function ReferenceTab({
       
       {snapshot && (
         <div className="flex justify-end">
-          <Button 
-            onClick={onContinue}
-            disabled={snapshot.pictures?.length === 0}
-          >
+          <Button onClick={onContinue} disabled={snapshot.pictures?.length === 0}>
             Continuar para edição
           </Button>
         </div>
