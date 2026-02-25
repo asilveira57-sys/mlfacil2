@@ -85,28 +85,62 @@ async function logEvent(
 }
 
 // ============================================
-// ACTION: Load source (public API, no token needed)
+// ACTION: Load source — ISOLATED public fetch (NO token, NO global client)
 // ============================================
-async function loadSource(itemId: string) {
-  // 1. Fetch item (public)
-  const itemRes = await fetchWithRetry(`https://api.mercadolibre.com/items/${itemId}?include_attributes=all`);
-  if (!itemRes.ok) {
-    const status = itemRes.status;
-    if (status === 404) {
+
+/**
+ * Fetch puro e isolado — NÃO usa mlClient, NÃO usa axios, NÃO usa supabase.functions.invoke.
+ * Apenas fetch nativo do Deno, sem nenhum header de autorização.
+ */
+async function mlPublicFetchItem(itemId: string, supabase: any, userId: string): Promise<any> {
+  const url = `https://api.mercadolibre.com/items/${itemId}?include_attributes=all`;
+  const start = Date.now();
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json',
+    },
+  });
+
+  const body = await response.text();
+  const elapsed = Date.now() - start;
+
+  // Log detalhado para diagnóstico
+  await logEvent(supabase, userId, 'source', itemId, 'ml_public_fetch', 'info',
+    `Public fetch ${itemId}: HTTP ${response.status} in ${elapsed}ms`, {
+      action: 'ml_public_fetch',
+      endpoint: url,
+      used_token: false,
+      http_status: response.status,
+      elapsed_ms: elapsed,
+      response_body_snippet: body.substring(0, 2000),
+    });
+
+  if (!response.ok) {
+    if (response.status === 404) {
       throw new Error(`Anúncio ${itemId} não encontrado. Verifique se o ID está correto. IDs do tipo MLBU (catálogo) não são suportados — use o link completo do anúncio para que o MLB seja extraído automaticamente.`);
     }
-    if (status === 403) {
-      throw new Error(`Anúncio ${itemId} está bloqueado por políticas do Mercado Livre. Isso pode ocorrer com produtos de catálogo restrito. Tente outro anúncio.`);
+    if (response.status === 403) {
+      throw new Error(`Anúncio ${itemId} está bloqueado por políticas do Mercado Livre (HTTP 403 via fetch público sem token). Isso pode ser bloqueio por IP do servidor.`);
     }
-    const err = await itemRes.text();
-    throw new Error(`Falha ao buscar item ${itemId} (HTTP ${status}). Tente novamente em alguns instantes.`);
+    throw new Error(`Falha ao buscar item ${itemId} (HTTP ${response.status}). Tente novamente em alguns instantes.`);
   }
-  const item = await itemRes.json();
+
+  return JSON.parse(body);
+}
+
+async function loadSource(itemId: string, supabase: any, userId: string) {
+  // 1. Fetch item via fetch público isolado
+  const item = await mlPublicFetchItem(itemId, supabase, userId);
 
   // 2. Fetch description (public)
   let description = '';
   try {
-    const descRes = await fetchWithRetry(`https://api.mercadolibre.com/items/${itemId}/description`);
+    const descRes = await fetch(`https://api.mercadolibre.com/items/${itemId}/description`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+    });
     if (descRes.ok) {
       const descData = await descRes.json();
       description = descData.plain_text || descData.text || '';
@@ -119,7 +153,10 @@ async function loadSource(itemId: string) {
   let categoryName = '';
   try {
     if (item.category_id) {
-      const catRes = await fetchWithRetry(`https://api.mercadolibre.com/categories/${item.category_id}`);
+      const catRes = await fetch(`https://api.mercadolibre.com/categories/${item.category_id}`, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+      });
       if (catRes.ok) {
         const catData = await catRes.json();
         categoryName = catData.name || '';
@@ -526,7 +563,7 @@ Deno.serve(async (req) => {
       if (!item_id) return respond({ error: 'item_id é obrigatório' }, 400);
 
       try {
-        const snapshot = await loadSource(item_id);
+        const snapshot = await loadSource(item_id, supabase, userId);
         await logEvent(supabase, userId, 'source', item_id, 'source_loaded', 'info', `Item ${item_id} carregado`, {
           pictures_count: snapshot.pictures?.length || 0,
           variations_count: snapshot.variations?.length || 0,
