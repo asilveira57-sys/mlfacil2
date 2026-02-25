@@ -10,7 +10,7 @@ O MKTP Fácil é operado por:
 
 **MLFACIL CONSULTORIA E SISTEMAS LTDA**
 CNPJ: 52.833.264/0001-20
-Endereço: Rua Luiz Fernando Reis, nº 417, Apto 703
+Endereço: Rua Luiz Fernando Reis, nº 417
 Bairro Praia da Costa – Vila Velha – ES
 CEP: 29.101-120
 E-mail para contato: contato@mktpfacil.com
