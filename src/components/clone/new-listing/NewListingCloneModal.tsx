@@ -41,6 +41,7 @@ export function NewListingCloneModal({ open, onOpenChange }: NewListingCloneModa
     draft,
     loading: draftLoading,
     error: draftError,
+    errorDetail: draftErrorDetail,
     setError,
     fetchReference,
     createDraft,
@@ -496,6 +497,7 @@ export function NewListingCloneModal({ open, onOpenChange }: NewListingCloneModa
                   snapshot={snapshot}
                   loading={draftLoading}
                   error={draftError}
+                  errorDetail={draftErrorDetail}
                   onFetch={handleFetchReference}
                   onContinue={handleContinueFromReference}
                   parseResult={currentParseResult}

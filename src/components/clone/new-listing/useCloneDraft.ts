@@ -20,20 +20,13 @@ export interface ParseResult {
   raw_input: string;
 }
 
-/**
- * Parser inteligente que extrai MLB e/ou MLBU de qualquer input.
- * Regra de precedência:
- *   1. item_id:MLB ou item_id=MLB em query params → usa esse MLB
- *   2. MLB\d+ em qualquer parte da URL → primeiro match
- *   3. /up/MLBU\d+ ou /p/MLBU\d+ → MLBU (precisa resolução manual)
- */
 export function parseInput(input: string): ParseResult {
   if (!input?.trim()) return { mlb_id: null, mlbu_id: null, decision: 'none', raw_input: input };
   const trimmed = input.trim();
 
   console.log('[CloneParser] step=parse_input raw_input=', trimmed);
 
-  // Extrair MLBU se presente (para registro mesmo se MLB for encontrado)
+  // Extrair MLBU se presente
   let mlbu_id: string | null = null;
   const mlbuPatterns = [/\/up\/(MLBU\d+)/i, /\/p\/(MLBU\d+)/i, /(MLBU\d{8,})/i];
   for (const p of mlbuPatterns) {
@@ -45,7 +38,7 @@ export function parseInput(input: string): ParseResult {
     }
   }
 
-  // 1) item_id em query param (pdp_filters=item_id:MLB... ou item_id=MLB...)
+  // 1) item_id em query param
   const paramPatterns = [
     /item_id[=:](MLB[\d-]+)/i,
     /pdp_filters=item_id[=:](MLB[\d-]+)/i,
@@ -61,12 +54,10 @@ export function parseInput(input: string): ParseResult {
     }
   }
 
-  // 2) MLB\d+ em qualquer parte da URL (cuidado para não pegar MLBU)
-  // Usar negative lookbehind para não capturar MLB dentro de MLBU
+  // 2) MLB\d+ em qualquer parte da URL (não MLBU)
   const mlbGeneric = trimmed.match(/(?<![A-Z])(MLB[\d-]{8,})/i);
   if (mlbGeneric) {
     const candidate = mlbGeneric[1].replace(/-/g, '').toUpperCase();
-    // Garantir que não é MLBU
     if (/^MLB\d+$/.test(candidate) && !candidate.startsWith('MLBU')) {
       console.log('[CloneParser] step=detect_item_id decision=mlb_from_url extracted_item_id=', candidate, 'extracted_product_id=', mlbu_id);
       return { mlb_id: candidate, mlbu_id, decision: 'mlb_from_url', raw_input: trimmed };
@@ -94,19 +85,12 @@ export function parseInput(input: string): ParseResult {
 
 // === Helpers ===
 
-function extractPackageDimensions(attributes: Attribute[]): {
-  height: number;
-  width: number;
-  length: number;
-  weight: number;
-} {
+function extractPackageDimensions(attributes: Attribute[]) {
   const result = { height: 0, width: 0, length: 0, weight: 0 };
   if (!attributes || !Array.isArray(attributes)) return result;
-  
   for (const attr of attributes) {
     const id = attr.id?.toUpperCase();
     const value = attr.value_name ? parseFloat(attr.value_name) : attr.value_struct?.number;
-    
     if (value && !isNaN(value)) {
       if (id === 'SELLER_PACKAGE_HEIGHT' || id === 'PACKAGE_HEIGHT') result.height = value;
       else if (id === 'SELLER_PACKAGE_WIDTH' || id === 'PACKAGE_WIDTH') result.width = value;
@@ -114,7 +98,6 @@ function extractPackageDimensions(attributes: Attribute[]): {
       else if (id === 'SELLER_PACKAGE_WEIGHT' || id === 'PACKAGE_WEIGHT') result.weight = value;
     }
   }
-  
   return result;
 }
 
@@ -123,14 +106,9 @@ function filterSafeAttributes(attributes: Attribute[]): Attribute[] {
   return attributes.filter(attr => !CATALOG_FORCING_ATTRIBUTES.has(attr.id?.toUpperCase()));
 }
 
-function extractIdentifiers(attributes: Attribute[]): {
-  gtin?: string;
-  ean?: string;
-  sku?: string;
-} {
+function extractIdentifiers(attributes: Attribute[]) {
   const result: { gtin?: string; ean?: string; sku?: string } = {};
   if (!attributes || !Array.isArray(attributes)) return result;
-  
   for (const attr of attributes) {
     const id = attr.id?.toUpperCase();
     const value = attr.value_name || attr.value_id;
@@ -139,8 +117,17 @@ function extractIdentifiers(attributes: Attribute[]): {
     else if (id === 'EAN') result.ean = value;
     else if (id === 'SELLER_SKU' || id === 'SKU') result.sku = value;
   }
-  
   return result;
+}
+
+// === Error detail interface ===
+
+export interface LoadErrorDetail {
+  item_id: string;
+  http_status?: number;
+  ml_error?: string;
+  error_body_snippet?: string;
+  load_mode: string;
 }
 
 // === Hook ===
@@ -150,8 +137,8 @@ export function useCloneDraft() {
   const [draft, setDraft] = useState<CloneDraft | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<LoadErrorDetail | null>(null);
   
-  // Buscar dados do anúncio de referência
   const fetchReference = useCallback(async (itemId: string, idType: 'MLB' | 'MLBU' = 'MLB'): Promise<RawSnapshot | null> => {
     if (!activeAccount?.sellerId) {
       setError('Selecione uma conta do Mercado Livre');
@@ -160,6 +147,7 @@ export function useCloneDraft() {
     
     setLoading(true);
     setError(null);
+    setErrorDetail(null);
     
     try {
       console.log('[CloneParser] step=load_item item_id=', itemId, 'id_type=', idType);
@@ -172,21 +160,36 @@ export function useCloneDraft() {
         },
       });
       
-      if (fetchError || !data?.success) {
-        throw new Error(data?.message || fetchError?.message || 'Erro ao buscar dados do anúncio');
+      if (fetchError) {
+        setError(`Erro de conexão: ${fetchError.message}`);
+        setErrorDetail({ item_id: itemId, load_mode: 'public_api', ml_error: fetchError.message });
+        return null;
+      }
+      
+      if (!data?.success) {
+        // Build detailed error from backend response
+        const detail: LoadErrorDetail = {
+          item_id: data?.item_id || itemId,
+          http_status: data?.http_status,
+          ml_error: data?.message || data?.error || 'Erro desconhecido',
+          error_body_snippet: data?.error_body_snippet,
+          load_mode: data?.load_mode || 'public_api',
+        };
+        setErrorDetail(detail);
+        
+        // Only say "catálogo" if backend explicitly returned CATALOG_RESOLUTION_FAILED
+        if (data?.error === 'CATALOG_RESOLUTION_FAILED') {
+          setError(data.message || 'Não foi possível resolver o link de catálogo');
+        } else {
+          setError(data?.message || `Falha ao carregar anúncio ${itemId}`);
+        }
+        return null;
       }
       
       const item = data.item;
       const captureLog: CaptureLog = data.capture_log || {
-        pictures_count: 0,
-        pictures_source: 'none',
-        description_captured: false,
-        dimensions_captured: false,
-        attributes_count: 0,
-        gtin_found: false,
-        ean_found: false,
-        sku_found: false,
-        errors: [],
+        pictures_count: 0, pictures_source: 'none', description_captured: false,
+        dimensions_captured: false, attributes_count: 0, gtin_found: false, ean_found: false, sku_found: false, errors: [],
       };
       
       const finalPictures = item.pictures || [];
@@ -194,6 +197,13 @@ export function useCloneDraft() {
       const identifiers = extractIdentifiers(item.attributes || []);
       
       console.log('[CloneParser] step=load_item success pictures=', finalPictures.length, 'description=', !!item.description, 'dimensions=', captureLog.dimensions_captured);
+      
+      // Detect catalog ONLY from real API data
+      const isCatalog = !!(
+        item.catalog_product_id ||
+        item.catalog_listing === true ||
+        item.parent_item_id
+      );
       
       const snapshot: RawSnapshot = {
         item_id: data.resolved_item_id || item.id || itemId,
@@ -210,11 +220,7 @@ export function useCloneDraft() {
         thumbnail: item.thumbnail,
         variations: item.variations,
         shipping: item.shipping,
-        is_catalog_source: !!(
-          item.catalog_product_id ||
-          item.catalog_listing === true ||
-          item.parent_item_id
-        ),
+        is_catalog_source: isCatalog,
         catalog_product_id: item.catalog_product_id,
         capture_log: captureLog,
         captured_gtin: item.captured_gtin || identifiers.gtin,
@@ -227,13 +233,13 @@ export function useCloneDraft() {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Erro desconhecido';
       setError(message);
+      setErrorDetail({ item_id: itemId, load_mode: 'public_api', ml_error: message });
       return null;
     } finally {
       setLoading(false);
     }
   }, [activeAccount?.sellerId]);
   
-  // Criar rascunho a partir do snapshot
   const createDraft = useCallback(async (
     sourceUrl: string,
     snapshot: RawSnapshot
@@ -247,20 +253,15 @@ export function useCloneDraft() {
       if (!user) throw new Error('Não autenticado');
       
       const { data: prefs } = await supabase
-        .from('user_preferences')
-        .select('active_workspace_id')
-        .eq('user_id', user.id)
-        .maybeSingle();
+        .from('user_preferences').select('active_workspace_id')
+        .eq('user_id', user.id).maybeSingle();
       
       let workspaceId = (prefs as any)?.active_workspace_id;
       
       if (!workspaceId) {
         const { data: member } = await supabase
-          .from('workspace_members')
-          .select('workspace_id')
-          .eq('user_id', user.id)
-          .limit(1)
-          .maybeSingle();
+          .from('workspace_members').select('workspace_id')
+          .eq('user_id', user.id).limit(1).maybeSingle();
         workspaceId = (member as any)?.workspace_id;
       }
       
@@ -269,11 +270,9 @@ export function useCloneDraft() {
       let mlAccountId: string | null = null;
       if (activeAccount?.sellerId) {
         const { data: mlAccount } = await supabase
-          .from('ml_accounts')
-          .select('id')
+          .from('ml_accounts').select('id')
           .eq('ml_user_id', String(activeAccount.sellerId))
-          .eq('user_id', user.id)
-          .maybeSingle();
+          .eq('user_id', user.id).maybeSingle();
         mlAccountId = mlAccount?.id || null;
       }
       
@@ -353,32 +352,24 @@ export function useCloneDraft() {
     }
   }, [activeAccount?.sellerId]);
   
-  // Atualizar payload do rascunho
   const updateDraftPayload = useCallback(async (
     draftId: string,
     payload: Partial<DraftPayload>
   ): Promise<boolean> => {
     if (!draft) return false;
-    
     setLoading(true);
     setError(null);
     
     try {
       const newPayload = { ...draft.draft_payload, ...payload };
-      
       const { error: updateError } = await supabase
         .from('clone_drafts')
-        .update({ 
-          draft_payload: JSON.parse(JSON.stringify(newPayload)),
-          updated_at: new Date().toISOString(),
-        })
+        .update({ draft_payload: JSON.parse(JSON.stringify(newPayload)), updated_at: new Date().toISOString() })
         .eq('id', draftId);
       
       if (updateError) throw new Error('Erro ao atualizar rascunho');
-      
       setDraft({ ...draft, draft_payload: newPayload });
       return true;
-      
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Erro desconhecido';
       setError(message);
@@ -391,6 +382,7 @@ export function useCloneDraft() {
   const resetDraft = useCallback(() => {
     setDraft(null);
     setError(null);
+    setErrorDetail(null);
     setLoading(false);
   }, []);
   
@@ -399,6 +391,7 @@ export function useCloneDraft() {
     setDraft,
     loading,
     error,
+    errorDetail,
     setError,
     fetchReference,
     createDraft,
