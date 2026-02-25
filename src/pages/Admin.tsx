@@ -32,6 +32,7 @@ import { AdminConsultantTips } from './admin/AdminConsultantTips';
 import { AdminExplanatoryCards } from './admin/AdminExplanatoryCards';
 import { AdminAuditLogs } from './admin/AdminAuditLogs';
 import { AdminSystemStatus } from './admin/AdminSystemStatus';
+import AdminContatos from './admin/AdminContatos';
 
 const adminTabs = [
   { id: '', label: 'Dashboard', icon: LayoutDashboard },
@@ -61,6 +62,7 @@ const adminTabs = [
   { id: 'identidade-visual', label: 'Identidade Visual', icon: Palette },
   { id: 'cards-explicativos', label: 'Cards Explicativos', icon: Eye },
   { id: 'system-status', label: 'Status Sistema', icon: Activity },
+  { id: 'contatos', label: 'Contatos', icon: Users },
 ];
 
 export default function Admin() {
@@ -130,6 +132,7 @@ export default function Admin() {
           <Route path="dica-consultor" element={<AdminConsultantTips />} />
           <Route path="cards-explicativos" element={<AdminExplanatoryCards />} />
           <Route path="system-status" element={<AdminSystemStatus />} />
+          <Route path="contatos" element={<AdminContatos />} />
         </Routes>
       </div>
     </PageContainer>

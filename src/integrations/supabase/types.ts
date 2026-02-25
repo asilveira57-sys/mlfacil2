@@ -3694,6 +3694,80 @@ export type Database = {
         }
         Relationships: []
       }
+      contact_logs: {
+        Row: {
+          action: string
+          contact_id: string
+          created_at: string
+          id: string
+          performed_by: string | null
+        }
+        Insert: {
+          action: string
+          contact_id: string
+          created_at?: string
+          id?: string
+          performed_by?: string | null
+        }
+        Update: {
+          action?: string
+          contact_id?: string
+          created_at?: string
+          id?: string
+          performed_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_logs_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contact_messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contact_messages: {
+        Row: {
+          company: string | null
+          created_at: string
+          email: string
+          id: string
+          message: string
+          name: string
+          phone: string | null
+          priority: string
+          source: string
+          status: string
+          subject: string
+        }
+        Insert: {
+          company?: string | null
+          created_at?: string
+          email: string
+          id?: string
+          message: string
+          name: string
+          phone?: string | null
+          priority?: string
+          source?: string
+          status?: string
+          subject: string
+        }
+        Update: {
+          company?: string | null
+          created_at?: string
+          email?: string
+          id?: string
+          message?: string
+          name?: string
+          phone?: string | null
+          priority?: string
+          source?: string
+          status?: string
+          subject?: string
+        }
+        Relationships: []
+      }
       cookie_consents: {
         Row: {
           accepted_at: string
