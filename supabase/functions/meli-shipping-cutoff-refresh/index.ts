@@ -200,7 +200,9 @@ Deno.serve(async (req) => {
         try {
           const spDate = getDateRefSP();
           const todayStartUTC = spDate + "T03:00:00.000Z";
-          const todayEndUTC = new Date(new Date(spDate + "T03:00:00.000Z").getTime() + 24 * 60 * 60 * 1000 - 1).toISOString();
+          // Extended to 48h window (today + tomorrow) to capture deadlines
+          // that ML shows as "envios de hoje" (seller must act today for tomorrow's deadline)
+          const tomorrowEndUTC = new Date(new Date(spDate + "T03:00:00.000Z").getTime() + 2 * 24 * 60 * 60 * 1000 - 1).toISOString();
 
           const { data: earliestShipment, error: shipErr } = await supabase
             .from("meli_shipments_cache")
@@ -208,7 +210,7 @@ Deno.serve(async (req) => {
             .eq("seller_id", mlUserId)
             .in("shipment_status", ["ready_to_ship", "handling"])
             .gte("estimated_handling_limit", todayStartUTC)
-            .lte("estimated_handling_limit", todayEndUTC)
+            .lte("estimated_handling_limit", tomorrowEndUTC)
             .order("estimated_handling_limit", { ascending: true })
             .limit(1)
             .maybeSingle();
@@ -218,7 +220,7 @@ Deno.serve(async (req) => {
             action: "shipment_cutoff", status: earliestShipment ? "success" : "empty",
             step: "earliest_deadline_fallback", execution_time_ms: Date.now() - startTime,
             payload_summary: {
-              query_range: `${todayStartUTC} .. ${todayEndUTC}`,
+              query_range: `${todayStartUTC} .. ${tomorrowEndUTC}`,
               found: !!earliestShipment,
               error: shipErr?.message || null,
               deadline: earliestShipment?.estimated_handling_limit || null,
