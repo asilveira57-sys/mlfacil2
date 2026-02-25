@@ -40,10 +40,10 @@ const SAMPLE_ORDER: OrderData = {
 };
 
 const SAMPLE_ITEMS: OrderItem[] = [
-  { sku: 'ABC-123', title_short: 'Camiseta Azul M', title: 'Camiseta Azul Tamanho M', quantity: 2 },
+  { sku: null, title_short: 'Etiqueta Adesiva Couche 30x15 3 Colunas 32 Metros 6 Rolos', title: 'Etiqueta Adesiva Couche 30x15 3 Colunas 32 Metros 6 Rolos Branco', quantity: 1 },
   { sku: 'XYZ-789', title_short: 'Calça Jeans 42', title: 'Calça Jeans Tamanho 42', quantity: 1 },
   { sku: 'DEF-456', title_short: 'Tênis Branco 40', title: 'Tênis Branco Tamanho 40', quantity: 1 },
-  { sku: null, title_short: 'Meia Preta', title: 'Meia Preta Kit 3 pares', quantity: 3 },
+  { sku: null, title_short: 'Meia Preta Kit 3 pares', title: 'Meia Preta Kit 3 pares', quantity: 3 },
 ];
 
 export default function LabelHeaderSettings() {
@@ -120,12 +120,12 @@ export default function LabelHeaderSettings() {
       const lines: string[] = [];
       let currentLine = '';
       let itemsPlaced = 0;
-      const maxLineLength = 45;
+      const maxLineLength = 70;
 
       for (let i = 0; i < sortedItems.length; i++) {
         const item = sortedItems[i];
-        const displayText = item.sku || item.title_short || 'Item';
-        const formatted = `${item.quantity}x ${displayText.substring(0, 20)}`;
+        const displayText = item.sku || item.title_short || item.title || 'Item';
+        const formatted = `${item.quantity}x ${displayText.substring(0, 60)}`;
         const separator = currentLine ? ' | ' : '';
         const potentialLine = currentLine + separator + formatted;
 

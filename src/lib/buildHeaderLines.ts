@@ -76,7 +76,7 @@ function sanitize(text: string | null | undefined, maxLength = 90): string {
 function buildProductLines(
   items: OrderItem[],
   maxProductLines: number,
-  maxLineLength = 58
+  maxLineLength = 72
 ): string[] {
   if (items.length === 0) return [];
 
@@ -91,7 +91,7 @@ function buildProductLines(
   // Format each item as "Nx SKU" or "Nx Title"
   const formattedItems = sortedItems.map(item => {
     const displayText = item.title_short || item.title || item.sku || 'Item';
-    const truncatedText = truncate(displayText, 40); // SKU/title max 40 chars
+    const truncatedText = truncate(displayText, 60); // SKU/title max 60 chars
     return `${item.quantity}x ${truncatedText}`;
   });
 
