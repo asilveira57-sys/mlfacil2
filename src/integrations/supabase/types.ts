@@ -8570,6 +8570,8 @@ export type Database = {
           description: string | null
           features: Json
           id: string
+          max_sales: number | null
+          min_sales: number | null
           name: string
           slug: string
           sort_order: number
@@ -8582,6 +8584,8 @@ export type Database = {
           description?: string | null
           features?: Json
           id?: string
+          max_sales?: number | null
+          min_sales?: number | null
           name: string
           slug: string
           sort_order?: number
@@ -8594,6 +8598,8 @@ export type Database = {
           description?: string | null
           features?: Json
           id?: string
+          max_sales?: number | null
+          min_sales?: number | null
           name?: string
           slug?: string
           sort_order?: number
