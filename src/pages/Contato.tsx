@@ -86,7 +86,7 @@ export default function Contato() {
               <img
                 src={alexandrePhoto}
                 alt="Alexandre Silveira"
-                className="w-56 h-56 rounded-2xl object-cover shadow-lg border border-border"
+                className="w-56 h-56 rounded-2xl object-cover object-top shadow-lg border border-border"
               />
             </div>
 
