@@ -78,6 +78,22 @@ async function instrumentedFetch(
     headers["Authorization"] = `Bearer ${params.accessToken}`;
   }
 
+  // === LOG: ml_request_prepare (before calling) ===
+  await logStep(supabase, {
+    user_id: userId,
+    action: 'ml_request_prepare',
+    message: `Preparando ${method} ${params.endpoint}`,
+    meta: {
+      attempt: params.attempt,
+      endpoint: params.endpoint,
+      method,
+      used_token: params.used_token,
+      headers_sanitized: params.used_token ? { Authorization: 'Bearer ***' } : {},
+      item_id: params.item_id,
+      source_input_raw: params.source_input_raw,
+    },
+  });
+
   try {
     const fetchOptions: RequestInit = { method, headers };
     if (params.timeout) {
@@ -89,17 +105,15 @@ async function instrumentedFetch(
     const bodyText = await response.text().catch(() => "");
 
     let data: any = undefined;
-    if (response.ok) {
-      try { data = JSON.parse(bodyText); } catch { data = undefined; }
-    }
+    try { data = JSON.parse(bodyText); } catch { data = undefined; }
 
-    // Log ml_request
+    // === LOG: ml_request_result (ALWAYS, even on 200) ===
     await logStep(supabase, {
       user_id: userId,
-      action: 'ml_request',
+      action: 'ml_request_result',
       level: response.ok ? 'info' : 'error',
       success: response.ok,
-      message: `${method} ${new URL(params.endpoint).pathname}`,
+      message: `${method} ${new URL(params.endpoint).pathname} → ${response.status}`,
       meta: {
         attempt: params.attempt,
         endpoint: params.endpoint,
@@ -119,7 +133,7 @@ async function instrumentedFetch(
     const elapsed_ms = Date.now() - t0;
     await logStep(supabase, {
       user_id: userId,
-      action: 'ml_request',
+      action: 'ml_request_result',
       level: 'error',
       success: false,
       message: `${method} ${params.endpoint} NETWORK_ERROR`,
@@ -134,6 +148,7 @@ async function instrumentedFetch(
         error: true,
         item_id: params.item_id,
         source_input_raw: params.source_input_raw,
+        stack_trace: e.stack?.slice(0, 2000),
       },
     });
     return { ok: false, status: 0, body_text: e.message, elapsed_ms };
@@ -282,6 +297,7 @@ serve(async (req) => {
         source_product_id: id_type === 'MLBU' || /^MLBU/i.test(normalizedId) ? normalizedId : undefined,
         site_id: 'MLB',
         used_token_expected: false,
+        timestamp: new Date().toISOString(),
       },
     });
 
@@ -506,12 +522,14 @@ serve(async (req) => {
         meta: {
           item_id: resolvedItemId,
           final_reason: finalReason,
-          best_http_status: bestAttemptStatus,
+          final_http_status: bestAttemptStatus,
+          final_endpoint: itemEndpoint,
           best_error_body_snippet: bestAttemptBody?.slice(0, 2000),
+          used_token: bestAttemptName.includes('B_token'),
           endpoint_relevant: itemEndpoint,
-          used_token_in_best_attempt: bestAttemptName.includes('B_token'),
           elapsed_ms: Date.now() - t0Global,
           source_input_raw: source_input_raw || item_id,
+          stack_trace: null,
         },
       });
 
@@ -620,9 +638,27 @@ serve(async (req) => {
 
   } catch (error: any) {
     console.error(`[ad-item-snapshot] Error:`, error);
+    // Try to log the unhandled error
+    try {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+      const sb = createClient(supabaseUrl, supabaseServiceKey);
+      await logStep(sb, {
+        user_id: 'unknown',
+        action: 'load_source_error',
+        level: 'error',
+        success: false,
+        message: `Erro não tratado: ${error?.message || String(error)}`,
+        meta: {
+          stack_trace: error?.stack?.slice(0, 2000),
+          error_message: error?.message || String(error),
+        },
+      });
+    } catch (_) { /* fail-safe */ }
     return new Response(JSON.stringify({
       success: false, error: error?.message || String(error),
       http_status: 500,
+      stack_trace: error?.stack?.slice(0, 2000),
     }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });
