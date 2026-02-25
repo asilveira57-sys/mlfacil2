@@ -4,8 +4,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, Link, Search, Package, AlertCircle, CheckCircle2, Info, ImageIcon, FileText, Ruler } from 'lucide-react';
+import { Loader2, Link, Search, AlertCircle, CheckCircle2, Info, ImageIcon, FileText, Ruler, Package } from 'lucide-react';
 import { RawSnapshot } from '../types';
+import { ParseResult, parseInput } from '../useCloneDraft';
 
 interface ReferenceTabProps {
   sourceUrl: string;
@@ -15,6 +16,10 @@ interface ReferenceTabProps {
   error: string | null;
   onFetch: () => void;
   onContinue: () => void;
+  /** Set when parser detects MLBU-only (no MLB in URL) */
+  parseResult: ParseResult | null;
+  /** Called when user provides manual MLB for MLBU fallback */
+  onManualMlbSubmit: (mlbId: string) => void;
 }
 
 export function ReferenceTab({
@@ -25,7 +30,11 @@ export function ReferenceTab({
   error,
   onFetch,
   onContinue,
+  parseResult,
+  onManualMlbSubmit,
 }: ReferenceTabProps) {
+  const [manualMlbId, setManualMlbId] = useState('');
+
   const handlePaste = async () => {
     try {
       const text = await navigator.clipboard.readText();
@@ -36,6 +45,15 @@ export function ReferenceTab({
   };
   
   const captureLog = snapshot?.capture_log;
+  const isMLBUOnly = parseResult?.decision === 'mlbu_only' && !snapshot;
+  const isMLBFromCatalog = parseResult?.decision === 'mlb_from_param' && parseResult.mlbu_id;
+
+  const handleManualSubmit = () => {
+    const cleaned = manualMlbId.trim().replace(/-/g, '').toUpperCase();
+    if (/^MLB\d{8,}$/.test(cleaned)) {
+      onManualMlbSubmit(cleaned);
+    }
+  };
   
   return (
     <div className="space-y-6">
@@ -46,7 +64,6 @@ export function ReferenceTab({
         <p className="text-sm text-muted-foreground">
           Cole o link do Mercado Livre ou o ID do anúncio (MLB...) que será usado como base
         </p>
-        {/* CORREÇÃO 8: Campo de URL com largura total */}
         <div className="flex flex-col sm:flex-row gap-2">
           <div className="relative flex-1 min-w-0">
             <Link className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -92,6 +109,59 @@ export function ReferenceTab({
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+
+      {/* Mensagem de catálogo com MLB auto-detectado */}
+      {isMLBFromCatalog && snapshot && (
+        <Alert className="border-primary/30 bg-primary/5">
+          <Info className="h-4 w-4 text-primary" />
+          <AlertDescription>
+            Link de catálogo detectado. Anúncio específico (<strong>{snapshot.item_id}</strong>) identificado e selecionado automaticamente.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* MLBU-only: pedir MLB manual */}
+      {isMLBUOnly && (
+        <div className="border rounded-lg p-4 space-y-4 bg-accent/50 border-accent">
+          <div className="flex items-start gap-3">
+            <Package className="h-5 w-5 text-accent-foreground mt-0.5 flex-shrink-0" />
+            <div className="space-y-2">
+              <h4 className="font-medium text-foreground">
+                Produto de catálogo detectado (MLBU)
+              </h4>
+              <p className="text-sm text-muted-foreground">
+                Link de catálogo detectado (<strong>{parseResult.mlbu_id}</strong>). 
+                Selecione qual anúncio (<strong>MLB…</strong>) deve ser usado como origem.
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Não é possível clonar diretamente de um MLBU. Cole o ID de um anúncio específico (MLB…) vinculado a este produto de catálogo.
+              </p>
+            </div>
+          </div>
+          
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1 min-w-0">
+              <Input
+                value={manualMlbId}
+                onChange={(e) => setManualMlbId(e.target.value)}
+                placeholder="MLB1234567890"
+                className="w-full"
+              />
+            </div>
+            <Button
+              onClick={handleManualSubmit}
+              disabled={loading || !/^MLB\d{8,}$/i.test(manualMlbId.trim().replace(/-/g, ''))}
+            >
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Search className="h-4 w-4 mr-2" />
+              )}
+              Carregar
+            </Button>
+          </div>
+        </div>
+      )}
       
       {snapshot && (
         <div className="border rounded-lg p-4 space-y-4 bg-muted/30">
@@ -123,7 +193,6 @@ export function ReferenceTab({
                 )}
               </div>
               
-              {/* CORREÇÃO 7: Detalhes da captura */}
               <div className="text-xs text-muted-foreground space-y-1 pt-2 border-t">
                 <p className="font-medium text-foreground">Dados capturados:</p>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1">
@@ -153,7 +222,6 @@ export function ReferenceTab({
                   <p>Atributos: {snapshot.attributes?.length || 0}</p>
                 </div>
                 
-                {/* Identificadores capturados */}
                 {(snapshot.captured_gtin || snapshot.captured_ean || snapshot.captured_sku) && (
                   <div className="pt-1">
                     <p className="font-medium text-foreground">Identificadores encontrados:</p>
@@ -195,7 +263,6 @@ export function ReferenceTab({
             </Alert>
           )}
           
-          {/* CORREÇÃO 2: Aviso de descrição não capturada */}
           {!snapshot.description && (
             <Alert>
               <AlertCircle className="h-4 w-4" />
@@ -205,7 +272,6 @@ export function ReferenceTab({
             </Alert>
           )}
           
-          {/* Aviso de fotos insuficientes */}
           {snapshot.pictures?.length === 0 && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
@@ -215,7 +281,6 @@ export function ReferenceTab({
             </Alert>
           )}
           
-          {/* Erros de captura */}
           {captureLog?.errors && captureLog.errors.length > 0 && (
             <Alert>
               <AlertCircle className="h-4 w-4" />

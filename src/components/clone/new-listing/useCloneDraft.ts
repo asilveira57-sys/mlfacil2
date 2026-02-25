@@ -11,56 +11,88 @@ import {
   CATALOG_FORCING_ATTRIBUTES 
 } from './types';
 
-// Padrões de extração de ID
-const MLB_PATTERNS = [
-  /item_id[=:]?(MLB\d{8,})/i,
-  /pdp_filters=item_id[=:]?(MLB\d{8,})/i,
-  /\/(MLB\d{8,})/i,
-  /[?&]id=(MLB\d{8,})/i,
-  /(?<!MLBU?)(MLB\d{8,})/i,
-];
+// === Parsing de IDs MLB / MLBU ===
 
-const MLBU_PATTERNS = [
-  /\/up\/(MLBU\d+)/i,
-  /\/p\/(MLBU\d+)/i,
-  /(MLBU\d{8,})/i,
-];
-
-interface ExtractedId {
-  id: string;
-  type: 'MLB' | 'MLBU';
+export interface ParseResult {
+  mlb_id: string | null;
+  mlbu_id: string | null;
+  decision: 'mlb_from_param' | 'mlb_from_url' | 'mlb_direct' | 'mlbu_only' | 'none';
+  raw_input: string;
 }
 
-function extractMeliId(input: string): ExtractedId | null {
-  if (!input?.trim()) return null;
+/**
+ * Parser inteligente que extrai MLB e/ou MLBU de qualquer input.
+ * Regra de precedência:
+ *   1. item_id:MLB ou item_id=MLB em query params → usa esse MLB
+ *   2. MLB\d+ em qualquer parte da URL → primeiro match
+ *   3. /up/MLBU\d+ ou /p/MLBU\d+ → MLBU (precisa resolução manual)
+ */
+export function parseInput(input: string): ParseResult {
+  if (!input?.trim()) return { mlb_id: null, mlbu_id: null, decision: 'none', raw_input: input };
   const trimmed = input.trim();
-  
-  for (const pattern of MLB_PATTERNS) {
-    const match = trimmed.match(pattern);
-    if (match) {
-      const id = (match[1] || match[0]).replace(/-/g, '').toUpperCase();
+
+  console.log('[CloneParser] step=parse_input raw_input=', trimmed);
+
+  // Extrair MLBU se presente (para registro mesmo se MLB for encontrado)
+  let mlbu_id: string | null = null;
+  const mlbuPatterns = [/\/up\/(MLBU\d+)/i, /\/p\/(MLBU\d+)/i, /(MLBU\d{8,})/i];
+  for (const p of mlbuPatterns) {
+    const m = trimmed.match(p);
+    if (m) {
+      mlbu_id = (m[1] || m[0]).replace(/-/g, '').toUpperCase();
+      if (!/^MLBU\d+$/.test(mlbu_id)) mlbu_id = null;
+      else break;
+    }
+  }
+
+  // 1) item_id em query param (pdp_filters=item_id:MLB... ou item_id=MLB...)
+  const paramPatterns = [
+    /item_id[=:](MLB[\d-]+)/i,
+    /pdp_filters=item_id[=:](MLB[\d-]+)/i,
+  ];
+  for (const p of paramPatterns) {
+    const m = trimmed.match(p);
+    if (m) {
+      const id = m[1].replace(/-/g, '').toUpperCase();
       if (/^MLB\d+$/.test(id)) {
-        return { id, type: 'MLB' };
+        console.log('[CloneParser] step=detect_item_id decision=mlb_from_param extracted_item_id=', id, 'extracted_product_id=', mlbu_id);
+        return { mlb_id: id, mlbu_id, decision: 'mlb_from_param', raw_input: trimmed };
       }
     }
   }
-  
-  if (/^MLB\d{8,}$/i.test(trimmed)) {
-    return { id: trimmed.toUpperCase(), type: 'MLB' };
-  }
-  
-  for (const pattern of MLBU_PATTERNS) {
-    const match = trimmed.match(pattern);
-    if (match) {
-      const id = (match[1] || match[0]).replace(/-/g, '').toUpperCase();
-      if (/^MLBU\d+$/.test(id)) {
-        return { id, type: 'MLBU' };
-      }
+
+  // 2) MLB\d+ em qualquer parte da URL (cuidado para não pegar MLBU)
+  // Usar negative lookbehind para não capturar MLB dentro de MLBU
+  const mlbGeneric = trimmed.match(/(?<![A-Z])(MLB[\d-]{8,})/i);
+  if (mlbGeneric) {
+    const candidate = mlbGeneric[1].replace(/-/g, '').toUpperCase();
+    // Garantir que não é MLBU
+    if (/^MLB\d+$/.test(candidate) && !candidate.startsWith('MLBU')) {
+      console.log('[CloneParser] step=detect_item_id decision=mlb_from_url extracted_item_id=', candidate, 'extracted_product_id=', mlbu_id);
+      return { mlb_id: candidate, mlbu_id, decision: 'mlb_from_url', raw_input: trimmed };
     }
   }
-  
-  return null;
+
+  // 3) ID direto MLB
+  if (/^MLB[\d-]+$/i.test(trimmed)) {
+    const id = trimmed.replace(/-/g, '').toUpperCase();
+    if (/^MLB\d+$/.test(id)) {
+      console.log('[CloneParser] step=detect_item_id decision=mlb_direct extracted_item_id=', id);
+      return { mlb_id: id, mlbu_id: null, decision: 'mlb_direct', raw_input: trimmed };
+    }
+  }
+
+  // 4) Só MLBU encontrado
+  if (mlbu_id) {
+    console.log('[CloneParser] step=detect_product_id decision=mlbu_only extracted_product_id=', mlbu_id);
+    return { mlb_id: null, mlbu_id, decision: 'mlbu_only', raw_input: trimmed };
+  }
+
+  console.log('[CloneParser] step=parse_input decision=none');
+  return { mlb_id: null, mlbu_id: null, decision: 'none', raw_input: trimmed };
 }
+
+// === Helpers ===
 
 function extractPackageDimensions(attributes: Attribute[]): {
   height: number;
@@ -69,7 +101,6 @@ function extractPackageDimensions(attributes: Attribute[]): {
   weight: number;
 } {
   const result = { height: 0, width: 0, length: 0, weight: 0 };
-  
   if (!attributes || !Array.isArray(attributes)) return result;
   
   for (const attr of attributes) {
@@ -77,15 +108,10 @@ function extractPackageDimensions(attributes: Attribute[]): {
     const value = attr.value_name ? parseFloat(attr.value_name) : attr.value_struct?.number;
     
     if (value && !isNaN(value)) {
-      if (id === 'SELLER_PACKAGE_HEIGHT' || id === 'PACKAGE_HEIGHT') {
-        result.height = value;
-      } else if (id === 'SELLER_PACKAGE_WIDTH' || id === 'PACKAGE_WIDTH') {
-        result.width = value;
-      } else if (id === 'SELLER_PACKAGE_LENGTH' || id === 'PACKAGE_LENGTH') {
-        result.length = value;
-      } else if (id === 'SELLER_PACKAGE_WEIGHT' || id === 'PACKAGE_WEIGHT') {
-        result.weight = value;
-      }
+      if (id === 'SELLER_PACKAGE_HEIGHT' || id === 'PACKAGE_HEIGHT') result.height = value;
+      else if (id === 'SELLER_PACKAGE_WIDTH' || id === 'PACKAGE_WIDTH') result.width = value;
+      else if (id === 'SELLER_PACKAGE_LENGTH' || id === 'PACKAGE_LENGTH') result.length = value;
+      else if (id === 'SELLER_PACKAGE_WEIGHT' || id === 'PACKAGE_WEIGHT') result.weight = value;
     }
   }
   
@@ -94,12 +120,7 @@ function extractPackageDimensions(attributes: Attribute[]): {
 
 function filterSafeAttributes(attributes: Attribute[]): Attribute[] {
   if (!attributes || !Array.isArray(attributes)) return [];
-  
-  return attributes.filter(attr => {
-    const id = attr.id?.toUpperCase();
-    // Remover atributos que forçam catálogo
-    return !CATALOG_FORCING_ATTRIBUTES.has(id);
-  });
+  return attributes.filter(attr => !CATALOG_FORCING_ATTRIBUTES.has(attr.id?.toUpperCase()));
 }
 
 function extractIdentifiers(attributes: Attribute[]): {
@@ -108,26 +129,21 @@ function extractIdentifiers(attributes: Attribute[]): {
   sku?: string;
 } {
   const result: { gtin?: string; ean?: string; sku?: string } = {};
-  
   if (!attributes || !Array.isArray(attributes)) return result;
   
   for (const attr of attributes) {
     const id = attr.id?.toUpperCase();
     const value = attr.value_name || attr.value_id;
-    
     if (!value) continue;
-    
-    if (id === 'GTIN') {
-      result.gtin = value;
-    } else if (id === 'EAN') {
-      result.ean = value;
-    } else if (id === 'SELLER_SKU' || id === 'SKU') {
-      result.sku = value;
-    }
+    if (id === 'GTIN') result.gtin = value;
+    else if (id === 'EAN') result.ean = value;
+    else if (id === 'SELLER_SKU' || id === 'SKU') result.sku = value;
   }
   
   return result;
 }
+
+// === Hook ===
 
 export function useCloneDraft() {
   const { activeAccount } = useActiveAccount();
@@ -136,13 +152,7 @@ export function useCloneDraft() {
   const [error, setError] = useState<string | null>(null);
   
   // Buscar dados do anúncio de referência
-  const fetchReference = useCallback(async (url: string): Promise<RawSnapshot | null> => {
-    const extracted = extractMeliId(url);
-    if (!extracted) {
-      setError('Não foi possível identificar o ID do anúncio. Cole um link ou ID válido (MLB...)');
-      return null;
-    }
-    
+  const fetchReference = useCallback(async (itemId: string, idType: 'MLB' | 'MLBU' = 'MLB'): Promise<RawSnapshot | null> => {
     if (!activeAccount?.sellerId) {
       setError('Selecione uma conta do Mercado Livre');
       return null;
@@ -152,10 +162,12 @@ export function useCloneDraft() {
     setError(null);
     
     try {
+      console.log('[CloneParser] step=load_item item_id=', itemId, 'id_type=', idType);
+      
       const { data, error: fetchError } = await supabase.functions.invoke('ad-item-snapshot', {
         body: { 
-          item_id: extracted.id, 
-          id_type: extracted.type,
+          item_id: itemId, 
+          id_type: idType,
           seller_id: activeAccount.sellerId,
         },
       });
@@ -177,29 +189,21 @@ export function useCloneDraft() {
         errors: [],
       };
       
-      // CORREÇÃO 1: Usar fotos completas já processadas pela edge function
       const finalPictures = item.pictures || [];
-      
-      console.log(`[useCloneDraft] Capture log:`, captureLog);
-      console.log(`[useCloneDraft] Pictures: ${finalPictures.length}, Description: ${!!item.description}, Dimensions: ${captureLog.dimensions_captured}`);
-      
-      // Extrair dimensões dos atributos
       const dimensions = extractPackageDimensions(item.attributes || []);
-      
-      // CORREÇÃO 4: Extrair identificadores para controle do usuário
       const identifiers = extractIdentifiers(item.attributes || []);
       
+      console.log('[CloneParser] step=load_item success pictures=', finalPictures.length, 'description=', !!item.description, 'dimensions=', captureLog.dimensions_captured);
+      
       const snapshot: RawSnapshot = {
-        item_id: data.resolved_item_id || item.id || extracted.id,
+        item_id: data.resolved_item_id || item.id || itemId,
         title: item.title || '',
-        // CORREÇÃO 2: Usar descrição capturada pela edge function
         description: item.description || '',
         price: item.price || 0,
         available_quantity: item.available_quantity || 1,
         condition: item.condition || 'new',
         category_id: item.category_id || '',
         listing_type_id: item.listing_type_id || 'gold_special',
-        // CORREÇÃO 1: Fotos completas
         pictures: finalPictures,
         attributes: item.attributes || [],
         seller_id: String(item.seller_id),
@@ -212,9 +216,7 @@ export function useCloneDraft() {
           item.parent_item_id
         ),
         catalog_product_id: item.catalog_product_id,
-        // CORREÇÃO 7: Guardar log de captura
         capture_log: captureLog,
-        // CORREÇÃO 4: Guardar identificadores capturados
         captured_gtin: item.captured_gtin || identifiers.gtin,
         captured_ean: item.captured_ean || identifiers.ean,
         captured_sku: item.captured_sku || identifiers.sku,
@@ -244,7 +246,6 @@ export function useCloneDraft() {
       const user = authData?.user;
       if (!user) throw new Error('Não autenticado');
       
-      // Buscar workspace
       const { data: prefs } = await supabase
         .from('user_preferences')
         .select('active_workspace_id')
@@ -260,15 +261,11 @@ export function useCloneDraft() {
           .eq('user_id', user.id)
           .limit(1)
           .maybeSingle();
-        
         workspaceId = (member as any)?.workspace_id;
       }
       
-      if (!workspaceId) {
-        throw new Error('Workspace não encontrado');
-      }
+      if (!workspaceId) throw new Error('Workspace não encontrado');
       
-      // Buscar ml_account_id
       let mlAccountId: string | null = null;
       if (activeAccount?.sellerId) {
         const { data: mlAccount } = await supabase
@@ -277,50 +274,36 @@ export function useCloneDraft() {
           .eq('ml_user_id', String(activeAccount.sellerId))
           .eq('user_id', user.id)
           .maybeSingle();
-        
         mlAccountId = mlAccount?.id || null;
       }
       
-      // CORREÇÃO 3: Extrair dimensões do snapshot (já vieram da API)
       const dimensions = extractPackageDimensions(snapshot.attributes);
-      
-      // CORREÇÃO 5: Filtrar atributos seguros (remover GTIN/EAN/SKU etc)
       const safeAttributes = filterSafeAttributes(snapshot.attributes);
       
-      // Determinar listing_type inicial
       let listingType: 'gold_special' | 'gold_pro' = 'gold_special';
-      if (snapshot.listing_type_id === 'gold_pro') {
-        listingType = 'gold_pro';
-      }
+      if (snapshot.listing_type_id === 'gold_pro') listingType = 'gold_pro';
       
       const draftPayload: DraftPayload = {
         title: snapshot.title,
-        // CORREÇÃO 2: Descrição já vem preenchida do snapshot
         description: snapshot.description || '',
         price: snapshot.price,
         available_quantity: snapshot.available_quantity,
         condition: snapshot.condition,
-        // CORREÇÃO 1: Fotos já estão completas
         pictures: snapshot.pictures,
-        // CORREÇÃO 3: Dimensões pré-preenchidas quando existem
         seller_package_height: dimensions.height,
         seller_package_width: dimensions.width,
         seller_package_length: dimensions.length,
         seller_package_weight: dimensions.weight,
-        // CORREÇÃO 5: Apenas atributos seguros
         attributes: safeAttributes,
         listing_type_id: listingType,
-        initial_status: 'paused', // Default: criar pausado
+        initial_status: 'paused',
         category_id: snapshot.category_id,
-        // CORREÇÃO 4: Toggles desligados por padrão
         include_gtin: false,
         include_sku: false,
-        // Valores capturados para exibição
         captured_gtin: snapshot.captured_gtin,
         captured_sku: snapshot.captured_sku,
       };
       
-      // Inserir no banco
       const { data: insertedDraft, error: insertError } = await supabase
         .from('clone_drafts')
         .insert({
@@ -337,9 +320,7 @@ export function useCloneDraft() {
         .select()
         .single();
       
-      if (insertError) {
-        throw new Error('Erro ao salvar rascunho: ' + insertError.message);
-      }
+      if (insertError) throw new Error('Erro ao salvar rascunho: ' + insertError.message);
       
       const newDraft: CloneDraft = {
         id: insertedDraft.id,
@@ -393,15 +374,9 @@ export function useCloneDraft() {
         })
         .eq('id', draftId);
       
-      if (updateError) {
-        throw new Error('Erro ao atualizar rascunho');
-      }
+      if (updateError) throw new Error('Erro ao atualizar rascunho');
       
-      setDraft({
-        ...draft,
-        draft_payload: newPayload,
-      });
-      
+      setDraft({ ...draft, draft_payload: newPayload });
       return true;
       
     } catch (err: unknown) {
@@ -413,7 +388,6 @@ export function useCloneDraft() {
     }
   }, [draft]);
   
-  // Limpar estado
   const resetDraft = useCallback(() => {
     setDraft(null);
     setError(null);
