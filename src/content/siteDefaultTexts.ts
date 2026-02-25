@@ -3,7 +3,7 @@
 
 export const siteDefaultTexts: Record<string, string> = {
   // ============ HOME / HEADER ============
-  'home.header.logo_name': 'ML Analyzer Pro',
+  'home.header.logo_name': 'MKTP Fácil',
   'home.header.menu_recursos': 'Recursos',
   'home.header.menu_como_funciona': 'Como funciona',
   'home.header.menu_integracoes': 'Integrações',
@@ -198,7 +198,7 @@ export const siteDefaultTexts: Record<string, string> = {
   'home.cta.btn_secondary': 'Ver planos',
 
   // ============ HOME / FOOTER ============
-  'home.footer.logo_name': 'ML Analyzer Pro',
+  'home.footer.logo_name': 'MKTP Fácil',
   'home.footer.description': 'Plataforma completa de gestão e análise para sellers do Mercado Livre.',
   'home.footer.contact': 'contato@mlanalyzerpro.com.br',
   'home.footer.col1.title': 'Produto',
@@ -217,7 +217,7 @@ export const siteDefaultTexts: Record<string, string> = {
   'home.footer.col3.link3': 'Cookies',
   'home.footer.col3.link4': 'LGPD',
   'home.footer.col1.link5': 'Consultoria',
-  'home.footer.copyright': '© 2024 ML Analyzer Pro. Todos os direitos reservados.',
+  'home.footer.copyright': '© 2024 MKTP Fácil. Todos os direitos reservados.',
   'home.footer.social_twitter': '',
   'home.footer.social_linkedin': '',
   'home.footer.social_instagram': '',
