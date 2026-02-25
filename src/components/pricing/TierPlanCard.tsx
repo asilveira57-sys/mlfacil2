@@ -1,12 +1,13 @@
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Check, MessageSquare } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Check, MessageSquare, AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { TierPlan, PricingMode, BillingCycle } from "@/hooks/useTierPlans";
 import { formatPriceBRL, getPlanPrice } from "@/hooks/useTierPlans";
 import { usePlanCta } from "@/hooks/usePlanCta";
-
+import { isPlanTooSmall } from "@/hooks/useUserSalesVolume";
 interface TierPlanCardProps {
   plan: TierPlan;
   mode: PricingMode;
@@ -15,6 +16,7 @@ interface TierPlanCardProps {
   compact?: boolean; // For landing page use
   maxFeatures?: number; // Limit features shown
   onSelectPlan?: (plan: TierPlan, priceId: string) => void;
+  userTotalSales?: number; // Total sales across all accounts (last 30d)
 }
 
 export function TierPlanCard({
@@ -25,8 +27,10 @@ export function TierPlanCard({
   compact = false,
   maxFeatures,
   onSelectPlan,
+  userTotalSales = 0,
 }: TierPlanCardProps) {
   const { t } = useTranslation('landing');
+  const planTooSmall = userTotalSales > 0 && isPlanTooSmall(plan.slug, userTotalSales);
   const { getCtaConfig, handleCtaClick, isLoading } = usePlanCta();
   const price = getPlanPrice(plan, mode, period);
   const ctaConfig = getCtaConfig(mode);
@@ -191,10 +195,23 @@ export function TierPlanCard({
         </div>
       )}
 
+      {/* Plan too small warning */}
+      {planTooSmall && (
+        <div className="mb-3 p-2.5 rounded-lg bg-destructive/10 border border-destructive/20">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-destructive flex-shrink-0 mt-0.5" />
+            <p className="text-[11px] leading-tight text-destructive">
+              Seu volume de vendas ({userTotalSales}) excede este plano. 
+              Para contratar, deslogue contas até ficar dentro da franquia.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* CTA Button */}
       <Button
         onClick={handleClick}
-        disabled={!isConsultationPlan && isLoading}
+        disabled={planTooSmall || (!isConsultationPlan && isLoading)}
         variant={highlighted ? "secondary" : isConsultationPlan ? "outline" : ctaConfig.variant}
         size={compact ? "default" : "lg"}
         className={cn("w-full", isConsultationPlan && "gap-2")}
@@ -204,6 +221,8 @@ export function TierPlanCard({
             <MessageSquare className="w-4 h-4" />
             {t('planos.consult_cta')}
           </>
+        ) : planTooSmall ? (
+          'Plano insuficiente'
         ) : (
           ctaConfig.label
         )}

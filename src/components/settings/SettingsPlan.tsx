@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useUserAccessState } from "@/hooks/useUserAccessState";
+import { useUserSalesVolume, isPlanTooSmall } from "@/hooks/useUserSalesVolume";
 
 interface Plan {
   id: string;
@@ -66,6 +67,7 @@ interface Invoice {
 const SettingsPlan = () => {
   const { t } = useTranslation();
   const { flags, selectedPlan, trialActive, trialExpired, loading: userLoading } = useUserAccessState();
+  const { totalSales30d, accountBreakdown } = useUserSalesVolume();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -306,13 +308,14 @@ const SettingsPlan = () => {
               const monthlyPrice = getMonthlyPrice(plan);
               const isCurrent = isCurrentPlan(plan.id);
               const isPopular = index === 1;
+              const tooSmall = isPlanTooSmall(plan.slug, totalSales30d);
 
               return (
                 <Card
                   key={plan.id}
                   className={`relative ${isCurrent ? "border-primary ring-1 ring-primary" : ""} ${
                     isPopular ? "shadow-lg" : ""
-                  }`}
+                  } ${tooSmall ? "opacity-60" : ""}`}
                 >
                   {isPopular && (
                     <div className="absolute -top-3 left-1/2 -translate-x-1/2">
@@ -342,12 +345,28 @@ const SettingsPlan = () => {
                       ))}
                     </ul>
 
+                    {tooSmall && (
+                      <div className="p-2.5 rounded-lg bg-destructive/10 border border-destructive/20">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="w-4 h-4 text-destructive flex-shrink-0 mt-0.5" />
+                          <p className="text-[11px] leading-tight text-destructive">
+                            Seu volume ({totalSales30d} vendas) excede este plano. Deslogue contas para contratar.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
                     <Button
                       className="w-full"
                       variant={isCurrent ? "outline" : "default"}
-                      disabled={isCurrent}
+                      disabled={isCurrent || tooSmall}
                     >
-                      {isCurrent ? t('settings:plan.current') : t('settings:plan.choose_plan')}
+                      {isCurrent 
+                        ? t('settings:plan.current') 
+                        : tooSmall 
+                          ? 'Plano insuficiente'
+                          : t('settings:plan.choose_plan')
+                      }
                     </Button>
                   </CardContent>
                 </Card>
