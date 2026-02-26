@@ -32,7 +32,7 @@ export function usePlanCta(): UsePlanCtaReturn {
     // Rule: if not authenticated, treat as never used trial
     if (!isAuthenticated) {
       return {
-        label: 'Iniciar teste grátis',
+        label: 'Fazer Teste',
         action: 'start_trial',
         variant: 'default',
       };
@@ -78,7 +78,7 @@ export function usePlanCta(): UsePlanCtaReturn {
 
     // Default: user hasn't used trial yet
     return {
-      label: 'Iniciar teste grátis',
+      label: 'Fazer Teste',
       action: 'start_trial',
       variant: 'default',
     };
