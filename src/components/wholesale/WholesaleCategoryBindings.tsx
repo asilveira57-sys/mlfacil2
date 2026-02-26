@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Trash2, Loader2, FolderTree, Search, Building2, AlertCircle } from "lucide-react";
+import { Plus, Trash2, Loader2, FolderTree, Search, Building2, AlertCircle, Pencil } from "lucide-react";
 import { useWholesaleCategoryBindings } from "@/hooks/useWholesaleCategoryBindings";
 import { useWholesaleProfiles } from "@/hooks/useWholesaleProfiles";
 
@@ -17,11 +17,12 @@ import { useWorkspaceCompanies } from "@/hooks/useWorkspaceCompanies";
 import { supabase } from "@/integrations/supabase/client";
 
 export function WholesaleCategoryBindings() {
-  const { bindings, isLoading, addBinding, removeBinding, updateBindingProfile } = useWholesaleCategoryBindings();
+  const { bindings, isLoading, addBinding, removeBinding, updateBindingProfile, updateBindingCompany } = useWholesaleCategoryBindings();
   const { profiles } = useWholesaleProfiles();
   const { companies, isLoading: companiesLoading } = useWorkspaceCompanies();
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingBinding, setEditingBinding] = useState<null | { id: string; category_id: string; category_name: string | null; company_id: string; profile_id: string }>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -88,6 +89,18 @@ export function WholesaleCategoryBindings() {
   });
 
   const handleAdd = () => {
+    if (editingBinding) {
+      // Edit mode: update company and optionally profile
+      updateBindingCompany.mutate({
+        id: editingBinding.id,
+        company_id: selectedCompanyId,
+        profile_id: selectedProfileId || undefined,
+      });
+      setDialogOpen(false);
+      resetDialog();
+      return;
+    }
+
     if (selectedCategoryId && selectedProfileId) {
       const cat = availableCategories.find((c) => c.id === selectedCategoryId);
       addBinding.mutate({
@@ -115,6 +128,20 @@ export function WholesaleCategoryBindings() {
     setSelectedProfileId("");
     setManualCategoryId("");
     setManualCategoryName("");
+    setEditingBinding(null);
+  };
+
+  const openEdit = (binding: typeof bindings[0]) => {
+    setEditingBinding({
+      id: binding.id,
+      category_id: binding.category_id,
+      category_name: binding.category_name,
+      company_id: binding.company_id,
+      profile_id: binding.profile_id,
+    });
+    setSelectedCompanyId(binding.company_id);
+    setSelectedProfileId(binding.profile_id);
+    setDialogOpen(true);
   };
 
   const handleDelete = () => {
@@ -231,14 +258,24 @@ export function WholesaleCategoryBindings() {
                     </Select>
                   </TableCell>
                   <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive"
-                      onClick={() => setDeleteId(binding.id)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => openEdit(binding)}
+                        title="Editar vínculo"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive"
+                        onClick={() => setDeleteId(binding.id)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -251,9 +288,17 @@ export function WholesaleCategoryBindings() {
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) resetDialog(); setDialogOpen(o); }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Vincular Categoria a Perfil</DialogTitle>
+            <DialogTitle>{editingBinding ? "Editar Vínculo" : "Vincular Categoria a Perfil"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
+            {/* Show category info in edit mode */}
+            {editingBinding && (
+              <div className="p-3 rounded-md bg-muted text-sm">
+                <span className="font-medium">Categoria:</span>{" "}
+                {editingBinding.category_name || editingBinding.category_id}{" "}
+                <Badge variant="outline" className="font-mono text-xs ml-1">{editingBinding.category_id}</Badge>
+              </div>
+            )}
             {/* Step 1: Company select */}
             <div className="space-y-1.5">
               <Label className="flex items-center gap-1.5">
@@ -318,8 +363,8 @@ export function WholesaleCategoryBindings() {
               )}
             </div>
 
-            {/* Step 3: Category from seller's catalog */}
-            {resolvedSellerId && (
+            {/* Step 3: Category from seller's catalog (only in add mode) */}
+            {!editingBinding && resolvedSellerId && (
               <>
                 {categoriesLoading ? (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -346,8 +391,8 @@ export function WholesaleCategoryBindings() {
               </>
             )}
 
-            {/* Manual category ID */}
-            {(resolvedSellerId || hasNoAccount || hasNoSellerId || !selectedCompanyId) && (
+            {/* Manual category ID (only in add mode) */}
+            {!editingBinding && (resolvedSellerId || hasNoAccount || hasNoSellerId || !selectedCompanyId) && (
               <div className="space-y-1.5">
                 <Label>{availableCategories.length > 0 ? "Ou insira o ID manualmente" : "ID da Categoria"}</Label>
                 <Input
@@ -358,7 +403,7 @@ export function WholesaleCategoryBindings() {
               </div>
             )}
 
-            {manualCategoryId && (
+            {!editingBinding && manualCategoryId && (
               <div className="space-y-1.5">
                 <Label>Nome da categoria (opcional)</Label>
                 <Input
@@ -377,12 +422,14 @@ export function WholesaleCategoryBindings() {
               onClick={handleAdd}
               disabled={
                 !selectedProfileId ||
-                (!selectedCategoryId && !manualCategoryId) ||
-                addBinding.isPending
+                !selectedCompanyId ||
+                (!editingBinding && !selectedCategoryId && !manualCategoryId) ||
+                addBinding.isPending ||
+                updateBindingCompany.isPending
               }
             >
-              {addBinding.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-              Vincular
+              {(addBinding.isPending || updateBindingCompany.isPending) && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {editingBinding ? "Salvar" : "Vincular"}
             </Button>
           </DialogFooter>
         </DialogContent>
