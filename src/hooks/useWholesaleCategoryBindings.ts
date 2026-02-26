@@ -120,11 +120,31 @@ export function useWholesaleCategoryBindings() {
     },
   });
 
+  const updateBindingCompany = useMutation({
+    mutationFn: async ({ id, company_id, profile_id }: { id: string; company_id: string; profile_id?: string }) => {
+      const updates: Record<string, string> = { company_id };
+      if (profile_id) updates.profile_id = profile_id;
+      const { error } = await (supabase as any)
+        .from("wholesale_profile_categories")
+        .update(updates)
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["wholesale-category-bindings"] });
+      toast.success("Vínculo atualizado");
+    },
+    onError: (err: any) => {
+      toast.error("Erro ao atualizar: " + (err.message || "desconhecido"));
+    },
+  });
+
   return {
     bindings: bindingsQuery.data || [],
     isLoading: bindingsQuery.isLoading,
     addBinding,
     removeBinding,
     updateBindingProfile,
+    updateBindingCompany,
   };
 }
