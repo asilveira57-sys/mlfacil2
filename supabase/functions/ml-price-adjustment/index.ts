@@ -94,15 +94,66 @@ serve(async (req) => {
 
     // ── ACTION: get_seller_categories ──
     if (action === 'get_seller_categories') {
-      const url = `https://api.mercadolibre.com/users/${sellerId}/items/search?limit=0`;
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-      if (!res.ok) {
-        const err = await res.text();
-        return new Response(JSON.stringify({ error: 'Failed to fetch categories', details: err }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      // Fetch items in batches to collect distinct category_ids
+      const categoryMap = new Map<string, number>();
+      let offset = 0;
+      const batchLimit = 50;
+      const maxItems = 1000;
+
+      while (offset < maxItems) {
+        const url = `https://api.mercadolibre.com/users/${sellerId}/items/search?offset=${offset}&limit=${batchLimit}&status=active`;
+        const searchRes = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (!searchRes.ok) break;
+        const searchData = await searchRes.json();
+        const itemIds: string[] = searchData.results || [];
+        if (itemIds.length === 0) break;
+
+        // Multiget to get category_id for each item
+        for (let i = 0; i < itemIds.length; i += 20) {
+          const batch = itemIds.slice(i, i + 20);
+          const multiRes = await fetch(
+            `https://api.mercadolibre.com/items?ids=${batch.join(',')}&attributes=id,category_id`,
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          if (multiRes.ok) {
+            const multiData = await multiRes.json();
+            for (const entry of multiData) {
+              if (entry.code === 200 && entry.body?.category_id) {
+                const catId = entry.body.category_id;
+                categoryMap.set(catId, (categoryMap.get(catId) || 0) + 1);
+              }
+            }
+          }
+        }
+
+        offset += batchLimit;
+        const total = searchData.paging?.total || 0;
+        if (offset >= total) break;
       }
-      const searchData = await res.json();
-      const categoryFilter = (searchData.available_filters || []).find((f: any) => f.id === 'category');
-      const categories = categoryFilter?.values || [];
+
+      // Resolve category names in batch
+      const catIds = Array.from(categoryMap.keys());
+      const categories: Array<{ id: string; name: string; results: number }> = [];
+
+      for (let i = 0; i < catIds.length; i += 20) {
+        const batch = catIds.slice(i, i + 20);
+        const promises = batch.map(async (catId) => {
+          try {
+            const res = await fetch(`https://api.mercadolibre.com/categories/${catId}`);
+            if (res.ok) {
+              const data = await res.json();
+              return { id: catId, name: data.name || catId, results: categoryMap.get(catId) || 0 };
+            }
+          } catch { /* skip */ }
+          return { id: catId, name: catId, results: categoryMap.get(catId) || 0 };
+        });
+        const resolved = await Promise.all(promises);
+        categories.push(...resolved);
+      }
+
+      // Sort by count descending
+      categories.sort((a, b) => b.results - a.results);
+
       return new Response(JSON.stringify({ categories }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
