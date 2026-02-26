@@ -227,3 +227,6 @@ verify_jwt = false
 
 [functions.ads-nightly-cache]
 verify_jwt = false
+
+[functions.wholesale-engine]
+verify_jwt = false
