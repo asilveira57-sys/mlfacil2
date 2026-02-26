@@ -81,6 +81,7 @@ export default function AjustePreco() {
       const { data, error } = await supabase.functions.invoke("ml-price-adjustment", {
         body: {
           action: "search_items",
+          sellerId,
           query: searchQuery || undefined,
           categoryId: filterCategory || undefined,
           status: filterStatus || undefined,
@@ -171,6 +172,7 @@ export default function AjustePreco() {
       try {
         const payload: any = {
           action: "apply_price",
+          sellerId,
           itemId: row.item.id,
           newPrice: row.newPrice,
           oldPrice: row.oldPrice,
