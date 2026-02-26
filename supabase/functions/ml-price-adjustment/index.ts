@@ -45,15 +45,20 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { action } = body;
+    const { action, sellerId: requestedSellerId } = body;
 
-    // Get ML account + token
-    const { data: mlAccount, error: accError } = await supabase
+    // Get ML account + token — use sellerId from request to pick the right account
+    let accountQuery = supabase
       .from('ml_accounts')
       .select('*')
       .eq('user_id', userId)
-      .eq('is_active', true)
-      .single();
+      .eq('is_active', true);
+
+    if (requestedSellerId) {
+      accountQuery = accountQuery.eq('ml_user_id', requestedSellerId);
+    }
+
+    const { data: mlAccount, error: accError } = await accountQuery.limit(1).single();
 
     if (accError || !mlAccount) {
       return new Response(JSON.stringify({ error: 'No Mercado Livre account connected', needsAuth: true }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
