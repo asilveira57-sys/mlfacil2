@@ -487,31 +487,32 @@ serve(async (req) => {
             continue;
           }
 
-          // Build sale_terms with quantity discount structure
-          // ML uses sale_terms QUANTITY_DISCOUNTS for some categories
-          // We'll try the standard PUT /items approach with sale_terms
-          const salePrices = tierPrices.map(t => ({
-            quantity: t.min_quantity,
-            amount: t.unit_price,
-          }));
+          // Build prices payload for ML Prices by Quantity API
+          // Endpoint: POST /items/{item_id}/prices/standard/quantity
+          // Format: array of price nodes with id placeholders and amount/conditions
+          const pricesPayload: any[] = [];
+          tierPrices.forEach((t, idx) => {
+            // Add ID placeholder (ML will assign real IDs)
+            pricesPayload.push({ id: String(idx + 1) });
+            // Add price node
+            pricesPayload.push({
+              amount: t.unit_price,
+              currency_id: 'BRL',
+              conditions: {
+                context_restrictions: ['channel_marketplace', 'user_type_business'],
+                min_purchase_unit: t.min_quantity,
+              },
+            });
+          });
 
           try {
-            const putRes = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
-              method: 'PUT',
+            const putRes = await fetch(`https://api.mercadolibre.com/items/${itemId}/prices/standard/quantity`, {
+              method: 'POST',
               headers: {
                 'Authorization': `Bearer ${accessToken}`,
                 'Content-Type': 'application/json',
               },
-              body: JSON.stringify({
-                sale_terms: [{
-                  id: 'QUANTITY_DISCOUNTS',
-                  values: salePrices.map(sp => ({
-                    quantity: sp.quantity,
-                    amount: sp.amount,
-                    currency_id: 'BRL',
-                  })),
-                }],
-              }),
+              body: JSON.stringify({ prices: pricesPayload }),
             });
 
             if (putRes.ok) {
@@ -519,6 +520,7 @@ serve(async (req) => {
             } else {
               const errBody = await putRes.json().catch(() => ({}));
               const errMsg = errBody.message || errBody.error || `HTTP ${putRes.status}`;
+              console.error(`[wholesale-engine] ML API error for ${itemId}:`, JSON.stringify(errBody));
               batchResults.push({ item_id: itemId, success: false, error: errMsg });
             }
           } catch (err: any) {
