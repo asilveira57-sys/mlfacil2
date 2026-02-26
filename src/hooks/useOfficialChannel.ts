@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useCurrentUserId } from '@/hooks/useCurrentUserId';
+import { useUserContext } from '@/hooks/useUserContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,14 +44,26 @@ function logCanalEvent(
 
 // ─── User-facing hooks ────────────────────────────────────────────────────────
 
-/** Busca todos os comunicados ativos com flag de leitura para o usuário */
+/** Busca todos os comunicados ativos com flag de leitura para o usuário, filtrando por seller */
 export function useAnnouncements() {
   const userId = useCurrentUserId();
+  const { activeMarketplaceAccountId } = useUserContext();
 
   return useQuery<AnnouncementWithRead[]>({
-    queryKey: ['official-channel-announcements', userId],
+    queryKey: ['official-channel-announcements', userId, activeMarketplaceAccountId],
     queryFn: async () => {
       if (!userId) return [];
+
+      // Busca seller_id do marketplace account ativo (para filtro de target_seller_id)
+      let activeSellerId: string | null = null;
+      if (activeMarketplaceAccountId) {
+        const { data: maData } = await supabase
+          .from('marketplace_accounts')
+          .select('external_user_id')
+          .eq('id', activeMarketplaceAccountId)
+          .single();
+        activeSellerId = maData?.external_user_id ?? null;
+      }
 
       // Busca todos os comunicados ativos
       const { data: announcements, error: annErr } = await supabase
@@ -63,6 +76,13 @@ export function useAnnouncements() {
       if (annErr) throw annErr;
       if (!announcements || announcements.length === 0) return [];
 
+      // Filtra: target_seller_id IS NULL (para todos) OU = sellerId ativo
+      const filtered = announcements.filter((a: any) => {
+        const target = a.target_seller_id;
+        if (!target) return true; // comunicado global
+        return activeSellerId && target === activeSellerId;
+      });
+
       // Busca leituras do usuário
       const { data: reads, error: readsErr } = await supabase
         .from('mktpfacil_announcement_reads')
@@ -73,7 +93,7 @@ export function useAnnouncements() {
 
       const readIds = new Set((reads ?? []).map((r) => r.announcement_id));
 
-      return announcements.map((a) => ({
+      return filtered.map((a) => ({
         ...a,
         is_read: readIds.has(a.id),
       }));

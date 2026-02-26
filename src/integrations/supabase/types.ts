@@ -7007,6 +7007,7 @@ export type Database = {
           link_url: string | null
           plan_target: string
           priority: number
+          target_seller_id: string | null
           title: string
           updated_at: string
         }
@@ -7020,6 +7021,7 @@ export type Database = {
           link_url?: string | null
           plan_target?: string
           priority?: number
+          target_seller_id?: string | null
           title: string
           updated_at?: string
         }
@@ -7033,6 +7035,7 @@ export type Database = {
           link_url?: string | null
           plan_target?: string
           priority?: number
+          target_seller_id?: string | null
           title?: string
           updated_at?: string
         }
