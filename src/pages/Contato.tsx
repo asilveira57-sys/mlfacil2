@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -66,18 +67,15 @@ export default function Contato() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-40">
-        <div className="container mx-auto px-4 py-4">
-          <h1 className="text-2xl font-bold text-foreground">Contato</h1>
-          <p className="text-sm text-muted-foreground">
-            Entre em contato para parcerias, consultoria ou suporte.
-          </p>
-        </div>
-      </header>
+    <div className="py-8">
+      <div className="container mx-auto px-4 text-center mb-8">
+        <h1 className="text-2xl font-bold text-foreground">Contato</h1>
+        <p className="text-sm text-muted-foreground">
+          Entre em contato para parcerias, consultoria ou suporte.
+        </p>
+      </div>
 
-      <main className="container mx-auto px-4 py-10">
+      <div className="container mx-auto px-4">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 max-w-6xl mx-auto">
           {/* COLUNA 1 — Perfil */}
           <div className="space-y-6">
@@ -245,11 +243,14 @@ export default function Contato() {
             </CardContent>
           </Card>
         </div>
-      </main>
+      </div>
 
-      {/* Footer */}
-      <div className="text-center text-xs text-muted-foreground pb-8">
-        <p>Suas informações são tratadas com sigilo e segurança.</p>
+      {/* Secondary links */}
+      <div className="container mx-auto px-4 py-6 text-center">
+        <p className="text-xs text-muted-foreground mb-2">Suas informações são tratadas com sigilo e segurança.</p>
+        <Link to="/central-de-ajuda" className="text-xs text-primary hover:underline">
+          Consultar Central de Ajuda
+        </Link>
       </div>
     </div>
   );

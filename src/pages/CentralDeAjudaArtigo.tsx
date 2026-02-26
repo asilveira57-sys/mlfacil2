@@ -2,13 +2,13 @@ import { useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { ArrowLeft, BookOpen, Eye, Clock } from "lucide-react";
-import ArticleFeedback from "@/components/help/ArticleFeedback";
+import { BookOpen, Eye, Clock } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import ArticleFeedback from "@/components/help/ArticleFeedback";
 
 export default function CentralDeAjudaArtigo() {
   const { slug } = useParams<{ slug: string }>();
@@ -36,20 +36,18 @@ export default function CentralDeAjudaArtigo() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background">
-        <div className="container mx-auto px-4 py-12 max-w-3xl animate-pulse space-y-4">
-          <div className="h-6 bg-muted rounded w-1/3" />
-          <div className="h-8 bg-muted rounded w-2/3" />
-          <div className="h-4 bg-muted rounded w-full" />
-          <div className="h-4 bg-muted rounded w-full" />
-        </div>
+      <div className="container mx-auto px-4 py-12 max-w-3xl animate-pulse space-y-4">
+        <div className="h-6 bg-muted rounded w-1/3" />
+        <div className="h-8 bg-muted rounded w-2/3" />
+        <div className="h-4 bg-muted rounded w-full" />
+        <div className="h-4 bg-muted rounded w-full" />
       </div>
     );
   }
 
   if (!article) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="flex items-center justify-center py-20">
         <Card>
           <CardContent className="py-12 text-center">
             <BookOpen className="h-10 w-10 mx-auto mb-3 text-muted-foreground opacity-50" />
@@ -79,13 +77,11 @@ export default function CentralDeAjudaArtigo() {
   };
 
   const renderInline = (text: string) => {
-    // Bold
     const parts = text.split(/(\*\*[^*]+\*\*)/g);
     return parts.map((part, i) => {
       if (part.startsWith("**") && part.endsWith("**")) {
         return <strong key={i}>{part.slice(2, -2)}</strong>;
       }
-      // Links
       const linkParts = part.split(/(\[[^\]]+\]\([^)]+\))/g);
       return linkParts.map((lp, j) => {
         const match = lp.match(/\[([^\]]+)\]\(([^)]+)\)/);
@@ -96,56 +92,43 @@ export default function CentralDeAjudaArtigo() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-40">
-        <div className="container mx-auto px-4 py-4 flex items-center gap-3">
-          <Link to="/central-de-ajuda">
-            <Button variant="ghost" size="icon"><ArrowLeft className="h-4 w-4" /></Button>
-          </Link>
-          <div>
-            <h1 className="text-lg font-bold text-foreground">Central de Ajuda</h1>
-          </div>
+    <div className="container mx-auto px-4 py-8 max-w-3xl">
+      <div className="mb-6">
+        <div className="flex items-center gap-2 mb-3">
+          <Badge variant="outline" className="text-xs">
+            {(article as any).help_categories?.name}
+          </Badge>
+          <span className="text-xs text-muted-foreground flex items-center gap-1">
+            <Eye className="h-3 w-3" /> {article.views} visualizações
+          </span>
+          <span className="text-xs text-muted-foreground flex items-center gap-1">
+            <Clock className="h-3 w-3" />
+            {format(new Date(article.created_at), "dd/MM/yyyy", { locale: ptBR })}
+          </span>
         </div>
-      </header>
+        <h1 className="text-2xl font-bold text-foreground">{article.title}</h1>
+        {article.summary && (
+          <p className="text-muted-foreground mt-2">{article.summary}</p>
+        )}
+      </div>
 
-      <main className="container mx-auto px-4 py-8 max-w-3xl">
-        <div className="mb-6">
-          <div className="flex items-center gap-2 mb-3">
-            <Badge variant="outline" className="text-xs">
-              {(article as any).help_categories?.name}
-            </Badge>
-            <span className="text-xs text-muted-foreground flex items-center gap-1">
-              <Eye className="h-3 w-3" /> {article.views} visualizações
-            </span>
-            <span className="text-xs text-muted-foreground flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              {format(new Date(article.created_at), "dd/MM/yyyy", { locale: ptBR })}
-            </span>
-          </div>
-          <h1 className="text-2xl font-bold text-foreground">{article.title}</h1>
-          {article.summary && (
-            <p className="text-muted-foreground mt-2">{article.summary}</p>
-          )}
-        </div>
+      <Card>
+        <CardContent className="py-6">
+          <div className="prose-sm">{renderContent(article.content)}</div>
+        </CardContent>
+      </Card>
 
-        <Card>
-          <CardContent className="py-6">
-            <div className="prose-sm">{renderContent(article.content)}</div>
-          </CardContent>
-        </Card>
+      <div className="mt-6">
+        <ArticleFeedback articleId={article.id} articleTitle={article.title} />
+      </div>
 
-        <div className="mt-6">
-          <ArticleFeedback articleId={article.id} articleTitle={article.title} />
-        </div>
-
-        <div className="mt-8 text-center">
-          <Link to="/central-de-ajuda">
-            <Button variant="outline" size="sm" className="gap-2">
-              <ArrowLeft className="h-4 w-4" /> Voltar à Central de Ajuda
-            </Button>
-          </Link>
-        </div>
-      </main>
+      <div className="mt-8 text-center">
+        <Link to="/central-de-ajuda">
+          <Button variant="outline" size="sm" className="gap-2">
+            Voltar à Central de Ajuda
+          </Button>
+        </Link>
+      </div>
     </div>
   );
 }
