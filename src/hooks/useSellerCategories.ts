@@ -39,7 +39,7 @@ export function useSellerCategories(accountId: string | null) {
       const { data, error } = await supabase.rpc('get_seller_visible_categories', {
         p_user_id: session.user.id,
         p_account_id: accountId,
-        p_limit: 12,
+        p_limit: 50,
       });
 
       if (error) {

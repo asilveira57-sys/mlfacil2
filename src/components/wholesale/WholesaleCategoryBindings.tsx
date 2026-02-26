@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -8,27 +9,52 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Trash2, Loader2, FolderTree, Search } from "lucide-react";
+import { Plus, Trash2, Loader2, FolderTree, Search, Building2, AlertCircle } from "lucide-react";
 import { useWholesaleCategoryBindings } from "@/hooks/useWholesaleCategoryBindings";
 import { useWholesaleProfiles } from "@/hooks/useWholesaleProfiles";
 import { useSellerCategories } from "@/hooks/useSellerCategories";
-import { useActiveAccount } from "@/contexts/ActiveAccountContext";
+import { useWorkspaceCompanies } from "@/hooks/useWorkspaceCompanies";
+import { supabase } from "@/integrations/supabase/client";
 
 export function WholesaleCategoryBindings() {
-  const { activeAccount } = useActiveAccount();
   const { bindings, isLoading, addBinding, removeBinding, updateBindingProfile } = useWholesaleCategoryBindings();
   const { profiles } = useWholesaleProfiles();
-  const { data: sellerCategories } = useSellerCategories(activeAccount?.sellerId || null);
+  const { companies, isLoading: companiesLoading } = useWorkspaceCompanies();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
 
   // Dialog state
+  const [selectedCompanyId, setSelectedCompanyId] = useState("");
   const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [selectedProfileId, setSelectedProfileId] = useState("");
   const [manualCategoryId, setManualCategoryId] = useState("");
   const [manualCategoryName, setManualCategoryName] = useState("");
+
+  // Resolve sellerId from selected company's marketplace account
+  const { data: companyAccount, isLoading: accountLoading } = useQuery({
+    queryKey: ["marketplace-account-by-company", selectedCompanyId],
+    queryFn: async () => {
+      if (!selectedCompanyId) return null;
+      const { data, error } = await (supabase as any)
+        .from("marketplace_accounts")
+        .select("id, external_user_id, account_label")
+        .eq("company_id", selectedCompanyId)
+        .eq("is_active", true)
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data as { id: string; external_user_id: string | null; account_label: string } | null;
+    },
+    enabled: !!selectedCompanyId,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const resolvedSellerId = companyAccount?.external_user_id || null;
+
+  // Fetch categories based on the resolved seller ID (with higher limit)
+  const { data: sellerCategories, isLoading: categoriesLoading } = useSellerCategories(resolvedSellerId);
 
   const activeProfiles = profiles.filter((p) => p.is_active);
   const boundCategoryIds = new Set(bindings.map((b) => b.category_id));
@@ -69,6 +95,7 @@ export function WholesaleCategoryBindings() {
   };
 
   const resetDialog = () => {
+    setSelectedCompanyId("");
     setSelectedCategoryId("");
     setSelectedProfileId("");
     setManualCategoryId("");
@@ -89,6 +116,10 @@ export function WholesaleCategoryBindings() {
       </div>
     );
   }
+
+  const showCategorySection = !!selectedCompanyId && !accountLoading;
+  const hasNoAccount = showCategorySection && !companyAccount;
+  const hasNoSellerId = showCategorySection && companyAccount && !companyAccount.external_user_id;
 
   return (
     <div className="space-y-4">
@@ -201,7 +232,51 @@ export function WholesaleCategoryBindings() {
             <DialogTitle>Vincular Categoria a Perfil</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            {/* Profile select */}
+            {/* Step 1: Company select */}
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-1.5">
+                <Building2 className="h-3.5 w-3.5" />
+                Empresa
+              </Label>
+              <Select value={selectedCompanyId} onValueChange={(v) => { setSelectedCompanyId(v); setSelectedCategoryId(""); }}>
+                <SelectTrigger>
+                  <SelectValue placeholder={companiesLoading ? "Carregando..." : "Selecione a empresa"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {companies.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.displayName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Loading account */}
+            {selectedCompanyId && accountLoading && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Buscando conta vinculada...
+              </div>
+            )}
+
+            {/* No marketplace account */}
+            {hasNoAccount && (
+              <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 p-3 rounded-md">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>Esta empresa não possui conta de marketplace vinculada.</span>
+              </div>
+            )}
+
+            {/* No seller ID */}
+            {hasNoSellerId && (
+              <div className="flex items-center gap-2 text-sm text-amber-600 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-md">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>A conta vinculada não possui ID de vendedor configurado.</span>
+              </div>
+            )}
+
+            {/* Step 2: Profile select */}
             <div className="space-y-1.5">
               <Label>Perfil de atacado</Label>
               <Select value={selectedProfileId} onValueChange={setSelectedProfileId}>
@@ -221,34 +296,45 @@ export function WholesaleCategoryBindings() {
               )}
             </div>
 
-            {/* Category from seller's catalog */}
-            {availableCategories.length > 0 && (
-              <div className="space-y-1.5">
-                <Label>Categoria do catálogo</Label>
-                <Select value={selectedCategoryId} onValueChange={(v) => { setSelectedCategoryId(v); setManualCategoryId(""); }}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione uma categoria" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableCategories.map((c) => (
-                      <SelectItem key={c.category_id} value={c.category_id}>
-                        {c.category_name} ({c.orders_count_90d} pedidos)
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            {/* Step 3: Category from seller's catalog */}
+            {resolvedSellerId && (
+              <>
+                {categoriesLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Carregando categorias...
+                  </div>
+                ) : availableCategories.length > 0 ? (
+                  <div className="space-y-1.5">
+                    <Label>Categoria do catálogo</Label>
+                    <Select value={selectedCategoryId} onValueChange={(v) => { setSelectedCategoryId(v); setManualCategoryId(""); }}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione uma categoria" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableCategories.map((c) => (
+                          <SelectItem key={c.category_id} value={c.category_id}>
+                            {c.category_name} ({c.orders_count_90d} pedidos)
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
+              </>
             )}
 
             {/* Manual category ID */}
-            <div className="space-y-1.5">
-              <Label>{availableCategories.length > 0 ? "Ou insira o ID manualmente" : "ID da Categoria"}</Label>
-              <Input
-                placeholder="Ex: MLB1234"
-                value={manualCategoryId}
-                onChange={(e) => { setManualCategoryId(e.target.value); setSelectedCategoryId(""); }}
-              />
-            </div>
+            {(resolvedSellerId || hasNoAccount || hasNoSellerId || !selectedCompanyId) && (
+              <div className="space-y-1.5">
+                <Label>{availableCategories.length > 0 ? "Ou insira o ID manualmente" : "ID da Categoria"}</Label>
+                <Input
+                  placeholder="Ex: MLB1234"
+                  value={manualCategoryId}
+                  onChange={(e) => { setManualCategoryId(e.target.value); setSelectedCategoryId(""); }}
+                />
+              </div>
+            )}
 
             {manualCategoryId && (
               <div className="space-y-1.5">
