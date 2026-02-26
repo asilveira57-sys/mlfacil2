@@ -51,28 +51,27 @@ export default function CentralDeAjuda() {
     : filtered;
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-40">
-        <div className="container mx-auto px-4 py-6 text-center">
-          <HelpCircle className="h-10 w-10 mx-auto mb-3 text-primary" />
-          <h1 className="text-2xl font-bold text-foreground">Central de Ajuda</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Encontre respostas para suas dúvidas sobre a plataforma.
-          </p>
-          <div className="max-w-md mx-auto mt-4 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Buscar artigos..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-10"
-              maxLength={100}
-            />
-          </div>
+    <div className="py-8">
+      {/* Header section */}
+      <div className="container mx-auto px-4 text-center mb-8">
+        <HelpCircle className="h-10 w-10 mx-auto mb-3 text-primary" />
+        <h1 className="text-2xl font-bold text-foreground">Central de Ajuda</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Encontre respostas para suas dúvidas sobre a plataforma.
+        </p>
+        <div className="max-w-md mx-auto mt-4 relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Buscar artigos..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-10"
+            maxLength={100}
+          />
         </div>
-      </header>
+      </div>
 
-      <main className="container mx-auto px-4 py-8 space-y-8 max-w-4xl">
+      <div className="container mx-auto px-4 space-y-8 max-w-4xl">
         {/* Categories */}
         <div className="flex flex-wrap gap-2 justify-center">
           <Badge
@@ -152,14 +151,19 @@ export default function CentralDeAjuda() {
             <p className="text-sm text-muted-foreground mt-1 mb-3">
               Entre em contato com nossa equipe.
             </p>
-            <Link to="/contato">
-              <Button size="sm" className="gap-2">
-                <MessageSquare className="h-4 w-4" /> Falar com suporte
-              </Button>
-            </Link>
+            <div className="flex items-center justify-center gap-3">
+              <Link to="/contato">
+                <Button size="sm" className="gap-2">
+                  <MessageSquare className="h-4 w-4" /> Falar com suporte
+                </Button>
+              </Link>
+              <Link to="/">
+                <Button size="sm" variant="outline">Início</Button>
+              </Link>
+            </div>
           </CardContent>
         </Card>
-      </main>
+      </div>
     </div>
   );
 }

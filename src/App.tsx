@@ -67,6 +67,7 @@ import SystemStatus from "./pages/SystemStatus";
 import Contato from "./pages/Contato";
 import CentralDeAjuda from "./pages/CentralDeAjuda";
 import CentralDeAjudaArtigo from "./pages/CentralDeAjudaArtigo";
+import PublicLayout from "./components/PublicLayout";
 import { AdminRoute } from "./components/auth/AdminRoute";
 
 // NOTE: GlobalWatchdogs removed to prevent background activity storms on tab focus.
@@ -165,10 +166,10 @@ const App = () => {
                 <Route path="/ferramentas/tendencias" element={<TrendsLiteTool />} />
                 <Route path="/ferramentas/precificacao" element={<PricingSimulatorTool />} />
                 <Route path="/ferramentas/comissoes" element={<CommissionsTool />} />
-                <Route path="/status" element={<SystemStatus />} />
-                <Route path="/contato" element={<Contato />} />
-                <Route path="/central-de-ajuda" element={<CentralDeAjuda />} />
-                <Route path="/central-de-ajuda/:slug" element={<CentralDeAjudaArtigo />} />
+                <Route path="/status" element={<PublicLayout><SystemStatus /></PublicLayout>} />
+                <Route path="/contato" element={<PublicLayout><Contato /></PublicLayout>} />
+                <Route path="/central-de-ajuda" element={<PublicLayout><CentralDeAjuda /></PublicLayout>} />
+                <Route path="/central-de-ajuda/:slug" element={<PublicLayout><CentralDeAjudaArtigo /></PublicLayout>} />
 
                 {/* Dashboard routes (with persistent shell) */}
                 <Route element={<AppShellLayout />}>

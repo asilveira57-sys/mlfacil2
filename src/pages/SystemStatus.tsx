@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { format, formatDistanceToNow } from "date-fns";
@@ -77,24 +78,24 @@ export default function SystemStatus() {
   const OverallIcon = overallConfig.icon;
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-background/95 backdrop-blur sticky top-0 z-40">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">Status do Sistema</h1>
-            <p className="text-sm text-muted-foreground">
-              Acompanhe a disponibilidade e o desempenho dos serviços em tempo real.
-            </p>
-          </div>
-          <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
-            <RefreshCw className="h-4 w-4" />
-            Atualizar
-          </Button>
+    <div className="py-8">
+      <div className="container mx-auto px-4 mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Status do Sistema</h1>
+          <p className="text-sm text-muted-foreground">
+            Acompanhe a disponibilidade e o desempenho dos serviços em tempo real.
+          </p>
+          <Link to="/central-de-ajuda" className="text-xs text-primary hover:underline mt-1 inline-block">
+            Ver Central de Ajuda
+          </Link>
         </div>
-      </header>
+        <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2">
+          <RefreshCw className="h-4 w-4" />
+          Atualizar
+        </Button>
+      </div>
 
-      <main className="container mx-auto px-4 py-8 space-y-8">
+      <div className="container mx-auto px-4 space-y-8">
         {/* Overall Status Card */}
         <Card className={cn("border-2", overallConfig.bg)}>
           <CardContent className="flex items-center gap-4 py-6">
@@ -218,7 +219,7 @@ export default function SystemStatus() {
         <div className="text-center text-xs text-muted-foreground pb-8">
           <p>Esta página é atualizada automaticamente a cada 60 segundos.</p>
         </div>
-      </main>
+      </div>
     </div>
   );
 }
