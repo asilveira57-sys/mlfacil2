@@ -52,33 +52,34 @@ export function useWholesaleProfiles() {
   const profilesQuery = useQuery({
     queryKey: ["wholesale-profiles", companyId],
     queryFn: async () => {
-      if (!companyId) return [];
-      const { data, error } = await (supabase as any)
+      if (!companyId) return [] as WholesaleProfile[];
+      
+      // Fetch profiles
+      const { data: profiles, error } = await (supabase as any)
         .from("wholesale_profiles")
         .select("*")
         .eq("company_id", companyId)
         .order("created_at", { ascending: false });
       if (error) throw error;
-      return (data || []) as WholesaleProfile[];
-    },
-    enabled: !!companyId,
-  });
-
-  const tiersQuery = useQuery({
-    queryKey: ["wholesale-tiers", companyId],
-    queryFn: async () => {
-      if (!companyId) return [];
-      const profileIds = profilesQuery.data?.map((p) => p.id) || [];
-      if (profileIds.length === 0) return [];
-      const { data, error } = await (supabase as any)
+      
+      if (!profiles || profiles.length === 0) return [] as WholesaleProfile[];
+      
+      // Fetch all tiers for these profiles in the same query
+      const profileIds = profiles.map((p: any) => p.id);
+      const { data: tiers, error: tiersError } = await (supabase as any)
         .from("wholesale_profile_tiers")
         .select("*")
         .in("profile_id", profileIds)
         .order("tier_index");
-      if (error) throw error;
-      return (data || []) as WholesaleTier[];
+      if (tiersError) throw tiersError;
+      
+      // Merge tiers into profiles
+      return profiles.map((p: any) => ({
+        ...p,
+        tiers: (tiers || []).filter((t: any) => t.profile_id === p.id),
+      })) as WholesaleProfile[];
     },
-    enabled: !!companyId && !!profilesQuery.data,
+    enabled: !!companyId,
   });
 
   const createProfile = useMutation({
@@ -120,7 +121,6 @@ export function useWholesaleProfiles() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["wholesale-profiles"] });
-      queryClient.invalidateQueries({ queryKey: ["wholesale-tiers"] });
       toast.success("Perfil criado com sucesso");
     },
     onError: (err: any) => {
@@ -161,7 +161,6 @@ export function useWholesaleProfiles() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["wholesale-profiles"] });
-      queryClient.invalidateQueries({ queryKey: ["wholesale-tiers"] });
       toast.success("Perfil atualizado");
     },
     onError: (err: any) => {
@@ -176,7 +175,7 @@ export function useWholesaleProfiles() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["wholesale-profiles"] });
-      queryClient.invalidateQueries({ queryKey: ["wholesale-tiers"] });
+      
       toast.success("Perfil excluído");
     },
     onError: (err: any) => {
@@ -198,14 +197,8 @@ export function useWholesaleProfiles() {
     },
   });
 
-  // Merge tiers into profiles
-  const profilesWithTiers: WholesaleProfile[] = (profilesQuery.data || []).map((p) => ({
-    ...p,
-    tiers: (tiersQuery.data || []).filter((t: any) => t.profile_id === p.id),
-  }));
-
   return {
-    profiles: profilesWithTiers,
+    profiles: profilesQuery.data || [],
     isLoading: profilesQuery.isLoading,
     createProfile,
     updateProfile,
