@@ -1,23 +1,19 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Slider } from "@/components/ui/slider";
 import { LandingHeader, LandingFooter } from "@/components/landing";
-import { useTierPlans, formatPriceBRL, getPlanPrice, type PricingMode, type BillingCycle, type TierPlan } from "@/hooks/useTierPlans";
+import { useBillingPlans, useBillingCheckout, formatPriceBRL, getPeriodLabel } from "@/hooks/useBillingPlans";
 import { usePlanCta } from "@/hooks/usePlanCta";
-import { useBillingCheckout } from "@/hooks/useBillingPlans";
 import { useUserAccess } from "@/contexts/UserAccessContext";
 import { useUserSalesVolume, isPlanTooSmall } from "@/hooks/useUserSalesVolume";
 import { toast } from "sonner";
 import {
   Sparkles,
-  Check,
   CheckCircle,
+  ArrowLeft,
   ArrowDown,
   AlertTriangle,
   Tag,
@@ -27,16 +23,23 @@ import {
   Settings2,
   FileText,
   RefreshCw,
-  HelpCircle,
   ChevronDown,
+  ChevronRight,
+  CreditCard,
+  Repeat,
+  Package,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { Plan, PlanPrice } from "@/types/billing";
 
-// The 3 main volume tiers for the comparator
+// Tier definitions matching DB slugs
 const VOLUME_TIERS = [
-  { slug: "ate-50-vendas", min: 0, max: 50, label: "Até 50" },
-  { slug: "51-300-vendas", min: 51, max: 300, label: "51 a 300" },
-  { slug: "301-700-vendas", min: 301, max: 700, label: "301 a 700" },
+  { slug: "ate-50-vendas", label: "Até 50 pedidos/mês", desc: "Ideal para quem está começando no marketplace." },
+  { slug: "51-300-vendas", label: "51 a 300 pedidos/mês", desc: "Para operações em crescimento com volume moderado." },
+  { slug: "301-700-vendas", label: "301 a 700 pedidos/mês", desc: "Operações consolidadas com bom volume de vendas." },
+  { slug: "701-1500-vendas", label: "701 a 1.500 pedidos/mês", desc: "Sellers de alto volume com operação robusta." },
+  { slug: "1501-3000-vendas", label: "1.501 a 3.000 pedidos/mês", desc: "Grandes operações com volume intenso." },
+  { slug: "acima-3000-vendas", label: "Acima de 3.000 pedidos/mês", desc: "Volume enterprise. Entre em contato." },
 ];
 
 const INCLUDED_FEATURES = [
@@ -51,11 +54,15 @@ const INCLUDED_FEATURES = [
 const FAQ_ITEMS = [
   {
     q: "O que muda de um plano para outro?",
-    a: "Apenas o limite mensal de vendas/pedidos. As funcionalidades são exatamente iguais em todos os planos.",
+    a: "Apenas o limite mensal de pedidos. As funcionalidades são exatamente iguais em todos os planos.",
+  },
+  {
+    q: "Qual a diferença entre Pré-pago e Assinatura?",
+    a: "No Pré-pago você paga antecipado pelo período escolhido. Na Assinatura, a cobrança é mensal e recorrente.",
   },
   {
     q: "Posso trocar de plano depois?",
-    a: "Sim. Você pode ajustar seu plano a qualquer momento conforme seu volume de vendas mudar.",
+    a: "Sim. Você pode ajustar seu plano a qualquer momento conforme seu volume mudar.",
   },
   {
     q: "O teste grátis exige cartão?",
@@ -63,24 +70,16 @@ const FAQ_ITEMS = [
   },
 ];
 
-function sliderValueToTierIndex(value: number): number {
-  if (value <= 50) return 0;
-  if (value <= 300) return 1;
-  return 2;
-}
-
 const Planos = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { t } = useTranslation("landing");
-  const { data, isLoading, error } = useTierPlans();
+  const { volumePlans, zplPlan, settings, loading: isLoading, error } = useBillingPlans();
   const { checkout, loading: checkoutLoading } = useBillingCheckout();
   const { isAuthenticated, trialActive, trialExpired, flags } = useUserAccess();
   const { getCtaConfig, handleCtaClick, isLoading: ctaLoading } = usePlanCta();
   const { totalSales30d } = useUserSalesVolume();
 
-  const [billingCycle, setBillingCycle] = useState<BillingCycle>("mensal");
-  const [sliderValue, setSliderValue] = useState([150]);
+  const [selectedTierSlug, setSelectedTierSlug] = useState<string | null>(null);
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null);
 
   // Handle payment status from URL
@@ -98,41 +97,59 @@ const Planos = () => {
     }
   }, [searchParams]);
 
-  const volumePlans = data?.volumePlans || [];
-  const zplPlan = data?.zplPlan;
-  const trialPolicy = data?.trialPolicy;
-
-  // Get only the first 3 volume plans for the comparator
-  const mainPlans = useMemo(
-    () => volumePlans.filter((p) => VOLUME_TIERS.some((t) => t.slug === p.slug)),
-    [volumePlans]
+  // Find the selected plan data
+  const selectedPlan = useMemo(
+    () => volumePlans.find((p) => p.slug === selectedTierSlug) || null,
+    [volumePlans, selectedTierSlug]
   );
 
-  const recommendedIndex = sliderValueToTierIndex(sliderValue[0]);
-  const recommendedTier = VOLUME_TIERS[recommendedIndex];
-  const recommendedPlan = mainPlans.find((p) => p.slug === recommendedTier?.slug);
+  // Split prices into pré-pago and assinatura
+  const prePagoPrices = useMemo(() => {
+    if (!selectedPlan) return [];
+    return selectedPlan.prices
+      .filter((p) => p.mode === "avulso" && p.visible)
+      .filter((p) => {
+        if (p.is_campaign && !settings.enable_annual_campaign) return false;
+        return true;
+      })
+      .sort((a, b) => a.sort_order - b.sort_order);
+  }, [selectedPlan, settings]);
 
+  const assinaturaPrices = useMemo(() => {
+    if (!selectedPlan) return [];
+    return selectedPlan.prices
+      .filter((p) => p.mode === "assinatura" && p.visible)
+      .filter((p) => {
+        // Only show mensal for assinatura (anual only if campaign active)
+        if (p.period === "anual" && (!p.is_campaign || !settings.enable_annual_campaign)) return false;
+        if (p.period !== "mensal" && p.period !== "anual") return false;
+        return true;
+      })
+      .sort((a, b) => a.sort_order - b.sort_order);
+  }, [selectedPlan, settings]);
+
+  const tierInfo = VOLUME_TIERS.find((t) => t.slug === selectedTierSlug);
   const ctaConfig = getCtaConfig("avulso");
+  const ctaConfigSub = getCtaConfig("assinatura");
 
-  // Get discount percentage for non-monthly periods
-  const getDiscount = (plan: TierPlan, period: BillingCycle): number | null => {
-    if (period === "mensal") return null;
-    const monthlyPrice = getPlanPrice(plan, "avulso", "mensal");
-    const periodPrice = getPlanPrice(plan, "avulso", period);
-    if (!monthlyPrice || !periodPrice) return null;
-
-    const periodMonths = period === "trimestral" ? 3 : period === "semestral" ? 6 : 1;
-    const monthlyEquiv = periodPrice.price_cents / periodMonths;
-    const discount = Math.round(((monthlyPrice.price_cents - monthlyEquiv) / monthlyPrice.price_cents) * 100);
-    return discount > 0 ? discount : null;
+  const handleSelectTier = (slug: string) => {
+    setSelectedTierSlug(slug);
+    // Scroll to detail after a tick
+    setTimeout(() => {
+      document.getElementById("plan-detail")?.scrollIntoView({ behavior: "smooth" });
+    }, 100);
   };
 
-  const scrollToComparator = () => {
-    document.getElementById("comparador")?.scrollIntoView({ behavior: "smooth" });
+  const handleBack = () => {
+    setSelectedTierSlug(null);
+    setTimeout(() => {
+      document.getElementById("camadas")?.scrollIntoView({ behavior: "smooth" });
+    }, 100);
   };
 
-  const scrollToFeatures = () => {
-    document.getElementById("incluso")?.scrollIntoView({ behavior: "smooth" });
+  const handlePriceClick = (price: PlanPrice, mode: "avulso" | "assinatura") => {
+    const config = mode === "assinatura" ? ctaConfigSub : ctaConfig;
+    handleCtaClick(config, price.id, selectedPlan?.slug, mode, price.period);
   };
 
   // Loading state
@@ -144,14 +161,13 @@ const Planos = () => {
           <div className="text-center max-w-3xl mx-auto px-4 py-16">
             <Skeleton className="h-10 w-96 mx-auto mb-4" />
             <Skeleton className="h-5 w-[500px] mx-auto mb-8" />
-            <Skeleton className="h-12 w-48 mx-auto" />
           </div>
           <div className="max-w-5xl mx-auto px-4 py-12">
             <div className="grid md:grid-cols-3 gap-6">
-              {[1, 2, 3].map((i) => (
+              {[1, 2, 3, 4, 5, 6].map((i) => (
                 <div key={i} className="p-6 rounded-xl border border-border bg-card">
-                  <Skeleton className="h-6 w-32 mb-2" />
-                  <Skeleton className="h-10 w-24 mb-4" />
+                  <Skeleton className="h-6 w-40 mb-2" />
+                  <Skeleton className="h-4 w-56 mb-4" />
                   <Skeleton className="h-10 w-full" />
                 </div>
               ))}
@@ -176,24 +192,26 @@ const Planos = () => {
               <span className="text-primary">Você escolhe apenas o volume.</span>
             </h1>
             <p className="text-base md:text-lg text-muted-foreground max-w-2xl mx-auto mb-6">
-              Todos os planos incluem as mesmas funcionalidades do MKTP Fácil. A diferença está na capacidade mensal de vendas.
+              Todos os planos incluem as mesmas funcionalidades. A diferença está apenas na capacidade mensal de pedidos.
             </p>
 
-            {trialPolicy && (
-              <div className="inline-flex items-center gap-2 bg-success/10 text-success px-4 py-2 rounded-full border border-success/20 mb-8">
-                <Sparkles className="w-4 h-4" />
-                <span className="text-sm font-semibold">
-                  Teste grátis por {trialPolicy.trial_days} dias, sem cartão.
-                </span>
-              </div>
-            )}
+            <div className="inline-flex items-center gap-2 bg-success/10 text-success px-4 py-2 rounded-full border border-success/20 mb-8">
+              <Sparkles className="w-4 h-4" />
+              <span className="text-sm font-semibold">
+                Teste grátis por 14 dias, sem cartão.
+              </span>
+            </div>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-              <Button size="lg" className="gap-2 px-8 h-12 text-base" onClick={scrollToComparator}>
+              <Button size="lg" className="gap-2 px-8 h-12 text-base" onClick={() => {
+                document.getElementById("camadas")?.scrollIntoView({ behavior: "smooth" });
+              }}>
                 Escolher meu plano
                 <ArrowDown className="w-4 h-4" />
               </Button>
-              <Button size="lg" variant="outline" className="gap-2 px-6 h-12 text-base bg-background" onClick={scrollToFeatures}>
+              <Button size="lg" variant="outline" className="gap-2 px-6 h-12 text-base bg-background" onClick={() => {
+                document.getElementById("incluso")?.scrollIntoView({ behavior: "smooth" });
+              }}>
                 Ver o que está incluso
               </Button>
             </div>
@@ -225,19 +243,19 @@ const Planos = () => {
           </div>
         </section>
 
-        {/* ─── COMPARADOR INTERATIVO ─── */}
-        <section id="comparador" className="py-12 md:py-16 px-4 bg-muted/40">
-          <div className="max-w-4xl mx-auto">
+        {/* ─── ETAPA 1: SELEÇÃO DE CAMADA ─── */}
+        <section id="camadas" className="py-12 md:py-16 px-4 bg-muted/40">
+          <div className="max-w-5xl mx-auto">
             <h2 className="text-xl md:text-2xl font-bold text-foreground text-center mb-2">
-              Selecione seu volume mensal
+              Escolha sua capacidade mensal
             </h2>
             <p className="text-sm text-muted-foreground text-center mb-10">
-              Arraste para simular a quantidade de vendas/pedidos por mês. O plano recomendado muda automaticamente.
+              Selecione o volume de pedidos que corresponde à sua operação. Nenhum preço nesta etapa.
             </p>
 
             {/* Sales volume warning */}
             {isAuthenticated && totalSales30d > 0 && (
-              <div className="flex items-center gap-2 bg-primary/5 border border-primary/20 rounded-lg px-4 py-2.5 mb-6">
+              <div className="flex items-center gap-2 bg-primary/5 border border-primary/20 rounded-lg px-4 py-2.5 mb-6 max-w-3xl mx-auto">
                 <AlertTriangle className="w-4 h-4 text-primary flex-shrink-0" />
                 <p className="text-xs text-foreground">
                   Seu volume nos últimos 30 dias: <strong>{totalSales30d} vendas</strong>. Planos com franquia inferior estão bloqueados.
@@ -245,183 +263,55 @@ const Planos = () => {
               </div>
             )}
 
-            {/* Slider */}
-            <div className="bg-card border border-border rounded-2xl p-6 md:p-8 mb-8">
-              <div className="text-center mb-6">
-                <span className="text-3xl md:text-4xl font-bold text-primary">{sliderValue[0]}</span>
-                <span className="text-base text-muted-foreground ml-2">vendas/mês</span>
-              </div>
-
-              <div className="px-2 mb-4">
-                <Slider
-                  value={sliderValue}
-                  onValueChange={setSliderValue}
-                  min={0}
-                  max={700}
-                  step={1}
-                  className="w-full"
-                />
-              </div>
-
-              {/* Markers */}
-              <div className="flex justify-between px-2 text-xs text-muted-foreground">
-                {VOLUME_TIERS.map((tier) => (
-                  <button
-                    key={tier.slug}
-                    onClick={() => setSliderValue([Math.floor((tier.min + tier.max) / 2)])}
-                    className={cn(
-                      "transition-colors hover:text-foreground",
-                      recommendedTier?.slug === tier.slug && "text-primary font-semibold"
-                    )}
-                  >
-                    {tier.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Period Toggle */}
-            <div className="flex flex-col items-center gap-3 mb-8">
-              <Tabs value={billingCycle} onValueChange={(v) => setBillingCycle(v as BillingCycle)}>
-                <TabsList className="h-10 bg-background border border-border">
-                  <TabsTrigger value="mensal" className="px-5 text-sm">Mensal</TabsTrigger>
-                  <TabsTrigger value="trimestral" className="px-5 text-sm">Trimestral</TabsTrigger>
-                  <TabsTrigger value="semestral" className="px-5 text-sm">Semestral</TabsTrigger>
-                </TabsList>
-              </Tabs>
-              {recommendedPlan && billingCycle !== "mensal" && (() => {
-                const disc = getDiscount(recommendedPlan, billingCycle);
-                return disc ? (
-                  <Badge variant="secondary" className="bg-success/10 text-success border-success/20">
-                    <Tag className="w-3 h-3 mr-1" />
-                    Economize {disc}% no {billingCycle}
-                  </Badge>
-                ) : null;
-              })()}
-            </div>
-
-            {/* Recommended Plan Card */}
-            {recommendedPlan && (() => {
-              const price = getPlanPrice(recommendedPlan, "avulso", billingCycle);
-              const tooSmall = isAuthenticated && isPlanTooSmall(recommendedPlan.slug, totalSales30d);
-              return (
-                <div className="bg-primary/5 border-2 border-primary rounded-2xl p-6 md:p-8 text-center">
-                  <Badge className="mb-3 bg-primary/10 text-primary border-primary/20">
-                    Recomendado para seu volume
-                  </Badge>
-                  <h3 className="text-xl md:text-2xl font-bold text-foreground mb-1">
-                    {recommendedPlan.name}
-                  </h3>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Mesmas funcionalidades. Maior capacidade mensal.
-                  </p>
-                  {price && (
-                    <div className="mb-5">
-                      <span className="text-4xl md:text-5xl font-bold text-foreground">
-                        {formatPriceBRL(price.price_cents)}
-                      </span>
-                      <span className="text-muted-foreground ml-1">
-                        /{billingCycle === "mensal" ? "mês" : billingCycle === "trimestral" ? "trim." : "sem."}
-                      </span>
-                    </div>
-                  )}
-                  {tooSmall ? (
-                    <div className="inline-flex items-center gap-2 text-destructive text-sm mb-3">
-                      <AlertTriangle className="w-4 h-4" />
-                      Seu volume excede este plano
-                    </div>
-                  ) : (
-                    <Button
-                      size="lg"
-                      className="px-10 h-12 text-base"
-                      disabled={ctaLoading}
-                      onClick={() => {
-                        if (price) {
-                          handleCtaClick(ctaConfig, price.id, recommendedPlan.slug, "avulso", billingCycle);
-                        }
-                      }}
-                    >
-                      {ctaConfig.label === "Iniciar teste grátis" ? "Fazer Teste" : ctaConfig.label}
-                    </Button>
-                  )}
-                </div>
-              );
-            })()}
-
-            {/* Microcopy */}
-            <p className="text-center text-xs text-muted-foreground mt-6">
-              O MKTP Fácil é o mesmo em qualquer plano. Você paga apenas pela capacidade mensal de vendas.
-            </p>
-          </div>
-        </section>
-
-        {/* ─── CARDS DOS PLANOS ─── */}
-        <section className="py-12 md:py-16 px-4 bg-background">
-          <div className="max-w-5xl mx-auto">
-            <h2 className="text-xl md:text-2xl font-bold text-foreground text-center mb-8">
-              Todos os planos
-            </h2>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {mainPlans.map((plan) => {
-                const price = getPlanPrice(plan, "avulso", billingCycle);
-                const isRecommended = plan.slug === recommendedTier?.slug;
-                const tooSmall = isAuthenticated && isPlanTooSmall(plan.slug, totalSales30d);
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {VOLUME_TIERS.map((tier) => {
+                const plan = volumePlans.find((p) => p.slug === tier.slug);
+                const tooSmall = isAuthenticated && plan && isPlanTooSmall(plan.slug, totalSales30d);
+                const isSelected = selectedTierSlug === tier.slug;
+                const isConsulta = tier.slug === "acima-3000-vendas";
 
                 return (
                   <div
-                    key={plan.id}
+                    key={tier.slug}
                     className={cn(
-                      "relative flex flex-col rounded-2xl border transition-all duration-300 p-6",
-                      isRecommended
-                        ? "border-primary shadow-lg ring-2 ring-primary/20 bg-card"
-                        : "border-border bg-card hover:border-primary/30 hover:shadow-md"
+                      "relative flex flex-col rounded-2xl border p-6 transition-all duration-200",
+                      isSelected
+                        ? "border-primary ring-2 ring-primary/20 bg-primary/5"
+                        : "border-border bg-card hover:border-primary/30 hover:shadow-md",
+                      tooSmall && "opacity-60"
                     )}
                   >
-                    {isRecommended && (
-                      <Badge className="absolute -top-3 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground px-3 py-1">
-                        Recomendado
-                      </Badge>
-                    )}
-
-                    <h3 className="text-lg font-bold text-foreground mb-1">{plan.name}</h3>
-                    <p className="text-sm text-muted-foreground mb-4">{plan.description}</p>
-
-                    {price ? (
-                      <div className="mb-4">
-                        <span className="text-3xl font-bold text-foreground">
-                          {formatPriceBRL(price.price_cents)}
-                        </span>
-                        <span className="text-sm text-muted-foreground ml-1">
-                          /{billingCycle === "mensal" ? "mês" : billingCycle === "trimestral" ? "trim." : "sem."}
-                        </span>
+                    <div className="flex items-start gap-3 mb-3">
+                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                        <Package className="w-5 h-5 text-primary" />
                       </div>
-                    ) : (
-                      <div className="mb-4">
-                        <span className="text-lg font-semibold text-muted-foreground">Consulte-nos</span>
+                      <div>
+                        <h3 className="text-base font-bold text-foreground leading-tight">{tier.label}</h3>
+                        <p className="text-xs text-muted-foreground mt-1">{tier.desc}</p>
                       </div>
-                    )}
-
-                    <p className="text-xs text-muted-foreground mb-5 flex-1">
-                      Inclui todas as funcionalidades do MKTP Fácil.
-                    </p>
+                    </div>
 
                     {tooSmall ? (
-                      <Button variant="outline" disabled className="w-full gap-2">
+                      <Button variant="outline" disabled className="w-full mt-auto gap-2">
                         <AlertTriangle className="w-4 h-4" />
                         Plano insuficiente
                       </Button>
+                    ) : isConsulta ? (
+                      <Button
+                        variant="outline"
+                        className="w-full mt-auto"
+                        onClick={() => navigate("/contato")}
+                      >
+                        Fale conosco
+                      </Button>
                     ) : (
                       <Button
-                        variant={isRecommended ? "default" : "outline"}
-                        className="w-full"
-                        disabled={ctaLoading}
-                        onClick={() => {
-                          if (price) {
-                            handleCtaClick(ctaConfig, price.id, plan.slug, "avulso", billingCycle);
-                          }
-                        }}
+                        variant={isSelected ? "default" : "outline"}
+                        className="w-full mt-auto gap-2"
+                        onClick={() => handleSelectTier(tier.slug)}
                       >
-                        {ctaConfig.label === "Iniciar teste grátis" ? "Fazer Teste" : ctaConfig.label}
+                        Ver opções
+                        <ChevronRight className="w-4 h-4" />
                       </Button>
                     )}
                   </div>
@@ -431,94 +321,282 @@ const Planos = () => {
           </div>
         </section>
 
+        {/* ─── ETAPA 2: DETALHE DA CAMADA SELECIONADA ─── */}
+        {selectedPlan && tierInfo && (
+          <section id="plan-detail" className="py-12 md:py-16 px-4 bg-background border-t border-border">
+            <div className="max-w-4xl mx-auto">
+              {/* Breadcrumb */}
+              <nav className="flex items-center gap-2 text-sm text-muted-foreground mb-8">
+                <button onClick={handleBack} className="hover:text-foreground transition-colors">
+                  Planos
+                </button>
+                <ChevronRight className="w-3 h-3" />
+                <span className="text-foreground font-medium">{tierInfo.label}</span>
+              </nav>
+
+              {/* Back button */}
+              <Button variant="ghost" size="sm" className="gap-2 mb-6 -ml-2" onClick={handleBack}>
+                <ArrowLeft className="w-4 h-4" />
+                Voltar para escolher outra camada
+              </Button>
+
+              {/* Title */}
+              <h2 className="text-xl md:text-2xl font-bold text-foreground mb-2">
+                Plano {selectedPlan.name}
+              </h2>
+              <p className="text-sm text-muted-foreground mb-10">
+                As funcionalidades são as mesmas. Você está escolhendo apenas a capacidade mensal.
+              </p>
+
+              {/* ─── BLOCO A: PRÉ-PAGO ─── */}
+              {prePagoPrices.length > 0 && (
+                <div className="mb-10">
+                  <div className="flex items-center gap-3 mb-5">
+                    <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
+                      <CreditCard className="w-4.5 h-4.5 text-primary" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-foreground">Pagamento Antecipado (Pré-pago)</h3>
+                      <p className="text-xs text-muted-foreground">Pague antecipado e use durante o período escolhido.</p>
+                    </div>
+                  </div>
+
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {prePagoPrices.map((price) => {
+                      const periodLabel = getPeriodLabel(price.period);
+                      return (
+                        <Card
+                          key={price.id}
+                          className={cn(
+                            "border-border hover:border-primary/30 transition-all hover:shadow-md"
+                          )}
+                        >
+                          <CardContent className="p-5">
+                            <div className="flex items-center justify-between mb-3">
+                              <span className="text-sm font-semibold text-foreground">{periodLabel}</span>
+                              {price.badge_text && (
+                                <Badge variant="secondary" className="bg-success/10 text-success border-success/20 text-[10px]">
+                                  <Tag className="w-3 h-3 mr-1" />
+                                  {price.badge_text}
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="mb-4">
+                              <span className="text-2xl font-bold text-foreground">
+                                {formatPriceBRL(price.price_cents)}
+                              </span>
+                              <span className="text-xs text-muted-foreground ml-1">
+                                /{price.period === "mensal" ? "mês" : price.period === "trimestral" ? "trim." : "sem."}
+                              </span>
+                            </div>
+                            <Button
+                              className="w-full"
+                              variant="default"
+                              disabled={ctaLoading || checkoutLoading}
+                              onClick={() => handlePriceClick(price, "avulso")}
+                            >
+                              {ctaConfig.label}
+                            </Button>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* ─── BLOCO B: ASSINATURA RECORRENTE ─── */}
+              {assinaturaPrices.length > 0 && (
+                <div className="mb-10">
+                  <div className="flex items-center gap-3 mb-5">
+                    <div className="w-9 h-9 rounded-lg bg-accent/50 flex items-center justify-center">
+                      <Repeat className="w-4.5 h-4.5 text-primary" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-foreground">Assinatura Recorrente</h3>
+                      <p className="text-xs text-muted-foreground">Cobrança automática mensal. Cancele quando quiser.</p>
+                    </div>
+                  </div>
+
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {assinaturaPrices.map((price) => {
+                      const periodLabel = price.period === "anual" ? "Anual" : "Mensal";
+                      return (
+                        <Card
+                          key={price.id}
+                          className="border-border hover:border-primary/30 transition-all hover:shadow-md"
+                        >
+                          <CardContent className="p-5">
+                            <div className="flex items-center justify-between mb-3">
+                              <span className="text-sm font-semibold text-foreground">Assinatura {periodLabel}</span>
+                              {price.badge_text && (
+                                <Badge variant="secondary" className="bg-success/10 text-success border-success/20 text-[10px]">
+                                  <Tag className="w-3 h-3 mr-1" />
+                                  {price.badge_text}
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="mb-4">
+                              <span className="text-2xl font-bold text-foreground">
+                                {formatPriceBRL(price.price_cents)}
+                              </span>
+                              <span className="text-xs text-muted-foreground ml-1">/mês</span>
+                            </div>
+                            <Button
+                              className="w-full"
+                              variant="outline"
+                              disabled={ctaLoading || checkoutLoading}
+                              onClick={() => handlePriceClick(price, "assinatura")}
+                            >
+                              {ctaConfigSub.label}
+                            </Button>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Microcopy */}
+              <p className="text-xs text-muted-foreground text-center border-t border-border pt-6">
+                O MKTP Fácil é o mesmo em qualquer plano. Você paga apenas pela capacidade mensal de pedidos.
+              </p>
+            </div>
+          </section>
+        )}
+
         {/* ─── TABELA COMPARATIVA ─── */}
-        <section className="py-12 md:py-16 px-4 bg-muted/30">
-          <div className="max-w-4xl mx-auto">
-            <h2 className="text-xl md:text-2xl font-bold text-foreground text-center mb-8">
-              Comparativo de planos
-            </h2>
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="text-left py-3 px-4 text-sm font-semibold text-foreground">Funcionalidade</th>
-                    {mainPlans.map((plan) => (
-                      <th
-                        key={plan.id}
-                        className={cn(
-                          "text-center py-3 px-4 text-sm font-semibold",
-                          plan.slug === recommendedTier?.slug ? "text-primary" : "text-foreground"
-                        )}
-                      >
-                        {plan.name}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {INCLUDED_FEATURES.map((feat) => (
-                    <tr key={feat.label} className="border-b border-border/50">
-                      <td className="py-3 px-4 text-sm text-foreground">{feat.label}</td>
-                      {mainPlans.map((plan) => (
-                        <td key={plan.id} className="text-center py-3 px-4">
-                          <CheckCircle className="w-5 h-5 text-success mx-auto" />
-                        </td>
+        {!selectedTierSlug && (
+          <section className="py-12 md:py-16 px-4 bg-muted/30">
+            <div className="max-w-5xl mx-auto">
+              <h2 className="text-xl md:text-2xl font-bold text-foreground text-center mb-8">
+                Comparativo de funcionalidades
+              </h2>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left py-3 px-4 text-sm font-semibold text-foreground">Funcionalidade</th>
+                      {VOLUME_TIERS.slice(0, 5).map((tier) => (
+                        <th key={tier.slug} className="text-center py-3 px-4 text-xs font-semibold text-foreground">
+                          {tier.label.replace(" pedidos/mês", "")}
+                        </th>
                       ))}
                     </tr>
-                  ))}
-                  {/* Capacity row */}
-                  <tr className="bg-primary/5">
-                    <td className="py-3 px-4 text-sm font-semibold text-foreground">Capacidade mensal</td>
-                    {mainPlans.map((plan, i) => (
-                      <td key={plan.id} className="text-center py-3 px-4 text-sm font-bold text-primary">
-                        {VOLUME_TIERS[i]?.max || "—"}
-                      </td>
+                  </thead>
+                  <tbody>
+                    {INCLUDED_FEATURES.map((feat) => (
+                      <tr key={feat.label} className="border-b border-border/50">
+                        <td className="py-3 px-4 text-sm text-foreground">{feat.label}</td>
+                        {VOLUME_TIERS.slice(0, 5).map((tier) => (
+                          <td key={tier.slug} className="text-center py-3 px-4">
+                            <CheckCircle className="w-5 h-5 text-success mx-auto" />
+                          </td>
+                        ))}
+                      </tr>
                     ))}
-                  </tr>
-                </tbody>
-              </table>
+                    <tr className="bg-primary/5">
+                      <td className="py-3 px-4 text-sm font-semibold text-foreground">Capacidade mensal</td>
+                      {VOLUME_TIERS.slice(0, 5).map((tier) => {
+                        const plan = volumePlans.find((p) => p.slug === tier.slug);
+                        const label = tier.label.replace(" pedidos/mês", "").replace("Até ", "").replace("Acima de ", "");
+                        return (
+                          <td key={tier.slug} className="text-center py-3 px-4 text-xs font-bold text-primary">
+                            {label}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-center text-xs text-muted-foreground mt-4">
+                A única diferença entre os planos é a capacidade mensal de pedidos.
+              </p>
             </div>
-            <p className="text-center text-xs text-muted-foreground mt-4">
-              A única diferença é a capacidade mensal.
-            </p>
-          </div>
-        </section>
+          </section>
+        )}
 
         {/* ─── MÓDULO ZPL ─── */}
         {zplPlan && zplPlan.prices.length > 0 && (
           <section className="py-12 md:py-16 px-4 bg-background border-t border-border">
-            <div className="max-w-2xl mx-auto">
+            <div className="max-w-3xl mx-auto">
               <h2 className="text-xl md:text-2xl font-bold text-foreground text-center mb-2">
                 Módulo ZPL
               </h2>
               <p className="text-sm text-muted-foreground text-center mb-8">
-                Módulo técnico específico para geração e gestão de etiquetas em ZPL.
+                Plano técnico independente da camada de pedidos. Não faz parte dos limites de vendas dos planos principais.
               </p>
               <Card className="border-border">
                 <CardContent className="p-6">
-                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                    <div>
-                      <h3 className="text-lg font-bold text-foreground mb-1">{zplPlan.name}</h3>
-                      <p className="text-sm text-muted-foreground mb-2">{zplPlan.description}</p>
-                      <p className="text-xs text-muted-foreground">
-                        Não faz parte dos limites de vendas dos planos principais.
-                      </p>
-                    </div>
-                    <div className="flex flex-col gap-2 md:min-w-[200px]">
-                      {zplPlan.prices.slice(0, 3).map((price) => (
-                        <Button
-                          key={price.id}
-                          variant="outline"
-                          className="justify-between"
-                          onClick={() => checkout(price.id)}
-                          disabled={checkoutLoading}
-                        >
-                          <span className="text-sm">{price.period}</span>
-                          <span className="font-bold">{formatPriceBRL(price.price_cents)}</span>
-                        </Button>
-                      ))}
-                    </div>
+                  <div className="mb-6">
+                    <h3 className="text-lg font-bold text-foreground mb-1">{zplPlan.name}</h3>
+                    <p className="text-sm text-muted-foreground">{zplPlan.description}</p>
                   </div>
+
+                  {/* ZPL Pré-pago */}
+                  {(() => {
+                    const zplAvulso = zplPlan.prices.filter(
+                      (p) => p.mode === "avulso" && p.visible
+                    );
+                    if (zplAvulso.length === 0) return null;
+                    return (
+                      <div className="mb-5">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                          Pré-pago
+                        </p>
+                        <div className="grid sm:grid-cols-3 gap-3">
+                          {zplAvulso.map((price) => (
+                            <Button
+                              key={price.id}
+                              variant="outline"
+                              className="justify-between h-auto py-3"
+                              onClick={() => checkout(price.id)}
+                              disabled={checkoutLoading}
+                            >
+                              <span className="text-sm">{getPeriodLabel(price.period)}</span>
+                              <div className="flex flex-col items-end">
+                                <span className="font-bold">{formatPriceBRL(price.price_cents)}</span>
+                                {price.badge_text && (
+                                  <span className="text-[10px] text-success">{price.badge_text}</span>
+                                )}
+                              </div>
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* ZPL Assinatura */}
+                  {(() => {
+                    const zplSub = zplPlan.prices.filter(
+                      (p) => p.mode === "assinatura" && p.visible && p.period === "mensal"
+                    );
+                    if (zplSub.length === 0) return null;
+                    return (
+                      <div>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                          Assinatura Recorrente
+                        </p>
+                        <div className="grid sm:grid-cols-3 gap-3">
+                          {zplSub.map((price) => (
+                            <Button
+                              key={price.id}
+                              variant="outline"
+                              className="justify-between h-auto py-3"
+                              onClick={() => checkout(price.id)}
+                              disabled={checkoutLoading}
+                            >
+                              <span className="text-sm">Mensal</span>
+                              <span className="font-bold">{formatPriceBRL(price.price_cents)}/mês</span>
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </CardContent>
               </Card>
             </div>
@@ -576,12 +654,12 @@ const Planos = () => {
               Pronto para começar?
             </h2>
             <p className="text-muted-foreground mb-6 text-sm">
-              {trialPolicy
-                ? `Teste grátis por ${trialPolicy.trial_days} dias. Cancele a qualquer momento.`
-                : "Escolha o plano ideal para o seu negócio."}
+              Teste grátis por 14 dias. Cancele a qualquer momento.
             </p>
             <div className="flex items-center justify-center gap-3">
-              <Button size="lg" className="h-12 text-base px-8" onClick={scrollToComparator}>
+              <Button size="lg" className="h-12 text-base px-8" onClick={() => {
+                document.getElementById("camadas")?.scrollIntoView({ behavior: "smooth" });
+              }}>
                 Escolher meu plano
               </Button>
               <Button
