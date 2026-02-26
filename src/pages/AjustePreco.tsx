@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useUserContext } from "@/hooks/useUserContext";
@@ -10,8 +10,15 @@ import { Progress } from "@/components/ui/progress";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
-import { Search, ArrowRight, ArrowLeft, ChevronsRight, ChevronsLeft, Eye, Play, Loader2, CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
+import { format, addDays } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { cn } from "@/lib/utils";
+import { Search, ArrowRight, ArrowLeft, ChevronsRight, ChevronsLeft, Eye, Play, Loader2, CheckCircle2, XCircle, AlertTriangle, CalendarIcon, Bell } from "lucide-react";
 
 interface MlItem {
   id: string;
@@ -45,6 +52,12 @@ interface LogEntry {
   responseBody?: any;
 }
 
+interface SellerCategory {
+  id: string;
+  name: string;
+  results: number;
+}
+
 export default function AjustePreco() {
   const { sellerId } = useActiveAccount();
   const { activeCompanyId } = useUserContext();
@@ -58,6 +71,10 @@ export default function AjustePreco() {
   const [selectedItems, setSelectedItems] = useState<MlItem[]>([]);
   const [searchTotal, setSearchTotal] = useState(0);
   const [searchOffset, setSearchOffset] = useState(0);
+
+  // Categories
+  const [sellerCategories, setSellerCategories] = useState<SellerCategory[]>([]);
+  const [isFetchingCategories, setIsFetchingCategories] = useState(false);
 
   // Adjustment config
   const [tipoAjuste, setTipoAjuste] = useState<"aumentar" | "diminuir">("aumentar");
@@ -73,6 +90,46 @@ export default function AjustePreco() {
   const [applyMode, setApplyMode] = useState<"teste" | "definitivo" | null>(null);
   const cancelRef = useRef(false);
 
+  // Reminder dialog
+  const [showReminderDialog, setShowReminderDialog] = useState(false);
+  const [reminderDate, setReminderDate] = useState<Date | undefined>(addDays(new Date(), 15));
+  const [isSavingReminder, setIsSavingReminder] = useState(false);
+
+  // ── Reset on seller change ──
+  useEffect(() => {
+    setSearchQuery("");
+    setFilterStatus("active");
+    setFilterCategory("");
+    setFoundItems([]);
+    setSelectedItems([]);
+    setPreviewRows([]);
+    setShowPreview(false);
+    setApplyLogs([]);
+    setSearchTotal(0);
+    setSearchOffset(0);
+  }, [sellerId]);
+
+  // ── Fetch categories on seller change ──
+  useEffect(() => {
+    if (!sellerId) { setSellerCategories([]); return; }
+    const fetchCategories = async () => {
+      setIsFetchingCategories(true);
+      try {
+        const { data, error } = await supabase.functions.invoke("ml-price-adjustment", {
+          body: { action: "get_seller_categories", sellerId },
+        });
+        if (!error && data?.categories) {
+          setSellerCategories(data.categories);
+        }
+      } catch {
+        // silent
+      } finally {
+        setIsFetchingCategories(false);
+      }
+    };
+    fetchCategories();
+  }, [sellerId]);
+
   // ── Search ──
   const handleSearch = useCallback(async (offset = 0) => {
     if (!sellerId) { toast.error("Nenhuma conta ML conectada"); return; }
@@ -84,7 +141,7 @@ export default function AjustePreco() {
           sellerId,
           query: searchQuery || undefined,
           categoryId: filterCategory || undefined,
-          status: filterStatus || undefined,
+          status: filterStatus === "todos" ? undefined : (filterStatus || undefined),
           offset,
           limit: 50,
         },
@@ -196,12 +253,10 @@ export default function AjustePreco() {
         if (data?.success) {
           logs.push({ itemId: row.item.id, title: row.item.title, success: true, message: `R$ ${row.oldPrice} → R$ ${row.newPrice}`, responseBody: data.responseBody });
         } else {
-          // Check for 429 rate limit
           if (data?.status === 429) {
-            const retryAfter = 2000 * (i + 1); // Progressive backoff
+            const retryAfter = 2000 * (i + 1);
             logs.push({ itemId: row.item.id, title: row.item.title, success: false, message: `Rate limit (429). Aguardando ${retryAfter / 1000}s...` });
             await new Promise((r) => setTimeout(r, retryAfter));
-            // Retry once
             const { data: retryData } = await supabase.functions.invoke("ml-price-adjustment", { body: payload });
             if (retryData?.success) {
               logs[logs.length - 1] = { itemId: row.item.id, title: row.item.title, success: true, message: `R$ ${row.oldPrice} → R$ ${row.newPrice} (retry)` };
@@ -219,7 +274,6 @@ export default function AjustePreco() {
       setApplyProgress(Math.round(((i + 1) / total) * 100));
       setApplyLogs([...logs]);
 
-      // Small delay between items to avoid rate limits
       if (mode === "definitivo" && i < total - 1) {
         await new Promise((r) => setTimeout(r, 500));
       }
@@ -229,6 +283,38 @@ export default function AjustePreco() {
     const successes = logs.filter((l) => l.success).length;
     const failures = logs.filter((l) => !l.success).length;
     toast.success(`Concluído: ${successes} sucesso, ${failures} erro(s)`);
+
+    // Show reminder dialog after definitivo execution with successes
+    if (mode === "definitivo" && successes > 0) {
+      setShowReminderDialog(true);
+    }
+  };
+
+  // ── Save reminder ──
+  const saveReminder = async () => {
+    if (!reminderDate) return;
+    setIsSavingReminder(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Não autenticado");
+      
+      await supabase.from("app_notifications").insert({
+        user_id: user.id,
+        title: "Lembrete: Ajuste de Preço",
+        category: "task_assigned",
+        body: `Lembrete: fazer novo ajuste de preço em lote (último ajuste: ${tipoAjuste === "aumentar" ? "+" : "-"}${percentual}%)`,
+        action_url: "/ajuste-preco",
+        priority: "normal",
+        origin_module: "ajuste_preco",
+        created_at: reminderDate.toISOString(),
+      });
+      toast.success(`Lembrete agendado para ${format(reminderDate, "dd/MM/yyyy", { locale: ptBR })}`);
+      setShowReminderDialog(false);
+    } catch (e: any) {
+      toast.error(e.message || "Erro ao salvar lembrete");
+    } finally {
+      setIsSavingReminder(false);
+    }
   };
 
   const formatCurrency = (v: number) =>
@@ -250,14 +336,32 @@ export default function AjustePreco() {
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
               <Input placeholder="Título, SKU ou MLB..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSearch()} />
-              <Input placeholder="Categoria ID" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} />
+              
+              {/* Category dropdown */}
+              <Select value={filterCategory} onValueChange={setFilterCategory}>
+                <SelectTrigger>
+                  <SelectValue placeholder={isFetchingCategories ? "Carregando..." : "Todas as categorias"} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todas">Todas as categorias</SelectItem>
+                  {sellerCategories.map((cat) => (
+                    <SelectItem key={cat.id} value={cat.id}>
+                      {cat.name} ({cat.results})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {/* Status filter with Todos */}
               <Select value={filterStatus} onValueChange={setFilterStatus}>
                 <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="todos">Todos</SelectItem>
                   <SelectItem value="active">Ativo</SelectItem>
                   <SelectItem value="paused">Pausado</SelectItem>
                 </SelectContent>
               </Select>
+
               <Button onClick={() => handleSearch()} disabled={isSearching}>
                 {isSearching ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
                 Buscar
@@ -355,6 +459,16 @@ export default function AjustePreco() {
               <Input type="number" className="mt-2" value={percentual} onChange={(e) => setPercentual(Number(e.target.value))} min={0.1} max={100} step={0.1} />
             </div>
 
+            {/* ── 3% warning ── */}
+            {percentual > 3 && (
+              <Alert className="border-amber-500/50 bg-amber-500/10">
+                <AlertTriangle className="h-4 w-4 text-amber-500" />
+                <AlertDescription className="text-xs text-amber-700 dark:text-amber-400">
+                  Recomendamos reajuste máximo de 3% por vez, a cada 15 dias, para evitar impacto negativo no posicionamento dos anúncios.
+                </AlertDescription>
+              </Alert>
+            )}
+
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1 block">Arredondamento</label>
               <Select value={arredondamento} onValueChange={(v) => setArredondamento(v as any)}>
@@ -379,7 +493,15 @@ export default function AjustePreco() {
       {showPreview && previewRows.length > 0 && (
         <Card>
           <CardHeader className="pb-3 flex flex-row items-center justify-between">
-            <CardTitle className="text-base">Prévia de Ajuste</CardTitle>
+            <div className="space-y-1">
+              <CardTitle className="text-base">Prévia de Ajuste</CardTitle>
+              {percentual > 3 && (
+                <p className="text-xs text-amber-500 flex items-center gap-1">
+                  <AlertTriangle className="h-3 w-3" />
+                  Percentual acima de 3% — Atenção ao posicionamento
+                </p>
+              )}
+            </div>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={() => applyPrices("teste")} disabled={isApplying}>
                 <AlertTriangle className="h-4 w-4 mr-1 text-accent-foreground" />
@@ -465,6 +587,51 @@ export default function AjustePreco() {
           </CardContent>
         </Card>
       )}
+
+      {/* ── Reminder Dialog ── */}
+      <Dialog open={showReminderDialog} onOpenChange={setShowReminderDialog}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Bell className="h-5 w-5" />
+              Agendar Lembrete
+            </DialogTitle>
+            <DialogDescription>
+              Agende um lembrete para o próximo ajuste de preço. Recomendamos aguardar ao menos 15 dias.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn("w-full justify-start text-left font-normal", !reminderDate && "text-muted-foreground")}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {reminderDate ? format(reminderDate, "dd/MM/yyyy", { locale: ptBR }) : "Selecionar data"}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={reminderDate}
+                  onSelect={setReminderDate}
+                  disabled={(date) => date < new Date()}
+                  initialFocus
+                  className={cn("p-3 pointer-events-auto")}
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowReminderDialog(false)}>Pular</Button>
+            <Button onClick={saveReminder} disabled={!reminderDate || isSavingReminder}>
+              {isSavingReminder ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Bell className="h-4 w-4 mr-2" />}
+              Agendar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
