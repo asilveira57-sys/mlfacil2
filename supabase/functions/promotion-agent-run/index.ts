@@ -308,6 +308,18 @@ Deno.serve(async (req) => {
     // Create notification if items were adhered
     if (adhered > 0) {
       const campaignSummary = [...new Set(approved.filter((_, i) => results[i]?.success).map(a => a.promo.promotion_name || a.promo.promotion_id))];
+      // Buscar o user_id do seller para target_seller_id
+      let targetSellerId: string | null = null;
+      if (mlAccount?.id) {
+        const { data: maData } = await supabase
+          .from('marketplace_accounts')
+          .select('id')
+          .eq('seller_id', sellerId)
+          .limit(1)
+          .maybeSingle();
+        // Usar o seller_id diretamente como target (é o ml_user_id)
+        targetSellerId = sellerId;
+      }
       try {
         await supabase.from('mktpfacil_announcements').insert({
           title: `🤖 Agente aderiu automaticamente a ${adhered} produto${adhered !== 1 ? 's' : ''}`,
@@ -315,6 +327,7 @@ Deno.serve(async (req) => {
           priority: 1,
           is_active: true,
           plan_target: 'all',
+          target_seller_id: targetSellerId,
         });
         log('Notification created');
       } catch (err) {

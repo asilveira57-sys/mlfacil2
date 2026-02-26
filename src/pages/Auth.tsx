@@ -1,15 +1,17 @@
 import { Auth as SupabaseAuth } from "@supabase/auth-ui-react";
 import { ThemeSupa } from "@supabase/auth-ui-shared";
 import { supabase } from "@/integrations/supabase/client";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BarChart3, DollarSign, LayoutDashboard, Settings2 } from "lucide-react";
+import { BarChart3, DollarSign, LayoutDashboard, Settings2, MailCheck } from "lucide-react";
 
 const Auth = () => {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const currentYear = new Date().getFullYear();
+  const [showVerifyEmail, setShowVerifyEmail] = useState(false);
+  const [signupEmail, setSignupEmail] = useState('');
 
   useEffect(() => {
     // Check session on mount (once)
@@ -21,7 +23,7 @@ const Auth = () => {
 
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      // Redirect to dashboard on sign in
+      // Redirect to dashboard on sign in (only if email is confirmed)
       if (event === "SIGNED_IN" && session) {
         navigate("/dashboard");
       }
@@ -29,9 +31,28 @@ const Auth = () => {
       if (event === "SIGNED_OUT") {
         navigate("/");
       }
+      // Show verify email message after signup
+      if (event === "SIGNED_OUT" || event === "INITIAL_SESSION") {
+        // noop
+      }
     });
 
-    return () => subscription.unsubscribe();
+    // Intercept signup to show verification message
+    const originalSignUp = supabase.auth.signUp.bind(supabase.auth);
+    supabase.auth.signUp = async (credentials) => {
+      const result = await originalSignUp(credentials);
+      // If signup succeeded but user needs email confirmation
+      if (result.data?.user && !result.data.user.email_confirmed_at && !result.error) {
+        setSignupEmail(result.data.user.email || '');
+        setShowVerifyEmail(true);
+      }
+      return result;
+    };
+
+    return () => {
+      subscription.unsubscribe();
+      supabase.auth.signUp = originalSignUp;
+    };
   }, [navigate]);
 
   // Build localization object based on current language
@@ -141,6 +162,31 @@ const Auth = () => {
           </div>
 
           <div className="bg-card p-8 rounded-2xl shadow-elevated border border-border">
+            {showVerifyEmail ? (
+              <div className="text-center space-y-4 py-6">
+                <div className="flex justify-center">
+                  <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center">
+                    <MailCheck className="w-8 h-8 text-primary" />
+                  </div>
+                </div>
+                <h2 className="text-2xl font-bold text-card-foreground">
+                  {t('auth:verify_email')}
+                </h2>
+                <p className="text-muted-foreground text-sm max-w-sm mx-auto">
+                  {t('auth:verify_email_description')}
+                </p>
+                {signupEmail && (
+                  <p className="text-sm font-medium text-foreground">{signupEmail}</p>
+                )}
+                <button
+                  onClick={() => setShowVerifyEmail(false)}
+                  className="text-sm text-primary hover:underline mt-4"
+                >
+                  {t('auth:sign_in')}
+                </button>
+              </div>
+            ) : (
+            <>
             <div className="mb-8">
               <h2 className="text-2xl font-bold text-card-foreground mb-2">
                 {t('auth:login_title')}
@@ -197,6 +243,8 @@ const Auth = () => {
               redirectTo={`${window.location.origin}/dashboard`}
               localization={getLocalization()}
             />
+            </>
+            )}
           </div>
         </div>
       </div>

@@ -44,6 +44,7 @@ interface FormData {
   plan_target: string;
   priority: number;
   is_active: boolean;
+  target_seller_id: string;
 }
 
 const EMPTY_FORM: FormData = {
@@ -54,6 +55,7 @@ const EMPTY_FORM: FormData = {
   plan_target: 'all',
   priority: 0,
   is_active: true,
+  target_seller_id: '',
 };
 
 function AnnouncementForm({
@@ -73,6 +75,7 @@ function AnnouncementForm({
     plan_target: initial?.plan_target ?? 'all',
     priority: initial?.priority ?? 0,
     is_active: initial?.is_active ?? true,
+    target_seller_id: (initial as any)?.target_seller_id ?? '',
   });
 
   const set = (k: keyof FormData, v: string | number | boolean) =>
@@ -145,6 +148,16 @@ function AnnouncementForm({
             onChange={(e) => set('priority', Number(e.target.value))}
           />
         </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label>Seller Alvo (opcional)</Label>
+        <Input
+          value={form.target_seller_id}
+          onChange={(e) => set('target_seller_id', e.target.value)}
+          placeholder="ID do seller (deixe vazio para todos)"
+        />
+        <p className="text-[11px] text-muted-foreground">Se preenchido, só esse seller verá o comunicado.</p>
       </div>
 
       <div className="flex items-center gap-2">
@@ -259,7 +272,8 @@ export function AdminCanalOficial() {
         plan_target: form.plan_target,
         priority: form.priority,
         is_active: form.is_active,
-      });
+        target_seller_id: form.target_seller_id || null,
+      } as any);
       toast({ title: 'Comunicado salvo com sucesso' });
       setEditingId(null);
     } catch {
@@ -367,10 +381,15 @@ export function AdminCanalOficial() {
                     <p className="text-xs text-muted-foreground line-clamp-1 mt-0.5">
                       {ann.content}
                     </p>
-                    <div className="flex items-center gap-2 mt-1.5">
+                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                       <Badge variant="outline" className="text-[10px] px-1.5 py-0">
                         {ann.plan_target}
                       </Badge>
+                      {(ann as any).target_seller_id && (
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-accent text-accent-foreground">
+                          🎯 {(ann as any).target_seller_id.slice(0, 8)}…
+                        </Badge>
+                      )}
                       <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
                         Prioridade {ann.priority}
                       </Badge>
