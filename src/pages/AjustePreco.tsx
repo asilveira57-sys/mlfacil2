@@ -140,7 +140,7 @@ export default function AjustePreco() {
           action: "search_items",
           sellerId,
           query: searchQuery || undefined,
-          categoryId: filterCategory || undefined,
+          categoryId: (filterCategory && filterCategory !== "todas") ? filterCategory : undefined,
           status: filterStatus === "todos" ? undefined : (filterStatus || undefined),
           offset,
           limit: 50,
