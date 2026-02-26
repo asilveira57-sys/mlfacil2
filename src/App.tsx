@@ -63,6 +63,7 @@ import ConsultantLibrary from "./pages/ConsultantLibrary";
 import PublicTipPage from "./pages/PublicTipPage";
 import { ZplViewerTool, TrendsLiteTool, PricingSimulatorTool, CommissionsTool } from "./pages/tools";
 import ClonarAnuncio from "./pages/ClonarAnuncio";
+import AjustePreco from "./pages/AjustePreco";
 import SystemStatus from "./pages/SystemStatus";
 import Contato from "./pages/Contato";
 import CentralDeAjuda from "./pages/CentralDeAjuda";
@@ -199,6 +200,7 @@ const App = () => {
                   <Route path="/anuncios/linha-do-tempo/:itemId" element={<AdTimelineDetail />} />
                   <Route path="/anuncios/acoes" element={<AdActionsCenter />} />
                   <Route path="/anuncios/clonar" element={<ClonarAnuncio />} />
+                  <Route path="/ajuste-preco" element={<AjustePreco />} />
                   {/* Seed routes */}
                   <Route path="/seed" element={<Seed />} />
                   <Route path="/seed/:itemId" element={<Seed />} />

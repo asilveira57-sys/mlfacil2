@@ -9420,6 +9420,77 @@ export type Database = {
         }
         Relationships: []
       }
+      price_adjustment_logs: {
+        Row: {
+          arredondamento: string | null
+          created_at: string
+          empresa_id: string | null
+          id: string
+          item_id: string
+          modo: string
+          percentual: number | null
+          possui_pxq: boolean | null
+          possui_variacao: boolean | null
+          preco_antigo: number | null
+          preco_novo: number | null
+          request_payload: Json | null
+          response_body: Json | null
+          response_status: number | null
+          seller_id: string
+          tipo_ajuste: string
+          titulo: string | null
+          user_id: string
+        }
+        Insert: {
+          arredondamento?: string | null
+          created_at?: string
+          empresa_id?: string | null
+          id?: string
+          item_id: string
+          modo: string
+          percentual?: number | null
+          possui_pxq?: boolean | null
+          possui_variacao?: boolean | null
+          preco_antigo?: number | null
+          preco_novo?: number | null
+          request_payload?: Json | null
+          response_body?: Json | null
+          response_status?: number | null
+          seller_id: string
+          tipo_ajuste: string
+          titulo?: string | null
+          user_id: string
+        }
+        Update: {
+          arredondamento?: string | null
+          created_at?: string
+          empresa_id?: string | null
+          id?: string
+          item_id?: string
+          modo?: string
+          percentual?: number | null
+          possui_pxq?: boolean | null
+          possui_variacao?: boolean | null
+          preco_antigo?: number | null
+          preco_novo?: number | null
+          request_payload?: Json | null
+          response_body?: Json | null
+          response_status?: number | null
+          seller_id?: string
+          tipo_ajuste?: string
+          titulo?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_adjustment_logs_empresa_id_fkey"
+            columns: ["empresa_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pricing_simulation_events: {
         Row: {
           actor_user_id: string
