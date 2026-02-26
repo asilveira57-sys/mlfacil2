@@ -32,26 +32,26 @@ export function WholesaleCategoryBindings() {
   const [manualCategoryId, setManualCategoryId] = useState("");
   const [manualCategoryName, setManualCategoryName] = useState("");
 
-  // Resolve sellerId from selected company's marketplace account
+  // Resolve sellerId from selected company's ML account
   const { data: companyAccount, isLoading: accountLoading } = useQuery({
-    queryKey: ["marketplace-account-by-company", selectedCompanyId],
+    queryKey: ["ml-account-by-company", selectedCompanyId],
     queryFn: async () => {
       if (!selectedCompanyId) return null;
-      const { data, error } = await (supabase as any)
-        .from("marketplace_accounts")
-        .select("id, external_user_id, account_label")
+      const { data, error } = await supabase
+        .from("ml_accounts")
+        .select("id, ml_user_id, nickname")
         .eq("company_id", selectedCompanyId)
         .eq("is_active", true)
         .limit(1)
         .maybeSingle();
       if (error) throw error;
-      return data as { id: string; external_user_id: string | null; account_label: string } | null;
+      return data as { id: string; ml_user_id: string | null; nickname: string | null } | null;
     },
     enabled: !!selectedCompanyId,
     staleTime: 5 * 60 * 1000,
   });
 
-  const resolvedSellerId = companyAccount?.external_user_id || null;
+  const resolvedSellerId = companyAccount?.ml_user_id || null;
 
   // Fetch categories based on the resolved seller ID (with higher limit)
   const { data: sellerCategories, isLoading: categoriesLoading } = useSellerCategories(resolvedSellerId);
@@ -119,7 +119,7 @@ export function WholesaleCategoryBindings() {
 
   const showCategorySection = !!selectedCompanyId && !accountLoading;
   const hasNoAccount = showCategorySection && !companyAccount;
-  const hasNoSellerId = showCategorySection && companyAccount && !companyAccount.external_user_id;
+  const hasNoSellerId = showCategorySection && companyAccount && !companyAccount.ml_user_id;
 
   return (
     <div className="space-y-4">
