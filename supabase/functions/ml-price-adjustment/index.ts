@@ -92,6 +92,20 @@ serve(async (req) => {
 
     const sellerId = mlAccount.ml_user_id;
 
+    // ── ACTION: get_seller_categories ──
+    if (action === 'get_seller_categories') {
+      const url = `https://api.mercadolibre.com/users/${sellerId}/items/search?limit=0`;
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!res.ok) {
+        const err = await res.text();
+        return new Response(JSON.stringify({ error: 'Failed to fetch categories', details: err }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+      const searchData = await res.json();
+      const categoryFilter = (searchData.available_filters || []).find((f: any) => f.id === 'category');
+      const categories = categoryFilter?.values || [];
+      return new Response(JSON.stringify({ categories }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     // ── ACTION: search_items ──
     if (action === 'search_items') {
       const { query, categoryId, status, offset = 0, limit = 50 } = body;
