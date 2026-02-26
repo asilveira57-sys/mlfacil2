@@ -1,51 +1,55 @@
 
 
-## Problemas Identificados
-
-**Bug raiz**: O `addBinding` em `useWholesaleCategoryBindings` sempre usa `activeAccount.companyId` (empresa ativa global), ignorando a empresa selecionada no dialog. Resultado: todos os vínculos são salvos com o `company_id` errado.
-
-**Lista**: Não mostra a qual empresa pertence cada vínculo, tornando impossível distinguir.
-
-**Preview**: Busca itens de um seller mas usa vínculos que podem ter sido gravados com company_id incorreto (consequência do bug acima).
-
-**Filtro por categoria**: A aba "Por Categoria" é apenas um resumo estático, sem funcionalidade de filtro nos itens.
+## Dois problemas a resolver
 
 ---
 
-## Plano de Correção
+### Problema 1: Email auto-confirmado no cadastro
 
-### 1. Fix: `useWholesaleCategoryBindings.ts` — aceitar `company_id` no mutation
+O sistema está com auto-confirm habilitado — ao criar conta, o `email_confirmed_at` é preenchido instantaneamente sem o usuário clicar em nenhum link. Isso permite acesso sem email válido.
 
-- Adicionar campo opcional `company_id` ao input do `addBinding`
-- Se fornecido, usar esse valor em vez do `activeAccount.companyId`
-- Remover filtro `.eq("company_id", companyId)` da query principal — listar vínculos de TODAS as empresas do usuário (a RLS já garante segurança)
-- Fazer join com `companies(display_name)` para trazer o nome da empresa
-
-### 2. Fix: `WholesaleCategoryBindings.tsx` — passar `company_id` do dialog
-
-- No `handleAdd`, passar `company_id: selectedCompanyId` para o mutation
-- Adicionar coluna "Empresa" na tabela de vínculos, exibindo `company_display_name`
-- Adicionar filtro/busca que inclua o nome da empresa
-
-### 3. Fix: Preview — filtro por categoria
-
-- `WholesalePreview.tsx`: adicionar um `<Select>` de filtro por categoria acima da tabela de itens
-- Extrair lista de categorias únicas dos `previewData.rows`
-- Filtrar `filteredRows` pelo `category_id` selecionado (além da busca por texto)
-- Tornar a aba "Por Categoria" clicável: ao clicar em uma categoria no resumo, mudar para aba "Itens" com o filtro aplicado
-
-### 4. Schema: adicionar `company_display_name` ao retorno dos bindings
-
-- Alterar a query de bindings para incluir join com `companies(display_name)` 
-- Mapear como `company_name` no retorno
+**Correção:**
+- Desabilitar auto-confirm via ferramenta `configure-auth` (email confirmations = required)
+- Ajustar a página `Auth.tsx` para exibir mensagem de "verifique seu email" após signup, em vez de redirecionar direto ao dashboard
 
 ---
 
-## Arquivos Alterados
+### Problema 2: Canal Oficial — filtro por seller
+
+Hoje o campo `plan_target` filtra apenas por plano (all/free/pro/enterprise). Mas comunicados gerados por ações automáticas (ex: adesão a campanhas) só interessam ao seller que executou a ação. Precisamos de um filtro por seller.
+
+**Modelo proposto para targeting:**
+
+| Cenário | plan_target | target_seller_id |
+|---|---|---|
+| Comunicado para todos | `all` | `NULL` |
+| Comunicado para plano específico | `pro` | `NULL` |
+| Comunicado para seller específico | `all` | `uuid do seller` |
+
+**Alterações no banco:**
+- Adicionar coluna `target_seller_id UUID NULL` em `mktpfacil_announcements`
+- Criar índice nessa coluna
+
+**Alterações no código:**
+
+1. **`useOfficialChannel.ts`** — Na query de `useAnnouncements`, filtrar: só retornar comunicados onde `target_seller_id IS NULL` OU `target_seller_id = sellerId do usuário ativo`. Buscar o `sellerId` do contexto ativo.
+
+2. **`promotion-agent-run/index.ts`** — Ao criar o comunicado de adesão, gravar `target_seller_id` com o `sellerId` que executou a ação (já disponível como parâmetro da função).
+
+3. **`AdminCanalOficial.tsx`** — Adicionar campo opcional "Seller alvo" no formulário admin (input de texto/UUID ou select com sellers conhecidos). Exibir badge de seller na lista quando preenchido.
+
+4. **`OfficialChannelDrawer.tsx`** — Nenhuma mudança estrutural; o filtro fica na query do hook.
+
+---
+
+### Resumo de arquivos
 
 | Arquivo | Mudança |
 |---|---|
-| `src/hooks/useWholesaleCategoryBindings.ts` | Aceitar `company_id` no mutation; remover filtro por empresa ativa na listagem; join com `companies` |
-| `src/components/wholesale/WholesaleCategoryBindings.tsx` | Passar `company_id` no handleAdd; coluna "Empresa" na tabela |
-| `src/components/wholesale/WholesalePreview.tsx` | Filtro por categoria no tab "Itens"; clique no resumo de categoria para filtrar |
+| Auth config | Desabilitar auto-confirm email |
+| `src/pages/Auth.tsx` | Tratar estado pós-signup (mensagem de verificação) |
+| Migration SQL | Adicionar `target_seller_id` em `mktpfacil_announcements` |
+| `src/hooks/useOfficialChannel.ts` | Filtrar por `target_seller_id` usando seller ativo |
+| `supabase/functions/promotion-agent-run/index.ts` | Gravar `target_seller_id` no comunicado |
+| `src/pages/admin/AdminCanalOficial.tsx` | Campo de seller alvo no formulário |
 
