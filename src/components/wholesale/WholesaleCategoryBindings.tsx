@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Plus, Trash2, Loader2, FolderTree, Search, Building2, AlertCircle } from "lucide-react";
 import { useWholesaleCategoryBindings } from "@/hooks/useWholesaleCategoryBindings";
 import { useWholesaleProfiles } from "@/hooks/useWholesaleProfiles";
-import { useSellerCategories } from "@/hooks/useSellerCategories";
+
 import { useWorkspaceCompanies } from "@/hooks/useWorkspaceCompanies";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -53,15 +53,27 @@ export function WholesaleCategoryBindings() {
 
   const resolvedSellerId = companyAccount?.ml_user_id || null;
 
-  // Fetch categories based on the resolved seller ID (with higher limit)
-  const { data: sellerCategories, isLoading: categoriesLoading } = useSellerCategories(resolvedSellerId);
+  // Fetch categories in real-time from ML API via edge function
+  const { data: sellerCategories, isLoading: categoriesLoading } = useQuery({
+    queryKey: ["ml-seller-categories-live", resolvedSellerId],
+    queryFn: async () => {
+      if (!resolvedSellerId) return [];
+      const { data, error } = await supabase.functions.invoke("ml-price-adjustment", {
+        body: { action: "get_seller_categories", sellerId: resolvedSellerId },
+      });
+      if (error) throw error;
+      return (data?.categories || []) as Array<{ id: string; name: string; results: number }>;
+    },
+    enabled: !!resolvedSellerId,
+    staleTime: 5 * 60 * 1000,
+  });
 
   const activeProfiles = profiles.filter((p) => p.is_active);
   const boundCategoryIds = new Set(bindings.map((b) => b.category_id));
 
   // Categories available (from seller's catalog, excluding already bound)
   const availableCategories = (sellerCategories || []).filter(
-    (c) => !boundCategoryIds.has(c.category_id)
+    (c) => !boundCategoryIds.has(c.id)
   );
 
   const filteredBindings = bindings.filter((b) => {
@@ -76,12 +88,12 @@ export function WholesaleCategoryBindings() {
 
   const handleAdd = () => {
     if (selectedCategoryId && selectedProfileId) {
-      const cat = availableCategories.find((c) => c.category_id === selectedCategoryId);
+      const cat = availableCategories.find((c) => c.id === selectedCategoryId);
       addBinding.mutate({
         profile_id: selectedProfileId,
         category_id: selectedCategoryId,
-        category_name: cat?.category_name || selectedCategoryId,
-        category_path: cat?.category_path || [],
+        category_name: cat?.name || selectedCategoryId,
+        category_path: [],
       });
     } else if (manualCategoryId && selectedProfileId) {
       addBinding.mutate({
@@ -313,8 +325,8 @@ export function WholesaleCategoryBindings() {
                       </SelectTrigger>
                       <SelectContent>
                         {availableCategories.map((c) => (
-                          <SelectItem key={c.category_id} value={c.category_id}>
-                            {c.category_name} ({c.orders_count_90d} pedidos)
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.name} ({c.results} anúncios)
                           </SelectItem>
                         ))}
                       </SelectContent>
