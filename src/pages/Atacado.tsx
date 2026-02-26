@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Layers, Settings2, FolderTree, Package } from "lucide-react";
+import { Layers, Settings2, FolderTree, Package, Eye } from "lucide-react";
 import { WholesaleProfiles } from "@/components/wholesale/WholesaleProfiles";
 import { WholesaleDefaultProfile } from "@/components/wholesale/WholesaleDefaultProfile";
 import { WholesaleCategoryBindings } from "@/components/wholesale/WholesaleCategoryBindings";
 import { WholesaleProductOverrides } from "@/components/wholesale/WholesaleProductOverrides";
+import { WholesalePreview } from "@/components/wholesale/WholesalePreview";
 
 export default function Atacado() {
   const [activeTab, setActiveTab] = useState("profiles");
@@ -36,6 +37,10 @@ export default function Atacado() {
             <Settings2 className="h-4 w-4" />
             Padrão
           </TabsTrigger>
+          <TabsTrigger value="preview" className="gap-2">
+            <Eye className="h-4 w-4" />
+            Preview & Aplicar
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="profiles" className="mt-4">
@@ -52,6 +57,10 @@ export default function Atacado() {
 
         <TabsContent value="default" className="mt-4">
           <WholesaleDefaultProfile />
+        </TabsContent>
+
+        <TabsContent value="preview" className="mt-4">
+          <WholesalePreview />
         </TabsContent>
       </Tabs>
     </div>
