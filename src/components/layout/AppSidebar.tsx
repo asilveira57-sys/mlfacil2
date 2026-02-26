@@ -28,6 +28,7 @@ import {
   Percent,
   Truck,
   Copy,
+  Layers,
 } from "lucide-react";
 import {
   Collapsible,
@@ -95,6 +96,7 @@ const analyticsNavItems: NavItem[] = [
   { titleKey: "nav:pricing", url: "/precificacao", icon: Calculator, moduleId: "precificacao", moduleKey: "precificacao" },
   { titleKey: "nav:commissions", url: "/comissoes", icon: Percent, moduleId: "comissoes", moduleKey: "comissoes" },
   { titleKey: "nav:freight", url: "/frete", icon: Truck, moduleId: "frete", moduleKey: "frete" },
+  { titleKey: "nav:wholesale", url: "/atacado", icon: Layers, moduleId: "wholesale", moduleKey: "wholesale" },
 ];
 
 const toolsNavItems: NavItem[] = [

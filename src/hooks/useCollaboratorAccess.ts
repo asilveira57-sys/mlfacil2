@@ -168,6 +168,7 @@ export const MODULE_ROUTE_MAP: Record<string, string[]> = {
   'marketplace.pricing': ['/precificacao'],
   'marketplace.shipping': ['/frete'],
   'tools.competitors': ['/concorrencia'],
+  'wholesale': ['/atacado'],
 };
 
 // Reverse lookup: route to module key
