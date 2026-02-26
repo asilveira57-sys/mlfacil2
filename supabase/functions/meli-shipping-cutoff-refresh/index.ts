@@ -121,126 +121,116 @@ Deno.serve(async (req) => {
         }
       }
 
-      // 5. Get real cutoff from ML handling_time API (most accurate source)
-      let shipmentCutoff: string | null = null;
-      let handlingTimeCutoff: string | null = null;
-      
-      // 5a. Try ML handling_time endpoint first (returns fixed agency cutoffs)
+      // 5. Get real agency cutoff from ML shipment lead_time
+      let agencyCutoff: string | null = null;
+
+      // 5a. Get one ready_to_ship shipment ID from cache
       try {
-        const htResult = await fetchWithRetry(
-          `https://api.mercadolibre.com/users/${mlUserId}/shipping/handling_time`,
-          token, "handling_time", supabase, traceId, companyId, sellerId
-        );
-        
-        if (htResult.ok && htResult.data) {
-          const htData = htResult.data;
-          // The API may return handling_deadline or cutoff fields
-          // Try multiple known response shapes
-          let cutoffTime: string | null = null;
-          
-          // Shape 1: { handling_deadline: "HH:MM" } or { handling_deadline: { time: "HH:MM" } }
-          if (htData.handling_deadline) {
-            if (typeof htData.handling_deadline === 'string') {
-              cutoffTime = htData.handling_deadline;
-            } else if (htData.handling_deadline.time) {
-              cutoffTime = htData.handling_deadline.time;
-            } else if (htData.handling_deadline.date) {
-              // It's a full datetime, extract BRT time
-              const d = new Date(htData.handling_deadline.date);
-              cutoffTime = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
+        const spDate = getDateRefSP();
+        const todayStartUTC = spDate + "T03:00:00.000Z";
+        const tomorrowEndUTC = new Date(new Date(spDate + "T03:00:00.000Z").getTime() + 2 * 24 * 60 * 60 * 1000 - 1).toISOString();
+
+        const { data: sampleShipments, error: shipErr } = await supabase
+          .from("meli_shipments_cache")
+          .select("shipment_id, estimated_handling_limit, logistic_type")
+          .eq("seller_id", mlUserId)
+          .in("shipment_status", ["ready_to_ship", "handling"])
+          .gte("estimated_handling_limit", todayStartUTC)
+          .lte("estimated_handling_limit", tomorrowEndUTC)
+          .order("estimated_handling_limit", { ascending: false })
+          .limit(3);
+
+        if (sampleShipments && sampleShipments.length > 0) {
+          // 5b. Call ML API to get full shipment detail with lead_time
+          for (const shipment of sampleShipments) {
+            try {
+              const shipDetailResult = await fetchWithRetry(
+                `https://api.mercadolibre.com/shipments/${shipment.shipment_id}`,
+                token, "shipment_detail", supabase, traceId, companyId, sellerId
+              );
+
+              if (shipDetailResult.ok && shipDetailResult.data) {
+                const sd = shipDetailResult.data;
+                let extractedCutoff: string | null = null;
+
+                // Strategy 1: lead_time.estimated_handling_limit.date (per-shipment deadline from ML)
+                // This is the actual deadline considering agency hours
+                const leadTime = sd.lead_time;
+                if (leadTime?.estimated_handling_limit?.date) {
+                  const d = new Date(leadTime.estimated_handling_limit.date);
+                  extractedCutoff = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
+                }
+
+                // Strategy 2: shipping_option.estimated_delivery_time.offset.deadline
+                if (!extractedCutoff) {
+                  const offset = sd.shipping_option?.estimated_delivery_time?.offset;
+                  if (offset?.deadline) {
+                    const d = new Date(offset.deadline);
+                    extractedCutoff = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
+                  }
+                }
+
+                // Strategy 3: shipping_option.estimated_handling_limit.date
+                if (!extractedCutoff) {
+                  const ehl = sd.shipping_option?.estimated_handling_limit;
+                  if (ehl?.date) {
+                    const d = new Date(ehl.date);
+                    extractedCutoff = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
+                  }
+                }
+
+                await log(supabase, {
+                  trace_id: traceId, company_id: companyId, seller_id: sellerId,
+                  action: "shipment_lead_time", status: extractedCutoff ? "success" : "empty",
+                  step: "shipment_detail_parse", execution_time_ms: Date.now() - startTime,
+                  payload_summary: {
+                    shipment_id: shipment.shipment_id,
+                    has_lead_time: !!leadTime,
+                    lead_time_keys: leadTime ? Object.keys(leadTime) : [],
+                    lead_time_ehl: leadTime?.estimated_handling_limit || null,
+                    shipping_option_keys: sd.shipping_option ? Object.keys(sd.shipping_option) : [],
+                    offset: sd.shipping_option?.estimated_delivery_time?.offset || null,
+                    extracted_cutoff: extractedCutoff,
+                    raw_preview: JSON.stringify({
+                      lead_time: leadTime,
+                      shipping_option_edt: sd.shipping_option?.estimated_delivery_time,
+                      shipping_option_ehl: sd.shipping_option?.estimated_handling_limit,
+                    }).substring(0, 800),
+                  },
+                });
+
+                if (extractedCutoff) {
+                  // Use the LATEST cutoff found (represents the real agency closing time)
+                  if (!agencyCutoff || extractedCutoff > agencyCutoff) {
+                    agencyCutoff = extractedCutoff;
+                  }
+                }
+
+                // If we found a cutoff, we can stop checking more shipments
+                if (agencyCutoff) break;
+              }
+            } catch (e: any) {
+              console.error("Shipment detail error:", e.message);
             }
           }
-          
-          // Shape 2: Array of logistic types with deadlines
-          if (!cutoffTime && Array.isArray(htData)) {
-            // Find xd_drop_off or cross_docking type
-            const colectaEntry = htData.find((e: any) => 
-              e.logistic_type === 'xd_drop_off' || e.logistic_type === 'cross_docking' || e.logistic_type === 'drop_off'
-            );
-            if (colectaEntry?.estimated_handling_limit?.date) {
-              const d = new Date(colectaEntry.estimated_handling_limit.date);
-              cutoffTime = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
-            } else if (colectaEntry?.cutoff_time) {
-              cutoffTime = typeof colectaEntry.cutoff_time === 'number' 
-                ? `${String(colectaEntry.cutoff_time).padStart(2, '0')}:00` 
-                : colectaEntry.cutoff_time;
-            }
-          }
-          
-          // Shape 3: { cutoff: "HH:MM" } or { cutoff_time: "HH:MM" }
-          if (!cutoffTime) {
-            cutoffTime = htData.cutoff_time || htData.cutoff || null;
-            if (typeof cutoffTime === 'number') {
-              cutoffTime = `${String(cutoffTime).padStart(2, '0')}:00`;
-            }
-          }
-          
-          if (cutoffTime) {
-            handlingTimeCutoff = cutoffTime;
-          }
-          
-          await log(supabase, {
-            trace_id: traceId, company_id: companyId, seller_id: sellerId,
-            action: "handling_time_api", status: cutoffTime ? "success" : "empty",
-            step: "handling_time_parse", execution_time_ms: Date.now() - startTime,
-            payload_summary: {
-              raw_keys: Object.keys(htData),
-              parsed_cutoff: cutoffTime,
-              raw_preview: JSON.stringify(htData).substring(0, 500),
-            },
-          });
         }
+
+        await log(supabase, {
+          trace_id: traceId, company_id: companyId, seller_id: sellerId,
+          action: "agency_cutoff", status: agencyCutoff ? "success" : "empty",
+          step: "cutoff_extraction_complete", execution_time_ms: Date.now() - startTime,
+          payload_summary: {
+            agency_cutoff: agencyCutoff,
+            shipments_checked: sampleShipments?.length || 0,
+            query_range: `${todayStartUTC} .. ${tomorrowEndUTC}`,
+          },
+        });
       } catch (e: any) {
-        console.error("Handling time API error:", e.message);
-        await log(supabase, { trace_id: traceId, company_id: companyId, seller_id: sellerId, action: "handling_time_api", status: "error", step: "handling_time_fetch", execution_time_ms: Date.now() - startTime, error_message: e.message });
+        console.error("Cutoff extraction error:", e.message);
+        await log(supabase, { trace_id: traceId, company_id: companyId, seller_id: sellerId, action: "agency_cutoff", status: "error", step: "cutoff_extraction", execution_time_ms: Date.now() - startTime, error_message: e.message });
       }
-      
-      // 5b. Fallback: earliest handling deadline from cached shipments
-      if (!handlingTimeCutoff) {
-        try {
-          const spDate = getDateRefSP();
-          const todayStartUTC = spDate + "T03:00:00.000Z";
-          // Extended to 48h window (today + tomorrow) to capture deadlines
-          // that ML shows as "envios de hoje" (seller must act today for tomorrow's deadline)
-          const tomorrowEndUTC = new Date(new Date(spDate + "T03:00:00.000Z").getTime() + 2 * 24 * 60 * 60 * 1000 - 1).toISOString();
 
-          const { data: earliestShipment, error: shipErr } = await supabase
-            .from("meli_shipments_cache")
-            .select("estimated_handling_limit, logistic_type, shipment_status")
-            .eq("seller_id", mlUserId)
-            .in("shipment_status", ["ready_to_ship", "handling"])
-            .gte("estimated_handling_limit", todayStartUTC)
-            .lte("estimated_handling_limit", tomorrowEndUTC)
-            .order("estimated_handling_limit", { ascending: true })
-            .limit(1)
-            .maybeSingle();
-
-          await log(supabase, {
-            trace_id: traceId, company_id: companyId, seller_id: sellerId,
-            action: "shipment_cutoff", status: earliestShipment ? "success" : "empty",
-            step: "earliest_deadline_fallback", execution_time_ms: Date.now() - startTime,
-            payload_summary: {
-              query_range: `${todayStartUTC} .. ${tomorrowEndUTC}`,
-              found: !!earliestShipment,
-              error: shipErr?.message || null,
-              deadline: earliestShipment?.estimated_handling_limit || null,
-              logistic: earliestShipment?.logistic_type || null,
-            },
-          });
-
-          if (earliestShipment?.estimated_handling_limit) {
-            const deadline = new Date(earliestShipment.estimated_handling_limit);
-            const brtTime = deadline.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
-            shipmentCutoff = brtTime;
-          }
-        } catch (e: any) {
-          console.error("Shipment cutoff lookup error:", e.message);
-          await log(supabase, { trace_id: traceId, company_id: companyId, seller_id: sellerId, action: "shipment_cutoff", status: "error", step: "earliest_deadline", execution_time_ms: Date.now() - startTime, error_message: e.message });
-        }
-      }
-      
-      // Use handling_time API result if available, otherwise fallback to shipment deadline
-      const finalCutoff = handlingTimeCutoff || shipmentCutoff;
+      const finalCutoff = agencyCutoff;
 
       // 6. Normalize
       await log(supabase, { trace_id: traceId, company_id: companyId, seller_id: sellerId, action: "normalize", status: "success", step: "normalize_start", execution_time_ms: Date.now() - startTime });
