@@ -211,8 +211,8 @@ Deno.serve(async (req) => {
                 );
                 if (slaResult.ok && slaResult.data) {
                   const sla = slaResult.data;
-                  // Look for handling_deadline or cutoff in SLA
-                  const deadline = sla.handling_deadline?.date || sla.handling_limit?.date || sla.cutoff?.date;
+                  // SLA returns expected_date which is the actual agency cutoff
+                  const deadline = sla.expected_date || sla.handling_deadline?.date || sla.handling_limit?.date || sla.cutoff?.date;
                   if (deadline) {
                     const d = new Date(deadline);
                     const timeStr = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
