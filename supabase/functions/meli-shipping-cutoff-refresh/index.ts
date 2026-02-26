@@ -153,30 +153,46 @@ Deno.serve(async (req) => {
                 const sd = shipDetailResult.data;
                 let extractedCutoff: string | null = null;
 
-                // Strategy 1: lead_time.estimated_handling_limit.date (per-shipment deadline from ML)
-                // This is the actual deadline considering agency hours
+                // Strategy 1: estimated_schedule_limit (agency cutoff - top-level field)
+                if (sd.estimated_schedule_limit?.date) {
+                  const d = new Date(sd.estimated_schedule_limit.date);
+                  extractedCutoff = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
+                }
+
+                // Strategy 2: shipping_option.estimated_schedule_limit
+                if (!extractedCutoff && sd.shipping_option?.estimated_schedule_limit) {
+                  const esl = sd.shipping_option.estimated_schedule_limit;
+                  const eslDate = typeof esl === 'string' ? esl : esl?.date;
+                  if (eslDate) {
+                    const d = new Date(eslDate);
+                    extractedCutoff = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
+                  }
+                }
+
+                // Strategy 3: shipping_option.estimated_delivery_limit (may contain handling cutoff)
+                if (!extractedCutoff && sd.shipping_option?.estimated_delivery_limit) {
+                  const edl = sd.shipping_option.estimated_delivery_limit;
+                  const edlDate = typeof edl === 'string' ? edl : edl?.date;
+                  if (edlDate) {
+                    const d = new Date(edlDate);
+                    extractedCutoff = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
+                  }
+                }
+
+                // Strategy 4: lead_time.estimated_handling_limit.date
                 const leadTime = sd.lead_time;
-                if (leadTime?.estimated_handling_limit?.date) {
+                if (!extractedCutoff && leadTime?.estimated_handling_limit?.date) {
                   const d = new Date(leadTime.estimated_handling_limit.date);
                   extractedCutoff = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
                 }
 
-                // Strategy 2: shipping_option.estimated_delivery_time.offset.deadline
-                if (!extractedCutoff) {
-                  const offset = sd.shipping_option?.estimated_delivery_time?.offset;
-                  if (offset?.deadline) {
-                    const d = new Date(offset.deadline);
-                    extractedCutoff = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
-                  }
-                }
-
-                // Strategy 3: shipping_option.estimated_handling_limit.date
-                if (!extractedCutoff) {
-                  const ehl = sd.shipping_option?.estimated_handling_limit;
-                  if (ehl?.date) {
-                    const d = new Date(ehl.date);
-                    extractedCutoff = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
-                  }
+                // Strategy 5: estimated_handling_limit (top-level)
+                if (!extractedCutoff && sd.estimated_handling_limit?.date) {
+                  const d = new Date(sd.estimated_handling_limit.date);
+                  extractedCutoff = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
+                } else if (!extractedCutoff && typeof sd.estimated_handling_limit === 'string') {
+                  const d = new Date(sd.estimated_handling_limit);
+                  extractedCutoff = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
                 }
 
                 await log(supabase, {
@@ -185,17 +201,16 @@ Deno.serve(async (req) => {
                   step: "shipment_detail_parse", execution_time_ms: Date.now() - startTime,
                   payload_summary: {
                     shipment_id: shipment.shipment_id,
+                    top_level_keys: Object.keys(sd).sort(),
+                    estimated_schedule_limit: sd.estimated_schedule_limit || null,
+                    estimated_handling_limit_raw: sd.estimated_handling_limit || null,
+                    shipping_option_estimated_schedule_limit: sd.shipping_option?.estimated_schedule_limit || null,
+                    shipping_option_estimated_delivery_limit: sd.shipping_option?.estimated_delivery_limit || null,
+                    shipping_option_estimated_delivery_final: sd.shipping_option?.estimated_delivery_final || null,
+                    pickup_promise: sd.shipping_option?.pickup_promise || sd.pickup_promise || null,
                     has_lead_time: !!leadTime,
-                    lead_time_keys: leadTime ? Object.keys(leadTime) : [],
-                    lead_time_ehl: leadTime?.estimated_handling_limit || null,
-                    shipping_option_keys: sd.shipping_option ? Object.keys(sd.shipping_option) : [],
-                    offset: sd.shipping_option?.estimated_delivery_time?.offset || null,
                     extracted_cutoff: extractedCutoff,
-                    raw_preview: JSON.stringify({
-                      lead_time: leadTime,
-                      shipping_option_edt: sd.shipping_option?.estimated_delivery_time,
-                      shipping_option_ehl: sd.shipping_option?.estimated_handling_limit,
-                    }).substring(0, 800),
+                    extracted_from: extractedCutoff ? 'see_above' : 'none',
                   },
                 });
 
