@@ -82,7 +82,8 @@ export function WholesaleCategoryBindings() {
     return (
       (b.category_name || "").toLowerCase().includes(term) ||
       b.category_id.toLowerCase().includes(term) ||
-      (b.profile_name || "").toLowerCase().includes(term)
+      (b.profile_name || "").toLowerCase().includes(term) ||
+      (b.company_name || "").toLowerCase().includes(term)
     );
   });
 
@@ -94,12 +95,14 @@ export function WholesaleCategoryBindings() {
         category_id: selectedCategoryId,
         category_name: cat?.name || selectedCategoryId,
         category_path: [],
+        company_id: selectedCompanyId || undefined,
       });
     } else if (manualCategoryId && selectedProfileId) {
       addBinding.mutate({
         profile_id: selectedProfileId,
         category_id: manualCategoryId,
         category_name: manualCategoryName || manualCategoryId,
+        company_id: selectedCompanyId || undefined,
       });
     }
     setDialogOpen(false);
@@ -176,6 +179,7 @@ export function WholesaleCategoryBindings() {
               <TableRow>
                 <TableHead>Categoria</TableHead>
                 <TableHead>ID</TableHead>
+                <TableHead>Empresa</TableHead>
                 <TableHead>Perfil</TableHead>
                 <TableHead className="w-[80px]">Ações</TableHead>
               </TableRow>
@@ -200,6 +204,12 @@ export function WholesaleCategoryBindings() {
                     <Badge variant="outline" className="font-mono text-xs">
                       {binding.category_id}
                     </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1.5">
+                      <Building2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <span className="text-sm">{binding.company_name || "—"}</span>
+                    </div>
                   </TableCell>
                   <TableCell>
                     <Select

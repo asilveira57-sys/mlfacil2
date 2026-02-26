@@ -14,6 +14,7 @@ export interface CategoryBinding {
   created_at: string;
   updated_at: string;
   profile_name?: string;
+  company_name?: string;
 }
 
 export function useWholesaleCategoryBindings() {
@@ -22,14 +23,11 @@ export function useWholesaleCategoryBindings() {
   const queryClient = useQueryClient();
 
   const bindingsQuery = useQuery({
-    queryKey: ["wholesale-category-bindings", companyId],
+    queryKey: ["wholesale-category-bindings"],
     queryFn: async (): Promise<CategoryBinding[]> => {
-      if (!companyId) return [];
-
       const { data, error } = await (supabase as any)
         .from("wholesale_profile_categories")
-        .select("*, wholesale_profiles!inner(name)")
-        .eq("company_id", companyId)
+        .select("*, wholesale_profiles!inner(name), companies!inner(display_name)")
         .order("priority", { ascending: false });
 
       if (error) throw error;
@@ -45,9 +43,10 @@ export function useWholesaleCategoryBindings() {
         created_at: row.created_at,
         updated_at: row.updated_at,
         profile_name: row.wholesale_profiles?.name || "—",
+        company_name: row.companies?.display_name || "—",
       }));
     },
-    enabled: !!companyId,
+    enabled: true,
   });
 
   const addBinding = useMutation({
@@ -56,15 +55,17 @@ export function useWholesaleCategoryBindings() {
       category_id: string;
       category_name: string;
       category_path?: string[];
+      company_id?: string;
     }) => {
-      if (!companyId) throw new Error("Sem empresa ativa");
+      const targetCompanyId = input.company_id || companyId;
+      if (!targetCompanyId) throw new Error("Sem empresa selecionada");
       const { data: { session } } = await supabase.auth.getSession();
 
       const { error } = await (supabase as any)
         .from("wholesale_profile_categories")
         .upsert(
           {
-            company_id: companyId,
+            company_id: targetCompanyId,
             profile_id: input.profile_id,
             category_id: input.category_id,
             category_name: input.category_name,

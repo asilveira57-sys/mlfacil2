@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertTriangle, CheckCircle2, Eye, Loader2, Play, Search, XCircle } from "lucide-react";
@@ -30,14 +31,27 @@ export function WholesalePreview() {
   const [search, setSearch] = useState("");
   const [confirmApply, setConfirmApply] = useState(false);
   const [viewTab, setViewTab] = useState("items");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+
+  const uniqueCategories = useMemo(() => {
+    if (!previewData) return [];
+    const map = new Map<string, string>();
+    previewData.rows.forEach((r) => {
+      if (r.category_id && !map.has(r.category_id)) {
+        map.set(r.category_id, r.category_name || r.category_id);
+      }
+    });
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [previewData]);
 
   const filteredRows = useMemo(() => {
     if (!previewData) return [];
     const q = search.toLowerCase();
     return previewData.rows.filter(
-      (r) => !q || r.title.toLowerCase().includes(q) || r.item_id.toLowerCase().includes(q)
+      (r) => (!q || r.title.toLowerCase().includes(q) || r.item_id.toLowerCase().includes(q)) &&
+        (categoryFilter === "all" || r.category_id === categoryFilter)
     );
-  }, [previewData, search]);
+  }, [previewData, search, categoryFilter]);
 
   const applicableRows = filteredRows.filter((r) => !r.is_excluded && r.tiers.length > 0);
 
@@ -140,6 +154,17 @@ export function WholesalePreview() {
                   className="pl-9"
                 />
               </div>
+              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                <SelectTrigger className="w-[220px]">
+                  <SelectValue placeholder="Todas categorias" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas categorias</SelectItem>
+                  {uniqueCategories.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Button
                 onClick={handleApply}
                 disabled={applying || selectedIds.size === 0}
@@ -196,7 +221,7 @@ export function WholesalePreview() {
                 </TableHeader>
                 <TableBody>
                   {previewData.summary.map((s) => (
-                    <TableRow key={s.category_id}>
+                    <TableRow key={s.category_id} className="cursor-pointer hover:bg-muted/50" onClick={() => { setCategoryFilter(s.category_id); setViewTab("items"); }}>
                       <TableCell className="font-medium">{s.category_name}</TableCell>
                       <TableCell className="text-right">{s.items_count}</TableCell>
                       <TableCell className="text-right">{s.avg_max_discount.toFixed(1)}%</TableCell>
