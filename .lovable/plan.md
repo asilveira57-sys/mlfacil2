@@ -2,27 +2,27 @@
 
 ## Problema
 
-O dialog "Vincular Categoria a Perfil" busca categorias diretamente do `activeAccount?.sellerId` (conta ativa global). O usuário quer primeiro selecionar a empresa de destino e depois ver apenas as categorias que aquela empresa/conta trabalha.
+A tabela `account_category_activity` só possui dados para a conta `66043362` (ADECONEXVV). A conta `1411095727` (ADECONEX.SP) não tem registros, então o RPC `get_seller_visible_categories` retorna `[]`.
 
-## Plano
+## Solução
 
-### 1. Adicionar seletor de empresa no dialog `WholesaleCategoryBindings.tsx`
+Substituir o `useSellerCategories` (que depende da tabela local) por uma chamada direta à edge function `ml-price-adjustment` com action `get_seller_categories`, que busca as categorias em tempo real da API do Mercado Livre.
 
-- Importar `useWorkspaceCompanies` para listar empresas ativas
-- Adicionar estado `selectedCompanyId` no dialog
-- Buscar a `marketplace_account` vinculada à empresa selecionada (query na tabela `marketplace_accounts` por `company_id`)
-- Derivar o `sellerId` (`external_user_id`) da conta vinculada à empresa escolhida
-- Passar esse `sellerId` dinâmico para `useSellerCategories` ao invés do `activeAccount?.sellerId`
+## Alteração: `src/components/wholesale/WholesaleCategoryBindings.tsx`
 
-### 2. Ajustar fluxo do dialog
+1. Remover import de `useSellerCategories`
+2. Substituir a query de categorias (linha 57) por uma `useQuery` que chama:
+   ```ts
+   supabase.functions.invoke("ml-price-adjustment", {
+     body: { action: "get_seller_categories", sellerId: resolvedSellerId }
+   })
+   ```
+3. Mapear o retorno `data.categories` (array `{ id, name, results }`) para o formato usado no select:
+   - `category_id` → `id`
+   - `category_name` → `name`  
+   - Label: `"Nome (X anúncios)"`
+4. Ajustar referências de `c.category_id` → `c.id`, `c.category_name` → `c.name`, `c.orders_count_90d` → `c.results`
+5. No `handleAdd`, passar `category_path: []` pois a API não retorna path
 
-- **Passo 1**: Selecionar empresa → ao selecionar, buscar conta de marketplace vinculada
-- **Passo 2**: Com o `sellerId` resolvido, carregar categorias via `useSellerCategories`
-- **Passo 3**: Selecionar perfil e categoria (fluxo atual)
-- Se a empresa não tem conta vinculada, exibir mensagem informativa
-- Pré-selecionar a empresa da conta ativa atual como default
-
-### 3. Alterações nos arquivos
-
-- **`src/components/wholesale/WholesaleCategoryBindings.tsx`**: Adicionar select de empresa no topo do dialog, estado para `selectedCompanyId`, query para buscar `marketplace_accounts.external_user_id` pela empresa, e usar esse seller ID para filtrar categorias. Aumentar o `p_limit` de 12 para um valor maior (ex: 50) para cobrir todas as categorias da empresa.
+Nenhuma outra alteração necessária — a edge function já aceita `sellerId` e resolve o token correto.
 
