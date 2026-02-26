@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Layers, Settings2 } from "lucide-react";
+import { Layers, Settings2, FolderTree, Package } from "lucide-react";
 import { WholesaleProfiles } from "@/components/wholesale/WholesaleProfiles";
 import { WholesaleDefaultProfile } from "@/components/wholesale/WholesaleDefaultProfile";
+import { WholesaleCategoryBindings } from "@/components/wholesale/WholesaleCategoryBindings";
+import { WholesaleProductOverrides } from "@/components/wholesale/WholesaleProductOverrides";
 
 export default function Atacado() {
   const [activeTab, setActiveTab] = useState("profiles");
@@ -17,19 +19,35 @@ export default function Atacado() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
+        <TabsList className="flex-wrap h-auto gap-1">
           <TabsTrigger value="profiles" className="gap-2">
             <Layers className="h-4 w-4" />
-            Perfis de Camadas
+            Perfis
+          </TabsTrigger>
+          <TabsTrigger value="categories" className="gap-2">
+            <FolderTree className="h-4 w-4" />
+            Categorias
+          </TabsTrigger>
+          <TabsTrigger value="overrides" className="gap-2">
+            <Package className="h-4 w-4" />
+            Avulso (SKU)
           </TabsTrigger>
           <TabsTrigger value="default" className="gap-2">
             <Settings2 className="h-4 w-4" />
-            Perfil Padrão
+            Padrão
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="profiles" className="mt-4">
           <WholesaleProfiles />
+        </TabsContent>
+
+        <TabsContent value="categories" className="mt-4">
+          <WholesaleCategoryBindings />
+        </TabsContent>
+
+        <TabsContent value="overrides" className="mt-4">
+          <WholesaleProductOverrides />
         </TabsContent>
 
         <TabsContent value="default" className="mt-4">

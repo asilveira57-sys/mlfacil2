@@ -15470,6 +15470,265 @@ export type Database = {
         }
         Relationships: []
       }
+      wholesale_product_overrides: {
+        Row: {
+          company_id: string
+          created_at: string
+          created_by: string | null
+          custom_tiers: Json | null
+          id: string
+          is_excluded: boolean
+          item_id: string
+          override_mode: string
+          product_key: string | null
+          profile_id: string | null
+          title: string | null
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          custom_tiers?: Json | null
+          id?: string
+          is_excluded?: boolean
+          item_id: string
+          override_mode?: string
+          product_key?: string | null
+          profile_id?: string | null
+          title?: string | null
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          custom_tiers?: Json | null
+          id?: string
+          is_excluded?: boolean
+          item_id?: string
+          override_mode?: string
+          product_key?: string | null
+          profile_id?: string | null
+          title?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wholesale_product_overrides_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wholesale_product_overrides_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "wholesale_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wholesale_profile_categories: {
+        Row: {
+          category_id: string
+          category_name: string | null
+          category_path: string[] | null
+          company_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          priority: number
+          profile_id: string
+          updated_at: string
+        }
+        Insert: {
+          category_id: string
+          category_name?: string | null
+          category_path?: string[] | null
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          priority?: number
+          profile_id: string
+          updated_at?: string
+        }
+        Update: {
+          category_id?: string
+          category_name?: string | null
+          category_path?: string[] | null
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          priority?: number
+          profile_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wholesale_profile_categories_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wholesale_profile_categories_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "wholesale_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wholesale_profile_tiers: {
+        Row: {
+          created_at: string
+          id: string
+          is_enabled: boolean
+          min_quantity: number
+          profile_id: string
+          tier_index: number
+          updated_at: string
+          value: number
+          value_type: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_enabled?: boolean
+          min_quantity?: number
+          profile_id: string
+          tier_index: number
+          updated_at?: string
+          value?: number
+          value_type?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_enabled?: boolean
+          min_quantity?: number
+          profile_id?: string
+          tier_index?: number
+          updated_at?: string
+          value?: number
+          value_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wholesale_profile_tiers_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "wholesale_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wholesale_profiles: {
+        Row: {
+          allow_without_cost: boolean
+          company_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          is_active: boolean
+          margin_min_pct: number | null
+          name: string
+          rounding_mode: string
+          updated_at: string
+        }
+        Insert: {
+          allow_without_cost?: boolean
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          margin_min_pct?: number | null
+          name: string
+          rounding_mode?: string
+          updated_at?: string
+        }
+        Update: {
+          allow_without_cost?: boolean
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          margin_min_pct?: number | null
+          name?: string
+          rounding_mode?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wholesale_profiles_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wholesale_seller_settings: {
+        Row: {
+          auto_reapply_mode: string
+          auto_reapply_on_price_change: boolean
+          company_id: string
+          created_at: string
+          default_profile_id: string | null
+          id: string
+          scheduled_time: string
+          strategy_mode: string
+          timezone: string
+          updated_at: string
+        }
+        Insert: {
+          auto_reapply_mode?: string
+          auto_reapply_on_price_change?: boolean
+          company_id: string
+          created_at?: string
+          default_profile_id?: string | null
+          id?: string
+          scheduled_time?: string
+          strategy_mode?: string
+          timezone?: string
+          updated_at?: string
+        }
+        Update: {
+          auto_reapply_mode?: string
+          auto_reapply_on_price_change?: boolean
+          company_id?: string
+          created_at?: string
+          default_profile_id?: string | null
+          id?: string
+          scheduled_time?: string
+          strategy_mode?: string
+          timezone?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wholesale_seller_settings_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wholesale_seller_settings_default_profile_id_fkey"
+            columns: ["default_profile_id"]
+            isOneToOne: false
+            referencedRelation: "wholesale_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       workspace_accounts: {
         Row: {
           created_at: string
