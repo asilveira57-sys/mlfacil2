@@ -230,3 +230,12 @@ verify_jwt = false
 
 [functions.wholesale-engine]
 verify_jwt = false
+
+[functions.mp-auth-url]
+verify_jwt = false
+
+[functions.mp-oauth-callback]
+verify_jwt = false
+
+[functions.mp-token-refresh]
+verify_jwt = false
