@@ -41,10 +41,8 @@ serve(async (req) => {
 
     let testResult: { success: boolean; message: string } = { success: false, message: "Unknown provider" };
 
-    if (integration.provider === "tiny") {
+    if (integration.provider === "tiny" || integration.provider === "olist") {
       testResult = await testTinyConnection(integration.api_key);
-    } else if (integration.provider === "olist") {
-      testResult = await testOlistConnection(integration.api_key);
     }
 
     // Update integration with test result
