@@ -264,13 +264,25 @@ export function ShippingTable({
                   )}
                 </TableCell>
                 <TableCell>
-                  <Badge 
-                    variant={statusInfo.badgeVariant}
-                    className={statusInfo.className}
-                    title={statusInfo.description}
-                  >
-                    {statusInfo.label}
-                  </Badge>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <Badge 
+                      variant={statusInfo.badgeVariant}
+                      className={statusInfo.className}
+                      title={statusInfo.description}
+                    >
+                      {statusInfo.label}
+                    </Badge>
+                    {order.logistic_type === 'self_service' && (
+                      <Badge variant="outline" className="text-amber-600 border-amber-500 bg-amber-50 dark:bg-amber-950/30 text-[10px] px-1.5 py-0">
+                        Flex
+                      </Badge>
+                    )}
+                    {order.logistic_type && order.logistic_type !== 'self_service' && order.logistic_type !== 'fulfillment' && (
+                      <Badge variant="outline" className="text-blue-600 border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-[10px] px-1.5 py-0">
+                        Coleta
+                      </Badge>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
                   <Button
