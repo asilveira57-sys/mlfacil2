@@ -153,7 +153,7 @@ export function ShippingTable({
 
   return (
     <div className="border rounded-lg overflow-auto max-h-[calc(100vh-360px)]">
-      <Table>
+      <Table className="[&_th]:px-2 [&_th]:py-2 [&_td]:px-2 [&_td]:py-2">
         <TableHeader>
           <TableRow>
             <TableHead className="w-12">

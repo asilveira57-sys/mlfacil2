@@ -92,7 +92,7 @@ export function AppShellLayout() {
 
   return (
     <PageHeaderContext.Provider value={contextValue}>
-      <SidebarProvider defaultOpen={true}>
+      <SidebarProvider defaultOpen={false}>
         <div className="min-h-screen flex w-full bg-background">
           <DynamicSidebar />
           <SidebarInset className="flex flex-col flex-1 overflow-x-hidden">
