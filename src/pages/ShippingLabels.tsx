@@ -28,6 +28,7 @@ export default function ShippingLabels() {
   
   const [selectedOrder, setSelectedOrder] = useState<ShippingOrder | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [logisticFilter, setLogisticFilter] = useState<'all' | 'flex' | 'coleta' | 'full'>('all');
   const { isAdmin } = useUserRole();
   const companyId = activeAccount?.companyId || null;
 
@@ -183,11 +184,18 @@ export default function ShippingLabels() {
           onSync={sync}
           lastSyncAt={lastSyncAt}
           totalCount={totalCount}
+          logisticFilter={logisticFilter}
+          setLogisticFilter={setLogisticFilter}
         />
 
         {/* Table - shows loading only for initial load, not during sync */}
         <ShippingTable
-          orders={orders}
+          orders={logisticFilter === 'all' ? orders : orders.filter(o => {
+            if (logisticFilter === 'flex') return o.logistic_type === 'self_service';
+            if (logisticFilter === 'full') return o.logistic_type === 'fulfillment';
+            // coleta = everything else that has a logistic_type and isn't flex/full
+            return o.logistic_type && o.logistic_type !== 'self_service' && o.logistic_type !== 'fulfillment';
+          })}
           selectedIds={selectedIds}
           onToggleSelection={toggleSelection}
           onSelectAll={selectAll}
