@@ -16484,6 +16484,7 @@ export type Database = {
         | "operacional"
         | "ferramentas"
         | "sistema"
+        | "financeiro"
       notification_category:
         | "qa_pending"
         | "qa_sla_warning"
@@ -16695,6 +16696,7 @@ export const Constants = {
         "operacional",
         "ferramentas",
         "sistema",
+        "financeiro",
       ],
       notification_category: [
         "qa_pending",
