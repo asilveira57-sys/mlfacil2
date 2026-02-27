@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Calendar } from '@/components/ui/calendar';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { RefreshCw, Clock, CalendarIcon, Search, X } from 'lucide-react';
+import { RefreshCw, Clock, CalendarIcon, Search, X, Truck } from 'lucide-react';
 import { FinalStatus, PeriodFilter, SyncPhase, DateRange } from '@/hooks/useShippingLabels';
 import { formatDistanceToNow, format } from 'date-fns';
 import { ptBR, enUS, es } from 'date-fns/locale';
@@ -13,6 +13,8 @@ import { cn } from '@/lib/utils';
 
 // Filter status types (only the ones shown as filter chips)
 type FilterStatus = 'all' | 'pronta' | 'aguardando_nf' | 'reimprimir';
+
+export type LogisticFilter = 'all' | 'flex' | 'coleta' | 'full';
 
 interface ShippingFiltersProps {
   statusFilter: FinalStatus;
@@ -30,6 +32,8 @@ interface ShippingFiltersProps {
   onSync: () => void;
   lastSyncAt: string | null;
   totalCount: number;
+  logisticFilter: LogisticFilter;
+  setLogisticFilter: (filter: LogisticFilter) => void;
 }
 
 const STATUS_VARIANTS: Record<FilterStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
@@ -57,6 +61,13 @@ const STATUS_KEYS: { value: FilterStatus; labelKey: string }[] = [
   { value: 'reimprimir', labelKey: 'status.reprint' },
 ];
 
+const LOGISTIC_KEYS: { value: LogisticFilter; label: string }[] = [
+  { value: 'all', label: 'Todos' },
+  { value: 'full', label: 'Full' },
+  { value: 'flex', label: 'Flex' },
+  { value: 'coleta', label: 'Coleta' },
+];
+
 export function ShippingFilters({
   statusFilter,
   setStatusFilter,
@@ -73,6 +84,8 @@ export function ShippingFilters({
   onSync,
   lastSyncAt,
   totalCount,
+  logisticFilter,
+  setLogisticFilter,
 }: ShippingFiltersProps) {
   const { t, i18n } = useTranslation('shipping');
   const [datePickerOpen, setDatePickerOpen] = useState(false);
@@ -274,6 +287,23 @@ export function ShippingFilters({
               <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-background/20 text-xs">
                 {statusCounts[status.value]}
               </span>
+            </Badge>
+          ))}
+        </div>
+
+        {/* Logistic type filter */}
+        <div className="flex items-center gap-1.5">
+          <Truck className="h-3.5 w-3.5 text-muted-foreground" />
+          {LOGISTIC_KEYS.map((opt) => (
+            <Badge
+              key={opt.value}
+              variant={logisticFilter === opt.value ? 'default' : 'outline'}
+              className={`cursor-pointer px-2.5 py-1 text-xs ${
+                logisticFilter === opt.value ? '' : 'opacity-70 hover:opacity-100'
+              }`}
+              onClick={() => setLogisticFilter(opt.value)}
+            >
+              {opt.label}
             </Badge>
           ))}
         </div>
