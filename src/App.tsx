@@ -68,6 +68,7 @@ import AjustePreco from "./pages/AjustePreco";
 import Atacado from "./pages/Atacado";
 import SystemStatus from "./pages/SystemStatus";
 import Contato from "./pages/Contato";
+import Suporte from "./pages/Suporte";
 import CentralDeAjuda from "./pages/CentralDeAjuda";
 import CentralDeAjudaArtigo from "./pages/CentralDeAjudaArtigo";
 import PublicLayout from "./components/PublicLayout";
@@ -171,6 +172,7 @@ const App = () => {
                 <Route path="/ferramentas/comissoes" element={<CommissionsTool />} />
                 <Route path="/status" element={<PublicLayout><SystemStatus /></PublicLayout>} />
                 <Route path="/contato" element={<PublicLayout><Contato /></PublicLayout>} />
+                <Route path="/suporte" element={<Suporte />} />
                 <Route path="/central-de-ajuda" element={<PublicLayout><CentralDeAjuda /></PublicLayout>} />
                 <Route path="/central-de-ajuda/:slug" element={<PublicLayout><CentralDeAjudaArtigo /></PublicLayout>} />
 

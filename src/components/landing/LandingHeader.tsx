@@ -23,7 +23,7 @@ export function LandingHeader() {
     { label: t('header.menu_planos'), href: "#planos" },
     { label: t('header.menu_consultoria'), href: "/consultoria" },
     { label: t('header.menu_blog'), href: "/blog" },
-    { label: t('header.menu_suporte'), href: "#faq" },
+    { label: t('header.menu_suporte'), href: "/suporte" },
   ];
 
   const handleNavClick = (href: string) => {
