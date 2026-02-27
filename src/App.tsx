@@ -48,6 +48,7 @@ import Sandbox from "./pages/Sandbox";
 import FreightManagement from "./pages/FreightManagement";
 import Precificacao from "./pages/Precificacao";
 import Comissoes from "./pages/Comissoes";
+import Financeiro from "./pages/financeiro/Financeiro";
 import Retrospectiva from "./pages/Retrospectiva";
 import Consultoria from "./pages/Consultoria";
 import ModuloDetalhe from "./pages/ModuloDetalhe";
@@ -214,6 +215,14 @@ const App = () => {
                   <Route path="/calendario-social" element={<SocialCalendar />} />
                   <Route path="/comissoes" element={<Comissoes />} />
                   <Route path="/retrospectiva" element={<Retrospectiva />} />
+                  {/* Financeiro routes */}
+                  <Route path="/financeiro" element={<Financeiro />} />
+                  <Route path="/financeiro/resumo" element={<Financeiro />} />
+                  <Route path="/financeiro/recebimentos" element={<Financeiro />} />
+                  <Route path="/financeiro/movimentos" element={<Financeiro />} />
+                  <Route path="/financeiro/conciliacao" element={<Financeiro />} />
+                  <Route path="/financeiro/rotinas" element={<Financeiro />} />
+                  <Route path="/financeiro/integracoes" element={<Financeiro />} />
                   {/* Products module */}
                   <Route path="/produtos" element={<ProductsPage />} />
                   <Route path="/produtos/:id" element={<ProductDetailPage />} />
