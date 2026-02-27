@@ -4000,6 +4000,271 @@ export type Database = {
         }
         Relationships: []
       }
+      finance_accounts: {
+        Row: {
+          access_token: string
+          company_id: string | null
+          connection_status: string
+          consecutive_failures: number
+          created_at: string
+          email: string | null
+          id: string
+          is_active: boolean
+          last_api_error_at: string | null
+          last_api_error_code: string | null
+          last_api_ok_at: string | null
+          last_token_refresh_at: string | null
+          ml_account_id: string | null
+          mp_user_id: string
+          nickname: string | null
+          refresh_token: string
+          token_expires_at: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          access_token?: string
+          company_id?: string | null
+          connection_status?: string
+          consecutive_failures?: number
+          created_at?: string
+          email?: string | null
+          id?: string
+          is_active?: boolean
+          last_api_error_at?: string | null
+          last_api_error_code?: string | null
+          last_api_ok_at?: string | null
+          last_token_refresh_at?: string | null
+          ml_account_id?: string | null
+          mp_user_id: string
+          nickname?: string | null
+          refresh_token?: string
+          token_expires_at?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          access_token?: string
+          company_id?: string | null
+          connection_status?: string
+          consecutive_failures?: number
+          created_at?: string
+          email?: string | null
+          id?: string
+          is_active?: boolean
+          last_api_error_at?: string | null
+          last_api_error_code?: string | null
+          last_api_ok_at?: string | null
+          last_token_refresh_at?: string | null
+          ml_account_id?: string | null
+          mp_user_id?: string
+          nickname?: string | null
+          refresh_token?: string
+          token_expires_at?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_accounts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_accounts_ml_account_id_fkey"
+            columns: ["ml_account_id"]
+            isOneToOne: false
+            referencedRelation: "ml_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_accounts_ml_account_id_fkey"
+            columns: ["ml_account_id"]
+            isOneToOne: false
+            referencedRelation: "unified_marketplace_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_job_runs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          failed_records: number | null
+          finance_account_id: string
+          id: string
+          job_type: string
+          metrics: Json | null
+          processed_records: number | null
+          started_at: string
+          status: string
+          total_records: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          failed_records?: number | null
+          finance_account_id: string
+          id?: string
+          job_type: string
+          metrics?: Json | null
+          processed_records?: number | null
+          started_at?: string
+          status?: string
+          total_records?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          failed_records?: number | null
+          finance_account_id?: string
+          id?: string
+          job_type?: string
+          metrics?: Json | null
+          processed_records?: number | null
+          started_at?: string
+          status?: string
+          total_records?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_job_runs_finance_account_id_fkey"
+            columns: ["finance_account_id"]
+            isOneToOne: false
+            referencedRelation: "finance_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_reconciliation_items: {
+        Row: {
+          created_at: string
+          difference: number | null
+          id: string
+          movement_amount: number | null
+          movement_id: string | null
+          notes: string | null
+          order_amount: number | null
+          order_id: string | null
+          payment_amount: number | null
+          payment_id: string | null
+          reconciliation_status: string
+          run_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          difference?: number | null
+          id?: string
+          movement_amount?: number | null
+          movement_id?: string | null
+          notes?: string | null
+          order_amount?: number | null
+          order_id?: string | null
+          payment_amount?: number | null
+          payment_id?: string | null
+          reconciliation_status?: string
+          run_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          difference?: number | null
+          id?: string
+          movement_amount?: number | null
+          movement_id?: string | null
+          notes?: string | null
+          order_amount?: number | null
+          order_id?: string | null
+          payment_amount?: number | null
+          payment_id?: string | null
+          reconciliation_status?: string
+          run_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_reconciliation_items_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "finance_reconciliation_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      finance_reconciliation_runs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          divergent_count: number | null
+          finance_account_id: string
+          id: string
+          missing_order_count: number | null
+          missing_payment_count: number | null
+          ok_count: number | null
+          period_from: string | null
+          period_to: string | null
+          started_at: string
+          status: string
+          total_items: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          divergent_count?: number | null
+          finance_account_id: string
+          id?: string
+          missing_order_count?: number | null
+          missing_payment_count?: number | null
+          ok_count?: number | null
+          period_from?: string | null
+          period_to?: string | null
+          started_at?: string
+          status?: string
+          total_items?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          divergent_count?: number | null
+          finance_account_id?: string
+          id?: string
+          missing_order_count?: number | null
+          missing_payment_count?: number | null
+          ok_count?: number | null
+          period_from?: string | null
+          period_to?: string | null
+          started_at?: string
+          status?: string
+          total_items?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_reconciliation_runs_finance_account_id_fkey"
+            columns: ["finance_account_id"]
+            isOneToOne: false
+            referencedRelation: "finance_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       financial_concept_map: {
         Row: {
           bucket: string
@@ -7754,6 +8019,160 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      mp_movements_raw: {
+        Row: {
+          amount: number | null
+          balance: number | null
+          created_at: string
+          date_created: string | null
+          description: string | null
+          finance_account_id: string
+          id: string
+          movement_type: string | null
+          mp_movement_id: string
+          payment_id: string | null
+          raw_json: Json | null
+          reference_id: string | null
+          status: string | null
+          synced_at: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          amount?: number | null
+          balance?: number | null
+          created_at?: string
+          date_created?: string | null
+          description?: string | null
+          finance_account_id: string
+          id?: string
+          movement_type?: string | null
+          mp_movement_id: string
+          payment_id?: string | null
+          raw_json?: Json | null
+          reference_id?: string | null
+          status?: string | null
+          synced_at?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          amount?: number | null
+          balance?: number | null
+          created_at?: string
+          date_created?: string | null
+          description?: string | null
+          finance_account_id?: string
+          id?: string
+          movement_type?: string | null
+          mp_movement_id?: string
+          payment_id?: string | null
+          raw_json?: Json | null
+          reference_id?: string | null
+          status?: string | null
+          synced_at?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mp_movements_raw_finance_account_id_fkey"
+            columns: ["finance_account_id"]
+            isOneToOne: false
+            referencedRelation: "finance_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mp_payments_raw: {
+        Row: {
+          created_at: string
+          date_approved: string | null
+          date_created: string | null
+          description: string | null
+          external_reference: string | null
+          fee_amount: number | null
+          finance_account_id: string
+          id: string
+          installments: number | null
+          money_release_date: string | null
+          mp_order_id: string | null
+          mp_payment_id: string
+          net_received_amount: number | null
+          payer_email: string | null
+          payment_method_id: string | null
+          payment_type: string | null
+          raw_json: Json | null
+          status: string | null
+          status_detail: string | null
+          synced_at: string
+          total_paid_amount: number | null
+          transaction_amount: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          date_approved?: string | null
+          date_created?: string | null
+          description?: string | null
+          external_reference?: string | null
+          fee_amount?: number | null
+          finance_account_id: string
+          id?: string
+          installments?: number | null
+          money_release_date?: string | null
+          mp_order_id?: string | null
+          mp_payment_id: string
+          net_received_amount?: number | null
+          payer_email?: string | null
+          payment_method_id?: string | null
+          payment_type?: string | null
+          raw_json?: Json | null
+          status?: string | null
+          status_detail?: string | null
+          synced_at?: string
+          total_paid_amount?: number | null
+          transaction_amount?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          date_approved?: string | null
+          date_created?: string | null
+          description?: string | null
+          external_reference?: string | null
+          fee_amount?: number | null
+          finance_account_id?: string
+          id?: string
+          installments?: number | null
+          money_release_date?: string | null
+          mp_order_id?: string | null
+          mp_payment_id?: string
+          net_received_amount?: number | null
+          payer_email?: string | null
+          payment_method_id?: string | null
+          payment_type?: string | null
+          raw_json?: Json | null
+          status?: string | null
+          status_detail?: string | null
+          synced_at?: string
+          total_paid_amount?: number | null
+          transaction_amount?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mp_payments_raw_finance_account_id_fkey"
+            columns: ["finance_account_id"]
+            isOneToOne: false
+            referencedRelation: "finance_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       nfse_field_mappings: {
         Row: {
