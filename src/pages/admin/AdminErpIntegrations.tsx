@@ -11,20 +11,43 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Loader2, Check, X, RefreshCw, Plug, Settings2, MapPin, FileText, AlertCircle } from 'lucide-react';
 import { useErpIntegrations, useErpIntegrationMutations, useNfseSettings, useNfseSettingsMutation, useNfseFieldMappings, useNfseFieldMappingsMutation, useIntegrationSyncRuns, useTriggerSync } from '@/hooks/useErpIntegrations';
-import { TOMADOR_FIELDS, DEFAULT_TINY_MAPPINGS, DEFAULT_OLIST_MAPPINGS, type ErpProvider } from '@/types/erp-integration';
+import { TOMADOR_FIELDS, DEFAULT_OLIST_MAPPINGS, type ErpProvider } from '@/types/erp-integration';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-
-// Temporary company ID - in production, get from context
-const DEMO_COMPANY_ID = '00000000-0000-0000-0000-000000000001';
+import { useUserContext } from '@/hooks/useUserContext';
 
 export function AdminErpIntegrations() {
+  const { activeCompanyId } = useUserContext();
+
+  if (!activeCompanyId) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Integrações ERP</h2>
+          <p className="text-muted-foreground">
+            Configure conexões com Olist (Tiny ERP) para captura de pedidos e NFS-e
+          </p>
+        </div>
+        <Card>
+          <CardContent className="flex items-center justify-center py-12">
+            <div className="text-center space-y-2">
+              <AlertCircle className="h-10 w-10 text-muted-foreground mx-auto" />
+              <p className="text-muted-foreground">
+                Nenhuma empresa ativa encontrada. Selecione ou crie uma empresa primeiro.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Integrações ERP</h2>
         <p className="text-muted-foreground">
-          Configure conexões com Tiny e Olist para captura de pedidos e NFS-e
+          Configure conexões com Olist (Tiny ERP) para captura de pedidos e NFS-e
         </p>
       </div>
 
@@ -49,19 +72,19 @@ export function AdminErpIntegrations() {
         </TabsList>
 
         <TabsContent value="credentials">
-          <CredentialsTab companyId={DEMO_COMPANY_ID} />
+          <CredentialsTab companyId={activeCompanyId} />
         </TabsContent>
 
         <TabsContent value="capture">
-          <CaptureRulesTab companyId={DEMO_COMPANY_ID} />
+          <CaptureRulesTab companyId={activeCompanyId} />
         </TabsContent>
 
         <TabsContent value="mapping">
-          <FieldMappingTab companyId={DEMO_COMPANY_ID} />
+          <FieldMappingTab companyId={activeCompanyId} />
         </TabsContent>
 
         <TabsContent value="nfse">
-          <NfseSettingsTab companyId={DEMO_COMPANY_ID} />
+          <NfseSettingsTab companyId={activeCompanyId} />
         </TabsContent>
       </Tabs>
     </div>
@@ -74,20 +97,10 @@ function CredentialsTab({ companyId }: { companyId: string }) {
   const { data: integrations, isLoading } = useErpIntegrations(companyId);
   const { upsertIntegration, testConnection } = useErpIntegrationMutations();
 
-  const tinyIntegration = integrations?.find(i => i.provider === 'tiny');
   const olistIntegration = integrations?.find(i => i.provider === 'olist');
 
   return (
     <div className="grid gap-6 md:grid-cols-2">
-      <IntegrationCard
-        provider="tiny"
-        integration={tinyIntegration}
-        companyId={companyId}
-        onSave={upsertIntegration.mutateAsync}
-        onTest={testConnection.mutateAsync}
-        isSaving={upsertIntegration.isPending}
-        isTesting={testConnection.isPending}
-      />
       <IntegrationCard
         provider="olist"
         integration={olistIntegration}
@@ -134,7 +147,7 @@ function IntegrationCard({ provider, integration, companyId, onSave, onTest, isS
     }
   };
 
-  const providerLabel = provider === 'tiny' ? 'Tiny ERP' : 'Olist';
+  const providerLabel = 'Olist (Tiny ERP)';
   const lastTest = integration?.last_test_at ? format(new Date(integration.last_test_at), "dd/MM/yyyy HH:mm", { locale: ptBR }) : null;
 
   return (
@@ -173,20 +186,18 @@ function IntegrationCard({ provider, integration, companyId, onSave, onTest, isS
           />
         </div>
 
-        {provider === 'tiny' && (
-          <div className="space-y-2">
-            <Label>Ambiente</Label>
-            <Select value={environment} onValueChange={setEnvironment}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="production">Produção</SelectItem>
-                <SelectItem value="sandbox">Sandbox</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        )}
+        <div className="space-y-2">
+          <Label>Ambiente</Label>
+          <Select value={environment} onValueChange={setEnvironment}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="production">Produção</SelectItem>
+              <SelectItem value="sandbox">Sandbox</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
 
         {lastTest && (
           <div className="text-sm text-muted-foreground flex items-center gap-2">
@@ -272,9 +283,7 @@ function CaptureRulesTab({ companyId }: { companyId: string }) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="tiny">Apenas Tiny</SelectItem>
-                <SelectItem value="olist">Apenas Olist</SelectItem>
-                <SelectItem value="both">Ambos</SelectItem>
+                <SelectItem value="olist">Olist (Tiny ERP)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -396,11 +405,11 @@ function SyncRunsHistory({ integrationId }: { integrationId: string }) {
 // ========== Tab C: Field Mapping ==========
 
 function FieldMappingTab({ companyId }: { companyId: string }) {
-  const [activeProvider, setActiveProvider] = useState<ErpProvider>('tiny');
+  const activeProvider: ErpProvider = 'olist';
   const { data: mappings, isLoading } = useNfseFieldMappings(companyId, activeProvider);
   const saveMappings = useNfseFieldMappingsMutation();
 
-  const defaults = activeProvider === 'tiny' ? DEFAULT_TINY_MAPPINGS : DEFAULT_OLIST_MAPPINGS;
+  const defaults = DEFAULT_OLIST_MAPPINGS;
 
   const [localMappings, setLocalMappings] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
@@ -440,15 +449,7 @@ function FieldMappingTab({ companyId }: { companyId: string }) {
               Configure de onde vêm os dados do cliente para a NFS-e
             </CardDescription>
           </div>
-          <Select value={activeProvider} onValueChange={(v) => setActiveProvider(v as ErpProvider)}>
-            <SelectTrigger className="w-[150px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="tiny">Tiny</SelectItem>
-              <SelectItem value="olist">Olist</SelectItem>
-            </SelectContent>
-          </Select>
+          <Badge variant="secondary">Olist (Tiny ERP)</Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
