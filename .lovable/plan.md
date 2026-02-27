@@ -1,35 +1,25 @@
 
 
-## Diagnóstico
+## Plano: Adicionar tag Flex/Coleta na tabela de envios
 
-O erro é **foreign key violation**: o código usa um `company_id` fixo fake (`00000000-0000-0000-0000-000000000001`) que não existe na tabela `companies`. Essa é a causa de todos os erros de integração ERP.
+### O que muda
 
-Além disso, o usuário quer unificar Tiny ERP e Olist em um único card, já que são a mesma plataforma (Olist = Tiny).
+No `src/components/shipping/ShippingTable.tsx`, adicionar um badge ao lado do status (ou na coluna de prazo) indicando o tipo logístico:
 
----
+- **Flex** → badge amarelo/laranja "Flex" (quando `logistic_type` contém `"self_service"` ou similar valor Flex do ML)
+- **Coleta** → badge azul "Coleta" (demais tipos como `"xd_drop_off"`, `"cross_docking"`, etc.)
 
-## Plano de correção
+O campo `logistic_type` já existe no `ShippingOrder` e já vem do banco. Nenhuma alteração de banco necessária.
 
-### 1. Usar company_id real do usuário logado
-
-No `AdminErpIntegrations.tsx`, substituir o `DEMO_COMPANY_ID` constante pelo `activeCompanyId` obtido via `useUserContext()`. Adicionar tratamento para quando não houver empresa ativa.
-
-### 2. Unificar em um único card "Olist / Tiny ERP"
-
-- Remover os dois cards separados (Tiny + Olist)
-- Manter um único card com provider `olist` e label "Olist (Tiny ERP)"
-- Remover referências a `tiny` como provider separado nas abas de Captura e Mapeamento
-- Manter a edge function `erp-test-connection` suportando ambos os providers internamente
-
-### 3. Ajustar a edge function de teste
-
-A função `erp-test-connection` já suporta `tiny` e `olist` — sem mudança necessária. O provider salvo será `olist`.
-
----
-
-### Arquivos alterados
+### Arquivo alterado
 
 | Arquivo | Mudança |
 |---|---|
-| `src/pages/admin/AdminErpIntegrations.tsx` | Usar `useUserContext()` no lugar do ID fake; unificar em um único card Olist |
+| `src/components/shipping/ShippingTable.tsx` | Adicionar badge Flex/Coleta ao lado do status ou na coluna de prazo, usando `order.logistic_type` |
+
+### Mapeamento de tipos
+
+- `self_service` → **Flex**
+- `fulfillment` → **Full**  
+- Todos os demais (`xd_drop_off`, `cross_docking`, `drop_off`, etc.) → **Coleta**
 
