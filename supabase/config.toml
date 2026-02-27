@@ -239,3 +239,9 @@ verify_jwt = false
 
 [functions.mp-token-refresh]
 verify_jwt = false
+
+[functions.mp-sync-payments]
+verify_jwt = false
+
+[functions.mp-sync-movements]
+verify_jwt = false
