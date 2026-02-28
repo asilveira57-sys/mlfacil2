@@ -9,7 +9,9 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Search, AlertCircle, TrendingUp, TrendingDown, RefreshCw, CheckCircle2, DollarSign, Save, ArrowUpDown, ArrowUp, ArrowDown, Package, RotateCw } from 'lucide-react';
+import { Search, AlertCircle, TrendingUp, TrendingDown, RefreshCw, CheckCircle2, DollarSign, Save, ArrowUpDown, ArrowUp, ArrowDown, Package, RotateCw, Square, CheckSquare, Loader2 } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { getCostCache, setCostCache, checkSellerChange } from '@/hooks/useCostModuleCache';
@@ -85,6 +87,74 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
 
   const [resyncingOrder, setResyncingOrder] = useState<string | null>(null);
+
+  // Batch selection state
+  const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
+  const [batchProcessing, setBatchProcessing] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, currentOrderId: '' });
+
+  const allOnPageSelected = orders.length > 0 && orders.every(o => selectedOrders.has(o.order_id));
+  const someOnPageSelected = orders.some(o => selectedOrders.has(o.order_id));
+
+  const toggleSelectAll = () => {
+    setSelectedOrders(prev => {
+      const next = new Set(prev);
+      if (allOnPageSelected) {
+        orders.forEach(o => next.delete(o.order_id));
+      } else {
+        orders.forEach(o => next.add(o.order_id));
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectOrder = (orderId: string) => {
+    setSelectedOrders(prev => {
+      const next = new Set(prev);
+      if (next.has(orderId)) next.delete(orderId);
+      else next.add(orderId);
+      return next;
+    });
+  };
+
+  const handleBatchResync = async () => {
+    const ids = Array.from(selectedOrders);
+    if (ids.length === 0) return;
+
+    setBatchProcessing(true);
+    setBatchProgress({ current: 0, total: ids.length, currentOrderId: '' });
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (let i = 0; i < ids.length; i++) {
+      const orderId = ids[i];
+      setBatchProgress({ current: i + 1, total: ids.length, currentOrderId: orderId });
+      try {
+        const { error } = await supabase.functions.invoke('ml-sync-real-costs', {
+          body: { seller_id: sellerId, action: 'resync_single', order_id: orderId }
+        });
+        if (error) throw error;
+        successCount++;
+      } catch {
+        errorCount++;
+      }
+      // Small delay to avoid rate limiting
+      if (i < ids.length - 1) {
+        await new Promise(r => setTimeout(r, 500));
+      }
+    }
+
+    setBatchProcessing(false);
+    setSelectedOrders(new Set());
+    setBatchProgress({ current: 0, total: 0, currentOrderId: '' });
+
+    if (errorCount === 0) {
+      toast.success(`${successCount} pedidos atualizados com sucesso`);
+    } else {
+      toast.warning(`${successCount} atualizados, ${errorCount} com erro`);
+    }
+    loadOrders();
+  };
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -446,10 +516,54 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
             </div>
           ) : (
             <>
+              {/* Batch action bar */}
+              {selectedOrders.size > 0 && (
+                <div className="flex items-center gap-3 p-3 mb-2 rounded-lg bg-muted border">
+                  <span className="text-sm font-medium">{selectedOrders.size} selecionado(s)</span>
+                  <Button
+                    size="sm"
+                    onClick={handleBatchResync}
+                    disabled={batchProcessing}
+                  >
+                    {batchProcessing ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                        {batchProgress.current}/{batchProgress.total}
+                      </>
+                    ) : (
+                      <>
+                        <RotateCw className="h-3.5 w-3.5 mr-1" />
+                        Atualizar selecionados
+                      </>
+                    )}
+                  </Button>
+                  {!batchProcessing && (
+                    <Button size="sm" variant="ghost" onClick={() => setSelectedOrders(new Set())}>
+                      Limpar seleção
+                    </Button>
+                  )}
+                  {batchProcessing && (
+                    <div className="flex-1 flex items-center gap-2">
+                      <Progress value={(batchProgress.current / batchProgress.total) * 100} className="flex-1 h-2" />
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">
+                        Pedido {batchProgress.currentOrderId}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="border rounded-lg overflow-hidden">
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-10">
+                        <Checkbox
+                          checked={allOnPageSelected}
+                          onCheckedChange={toggleSelectAll}
+                          aria-label="Selecionar todos da página"
+                        />
+                      </TableHead>
                       <TableHead 
                         className="cursor-pointer select-none hover:bg-muted/80"
                         onClick={() => handleSort('created_at_meli')}
@@ -513,7 +627,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                   <TableBody>
                     {orders.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                           Nenhum pedido encontrado. Clique em "Recalcular" para processar.
                         </TableCell>
                       </TableRow>
@@ -527,9 +641,16 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                         return (
                           <TableRow
                             key={order.id}
-                            className="cursor-pointer hover:bg-muted/50"
+                            className={cn("cursor-pointer hover:bg-muted/50", selectedOrders.has(order.order_id) && "bg-muted/30")}
                             onClick={() => loadOrderDetail(order.order_id)}
                           >
+                            <TableCell onClick={(e) => e.stopPropagation()}>
+                              <Checkbox
+                                checked={selectedOrders.has(order.order_id)}
+                                onCheckedChange={() => toggleSelectOrder(order.order_id)}
+                                disabled={batchProcessing}
+                              />
+                            </TableCell>
                             <TableCell>{formatDate(order.created_at_meli)}</TableCell>
                             <TableCell>
                               <div className="font-mono text-xs">{order.order_id}</div>
