@@ -261,44 +261,68 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
     }
   }
 
-  // Strategy 3: If no billing at all, try /orders/{orderId}/billing_info for seller.charges
+  // Strategy 3: Search billing movements for this specific order
   if (feeMLSource === "pending") {
     try {
-      console.log(`[RealCosts] Strategy 3: calling /orders/${orderId}/billing_info`);
-      const billingResp = await fetch(`https://api.mercadolibre.com/orders/${orderId}/billing_info`, { headers: { Authorization: `Bearer ${currentToken}` } });
-      console.log(`[RealCosts] Strategy 3: billing_info status=${billingResp.status} for order ${orderId}`);
-      if (billingResp.ok) {
-        const billingData = await billingResp.json();
-        console.log(`[RealCosts] Strategy 3: billing_info raw keys=${JSON.stringify(Object.keys(billingData))} for order ${orderId}`);
-        // The API may return { billing_info: { ... } } or directly the object
-        const billingInfo = billingData.billing_info || billingData;
-        console.log(`[RealCosts] Strategy 3: billingInfo keys=${JSON.stringify(Object.keys(billingInfo))}, has seller=${!!billingInfo.seller}, seller keys=${billingInfo.seller ? JSON.stringify(Object.keys(billingInfo.seller)) : 'N/A'}`);
+      // Try the billing movements search endpoint filtered by order reference
+      const movementsUrl = `https://api.mercadolibre.com/billing/integration/movements/search?user_id=${sellerId}&reference=${orderId}&limit=50`;
+      console.log(`[RealCosts] Strategy 3: calling billing movements for order ${orderId}`);
+      
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const movResp = await fetch(movementsUrl, { headers: { Authorization: `Bearer ${currentToken}` } });
+        console.log(`[RealCosts] Strategy 3: movements status=${movResp.status} for order ${orderId}`);
         
-        // Try seller.charges first
-        const charges = billingInfo.seller?.charges || billingInfo.charges || [];
-        console.log(`[RealCosts] Strategy 3: found ${charges.length} charges for order ${orderId}`);
-        if (charges.length > 0) {
-          console.log(`[RealCosts] Strategy 3: charges detail: ${JSON.stringify(charges)}`);
+        if (movResp.ok) {
+          const movData = await movResp.json();
+          const results = movData.results || movData.movements || [];
+          console.log(`[RealCosts] Strategy 3: found ${results.length} movements for order ${orderId}`);
+          
+          for (const mov of results) {
+            const concept = (mov.concept || mov.type || mov.detail || '').toLowerCase();
+            const chargeType = (mov.charge_info?.transaction_detail || mov.charge_info?.concept_type || '').toLowerCase();
+            const amount = Math.abs(mov.amount || mov.charge_info?.detail_amount || 0);
+            
+            console.log(`[RealCosts] Strategy 3: movement concept="${concept}" chargeType="${chargeType}" amount=${amount}`);
+            
+            if (chargeType.includes('custo por vender') || chargeType.includes('custo por cobrar') || 
+                chargeType.includes('sale_fee') || chargeType.includes('cargo por venta') ||
+                concept.includes('sale_fee') || concept.includes('commission') || concept.includes('comisi')) {
+              feeML += amount;
+            } else if (chargeType.includes('tarifa de envio') || chargeType.includes('envio extra') || 
+                       chargeType.includes('envio intermunicipal') || chargeType.includes('shipping') ||
+                       concept.includes('shipping')) {
+              // Only add if not already found from cache
+              if (shippingCostSeller === 0) shippingCostSeller += amount;
+            } else if (chargeType.includes('taxa de parcelamento') || chargeType.includes('installment') ||
+                       concept.includes('financing') || concept.includes('installment')) {
+              installmentsCost += amount;
+            }
+          }
+          
+          if (feeML > 0) { 
+            feeMLSource = "billing"; 
+            sourceRefs.push("billing_movements:api"); 
+          } else if (results.length > 0) {
+            console.log(`[RealCosts] Strategy 3: movements found but no commission. Raw: ${JSON.stringify(results).substring(0, 2000)}`);
+          }
+          break;
         }
         
-        for (const charge of charges) {
-          const ct = (charge.type || charge.charge_type || charge.name || '').toLowerCase();
-          const amount = Math.abs(charge.value || charge.amount || charge.gross_amount || 0);
-          console.log(`[RealCosts] Strategy 3: charge type="${ct}" amount=${amount}`);
-          if (ct.includes('sale_fee') || ct.includes('commission') || ct.includes('fee') || ct.includes('comisi')) feeML += amount;
-          else if (ct.includes('shipping') || ct.includes('envio')) shippingCostSeller += amount;
-          else if (ct.includes('financing') || ct.includes('installment') || ct.includes('parcela')) installmentsCost += amount;
+        if (movResp.status === 401) { 
+          await movResp.text(); 
+          if (await tryRefreshToken()) continue; 
+          break; 
         }
-        if (feeML > 0) { feeMLSource = "billing"; sourceRefs.push("billing_info:api"); }
-        else {
-          // Log full response for debugging
-          console.log(`[RealCosts] Strategy 3: NO commission found. Full response: ${JSON.stringify(billingData).substring(0, 2000)}`);
+        if (movResp.status === 429) { 
+          await movResp.text(); 
+          await new Promise(r => setTimeout(r, 2000 * (attempt + 1))); 
+          continue; 
         }
-      } else { 
-        const errText = await billingResp.text();
-        console.log(`[RealCosts] Strategy 3: billing_info error response: ${errText.substring(0, 500)}`);
+        const errText = await movResp.text();
+        console.log(`[RealCosts] Strategy 3: movements error: ${errText.substring(0, 500)}`);
+        break;
       }
-    } catch (e) { console.error(`[RealCosts] billing_info error:`, e); }
+    } catch (e) { console.error(`[RealCosts] Strategy 3 billing movements error:`, e); }
   }
 
   // Final: if all 3 strategies exhausted and still no fee but have shipping, mark as billing
@@ -633,55 +657,62 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
       }
     }
 
-    // Strategy 3: If still no fee, try /orders/{order_id}/billing_info API
+    // Strategy 3: Search billing movements for this specific order
     if (feeMLSource === "pending") {
       try {
-        const billingResp = await fetch(`https://api.mercadolibre.com/orders/${order.order_id}/billing_info`, { headers: { Authorization: `Bearer ${currentToken}` } });
-        if (billingResp.ok) {
-          const billingData = await billingResp.json();
-          const billingInfo = billingData.billing_info || billingData;
-          if (billingInfo.seller?.charges) {
-            for (const charge of billingInfo.seller.charges) {
-              const ct = (charge.type || '').toLowerCase();
-              const amount = Math.abs(charge.value || 0);
-              if (ct.includes('sale_fee') || ct.includes('commission')) feeML += amount;
-              else if (ct.includes('shipping')) shippingCostSeller += amount;
-              else if (ct.includes('financing') || ct.includes('installment')) installmentsCost += amount;
+        const movementsUrl = `https://api.mercadolibre.com/billing/integration/movements/search?user_id=${sellerId}&reference=${order.order_id}&limit=50`;
+        
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const movResp = await fetch(movementsUrl, { headers: { Authorization: `Bearer ${currentToken}` } });
+          
+          if (movResp.ok) {
+            const movData = await movResp.json();
+            const results = movData.results || movData.movements || [];
+            
+            for (const mov of results) {
+              const concept = (mov.concept || mov.type || mov.detail || '').toLowerCase();
+              const chargeType = (mov.charge_info?.transaction_detail || mov.charge_info?.concept_type || '').toLowerCase();
+              const amount = Math.abs(mov.amount || mov.charge_info?.detail_amount || 0);
+              
+              if (chargeType.includes('custo por vender') || chargeType.includes('custo por cobrar') || 
+                  chargeType.includes('sale_fee') || chargeType.includes('cargo por venta') ||
+                  concept.includes('sale_fee') || concept.includes('commission') || concept.includes('comisi')) {
+                feeML += amount;
+              } else if (chargeType.includes('tarifa de envio') || chargeType.includes('envio extra') || 
+                         chargeType.includes('envio intermunicipal') || chargeType.includes('shipping') ||
+                         concept.includes('shipping')) {
+                if (shippingCostSeller === 0) shippingCostSeller += amount;
+              } else if (chargeType.includes('taxa de parcelamento') || chargeType.includes('installment') ||
+                         concept.includes('financing') || concept.includes('installment')) {
+                installmentsCost += amount;
+              }
             }
-            if (feeML > 0) { feeMLSource = "billing"; sourceRefs.push("billing_info:api"); updatedCount++; }
+            
+            if (feeML > 0) { feeMLSource = "billing"; sourceRefs.push("billing_movements:api"); updatedCount++; }
+            break;
           }
-        } else if (billingResp.status === 401) {
-          await billingResp.text();
-          // Try token refresh
-          const ML_APP_ID2 = Deno.env.get('ML_APP_ID') || '';
-          const ML_SECRET_KEY2 = Deno.env.get('ML_SECRET_KEY') || '';
-          const { data: acct2 } = await supabase.from("ml_accounts").select("id, refresh_token").eq("ml_user_id", sellerId).eq("is_active", true).maybeSingle();
-          if (acct2?.refresh_token) {
-            const tr2 = await fetch('https://api.mercadolibre.com/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'refresh_token', client_id: ML_APP_ID2, client_secret: ML_SECRET_KEY2, refresh_token: acct2.refresh_token }) });
-            if (tr2.ok) {
-              const td2 = await tr2.json();
-              currentToken = td2.access_token;
-              await supabase.from("ml_accounts").update({ access_token: td2.access_token, refresh_token: td2.refresh_token, token_expires_at: new Date(Date.now() + td2.expires_in * 1000).toISOString(), updated_at: new Date().toISOString() }).eq("id", acct2.id);
-              // Retry billing_info with new token
-              const retryResp = await fetch(`https://api.mercadolibre.com/orders/${order.order_id}/billing_info`, { headers: { Authorization: `Bearer ${currentToken}` } });
-              if (retryResp.ok) {
-                const retryData = await retryResp.json();
-                const retryInfo = retryData.billing_info || retryData;
-                if (retryInfo.seller?.charges) {
-                  for (const charge of retryInfo.seller.charges) {
-                    const ct = (charge.type || '').toLowerCase();
-                    const amount = Math.abs(charge.value || 0);
-                    if (ct.includes('sale_fee') || ct.includes('commission')) feeML += amount;
-                    else if (ct.includes('shipping') && shippingCostSeller === 0) shippingCostSeller += amount;
-                    else if ((ct.includes('financing') || ct.includes('installment')) && installmentsCost === 0) installmentsCost += amount;
-                  }
-                  if (feeML > 0) { feeMLSource = "billing"; sourceRefs.push("billing_info:api:retry"); updatedCount++; }
-                }
-              } else { await retryResp.text(); }
-            } else { await tr2.text(); }
+          
+          if (movResp.status === 401) {
+            await movResp.text();
+            const ML_APP_ID2 = Deno.env.get('ML_APP_ID') || '';
+            const ML_SECRET_KEY2 = Deno.env.get('ML_SECRET_KEY') || '';
+            const { data: acct2 } = await supabase.from("ml_accounts").select("id, refresh_token").eq("ml_user_id", sellerId).eq("is_active", true).maybeSingle();
+            if (acct2?.refresh_token) {
+              const tr2 = await fetch('https://api.mercadolibre.com/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'refresh_token', client_id: ML_APP_ID2, client_secret: ML_SECRET_KEY2, refresh_token: acct2.refresh_token }) });
+              if (tr2.ok) {
+                const td2 = await tr2.json();
+                currentToken = td2.access_token;
+                await supabase.from("ml_accounts").update({ access_token: td2.access_token, refresh_token: td2.refresh_token, token_expires_at: new Date(Date.now() + td2.expires_in * 1000).toISOString(), updated_at: new Date().toISOString() }).eq("id", acct2.id);
+                continue;
+              }
+              await tr2.text();
+            }
+            break;
           }
-        } else { await billingResp.text(); }
-      } catch (e) { console.error(`[ReprocessPending] billing_info error for ${order.order_id}:`, e); }
+          if (movResp.status === 429) { await movResp.text(); await new Promise(r => setTimeout(r, 2000 * (attempt + 1))); continue; }
+          await movResp.text(); break;
+        }
+      } catch (e) { console.error(`[ReprocessPending] billing movements error for ${order.order_id}:`, e); }
     }
 
     // Final: if all 3 strategies exhausted and still no fee but have shipping, mark as billing (all sources checked)
