@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { Search, FileSearch, ArrowRight, CheckCircle2, XCircle, Package, Truck, Receipt, AlertTriangle } from 'lucide-react';
+import { Search, FileSearch, ArrowRight, CheckCircle2, XCircle, Package, Truck, Receipt, AlertTriangle, RefreshCw, Info } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface CostOrderDiagnosticProps {
@@ -26,6 +26,7 @@ interface DiagnosticData {
 export function CostOrderDiagnostic({ sellerId }: CostOrderDiagnosticProps) {
   const [orderId, setOrderId] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resyncing, setResyncing] = useState(false);
   const [data, setData] = useState<DiagnosticData | null>(null);
 
   const searchOrder = async () => {
@@ -151,6 +152,30 @@ export function CostOrderDiagnostic({ sellerId }: CostOrderDiagnosticProps) {
               <Search className="h-4 w-4 mr-2" />
               {loading ? 'Buscando...' : 'Buscar'}
             </Button>
+            {data && (
+              <Button 
+                variant="outline" 
+                onClick={async () => {
+                  setResyncing(true);
+                  try {
+                    const { data: result, error } = await supabase.functions.invoke('ml-sync-real-costs', {
+                      body: { seller_id: sellerId, action: 'resync_single', order_id: orderId.trim() }
+                    });
+                    if (error) throw error;
+                    toast.success(result?.message || 'Pedido resincronizado');
+                    await searchOrder();
+                  } catch (err) {
+                    toast.error('Erro ao resincronizar pedido');
+                  } finally {
+                    setResyncing(false);
+                  }
+                }}
+                disabled={resyncing}
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${resyncing ? 'animate-spin' : ''}`} />
+                {resyncing ? 'Resincronizando...' : 'Recalcular'}
+              </Button>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -223,10 +248,15 @@ export function CostOrderDiagnostic({ sellerId }: CostOrderDiagnosticProps) {
                       <span className="text-muted-foreground">Frete Seller</span>
                       <p className="font-bold text-lg">{formatCurrency(data.breakdown.shipping_cost_seller)}</p>
                     </div>
-                    <div className="p-3 bg-muted/50 rounded-lg">
-                      <span className="text-muted-foreground">Parcelamento</span>
-                      <p className="font-bold text-lg">{formatCurrency(data.breakdown.installments_cost)}</p>
-                    </div>
+                     <div className="p-3 bg-muted/50 rounded-lg">
+                       <span className="text-muted-foreground flex items-center gap-1">
+                         Parcelamento
+                         <Badge variant="outline" className="text-xs font-normal ml-1">
+                           <Info className="h-3 w-3 mr-1" />pago pelo comprador
+                         </Badge>
+                       </span>
+                       <p className="font-bold text-lg text-muted-foreground">{formatCurrency(data.breakdown.installments_cost)}</p>
+                     </div>
                     <div className="p-3 bg-muted/50 rounded-lg">
                       <span className="text-muted-foreground">Ajustes</span>
                       <p className="font-bold text-lg">{formatCurrency(data.breakdown.adjustments)}</p>

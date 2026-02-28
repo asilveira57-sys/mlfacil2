@@ -571,7 +571,7 @@ async function processRealCosts(supabase: any, userId: string, sellerId: string,
         continue; // Still pending
       }
 
-      const costFees = feeML + installmentsCost + adjustments;
+      const costFees = feeML + adjustments;
       const costTotal = (order.cost_items_total || 0) + (order.cost_packaging || 0) + costFees + shippingCost;
       const revenueTotal = order.revenue_total || 0;
       const profitTotal = revenueTotal - costTotal;
@@ -588,7 +588,7 @@ async function processRealCosts(supabase: any, userId: string, sellerId: string,
           shipping_cost_seller: shippingCost,
           installments_cost: installmentsCost,
           adjustments: adjustments,
-          total_marketplace_cost: feeML + shippingCost + installmentsCost + adjustments,
+          total_marketplace_cost: feeML + shippingCost + adjustments,
           cost_total: costTotal,
           profit_total: profitTotal,
           margin_percent: marginPercent,

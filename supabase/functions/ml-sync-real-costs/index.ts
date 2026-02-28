@@ -57,6 +57,15 @@ Deno.serve(async (req) => {
     if (action === "status") return await handleGetStatus(supabase, seller_id, corsHeaders);
     if (action === "pause") return await handlePause(supabase, user.id, seller_id, corsHeaders);
     if (action === "reset") return await handleReset(supabase, user.id, seller_id, corsHeaders);
+    if (action === "resync_single") {
+      const { order_id } = body;
+      if (!order_id) {
+        return new Response(JSON.stringify({ error: "order_id is required for resync_single" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      return await handleResyncSingle(supabase, user.id, seller_id, order_id, corsHeaders);
+    }
     if (action === "reprocess_pending") {
       return await handleReprocessPending(supabase, user.id, seller_id, scope_days, corsHeaders);
     }
@@ -153,6 +162,134 @@ async function handleReset(supabase: any, userId: string, sellerId: string, cors
     .eq("seller_id", sellerId)
     .eq("user_id", userId);
   return new Response(JSON.stringify({ message: "Reset complete", state: null }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+
+async function handleResyncSingle(supabase: any, userId: string, sellerId: string, orderId: string, corsHeaders: any) {
+  console.log(`[RealCosts] resync_single for order ${orderId}, seller ${sellerId}`);
+  
+  const { data: mlAccount } = await supabase.from("ml_accounts").select("access_token").eq("ml_user_id", sellerId).eq("is_active", true).maybeSingle();
+  if (!mlAccount) {
+    return new Response(JSON.stringify({ error: "ML account not found" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
+  // Get order from cache
+  const { data: order } = await supabase.from("meli_orders_cache").select("order_id, shipment_id, total_amount, created_at_meli").eq("seller_id", sellerId).eq("order_id", orderId).maybeSingle();
+  if (!order) {
+    return new Response(JSON.stringify({ error: "Order not found in cache" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
+  // 1. Fetch billing details for this specific order
+  const { data: billingDetails } = await supabase
+    .from("meli_billing_details_cache")
+    .select("order_id, shipment_id, charge_type, gross_amount")
+    .eq("seller_id", sellerId)
+    .eq("order_id", orderId);
+
+  let feeML = 0, shippingCostSeller = 0, installmentsCost = 0, adjustments = 0;
+  let feeMLSource = "pending";
+  const sourceRefs: string[] = [];
+
+  if (billingDetails && billingDetails.length > 0) {
+    for (const detail of billingDetails) {
+      const entry = { fee_ml: 0, shipping: 0, installments: 0, adjustments: 0 };
+      processChargeType(entry, detail);
+      feeML += entry.fee_ml;
+      shippingCostSeller += entry.shipping;
+      installmentsCost += entry.installments;
+      adjustments += entry.adjustments;
+    }
+    if (feeML !== 0 || shippingCostSeller !== 0) {
+      feeMLSource = "billing";
+      sourceRefs.push("billing:order:resync");
+    }
+  }
+
+  // 2. Also check shipment billing if no shipping found
+  if (shippingCostSeller === 0 && order.shipment_id) {
+    const { data: shipBilling } = await supabase
+      .from("meli_billing_details_cache")
+      .select("charge_type, gross_amount")
+      .eq("seller_id", sellerId)
+      .is("order_id", null)
+      .eq("shipment_id", order.shipment_id);
+    
+    if (shipBilling) {
+      for (const detail of shipBilling) {
+        const ct = (detail.charge_type || "").toLowerCase();
+        if (ct.includes("tarifa de envio") || ct.includes("envio extra") || ct.includes("shipping")) {
+          shippingCostSeller += detail.gross_amount || 0;
+          sourceRefs.push("billing:shipment:resync");
+        }
+      }
+    }
+  }
+
+  // 3. Try shipment costs API if still no shipping
+  if (shippingCostSeller === 0 && order.shipment_id) {
+    try {
+      const r = await fetch(`https://api.mercadolibre.com/shipments/${order.shipment_id}/costs`, {
+        headers: { Authorization: `Bearer ${mlAccount.access_token}` }
+      });
+      if (r.ok) {
+        const d = await r.json();
+        shippingCostSeller = d.sender?.cost || d.senders?.[0]?.cost || d.receiver?.cost || 0;
+        sourceRefs.push("shipment:api:resync");
+        await supabase.from("meli_shipment_costs_cache").upsert({
+          user_id: userId, seller_id: sellerId, shipment_id: order.shipment_id, order_id: orderId,
+          sender_cost: shippingCostSeller, gross_amount: d.gross_amount || 0, raw_json: d,
+          synced_at: new Date().toISOString()
+        }, { onConflict: "shipment_id" });
+      }
+    } catch {}
+  }
+
+  // 4. Get existing breakdown for cost_items_total and cost_packaging
+  const { data: existing } = await supabase.from("order_cost_breakdown_cache").select("cost_items_total, cost_packaging").eq("seller_id", sellerId).eq("order_id", orderId).maybeSingle();
+  const costItemsTotal = existing?.cost_items_total || 0;
+  const costPackaging = existing?.cost_packaging || 0;
+
+  const revenueTotal = order.total_amount || 0;
+  const commissionCost = feeML;
+  const totalMarketplaceCost = feeML + shippingCostSeller + adjustments;
+  const costFees = feeML + adjustments;
+  const costShipping = shippingCostSeller;
+  const costTotal = costItemsTotal + costPackaging + costFees + costShipping;
+  const profitTotal = revenueTotal - costTotal;
+  const marginPercent = revenueTotal > 0 ? Math.round((profitTotal / revenueTotal) * 100) : 0;
+
+  const missingFields: string[] = [];
+  if (feeMLSource === "pending") missingFields.push("sem_comissao");
+  if (shippingCostSeller === 0 && order.shipment_id) missingFields.push("sem_frete_cobrado");
+
+  await supabase.from("order_cost_breakdown_cache").upsert({
+    user_id: userId, seller_id: sellerId, order_id: orderId,
+    shipment_id: order.shipment_id, revenue_total: revenueTotal,
+    created_at_meli: order.created_at_meli,
+    fee_ml: feeML, fee_ml_source: feeMLSource,
+    shipping_cost_seller: shippingCostSeller, installments_cost: installmentsCost,
+    adjustments, total_marketplace_cost: totalMarketplaceCost,
+    has_real_financial: feeMLSource === "billing",
+    has_real_cost: false, source_refs: { refs: sourceRefs },
+    real_cost_synced_at: new Date().toISOString(),
+    calculated_at: new Date().toISOString(),
+    last_checked_at: new Date().toISOString(),
+    status: feeMLSource === "billing" ? "calculated" : "pending",
+    commission_cost: commissionCost, missing_fields: missingFields,
+    cost_fees: costFees, cost_shipping: costShipping,
+    cost_total: costTotal, profit_total: profitTotal, margin_percent: marginPercent,
+  }, { onConflict: "seller_id,order_id" });
+
+  return new Response(JSON.stringify({
+    ok: true,
+    message: `Pedido ${orderId} resincronizado`,
+    data: {
+      fee_ml: feeML, fee_ml_source: feeMLSource,
+      shipping_cost_seller: shippingCostSeller, installments_cost: installmentsCost,
+      total_marketplace_cost: totalMarketplaceCost, cost_total: costTotal,
+      profit_total: profitTotal, margin_percent: marginPercent,
+      source_refs: sourceRefs,
+    }
+  }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
 // PAGINATED billing data aggregation to handle >1000 records
@@ -382,7 +519,7 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
           });
           if (r.ok) { 
             const d = await r.json(); 
-            shippingCostSeller = d.sender?.cost || 0; 
+            shippingCostSeller = d.sender?.cost || d.senders?.[0]?.cost || d.receiver?.cost || 0; 
             sourceRefs.push("shipment:api"); 
             await supabase.from("meli_shipment_costs_cache").upsert({ 
               user_id: userId, seller_id: sellerId, shipment_id: order.shipment_id, order_id: order.order_id, 
@@ -394,13 +531,13 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
       }
     }
 
-    const totalMarketplaceCost = feeML + shippingCostSeller + installmentsCost + adjustments;
+    const totalMarketplaceCost = feeML + shippingCostSeller + adjustments;
     const revenueTotal = order.revenue_total || 0;
     const commissionCost = feeML;
     const costItemsTotal = order.cost_items_total || 0;
     const costPackaging = order.cost_packaging || 0;
     
-    const costFees = feeML + installmentsCost + adjustments;
+    const costFees = feeML + adjustments;
     const costShipping = shippingCostSeller;
     const costTotal = costItemsTotal + costPackaging + costFees + costShipping;
     const profitTotal = revenueTotal - costTotal;
