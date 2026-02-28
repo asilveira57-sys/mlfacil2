@@ -28,22 +28,20 @@ Deno.serve(async (req) => {
       });
     }
 
-    const token = authHeader.replace("Bearer ", "");
-    
-    // Create client with user's auth context for getClaims
+    // Create client with user's auth context
     const userSupabase = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
       global: { headers: { Authorization: authHeader } }
     });
     
-    const { data: claimsData, error: claimsError } = await userSupabase.auth.getClaims(token);
-    if (claimsError || !claimsData?.claims?.sub) {
-      console.error("[RealCosts] Auth error:", claimsError?.message || "No claims");
+    const { data: { user: authUser }, error: authError } = await userSupabase.auth.getUser();
+    if (authError || !authUser) {
+      console.error("[RealCosts] Auth error:", authError?.message || "No user");
       return new Response(JSON.stringify({ error: "Invalid token" }), {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
     
-    const user = { id: claimsData.claims.sub };
+    const user = { id: authUser.id };
 
     const body = await req.json().catch(() => ({}));
     const { seller_id, action, scope_days, force_resume, mode } = body;
