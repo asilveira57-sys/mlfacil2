@@ -180,184 +180,77 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
     return new Response(JSON.stringify({ error: "Order not found in cache" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
-  // ---- NEW: Fetch billing details directly from ML API for this order's period ----
-  let apiBillingFetched = false;
-  try {
-    // Determine the period key from the order date (YYYY-MM format)
-    const orderDate = new Date(order.created_at_meli);
-    const year = orderDate.getFullYear();
-    const month = String(orderDate.getMonth() + 1).padStart(2, '0');
-    
-    // Fetch billing periods to find the correct period_key
-    const periodsUrl = `https://api.mercadolibre.com/billing/integration/monthly/periods?group=ML&document_type=BILL&limit=6&offset=0`;
-    const periodsRes = await fetch(periodsUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
-    
-    if (periodsRes.ok) {
-      const periodsData = await periodsRes.json();
-      const periods = periodsData.results || [];
-      
-      // Find periods that could contain this order (current month and previous)
-      const targetPeriods = periods.filter((p: any) => {
-        // Include the period matching the order month and the next one (billing can lag)
-        return true; // Process up to 3 most recent periods for safety
-      }).slice(0, 3);
-
-      for (const period of targetPeriods) {
-        const periodKey = period.key;
-        let offset = 0;
-        const PAGE_LIMIT = 1000;
-        let foundOrder = false;
-
-        // Paginated loop — search ALL pages until we find this order's billing
-        while (true) {
-          const detailsUrl = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/group/ML/details?document_type=BILL&limit=${PAGE_LIMIT}&offset=${offset}`;
-          
-          const detailsRes = await fetch(detailsUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
-          if (!detailsRes.ok) break;
-
-          const detailsData = await detailsRes.json();
-          const results = detailsData.results || [];
-
-          if (results.length === 0) break;
-
-          // Filter for this specific order
-          const orderResults = results.filter((item: any) => {
-            const salesInfo = (item.sales_info || [])[0] || {};
-            return String(salesInfo.order_id) === String(orderId);
-          });
-
-          if (orderResults.length > 0) {
-            const records = orderResults.map((item: any) => {
-              const chargeInfo = item.charge_info || {};
-              const salesInfo = (item.sales_info || [])[0] || {};
-              const shippingInfo = item.shipping_info || {};
-              return {
-                seller_id: sellerId,
-                period_key: periodKey,
-                detail_id: String(chargeInfo.detail_id || `${periodKey}-${Math.random()}`),
-                order_id: salesInfo.order_id || null,
-                shipment_id: shippingInfo.shipping_id || null,
-                charge_type: chargeInfo.transaction_detail || chargeInfo.concept_type || 'unknown',
-                charge_description: chargeInfo.charge_bonified_id ? `Bonified: ${chargeInfo.charge_bonified_id}` : null,
-                gross_amount: chargeInfo.detail_amount || 0,
-                net_amount: chargeInfo.detail_amount || 0,
-                currency_id: chargeInfo.currency_id || 'BRL',
-                created_at_meli: item.created_date || null,
-                fetched_at: new Date().toISOString(),
-                raw_data: item,
-              };
-            });
-
-            await supabase.from('meli_billing_details_cache').upsert(records, { onConflict: 'seller_id,period_key,detail_id' });
-            apiBillingFetched = true;
-            foundOrder = true;
-            console.log(`[RealCosts] resync_single: fetched ${records.length} billing records from API for order ${orderId} in period ${periodKey} (offset=${offset})`);
-            break;
-          }
-
-          // Also check for shipment-linked entries on this page
-          if (order.shipment_id) {
-            const shipResults = results.filter((item: any) => {
-              const shippingInfo = item.shipping_info || {};
-              return String(shippingInfo.shipping_id) === String(order.shipment_id);
-            });
-            if (shipResults.length > 0) {
-              const records = shipResults.map((item: any) => {
-                const chargeInfo = item.charge_info || {};
-                const salesInfo = (item.sales_info || [])[0] || {};
-                const shippingInfo = item.shipping_info || {};
-                return {
-                  seller_id: sellerId,
-                  period_key: periodKey,
-                  detail_id: String(chargeInfo.detail_id || `${periodKey}-${Math.random()}`),
-                  order_id: salesInfo.order_id || null,
-                  shipment_id: shippingInfo.shipping_id || null,
-                  charge_type: chargeInfo.transaction_detail || chargeInfo.concept_type || 'unknown',
-                  charge_description: chargeInfo.charge_bonified_id ? `Bonified: ${chargeInfo.charge_bonified_id}` : null,
-                  gross_amount: chargeInfo.detail_amount || 0,
-                  net_amount: chargeInfo.detail_amount || 0,
-                  currency_id: chargeInfo.currency_id || 'BRL',
-                  created_at_meli: item.created_date || null,
-                  fetched_at: new Date().toISOString(),
-                  raw_data: item,
-                };
-              });
-              await supabase.from('meli_billing_details_cache').upsert(records, { onConflict: 'seller_id,period_key,detail_id' });
-              apiBillingFetched = true;
-              foundOrder = true;
-              console.log(`[RealCosts] resync_single: fetched ${records.length} shipment billing records from API for shipment ${order.shipment_id} (offset=${offset})`);
-              break;
-            }
-          }
-
-          // If fewer than PAGE_LIMIT results, this is the last page
-          if (results.length < PAGE_LIMIT) break;
-          offset += results.length;
-
-          // Rate limit between pages
-          await new Promise(r => setTimeout(r, 200));
-        }
-
-        if (foundOrder) break; // Found in this period, no need to check others
-      }
-    }
-  } catch (apiError) {
-    console.error(`[RealCosts] resync_single: billing API error for order ${orderId}:`, apiError);
-  }
-
-  // ---- Now read from (freshly updated) cache ----
-  // 1. Fetch billing details for this specific order
-  const { data: billingDetails } = await supabase
-    .from("meli_billing_details_cache")
-    .select("order_id, shipment_id, charge_type, gross_amount")
-    .eq("seller_id", sellerId)
-    .eq("order_id", orderId);
-
+  // ---- NEW: Use /orders/{order_id}/billing_info directly (1 call per order) ----
   let feeML = 0, shippingCostSeller = 0, installmentsCost = 0, adjustments = 0;
   let feeMLSource = "pending";
   const sourceRefs: string[] = [];
-  if (apiBillingFetched) sourceRefs.push("billing:api:resync");
 
-  if (billingDetails && billingDetails.length > 0) {
-    for (const detail of billingDetails) {
-      const entry = { fee_ml: 0, shipping: 0, installments: 0, adjustments: 0 };
-      processChargeType(entry, detail);
-      feeML += entry.fee_ml;
-      shippingCostSeller += entry.shipping;
-      installmentsCost += entry.installments;
-      adjustments += entry.adjustments;
-    }
-    if (feeML !== 0 || shippingCostSeller !== 0) {
-      feeMLSource = "billing";
-      sourceRefs.push("billing:order:resync");
-    }
-  }
+  // Try billing_info with retry on 429
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const billingUrl = `https://api.mercadolibre.com/orders/${orderId}/billing_info`;
+      const billingResp = await fetch(billingUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
 
-  // 2. Also check shipment billing if no shipping found
-  if (shippingCostSeller === 0 && order.shipment_id) {
-    const { data: shipBilling } = await supabase
-      .from("meli_billing_details_cache")
-      .select("charge_type, gross_amount")
-      .eq("seller_id", sellerId)
-      .is("order_id", null)
-      .eq("shipment_id", order.shipment_id);
-    
-    if (shipBilling) {
-      for (const detail of shipBilling) {
-        const ct = (detail.charge_type || "").toLowerCase();
-        if (ct.includes("tarifa de envio") || ct.includes("envio extra") || ct.includes("shipping")) {
-          shippingCostSeller += detail.gross_amount || 0;
-          sourceRefs.push("billing:shipment:resync");
+      if (billingResp.ok) {
+        const billingData = await billingResp.json();
+        if (billingData.seller?.charges) {
+          for (const charge of billingData.seller.charges) {
+            const chargeType = (charge.type || '').toLowerCase();
+            const amount = Math.abs(charge.value || 0);
+            if (chargeType.includes('sale_fee') || chargeType.includes('commission')) {
+              feeML += amount;
+            } else if (chargeType.includes('shipping')) {
+              shippingCostSeller += amount;
+            } else if (chargeType.includes('financing') || chargeType.includes('installment')) {
+              installmentsCost += amount;
+            } else if (chargeType.includes('cancel') || chargeType.includes('refund')) {
+              adjustments += amount;
+            }
+          }
+          if (feeML !== 0 || shippingCostSeller !== 0) {
+            feeMLSource = "billing";
+            sourceRefs.push("billing_info:api:resync");
+          }
         }
+        // Cache in meli_order_financials_cache
+        await supabase.from("meli_order_financials_cache").upsert({
+          seller_id: sellerId,
+          order_id: orderId,
+          shipment_id: order.shipment_id,
+          cost_sale_fee: feeML,
+          cost_shipping_fee: shippingCostSeller,
+          cost_installment_fee: installmentsCost,
+          cost_cancellations: adjustments,
+          revenue_products: order.total_amount || 0,
+          synced_at: new Date().toISOString(),
+        }, { onConflict: "seller_id,order_id", ignoreDuplicates: false });
+        break; // Success
       }
+
+      if (billingResp.status === 404) {
+        // No billing info available — body must be consumed
+        await billingResp.text();
+        break;
+      }
+      if (billingResp.status === 429) {
+        await billingResp.text();
+        console.warn(`[RealCosts] resync_single: 429 for order ${orderId}, retry ${attempt + 1}`);
+        await new Promise(r => setTimeout(r, 1500));
+        continue;
+      }
+      // Other error
+      await billingResp.text();
+      break;
+    } catch (apiError) {
+      console.error(`[RealCosts] resync_single: billing_info error for order ${orderId}:`, apiError);
     }
   }
 
-  // 3. Try shipment costs API if still no shipping
+  // Fallback: Try shipment costs API if still no shipping
   if (shippingCostSeller === 0 && order.shipment_id) {
     try {
       const r = await fetch(`https://api.mercadolibre.com/shipments/${order.shipment_id}/costs`, {
-        headers: { Authorization: `Bearer ${mlAccount.access_token}` }
+        headers: { Authorization: `Bearer ${accessToken}` }
       });
       if (r.ok) {
         const d = await r.json();
@@ -368,6 +261,8 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
           sender_cost: shippingCostSeller, gross_amount: d.gross_amount || 0, raw_json: d,
           synced_at: new Date().toISOString()
         }, { onConflict: "shipment_id" });
+      } else {
+        await r.text();
       }
     } catch {}
   }
@@ -596,159 +491,108 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
   
-  // ---- Fetch billing from ML API for all pending order periods ----
-  // Group orders by month to minimize API calls
-  const periodMonths = new Set<string>();
-  for (const o of pendingOrders) {
-    if (o.created_at_meli) {
-      const d = new Date(o.created_at_meli);
-      periodMonths.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-    }
-  }
-
-  // Fetch billing periods from API
-  try {
-    const periodsUrl = `https://api.mercadolibre.com/billing/integration/monthly/periods?group=ML&document_type=BILL&limit=6&offset=0`;
-    const periodsRes = await fetch(periodsUrl, { headers: { Authorization: `Bearer ${mlAccount.access_token}` } });
-    
-    if (periodsRes.ok) {
-      const periodsData = await periodsRes.json();
-      const periods = periodsData.results || [];
-      
-      // Only fetch periods that match our pending orders
-      const relevantPeriods = periods.slice(0, 4); // Last 4 periods max
-      
-      for (const period of relevantPeriods) {
-        if (Date.now() - startTime >= MAX_RUNTIME_MS - 10000) break; // Leave 10s for processing
-        
-        const periodKey = period.key;
-        let offset = 0;
-        let hasMore = true;
-        
-        while (hasMore && Date.now() - startTime < MAX_RUNTIME_MS - 10000) {
-          const detailsUrl = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/group/ML/details?document_type=BILL&limit=1000&offset=${offset}`;
-          const detailsRes = await fetch(detailsUrl, { headers: { Authorization: `Bearer ${mlAccount.access_token}` } });
-          
-          if (!detailsRes.ok) {
-            console.warn(`[ReprocessPending] billing API error for period ${periodKey}: ${detailsRes.status}`);
-            break;
-          }
-          
-          const detailsData = await detailsRes.json();
-          const results = detailsData.results || [];
-          
-          if (results.length === 0) break;
-          
-          // Upsert all billing records to cache
-          const records = results.map((item: any) => {
-            const chargeInfo = item.charge_info || {};
-            const salesInfo = (item.sales_info || [])[0] || {};
-            const shippingInfo = item.shipping_info || {};
-            return {
-              seller_id: sellerId,
-              period_key: periodKey,
-              detail_id: String(chargeInfo.detail_id || `${periodKey}-${offset}-${Math.random()}`),
-              order_id: salesInfo.order_id ? String(salesInfo.order_id) : null,
-              shipment_id: shippingInfo.shipping_id ? String(shippingInfo.shipping_id) : null,
-              charge_type: chargeInfo.transaction_detail || chargeInfo.concept_type || 'unknown',
-              charge_description: chargeInfo.charge_bonified_id ? `Bonified: ${chargeInfo.charge_bonified_id}` : null,
-              gross_amount: chargeInfo.detail_amount || 0,
-              net_amount: chargeInfo.detail_amount || 0,
-              currency_id: chargeInfo.currency_id || 'BRL',
-              created_at_meli: item.created_date || null,
-              fetched_at: new Date().toISOString(),
-              raw_data: item,
-            };
-          });
-          
-          // Batch upsert in chunks of 500
-          for (let i = 0; i < records.length; i += 500) {
-            await supabase.from('meli_billing_details_cache').upsert(records.slice(i, i + 500), { onConflict: 'seller_id,period_key,detail_id' });
-          }
-          
-          offset += results.length;
-          hasMore = results.length === 1000;
-          
-          // Rate limit: small delay between API calls
-          await new Promise(r => setTimeout(r, 200));
-        }
-      }
-      console.log(`[ReprocessPending] billing API fetched for ${relevantPeriods.length} periods`);
-    }
-  } catch (apiErr) {
-    console.error('[ReprocessPending] billing API error:', apiErr);
-  }
-
-  // ---- Now read from (freshly updated) cache ----
+  // ---- NEW: Use /orders/{order_id}/billing_info per order (replaces bulk billing period fetch) ----
   const orderIds = pendingOrders.map((o: any) => o.order_id);
   const shipmentIds = pendingOrders.map((o: any) => o.shipment_id);
-
-  const { billingByOrder, billingByShipment } = await aggregateBillingData(supabase, sellerId, orderIds, shipmentIds);
 
   const rowsToUpsert: any[] = [];
   let processedCount = 0;
   let updatedCount = 0;
-  
+
   for (const order of pendingOrders) {
     if (Date.now() - startTime >= MAX_RUNTIME_MS) break;
-    
-    const billing = billingByOrder.get(order.order_id);
-    const shipmentBilling = order.shipment_id ? billingByShipment.get(order.shipment_id) : null;
     
     let feeML = 0, feeMLSource = "pending", shippingCostSeller = 0, installmentsCost = 0, adjustments = 0;
     const sourceRefs: string[] = [];
 
-    const hasBillingMovements = billing && (billing.fee_ml !== 0 || billing.shipping !== 0 || billing.installments !== 0 || billing.adjustments !== 0);
-    
-    if (hasBillingMovements) {
-      feeML = billing.fee_ml;
-      feeMLSource = "billing";
-      shippingCostSeller = billing.shipping;
-      installmentsCost = billing.installments;
-      adjustments = billing.adjustments;
-      sourceRefs.push("billing:order");
-      updatedCount++;
-    } else {
-      feeMLSource = "pending";
-      sourceRefs.push("billing:pending");
+    // Fetch billing_info with retry on 429
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const billingUrl = `https://api.mercadolibre.com/orders/${order.order_id}/billing_info`;
+        const billingResp = await fetch(billingUrl, { headers: { Authorization: `Bearer ${mlAccount.access_token}` } });
+
+        if (billingResp.ok) {
+          const billingData = await billingResp.json();
+          if (billingData.seller?.charges) {
+            for (const charge of billingData.seller.charges) {
+              const chargeType = (charge.type || '').toLowerCase();
+              const amount = Math.abs(charge.value || 0);
+              if (chargeType.includes('sale_fee') || chargeType.includes('commission')) {
+                feeML += amount;
+              } else if (chargeType.includes('shipping')) {
+                shippingCostSeller += amount;
+              } else if (chargeType.includes('financing') || chargeType.includes('installment')) {
+                installmentsCost += amount;
+              } else if (chargeType.includes('cancel') || chargeType.includes('refund')) {
+                adjustments += amount;
+              }
+            }
+            if (feeML !== 0 || shippingCostSeller !== 0) {
+              feeMLSource = "billing";
+              sourceRefs.push("billing_info:api:batch");
+              updatedCount++;
+            }
+          }
+          // Cache
+          await supabase.from("meli_order_financials_cache").upsert({
+            seller_id: sellerId, order_id: order.order_id, shipment_id: order.shipment_id,
+            cost_sale_fee: feeML, cost_shipping_fee: shippingCostSeller,
+            cost_installment_fee: installmentsCost, cost_cancellations: adjustments,
+            revenue_products: order.revenue_total || 0,
+            synced_at: new Date().toISOString(),
+          }, { onConflict: "seller_id,order_id", ignoreDuplicates: false });
+          break;
+        }
+
+        if (billingResp.status === 404) {
+          await billingResp.text();
+          break;
+        }
+        if (billingResp.status === 429) {
+          await billingResp.text();
+          console.warn(`[ReprocessPending] 429 for order ${order.order_id}, retry ${attempt + 1}`);
+          await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+          continue;
+        }
+        await billingResp.text();
+        break;
+      } catch (err) {
+        console.error(`[ReprocessPending] billing_info error for ${order.order_id}:`, err);
+      }
     }
 
-    if (shippingCostSeller === 0 && shipmentBilling && shipmentBilling.shipping > 0) {
-      shippingCostSeller = shipmentBilling.shipping;
-      adjustments += shipmentBilling.adjustments;
-      sourceRefs.push("billing:shipment");
-    }
-
-    if (order.shipment_id && shippingCostSeller === 0) {
+    // Fallback: shipment costs API if no shipping
+    if (shippingCostSeller === 0 && order.shipment_id) {
       const { data: sc } = await supabase.from("meli_shipment_costs_cache").select("sender_cost").eq("shipment_id", order.shipment_id).maybeSingle();
-      if (sc) { 
-        shippingCostSeller = sc.sender_cost || 0; 
-        sourceRefs.push("shipment:cache"); 
+      if (sc) {
+        shippingCostSeller = sc.sender_cost || 0;
+        sourceRefs.push("shipment:cache");
       } else {
         try {
-          const r = await fetch(`https://api.mercadolibre.com/shipments/${order.shipment_id}/costs`, { 
-            headers: { Authorization: `Bearer ${mlAccount.access_token}` } 
+          const r = await fetch(`https://api.mercadolibre.com/shipments/${order.shipment_id}/costs`, {
+            headers: { Authorization: `Bearer ${mlAccount.access_token}` }
           });
-          if (r.ok) { 
-            const d = await r.json(); 
-            shippingCostSeller = d.sender?.cost || d.senders?.[0]?.cost || d.receiver?.cost || 0; 
-            sourceRefs.push("shipment:api"); 
-            await supabase.from("meli_shipment_costs_cache").upsert({ 
-              user_id: userId, seller_id: sellerId, shipment_id: order.shipment_id, order_id: order.order_id, 
-              sender_cost: shippingCostSeller, gross_amount: d.gross_amount || 0, raw_json: d, 
-              synced_at: new Date().toISOString() 
-            }, { onConflict: "shipment_id" }); 
-          }
+          if (r.ok) {
+            const d = await r.json();
+            shippingCostSeller = d.sender?.cost || d.senders?.[0]?.cost || d.receiver?.cost || 0;
+            sourceRefs.push("shipment:api");
+            await supabase.from("meli_shipment_costs_cache").upsert({
+              user_id: userId, seller_id: sellerId, shipment_id: order.shipment_id, order_id: order.order_id,
+              sender_cost: shippingCostSeller, gross_amount: d.gross_amount || 0, raw_json: d,
+              synced_at: new Date().toISOString()
+            }, { onConflict: "shipment_id" });
+          } else { await r.text(); }
         } catch {}
       }
     }
+
+    if (feeMLSource === "pending") sourceRefs.push("billing:pending");
 
     const totalMarketplaceCost = feeML + shippingCostSeller + adjustments;
     const revenueTotal = order.revenue_total || 0;
     const commissionCost = feeML;
     const costItemsTotal = order.cost_items_total || 0;
     const costPackaging = order.cost_packaging || 0;
-    
     const costFees = feeML + adjustments;
     const costShipping = shippingCostSeller;
     const costTotal = costItemsTotal + costPackaging + costFees + costShipping;
@@ -759,37 +603,28 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
     if (feeMLSource === "pending") missingFields.push("sem_comissao");
     if (shippingCostSeller === 0 && order.shipment_id) missingFields.push("sem_frete_cobrado");
 
-    rowsToUpsert.push({ 
-      user_id: userId, 
-      seller_id: sellerId, 
-      order_id: order.order_id, 
-      shipment_id: order.shipment_id, 
-      revenue_total: revenueTotal,
+    rowsToUpsert.push({
+      user_id: userId, seller_id: sellerId, order_id: order.order_id,
+      shipment_id: order.shipment_id, revenue_total: revenueTotal,
       created_at_meli: order.created_at_meli,
-      fee_ml: feeML, 
-      fee_ml_source: feeMLSource, 
-      shipping_cost_seller: shippingCostSeller, 
-      installments_cost: installmentsCost, 
-      adjustments: adjustments, 
-      total_marketplace_cost: totalMarketplaceCost, 
-      has_real_financial: feeMLSource === "billing" || feeMLSource === "no_charges", 
-      has_real_cost: false, 
-      source_refs: { refs: sourceRefs }, 
-      real_cost_synced_at: new Date().toISOString(), 
-      calculated_at: new Date().toISOString(), 
-      // Track when this order was last checked for billing data
+      fee_ml: feeML, fee_ml_source: feeMLSource,
+      shipping_cost_seller: shippingCostSeller, installments_cost: installmentsCost,
+      adjustments, total_marketplace_cost: totalMarketplaceCost,
+      has_real_financial: feeMLSource === "billing" || feeMLSource === "no_charges",
+      has_real_cost: false, source_refs: { refs: sourceRefs },
+      real_cost_synced_at: new Date().toISOString(),
+      calculated_at: new Date().toISOString(),
       last_checked_at: new Date().toISOString(),
       status: (feeMLSource === "billing" || feeMLSource === "no_charges") ? "calculated" : "pending",
-      commission_cost: commissionCost,
-      missing_fields: missingFields,
-      cost_fees: costFees,
-      cost_shipping: costShipping,
-      cost_total: costTotal,
-      profit_total: profitTotal,
-      margin_percent: marginPercent,
+      commission_cost: commissionCost, missing_fields: missingFields,
+      cost_fees: costFees, cost_shipping: costShipping,
+      cost_total: costTotal, profit_total: profitTotal, margin_percent: marginPercent,
     });
     
     processedCount++;
+
+    // Rate limit: 200ms between orders
+    await new Promise(r => setTimeout(r, 200));
   }
 
   if (rowsToUpsert.length) {
