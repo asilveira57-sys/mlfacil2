@@ -185,11 +185,13 @@ const lastResumeAttemptRef = useRef<{ [key: string]: number }>({});
     }
     
     // Priority 3: Missing breakdown > 0 and no backfill running -> Start backfill
+    // BUT: only if missingBreakdown changed from last check (avoid loop)
     if (state.missingBreakdown > 0 && 
         (!state.backfillStatus || state.backfillStatus === 'idle' || state.backfillStatus === 'done') &&
         (state.billingStatus === 'done' || !state.billingStatus)) {
       const lastResume = lastResumeAttemptRef.current['startBackfill'] || 0;
-      if (Date.now() - lastResume < 60000) {
+      // Increased debounce to 5 minutes to avoid rapid retries when pending stays same
+      if (Date.now() - lastResume < 300000) {
         return;
       }
       console.log("[GlobalWatchdog] Starting backfill for missing orders...");
@@ -254,12 +256,14 @@ const lastResumeAttemptRef = useRef<{ [key: string]: number }>({});
     }
     
     // Priority 5: Pending billing > 0 and backfill done -> Reprocess pending
+    // BUT: only once per 5 minutes to avoid loop when billing data isn't available yet
     if (state.pendingBilling > 0 &&
         state.missingBreakdown === 0 &&
         state.backfillStatus === 'done' &&
         (!state.realCostsStatus || state.realCostsStatus === 'idle' || state.realCostsStatus === 'done')) {
       const lastResume = lastResumeAttemptRef.current['reprocess'] || 0;
-      if (Date.now() - lastResume < 60000) {
+      // Increased debounce to 5 minutes to prevent rapid re-processing loop
+      if (Date.now() - lastResume < 300000) {
         return;
       }
       console.log("[GlobalWatchdog] Starting reprocess pending...");
