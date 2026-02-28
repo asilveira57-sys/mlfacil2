@@ -1,62 +1,54 @@
 
 
-## Diagnóstico — 81 Pedidos Travados em "Sem Custo" (ADECONEX.SP)
+## Diagnóstico Final — 41 Pedidos Travados em "Sem Custo"
 
-### Causa Raiz Confirmada: Billing fetch SEM paginação
+### Causa Raiz: API errada para buscar custos individuais
 
-**Dados do banco:**
-- Período `2026-01-01`: 2000 registros em cache (exatamente 2×1000 — fetch truncado)
-- Período `2026-02-01`: 2109 registros em cache (incompleto)
-- 81 pedidos pendentes (Jan 13-15 + Feb 16-20), todos `order_status: paid`, nenhum cancelado
-- **Zero** registros de billing no cache para esses order_ids específicos
-- A comissão desses pedidos está em páginas 3+ do billing API, nunca buscadas
+O `resync_single` e o `handleReprocessPending` buscam dados de custo via **billing mensal** (`/billing/integration/periods/key/.../details`) — uma API que retorna 3.000+ registros por período, exigindo paginação massiva. Isso causa:
 
-**O bug está em dois lugares:**
+1. **Rate limit 429** — os logs mostram erros 429 em praticamente todos os períodos. O batch esgota o rate limit, e o individual também falha.
+2. **Dados nunca encontrados** — o cache de billing para Feb/2026 tem apenas 2.109 registros (truncado). Os 41 pedidos (Feb 16-20) estão nas páginas que nunca foram buscadas. E ao buscar via API, dá 429.
+3. **Loop infinito**: o batch processa 50 pedidos, não encontra billing (429), marca `last_checked_at` mas mantém `fee_ml_source: 'pending'`, e na próxima execução re-processa os mesmos 41.
 
-1. **`costs-nightly-sync` linha 360:** `limit=1000&offset=0` hardcoded — busca apenas a primeira página de billing por período. Seller com alto volume tem 3000+ entries por período.
+**Enquanto isso**, o sistema já tem uma solução que funciona: a `ml-sync-financial` usa `GET /orders/{order_id}/billing_info` — **uma chamada por pedido**, retorna comissão, frete e parcelamento diretamente. É a API correta para resync individual e batch.
 
-2. **`resync_single` linha 207:** mesmo problema — `limit=1000&offset=0` sem loop. A busca individual busca 1000 registros por período, não encontra o pedido, e desiste.
-
-3. **`handleReprocessPending`** já tem paginação correta (linhas 604-653), mas tem tempo limitado de 40s que pode não ser suficiente para percorrer todos os períodos com 3000+ entries cada.
-
----
-
-### Correções
+### Correção
 
 | Arquivo | Alteração |
 |---|---|
-| `supabase/functions/costs-nightly-sync/index.ts` | Linhas 358-400: Adicionar loop de paginação com `offset` incremental (igual ao `handleReprocessPending`) em vez de `offset=0` fixo |
-| `supabase/functions/ml-sync-real-costs/index.ts` | Linhas 205-248: Adicionar paginação ao fetch de billing no `resync_single` — loop com offset até encontrar o pedido ou esgotar páginas |
+| `supabase/functions/ml-sync-real-costs/index.ts` | `resync_single`: substituir o loop de paginação billing por uma chamada a `/orders/{order_id}/billing_info`. Extrair `seller.charges[]` com `sale_fee`, `shipping`, `installment`. Cachear em `meli_order_financials_cache`. |
+| `supabase/functions/ml-sync-real-costs/index.ts` | `handleReprocessPending`: substituir o fetch massivo de billing periods por chamadas individuais a `/orders/{order_id}/billing_info` para cada pedido pendente (50 por lote). Adicionar retry com backoff em 429. Remover a fase de fetch de billing periods inteira. |
 
 ### Detalhes Técnicos
 
-**costs-nightly-sync — billing fetch paginado:**
+**`resync_single` — nova lógica:**
 ```text
-for each period:
-  offset = 0
-  loop:
-    fetch /details?limit=1000&offset={offset}
-    if empty → break
-    upsert records
-    offset += results.length
-    if results.length < 1000 → break (última página)
-    sleep(200ms) // rate limit
+1. GET /orders/{order_id}/billing_info
+2. Extrair seller.charges[]:
+   - type includes 'sale_fee' → feeML
+   - type includes 'shipping' → shippingCostSeller
+   - type includes 'financing'/'installment' → installmentsCost
+3. Se billing_info retorna dados → fee_ml_source = 'billing'
+4. Cachear em meli_order_financials_cache
+5. Fallback: manter shipment API para frete (/shipments/{id}/costs)
+6. Se billing_info retorna 429 → retry 1x após 1s
 ```
 
-**resync_single — billing fetch paginado:**
+**`handleReprocessPending` — nova lógica:**
 ```text
-for each period (up to 3):
-  offset = 0
-  found = false
-  loop:
-    fetch /details?limit=1000&offset={offset}
-    filter for target order_id
-    if found → upsert + break
-    if results.length < 1000 → break (última página)
-    offset += results.length
-    sleep(200ms)
-  if found → break period loop
+1. Query 50 pedidos pendentes (como hoje)
+2. Para CADA pedido:
+   a. GET /orders/{order_id}/billing_info
+   b. Se 429 → aguardar 2s e retry (max 2 tentativas)
+   c. Extrair charges como acima
+   d. Se sem dados billing → GET /shipments/{id}/costs
+   e. Montar row com fee_ml_source correto
+3. Rate limit: 200ms entre cada pedido
+4. Remover inteiramente o bloco de fetch de billing periods (linhas 599-680)
 ```
 
-Essas duas alterações garantem que pedidos em páginas 2+ do billing sejam capturados tanto pelo sync noturno quanto pela ressincronização individual.
+Essa mudança elimina:
+- A necessidade de paginar 3.000+ registros de billing
+- Os erros 429 em cascata (1 chamada por pedido vs 4+ chamadas de paginação por período)
+- O cache truncado como ponto de falha
 
