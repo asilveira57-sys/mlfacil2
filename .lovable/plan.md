@@ -1,75 +1,57 @@
 
 
-## Plano de Correção — Módulo de Custos (5 problemas)
+## Diagnóstico Completo — Sistema de Custos Travado
 
-### Problema 1: Mensagem "~24h" → "24 a 48 horas"
-**Arquivo:** `src/components/custos/CostSettings.tsx` (linhas 457 e 638)
-- Alterar as duas ocorrências de "~24h" e "24h" para "24 a 48 horas"
+### Problema 1: Billing sync NUNCA re-executa (causa raiz principal)
+
+**Causa confirmada no banco:**
+- ADECONEXVV (66043362): billing_details_cache última busca em **19/01/2026** (40 dias atrás!)
+- ADECONEX.SP (1411095727): última busca em **11/02/2026** (17 dias atrás)
+- Ambos com `billing_details_sync_state.status = 'done'`
+
+**O bug:** No `costs-nightly-sync` (linha 194), a condição para executar billing sync é:
+```
+if (!billingState || billingState.status === 'paused' || billingState.status === 'error')
+```
+Quando status é `'done'`, **pula o billing sync**. Nunca mais busca dados novos. Por isso:
+- ADECONEXVV: 0 pedidos com `fee_ml_source='billing'` nos últimos 30 dias → aba Pedidos vazia
+- ADECONEX.SP: último pedido com billing é de 11/02 → pedidos após essa data ficam pending
+
+**Correção:** Alterar a condição para SEMPRE executar billing sync (scope `recent`) quando `status === 'done'`, resetando o estado para buscar os períodos mais recentes.
 
 ---
 
-### Problema 2: Parcelamento NÃO é custo do seller
-**Causa confirmada no banco:** Pedido 2000015092686860 tem `installments_cost: 241.79` somado ao `cost_fees: 445.22` e `cost_total: 445.22`. O valor correto de custo é apenas R$203.43 (comissão).
+### Problema 2: resync_single não busca billing via API
 
-A "Taxa de parcelamento (equivalente ao acréscimo no preço pago pelo comprador)" é paga pelo comprador. Não deve entrar no cálculo de custo do seller.
+**Causa:** `handleResyncSingle` lê apenas do cache local (`meli_billing_details_cache`). Se o billing não foi sincronizado, não encontra nada → retorna `fee_ml_source: 'pending'` e aparenta sucesso ("resincronizado") sem trazer dados.
 
-**Alterações:**
+**Confirmado:** Pedido `2000015175713528` após resync mostra `fee_ml_source: pending`, `cost_fees: 0`, `commission_cost: 0`.
 
-| Arquivo | Mudança |
+**Correção:** Antes de ler o cache, `resync_single` deve chamar a API de billing do ML diretamente para aquele pedido/período específico e atualizar o cache.
+
+---
+
+### Problema 3: Seletor de conta duplicado
+
+**Causa:** A página `Custos.tsx` renderiza um `<Select>` próprio no `headerContent` (linhas 114-126) com a lista de contas. Simultaneamente, o layout global já renderiza o `AccountSwitcher` no header. Resultado: dois seletores lado a lado.
+
+**Correção:** Remover o `<Select>` de contas do `headerContent` em `Custos.tsx`, mantendo apenas o botão "Recalcular".
+
+---
+
+### Problema 4: backfill no nightly sync não resolve installments (bug residual)
+
+No `costs-nightly-sync`, a função `processBackfill` (linha 498) calcula `costFees = feeML + installmentsCost + adjustments`, incluindo parcelamento no custo — contrário à correção recente.
+
+**Correção:** Alinhar com as correções já feitas: `costFees = feeML + adjustments` (sem installments).
+
+---
+
+### Resumo de alterações
+
+| Arquivo | Alteração |
 |---|---|
-| `supabase/functions/ml-sync-real-costs/index.ts` | Remover `installmentsCost` de `costFees` e `totalMarketplaceCost`. Manter o campo `installments_cost` salvo para exibição informativa, mas não incluir em `cost_fees`, `cost_total`, `profit_total` |
-| `supabase/functions/cost-engine/index.ts` | Remover `installmentsCost` de `costFees` (linha 634) e de `costNet` (linha 648). Manter o campo salvo separadamente |
-| `supabase/functions/costs-nightly-sync/index.ts` | Mesma correção: excluir installments de cost_fees |
-| `src/components/custos/CostOrderDiagnostic.tsx` | Exibir "Parcelamento" com label "(pago pelo comprador)" e não incluir no "Total Custo Marketplace" |
-| `src/components/custos/CostOrders.tsx` | Mesma mudança visual: marcar como informativo, não custo |
-
----
-
-### Problema 3: Frete não carregado (R$28.45 faltando)
-**Causa raiz investigada:** 
-- A tabela `meli_order_financials_cache` está **vazia** (0 registros). O `cost-engine` depende dela para `cost_shipping_fee` mas não encontra dados.
-- Na `meli_billing_details_cache`, o pedido 2000015092686860 tem apenas 3 entradas (comissão ML, comissão MP, parcelamento). **Não existe entrada de "Tarifa de envio"** para este pedido.
-- A API `shipments/{id}/costs` retornou `sender.cost = 0` (fulfillment pode usar campo diferente).
-- Outros pedidos do mesmo seller TÊM billing details de envio ("Tarifa de envio extra ou intermunicipal").
-
-**Hipótese:** Para pedidos fulfillment, o ML pode faturar o envio em período posterior ou sob outro detail_sub_type. A entrada existe no painel do ML (R$28.45) mas não foi capturada pelo billing sync.
-
-**Correção:**
-1. No `ml-sync-real-costs`, ao chamar `/shipments/{id}/costs`, verificar campos alternativos: `d.senders?.[0]?.cost`, `d.receiver?.cost`, além de `d.sender?.cost`
-2. Criar ação `resync_single` no `ml-sync-real-costs` que permite reprocessar UM pedido específico, buscando billing details via API e shipment costs, ignorando cooldown
-3. No `cost-engine`, quando `meli_order_financials_cache` não tem dados, fazer fallback para `order_cost_breakdown_cache.shipping_cost_seller` (dados do sync-real-costs)
-
----
-
-### Problema 4: Pedidos sem frete marcados como erro incorretamente
-**Lógica atual:** `if (costShipping === 0 && order.shipment_id) missingFields.push('sem_frete_cobrado')` — marca TODO pedido com shipment e frete 0 como erro.
-
-**Correção:** Distinguir entre:
-- **Frete grátis real** (logistic_type = "fulfillment" com valor de frete abaixo de threshold, ou `free_shipping = true`) → status "ok", sem alerta
-- **Frete realmente ausente** (pedido > 48h, tem shipment_id, valor do produto > R$79, sem billing de envio) → manter como erro/alerta
-- Buscar `logistic_type` do `meli_shipments_cache` para determinar se frete é esperado
-
----
-
-### Problema 5: Botão recalcular por pedido individual
-**Novo recurso:** Na aba "Sem Custo" e no "Diagnóstico", adicionar botão "🔄 Recalcular" por linha/pedido que:
-1. Chama `ml-sync-real-costs` com `action: "resync_single"` e `order_id`
-2. Busca billing details atualizado via API do ML para aquele pedido
-3. Busca shipment costs via API
-4. Atualiza o `order_cost_breakdown_cache` com os novos dados
-5. Recarrega a tela automaticamente
-
----
-
-### Resumo de arquivos a editar
-
-| Arquivo | Alterações |
-|---|---|
-| `src/components/custos/CostSettings.tsx` | Texto "24 a 48 horas" |
-| `supabase/functions/ml-sync-real-costs/index.ts` | Excluir installments de cost; adicionar `resync_single`; verificar campos alternativos de shipping; usar logistic_type para sem_frete |
-| `supabase/functions/cost-engine/index.ts` | Excluir installments de cost_fees/costNet; fallback shipping |
-| `supabase/functions/costs-nightly-sync/index.ts` | Excluir installments de cost |
-| `src/components/custos/CostOrderDiagnostic.tsx` | Label informativo no parcelamento; botão recalcular |
-| `src/components/custos/CostOrders.tsx` | Label informativo no parcelamento |
-| `src/components/custos/CostOrdersNoCost.tsx` | Botão recalcular por pedido; lógica de frete vs sem-frete |
+| `supabase/functions/costs-nightly-sync/index.ts` | L194: incluir `status === 'done'` para re-executar billing sync; L498: excluir installments de costFees |
+| `supabase/functions/ml-sync-real-costs/index.ts` | `handleResyncSingle`: buscar billing via API do ML antes de ler cache local |
+| `src/pages/Custos.tsx` | Remover `<Select>` de conta do headerContent, manter apenas botão Recalcular |
 
