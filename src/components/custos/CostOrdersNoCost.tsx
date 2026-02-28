@@ -41,6 +41,7 @@ export function CostOrdersNoCost({ sellerId }: CostOrdersNoCostProps) {
   const [pendingTotal, setPendingTotal] = useState(0);
   const [noChargesTotal, setNoChargesTotal] = useState(0);
   const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<{ processed: number; updated: number; remaining: number } | null>(null);
 
   // Manual cost dialog
   const [editOrder, setEditOrder] = useState<NoCostOrder | null>(null);
@@ -49,6 +50,7 @@ export function CostOrdersNoCost({ sellerId }: CostOrdersNoCostProps) {
   const [editNotes, setEditNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [resyncingOrder, setResyncingOrder] = useState<string | null>(null);
+  const [goToPageInput, setGoToPageInput] = useState('');
 
   const loadOrders = useCallback(async () => {
     checkSellerChange(sellerId);
@@ -125,39 +127,66 @@ export function CostOrdersNoCost({ sellerId }: CostOrdersNoCostProps) {
       return;
     }
     setSyncing(true);
+    setSyncProgress({ processed: 0, updated: 0, remaining: 0 });
+    
+    let totalProcessed = 0;
+    let totalUpdated = 0;
+    let batchCount = 0;
+    const MAX_BATCHES = 50; // Safety limit
+    
     try {
-      const { data, error } = await supabase.functions.invoke('ml-sync-real-costs', {
-        body: {
-          seller_id: sellerId,
-          action: 'reprocess_pending',
-          scope_days: parseInt(periodDays),
-        },
-      });
+      while (batchCount < MAX_BATCHES) {
+        batchCount++;
+        
+        const { data, error } = await supabase.functions.invoke('ml-sync-real-costs', {
+          body: {
+            seller_id: sellerId,
+            action: 'reprocess_pending',
+            scope_days: parseInt(periodDays),
+          },
+        });
 
-      if (error) throw error;
+        if (error) throw error;
+        
+        totalProcessed += (data.processed || 0);
+        totalUpdated += (data.updated || 0);
+        const remaining = data.remaining || 0;
+        
+        setSyncProgress({ processed: totalProcessed, updated: totalUpdated, remaining });
+        
+        // If nothing was processed or no more remaining, we're done
+        if (data.processed === 0 || remaining === 0) {
+          break;
+        }
+        
+        // Refresh the list after each batch
+        invalidateCostCache('no-cost');
+        invalidateCostCache('orders');
+        loadOrders();
+        
+        // Small delay between batches
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      
       setLastSyncTime(Date.now());
       
-      // Show detailed result
-      if (data.updated > 0) {
-        toast.success(`${data.updated} pedidos atualizados com dados reais`);
-      }
-      if (data.still_pending > 0) {
-        toast.info(`${data.still_pending} pedidos ainda aguardando billing do ML (24-48h)`);
-      }
-      if (data.processed === 0 && data.pending_waiting > 0) {
-        toast.info(data.message);
-      }
-      if (data.processed === 0 && !data.pending_waiting) {
-        toast.success(data.message || 'Nenhum pedido pendente');
+      if (totalUpdated > 0) {
+        toast.success(`${totalUpdated} pedidos atualizados com dados reais (${totalProcessed} processados)`);
+      } else if (totalProcessed > 0) {
+        toast.info(`${totalProcessed} pedidos verificados, nenhum com billing disponível ainda`);
+      } else {
+        toast.success('Nenhum pedido pendente para processar');
       }
       
       invalidateCostCache('no-cost');
+      invalidateCostCache('orders');
       loadOrders();
     } catch (err) {
       console.error('Error syncing:', err);
-      toast.error('Erro ao sincronizar');
+      toast.error('Erro ao sincronizar. Progresso salvo — tente novamente para continuar de onde parou.');
     } finally {
       setSyncing(false);
+      setSyncProgress(null);
     }
   };
 
@@ -292,6 +321,26 @@ export function CostOrdersNoCost({ sellerId }: CostOrdersNoCostProps) {
             </div>
           </div>
 
+          {/* Sync progress bar */}
+          {syncing && syncProgress && (
+            <div className="bg-muted/50 rounded-lg p-3 mb-4 space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-medium">Sincronizando pedidos...</span>
+                <span className="text-muted-foreground">
+                  {syncProgress.processed} processados · {syncProgress.updated} atualizados · {syncProgress.remaining} restantes
+                </span>
+              </div>
+              {syncProgress.remaining > 0 && (
+                <div className="w-full bg-muted rounded-full h-2">
+                  <div 
+                    className="bg-primary h-2 rounded-full transition-all duration-500"
+                    style={{ width: `${Math.min(100, Math.round((syncProgress.processed / (syncProgress.processed + syncProgress.remaining)) * 100))}%` }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           {loading ? (
             <div className="space-y-2">
               {[...Array(5)].map((_, i) => (
@@ -368,8 +417,9 @@ export function CostOrdersNoCost({ sellerId }: CostOrdersNoCostProps) {
                                     });
                                     if (error) throw error;
                                     toast.success(result?.message || 'Pedido resincronizado');
-                                    invalidateCostCache('no-cost');
-                                    loadOrders();
+                    invalidateCostCache('no-cost');
+                    invalidateCostCache('orders');
+                    loadOrders();
                                   } catch {
                                     toast.error('Erro ao resincronizar');
                                   } finally {
@@ -390,16 +440,61 @@ export function CostOrdersNoCost({ sellerId }: CostOrdersNoCostProps) {
               </div>
 
               {totalPages > 1 && (
-                <div className="flex justify-center gap-2 mt-4">
-                  <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
-                    Anterior
-                  </Button>
-                  <span className="py-2 px-4 text-sm">
-                    Página {page} de {totalPages}
-                  </span>
-                  <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
-                    Próxima
-                  </Button>
+                <div className="flex flex-wrap items-center justify-center gap-4 mt-4">
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(1)}>
+                      Primeira
+                    </Button>
+                    <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+                      Anterior
+                    </Button>
+                    <span className="py-2 px-4 text-sm">
+                      Página {page} de {totalPages}
+                    </span>
+                    <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+                      Próxima
+                    </Button>
+                    <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(totalPages)}>
+                      Última
+                    </Button>
+                  </div>
+                  
+                  {/* Go to page */}
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="goToPageNoCost" className="text-sm text-muted-foreground">Ir para:</Label>
+                    <Input
+                      id="goToPageNoCost"
+                      type="number"
+                      min="1"
+                      max={totalPages}
+                      value={goToPageInput}
+                      onChange={(e) => setGoToPageInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const pageNum = parseInt(goToPageInput);
+                          if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
+                            setPage(pageNum);
+                            setGoToPageInput('');
+                          } else {
+                            toast.error(`Página inválida. Digite um número entre 1 e ${totalPages}`);
+                          }
+                        }
+                      }}
+                      placeholder={String(page)}
+                      className="w-20 h-8"
+                    />
+                    <Button variant="outline" size="sm" onClick={() => {
+                      const pageNum = parseInt(goToPageInput);
+                      if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
+                        setPage(pageNum);
+                        setGoToPageInput('');
+                      } else {
+                        toast.error(`Página inválida. Digite um número entre 1 e ${totalPages}`);
+                      }
+                    }}>
+                      Ir
+                    </Button>
+                  </div>
                 </div>
               )}
             </>

@@ -18,6 +18,7 @@ import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { useCostSyncWatchdog } from '@/hooks/useCostSyncWatchdog';
 import { useCostWatchdogPreferences } from '@/hooks/useCostWatchdogPreferences';
 import { useCostDataPolling } from '@/hooks/useCostDataPolling';
+import { invalidateCostCache } from '@/hooks/useCostModuleCache';
 import { useModuleFeedbackIntegration } from '@/hooks/useModuleFeedbackIntegration';
 import { FeedbackPromptCard } from '@/components/feedback';
 
@@ -49,10 +50,16 @@ export default function Custos() {
     checkAuth();
   }, [navigate]);
 
-  // Refresh summary when tab becomes active
+  // Invalidate cache and refresh when switching tabs
   useEffect(() => {
     if (activeTab === 'resumo' && sellerId) {
       refreshSummary();
+    }
+    // Invalidate stale caches when switching to data tabs
+    if (activeTab === 'pedidos') {
+      invalidateCostCache('orders');
+    } else if (activeTab === 'sem-custo') {
+      invalidateCostCache('no-cost');
     }
   }, [activeTab, sellerId, refreshSummary]);
 

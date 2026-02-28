@@ -529,9 +529,9 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
     return new Response(JSON.stringify({ error: "ML account not found" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }); 
   }
 
-  // COOLDOWN: Skip orders checked less than 12h ago AND orders created less than 48h ago
-  const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+  // Only skip orders created less than 48h ago (billing not available yet)
   const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+  const BATCH_SIZE = 50;
 
   let query = supabase
     .from("order_cost_breakdown_cache")
@@ -540,10 +540,9 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
     .or("fee_ml_source.eq.pending,commission_cost.eq.0")
     // Only reprocess orders older than 48h (newer ones won't have billing yet)
     .lt("created_at_meli", fortyEightHoursAgo)
-    // Only reprocess orders not checked in the last 12h
-    .or(`last_checked_at.is.null,last_checked_at.lt.${twelveHoursAgo}`)
-    .order("created_at_meli", { ascending: false })
-    .limit(MAX_ORDERS_PER_RUN);
+    // Process oldest first so we clear the backlog progressively
+    .order("created_at_meli", { ascending: true })
+    .limit(BATCH_SIZE);
   
   if (scopeDays) {
     const d = new Date();
@@ -576,6 +575,90 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
   
+  // ---- Fetch billing from ML API for all pending order periods ----
+  // Group orders by month to minimize API calls
+  const periodMonths = new Set<string>();
+  for (const o of pendingOrders) {
+    if (o.created_at_meli) {
+      const d = new Date(o.created_at_meli);
+      periodMonths.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+  }
+
+  // Fetch billing periods from API
+  try {
+    const periodsUrl = `https://api.mercadolibre.com/billing/integration/monthly/periods?group=ML&document_type=BILL&limit=6&offset=0`;
+    const periodsRes = await fetch(periodsUrl, { headers: { Authorization: `Bearer ${mlAccount.access_token}` } });
+    
+    if (periodsRes.ok) {
+      const periodsData = await periodsRes.json();
+      const periods = periodsData.results || [];
+      
+      // Only fetch periods that match our pending orders
+      const relevantPeriods = periods.slice(0, 4); // Last 4 periods max
+      
+      for (const period of relevantPeriods) {
+        if (Date.now() - startTime >= MAX_RUNTIME_MS - 10000) break; // Leave 10s for processing
+        
+        const periodKey = period.key;
+        let offset = 0;
+        let hasMore = true;
+        
+        while (hasMore && Date.now() - startTime < MAX_RUNTIME_MS - 10000) {
+          const detailsUrl = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/group/ML/details?document_type=BILL&limit=1000&offset=${offset}`;
+          const detailsRes = await fetch(detailsUrl, { headers: { Authorization: `Bearer ${mlAccount.access_token}` } });
+          
+          if (!detailsRes.ok) {
+            console.warn(`[ReprocessPending] billing API error for period ${periodKey}: ${detailsRes.status}`);
+            break;
+          }
+          
+          const detailsData = await detailsRes.json();
+          const results = detailsData.results || [];
+          
+          if (results.length === 0) break;
+          
+          // Upsert all billing records to cache
+          const records = results.map((item: any) => {
+            const chargeInfo = item.charge_info || {};
+            const salesInfo = (item.sales_info || [])[0] || {};
+            const shippingInfo = item.shipping_info || {};
+            return {
+              seller_id: sellerId,
+              period_key: periodKey,
+              detail_id: String(chargeInfo.detail_id || `${periodKey}-${offset}-${Math.random()}`),
+              order_id: salesInfo.order_id ? String(salesInfo.order_id) : null,
+              shipment_id: shippingInfo.shipping_id ? String(shippingInfo.shipping_id) : null,
+              charge_type: chargeInfo.transaction_detail || chargeInfo.concept_type || 'unknown',
+              charge_description: chargeInfo.charge_bonified_id ? `Bonified: ${chargeInfo.charge_bonified_id}` : null,
+              gross_amount: chargeInfo.detail_amount || 0,
+              net_amount: chargeInfo.detail_amount || 0,
+              currency_id: chargeInfo.currency_id || 'BRL',
+              created_at_meli: item.created_date || null,
+              fetched_at: new Date().toISOString(),
+              raw_data: item,
+            };
+          });
+          
+          // Batch upsert in chunks of 500
+          for (let i = 0; i < records.length; i += 500) {
+            await supabase.from('meli_billing_details_cache').upsert(records.slice(i, i + 500), { onConflict: 'seller_id,period_key,detail_id' });
+          }
+          
+          offset += results.length;
+          hasMore = results.length === 1000;
+          
+          // Rate limit: small delay between API calls
+          await new Promise(r => setTimeout(r, 200));
+        }
+      }
+      console.log(`[ReprocessPending] billing API fetched for ${relevantPeriods.length} periods`);
+    }
+  } catch (apiErr) {
+    console.error('[ReprocessPending] billing API error:', apiErr);
+  }
+
+  // ---- Now read from (freshly updated) cache ----
   const orderIds = pendingOrders.map((o: any) => o.order_id);
   const shipmentIds = pendingOrders.map((o: any) => o.shipment_id);
 
@@ -692,11 +775,22 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
     await supabase.from("order_cost_breakdown_cache").upsert(rowsToUpsert, { onConflict: "seller_id,order_id" });
   }
 
+  // Count remaining pending orders for progress tracking
+  const { count: remainingCount } = await supabase
+    .from("order_cost_breakdown_cache")
+    .select("*", { count: "exact", head: true })
+    .eq("seller_id", sellerId)
+    .or("fee_ml_source.eq.pending,commission_cost.eq.0")
+    .lt("created_at_meli", fortyEightHoursAgo);
+
+  const remaining = (remainingCount || 0);
+
   return new Response(JSON.stringify({ 
     message: `Reprocessados ${processedCount} pedidos pendentes (${updatedCount} atualizados com dados reais, ${processedCount - updatedCount} ainda aguardando billing)`,
     processed: processedCount,
     updated: updatedCount,
     still_pending: processedCount - updatedCount,
+    remaining: remaining,
     total_pending: pendingOrders.length
   }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
