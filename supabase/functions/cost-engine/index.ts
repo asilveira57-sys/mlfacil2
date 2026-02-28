@@ -282,6 +282,8 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
   const search = params.search || '';
   const page = parseInt(params.page || '1');
   const pageSize = parseInt(params.page_size || '50');
+  const sortBy = params.sort_by || 'created_at_meli';
+  const sortDir = params.sort_dir || 'desc';
 
   if (!sellerId) throw new Error('seller_id is required');
 
@@ -416,6 +418,22 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
   }
 
   // buyer_nickname already in breakdown - no secondary query needed
+
+  // Server-side sorting
+  const validSortKeys = ['created_at_meli', 'revenue_total', 'cost_total', 'shipping_cost_seller', 'profit_total', 'margin_percent'];
+  if (validSortKeys.includes(sortBy)) {
+    results.sort((a: any, b: any) => {
+      let aVal: number, bVal: number;
+      if (sortBy === 'created_at_meli') {
+        aVal = a.created_at_meli ? new Date(a.created_at_meli).getTime() : 0;
+        bVal = b.created_at_meli ? new Date(b.created_at_meli).getTime() : 0;
+      } else {
+        aVal = Number(a[sortBy] || 0);
+        bVal = Number(b[sortBy] || 0);
+      }
+      return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
+    });
+  }
 
   const total = results.length;
   const totalPages = Math.ceil(total / pageSize);

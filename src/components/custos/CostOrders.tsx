@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Search, AlertCircle, TrendingUp, TrendingDown, RefreshCw, CheckCircle2, DollarSign, Save, ArrowUpDown, ArrowUp, ArrowDown, Package } from 'lucide-react';
+import { Search, AlertCircle, TrendingUp, TrendingDown, RefreshCw, CheckCircle2, DollarSign, Save, ArrowUpDown, ArrowUp, ArrowDown, Package, RotateCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { getCostCache, setCostCache, checkSellerChange } from '@/hooks/useCostModuleCache';
@@ -84,6 +84,8 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const [sortKey, setSortKey] = useState<SortKey>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
 
+  const [resyncingOrder, setResyncingOrder] = useState<string | null>(null);
+
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
       if (sortDirection === 'desc') {
@@ -96,30 +98,10 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
       setSortKey(key);
       setSortDirection('desc');
     }
+    setPage(1); // reset to page 1 on sort change
   };
 
-  const sortedOrders = [...orders].sort((a, b) => {
-    if (!sortKey || !sortDirection) return 0;
-    
-    let aValue: number | string | null;
-    let bValue: number | string | null;
-    
-    if (sortKey === 'created_at_meli') {
-      aValue = a.created_at_meli ? new Date(a.created_at_meli).getTime() : 0;
-      bValue = b.created_at_meli ? new Date(b.created_at_meli).getTime() : 0;
-    } else if (sortKey === 'shipping_cost_seller') {
-      aValue = a.shipping_cost_seller || 0;
-      bValue = b.shipping_cost_seller || 0;
-    } else {
-      aValue = a[sortKey];
-      bValue = b[sortKey];
-    }
-    
-    if (sortDirection === 'desc') {
-      return (bValue as number) - (aValue as number);
-    }
-    return (aValue as number) - (bValue as number);
-  });
+  // No client-side sorting - sorting is done server-side
 
   // Count orders with high shipping costs
   const highShippingCount = orders.filter(o => (o.shipping_cost_seller || 0) >= 100).length;
@@ -141,7 +123,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
 
   const loadOrders = async () => {
     checkSellerChange(sellerId);
-    const cacheKey = `orders:${sellerId}:${periodDays}:${search}:${page}:${statusFilter}:${profitFilter}:${ecommerceFilter}:${shippingFilter}:${orderStatusFilter}`;
+    const cacheKey = `orders:${sellerId}:${periodDays}:${search}:${page}:${statusFilter}:${profitFilter}:${ecommerceFilter}:${shippingFilter}:${orderStatusFilter}:${sortKey}:${sortDirection}`;
     const cached = getCostCache(cacheKey);
     if (cached) {
       setOrders(cached.orders || []);
@@ -163,6 +145,11 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
         page: String(page),
         page_size: '50',
       });
+
+      if (sortKey && sortDirection) {
+        params.set('sort_by', sortKey);
+        params.set('sort_dir', sortDirection);
+      }
 
       if (statusFilter !== 'all') params.set('status', statusFilter);
       if (profitFilter !== 'all') params.set('profit_type', profitFilter);
@@ -194,7 +181,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     if (sellerId) {
       loadOrders();
     }
-  }, [sellerId, periodDays, statusFilter, profitFilter, ecommerceFilter, shippingFilter, orderStatusFilter, page]);
+  }, [sellerId, periodDays, statusFilter, profitFilter, ecommerceFilter, shippingFilter, orderStatusFilter, page, sortKey, sortDirection]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -520,17 +507,18 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                         </div>
                       </TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead className="w-10"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {sortedOrders.length === 0 ? (
+                    {orders.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                           Nenhum pedido encontrado. Clique em "Recalcular" para processar.
                         </TableCell>
                       </TableRow>
                     ) : (
-                      sortedOrders.map((order) => {
+                      orders.map((order) => {
                         const shippingCost = order.shipping_cost_seller || 0;
                         const isMissingShipping = shippingCost === 0 && order.missing_fields?.includes('sem_frete_cobrado') && order.fee_ml_source !== 'no_charges';
                         const isHighShipping = shippingCost >= 100;
@@ -615,6 +603,32 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                                 </span>
                               )}
                             </div>
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={resyncingOrder === order.order_id}
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                setResyncingOrder(order.order_id);
+                                try {
+                                  const { data: result, error } = await supabase.functions.invoke('ml-sync-real-costs', {
+                                    body: { seller_id: sellerId, action: 'resync_single', order_id: order.order_id }
+                                  });
+                                  if (error) throw error;
+                                  toast.success(`Pedido ${order.order_id} atualizado`);
+                                  loadOrders();
+                                } catch (err) {
+                                  toast.error('Erro ao resincronizar');
+                                } finally {
+                                  setResyncingOrder(null);
+                                }
+                              }}
+                              title="Atualizar custos deste pedido"
+                            >
+                              <RotateCw className={`h-3 w-3 ${resyncingOrder === order.order_id ? 'animate-spin' : ''}`} />
+                            </Button>
                           </TableCell>
                         </TableRow>
                         );
