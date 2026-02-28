@@ -261,50 +261,58 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
     }
   }
 
-  // Strategy 3: Search billing period details for this specific order via API
+  // Strategy 3: Search billing period details for this specific order via API (search from END)
   if (feeMLSource === "pending") {
     try {
-      // Determine which billing period(s) to search based on order date
       const orderDate = order.created_at_meli ? new Date(order.created_at_meli) : new Date();
-      const periodKeys: string[] = [];
-      // Current month period
       const y = orderDate.getFullYear();
-      const m = orderDate.getMonth(); // 0-based
-      periodKeys.push(`${y}-${String(m + 1).padStart(2, '0')}-01`);
-      // Next month (billing might appear in next period)
-      const nextDate = new Date(y, m + 1, 1);
-      periodKeys.push(`${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-01`);
+      const m = orderDate.getMonth();
+      // Search the period the order belongs to AND the next period
+      const periodKeys = [
+        `${y}-${String(m + 1).padStart(2, '0')}-01`,
+        `${new Date(y, m + 1, 1).getFullYear()}-${String(new Date(y, m + 1, 1).getMonth() + 1).padStart(2, '0')}-01`,
+      ];
       
-      console.log(`[RealCosts] Strategy 3: searching billing periods ${periodKeys.join(', ')} for order ${orderId}`);
+      console.log(`[RealCosts] Strategy 3: searching billing periods for order ${orderId}`);
       
       for (const periodKey of periodKeys) {
-        if (feeML > 0) break; // Already found commission
+        if (feeML > 0) break;
         
-        let offset = 0;
-        let hasMore = true;
+        // First, get total count by fetching offset 0 with limit 1
+        const countUrl = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/group/ML/details?document_type=BILL&limit=1&offset=0`;
+        const countResp = await fetch(countUrl, { headers: { Authorization: `Bearer ${currentToken}` } });
+        if (countResp.status === 401) { await countResp.text(); if (await tryRefreshToken()) { continue; } break; }
+        if (!countResp.ok) { await countResp.text(); continue; }
+        const countData = await countResp.json();
+        const totalRecords = countData.paging?.total || countData.total || 0;
+        
+        if (totalRecords === 0) continue;
+        console.log(`[RealCosts] Strategy 3: period ${periodKey} has ${totalRecords} records, searching from end`);
+        
+        // Search from the END (most recent records = our order is likely here)
+        const PAGE_SIZE = 200;
+        let startOffset = Math.max(0, totalRecords - PAGE_SIZE);
         let pagesSearched = 0;
-        const MAX_PAGES = 50; // Safety limit
+        const MAX_PAGES = 30;
         
-        while (hasMore && pagesSearched < MAX_PAGES) {
-          const detailsUrl = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/group/ML/details?document_type=BILL&limit=200&offset=${offset}`;
+        while (startOffset >= 0 && pagesSearched < MAX_PAGES && feeML === 0) {
+          const detailsUrl = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/group/ML/details?document_type=BILL&limit=${PAGE_SIZE}&offset=${startOffset}`;
           
-          let detailsResp: Response;
-          let retryCount = 0;
-          while (true) {
+          let detailsResp: Response | undefined;
+          for (let retry = 0; retry < 3; retry++) {
             detailsResp = await fetch(detailsUrl, { headers: { Authorization: `Bearer ${currentToken}` } });
             if (detailsResp.status === 401) { await detailsResp.text(); if (await tryRefreshToken()) continue; break; }
-            if (detailsResp.status === 429) { await detailsResp.text(); retryCount++; if (retryCount > 3) break; await new Promise(r => setTimeout(r, 2000 * retryCount)); continue; }
+            if (detailsResp.status === 429) { await detailsResp.text(); await new Promise(r => setTimeout(r, 2000 * (retry + 1))); continue; }
             break;
           }
           
-          if (!detailsResp!.ok) { await detailsResp!.text(); break; }
+          if (!detailsResp || !detailsResp.ok) { if (detailsResp) await detailsResp.text(); break; }
           
-          const detailsData = await detailsResp!.json();
+          const detailsData = await detailsResp.json();
           const results = detailsData.results || [];
           
-          if (results.length === 0) { hasMore = false; break; }
+          if (results.length === 0) break;
           
-          // Search for our order in this page
           for (const item of results) {
             const salesInfo = (item.sales_info || [])[0] || {};
             if (String(salesInfo.order_id) === String(orderId)) {
@@ -312,28 +320,23 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
               const ct = (chargeInfo.transaction_detail || chargeInfo.concept_type || '').toLowerCase();
               const amount = Math.abs(chargeInfo.detail_amount || 0);
               
-              console.log(`[RealCosts] Strategy 3: FOUND order ${orderId} in period ${periodKey}: type="${ct}" amount=${amount}`);
+              console.log(`[RealCosts] Strategy 3: FOUND order ${orderId} in period ${periodKey} offset ${startOffset}: type="${ct}" amount=${amount}`);
               
               if (ct.includes('custo por vender') || ct.includes('custo por cobrar') || 
                   ct.includes('sale_fee') || ct.includes('cargo por venta')) {
                 feeML += amount;
-              } else if (ct.includes('tarifa de envio') || ct.includes('envio extra') || 
-                         ct.includes('envio intermunicipal') || ct.includes('shipping')) {
-                if (shippingCostSeller === 0) shippingCostSeller = amount;
+              } else if ((ct.includes('tarifa de envio') || ct.includes('envio extra') || 
+                         ct.includes('envio intermunicipal') || ct.includes('shipping')) && shippingCostSeller === 0) {
+                shippingCostSeller = amount;
               } else if (ct.includes('taxa de parcelamento') || ct.includes('installment')) {
                 installmentsCost += amount;
               }
             }
           }
           
-          offset += results.length;
-          hasMore = results.length >= 200;
+          startOffset -= PAGE_SIZE;
           pagesSearched++;
-          
-          // If we found our order's commission, stop searching
           if (feeML > 0) break;
-          
-          // Small delay between pages
           await new Promise(r => setTimeout(r, 300));
         }
       }
