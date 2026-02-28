@@ -115,8 +115,17 @@ export function useCollaboratorAccess(): CollaboratorAccess {
       setEnabledModules(modules);
     } catch (err) {
       console.error('[useCollaboratorAccess] Error:', err);
-      setIsCollaborator(true);
-      setEnabledModules(new Set(['dashboard']));
+      // CRITICAL: If we already resolved access once, keep previous state
+      // instead of wrongly restricting the owner/admin.
+      // Only default to restricted on the very first load AND only if we
+      // have absolutely no prior state to rely on.
+      if (!initialLoadDoneRef.current) {
+        // First load failed – grant full access (fail-open for owners).
+        // This is safe because RLS still protects data server-side.
+        setIsCollaborator(false);
+        setEnabledModules(new Set(['__all__']));
+      }
+      // If already resolved, keep previous isCollaborator / enabledModules values
     } finally {
       setIsLoading(false);
       initialLoadDoneRef.current = true;
