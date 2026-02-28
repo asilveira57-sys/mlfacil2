@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DollarSign, Package, TrendingUp, Calculator, RefreshCw, Settings, BarChart3, FileSearch, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { CostCatalog } from '@/components/custos/CostCatalog';
@@ -24,7 +23,7 @@ import { FeedbackPromptCard } from '@/components/feedback';
 
 export default function Custos() {
   const navigate = useNavigate();
-  const { sellerId, activeAccount, accounts, setActiveAccount, loading: accountsLoading, initialized } = useActiveAccount();
+  const { sellerId, loading: accountsLoading, initialized } = useActiveAccount();
   const [activeTab, setActiveTab] = useState('resumo');
   const feedback = useModuleFeedbackIntegration('precificacao-custos');
   const [isCalculating, setIsCalculating] = useState(false);
@@ -102,33 +101,17 @@ export default function Custos() {
     );
   }
 
-  // Handle account switching using global context
-  const handleAccountChange = async (accountId: string) => {
-    await setActiveAccount(accountId);
-  };
+
+
 
   const formatCurrency = (value: number) => 
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 
   const headerContent = (
-    <div className="flex items-center gap-4">
-      <Select value={activeAccount?.id || ''} onValueChange={handleAccountChange}>
-        <SelectTrigger className="w-48">
-          <SelectValue placeholder="Selecione a conta" />
-        </SelectTrigger>
-        <SelectContent>
-          {accounts.map(acc => (
-            <SelectItem key={acc.id} value={acc.id}>
-              {acc.nickname || acc.sellerId}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Button onClick={handleCalculate} disabled={isCalculating || !sellerId}>
-        <RefreshCw className={`h-4 w-4 mr-2 ${isCalculating ? 'animate-spin' : ''}`} />
-        {isCalculating ? 'Calculando...' : 'Recalcular'}
-      </Button>
-    </div>
+    <Button onClick={handleCalculate} disabled={isCalculating || !sellerId}>
+      <RefreshCw className={`h-4 w-4 mr-2 ${isCalculating ? 'animate-spin' : ''}`} />
+      {isCalculating ? 'Calculando...' : 'Recalcular'}
+    </Button>
   );
 
   return (
