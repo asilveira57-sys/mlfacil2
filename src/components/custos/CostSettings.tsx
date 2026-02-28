@@ -454,7 +454,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
 
           <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-sm">
             <AlertCircle className="h-4 w-4 text-amber-600" />
-            <span className="text-amber-700 dark:text-amber-300">O Mercado Livre disponibiliza billing ~24h após a venda. Pedidos recentes aparecerão como "Pendente".</span>
+            <span className="text-amber-700 dark:text-amber-300">O Mercado Livre disponibiliza billing 24 a 48 horas após a venda. Pedidos recentes aparecerão como "Pendente".</span>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -635,7 +635,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
         <CardHeader><CardTitle className="flex items-center gap-2"><Percent className="h-5 w-5" />Taxa de Venda (Legado)</CardTitle><CardDescription>Esta configuração é mantida apenas para referência. O sistema agora usa exclusivamente dados reais da API.</CardDescription></CardHeader>
         <CardContent className="space-y-4">
           <div className="p-3 bg-muted rounded-lg text-sm text-muted-foreground">
-            <p>⚠️ O sistema não usa mais taxas estimadas. Pedidos sem dados de billing são marcados como "Pendente" até que o Mercado Livre disponibilize os dados (geralmente 24h após a venda).</p>
+            <p>⚠️ O sistema não usa mais taxas estimadas. Pedidos sem dados de billing são marcados como "Pendente" até que o Mercado Livre disponibilize os dados (geralmente 24 a 48 horas após a venda).</p>
           </div>
           <div className="grid grid-cols-2 gap-4 opacity-50">
             <div className="space-y-2"><Label>Taxa padrão (%)</Label><Input type="number" step="0.1" value={feePercent} onChange={(e) => setFeePercent(e.target.value)} placeholder="17" disabled /></div>

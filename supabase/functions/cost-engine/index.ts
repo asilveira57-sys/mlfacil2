@@ -631,7 +631,7 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
         // Real data from ML billing API
         commissionCost = billing.cost_sale_fee || 0;
         installmentsCost = billing.cost_installment_fee || 0;
-        costFees = commissionCost + installmentsCost;
+        costFees = commissionCost;
         costShipping = billing.cost_shipping_fee || 0;
         revenueShipping = billing.revenue_shipping || 0;
       }
@@ -645,7 +645,7 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
       
       // Cost NET = product costs + commission + packaging (WITHOUT shipping)
       // This is the "real" cost of selling the product
-      const costNet = costItemsTotal + costPackaging + commissionCost + installmentsCost;
+      const costNet = costItemsTotal + costPackaging + commissionCost;
       
       // Profit NET = product profit (not impacted by shipping)
       const profitNet = revenueNet - costNet;

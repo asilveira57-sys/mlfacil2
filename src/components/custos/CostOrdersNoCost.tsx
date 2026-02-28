@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Search, RefreshCw, AlertCircle, Clock, Edit2 } from 'lucide-react';
+import { Search, RefreshCw, AlertCircle, Clock, Edit2, RotateCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { getCostCache, setCostCache, invalidateCostCache, checkSellerChange } from '@/hooks/useCostModuleCache';
 
@@ -48,6 +48,7 @@ export function CostOrdersNoCost({ sellerId }: CostOrdersNoCostProps) {
   const [editShipping, setEditShipping] = useState(0);
   const [editNotes, setEditNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [resyncingOrder, setResyncingOrder] = useState<string | null>(null);
 
   const loadOrders = useCallback(async () => {
     checkSellerChange(sellerId);
@@ -346,14 +347,40 @@ export function CostOrdersNoCost({ sellerId }: CostOrdersNoCostProps) {
                             )}
                           </TableCell>
                           <TableCell>
-                            <Button 
-                              size="sm" 
-                              variant="ghost"
-                              onClick={() => openManualCostDialog(order)}
-                            >
-                              <Edit2 className="h-3 w-3 mr-1" />
-                              Editar
-                            </Button>
+                            <div className="flex items-center gap-1">
+                              <Button 
+                                size="sm" 
+                                variant="ghost"
+                                onClick={() => openManualCostDialog(order)}
+                              >
+                                <Edit2 className="h-3 w-3 mr-1" />
+                                Editar
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={resyncingOrder === order.order_id}
+                                onClick={async () => {
+                                  setResyncingOrder(order.order_id);
+                                  try {
+                                    const { data: result, error } = await supabase.functions.invoke('ml-sync-real-costs', {
+                                      body: { seller_id: sellerId, action: 'resync_single', order_id: order.order_id }
+                                    });
+                                    if (error) throw error;
+                                    toast.success(result?.message || 'Pedido resincronizado');
+                                    invalidateCostCache('no-cost');
+                                    loadOrders();
+                                  } catch {
+                                    toast.error('Erro ao resincronizar');
+                                  } finally {
+                                    setResyncingOrder(null);
+                                  }
+                                }}
+                                title="Recalcular custos deste pedido"
+                              >
+                                <RotateCw className={`h-3 w-3 ${resyncingOrder === order.order_id ? 'animate-spin' : ''}`} />
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))
