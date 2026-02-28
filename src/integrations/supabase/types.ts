@@ -6867,6 +6867,7 @@ export type Database = {
           last_error: string | null
           last_heartbeat_at: string | null
           last_page_size: number | null
+          last_pending_count: number | null
           processed: number
           scope_days: number | null
           seller_id: string
@@ -6885,6 +6886,7 @@ export type Database = {
           last_error?: string | null
           last_heartbeat_at?: string | null
           last_page_size?: number | null
+          last_pending_count?: number | null
           processed?: number
           scope_days?: number | null
           seller_id: string
@@ -6903,6 +6905,7 @@ export type Database = {
           last_error?: string | null
           last_heartbeat_at?: string | null
           last_page_size?: number | null
+          last_pending_count?: number | null
           processed?: number
           scope_days?: number | null
           seller_id?: string
@@ -8942,6 +8945,7 @@ export type Database = {
           has_real_financial: boolean | null
           id: string
           installments_cost: number | null
+          last_checked_at: string | null
           margin_net: number | null
           margin_percent: number
           missing_cost_items_count: number
@@ -8994,6 +8998,7 @@ export type Database = {
           has_real_financial?: boolean | null
           id?: string
           installments_cost?: number | null
+          last_checked_at?: string | null
           margin_net?: number | null
           margin_percent?: number
           missing_cost_items_count?: number
@@ -9046,6 +9051,7 @@ export type Database = {
           has_real_financial?: boolean | null
           id?: string
           installments_cost?: number | null
+          last_checked_at?: string | null
           margin_net?: number | null
           margin_percent?: number
           missing_cost_items_count?: number

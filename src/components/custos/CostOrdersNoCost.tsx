@@ -112,7 +112,17 @@ export function CostOrdersNoCost({ sellerId }: CostOrdersNoCostProps) {
     return () => clearTimeout(timer);
   }, [search]);
 
+  // Rate limit: 30 min cooldown
+  const [lastSyncTime, setLastSyncTime] = useState<number>(0);
+  const SYNC_COOLDOWN_MS = 30 * 60 * 1000;
+  const canSync = Date.now() - lastSyncTime > SYNC_COOLDOWN_MS;
+  const cooldownRemaining = Math.max(0, Math.ceil((SYNC_COOLDOWN_MS - (Date.now() - lastSyncTime)) / 60000));
+
   const handleSync = async () => {
+    if (!canSync) {
+      toast.info(`Aguarde ${cooldownRemaining} minuto(s) antes de sincronizar novamente`);
+      return;
+    }
     setSyncing(true);
     try {
       const { data, error } = await supabase.functions.invoke('ml-sync-real-costs', {
@@ -124,7 +134,22 @@ export function CostOrdersNoCost({ sellerId }: CostOrdersNoCostProps) {
       });
 
       if (error) throw error;
-      toast.success(data.message || 'Sincronização concluída');
+      setLastSyncTime(Date.now());
+      
+      // Show detailed result
+      if (data.updated > 0) {
+        toast.success(`${data.updated} pedidos atualizados com dados reais`);
+      }
+      if (data.still_pending > 0) {
+        toast.info(`${data.still_pending} pedidos ainda aguardando billing do ML (24-48h)`);
+      }
+      if (data.processed === 0 && data.pending_waiting > 0) {
+        toast.info(data.message);
+      }
+      if (data.processed === 0 && !data.pending_waiting) {
+        toast.success(data.message || 'Nenhum pedido pendente');
+      }
+      
       invalidateCostCache('no-cost');
       loadOrders();
     } catch (err) {
@@ -248,16 +273,22 @@ export function CostOrdersNoCost({ sellerId }: CostOrdersNoCostProps) {
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             </Button>
 
-            <Button onClick={handleSync} disabled={syncing || loading}>
+            <Button onClick={handleSync} disabled={syncing || loading || !canSync} title={!canSync ? `Aguarde ${cooldownRemaining} min` : ''}>
               <RefreshCw className={`h-4 w-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
-              {syncing ? 'Sincronizando...' : 'Forçar Sincronização'}
+              {syncing ? 'Sincronizando...' : !canSync ? `Aguarde ${cooldownRemaining}min` : 'Forçar Sincronização'}
             </Button>
           </div>
 
-          <div className="bg-muted/50 rounded-lg p-3 mb-4 text-sm text-muted-foreground">
-            <AlertCircle className="h-4 w-4 inline mr-2" />
-            Pedidos que ainda não possuem dados de taxas/frete do Mercado Livre. 
-            Use "Forçar Sincronização" para tentar buscar novamente, ou cadastre os custos manualmente.
+          <div className="bg-muted/50 rounded-lg p-3 mb-4 text-sm text-muted-foreground space-y-1">
+            <div>
+              <AlertCircle className="h-4 w-4 inline mr-2" />
+              Pedidos que ainda não possuem dados de taxas/frete do Mercado Livre.
+            </div>
+            <div className="text-xs">
+              <Clock className="h-3 w-3 inline mr-1" />
+              <strong>Importante:</strong> Pedidos recentes levam de 24 a 48 horas para ter dados de billing disponíveis no Mercado Livre. 
+              O sistema sincroniza automaticamente durante a madrugada. Use "Forçar Sincronização" apenas para pedidos com mais de 48h.
+            </div>
           </div>
 
           {loading ? (

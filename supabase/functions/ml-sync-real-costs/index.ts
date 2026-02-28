@@ -284,11 +284,19 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
     return new Response(JSON.stringify({ error: "ML account not found" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }); 
   }
 
+  // COOLDOWN: Skip orders checked less than 12h ago AND orders created less than 48h ago
+  const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+  const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+
   let query = supabase
     .from("order_cost_breakdown_cache")
     .select("order_id, shipment_id, revenue_total, created_at_meli, cost_items_total, cost_packaging")
     .eq("seller_id", sellerId)
     .or("fee_ml_source.eq.pending,commission_cost.eq.0")
+    // Only reprocess orders older than 48h (newer ones won't have billing yet)
+    .lt("created_at_meli", fortyEightHoursAgo)
+    // Only reprocess orders not checked in the last 12h
+    .or(`last_checked_at.is.null,last_checked_at.lt.${twelveHoursAgo}`)
     .order("created_at_meli", { ascending: false })
     .limit(MAX_ORDERS_PER_RUN);
   
@@ -305,9 +313,21 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
   }
   
   if (!pendingOrders?.length) {
+    // Count total pending (including recently checked) for informational purposes
+    const { count: totalPendingCount } = await supabase
+      .from("order_cost_breakdown_cache")
+      .select("*", { count: "exact", head: true })
+      .eq("seller_id", sellerId)
+      .or("fee_ml_source.eq.pending,commission_cost.eq.0");
+
+    const recentCount = (totalPendingCount || 0);
     return new Response(JSON.stringify({ 
-      message: "Nenhum pedido pendente encontrado", 
-      processed: 0 
+      message: recentCount > 0 
+        ? `${recentCount} pedidos pendentes aguardando dados de billing do Mercado Livre (24-48h). Nenhum precisa de reprocessamento agora.`
+        : "Nenhum pedido pendente encontrado", 
+      processed: 0,
+      pending_waiting: recentCount,
+      skipped_reason: "cooldown_or_recent"
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
   
@@ -329,7 +349,6 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
     let feeML = 0, feeMLSource = "pending", shippingCostSeller = 0, installmentsCost = 0, adjustments = 0;
     const sourceRefs: string[] = [];
 
-    // FIX: Consider "has billing" if ANY movement exists, even if fee_ml sums to 0
     const hasBillingMovements = billing && (billing.fee_ml !== 0 || billing.shipping !== 0 || billing.installments !== 0 || billing.adjustments !== 0);
     
     if (hasBillingMovements) {
@@ -341,7 +360,6 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
       sourceRefs.push("billing:order");
       updatedCount++;
     } else {
-      // No billing data yet - keep as pending until billing appears or user enters manually
       feeMLSource = "pending";
       sourceRefs.push("billing:pending");
     }
@@ -382,7 +400,6 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
     const costItemsTotal = order.cost_items_total || 0;
     const costPackaging = order.cost_packaging || 0;
     
-    // FIXED: Update legacy fields that grid uses
     const costFees = feeML + installmentsCost + adjustments;
     const costShipping = shippingCostSeller;
     const costTotal = costItemsTotal + costPackaging + costFees + costShipping;
@@ -411,10 +428,11 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
       source_refs: { refs: sourceRefs }, 
       real_cost_synced_at: new Date().toISOString(), 
       calculated_at: new Date().toISOString(), 
+      // Track when this order was last checked for billing data
+      last_checked_at: new Date().toISOString(),
       status: (feeMLSource === "billing" || feeMLSource === "no_charges") ? "calculated" : "pending",
       commission_cost: commissionCost,
       missing_fields: missingFields,
-      // FIXED: Update legacy fields
       cost_fees: costFees,
       cost_shipping: costShipping,
       cost_total: costTotal,
@@ -430,9 +448,10 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
   }
 
   return new Response(JSON.stringify({ 
-    message: `Reprocessados ${processedCount} pedidos pendentes (${updatedCount} atualizados com dados reais)`,
+    message: `Reprocessados ${processedCount} pedidos pendentes (${updatedCount} atualizados com dados reais, ${processedCount - updatedCount} ainda aguardando billing)`,
     processed: processedCount,
     updated: updatedCount,
+    still_pending: processedCount - updatedCount,
     total_pending: pendingOrders.length
   }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
@@ -692,6 +711,31 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
   
   console.log(`[RealCosts] Mode: ${mode}, Total paid: ${totalPaid}, Needing sync: ${needingSync}`);
 
+  // LOOP DETECTION: If pending count hasn't changed since last run, stop
+  const previousPendingCount = state?.last_pending_count;
+  if (needingSync > 0 && previousPendingCount !== null && previousPendingCount !== undefined && needingSync === previousPendingCount) {
+    console.log(`[RealCosts] Loop detected: pending count unchanged at ${needingSync}. Marking done.`);
+    if (state) {
+      await supabase.from("meli_real_costs_sync_state").update({
+        status: "done",
+        total: totalPaid || 0,
+        processed: totalPaid || 0,
+        cursor_offset: 0,
+        finished_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        last_pending_count: needingSync,
+      }).eq("seller_id", sellerId);
+    }
+    return new Response(JSON.stringify({ 
+      message: `${needingSync} pedidos ainda pendentes (aguardando billing do Mercado Livre, 24-48h). Sync pausado para evitar loop.`, 
+      processed: 0, 
+      total: needingSync,
+      still_pending: needingSync,
+      mode: "incremental",
+      loop_prevented: true
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
   // If nothing to process, mark as done immediately
   if (needingSync === 0) {
     if (state) {
@@ -699,9 +743,10 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
         status: "done",
         total: totalPaid || 0,
         processed: totalPaid || 0,
-        cursor_offset: 0, // Reset for next run
+        cursor_offset: 0,
         finished_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+        last_pending_count: 0,
       }).eq("seller_id", sellerId);
     }
     return new Response(JSON.stringify({ 
@@ -793,7 +838,8 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
           updated_at: new Date().toISOString(), 
           stats_json: stats,
           processed: state.processed + processedInRun,
-          cursor_offset: currentOffset
+          cursor_offset: currentOffset,
+          last_pending_count: stats.pending || 0,
         }).eq("seller_id", sellerId);
         return new Response(JSON.stringify({ 
           message: "Sync incremental concluído", 
@@ -900,6 +946,7 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
           source_refs: { refs: sourceRefs }, 
           real_cost_synced_at: new Date().toISOString(), 
           calculated_at: new Date().toISOString(), 
+          last_checked_at: new Date().toISOString(),
           status: feeMLSource === "billing" ? "calculated" : "pending",
           commission_cost: commissionCost,
           missing_fields: missingFields,
