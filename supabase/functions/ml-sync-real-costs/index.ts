@@ -261,68 +261,91 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
     }
   }
 
-  // Strategy 3: Search billing movements for this specific order
+  // Strategy 3: Search billing period details for this specific order via API
   if (feeMLSource === "pending") {
     try {
-      // Try the billing movements search endpoint filtered by order reference
-      const movementsUrl = `https://api.mercadolibre.com/billing/integration/movements/search?user_id=${sellerId}&reference=${orderId}&limit=50`;
-      console.log(`[RealCosts] Strategy 3: calling billing movements for order ${orderId}`);
+      // Determine which billing period(s) to search based on order date
+      const orderDate = order.created_at_meli ? new Date(order.created_at_meli) : new Date();
+      const periodKeys: string[] = [];
+      // Current month period
+      const y = orderDate.getFullYear();
+      const m = orderDate.getMonth(); // 0-based
+      periodKeys.push(`${y}-${String(m + 1).padStart(2, '0')}-01`);
+      // Next month (billing might appear in next period)
+      const nextDate = new Date(y, m + 1, 1);
+      periodKeys.push(`${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-01`);
       
-      for (let attempt = 0; attempt < 3; attempt++) {
-        const movResp = await fetch(movementsUrl, { headers: { Authorization: `Bearer ${currentToken}` } });
-        console.log(`[RealCosts] Strategy 3: movements status=${movResp.status} for order ${orderId}`);
+      console.log(`[RealCosts] Strategy 3: searching billing periods ${periodKeys.join(', ')} for order ${orderId}`);
+      
+      for (const periodKey of periodKeys) {
+        if (feeML > 0) break; // Already found commission
         
-        if (movResp.ok) {
-          const movData = await movResp.json();
-          const results = movData.results || movData.movements || [];
-          console.log(`[RealCosts] Strategy 3: found ${results.length} movements for order ${orderId}`);
+        let offset = 0;
+        let hasMore = true;
+        let pagesSearched = 0;
+        const MAX_PAGES = 50; // Safety limit
+        
+        while (hasMore && pagesSearched < MAX_PAGES) {
+          const detailsUrl = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/group/ML/details?document_type=BILL&limit=200&offset=${offset}`;
           
-          for (const mov of results) {
-            const concept = (mov.concept || mov.type || mov.detail || '').toLowerCase();
-            const chargeType = (mov.charge_info?.transaction_detail || mov.charge_info?.concept_type || '').toLowerCase();
-            const amount = Math.abs(mov.amount || mov.charge_info?.detail_amount || 0);
-            
-            console.log(`[RealCosts] Strategy 3: movement concept="${concept}" chargeType="${chargeType}" amount=${amount}`);
-            
-            if (chargeType.includes('custo por vender') || chargeType.includes('custo por cobrar') || 
-                chargeType.includes('sale_fee') || chargeType.includes('cargo por venta') ||
-                concept.includes('sale_fee') || concept.includes('commission') || concept.includes('comisi')) {
-              feeML += amount;
-            } else if (chargeType.includes('tarifa de envio') || chargeType.includes('envio extra') || 
-                       chargeType.includes('envio intermunicipal') || chargeType.includes('shipping') ||
-                       concept.includes('shipping')) {
-              // Only add if not already found from cache
-              if (shippingCostSeller === 0) shippingCostSeller += amount;
-            } else if (chargeType.includes('taxa de parcelamento') || chargeType.includes('installment') ||
-                       concept.includes('financing') || concept.includes('installment')) {
-              installmentsCost += amount;
+          let detailsResp: Response;
+          let retryCount = 0;
+          while (true) {
+            detailsResp = await fetch(detailsUrl, { headers: { Authorization: `Bearer ${currentToken}` } });
+            if (detailsResp.status === 401) { await detailsResp.text(); if (await tryRefreshToken()) continue; break; }
+            if (detailsResp.status === 429) { await detailsResp.text(); retryCount++; if (retryCount > 3) break; await new Promise(r => setTimeout(r, 2000 * retryCount)); continue; }
+            break;
+          }
+          
+          if (!detailsResp!.ok) { await detailsResp!.text(); break; }
+          
+          const detailsData = await detailsResp!.json();
+          const results = detailsData.results || [];
+          
+          if (results.length === 0) { hasMore = false; break; }
+          
+          // Search for our order in this page
+          for (const item of results) {
+            const salesInfo = (item.sales_info || [])[0] || {};
+            if (String(salesInfo.order_id) === String(orderId)) {
+              const chargeInfo = item.charge_info || {};
+              const ct = (chargeInfo.transaction_detail || chargeInfo.concept_type || '').toLowerCase();
+              const amount = Math.abs(chargeInfo.detail_amount || 0);
+              
+              console.log(`[RealCosts] Strategy 3: FOUND order ${orderId} in period ${periodKey}: type="${ct}" amount=${amount}`);
+              
+              if (ct.includes('custo por vender') || ct.includes('custo por cobrar') || 
+                  ct.includes('sale_fee') || ct.includes('cargo por venta')) {
+                feeML += amount;
+              } else if (ct.includes('tarifa de envio') || ct.includes('envio extra') || 
+                         ct.includes('envio intermunicipal') || ct.includes('shipping')) {
+                if (shippingCostSeller === 0) shippingCostSeller = amount;
+              } else if (ct.includes('taxa de parcelamento') || ct.includes('installment')) {
+                installmentsCost += amount;
+              }
             }
           }
           
-          if (feeML > 0) { 
-            feeMLSource = "billing"; 
-            sourceRefs.push("billing_movements:api"); 
-          } else if (results.length > 0) {
-            console.log(`[RealCosts] Strategy 3: movements found but no commission. Raw: ${JSON.stringify(results).substring(0, 2000)}`);
-          }
-          break;
+          offset += results.length;
+          hasMore = results.length >= 200;
+          pagesSearched++;
+          
+          // If we found our order's commission, stop searching
+          if (feeML > 0) break;
+          
+          // Small delay between pages
+          await new Promise(r => setTimeout(r, 300));
         }
-        
-        if (movResp.status === 401) { 
-          await movResp.text(); 
-          if (await tryRefreshToken()) continue; 
-          break; 
-        }
-        if (movResp.status === 429) { 
-          await movResp.text(); 
-          await new Promise(r => setTimeout(r, 2000 * (attempt + 1))); 
-          continue; 
-        }
-        const errText = await movResp.text();
-        console.log(`[RealCosts] Strategy 3: movements error: ${errText.substring(0, 500)}`);
-        break;
       }
-    } catch (e) { console.error(`[RealCosts] Strategy 3 billing movements error:`, e); }
+      
+      if (feeML > 0) { 
+        feeMLSource = "billing"; 
+        sourceRefs.push("billing_period_details:api_search"); 
+        console.log(`[RealCosts] Strategy 3: SUCCESS - found fee_ml=${feeML} for order ${orderId}`);
+      } else {
+        console.log(`[RealCosts] Strategy 3: no commission found in billing periods for order ${orderId}`);
+      }
+    } catch (e) { console.error(`[RealCosts] Strategy 3 billing period search error:`, e); }
   }
 
   // Final: if all 3 strategies exhausted and still no fee but have shipping, mark as billing
@@ -657,62 +680,72 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
       }
     }
 
-    // Strategy 3: Search billing movements for this specific order
+    // Strategy 3: Search billing period details via API for this specific order
     if (feeMLSource === "pending") {
       try {
-        const movementsUrl = `https://api.mercadolibre.com/billing/integration/movements/search?user_id=${sellerId}&reference=${order.order_id}&limit=50`;
+        const orderDate = order.created_at_meli ? new Date(order.created_at_meli) : new Date();
+        const y = orderDate.getFullYear();
+        const m = orderDate.getMonth();
+        const periodKeys = [
+          `${y}-${String(m + 1).padStart(2, '0')}-01`,
+          `${new Date(y, m + 1, 1).getFullYear()}-${String(new Date(y, m + 1, 1).getMonth() + 1).padStart(2, '0')}-01`,
+        ];
         
-        for (let attempt = 0; attempt < 3; attempt++) {
-          const movResp = await fetch(movementsUrl, { headers: { Authorization: `Bearer ${currentToken}` } });
+        for (const periodKey of periodKeys) {
+          if (feeML > 0) break;
+          let offset = 0;
+          let hasMore = true;
+          let pages = 0;
           
-          if (movResp.ok) {
-            const movData = await movResp.json();
-            const results = movData.results || movData.movements || [];
+          while (hasMore && pages < 50) {
+            const url = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/group/ML/details?document_type=BILL&limit=200&offset=${offset}`;
+            let resp: Response;
+            let retries = 0;
+            while (true) {
+              resp = await fetch(url, { headers: { Authorization: `Bearer ${currentToken}` } });
+              if (resp.status === 401) {
+                await resp.text();
+                const ML_APP_ID2 = Deno.env.get('ML_APP_ID') || '';
+                const ML_SECRET_KEY2 = Deno.env.get('ML_SECRET_KEY') || '';
+                const { data: acct2 } = await supabase.from("ml_accounts").select("id, refresh_token").eq("ml_user_id", sellerId).eq("is_active", true).maybeSingle();
+                if (acct2?.refresh_token) {
+                  const tr2 = await fetch('https://api.mercadolibre.com/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'refresh_token', client_id: ML_APP_ID2, client_secret: ML_SECRET_KEY2, refresh_token: acct2.refresh_token }) });
+                  if (tr2.ok) { const td2 = await tr2.json(); currentToken = td2.access_token; await supabase.from("ml_accounts").update({ access_token: td2.access_token, refresh_token: td2.refresh_token, token_expires_at: new Date(Date.now() + td2.expires_in * 1000).toISOString(), updated_at: new Date().toISOString() }).eq("id", acct2.id); continue; }
+                  await tr2.text();
+                }
+                break;
+              }
+              if (resp.status === 429) { await resp.text(); retries++; if (retries > 3) break; await new Promise(r => setTimeout(r, 2000 * retries)); continue; }
+              break;
+            }
+            if (!resp!.ok) { await resp!.text(); break; }
             
-            for (const mov of results) {
-              const concept = (mov.concept || mov.type || mov.detail || '').toLowerCase();
-              const chargeType = (mov.charge_info?.transaction_detail || mov.charge_info?.concept_type || '').toLowerCase();
-              const amount = Math.abs(mov.amount || mov.charge_info?.detail_amount || 0);
-              
-              if (chargeType.includes('custo por vender') || chargeType.includes('custo por cobrar') || 
-                  chargeType.includes('sale_fee') || chargeType.includes('cargo por venta') ||
-                  concept.includes('sale_fee') || concept.includes('commission') || concept.includes('comisi')) {
-                feeML += amount;
-              } else if (chargeType.includes('tarifa de envio') || chargeType.includes('envio extra') || 
-                         chargeType.includes('envio intermunicipal') || chargeType.includes('shipping') ||
-                         concept.includes('shipping')) {
-                if (shippingCostSeller === 0) shippingCostSeller += amount;
-              } else if (chargeType.includes('taxa de parcelamento') || chargeType.includes('installment') ||
-                         concept.includes('financing') || concept.includes('installment')) {
-                installmentsCost += amount;
+            const data = await resp!.json();
+            const results = data.results || [];
+            if (results.length === 0) { hasMore = false; break; }
+            
+            for (const item of results) {
+              const salesInfo = (item.sales_info || [])[0] || {};
+              if (String(salesInfo.order_id) === String(order.order_id)) {
+                const chargeInfo = item.charge_info || {};
+                const ct = (chargeInfo.transaction_detail || chargeInfo.concept_type || '').toLowerCase();
+                const amount = Math.abs(chargeInfo.detail_amount || 0);
+                if (ct.includes('custo por vender') || ct.includes('custo por cobrar') || ct.includes('sale_fee') || ct.includes('cargo por venta')) feeML += amount;
+                else if ((ct.includes('tarifa de envio') || ct.includes('envio extra') || ct.includes('envio intermunicipal') || ct.includes('shipping')) && shippingCostSeller === 0) shippingCostSeller = amount;
+                else if (ct.includes('taxa de parcelamento') || ct.includes('installment')) installmentsCost += amount;
               }
             }
             
-            if (feeML > 0) { feeMLSource = "billing"; sourceRefs.push("billing_movements:api"); updatedCount++; }
-            break;
+            offset += results.length;
+            hasMore = results.length >= 200;
+            pages++;
+            if (feeML > 0) break;
+            await new Promise(r => setTimeout(r, 300));
           }
-          
-          if (movResp.status === 401) {
-            await movResp.text();
-            const ML_APP_ID2 = Deno.env.get('ML_APP_ID') || '';
-            const ML_SECRET_KEY2 = Deno.env.get('ML_SECRET_KEY') || '';
-            const { data: acct2 } = await supabase.from("ml_accounts").select("id, refresh_token").eq("ml_user_id", sellerId).eq("is_active", true).maybeSingle();
-            if (acct2?.refresh_token) {
-              const tr2 = await fetch('https://api.mercadolibre.com/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'refresh_token', client_id: ML_APP_ID2, client_secret: ML_SECRET_KEY2, refresh_token: acct2.refresh_token }) });
-              if (tr2.ok) {
-                const td2 = await tr2.json();
-                currentToken = td2.access_token;
-                await supabase.from("ml_accounts").update({ access_token: td2.access_token, refresh_token: td2.refresh_token, token_expires_at: new Date(Date.now() + td2.expires_in * 1000).toISOString(), updated_at: new Date().toISOString() }).eq("id", acct2.id);
-                continue;
-              }
-              await tr2.text();
-            }
-            break;
-          }
-          if (movResp.status === 429) { await movResp.text(); await new Promise(r => setTimeout(r, 2000 * (attempt + 1))); continue; }
-          await movResp.text(); break;
         }
-      } catch (e) { console.error(`[ReprocessPending] billing movements error for ${order.order_id}:`, e); }
+        
+        if (feeML > 0) { feeMLSource = "billing"; sourceRefs.push("billing_period_details:api_search"); updatedCount++; }
+      } catch (e) { console.error(`[ReprocessPending] billing period search error for ${order.order_id}:`, e); }
     }
 
     // Final: if all 3 strategies exhausted and still no fee but have shipping, mark as billing (all sources checked)
