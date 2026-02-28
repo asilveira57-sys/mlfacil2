@@ -264,21 +264,40 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
   // Strategy 3: If no billing at all, try /orders/{orderId}/billing_info for seller.charges
   if (feeMLSource === "pending") {
     try {
+      console.log(`[RealCosts] Strategy 3: calling /orders/${orderId}/billing_info`);
       const billingResp = await fetch(`https://api.mercadolibre.com/orders/${orderId}/billing_info`, { headers: { Authorization: `Bearer ${currentToken}` } });
+      console.log(`[RealCosts] Strategy 3: billing_info status=${billingResp.status} for order ${orderId}`);
       if (billingResp.ok) {
         const billingData = await billingResp.json();
+        console.log(`[RealCosts] Strategy 3: billing_info raw keys=${JSON.stringify(Object.keys(billingData))} for order ${orderId}`);
+        // The API may return { billing_info: { ... } } or directly the object
         const billingInfo = billingData.billing_info || billingData;
-        if (billingInfo.seller?.charges) {
-          for (const charge of billingInfo.seller.charges) {
-            const ct = (charge.type || '').toLowerCase();
-            const amount = Math.abs(charge.value || 0);
-            if (ct.includes('sale_fee') || ct.includes('commission')) feeML += amount;
-            else if (ct.includes('shipping')) shippingCostSeller += amount;
-            else if (ct.includes('financing') || ct.includes('installment')) installmentsCost += amount;
-          }
-          if (feeML > 0) { feeMLSource = "billing"; sourceRefs.push("billing_info:api"); }
+        console.log(`[RealCosts] Strategy 3: billingInfo keys=${JSON.stringify(Object.keys(billingInfo))}, has seller=${!!billingInfo.seller}, seller keys=${billingInfo.seller ? JSON.stringify(Object.keys(billingInfo.seller)) : 'N/A'}`);
+        
+        // Try seller.charges first
+        const charges = billingInfo.seller?.charges || billingInfo.charges || [];
+        console.log(`[RealCosts] Strategy 3: found ${charges.length} charges for order ${orderId}`);
+        if (charges.length > 0) {
+          console.log(`[RealCosts] Strategy 3: charges detail: ${JSON.stringify(charges)}`);
         }
-      } else { await billingResp.text(); }
+        
+        for (const charge of charges) {
+          const ct = (charge.type || charge.charge_type || charge.name || '').toLowerCase();
+          const amount = Math.abs(charge.value || charge.amount || charge.gross_amount || 0);
+          console.log(`[RealCosts] Strategy 3: charge type="${ct}" amount=${amount}`);
+          if (ct.includes('sale_fee') || ct.includes('commission') || ct.includes('fee') || ct.includes('comisi')) feeML += amount;
+          else if (ct.includes('shipping') || ct.includes('envio')) shippingCostSeller += amount;
+          else if (ct.includes('financing') || ct.includes('installment') || ct.includes('parcela')) installmentsCost += amount;
+        }
+        if (feeML > 0) { feeMLSource = "billing"; sourceRefs.push("billing_info:api"); }
+        else {
+          // Log full response for debugging
+          console.log(`[RealCosts] Strategy 3: NO commission found. Full response: ${JSON.stringify(billingData).substring(0, 2000)}`);
+        }
+      } else { 
+        const errText = await billingResp.text();
+        console.log(`[RealCosts] Strategy 3: billing_info error response: ${errText.substring(0, 500)}`);
+      }
     } catch (e) { console.error(`[RealCosts] billing_info error:`, e); }
   }
 
