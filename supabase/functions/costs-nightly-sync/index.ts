@@ -357,46 +357,68 @@ async function processBillingSync(supabase: any, userId: string, sellerId: strin
       }
 
       const periodKey = period.key;
-      const detailsUrl = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/group/ML/details?document_type=BILL&limit=1000&offset=0`;
-      
-      await sleep(12000); // Rate limit: 5 req/min
-      
-      const detailsRes = await fetch(detailsUrl, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      let offset = 0;
+      const PAGE_LIMIT = 1000;
 
-      if (!detailsRes.ok) continue;
+      // Paginated loop — fetch ALL billing details for this period
+      while (true) {
+        if (Date.now() - startTime >= MAX_BILLING_RUNTIME_MS) {
+          await supabase.from('meli_billing_details_sync_state').update({
+            status: 'paused',
+            last_error: null,
+          }).eq('seller_id', sellerId);
+          break;
+        }
 
-      const detailsData = await detailsRes.json();
-      const results = detailsData.results || [];
+        const detailsUrl = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/group/ML/details?document_type=BILL&limit=${PAGE_LIMIT}&offset=${offset}`;
+        
+        await sleep(12000); // Rate limit: 5 req/min
+        
+        const detailsRes = await fetch(detailsUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
 
-      const records = results.map((item: any) => {
-        const chargeInfo = item.charge_info || {};
-        const salesInfo = (item.sales_info || [])[0] || {};
-        const shippingInfo = item.shipping_info || {};
+        if (!detailsRes.ok) break;
 
-        return {
-          seller_id: sellerId,
-          period_key: periodKey,
-          detail_id: String(chargeInfo.detail_id || `${periodKey}-${Math.random()}`),
-          order_id: salesInfo.order_id || null,
-          shipment_id: shippingInfo.shipping_id || null,
-          charge_type: chargeInfo.transaction_detail || chargeInfo.concept_type || 'unknown',
-          charge_description: chargeInfo.charge_bonified_id ? `Bonified: ${chargeInfo.charge_bonified_id}` : null,
-          gross_amount: chargeInfo.detail_amount || 0,
-          net_amount: chargeInfo.detail_amount || 0,
-          currency_id: chargeInfo.currency_id || 'BRL',
-          created_at_meli: item.created_date || null,
-          fetched_at: new Date().toISOString(),
-          raw_data: item,
-        };
-      });
+        const detailsData = await detailsRes.json();
+        const results = detailsData.results || [];
 
-      if (records.length > 0) {
-        await supabase
-          .from('meli_billing_details_cache')
-          .upsert(records, { onConflict: 'seller_id,period_key,detail_id' });
-        totalInserted += records.length;
+        if (results.length === 0) break;
+
+        const records = results.map((item: any) => {
+          const chargeInfo = item.charge_info || {};
+          const salesInfo = (item.sales_info || [])[0] || {};
+          const shippingInfo = item.shipping_info || {};
+
+          return {
+            seller_id: sellerId,
+            period_key: periodKey,
+            detail_id: String(chargeInfo.detail_id || `${periodKey}-${Math.random()}`),
+            order_id: salesInfo.order_id || null,
+            shipment_id: shippingInfo.shipping_id || null,
+            charge_type: chargeInfo.transaction_detail || chargeInfo.concept_type || 'unknown',
+            charge_description: chargeInfo.charge_bonified_id ? `Bonified: ${chargeInfo.charge_bonified_id}` : null,
+            gross_amount: chargeInfo.detail_amount || 0,
+            net_amount: chargeInfo.detail_amount || 0,
+            currency_id: chargeInfo.currency_id || 'BRL',
+            created_at_meli: item.created_date || null,
+            fetched_at: new Date().toISOString(),
+            raw_data: item,
+          };
+        });
+
+        if (records.length > 0) {
+          await supabase
+            .from('meli_billing_details_cache')
+            .upsert(records, { onConflict: 'seller_id,period_key,detail_id' });
+          totalInserted += records.length;
+        }
+
+        console.log(`[costs-nightly] Period ${periodKey}: fetched page at offset=${offset}, got ${results.length} records`);
+
+        // If we got fewer than PAGE_LIMIT, this is the last page
+        if (results.length < PAGE_LIMIT) break;
+        offset += results.length;
       }
     }
 

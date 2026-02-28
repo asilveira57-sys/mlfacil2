@@ -204,56 +204,30 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
 
       for (const period of targetPeriods) {
         const periodKey = period.key;
-        const detailsUrl = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/group/ML/details?document_type=BILL&limit=1000&offset=0`;
-        
-        const detailsRes = await fetch(detailsUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
-        if (!detailsRes.ok) continue;
+        let offset = 0;
+        const PAGE_LIMIT = 1000;
+        let foundOrder = false;
 
-        const detailsData = await detailsRes.json();
-        const results = detailsData.results || [];
+        // Paginated loop — search ALL pages until we find this order's billing
+        while (true) {
+          const detailsUrl = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/group/ML/details?document_type=BILL&limit=${PAGE_LIMIT}&offset=${offset}`;
+          
+          const detailsRes = await fetch(detailsUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+          if (!detailsRes.ok) break;
 
-        // Filter for this specific order and upsert to cache
-        const orderResults = results.filter((item: any) => {
-          const salesInfo = (item.sales_info || [])[0] || {};
-          return String(salesInfo.order_id) === String(orderId);
-        });
+          const detailsData = await detailsRes.json();
+          const results = detailsData.results || [];
 
-        if (orderResults.length > 0) {
-          const records = orderResults.map((item: any) => {
-            const chargeInfo = item.charge_info || {};
+          if (results.length === 0) break;
+
+          // Filter for this specific order
+          const orderResults = results.filter((item: any) => {
             const salesInfo = (item.sales_info || [])[0] || {};
-            const shippingInfo = item.shipping_info || {};
-            return {
-              seller_id: sellerId,
-              period_key: periodKey,
-              detail_id: String(chargeInfo.detail_id || `${periodKey}-${Math.random()}`),
-              order_id: salesInfo.order_id || null,
-              shipment_id: shippingInfo.shipping_id || null,
-              charge_type: chargeInfo.transaction_detail || chargeInfo.concept_type || 'unknown',
-              charge_description: chargeInfo.charge_bonified_id ? `Bonified: ${chargeInfo.charge_bonified_id}` : null,
-              gross_amount: chargeInfo.detail_amount || 0,
-              net_amount: chargeInfo.detail_amount || 0,
-              currency_id: chargeInfo.currency_id || 'BRL',
-              created_at_meli: item.created_date || null,
-              fetched_at: new Date().toISOString(),
-              raw_data: item,
-            };
+            return String(salesInfo.order_id) === String(orderId);
           });
 
-          await supabase.from('meli_billing_details_cache').upsert(records, { onConflict: 'seller_id,period_key,detail_id' });
-          apiBillingFetched = true;
-          console.log(`[RealCosts] resync_single: fetched ${records.length} billing records from API for order ${orderId} in period ${periodKey}`);
-          break; // Found billing for this order, stop searching periods
-        }
-
-        // Also check for shipment-linked entries
-        if (order.shipment_id) {
-          const shipResults = results.filter((item: any) => {
-            const shippingInfo = item.shipping_info || {};
-            return String(shippingInfo.shipping_id) === String(order.shipment_id);
-          });
-          if (shipResults.length > 0) {
-            const records = shipResults.map((item: any) => {
+          if (orderResults.length > 0) {
+            const records = orderResults.map((item: any) => {
               const chargeInfo = item.charge_info || {};
               const salesInfo = (item.sales_info || [])[0] || {};
               const shippingInfo = item.shipping_info || {};
@@ -273,11 +247,58 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
                 raw_data: item,
               };
             });
+
             await supabase.from('meli_billing_details_cache').upsert(records, { onConflict: 'seller_id,period_key,detail_id' });
             apiBillingFetched = true;
-            console.log(`[RealCosts] resync_single: fetched ${records.length} shipment billing records from API for shipment ${order.shipment_id}`);
+            foundOrder = true;
+            console.log(`[RealCosts] resync_single: fetched ${records.length} billing records from API for order ${orderId} in period ${periodKey} (offset=${offset})`);
+            break;
           }
+
+          // Also check for shipment-linked entries on this page
+          if (order.shipment_id) {
+            const shipResults = results.filter((item: any) => {
+              const shippingInfo = item.shipping_info || {};
+              return String(shippingInfo.shipping_id) === String(order.shipment_id);
+            });
+            if (shipResults.length > 0) {
+              const records = shipResults.map((item: any) => {
+                const chargeInfo = item.charge_info || {};
+                const salesInfo = (item.sales_info || [])[0] || {};
+                const shippingInfo = item.shipping_info || {};
+                return {
+                  seller_id: sellerId,
+                  period_key: periodKey,
+                  detail_id: String(chargeInfo.detail_id || `${periodKey}-${Math.random()}`),
+                  order_id: salesInfo.order_id || null,
+                  shipment_id: shippingInfo.shipping_id || null,
+                  charge_type: chargeInfo.transaction_detail || chargeInfo.concept_type || 'unknown',
+                  charge_description: chargeInfo.charge_bonified_id ? `Bonified: ${chargeInfo.charge_bonified_id}` : null,
+                  gross_amount: chargeInfo.detail_amount || 0,
+                  net_amount: chargeInfo.detail_amount || 0,
+                  currency_id: chargeInfo.currency_id || 'BRL',
+                  created_at_meli: item.created_date || null,
+                  fetched_at: new Date().toISOString(),
+                  raw_data: item,
+                };
+              });
+              await supabase.from('meli_billing_details_cache').upsert(records, { onConflict: 'seller_id,period_key,detail_id' });
+              apiBillingFetched = true;
+              foundOrder = true;
+              console.log(`[RealCosts] resync_single: fetched ${records.length} shipment billing records from API for shipment ${order.shipment_id} (offset=${offset})`);
+              break;
+            }
+          }
+
+          // If fewer than PAGE_LIMIT results, this is the last page
+          if (results.length < PAGE_LIMIT) break;
+          offset += results.length;
+
+          // Rate limit between pages
+          await new Promise(r => setTimeout(r, 200));
         }
+
+        if (foundOrder) break; // Found in this period, no need to check others
       }
     }
   } catch (apiError) {
