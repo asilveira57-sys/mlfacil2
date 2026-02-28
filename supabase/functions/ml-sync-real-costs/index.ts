@@ -167,10 +167,12 @@ async function handleReset(supabase: any, userId: string, sellerId: string, cors
 async function handleResyncSingle(supabase: any, userId: string, sellerId: string, orderId: string, corsHeaders: any) {
   console.log(`[RealCosts] resync_single for order ${orderId}, seller ${sellerId}`);
   
-  const { data: mlAccount } = await supabase.from("ml_accounts").select("access_token").eq("ml_user_id", sellerId).eq("is_active", true).maybeSingle();
+  const { data: mlAccount } = await supabase.from("ml_accounts").select("access_token, refresh_token, token_expires_at").eq("ml_user_id", sellerId).eq("is_active", true).maybeSingle();
   if (!mlAccount) {
     return new Response(JSON.stringify({ error: "ML account not found" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
+
+  const accessToken = mlAccount.access_token;
 
   // Get order from cache
   const { data: order } = await supabase.from("meli_orders_cache").select("order_id, shipment_id, total_amount, created_at_meli").eq("seller_id", sellerId).eq("order_id", orderId).maybeSingle();
@@ -178,6 +180,111 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
     return new Response(JSON.stringify({ error: "Order not found in cache" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
+  // ---- NEW: Fetch billing details directly from ML API for this order's period ----
+  let apiBillingFetched = false;
+  try {
+    // Determine the period key from the order date (YYYY-MM format)
+    const orderDate = new Date(order.created_at_meli);
+    const year = orderDate.getFullYear();
+    const month = String(orderDate.getMonth() + 1).padStart(2, '0');
+    
+    // Fetch billing periods to find the correct period_key
+    const periodsUrl = `https://api.mercadolibre.com/billing/integration/monthly/periods?group=ML&document_type=BILL&limit=6&offset=0`;
+    const periodsRes = await fetch(periodsUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+    
+    if (periodsRes.ok) {
+      const periodsData = await periodsRes.json();
+      const periods = periodsData.results || [];
+      
+      // Find periods that could contain this order (current month and previous)
+      const targetPeriods = periods.filter((p: any) => {
+        // Include the period matching the order month and the next one (billing can lag)
+        return true; // Process up to 3 most recent periods for safety
+      }).slice(0, 3);
+
+      for (const period of targetPeriods) {
+        const periodKey = period.key;
+        const detailsUrl = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/group/ML/details?document_type=BILL&limit=1000&offset=0`;
+        
+        const detailsRes = await fetch(detailsUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (!detailsRes.ok) continue;
+
+        const detailsData = await detailsRes.json();
+        const results = detailsData.results || [];
+
+        // Filter for this specific order and upsert to cache
+        const orderResults = results.filter((item: any) => {
+          const salesInfo = (item.sales_info || [])[0] || {};
+          return String(salesInfo.order_id) === String(orderId);
+        });
+
+        if (orderResults.length > 0) {
+          const records = orderResults.map((item: any) => {
+            const chargeInfo = item.charge_info || {};
+            const salesInfo = (item.sales_info || [])[0] || {};
+            const shippingInfo = item.shipping_info || {};
+            return {
+              seller_id: sellerId,
+              period_key: periodKey,
+              detail_id: String(chargeInfo.detail_id || `${periodKey}-${Math.random()}`),
+              order_id: salesInfo.order_id || null,
+              shipment_id: shippingInfo.shipping_id || null,
+              charge_type: chargeInfo.transaction_detail || chargeInfo.concept_type || 'unknown',
+              charge_description: chargeInfo.charge_bonified_id ? `Bonified: ${chargeInfo.charge_bonified_id}` : null,
+              gross_amount: chargeInfo.detail_amount || 0,
+              net_amount: chargeInfo.detail_amount || 0,
+              currency_id: chargeInfo.currency_id || 'BRL',
+              created_at_meli: item.created_date || null,
+              fetched_at: new Date().toISOString(),
+              raw_data: item,
+            };
+          });
+
+          await supabase.from('meli_billing_details_cache').upsert(records, { onConflict: 'seller_id,period_key,detail_id' });
+          apiBillingFetched = true;
+          console.log(`[RealCosts] resync_single: fetched ${records.length} billing records from API for order ${orderId} in period ${periodKey}`);
+          break; // Found billing for this order, stop searching periods
+        }
+
+        // Also check for shipment-linked entries
+        if (order.shipment_id) {
+          const shipResults = results.filter((item: any) => {
+            const shippingInfo = item.shipping_info || {};
+            return String(shippingInfo.shipping_id) === String(order.shipment_id);
+          });
+          if (shipResults.length > 0) {
+            const records = shipResults.map((item: any) => {
+              const chargeInfo = item.charge_info || {};
+              const salesInfo = (item.sales_info || [])[0] || {};
+              const shippingInfo = item.shipping_info || {};
+              return {
+                seller_id: sellerId,
+                period_key: periodKey,
+                detail_id: String(chargeInfo.detail_id || `${periodKey}-${Math.random()}`),
+                order_id: salesInfo.order_id || null,
+                shipment_id: shippingInfo.shipping_id || null,
+                charge_type: chargeInfo.transaction_detail || chargeInfo.concept_type || 'unknown',
+                charge_description: chargeInfo.charge_bonified_id ? `Bonified: ${chargeInfo.charge_bonified_id}` : null,
+                gross_amount: chargeInfo.detail_amount || 0,
+                net_amount: chargeInfo.detail_amount || 0,
+                currency_id: chargeInfo.currency_id || 'BRL',
+                created_at_meli: item.created_date || null,
+                fetched_at: new Date().toISOString(),
+                raw_data: item,
+              };
+            });
+            await supabase.from('meli_billing_details_cache').upsert(records, { onConflict: 'seller_id,period_key,detail_id' });
+            apiBillingFetched = true;
+            console.log(`[RealCosts] resync_single: fetched ${records.length} shipment billing records from API for shipment ${order.shipment_id}`);
+          }
+        }
+      }
+    }
+  } catch (apiError) {
+    console.error(`[RealCosts] resync_single: billing API error for order ${orderId}:`, apiError);
+  }
+
+  // ---- Now read from (freshly updated) cache ----
   // 1. Fetch billing details for this specific order
   const { data: billingDetails } = await supabase
     .from("meli_billing_details_cache")
@@ -188,6 +295,7 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
   let feeML = 0, shippingCostSeller = 0, installmentsCost = 0, adjustments = 0;
   let feeMLSource = "pending";
   const sourceRefs: string[] = [];
+  if (apiBillingFetched) sourceRefs.push("billing:api:resync");
 
   if (billingDetails && billingDetails.length > 0) {
     for (const detail of billingDetails) {

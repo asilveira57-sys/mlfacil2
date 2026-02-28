@@ -191,11 +191,14 @@ Deno.serve(async (req) => {
           .eq('seller_id', sellerId)
           .maybeSingle();
 
-        if (!billingState || billingState.status === 'paused' || billingState.status === 'error') {
-          console.log(`[costs-nightly] Triggering billing sync for ${sellerId} (state: ${billingState?.status || 'none'})`);
+        // ALWAYS re-execute billing sync: when done, fetch recent periods; when paused/error, resume
+        const shouldSyncBilling = !billingState || billingState.status === 'paused' || billingState.status === 'error' || billingState.status === 'done';
+        if (shouldSyncBilling) {
+          const syncScope = billingState?.status === 'done' ? 'recent' : (billingState?.scope || 'recent');
+          console.log(`[costs-nightly] Triggering billing sync for ${sellerId} (state: ${billingState?.status || 'none'}, scope: ${syncScope})`);
           
           // Call billing sync with service role (no user auth needed)
-          await processBillingSync(supabase, userId, sellerId, accessToken, billingState?.scope || 'recent');
+          await processBillingSync(supabase, userId, sellerId, accessToken, syncScope);
           stats.billing_synced++;
         }
 
