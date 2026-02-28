@@ -100,7 +100,7 @@ export function useDailyMessage(userId: string | undefined) {
 
       return picked as DailyMessage;
     },
-    enabled: !!userId && preferences?.exibir_mensagem !== false,
+    enabled: !!userId && preferences !== undefined && preferences?.exibir_mensagem !== false,
   });
 
   // Fetch like count for current message
