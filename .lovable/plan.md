@@ -1,57 +1,62 @@
 
 
-## Diagnóstico Completo — Sistema de Custos Travado
+## Diagnóstico — 81 Pedidos Travados em "Sem Custo" (ADECONEX.SP)
 
-### Problema 1: Billing sync NUNCA re-executa (causa raiz principal)
+### Causa Raiz Confirmada: Billing fetch SEM paginação
 
-**Causa confirmada no banco:**
-- ADECONEXVV (66043362): billing_details_cache última busca em **19/01/2026** (40 dias atrás!)
-- ADECONEX.SP (1411095727): última busca em **11/02/2026** (17 dias atrás)
-- Ambos com `billing_details_sync_state.status = 'done'`
+**Dados do banco:**
+- Período `2026-01-01`: 2000 registros em cache (exatamente 2×1000 — fetch truncado)
+- Período `2026-02-01`: 2109 registros em cache (incompleto)
+- 81 pedidos pendentes (Jan 13-15 + Feb 16-20), todos `order_status: paid`, nenhum cancelado
+- **Zero** registros de billing no cache para esses order_ids específicos
+- A comissão desses pedidos está em páginas 3+ do billing API, nunca buscadas
 
-**O bug:** No `costs-nightly-sync` (linha 194), a condição para executar billing sync é:
-```
-if (!billingState || billingState.status === 'paused' || billingState.status === 'error')
-```
-Quando status é `'done'`, **pula o billing sync**. Nunca mais busca dados novos. Por isso:
-- ADECONEXVV: 0 pedidos com `fee_ml_source='billing'` nos últimos 30 dias → aba Pedidos vazia
-- ADECONEX.SP: último pedido com billing é de 11/02 → pedidos após essa data ficam pending
+**O bug está em dois lugares:**
 
-**Correção:** Alterar a condição para SEMPRE executar billing sync (scope `recent`) quando `status === 'done'`, resetando o estado para buscar os períodos mais recentes.
+1. **`costs-nightly-sync` linha 360:** `limit=1000&offset=0` hardcoded — busca apenas a primeira página de billing por período. Seller com alto volume tem 3000+ entries por período.
 
----
+2. **`resync_single` linha 207:** mesmo problema — `limit=1000&offset=0` sem loop. A busca individual busca 1000 registros por período, não encontra o pedido, e desiste.
 
-### Problema 2: resync_single não busca billing via API
-
-**Causa:** `handleResyncSingle` lê apenas do cache local (`meli_billing_details_cache`). Se o billing não foi sincronizado, não encontra nada → retorna `fee_ml_source: 'pending'` e aparenta sucesso ("resincronizado") sem trazer dados.
-
-**Confirmado:** Pedido `2000015175713528` após resync mostra `fee_ml_source: pending`, `cost_fees: 0`, `commission_cost: 0`.
-
-**Correção:** Antes de ler o cache, `resync_single` deve chamar a API de billing do ML diretamente para aquele pedido/período específico e atualizar o cache.
+3. **`handleReprocessPending`** já tem paginação correta (linhas 604-653), mas tem tempo limitado de 40s que pode não ser suficiente para percorrer todos os períodos com 3000+ entries cada.
 
 ---
 
-### Problema 3: Seletor de conta duplicado
-
-**Causa:** A página `Custos.tsx` renderiza um `<Select>` próprio no `headerContent` (linhas 114-126) com a lista de contas. Simultaneamente, o layout global já renderiza o `AccountSwitcher` no header. Resultado: dois seletores lado a lado.
-
-**Correção:** Remover o `<Select>` de contas do `headerContent` em `Custos.tsx`, mantendo apenas o botão "Recalcular".
-
----
-
-### Problema 4: backfill no nightly sync não resolve installments (bug residual)
-
-No `costs-nightly-sync`, a função `processBackfill` (linha 498) calcula `costFees = feeML + installmentsCost + adjustments`, incluindo parcelamento no custo — contrário à correção recente.
-
-**Correção:** Alinhar com as correções já feitas: `costFees = feeML + adjustments` (sem installments).
-
----
-
-### Resumo de alterações
+### Correções
 
 | Arquivo | Alteração |
 |---|---|
-| `supabase/functions/costs-nightly-sync/index.ts` | L194: incluir `status === 'done'` para re-executar billing sync; L498: excluir installments de costFees |
-| `supabase/functions/ml-sync-real-costs/index.ts` | `handleResyncSingle`: buscar billing via API do ML antes de ler cache local |
-| `src/pages/Custos.tsx` | Remover `<Select>` de conta do headerContent, manter apenas botão Recalcular |
+| `supabase/functions/costs-nightly-sync/index.ts` | Linhas 358-400: Adicionar loop de paginação com `offset` incremental (igual ao `handleReprocessPending`) em vez de `offset=0` fixo |
+| `supabase/functions/ml-sync-real-costs/index.ts` | Linhas 205-248: Adicionar paginação ao fetch de billing no `resync_single` — loop com offset até encontrar o pedido ou esgotar páginas |
+
+### Detalhes Técnicos
+
+**costs-nightly-sync — billing fetch paginado:**
+```text
+for each period:
+  offset = 0
+  loop:
+    fetch /details?limit=1000&offset={offset}
+    if empty → break
+    upsert records
+    offset += results.length
+    if results.length < 1000 → break (última página)
+    sleep(200ms) // rate limit
+```
+
+**resync_single — billing fetch paginado:**
+```text
+for each period (up to 3):
+  offset = 0
+  found = false
+  loop:
+    fetch /details?limit=1000&offset={offset}
+    filter for target order_id
+    if found → upsert + break
+    if results.length < 1000 → break (última página)
+    offset += results.length
+    sleep(200ms)
+  if found → break period loop
+```
+
+Essas duas alterações garantem que pedidos em páginas 2+ do billing sejam capturados tanto pelo sync noturno quanto pela ressincronização individual.
 
