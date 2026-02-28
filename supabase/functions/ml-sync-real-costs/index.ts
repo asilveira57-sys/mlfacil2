@@ -180,30 +180,39 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
     return new Response(JSON.stringify({ error: "Order not found in cache" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
-  // ---- Use /orders/{order_id} to get payments[].marketplace_fee (ML commission) ----
+  // ---- Multi-strategy fee extraction ----
   let feeML = 0, shippingCostSeller = 0, installmentsCost = 0, adjustments = 0;
   let feeMLSource = "pending";
   const sourceRefs: string[] = [];
+  let currentToken = accessToken;
 
-  // Fetch order details to get marketplace_fee from payments
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // Helper: refresh token if 401
+  async function tryRefreshToken(): Promise<boolean> {
+    const ML_APP_ID = Deno.env.get('ML_APP_ID') || '';
+    const ML_SECRET_KEY = Deno.env.get('ML_SECRET_KEY') || '';
+    const { data: acct } = await supabase.from("ml_accounts").select("id, refresh_token").eq("ml_user_id", sellerId).eq("is_active", true).maybeSingle();
+    if (!acct?.refresh_token) return false;
+    const tokenResp = await fetch('https://api.mercadolibre.com/oauth/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'refresh_token', client_id: ML_APP_ID, client_secret: ML_SECRET_KEY, refresh_token: acct.refresh_token }),
+    });
+    if (tokenResp.ok) {
+      const td = await tokenResp.json();
+      currentToken = td.access_token;
+      await supabase.from("ml_accounts").update({ access_token: td.access_token, refresh_token: td.refresh_token, token_expires_at: new Date(Date.now() + td.expires_in * 1000).toISOString(), updated_at: new Date().toISOString() }).eq("id", acct.id);
+      console.log(`[RealCosts] resync_single: token refreshed for ${sellerId}`);
+      return true;
+    }
+    await tokenResp.text();
+    return false;
+  }
+
+  // Strategy 1: /orders/{orderId} → payments[].marketplace_fee (most reliable)
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const orderUrl = `https://api.mercadolibre.com/orders/${orderId}`;
-      const orderResp = await fetch(orderUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
-
+      const orderResp = await fetch(`https://api.mercadolibre.com/orders/${orderId}`, { headers: { Authorization: `Bearer ${currentToken}` } });
       if (orderResp.ok) {
-        const orderText = await orderResp.text();
-        if (!orderText || orderText.trim() === '') {
-          console.warn(`[RealCosts] resync_single: empty order body for ${orderId}`);
-          break;
-        }
-        let orderData: any;
-        try { orderData = JSON.parse(orderText); } catch {
-          console.warn(`[RealCosts] resync_single: invalid JSON from order for ${orderId}`);
-          break;
-        }
-
-        // Extract marketplace_fee from payments
+        const orderData = await orderResp.json();
         if (orderData.payments && Array.isArray(orderData.payments)) {
           for (const payment of orderData.payments) {
             if (payment.marketplace_fee != null && payment.marketplace_fee > 0) {
@@ -211,43 +220,79 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
             }
           }
         }
-
         if (feeML > 0) {
           feeMLSource = "billing";
-          sourceRefs.push("order:api:marketplace_fee");
+          sourceRefs.push("orders:api:marketplace_fee");
         }
-
-        // Cache in meli_order_financials_cache
-        await supabase.from("meli_order_financials_cache").upsert({
-          seller_id: sellerId,
-          order_id: orderId,
-          shipment_id: order.shipment_id,
-          cost_sale_fee: feeML,
-          cost_shipping_fee: shippingCostSeller,
-          cost_installment_fee: installmentsCost,
-          cost_cancellations: adjustments,
-          revenue_products: order.total_amount || 0,
-          synced_at: new Date().toISOString(),
-        }, { onConflict: "seller_id,order_id", ignoreDuplicates: false });
-        break; // Success
-      }
-
-      if (orderResp.status === 404) {
-        await orderResp.text();
         break;
       }
-      if (orderResp.status === 429) {
-        await orderResp.text();
-        console.warn(`[RealCosts] resync_single: 429 for order ${orderId}, retry ${attempt + 1}`);
-        await new Promise(r => setTimeout(r, 1500));
-        continue;
+      if (orderResp.status === 401) { await orderResp.text(); if (await tryRefreshToken()) continue; break; }
+      if (orderResp.status === 429) { await orderResp.text(); await new Promise(r => setTimeout(r, 1500 * (attempt + 1))); continue; }
+      await orderResp.text(); break;
+    } catch (e) { console.error(`[RealCosts] orders API error:`, e); break; }
+  }
+
+  // Strategy 2: If still no fee, check meli_billing_details_cache (from billing periods sync)
+  if (feeML === 0) {
+    const { data: billingRows } = await supabase
+      .from("meli_billing_details_cache")
+      .select("charge_type, gross_amount")
+      .eq("seller_id", sellerId)
+      .eq("order_id", parseInt(orderId));
+    
+    if (billingRows?.length) {
+      for (const detail of billingRows) {
+        const ct = (detail.charge_type || "").toLowerCase();
+        const amount = Math.abs(detail.gross_amount || 0);
+        if (ct.includes("custo por vender") || ct.includes("custo por cobrar") || ct.includes("sale_fee") || ct.includes("cargo por venta")) {
+          feeML += amount;
+        } else if (ct.includes("tarifa de envio") || ct.includes("envio extra") || ct.includes("envio intermunicipal") || ct.includes("shipping")) {
+          shippingCostSeller += amount;
+        } else if (ct.includes("taxa de parcelamento") || ct.includes("installment")) {
+          installmentsCost += amount;
+        }
       }
-      await orderResp.text();
-      break;
-    } catch (apiError) {
-      console.error(`[RealCosts] resync_single: order API error for ${orderId}:`, apiError);
-      break;
+      if (feeML > 0) {
+        feeMLSource = "billing";
+        sourceRefs.push("billing_details_cache");
+      } else {
+        // Has billing records but no commission → ML genuinely charges 0 commission for this order
+        feeMLSource = "billing";
+        sourceRefs.push("billing_details_cache:no_commission");
+        console.log(`[RealCosts] resync_single: order ${orderId} has billing records but no commission charge — marking as billing with fee_ml=0`);
+      }
     }
+  }
+
+  // Strategy 3: If no billing at all, try /orders/{orderId}/billing_info for seller.charges
+  if (feeMLSource === "pending") {
+    try {
+      const billingResp = await fetch(`https://api.mercadolibre.com/orders/${orderId}/billing_info`, { headers: { Authorization: `Bearer ${currentToken}` } });
+      if (billingResp.ok) {
+        const billingData = await billingResp.json();
+        const billingInfo = billingData.billing_info || billingData;
+        if (billingInfo.seller?.charges) {
+          for (const charge of billingInfo.seller.charges) {
+            const ct = (charge.type || '').toLowerCase();
+            const amount = Math.abs(charge.value || 0);
+            if (ct.includes('sale_fee') || ct.includes('commission')) feeML += amount;
+            else if (ct.includes('shipping')) shippingCostSeller += amount;
+            else if (ct.includes('financing') || ct.includes('installment')) installmentsCost += amount;
+          }
+          if (feeML > 0) { feeMLSource = "billing"; sourceRefs.push("billing_info:api"); }
+        }
+      } else { await billingResp.text(); }
+    } catch (e) { console.error(`[RealCosts] billing_info error:`, e); }
+  }
+
+  // Cache in meli_order_financials_cache
+  if (feeMLSource === "billing") {
+    await supabase.from("meli_order_financials_cache").upsert({
+      seller_id: sellerId, order_id: orderId, shipment_id: order.shipment_id,
+      cost_sale_fee: feeML, cost_shipping_fee: shippingCostSeller,
+      cost_installment_fee: installmentsCost, cost_cancellations: adjustments,
+      revenue_products: order.total_amount || 0, synced_at: new Date().toISOString(),
+    }, { onConflict: "seller_id,order_id", ignoreDuplicates: false });
   }
 
   // Fallback: Try shipment costs API if still no shipping
@@ -495,13 +540,11 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
   
-  // ---- NEW: Use /orders/{order_id}/billing_info per order (replaces bulk billing period fetch) ----
-  const orderIds = pendingOrders.map((o: any) => o.order_id);
-  const shipmentIds = pendingOrders.map((o: any) => o.shipment_id);
-
+  // ---- Multi-strategy: orders API → billing_details_cache → billing_info ----
   const rowsToUpsert: any[] = [];
   let processedCount = 0;
   let updatedCount = 0;
+  let currentToken = mlAccount.access_token;
 
   for (const order of pendingOrders) {
     if (Date.now() - startTime >= MAX_RUNTIME_MS) break;
@@ -509,25 +552,12 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
     let feeML = 0, feeMLSource = "pending", shippingCostSeller = 0, installmentsCost = 0, adjustments = 0;
     const sourceRefs: string[] = [];
 
-    // Fetch order details to get marketplace_fee from payments
+    // Strategy 1: /orders/{order_id} → payments[].marketplace_fee
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const orderUrl = `https://api.mercadolibre.com/orders/${order.order_id}`;
-        const orderResp = await fetch(orderUrl, { headers: { Authorization: `Bearer ${mlAccount.access_token}` } });
-
+        const orderResp = await fetch(`https://api.mercadolibre.com/orders/${order.order_id}`, { headers: { Authorization: `Bearer ${currentToken}` } });
         if (orderResp.ok) {
-          const orderText = await orderResp.text();
-          if (!orderText || orderText.trim() === '') {
-            console.warn(`[ReprocessPending] empty order body for ${order.order_id}`);
-            break;
-          }
-          let orderData: any;
-          try { orderData = JSON.parse(orderText); } catch {
-            console.warn(`[ReprocessPending] invalid JSON from order for ${order.order_id}`);
-            break;
-          }
-
-          // Extract marketplace_fee from payments
+          const orderData = await orderResp.json();
           if (orderData.payments && Array.isArray(orderData.payments)) {
             for (const payment of orderData.payments) {
               if (payment.marketplace_fee != null && payment.marketplace_fee > 0) {
@@ -535,41 +565,63 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
               }
             }
           }
-
-          if (feeML > 0) {
-            feeMLSource = "billing";
-            sourceRefs.push("order:api:marketplace_fee");
-            updatedCount++;
+          if (feeML > 0) { feeMLSource = "billing"; sourceRefs.push("orders:api:marketplace_fee"); updatedCount++; }
+          break;
+        }
+        if (orderResp.status === 401) {
+          await orderResp.text();
+          const ML_APP_ID = Deno.env.get('ML_APP_ID') || '';
+          const ML_SECRET_KEY = Deno.env.get('ML_SECRET_KEY') || '';
+          const { data: acct } = await supabase.from("ml_accounts").select("id, refresh_token").eq("ml_user_id", sellerId).eq("is_active", true).maybeSingle();
+          if (acct?.refresh_token) {
+            const tr = await fetch('https://api.mercadolibre.com/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'refresh_token', client_id: ML_APP_ID, client_secret: ML_SECRET_KEY, refresh_token: acct.refresh_token }) });
+            if (tr.ok) { const td = await tr.json(); currentToken = td.access_token; await supabase.from("ml_accounts").update({ access_token: td.access_token, refresh_token: td.refresh_token, token_expires_at: new Date(Date.now() + td.expires_in * 1000).toISOString(), updated_at: new Date().toISOString() }).eq("id", acct.id); continue; }
+            await tr.text();
           }
-
-          // Cache
-          await supabase.from("meli_order_financials_cache").upsert({
-            seller_id: sellerId, order_id: order.order_id, shipment_id: order.shipment_id,
-            cost_sale_fee: feeML, cost_shipping_fee: shippingCostSeller,
-            cost_installment_fee: installmentsCost, cost_cancellations: adjustments,
-            revenue_products: order.revenue_total || 0,
-            synced_at: new Date().toISOString(),
-          }, { onConflict: "seller_id,order_id", ignoreDuplicates: false });
           break;
         }
+        if (orderResp.status === 429) { await orderResp.text(); await new Promise(r => setTimeout(r, 2000 * (attempt + 1))); continue; }
+        await orderResp.text(); break;
+      } catch (e) { console.error(`[ReprocessPending] orders API error for ${order.order_id}:`, e); break; }
+    }
 
-        if (orderResp.status === 404) {
-          await orderResp.text();
-          break;
+    // Strategy 2: If no fee, check billing_details_cache
+    if (feeML === 0) {
+      const { data: billingRows } = await supabase
+        .from("meli_billing_details_cache")
+        .select("charge_type, gross_amount")
+        .eq("seller_id", sellerId)
+        .eq("order_id", parseInt(order.order_id));
+      
+      if (billingRows?.length) {
+        for (const detail of billingRows) {
+          const ct = (detail.charge_type || "").toLowerCase();
+          const amount = Math.abs(detail.gross_amount || 0);
+          if (ct.includes("custo por vender") || ct.includes("custo por cobrar") || ct.includes("sale_fee") || ct.includes("cargo por venta")) {
+            feeML += amount;
+          } else if (ct.includes("tarifa de envio") || ct.includes("envio extra") || ct.includes("envio intermunicipal") || ct.includes("shipping")) {
+            shippingCostSeller += amount;
+          } else if (ct.includes("taxa de parcelamento") || ct.includes("installment")) {
+            installmentsCost += amount;
+          }
         }
-        if (orderResp.status === 429) {
-          await orderResp.text();
-          console.warn(`[ReprocessPending] 429 for order ${order.order_id}, retry ${attempt + 1}`);
-          await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
-          continue;
-        }
-        await orderResp.text();
-        break;
-      } catch (err) {
-        console.error(`[ReprocessPending] order API error for ${order.order_id}:`, err);
-        break;
+        if (feeML > 0) { feeMLSource = "billing"; sourceRefs.push("billing_details_cache"); updatedCount++; }
+        else { feeMLSource = "billing"; sourceRefs.push("billing_details_cache:no_commission"); }
       }
     }
+
+    // Cache financials
+    if (feeMLSource === "billing") {
+      await supabase.from("meli_order_financials_cache").upsert({
+        seller_id: sellerId, order_id: order.order_id, shipment_id: order.shipment_id,
+        cost_sale_fee: feeML, cost_shipping_fee: shippingCostSeller,
+        cost_installment_fee: installmentsCost, cost_cancellations: adjustments,
+        revenue_products: order.revenue_total || 0, synced_at: new Date().toISOString(),
+      }, { onConflict: "seller_id,order_id", ignoreDuplicates: false });
+    }
+
+    // Rate limit: 200ms between orders
+    await new Promise(r => setTimeout(r, 200));
 
     // Fallback: shipment costs API if no shipping
     if (shippingCostSeller === 0 && order.shipment_id) {
