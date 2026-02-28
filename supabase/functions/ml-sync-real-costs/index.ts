@@ -180,38 +180,43 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
     return new Response(JSON.stringify({ error: "Order not found in cache" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
-  // ---- NEW: Use /orders/{order_id}/billing_info directly (1 call per order) ----
+  // ---- Use /orders/{order_id} to get payments[].marketplace_fee (ML commission) ----
   let feeML = 0, shippingCostSeller = 0, installmentsCost = 0, adjustments = 0;
   let feeMLSource = "pending";
   const sourceRefs: string[] = [];
 
-  // Try billing_info with retry on 429
+  // Fetch order details to get marketplace_fee from payments
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const billingUrl = `https://api.mercadolibre.com/orders/${orderId}/billing_info`;
-      const billingResp = await fetch(billingUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+      const orderUrl = `https://api.mercadolibre.com/orders/${orderId}`;
+      const orderResp = await fetch(orderUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
 
-      if (billingResp.ok) {
-        const billingData = await billingResp.json();
-        if (billingData.seller?.charges) {
-          for (const charge of billingData.seller.charges) {
-            const chargeType = (charge.type || '').toLowerCase();
-            const amount = Math.abs(charge.value || 0);
-            if (chargeType.includes('sale_fee') || chargeType.includes('commission')) {
-              feeML += amount;
-            } else if (chargeType.includes('shipping')) {
-              shippingCostSeller += amount;
-            } else if (chargeType.includes('financing') || chargeType.includes('installment')) {
-              installmentsCost += amount;
-            } else if (chargeType.includes('cancel') || chargeType.includes('refund')) {
-              adjustments += amount;
+      if (orderResp.ok) {
+        const orderText = await orderResp.text();
+        if (!orderText || orderText.trim() === '') {
+          console.warn(`[RealCosts] resync_single: empty order body for ${orderId}`);
+          break;
+        }
+        let orderData: any;
+        try { orderData = JSON.parse(orderText); } catch {
+          console.warn(`[RealCosts] resync_single: invalid JSON from order for ${orderId}`);
+          break;
+        }
+
+        // Extract marketplace_fee from payments
+        if (orderData.payments && Array.isArray(orderData.payments)) {
+          for (const payment of orderData.payments) {
+            if (payment.marketplace_fee != null && payment.marketplace_fee > 0) {
+              feeML += payment.marketplace_fee;
             }
           }
-          if (feeML !== 0 || shippingCostSeller !== 0) {
-            feeMLSource = "billing";
-            sourceRefs.push("billing_info:api:resync");
-          }
         }
+
+        if (feeML > 0) {
+          feeMLSource = "billing";
+          sourceRefs.push("order:api:marketplace_fee");
+        }
+
         // Cache in meli_order_financials_cache
         await supabase.from("meli_order_financials_cache").upsert({
           seller_id: sellerId,
@@ -227,22 +232,21 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
         break; // Success
       }
 
-      if (billingResp.status === 404) {
-        // No billing info available — body must be consumed
-        await billingResp.text();
+      if (orderResp.status === 404) {
+        await orderResp.text();
         break;
       }
-      if (billingResp.status === 429) {
-        await billingResp.text();
+      if (orderResp.status === 429) {
+        await orderResp.text();
         console.warn(`[RealCosts] resync_single: 429 for order ${orderId}, retry ${attempt + 1}`);
         await new Promise(r => setTimeout(r, 1500));
         continue;
       }
-      // Other error
-      await billingResp.text();
+      await orderResp.text();
       break;
     } catch (apiError) {
-      console.error(`[RealCosts] resync_single: billing_info error for order ${orderId}:`, apiError);
+      console.error(`[RealCosts] resync_single: order API error for ${orderId}:`, apiError);
+      break;
     }
   }
 
@@ -505,34 +509,39 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
     let feeML = 0, feeMLSource = "pending", shippingCostSeller = 0, installmentsCost = 0, adjustments = 0;
     const sourceRefs: string[] = [];
 
-    // Fetch billing_info with retry on 429
+    // Fetch order details to get marketplace_fee from payments
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const billingUrl = `https://api.mercadolibre.com/orders/${order.order_id}/billing_info`;
-        const billingResp = await fetch(billingUrl, { headers: { Authorization: `Bearer ${mlAccount.access_token}` } });
+        const orderUrl = `https://api.mercadolibre.com/orders/${order.order_id}`;
+        const orderResp = await fetch(orderUrl, { headers: { Authorization: `Bearer ${mlAccount.access_token}` } });
 
-        if (billingResp.ok) {
-          const billingData = await billingResp.json();
-          if (billingData.seller?.charges) {
-            for (const charge of billingData.seller.charges) {
-              const chargeType = (charge.type || '').toLowerCase();
-              const amount = Math.abs(charge.value || 0);
-              if (chargeType.includes('sale_fee') || chargeType.includes('commission')) {
-                feeML += amount;
-              } else if (chargeType.includes('shipping')) {
-                shippingCostSeller += amount;
-              } else if (chargeType.includes('financing') || chargeType.includes('installment')) {
-                installmentsCost += amount;
-              } else if (chargeType.includes('cancel') || chargeType.includes('refund')) {
-                adjustments += amount;
+        if (orderResp.ok) {
+          const orderText = await orderResp.text();
+          if (!orderText || orderText.trim() === '') {
+            console.warn(`[ReprocessPending] empty order body for ${order.order_id}`);
+            break;
+          }
+          let orderData: any;
+          try { orderData = JSON.parse(orderText); } catch {
+            console.warn(`[ReprocessPending] invalid JSON from order for ${order.order_id}`);
+            break;
+          }
+
+          // Extract marketplace_fee from payments
+          if (orderData.payments && Array.isArray(orderData.payments)) {
+            for (const payment of orderData.payments) {
+              if (payment.marketplace_fee != null && payment.marketplace_fee > 0) {
+                feeML += payment.marketplace_fee;
               }
             }
-            if (feeML !== 0 || shippingCostSeller !== 0) {
-              feeMLSource = "billing";
-              sourceRefs.push("billing_info:api:batch");
-              updatedCount++;
-            }
           }
+
+          if (feeML > 0) {
+            feeMLSource = "billing";
+            sourceRefs.push("order:api:marketplace_fee");
+            updatedCount++;
+          }
+
           // Cache
           await supabase.from("meli_order_financials_cache").upsert({
             seller_id: sellerId, order_id: order.order_id, shipment_id: order.shipment_id,
@@ -544,20 +553,21 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
           break;
         }
 
-        if (billingResp.status === 404) {
-          await billingResp.text();
+        if (orderResp.status === 404) {
+          await orderResp.text();
           break;
         }
-        if (billingResp.status === 429) {
-          await billingResp.text();
+        if (orderResp.status === 429) {
+          await orderResp.text();
           console.warn(`[ReprocessPending] 429 for order ${order.order_id}, retry ${attempt + 1}`);
           await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
           continue;
         }
-        await billingResp.text();
+        await orderResp.text();
         break;
       } catch (err) {
-        console.error(`[ReprocessPending] billing_info error for ${order.order_id}:`, err);
+        console.error(`[ReprocessPending] order API error for ${order.order_id}:`, err);
+        break;
       }
     }
 
