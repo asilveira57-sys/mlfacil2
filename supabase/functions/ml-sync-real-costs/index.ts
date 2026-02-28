@@ -254,10 +254,9 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
         feeMLSource = "billing";
         sourceRefs.push("billing_details_cache");
       } else {
-        // Has billing records but no commission → ML genuinely charges 0 commission for this order
-        feeMLSource = "billing";
-        sourceRefs.push("billing_details_cache:no_commission");
-        console.log(`[RealCosts] resync_single: order ${orderId} has billing records but no commission charge — marking as billing with fee_ml=0`);
+        // Cache has records but no commission — DON'T close the door, let Strategy 3 try the API
+        sourceRefs.push("billing_details_cache:no_commission_found");
+        console.log(`[RealCosts] resync_single: order ${orderId} has billing cache but no commission — falling through to Strategy 3`);
       }
     }
   }
@@ -281,6 +280,13 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
         }
       } else { await billingResp.text(); }
     } catch (e) { console.error(`[RealCosts] billing_info error:`, e); }
+  }
+
+  // Final: if all 3 strategies exhausted and still no fee but have shipping, mark as billing
+  if (feeMLSource === "pending" && shippingCostSeller > 0) {
+    feeMLSource = "billing";
+    sourceRefs.push("all_strategies_exhausted:shipping_only");
+    console.log(`[RealCosts] resync_single: order ${orderId}: all 3 strategies checked, no commission found but has shipping — marking as billing`);
   }
 
   // Cache in meli_order_financials_cache
@@ -604,8 +610,66 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
           }
         }
         if (feeML > 0) { feeMLSource = "billing"; sourceRefs.push("billing_details_cache"); updatedCount++; }
-        else { feeMLSource = "billing"; sourceRefs.push("billing_details_cache:no_commission"); }
+        else { sourceRefs.push("billing_details_cache:no_commission_found"); }
       }
+    }
+
+    // Strategy 3: If still no fee, try /orders/{order_id}/billing_info API
+    if (feeMLSource === "pending") {
+      try {
+        const billingResp = await fetch(`https://api.mercadolibre.com/orders/${order.order_id}/billing_info`, { headers: { Authorization: `Bearer ${currentToken}` } });
+        if (billingResp.ok) {
+          const billingData = await billingResp.json();
+          const billingInfo = billingData.billing_info || billingData;
+          if (billingInfo.seller?.charges) {
+            for (const charge of billingInfo.seller.charges) {
+              const ct = (charge.type || '').toLowerCase();
+              const amount = Math.abs(charge.value || 0);
+              if (ct.includes('sale_fee') || ct.includes('commission')) feeML += amount;
+              else if (ct.includes('shipping')) shippingCostSeller += amount;
+              else if (ct.includes('financing') || ct.includes('installment')) installmentsCost += amount;
+            }
+            if (feeML > 0) { feeMLSource = "billing"; sourceRefs.push("billing_info:api"); updatedCount++; }
+          }
+        } else if (billingResp.status === 401) {
+          await billingResp.text();
+          // Try token refresh
+          const ML_APP_ID2 = Deno.env.get('ML_APP_ID') || '';
+          const ML_SECRET_KEY2 = Deno.env.get('ML_SECRET_KEY') || '';
+          const { data: acct2 } = await supabase.from("ml_accounts").select("id, refresh_token").eq("ml_user_id", sellerId).eq("is_active", true).maybeSingle();
+          if (acct2?.refresh_token) {
+            const tr2 = await fetch('https://api.mercadolibre.com/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'refresh_token', client_id: ML_APP_ID2, client_secret: ML_SECRET_KEY2, refresh_token: acct2.refresh_token }) });
+            if (tr2.ok) {
+              const td2 = await tr2.json();
+              currentToken = td2.access_token;
+              await supabase.from("ml_accounts").update({ access_token: td2.access_token, refresh_token: td2.refresh_token, token_expires_at: new Date(Date.now() + td2.expires_in * 1000).toISOString(), updated_at: new Date().toISOString() }).eq("id", acct2.id);
+              // Retry billing_info with new token
+              const retryResp = await fetch(`https://api.mercadolibre.com/orders/${order.order_id}/billing_info`, { headers: { Authorization: `Bearer ${currentToken}` } });
+              if (retryResp.ok) {
+                const retryData = await retryResp.json();
+                const retryInfo = retryData.billing_info || retryData;
+                if (retryInfo.seller?.charges) {
+                  for (const charge of retryInfo.seller.charges) {
+                    const ct = (charge.type || '').toLowerCase();
+                    const amount = Math.abs(charge.value || 0);
+                    if (ct.includes('sale_fee') || ct.includes('commission')) feeML += amount;
+                    else if (ct.includes('shipping') && shippingCostSeller === 0) shippingCostSeller += amount;
+                    else if ((ct.includes('financing') || ct.includes('installment')) && installmentsCost === 0) installmentsCost += amount;
+                  }
+                  if (feeML > 0) { feeMLSource = "billing"; sourceRefs.push("billing_info:api:retry"); updatedCount++; }
+                }
+              } else { await retryResp.text(); }
+            } else { await tr2.text(); }
+          }
+        } else { await billingResp.text(); }
+      } catch (e) { console.error(`[ReprocessPending] billing_info error for ${order.order_id}:`, e); }
+    }
+
+    // Final: if all 3 strategies exhausted and still no fee but have shipping, mark as billing (all sources checked)
+    if (feeMLSource === "pending" && shippingCostSeller > 0) {
+      feeMLSource = "billing";
+      sourceRefs.push("all_strategies_exhausted:shipping_only");
+      console.log(`[ReprocessPending] order ${order.order_id}: all 3 strategies checked, no commission found but has shipping — marking as billing`);
     }
 
     // Cache financials
