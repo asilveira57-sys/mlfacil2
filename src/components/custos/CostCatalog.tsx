@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
-import { Search, AlertCircle, Check, RefreshCw } from 'lucide-react';
+import { Search, AlertCircle, Check, RefreshCw, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { getCostCache, setCostCache, checkSellerChange } from '@/hooks/useCostModuleCache';
 
@@ -38,6 +38,7 @@ export function CostCatalog({ sellerId }: CostCatalogProps) {
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState('');
   const [saving, setSaving] = useState(false);
+  const [fetchingErpKey, setFetchingErpKey] = useState<string | null>(null);
 
   const loadCatalog = async () => {
     checkSellerChange(sellerId);
@@ -137,6 +138,46 @@ export function CostCatalog({ sellerId }: CostCatalogProps) {
     }
   };
 
+  const handleFetchErpCost = async (product: Product) => {
+    setFetchingErpKey(product.product_key);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/catalog/fetch-erp-cost`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            seller_id: sellerId,
+            product_key: product.product_key,
+            sku: product.sku,
+            item_id: product.item_id,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.success) {
+        toast.success(`Custo importado do ERP: R$ ${Number(data.cost_value).toFixed(2)}`);
+        loadCatalog();
+      } else if (data.error === 'no_erp' || data.error === 'no_api_key') {
+        toast.error(data.message, { duration: 6000 });
+      } else {
+        toast.error(data.message || 'Produto não encontrado no ERP');
+      }
+    } catch (error) {
+      toast.error('Erro ao buscar custo no ERP');
+    } finally {
+      setFetchingErpKey(null);
+    }
+  };
+
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 
@@ -196,7 +237,7 @@ export function CostCatalog({ sellerId }: CostCatalogProps) {
                     <TableHead>SKU</TableHead>
                     <TableHead>Custo Unitário</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead className="w-[100px]">Ações</TableHead>
+                    <TableHead className="w-[100px]">ERP</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -220,19 +261,27 @@ export function CostCatalog({ sellerId }: CostCatalogProps) {
                         </TableCell>
                         <TableCell>
                           {editingKey === product.product_key ? (
-                            <Input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              value={editingValue}
-                              onChange={(e) => setEditingValue(e.target.value)}
-                              className="w-24"
-                              autoFocus
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleSaveCost(product);
-                                if (e.key === 'Escape') setEditingKey(null);
-                              }}
-                            />
+                            <div className="flex gap-1 items-center">
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={editingValue}
+                                onChange={(e) => setEditingValue(e.target.value)}
+                                className="w-24"
+                                autoFocus
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleSaveCost(product);
+                                  if (e.key === 'Escape') setEditingKey(null);
+                                }}
+                              />
+                              <Button size="sm" onClick={() => handleSaveCost(product)} disabled={saving}>
+                                {saving ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => setEditingKey(null)}>
+                                X
+                              </Button>
+                            </div>
                           ) : (
                             <span
                               className={`cursor-pointer hover:underline ${!product.has_cost ? 'text-muted-foreground' : ''}`}
@@ -259,27 +308,19 @@ export function CostCatalog({ sellerId }: CostCatalogProps) {
                           )}
                         </TableCell>
                         <TableCell>
-                          {editingKey === product.product_key ? (
-                            <div className="flex gap-1">
-                              <Button size="sm" onClick={() => handleSaveCost(product)} disabled={saving}>
-                                {saving ? <RefreshCw className="h-3 w-3 animate-spin" /> : 'Salvar'}
-                              </Button>
-                              <Button size="sm" variant="ghost" onClick={() => setEditingKey(null)}>
-                                X
-                              </Button>
-                            </div>
-                          ) : (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => {
-                                setEditingKey(product.product_key);
-                                setEditingValue(String(product.cost_value || ''));
-                              }}
-                            >
-                              Editar
-                            </Button>
-                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={fetchingErpKey === product.product_key}
+                            onClick={() => handleFetchErpCost(product)}
+                            title="Buscar custo no ERP"
+                          >
+                            {fetchingErpKey === product.product_key ? (
+                              <RefreshCw className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <Download className="h-3 w-3" />
+                            )}
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))
