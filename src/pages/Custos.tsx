@@ -198,6 +198,42 @@ export default function Custos() {
               </Card>
             </div>
 
+            {/* ABC and missing cost indicators */}
+            {summary?.order_count ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                <Card className="bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800">
+                  <CardContent className="pt-4">
+                    <p className="text-sm text-muted-foreground mb-1">Classe A</p>
+                    <p className="text-2xl font-bold text-green-600">{summary?.abc_a_percent?.toFixed(0) || 0}%</p>
+                    <p className="text-xs text-muted-foreground">dos produtos (80% do lucro)</p>
+                  </CardContent>
+                </Card>
+                <Card className="bg-yellow-50 dark:bg-yellow-950/30 border-yellow-200 dark:border-yellow-800">
+                  <CardContent className="pt-4">
+                    <p className="text-sm text-muted-foreground mb-1">Classe B</p>
+                    <p className="text-2xl font-bold text-yellow-600">{summary?.abc_b_percent?.toFixed(0) || 0}%</p>
+                    <p className="text-xs text-muted-foreground">dos produtos (15% do lucro)</p>
+                  </CardContent>
+                </Card>
+                <Card className="bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800">
+                  <CardContent className="pt-4">
+                    <p className="text-sm text-muted-foreground mb-1">Classe C</p>
+                    <p className="text-2xl font-bold text-red-600">{summary?.abc_c_percent?.toFixed(0) || 0}%</p>
+                    <p className="text-xs text-muted-foreground">dos produtos (5% do lucro)</p>
+                  </CardContent>
+                </Card>
+                <Card className={`${(summary?.missing_cost_count || 0) > 0 ? 'border-destructive/30 bg-destructive/5' : ''}`}>
+                  <CardContent className="pt-4">
+                    <p className="text-sm text-muted-foreground mb-1">Pedidos sem Custo</p>
+                    <p className={`text-2xl font-bold ${(summary?.missing_cost_count || 0) > 0 ? 'text-destructive' : 'text-green-600'}`}>
+                      {summary?.missing_cost_count || 0}
+                    </p>
+                    <p className="text-xs text-muted-foreground">necessitam custo definido</p>
+                  </CardContent>
+                </Card>
+              </div>
+            ) : null}
+
             {!summary?.order_count && (
               <Card>
                 <CardContent className="py-8 text-center">

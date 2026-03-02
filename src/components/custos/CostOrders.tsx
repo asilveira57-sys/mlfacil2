@@ -48,6 +48,10 @@ interface OrderCost {
   missing_fields: string[];
   fee_ml_source: string | null;
   order_status?: string;
+  cost_packaging?: number;
+  tax_value?: number;
+  tax_percent_total?: number;
+  difal_applied?: boolean;
 }
 
 interface OrderDetail {
@@ -820,6 +824,8 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                           <SortIcon columnKey="shipping_cost_seller" />
                         </div>
                       </TableHead>
+                      <TableHead className="text-right">Embalagem</TableHead>
+                      <TableHead className="text-right">Impostos</TableHead>
                       <TableHead 
                         className="text-right cursor-pointer select-none hover:bg-muted/80"
                         onClick={() => handleSort('profit_total')}
@@ -845,7 +851,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                   <TableBody>
                     {orders.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
                           Nenhum pedido encontrado. Clique em "Recalcular" para processar.
                         </TableCell>
                       </TableRow>
@@ -934,6 +940,17 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                               ) : (
                                 formatCurrency(shippingCost)
                               )}
+                            </TableCell>
+                            <TableCell className="text-right text-muted-foreground">
+                              {(order.cost_packaging || 0) > 0 ? formatCurrency(order.cost_packaging!) : '-'}
+                            </TableCell>
+                            <TableCell className="text-right text-muted-foreground" title={order.difal_applied ? 'Inclui DIFAL' : ''}>
+                              {(order.tax_value || 0) > 0 ? (
+                                <span className="flex items-center justify-end gap-1">
+                                  {formatCurrency(order.tax_value!)}
+                                  {order.difal_applied && <span className="text-[10px] text-warning">D</span>}
+                                </span>
+                              ) : '-'}
                             </TableCell>
                             <TableCell className={`text-right font-medium ${order.profit_total >= 0 ? 'text-green-600' : 'text-destructive'}`}>
                               <span className="flex items-center justify-end gap-1">
