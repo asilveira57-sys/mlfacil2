@@ -1112,41 +1112,26 @@ async function getSummary(supabase: any, userId: string, params: Record<string, 
   })();
   const dateTo = params.date_to || new Date().toISOString();
 
-  const breakdowns = await fetchAllRows(
-    supabase.from('order_cost_breakdown_cache')
-      .select('revenue_total, cost_total, profit_total, margin_percent, status, missing_cost_items_count, tax_value, cost_packaging, cost_items_total, cost_fees, cost_shipping, commission_cost, shipping_cost_seller, fee_ml, installments_cost, cost_other, total_marketplace_cost, receita_produtos, receita_envio, receita_acrescimo')
-      .eq('seller_id', sellerId)
-      .eq('user_id', userId)
-      .gte('created_at_meli', dateFrom)
-      .lte('created_at_meli', dateTo)
-  );
+  // Use server-side aggregation RPCs for speed (single query instead of fetching all rows)
+  const [costResult, cancelledResult] = await Promise.all([
+    supabase.rpc('get_cost_summary', {
+      p_seller_id: sellerId,
+      p_user_id: userId,
+      p_date_from: dateFrom,
+      p_date_to: dateTo,
+    }),
+    supabase.rpc('get_cancelled_orders_summary', {
+      p_seller_id: sellerId,
+      p_date_from: dateFrom,
+      p_date_to: dateTo,
+    }),
+  ]);
 
-  const data = breakdowns;
-  const totalRevenue = data.reduce((sum: number, b: any) => sum + Number(b.revenue_total || 0), 0);
-  const totalCost = data.reduce((sum: number, b: any) => sum + Number(b.cost_total || 0), 0);
-  const totalProfit = data.reduce((sum: number, b: any) => sum + Number(b.profit_total || 0), 0);
-  const totalTax = data.reduce((sum: number, b: any) => sum + Number(b.tax_value || 0), 0);
-  const totalPackaging = data.reduce((sum: number, b: any) => sum + Number(b.cost_packaging || 0), 0);
-  const totalCostProduct = data.reduce((sum: number, b: any) => sum + Number(b.cost_items_total || 0), 0);
-  const totalCostShipping = data.reduce((sum: number, b: any) => sum + Number(b.cost_shipping || 0) + Number(b.shipping_cost_seller || 0), 0);
-  const totalCostMarketplace = data.reduce((sum: number, b: any) => sum + Number(b.total_marketplace_cost || 0) || (Number(b.cost_fees || 0) + Number(b.commission_cost || 0)), 0);
-  const totalInstallments = data.reduce((sum: number, b: any) => sum + Number(b.installments_cost || 0), 0);
-  const totalCostOther = data.reduce((sum: number, b: any) => sum + Number(b.cost_other || 0), 0);
-  const totalReceitaProdutos = data.reduce((sum: number, b: any) => sum + Number(b.receita_produtos || 0), 0);
-  const totalReceitaEnvio = data.reduce((sum: number, b: any) => sum + Number(b.receita_envio || 0), 0);
-  const avgMargin = data.length > 0 ? data.reduce((sum: number, b: any) => sum + Number(b.margin_percent || 0), 0) / data.length : 0;
-  const incompleteCount = data.filter((b: any) => b.status === 'incompleto').length;
-  const incompletePercent = data.length > 0 ? (incompleteCount / data.length) * 100 : 0;
-  const missingCostCount = data.filter((b: any) => (b.missing_cost_items_count || 0) > 0).length;
+  if (costResult.error) throw costResult.error;
+  if (cancelledResult.error) throw cancelledResult.error;
 
-  const cancelledOrders = await fetchAllRows(
-    supabase.from('meli_orders_cache')
-      .select('order_id, total_amount')
-      .eq('seller_id', sellerId)
-      .in('order_status', ['cancelled', 'refunded', 'partially_refunded'])
-      .gte('created_at_meli', dateFrom)
-      .lte('created_at_meli', dateTo)
-  );
+  const s = costResult.data || {};
+  const c = cancelledResult.data || {};
 
   // ABC summary from cache
   const { data: abcData } = await supabase
@@ -1162,20 +1147,25 @@ async function getSummary(supabase: any, userId: string, params: Record<string, 
 
   return {
     summary: {
-      total_revenue: totalRevenue, total_cost: totalCost, total_profit: totalProfit,
-      total_tax: totalTax, total_packaging: totalPackaging,
-      total_cost_product: totalCostProduct,
-      total_cost_shipping: totalCostShipping,
-      total_cost_marketplace: totalCostMarketplace,
-      total_installments: totalInstallments,
-      total_cost_other: totalCostOther,
-      total_receita_produtos: totalReceitaProdutos,
-      total_receita_envio: totalReceitaEnvio,
-      avg_margin: avgMargin, order_count: data.length,
-      incomplete_count: incompleteCount, incomplete_percent: incompletePercent,
-      missing_cost_count: missingCostCount,
-      cancelled_count: cancelledOrders.length,
-      cancelled_vgv: cancelledOrders.reduce((sum: number, o: any) => sum + Number(o.total_amount || 0), 0),
+      total_revenue: s.total_revenue || 0,
+      total_cost: s.total_cost || 0,
+      total_profit: s.total_profit || 0,
+      total_tax: s.total_tax || 0,
+      total_packaging: s.total_packaging || 0,
+      total_cost_product: s.total_cost_product || 0,
+      total_cost_shipping: s.total_cost_shipping || 0,
+      total_cost_marketplace: s.total_cost_marketplace || 0,
+      total_installments: s.total_installments || 0,
+      total_cost_other: s.total_cost_other || 0,
+      total_receita_produtos: s.total_receita_produtos || 0,
+      total_receita_envio: s.total_receita_envio || 0,
+      avg_margin: s.avg_margin || 0,
+      order_count: s.order_count || 0,
+      incomplete_count: s.incomplete_count || 0,
+      incomplete_percent: s.incomplete_percent || 0,
+      missing_cost_count: s.missing_cost_count || 0,
+      cancelled_count: c.cancelled_count || 0,
+      cancelled_vgv: c.cancelled_vgv || 0,
       abc_a_percent: abcTotal > 0 ? (abcACount / abcTotal) * 100 : 0,
       abc_b_percent: abcTotal > 0 ? (abcBCount / abcTotal) * 100 : 0,
       abc_c_percent: abcTotal > 0 ? (abcCCount / abcTotal) * 100 : 0,

@@ -16841,6 +16841,19 @@ export type Database = {
         Returns: Json
       }
       get_admin_dashboard_stats: { Args: never; Returns: Json }
+      get_cancelled_orders_summary: {
+        Args: { p_date_from: string; p_date_to: string; p_seller_id: string }
+        Returns: Json
+      }
+      get_cost_summary: {
+        Args: {
+          p_date_from: string
+          p_date_to: string
+          p_seller_id: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
       get_global_ads_metrics: { Args: never; Returns: Json }
       get_global_total_revenue: { Args: never; Returns: number }
       get_or_create_ml_account: {
