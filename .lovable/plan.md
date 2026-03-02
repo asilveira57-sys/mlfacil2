@@ -39,3 +39,13 @@ Na verdade, o filtro "Sem custo e-commerce" (`cost_other = 0`) funciona dentro d
 - O batch resync continua sendo sequencial (1 por 1 com delay de 500ms) para evitar rate limit
 - O estado `selectAllPages` é resetado ao mudar filtros ou página
 
+### Bulk Reimport/Resync em Background (v2 - Self-Chaining)
+
+**Arquitetura**: Edge Function com auto-invocação encadeada (self-chaining):
+1. Frontend cria job via `orders/bulk-reimport` → backend cria registro em `cost_bulk_jobs`, deleta caches, processa chunk de 10 pedidos
+2. Ao terminar chunk, a Edge Function se auto-invoca via `orders/bulk-reimport-continue` com `x-internal-key` auth
+3. Cada invocação processa 10 pedidos + 600ms delay entre cada → ~12s por chunk, bem dentro do timeout de 60s
+4. Progresso salvo em `cost_bulk_jobs` (processed_count, success_count, error_count)
+5. Frontend faz polling a cada 3s para mostrar progresso em tempo real
+6. Se fechar o navegador, o processamento continua server-side até completar
+7. Ao reabrir a página, o frontend detecta jobs ativos e retoma o polling

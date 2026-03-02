@@ -3813,6 +3813,60 @@ export type Database = {
         }
         Relationships: []
       }
+      cost_bulk_jobs: {
+        Row: {
+          chunk_size: number
+          created_at: string
+          current_offset: number
+          error_count: number
+          id: string
+          job_type: string
+          last_error: string | null
+          order_ids: string[]
+          processed_count: number
+          seller_id: string
+          status: string
+          success_count: number
+          total_orders: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          chunk_size?: number
+          created_at?: string
+          current_offset?: number
+          error_count?: number
+          id?: string
+          job_type?: string
+          last_error?: string | null
+          order_ids?: string[]
+          processed_count?: number
+          seller_id: string
+          status?: string
+          success_count?: number
+          total_orders?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          chunk_size?: number
+          created_at?: string
+          current_offset?: number
+          error_count?: number
+          id?: string
+          job_type?: string
+          last_error?: string | null
+          order_ids?: string[]
+          processed_count?: number
+          seller_id?: string
+          status?: string
+          success_count?: number
+          total_orders?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       daily_messages: {
         Row: {
           ativa: boolean
