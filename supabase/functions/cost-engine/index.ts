@@ -421,6 +421,8 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
     query = query.gt('cost_other', 0);
   } else if (ecommerceCost === 'without') {
     query = query.or('cost_other.is.null,cost_other.eq.0');
+  } else if (ecommerceCost === 'zero_total') {
+    query = query.lte('cost_total', 0);
   }
 
   // Filter by shipping cost

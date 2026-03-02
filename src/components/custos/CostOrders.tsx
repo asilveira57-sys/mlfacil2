@@ -571,6 +571,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                 <SelectItem value="30">30 dias</SelectItem>
                 <SelectItem value="90">90 dias</SelectItem>
                 <SelectItem value="180">6 meses</SelectItem>
+                <SelectItem value="365">12 meses</SelectItem>
               </SelectContent>
             </Select>
 
@@ -604,6 +605,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                 <SelectItem value="all">Todos</SelectItem>
                 <SelectItem value="with">Com custo e-commerce</SelectItem>
                 <SelectItem value="without">Sem custo e-commerce</SelectItem>
+                <SelectItem value="zero_total">Custo total ≤ 0</SelectItem>
               </SelectContent>
             </Select>
 
