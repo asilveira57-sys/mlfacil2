@@ -20,6 +20,26 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    const url = new URL(req.url);
+    const path = url.pathname.split('/').filter(Boolean).slice(1).join('/');
+    const params = Object.fromEntries(url.searchParams.entries());
+    const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
+
+    // Internal continuation endpoint (no user auth needed, uses service key auth)
+    if (path === 'orders/bulk-reimport-continue') {
+      const internalKey = req.headers.get('x-internal-key');
+      if (internalKey !== supabaseServiceKey) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const result = await continueBulkReimportJob(supabase, body.job_id);
+      return new Response(JSON.stringify(result), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     // Validate user authentication
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
@@ -39,10 +59,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const url = new URL(req.url);
-    const path = url.pathname.split('/').filter(Boolean).slice(1).join('/');
-    const params = Object.fromEntries(url.searchParams.entries());
-    const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
+    console.log(`[cost-engine] User ${user.id} requesting: ${path}`, params);
 
     console.log(`[cost-engine] User ${user.id} requesting: ${path}`, params);
 
@@ -79,11 +96,10 @@ Deno.serve(async (req) => {
         result = await reimportOrder(supabase, user.id, body);
         break;
       case 'orders/bulk-reimport':
-        // Background bulk reimport with rate limit handling
-        EdgeRuntime.waitUntil(
-          bulkReimportOrders(supabase, user.id, body.seller_id, body.order_ids || [])
-        );
-        result = { status: 'processing', total: (body.order_ids || []).length, message: 'Reimportação em massa iniciada em background' };
+        result = await startBulkReimportJob(supabase, user.id, body.seller_id, body.order_ids || [], body.job_type || 'reimport');
+        break;
+      case 'orders/bulk-reimport-status':
+        result = await getBulkJobStatus(supabase, user.id, params);
         break;
       case 'calculate':
         // Start background calculation
@@ -1353,54 +1369,181 @@ async function reimportOrder(supabase: any, userId: string, body: any) {
   return { success: true, message: `Pedido ${order_id} reimportado com sucesso` };
 }
 
-// ================== BULK REIMPORT ORDERS ==================
+// ================== BULK REIMPORT JOB (self-chaining) ==================
 
-async function bulkReimportOrders(supabase: any, userId: string, sellerId: string, orderIds: string[]) {
-  if (!sellerId || !orderIds.length) return;
+const CHUNK_SIZE = 10;
+const CHUNK_DELAY_MS = 600;
 
-  console.log(`[cost-engine] Bulk reimport started: ${orderIds.length} orders for seller ${sellerId}`);
+async function startBulkReimportJob(supabase: any, userId: string, sellerId: string, orderIds: string[], jobType: string = 'reimport') {
+  if (!sellerId || !orderIds.length) throw new Error('seller_id and order_ids are required');
 
-  let successCount = 0;
-  let errorCount = 0;
-  const BATCH_SIZE = 50; // Delete in batches of 50
-  const DELAY_MS = 600; // 600ms between recalculations to avoid rate limits
+  console.log(`[cost-engine] Starting bulk ${jobType} job: ${orderIds.length} orders for seller ${sellerId}`);
 
-  // Step 1: Bulk delete all cached data in batches
-  for (let i = 0; i < orderIds.length; i += BATCH_SIZE) {
-    const batch = orderIds.slice(i, i + BATCH_SIZE);
+  // Create job record
+  const { data: job, error: jobError } = await supabase
+    .from('cost_bulk_jobs')
+    .insert({
+      seller_id: sellerId,
+      user_id: userId,
+      job_type: jobType,
+      status: 'running',
+      order_ids: orderIds,
+      total_orders: orderIds.length,
+      chunk_size: CHUNK_SIZE,
+    })
+    .select()
+    .single();
 
-    await Promise.all([
-      supabase.from('order_cost_breakdown_cache').delete().eq('seller_id', sellerId).in('order_id', batch),
-      supabase.from('meli_order_financials_cache').delete().eq('seller_id', sellerId).in('order_id', batch),
-      supabase.from('meli_billing_details_cache').delete().eq('seller_id', sellerId).in('order_id', batch),
-    ]);
+  if (jobError) throw new Error(`Failed to create job: ${jobError.message}`);
 
-    console.log(`[cost-engine] Bulk reimport: deleted cache for batch ${i / BATCH_SIZE + 1} (${batch.length} orders)`);
+  // For reimport: delete all caches upfront in batches of 50
+  if (jobType === 'reimport') {
+    const BATCH = 50;
+    for (let i = 0; i < orderIds.length; i += BATCH) {
+      const batch = orderIds.slice(i, i + BATCH);
+      await Promise.all([
+        supabase.from('order_cost_breakdown_cache').delete().eq('seller_id', sellerId).in('order_id', batch),
+        supabase.from('meli_order_financials_cache').delete().eq('seller_id', sellerId).in('order_id', batch),
+        supabase.from('meli_billing_details_cache').delete().eq('seller_id', sellerId).in('order_id', batch),
+      ]);
+    }
+    console.log(`[cost-engine] Bulk reimport: caches deleted for ${orderIds.length} orders`);
   }
 
-  // Step 2: Recalculate each order sequentially with rate limit delay
-  for (let i = 0; i < orderIds.length; i++) {
-    const orderId = orderIds[i];
+  // Process first chunk inline, then self-invoke for rest
+  await processChunkAndContinue(supabase, job.id);
+
+  return { 
+    status: 'processing', 
+    job_id: job.id, 
+    total: orderIds.length, 
+    message: `Job iniciado em background. ${orderIds.length} pedidos serão processados.` 
+  };
+}
+
+async function getBulkJobStatus(supabase: any, userId: string, params: any) {
+  const jobId = params.job_id;
+  if (!jobId) throw new Error('job_id is required');
+
+  const { data, error } = await supabase
+    .from('cost_bulk_jobs')
+    .select('*')
+    .eq('id', jobId)
+    .eq('user_id', userId)
+    .single();
+
+  if (error) throw new Error('Job not found');
+  return data;
+}
+
+async function continueBulkReimportJob(supabase: any, jobId: string) {
+  if (!jobId) throw new Error('job_id is required');
+
+  // Fetch job
+  const { data: job, error } = await supabase
+    .from('cost_bulk_jobs')
+    .select('*')
+    .eq('id', jobId)
+    .single();
+
+  if (error || !job) throw new Error('Job not found');
+  if (job.status !== 'running') return { status: job.status, message: 'Job is not running' };
+
+  await processChunkAndContinue(supabase, jobId);
+  return { status: 'continuing', job_id: jobId };
+}
+
+async function processChunkAndContinue(supabase: any, jobId: string) {
+  // Re-fetch job to get current state
+  const { data: job } = await supabase
+    .from('cost_bulk_jobs')
+    .select('*')
+    .eq('id', jobId)
+    .single();
+
+  if (!job || job.status !== 'running') return;
+
+  const orderIds = job.order_ids as string[];
+  const offset = job.current_offset as number;
+  const chunkSize = job.chunk_size as number;
+
+  if (offset >= orderIds.length) {
+    // Done!
+    await supabase
+      .from('cost_bulk_jobs')
+      .update({ status: 'done' })
+      .eq('id', jobId);
+    console.log(`[cost-engine] Bulk job ${jobId} completed: ${job.success_count} ok, ${job.error_count} errors`);
+    return;
+  }
+
+  const chunk = orderIds.slice(offset, offset + chunkSize);
+  let successCount = job.success_count;
+  let errorCount = job.error_count;
+  let lastError = job.last_error;
+
+  // Process chunk
+  for (let i = 0; i < chunk.length; i++) {
+    const orderId = chunk[i];
     try {
-      await calculateSingleOrder(supabase, userId, sellerId, orderId);
+      if (job.job_type === 'reimport') {
+        await calculateSingleOrder(supabase, job.user_id, job.seller_id, orderId);
+      } else {
+        // resync: use the same resync logic
+        await calculateSingleOrder(supabase, job.user_id, job.seller_id, orderId);
+      }
       successCount++;
     } catch (e) {
-      console.error(`[cost-engine] Bulk reimport error for ${orderId}:`, e);
       errorCount++;
+      lastError = `${orderId}: ${e instanceof Error ? e.message : 'Unknown error'}`;
+      console.error(`[cost-engine] Bulk job error for ${orderId}:`, e);
     }
 
-    // Rate limit delay
-    if (i < orderIds.length - 1) {
-      await new Promise(r => setTimeout(r, DELAY_MS));
-    }
-
-    // Log progress every 50 orders
-    if ((i + 1) % 50 === 0) {
-      console.log(`[cost-engine] Bulk reimport progress: ${i + 1}/${orderIds.length} (${successCount} ok, ${errorCount} errors)`);
+    // Rate limit delay between orders within chunk
+    if (i < chunk.length - 1) {
+      await new Promise(r => setTimeout(r, CHUNK_DELAY_MS));
     }
   }
 
-  console.log(`[cost-engine] Bulk reimport completed: ${successCount} success, ${errorCount} errors out of ${orderIds.length} total`);
+  const newOffset = offset + chunk.length;
+  const processedCount = newOffset;
+
+  // Update job progress
+  await supabase
+    .from('cost_bulk_jobs')
+    .update({
+      current_offset: newOffset,
+      processed_count: processedCount,
+      success_count: successCount,
+      error_count: errorCount,
+      last_error: lastError,
+      status: newOffset >= orderIds.length ? 'done' : 'running',
+    })
+    .eq('id', jobId);
+
+  console.log(`[cost-engine] Bulk job ${jobId} progress: ${processedCount}/${orderIds.length}`);
+
+  // If more to process, self-invoke for next chunk
+  if (newOffset < orderIds.length) {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+
+    // Fire-and-forget self-invocation
+    EdgeRuntime.waitUntil(
+      fetch(`${supabaseUrl}/functions/v1/cost-engine/orders/bulk-reimport-continue`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-internal-key': serviceKey,
+        },
+        body: JSON.stringify({ job_id: jobId }),
+      }).then(res => {
+        console.log(`[cost-engine] Self-invocation for job ${jobId} chunk at offset ${newOffset}: ${res.status}`);
+      }).catch(err => {
+        console.error(`[cost-engine] Self-invocation failed for job ${jobId}:`, err);
+      })
+    );
+  }
 }
 
 // ================== FETCH ERP COST ==================

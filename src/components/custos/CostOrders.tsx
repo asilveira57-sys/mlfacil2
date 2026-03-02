@@ -96,6 +96,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const [loadingAllIds, setLoadingAllIds] = useState(false);
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, currentOrderId: '' });
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
   const allOnPageSelected = orders.length > 0 && orders.every(o => selectedOrders.has(o.order_id));
   const someOnPageSelected = orders.some(o => selectedOrders.has(o.order_id));
@@ -162,53 +163,102 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     }
   };
 
+  // Poll a bulk job for progress
+  const pollJobProgress = async (jobId: string) => {
+    setActiveJobId(jobId);
+    const poll = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders/bulk-reimport-status?job_id=${jobId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          }
+        );
+        if (!response.ok) return;
+        const job = await response.json();
+
+        setBatchProgress({
+          current: job.processed_count || 0,
+          total: job.total_orders || 0,
+          currentOrderId: `${job.processed_count}/${job.total_orders}`,
+        });
+
+        if (job.status === 'done' || job.status === 'error') {
+          setBatchProcessing(false);
+          setActiveJobId(null);
+          setSelectedOrders(new Set());
+          setSelectAllPages(false);
+          loadOrders();
+
+          if (job.status === 'done') {
+            toast.success(`${job.success_count} pedidos processados com sucesso${job.error_count > 0 ? `, ${job.error_count} com erro` : ''}`);
+          } else {
+            toast.error(`Job finalizado com erro: ${job.last_error || 'desconhecido'}`);
+          }
+          return;
+        }
+
+        // Continue polling every 3s
+        setTimeout(poll, 3000);
+      } catch {
+        // Retry polling even on network error
+        setTimeout(poll, 5000);
+      }
+    };
+    poll();
+  };
+
   const handleBatchResync = async () => {
     const ids = Array.from(selectedOrders);
     if (ids.length === 0) return;
 
     setBatchProcessing(true);
-    setBatchProgress({ current: 0, total: ids.length, currentOrderId: '' });
-    let successCount = 0;
-    let errorCount = 0;
+    setBatchProgress({ current: 0, total: ids.length, currentOrderId: 'iniciando...' });
 
-    for (let i = 0; i < ids.length; i++) {
-      const orderId = ids[i];
-      setBatchProgress({ current: i + 1, total: ids.length, currentOrderId: orderId });
-      try {
-        const { error } = await supabase.functions.invoke('ml-sync-real-costs', {
-          body: { seller_id: sellerId, action: 'resync_single', order_id: orderId }
-        });
-        if (error) throw error;
-        successCount++;
-      } catch {
-        errorCount++;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { toast.error('Sessão expirada'); return; }
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders/bulk-reimport`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ seller_id: sellerId, order_ids: ids, job_type: 'resync' }),
+        }
+      );
+
+      if (response.ok) {
+        const result = await response.json();
+        toast.success(`Atualização de ${ids.length} pedidos iniciada em background`);
+        pollJobProgress(result.job_id);
+      } else {
+        const err = await response.json().catch(() => ({}));
+        toast.error(err.error || 'Erro ao iniciar atualização');
+        setBatchProcessing(false);
       }
-      // Small delay to avoid rate limiting
-      if (i < ids.length - 1) {
-        await new Promise(r => setTimeout(r, 500));
-      }
+    } catch {
+      toast.error('Erro ao iniciar atualização em massa');
+      setBatchProcessing(false);
     }
-
-    setBatchProcessing(false);
-    setSelectedOrders(new Set());
-    setBatchProgress({ current: 0, total: 0, currentOrderId: '' });
-
-    if (errorCount === 0) {
-      toast.success(`${successCount} pedidos atualizados com sucesso`);
-    } else {
-      toast.warning(`${successCount} atualizados, ${errorCount} com erro`);
-    }
-    loadOrders();
   };
 
   const handleBulkReimport = async () => {
     const ids = Array.from(selectedOrders);
     if (ids.length === 0) return;
 
-    if (!confirm(`Excluir e reimportar ${ids.length} pedido(s)? Os dados de custo serão recalculados em background.`)) return;
+    if (!confirm(`Excluir e reimportar ${ids.length} pedido(s)? Os dados de custo serão recalculados em background, mesmo se você fechar o navegador.`)) return;
 
     setBatchProcessing(true);
-    setBatchProgress({ current: 0, total: ids.length, currentOrderId: 'enviando...' });
+    setBatchProgress({ current: 0, total: ids.length, currentOrderId: 'iniciando...' });
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -225,25 +275,22 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
             Authorization: `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ seller_id: sellerId, order_ids: ids }),
+          body: JSON.stringify({ seller_id: sellerId, order_ids: ids, job_type: 'reimport' }),
         }
       );
 
       if (response.ok) {
-        toast.success(`Reimportação de ${ids.length} pedidos iniciada em background. Os dados serão atualizados automaticamente.`);
-        setSelectedOrders(new Set());
-        setSelectAllPages(false);
-        // Reload after a short delay to show cleared data
-        setTimeout(() => loadOrders(), 3000);
+        const result = await response.json();
+        toast.success(`Reimportação de ${ids.length} pedidos iniciada em background. Pode fechar o navegador.`);
+        pollJobProgress(result.job_id);
       } else {
         const err = await response.json().catch(() => ({}));
         toast.error(err.error || 'Erro ao iniciar reimportação');
+        setBatchProcessing(false);
       }
     } catch {
       toast.error('Erro ao iniciar reimportação em massa');
-    } finally {
       setBatchProcessing(false);
-      setBatchProgress({ current: 0, total: 0, currentOrderId: '' });
     }
   };
 
@@ -342,6 +389,27 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   useEffect(() => {
     setSelectAllPages(false);
   }, [periodDays, statusFilter, profitFilter, ecommerceFilter, shippingFilter, orderStatusFilter, page, search]);
+
+  // Check for active bulk jobs on mount
+  useEffect(() => {
+    if (!sellerId) return;
+    const checkActiveJob = async () => {
+      const { data } = await supabase
+        .from('cost_bulk_jobs')
+        .select('id, total_orders, processed_count, status')
+        .eq('seller_id', sellerId)
+        .eq('status', 'running')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (data) {
+        setBatchProcessing(true);
+        setBatchProgress({ current: data.processed_count, total: data.total_orders, currentOrderId: `${data.processed_count}/${data.total_orders}` });
+        pollJobProgress(data.id);
+      }
+    };
+    checkActiveJob();
+  }, [sellerId]);
 
   useEffect(() => {
     if (sellerId) {
