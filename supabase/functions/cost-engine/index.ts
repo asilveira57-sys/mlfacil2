@@ -376,6 +376,11 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
   if (orderStatus === 'pending_cost') {
     // Show only orders without cost data
     query = query.in('fee_ml_source', ['pending', 'no_charges']);
+  } else if (orderStatus === 'all') {
+    // Show all orders regardless of billing source - no filter
+  } else if (ecommerceCost === 'without') {
+    // When filtering "sem custo e-commerce", include pending/no_charges too
+    // so the user can see ALL orders without e-commerce cost
   } else if (!billingFilter || billingFilter === 'all') {
     // Default: show billing + manual (exclude pending/no_charges)
     query = query.in('fee_ml_source', ['billing', 'manual']);
@@ -459,6 +464,15 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
   }
 
   const total = results.length;
+
+  // ids_only mode: return just order_ids without pagination (for select-all-pages)
+  if (params.ids_only === 'true') {
+    return {
+      order_ids: results.map((r: any) => r.order_id),
+      total,
+    };
+  }
+
   const totalPages = Math.ceil(total / pageSize);
   const offset = (page - 1) * pageSize;
   const paginatedResults = results.slice(offset, offset + pageSize);
