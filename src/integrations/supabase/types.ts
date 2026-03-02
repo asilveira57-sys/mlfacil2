@@ -6843,6 +6843,7 @@ export type Database = {
           pack_id: string | null
           seller_id: string
           shipment_id: string | null
+          shipping_state: string | null
           total_amount: number | null
           user_id: string
         }
@@ -6861,6 +6862,7 @@ export type Database = {
           pack_id?: string | null
           seller_id: string
           shipment_id?: string | null
+          shipping_state?: string | null
           total_amount?: number | null
           user_id: string
         }
@@ -6879,6 +6881,7 @@ export type Database = {
           pack_id?: string | null
           seller_id?: string
           shipment_id?: string | null
+          shipping_state?: string | null
           total_amount?: number | null
           user_id?: string
         }
