@@ -315,6 +315,7 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
       margin_percent: 0,
       missing_cost_items_count: 0,
       status: 'cancelled',
+      order_status: o.order_status || 'cancelled',
       buyer_nickname: o.buyer_nickname,
       buyer_name: o.buyer_name,
       created_at_meli: o.created_at_meli,
@@ -400,7 +401,22 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
 
   const results_raw = await fetchAllRows(query);
 
-  let results = results_raw;
+  // Batch lookup order_status from meli_orders_cache
+  const orderIds = results_raw.map((r: any) => r.order_id).filter(Boolean);
+  let orderStatusMap = new Map<string, string>();
+  if (orderIds.length > 0) {
+    const statusRows = await fetchWithBatchedIn(
+      supabase, 'meli_orders_cache', 'order_id, order_status',
+      'order_id', orderIds,
+      [{ column: 'seller_id', value: sellerId }]
+    );
+    orderStatusMap = new Map(statusRows.map((r: any) => [r.order_id, r.order_status]));
+  }
+
+  let results = results_raw.map((r: any) => ({
+    ...r,
+    order_status: orderStatusMap.get(r.order_id) || 'paid',
+  }));
 
   // Filter by profit type
   if (profitType === 'lucro') {

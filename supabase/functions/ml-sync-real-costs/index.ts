@@ -173,9 +173,24 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
   const accessToken = mlAccount.access_token;
 
   // Get order from cache
-  const { data: order } = await supabase.from("meli_orders_cache").select("order_id, shipment_id, total_amount, created_at_meli").eq("seller_id", sellerId).eq("order_id", orderId).maybeSingle();
+  const { data: order } = await supabase.from("meli_orders_cache").select("order_id, shipment_id, total_amount, created_at_meli, order_status").eq("seller_id", sellerId).eq("order_id", orderId).maybeSingle();
   if (!order) {
     return new Response(JSON.stringify({ error: "Order not found in cache" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
+  // Guard: skip re-sync for delivered orders older than 30 days
+  if (order.order_status === 'delivered' && order.created_at_meli) {
+    const orderAge = Date.now() - new Date(order.created_at_meli).getTime();
+    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+    if (orderAge > THIRTY_DAYS_MS) {
+      console.log(`[RealCosts] resync_single: SKIPPED order ${orderId} — delivered >30 days ago (frozen)`);
+      return new Response(JSON.stringify({
+        ok: true,
+        message: `Pedido ${orderId} entregue há mais de 30 dias — não requer atualização`,
+        skipped: true,
+        reason: 'delivered_over_30_days',
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
   }
 
   // ---- Multi-strategy fee extraction ----

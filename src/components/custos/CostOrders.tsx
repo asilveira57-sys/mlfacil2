@@ -47,6 +47,7 @@ interface OrderCost {
   margin_net: number;
   missing_fields: string[];
   fee_ml_source: string | null;
+  order_status?: string;
 }
 
 interface OrderDetail {
@@ -458,8 +459,8 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
             {/* Billing filter removed - pending/no_charges are in "Sem Custo" tab */}
 
             <Select value={orderStatusFilter} onValueChange={(v) => { setOrderStatusFilter(v); setPage(1); }}>
-              <SelectTrigger className="w-36">
-                <SelectValue placeholder="Pedidos" />
+              <SelectTrigger className="w-44">
+                <SelectValue placeholder="Status Venda" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="paid">Pagos</SelectItem>
@@ -574,6 +575,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                         </div>
                       </TableHead>
                       <TableHead>Pedido</TableHead>
+                      <TableHead>Status Venda</TableHead>
                       <TableHead>Comprador</TableHead>
                       <TableHead 
                         className="text-right cursor-pointer select-none hover:bg-muted/80"
@@ -627,7 +629,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                   <TableBody>
                     {orders.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
                           Nenhum pedido encontrado. Clique em "Recalcular" para processar.
                         </TableCell>
                       </TableRow>
@@ -657,6 +659,27 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                               {order.shipment_id && (
                                 <div className="text-xs text-muted-foreground">{order.shipment_id}</div>
                               )}
+                            </TableCell>
+                            <TableCell>
+                              {(() => {
+                                const st = order.order_status || order.status;
+                                const statusMap: Record<string, { label: string; cls: string }> = {
+                                  paid: { label: 'Pago', cls: 'bg-green-100 text-green-800 border-green-300' },
+                                  delivered: { label: 'Entregue', cls: 'bg-green-100 text-green-800 border-green-300' },
+                                  cancelled: { label: 'Cancelado', cls: 'bg-destructive/10 text-destructive border-destructive/30' },
+                                  refunded: { label: 'Reembolsado', cls: 'bg-destructive/10 text-destructive border-destructive/30' },
+                                  partially_refunded: { label: 'Reemb. Parcial', cls: 'bg-orange-100 text-orange-800 border-orange-300' },
+                                  return_pending: { label: 'Devolução', cls: 'bg-yellow-100 text-yellow-800 border-yellow-300' },
+                                  return_open: { label: 'Devolução', cls: 'bg-yellow-100 text-yellow-800 border-yellow-300' },
+                                  claim_open: { label: 'Reclamação', cls: 'bg-yellow-100 text-yellow-800 border-yellow-300' },
+                                };
+                                const info = statusMap[st] || { label: st || '-', cls: 'bg-muted text-muted-foreground border-border' };
+                                return (
+                                  <Badge variant="outline" className={cn('text-xs whitespace-nowrap', info.cls)}>
+                                    {info.label}
+                                  </Badge>
+                                );
+                              })()}
                             </TableCell>
                             <TableCell>{order.buyer_nickname || order.buyer_name || '-'}</TableCell>
                             <TableCell className="text-right font-medium">
