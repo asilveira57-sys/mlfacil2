@@ -50,7 +50,7 @@ export function CostAbcProfit({ sellerId }: CostAbcProfitProps) {
 
       if (response.ok) {
         const data = await response.json();
-        setItems(data.items || []);
+        setItems(data.data || []);
       }
     } catch (error) {
       console.error('Error loading ABC:', error);

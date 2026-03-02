@@ -1202,6 +1202,36 @@ async function calculateAbcProfit(supabase: any, userId: string, sellerId: strin
 }
 
 async function calculateAbcForMetric(supabase: any, userId: string, sellerId: string, periodKey: string, metric: string, aggregates: any[]) {
+  // Build display_name map from product_costs and order items
+  const productKeys = aggregates.map((a: any) => a.product_key);
+  const displayNameMap = new Map<string, string>();
+
+  // Try product_costs first (user-defined names)
+  const { data: costs } = await supabase
+    .from('product_costs')
+    .select('product_key, display_name')
+    .eq('seller_id', sellerId)
+    .in('product_key', productKeys.slice(0, 500));
+  for (const c of (costs || [])) {
+    if (c.display_name) displayNameMap.set(c.product_key, c.display_name);
+  }
+
+  // Fill gaps from order items cache
+  const missingKeys = productKeys.filter(k => !displayNameMap.has(k));
+  if (missingKeys.length > 0) {
+    const { data: items } = await supabase
+      .from('meli_order_items_cache')
+      .select('product_key, title_short, title, item_id')
+      .eq('seller_id', sellerId)
+      .in('product_key', missingKeys.slice(0, 500))
+      .limit(500);
+    for (const item of (items || [])) {
+      if (!displayNameMap.has(item.product_key)) {
+        displayNameMap.set(item.product_key, item.title_short || item.title || item.item_id || item.product_key);
+      }
+    }
+  }
+
   const sorted = [...aggregates].sort((a, b) => {
     const valueA = metric === 'profit' ? Number(a.profit_total) : Number(a.revenue_total);
     const valueB = metric === 'profit' ? Number(b.profit_total) : Number(b.revenue_total);
@@ -1223,7 +1253,7 @@ async function calculateAbcForMetric(supabase: any, userId: string, sellerId: st
 
     return {
       user_id: userId, seller_id: sellerId, period_key: periodKey, metric,
-      product_key: a.product_key, display_name: null, value_total: value,
+      product_key: a.product_key, display_name: displayNameMap.get(a.product_key) || a.product_key, value_total: value,
       percent, cumulative_percent: cumulativePercent, class: abcClass,
       rank: index + 1, updated_at: new Date().toISOString(),
     };
