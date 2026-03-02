@@ -1,17 +1,18 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { DollarSign, Package, TrendingUp, Calculator, RefreshCw, Settings, BarChart3, FileSearch } from 'lucide-react';
+import { DollarSign, Package, TrendingUp, RefreshCw, Settings, BarChart3, FileSearch } from 'lucide-react';
 import { toast } from 'sonner';
 import { CostCatalog } from '@/components/custos/CostCatalog';
 import { CostSettings } from '@/components/custos/CostSettings';
 import { CostOrders } from '@/components/custos/CostOrders';
 import { CostAbcProfit } from '@/components/custos/CostAbcProfit';
 import { CostOrderDiagnostic } from '@/components/custos/CostOrderDiagnostic';
+import { CostSummaryDashboard } from '@/components/custos/CostSummaryDashboard';
+import { CostDateFilter, getDefaultDateRange, type DateRange } from '@/components/custos/CostDateFilter';
 
 import { PageContainer } from "@/components/layout/PageContainer";
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
@@ -28,15 +29,19 @@ export default function Custos() {
   const [activeTab, setActiveTab] = useState('resumo');
   const feedback = useModuleFeedbackIntegration('precificacao-custos');
   const [isCalculating, setIsCalculating] = useState(false);
+  const [dateRange, setDateRange] = useState<DateRange>(getDefaultDateRange);
   
   // Watchdog integration
   const { enabled: watchdogEnabled } = useCostWatchdogPreferences();
   useCostSyncWatchdog(sellerId, watchdogEnabled);
   
-  // Auto-polling for summary data
+  // Auto-polling for summary data with date range
   const { summary, loading: summaryLoading, refresh: refreshSummary } = useCostDataPolling({
     sellerId,
     enabled: activeTab === 'resumo',
+    dateFrom: dateRange.from.toISOString(),
+    dateTo: dateRange.to.toISOString(),
+    periodDays: dateRange.periodDays,
   });
 
   // Redirect to auth if not logged in
@@ -55,7 +60,6 @@ export default function Custos() {
     if (activeTab === 'resumo' && sellerId) {
       refreshSummary();
     }
-    // Invalidate stale caches when switching to data tabs
     if (activeTab === 'pedidos') {
       invalidateCostCache('orders');
     }
@@ -77,7 +81,7 @@ export default function Custos() {
             Authorization: `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ seller_id: sellerId, period_days: 30 }),
+          body: JSON.stringify({ seller_id: sellerId, period_days: dateRange.periodDays }),
         }
       );
 
@@ -106,12 +110,6 @@ export default function Custos() {
     );
   }
 
-
-
-
-  const formatCurrency = (value: number) => 
-    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
-
   const headerContent = (
     <Button onClick={handleCalculate} disabled={isCalculating || !sellerId}>
       <RefreshCw className={`h-4 w-4 mr-2 ${isCalculating ? 'animate-spin' : ''}`} />
@@ -137,117 +135,16 @@ export default function Custos() {
           </TabsList>
 
           <TabsContent value="resumo">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm text-muted-foreground">Faturamento (30d)</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-2xl font-bold">
-                    {summary?.total_revenue ? formatCurrency(summary.total_revenue) : 'R$ 0,00'}
-                  </p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm text-muted-foreground">Custo Total</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-2xl font-bold text-destructive">
-                    {summary?.total_cost ? formatCurrency(summary.total_cost) : 'R$ 0,00'}
-                  </p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm text-muted-foreground">Lucro Total</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className={`text-2xl font-bold ${(summary?.total_profit || 0) >= 0 ? 'text-green-500' : 'text-destructive'}`}>
-                    {summary?.total_profit ? formatCurrency(summary.total_profit) : 'R$ 0,00'}
-                  </p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm text-muted-foreground">Margem Média</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-2xl font-bold">
-                    {summary?.avg_margin ? `${summary.avg_margin.toFixed(1)}%` : '0%'}
-                  </p>
-                  {(summary?.incomplete_percent || 0) > 0 && (
-                    <p className="text-xs text-warning mt-1">
-                      {summary?.incomplete_percent?.toFixed(0)}% pedidos sem custo
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-              <Card className="border-warning/30 bg-warning/5">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm text-warning">Cancelados (30d)</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-2xl font-bold text-warning">
-                    {summary?.cancelled_count || 0}
-                  </p>
-                  <p className="text-xs text-warning mt-1">
-                    VGV: {summary?.cancelled_vgv ? formatCurrency(summary.cancelled_vgv) : 'R$ 0,00'}
-                  </p>
-                </CardContent>
-              </Card>
+            <div className="mb-5">
+              <CostDateFilter value={dateRange} onChange={setDateRange} />
             </div>
-
-            {/* ABC and missing cost indicators */}
-            {summary?.order_count ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                <Card className="bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800">
-                  <CardContent className="pt-4">
-                    <p className="text-sm text-muted-foreground mb-1">Classe A</p>
-                    <p className="text-2xl font-bold text-green-600">{summary?.abc_a_percent?.toFixed(0) || 0}%</p>
-                    <p className="text-xs text-muted-foreground">dos produtos (80% do lucro)</p>
-                  </CardContent>
-                </Card>
-                <Card className="bg-yellow-50 dark:bg-yellow-950/30 border-yellow-200 dark:border-yellow-800">
-                  <CardContent className="pt-4">
-                    <p className="text-sm text-muted-foreground mb-1">Classe B</p>
-                    <p className="text-2xl font-bold text-yellow-600">{summary?.abc_b_percent?.toFixed(0) || 0}%</p>
-                    <p className="text-xs text-muted-foreground">dos produtos (15% do lucro)</p>
-                  </CardContent>
-                </Card>
-                <Card className="bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800">
-                  <CardContent className="pt-4">
-                    <p className="text-sm text-muted-foreground mb-1">Classe C</p>
-                    <p className="text-2xl font-bold text-red-600">{summary?.abc_c_percent?.toFixed(0) || 0}%</p>
-                    <p className="text-xs text-muted-foreground">dos produtos (5% do lucro)</p>
-                  </CardContent>
-                </Card>
-                <Card className={`${(summary?.missing_cost_count || 0) > 0 ? 'border-destructive/30 bg-destructive/5' : ''}`}>
-                  <CardContent className="pt-4">
-                    <p className="text-sm text-muted-foreground mb-1">Pedidos sem Custo</p>
-                    <p className={`text-2xl font-bold ${(summary?.missing_cost_count || 0) > 0 ? 'text-destructive' : 'text-green-600'}`}>
-                      {summary?.missing_cost_count || 0}
-                    </p>
-                    <p className="text-xs text-muted-foreground">necessitam custo definido</p>
-                  </CardContent>
-                </Card>
-              </div>
-            ) : null}
-
-            {!summary?.order_count && (
-              <Card>
-                <CardContent className="py-8 text-center">
-                  <Calculator className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                  <p className="text-muted-foreground mb-4">
-                    Nenhum cálculo realizado ainda. Clique em "Recalcular" para processar os pedidos.
-                  </p>
-                  <Button onClick={handleCalculate} disabled={isCalculating}>
-                    <RefreshCw className={`h-4 w-4 mr-2 ${isCalculating ? 'animate-spin' : ''}`} />
-                    Calcular Custos
-                  </Button>
-                </CardContent>
-              </Card>
-            )}
+            <CostSummaryDashboard
+              summary={summary}
+              loading={summaryLoading}
+              onCalculate={handleCalculate}
+              isCalculating={isCalculating}
+              dateLabel={dateRange.label}
+            />
           </TabsContent>
 
           <TabsContent value="catalogo">
