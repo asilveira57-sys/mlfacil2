@@ -201,6 +201,52 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     loadOrders();
   };
 
+  const handleBulkReimport = async () => {
+    const ids = Array.from(selectedOrders);
+    if (ids.length === 0) return;
+
+    if (!confirm(`Excluir e reimportar ${ids.length} pedido(s)? Os dados de custo serão recalculados em background.`)) return;
+
+    setBatchProcessing(true);
+    setBatchProgress({ current: 0, total: ids.length, currentOrderId: 'enviando...' });
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        toast.error('Sessão expirada');
+        return;
+      }
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders/bulk-reimport`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ seller_id: sellerId, order_ids: ids }),
+        }
+      );
+
+      if (response.ok) {
+        toast.success(`Reimportação de ${ids.length} pedidos iniciada em background. Os dados serão atualizados automaticamente.`);
+        setSelectedOrders(new Set());
+        setSelectAllPages(false);
+        // Reload after a short delay to show cleared data
+        setTimeout(() => loadOrders(), 3000);
+      } else {
+        const err = await response.json().catch(() => ({}));
+        toast.error(err.error || 'Erro ao iniciar reimportação');
+      }
+    } catch {
+      toast.error('Erro ao iniciar reimportação em massa');
+    } finally {
+      setBatchProcessing(false);
+      setBatchProgress({ current: 0, total: 0, currentOrderId: '' });
+    }
+  };
+
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
       if (sortDirection === 'desc') {
@@ -608,7 +654,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
 
               {/* Batch action bar */}
               {selectedOrders.size > 0 && (
-                <div className="flex items-center gap-3 p-3 mb-2 rounded-lg bg-muted border">
+                <div className="flex items-center gap-3 p-3 mb-2 rounded-lg bg-muted border flex-wrap">
                   <span className="text-sm font-medium">{selectedOrders.size.toLocaleString()} selecionado(s)</span>
                   <Button
                     size="sm"
@@ -626,6 +672,15 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                         Atualizar selecionados
                       </>
                     )}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={handleBulkReimport}
+                    disabled={batchProcessing}
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1" />
+                    Excluir e reimportar
                   </Button>
                   {!batchProcessing && !selectAllPages && (
                     <Button size="sm" variant="ghost" onClick={() => setSelectedOrders(new Set())}>
