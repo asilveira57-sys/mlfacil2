@@ -176,7 +176,7 @@ async function resolveCompanyId(supabase: any, sellerId: string): Promise<string
   const { data } = await supabase
     .from('marketplace_accounts')
     .select('company_id')
-    .eq('ml_account_id', sellerId)
+    .eq('external_user_id', sellerId)
     .limit(1)
     .maybeSingle();
   if (data?.company_id) return data.company_id;
@@ -705,14 +705,25 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
     const companyId = await resolveCompanyId(supabase, sellerId);
     const taxConfig = companyId ? await getTaxForCompany(supabase, companyId) : null;
 
-    const orders = await fetchAllRows(
-      supabase.from('meli_orders_cache')
-        .select('order_id, shipment_id, total_amount, buyer_nickname, buyer_name, created_at_meli, shipping_state')
-        .eq('seller_id', sellerId)
-        .eq('user_id', userId)
-        .eq('order_status', 'paid')
-        .gte('created_at_meli', dateFromStr)
-    );
+    let orders: any[];
+    try {
+      orders = await fetchAllRows(
+        supabase.from('meli_orders_cache')
+          .select('order_id, shipment_id, total_amount, buyer_nickname, buyer_name, created_at_meli, shipping_state')
+          .eq('seller_id', sellerId)
+          .eq('user_id', userId)
+          .eq('order_status', 'paid')
+          .gte('created_at_meli', dateFromStr)
+      );
+    } catch (fetchErr: any) {
+      console.error('[cost-engine] CRITICAL: Failed to fetch orders, aborting to prevent zero-overwrite:', fetchErr?.message);
+      return;
+    }
+
+    if (!orders || orders.length === 0) {
+      console.log('[cost-engine] No orders found, skipping calculation');
+      return;
+    }
 
     console.log(`[cost-engine] Found ${orders.length} orders to process`);
 
@@ -876,12 +887,17 @@ async function calculateSingleOrder(supabase: any, userId: string, sellerId: str
   const companyId = await resolveCompanyId(supabase, sellerId);
   const taxConfig = companyId ? await getTaxForCompany(supabase, companyId) : null;
 
-  const { data: order } = await supabase
+  const { data: order, error: orderError } = await supabase
     .from('meli_orders_cache')
     .select('order_id, shipment_id, total_amount, buyer_nickname, buyer_name, created_at_meli, shipping_state')
     .eq('seller_id', sellerId)
     .eq('order_id', orderId)
     .single();
+
+  if (orderError || !order) {
+    console.error(`[cost-engine] Failed to fetch order ${orderId}, aborting to prevent zero-overwrite:`, orderError?.message);
+    return { success: false, error: 'order_fetch_failed', message: orderError?.message || 'Order not found' };
+  }
 
   const { data: items } = await supabase
     .from('meli_order_items_cache')
