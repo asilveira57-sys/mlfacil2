@@ -970,7 +970,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                               {order.status === 'ok' ? (
                                 <Badge variant="outline" className="text-green-600 border-green-600">OK</Badge>
                               ) : (
-                                <Badge variant="destructive" className="flex items-center gap-1 w-fit">
+                                <Badge variant="outline" className="flex items-center gap-1 w-fit text-orange-600 border-orange-300">
                                   <AlertCircle className="h-3 w-3" />
                                   {order.missing_cost_items_count} s/ custo
                                 </Badge>
@@ -1208,9 +1208,9 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
 
                       <div className="flex items-center gap-1">
                         (-) Comissão ML:
-                        {selectedOrder.breakdown.commission_cost > 0 && <CheckCircle2 className="h-3 w-3 text-green-600" />}
+                        {(selectedOrder.breakdown.commission_cost > 0 || selectedOrder.breakdown.fee_ml > 0) && <CheckCircle2 className="h-3 w-3 text-green-600" />}
                       </div>
-                      <div className="text-right">{formatCurrency(selectedOrder.breakdown.commission_cost || selectedOrder.billing?.cost_sale_fee || 0)}</div>
+                      <div className="text-right">{formatCurrency(selectedOrder.breakdown.fee_ml || selectedOrder.breakdown.commission_cost || selectedOrder.billing?.cost_sale_fee || 0)}</div>
 
                       {(selectedOrder.breakdown.installments_cost > 0 || selectedOrder.billing?.cost_installment_fee > 0) && (
                         <>
@@ -1255,11 +1255,11 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
 
                       <div className="flex items-center gap-1">
                         Custo de Frete (ML cobrou):
-                        {(selectedOrder.breakdown.shipping_cost_seller > 0 || selectedOrder.billing?.cost_shipping_fee > 0) && 
+                        {(selectedOrder.breakdown.cost_shipping > 0 || selectedOrder.breakdown.shipping_cost_seller > 0 || selectedOrder.billing?.cost_shipping_fee > 0) && 
                           <CheckCircle2 className="h-3 w-3 text-green-600" />}
                       </div>
                       <div className="text-right text-destructive">
-                        -{formatCurrency(selectedOrder.breakdown.shipping_cost_seller || selectedOrder.billing?.cost_shipping_fee || 0)}
+                        -{formatCurrency(selectedOrder.breakdown.cost_shipping || selectedOrder.breakdown.shipping_cost_seller || selectedOrder.billing?.cost_shipping_fee || 0)}
                       </div>
 
                       <div className="border-t pt-2 font-medium">Saldo do Frete:</div>
