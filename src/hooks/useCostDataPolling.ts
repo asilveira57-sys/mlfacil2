@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 const POLL_INTERVAL_MS = 30000; // 30 seconds
 
-interface CostSummaryData {
+export interface CostSummaryData {
   total_revenue: number;
   total_cost: number;
   total_profit: number;
@@ -16,17 +16,32 @@ interface CostSummaryData {
   abc_a_percent?: number;
   abc_b_percent?: number;
   abc_c_percent?: number;
+  total_cost_product?: number;
+  total_cost_shipping?: number;
+  total_cost_marketplace?: number;
+  total_tax?: number;
+  total_packaging?: number;
+  total_installments?: number;
+  total_cost_other?: number;
+  total_receita_produtos?: number;
+  total_receita_envio?: number;
 }
 
 interface UseCostDataPollingOptions {
   sellerId: string | null;
   enabled?: boolean;
+  dateFrom?: string | null;
+  dateTo?: string | null;
+  periodDays?: number;
   onSummaryUpdate?: (summary: CostSummaryData | null) => void;
 }
 
 export function useCostDataPolling({ 
   sellerId, 
   enabled = true,
+  dateFrom,
+  dateTo,
+  periodDays = 30,
   onSummaryUpdate 
 }: UseCostDataPollingOptions) {
   const [loading, setLoading] = useState(false);
@@ -43,8 +58,12 @@ export function useCostDataPolling({
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
+      const queryParams = new URLSearchParams({ seller_id: sellerId, period_days: String(periodDays) });
+      if (dateFrom) queryParams.set('date_from', dateFrom);
+      if (dateTo) queryParams.set('date_to', dateTo);
+
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/summary?seller_id=${sellerId}&period_days=30`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/summary?${queryParams}`,
         { headers: { Authorization: `Bearer ${session.access_token}` } }
       );
 
@@ -61,7 +80,7 @@ export function useCostDataPolling({
     } finally {
       setLoading(false);
     }
-  }, [sellerId, enabled, onSummaryUpdate]);
+  }, [sellerId, enabled, dateFrom, dateTo, periodDays, onSummaryUpdate]);
 
   // Track tab visibility
   useEffect(() => {
