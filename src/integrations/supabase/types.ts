@@ -3867,6 +3867,71 @@ export type Database = {
         }
         Relationships: []
       }
+      cost_calculation_logs: {
+        Row: {
+          company_id: string | null
+          created_at: string | null
+          custo_produto: number | null
+          destination_state: string | null
+          difal_applied: boolean | null
+          difal_enabled: boolean | null
+          embalagem: number | null
+          id: string
+          imposto_percent_total: number | null
+          imposto_valor: number | null
+          lucro_final: number | null
+          margem_final: number | null
+          order_id: string | null
+          origin_state: string | null
+          receita: number | null
+          seller_id: string | null
+        }
+        Insert: {
+          company_id?: string | null
+          created_at?: string | null
+          custo_produto?: number | null
+          destination_state?: string | null
+          difal_applied?: boolean | null
+          difal_enabled?: boolean | null
+          embalagem?: number | null
+          id?: string
+          imposto_percent_total?: number | null
+          imposto_valor?: number | null
+          lucro_final?: number | null
+          margem_final?: number | null
+          order_id?: string | null
+          origin_state?: string | null
+          receita?: number | null
+          seller_id?: string | null
+        }
+        Update: {
+          company_id?: string | null
+          created_at?: string | null
+          custo_produto?: number | null
+          destination_state?: string | null
+          difal_applied?: boolean | null
+          difal_enabled?: boolean | null
+          embalagem?: number | null
+          id?: string
+          imposto_percent_total?: number | null
+          imposto_valor?: number | null
+          lucro_final?: number | null
+          margem_final?: number | null
+          order_id?: string | null
+          origin_state?: string | null
+          receita?: number | null
+          seller_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cost_calculation_logs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       daily_messages: {
         Row: {
           ativa: boolean
@@ -6134,42 +6199,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      marketplace_fee_rules: {
-        Row: {
-          channel: string
-          created_at: string
-          fee_fixed_default: number
-          fee_mode: string
-          fee_percent_default: number
-          id: string
-          seller_id: string
-          updated_at: string
-          user_id: string
-        }
-        Insert: {
-          channel?: string
-          created_at?: string
-          fee_fixed_default?: number
-          fee_mode?: string
-          fee_percent_default?: number
-          id?: string
-          seller_id: string
-          updated_at?: string
-          user_id: string
-        }
-        Update: {
-          channel?: string
-          created_at?: string
-          fee_fixed_default?: number
-          fee_mode?: string
-          fee_percent_default?: number
-          id?: string
-          seller_id?: string
-          updated_at?: string
-          user_id?: string
-        }
-        Relationships: []
       }
       meli_backfill_sync_state: {
         Row: {
@@ -8988,11 +9017,13 @@ export type Database = {
           cost_net: number | null
           cost_other: number
           cost_packaging: number
+          cost_packaging_detail: Json | null
           cost_shipping: number
           cost_total: number
           created_at_meli: string | null
           custo_diferenca_peso_medidas: number | null
           custo_envio_declarado: number | null
+          difal_applied: boolean | null
           fee_ml: number | null
           fee_ml_source: string | null
           has_real_cost: boolean | null
@@ -9000,6 +9031,7 @@ export type Database = {
           id: string
           installments_cost: number | null
           last_checked_at: string | null
+          last_recalculated_at: string | null
           margin_net: number | null
           margin_percent: number
           missing_cost_items_count: number
@@ -9024,6 +9056,8 @@ export type Database = {
           status: string
           tarifa_venda_e_impostos: number | null
           tarifas_envio: number | null
+          tax_percent_total: number | null
+          tax_value: number | null
           taxa_parcelamento_equivalente: number | null
           total_liquido: number | null
           total_marketplace_cost: number | null
@@ -9041,11 +9075,13 @@ export type Database = {
           cost_net?: number | null
           cost_other?: number
           cost_packaging?: number
+          cost_packaging_detail?: Json | null
           cost_shipping?: number
           cost_total?: number
           created_at_meli?: string | null
           custo_diferenca_peso_medidas?: number | null
           custo_envio_declarado?: number | null
+          difal_applied?: boolean | null
           fee_ml?: number | null
           fee_ml_source?: string | null
           has_real_cost?: boolean | null
@@ -9053,6 +9089,7 @@ export type Database = {
           id?: string
           installments_cost?: number | null
           last_checked_at?: string | null
+          last_recalculated_at?: string | null
           margin_net?: number | null
           margin_percent?: number
           missing_cost_items_count?: number
@@ -9077,6 +9114,8 @@ export type Database = {
           status?: string
           tarifa_venda_e_impostos?: number | null
           tarifas_envio?: number | null
+          tax_percent_total?: number | null
+          tax_value?: number | null
           taxa_parcelamento_equivalente?: number | null
           total_liquido?: number | null
           total_marketplace_cost?: number | null
@@ -9094,11 +9133,13 @@ export type Database = {
           cost_net?: number | null
           cost_other?: number
           cost_packaging?: number
+          cost_packaging_detail?: Json | null
           cost_shipping?: number
           cost_total?: number
           created_at_meli?: string | null
           custo_diferenca_peso_medidas?: number | null
           custo_envio_declarado?: number | null
+          difal_applied?: boolean | null
           fee_ml?: number | null
           fee_ml_source?: string | null
           has_real_cost?: boolean | null
@@ -9106,6 +9147,7 @@ export type Database = {
           id?: string
           installments_cost?: number | null
           last_checked_at?: string | null
+          last_recalculated_at?: string | null
           margin_net?: number | null
           margin_percent?: number
           missing_cost_items_count?: number
@@ -9130,6 +9172,8 @@ export type Database = {
           status?: string
           tarifa_venda_e_impostos?: number | null
           tarifas_envio?: number | null
+          tax_percent_total?: number | null
+          tax_value?: number | null
           taxa_parcelamento_equivalente?: number | null
           total_liquido?: number | null
           total_marketplace_cost?: number | null
@@ -9137,35 +9181,52 @@ export type Database = {
         }
         Relationships: []
       }
-      packaging_cost_settings: {
+      packaging_types: {
         Row: {
-          created_at: string
-          default_packaging_cost: number
+          company_id: string
+          cost_value: number
+          created_at: string | null
+          height_cm: number | null
           id: string
-          packaging_cost_mode: string
-          seller_id: string
-          updated_at: string
-          user_id: string
+          is_active: boolean | null
+          length_cm: number | null
+          name: string
+          updated_at: string | null
+          width_cm: number | null
         }
         Insert: {
-          created_at?: string
-          default_packaging_cost?: number
+          company_id: string
+          cost_value?: number
+          created_at?: string | null
+          height_cm?: number | null
           id?: string
-          packaging_cost_mode?: string
-          seller_id: string
-          updated_at?: string
-          user_id: string
+          is_active?: boolean | null
+          length_cm?: number | null
+          name: string
+          updated_at?: string | null
+          width_cm?: number | null
         }
         Update: {
-          created_at?: string
-          default_packaging_cost?: number
+          company_id?: string
+          cost_value?: number
+          created_at?: string | null
+          height_cm?: number | null
           id?: string
-          packaging_cost_mode?: string
-          seller_id?: string
-          updated_at?: string
-          user_id?: string
+          is_active?: boolean | null
+          length_cm?: number | null
+          name?: string
+          updated_at?: string | null
+          width_cm?: number | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "packaging_types_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       payments: {
         Row: {
@@ -10120,13 +10181,6 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "pricing_simulation_inputs_fee_ruleset_id_fkey"
-            columns: ["fee_ruleset_id"]
-            isOneToOne: false
-            referencedRelation: "marketplace_fee_rules"
-            referencedColumns: ["id"]
-          },
-          {
             foreignKeyName: "pricing_simulation_inputs_freight_ruleset_id_fkey"
             columns: ["freight_ruleset_id"]
             isOneToOne: false
@@ -10534,6 +10588,48 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      product_packaging_link: {
+        Row: {
+          company_id: string
+          created_at: string | null
+          id: string
+          packaging_id: string
+          product_key: string
+          seller_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string | null
+          id?: string
+          packaging_id: string
+          product_key: string
+          seller_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string | null
+          id?: string
+          packaging_id?: string
+          product_key?: string
+          seller_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_packaging_link_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_packaging_link_packaging_id_fkey"
+            columns: ["packaging_id"]
+            isOneToOne: false
+            referencedRelation: "packaging_types"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       product_profit_aggregate_cache: {
         Row: {
@@ -14472,6 +14568,59 @@ export type Database = {
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tax_configuration: {
+        Row: {
+          cofins_percent: number | null
+          company_id: string
+          created_at: string | null
+          csll_percent: number | null
+          das_icms_percent: number | null
+          difal_enabled: boolean | null
+          difal_percent: number | null
+          id: string
+          irpj_percent: number | null
+          origin_state: string | null
+          pis_percent: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          cofins_percent?: number | null
+          company_id: string
+          created_at?: string | null
+          csll_percent?: number | null
+          das_icms_percent?: number | null
+          difal_enabled?: boolean | null
+          difal_percent?: number | null
+          id?: string
+          irpj_percent?: number | null
+          origin_state?: string | null
+          pis_percent?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          cofins_percent?: number | null
+          company_id?: string
+          created_at?: string | null
+          csll_percent?: number | null
+          das_icms_percent?: number | null
+          difal_enabled?: boolean | null
+          difal_percent?: number | null
+          id?: string
+          irpj_percent?: number | null
+          origin_state?: string | null
+          pis_percent?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tax_configuration_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
             referencedColumns: ["id"]
           },
         ]
