@@ -28,6 +28,8 @@ export interface AdTimelineStats {
   price?: number;
   status?: string;
   available_quantity?: number;
+  sku?: string;
+  variation_id?: string;
 }
 
 export interface AdTimelineEvent {

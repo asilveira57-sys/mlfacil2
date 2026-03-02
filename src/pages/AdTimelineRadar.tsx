@@ -221,7 +221,8 @@ export default function AdTimelineRadar() {
       const term = searchTerm.toLowerCase();
       return (
         s.item_id.toLowerCase().includes(term) ||
-        s.title?.toLowerCase().includes(term)
+        s.title?.toLowerCase().includes(term) ||
+        s.sku?.toLowerCase().includes(term)
       );
     }) || [];
     
@@ -359,8 +360,8 @@ export default function AdTimelineRadar() {
           <div className="flex flex-wrap gap-2 items-center">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por ID ou título..."
+                <Input
+                placeholder="Buscar por ID, título ou SKU..."
                 value={searchTerm}
                 onChange={(e) => handleSearchChange(e.target.value)}
                 className="pl-9 w-64"
@@ -502,11 +503,13 @@ export default function AdTimelineRadar() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <div className="font-medium text-sm truncate max-w-[200px] hover:underline"
+                        <div className="font-medium text-sm truncate max-w-[250px] hover:underline"
                           onClick={() => navigate(`/anuncios/linha-do-tempo/${item.item_id}`)}>
                           {item.title || item.item_id}
                         </div>
-                        <div className="text-xs text-muted-foreground">{item.item_id}</div>
+                        <div className="text-xs text-muted-foreground truncate max-w-[250px]">
+                          {[item.sku && `SKU: ${item.sku}`, item.variation_id && `Var: ${item.variation_id}`].filter(Boolean).join(' • ') || item.item_id}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <StatusBucketBadge bucket={item.status_bucket as StatusBucket} />
