@@ -1,51 +1,55 @@
 
 
-## Plano: Correções no Módulo de Custos / Pedidos
+## Analise: Por que o sistema não encontra o produto no Olist
 
-### Problemas Identificados
+### Problemas identificados
 
-1. **Filtro "Sem custo e-commerce" não funciona para pedidos sem custo billing**: O filtro padrão "Status Venda = Pagos" exclui pedidos com `fee_ml_source` = `pending`/`no_charges` do resultado. Ao selecionar "Sem custo e-commerce", esses pedidos ficam invisíveis porque o backend já os filtrou antes.
+**Problema 1: O campo `preco_custo_medio` não está sendo lido**
 
-2. **Seleção limitada à página atual**: Só é possível selecionar os 50 pedidos da página corrente. Falta opção de "Selecionar todos" (todas as páginas).
+A API do Tiny/Olist retorna dois campos de custo:
+- `preco_custo` (Preço custo) -- na screenshot do usuário: **0,00**
+- `preco_custo_medio` (Custo médio) -- na screenshot: **45,00**
 
-### Correções
+O codigo atual (linha 1638) faz:
+```typescript
+const cost = parseFloat(product.preco_custo) || parseFloat(product.preco) || null;
+```
 
-**1. Corrigir filtro "Sem custo e-commerce"**
+Ele tenta `preco_custo` (que é 0), depois cai pro `preco` (preço de venda, 93,01). Nunca verifica `preco_custo_medio`. E como `preco_custo` = 0, o `parseFloat` retorna 0, que é falsy em JS, então cai pro `preco`. Mas o check `cost > 0` no final devolveria 93,01 (preço de venda), que está errado -- ou se `preco_custo` fosse lido como `0` e `preco` como preço de venda, retornaria o preço de venda errado.
 
-No backend (`supabase/functions/cost-engine/index.ts`), quando `orderStatus` for `'paid'` (padrão), o filtro exclui `pending`/`no_charges`. Preciso ajustar a lógica para que, quando `orderStatus` for `'all'` ou quando o filtro de e-commerce estiver ativo, não excluir esses registros. A solução mais limpa: quando `orderStatus === 'paid'`, manter o filtro atual. Mas o filtro "Sem Custo" (`pending_cost`) já existe como opção separada no dropdown de Status Venda. O problema real é que "Sem custo e-commerce" filtra `cost_other = 0`, o que é diferente de "sem billing". Vou verificar se o filtro está funcionando corretamente dentro do escopo `paid`.
+Precisa adicionar `preco_custo_medio` na cascata de fallback.
 
-Na verdade, o filtro "Sem custo e-commerce" (`cost_other = 0`) funciona dentro dos pedidos `paid` — ele mostra pedidos pagos que não têm custo e-commerce registrado. Se o usuário quer ver pedidos **sem custo de billing/comissão**, ele deve usar "Status Venda → Sem Custo". Vou renomear o filtro para ficar mais claro e garantir que o dropdown "Sem Custo" no Status Venda realmente funcione.
+**Problema 2: A pesquisa pode não encontrar o produto**
 
-**2. Adicionar "Selecionar todos de todas as páginas"**
+O parâmetro `pesquisa` da API Tiny busca por "Nome ou código (ou parte) do produto". O `searchTerm` é construído como `sku || item_id || product_key`.
 
-- Adicionar um banner que aparece quando todos da página estão selecionados: "Selecionar todos os {totalOrders} pedidos de todas as páginas?"
-- Implementar um estado `selectAllPages` que, ao ativar, busca todos os `order_id`s do backend (nova rota ou parâmetro `ids_only=true`) e os adiciona ao `selectedOrders`.
-- Alternativamente, no batch resync, quando `selectAllPages` estiver ativo, enviar os filtros para o backend processar em lote server-side ao invés de listar IDs no frontend.
+O `product_key` no catálogo de custos vem do Mercado Livre (formato `MLB_ITEM_ID` ou similar), e o `item_id` também é do ML. Se o SKU estiver preenchido (ex: "RM110X74MCBR"), ele usa o SKU -- que deveria bater com o campo `codigo` no Tiny.
 
-### Implementação
+Esse caso pode funcionar se o SKU do ML for igual ao codigo do Tiny. Mas se não existir na resposta, retorna `null`. Preciso adicionar logs para diagnosticar se a busca retorna ou não.
 
-**Backend** (`supabase/functions/cost-engine/index.ts`):
-- Adicionar suporte a `ids_only=true` na rota `/orders` que retorna apenas os `order_id`s sem paginação (para seleção total).
+### Correção proposta
 
-**Frontend** (`src/components/custos/CostOrders.tsx`):
-- Quando o checkbox "selecionar todos" da página for marcado, mostrar banner: "Todos os {50} desta página selecionados. **Selecionar todos os {totalOrders}?**"
-- Ao clicar, buscar IDs via `ids_only=true` e popular `selectedOrders`.
-- Renomear ou esclarecer o filtro "Sem custo e-commerce" para evitar confusão com "Sem Custo" de billing.
-- Manter ambas as opções: selecionar página atual (checkbox header) e selecionar todas as páginas (banner).
+**No `fetchOlistCost` (linhas 1617-1643):**
 
-### Detalhes Técnicos
+1. Adicionar `preco_custo_medio` na cascata de custo:
+```typescript
+const cost = parseFloat(product.preco_custo) 
+  || parseFloat(product.preco_custo_medio) 
+  || parseFloat(product.preco) 
+  || null;
+```
 
-- A rota `ids_only` reutiliza os mesmos filtros existentes mas retorna só `order_id[]` sem limite de paginação
-- O batch resync continua sendo sequencial (1 por 1 com delay de 500ms) para evitar rate limit
-- O estado `selectAllPages` é resetado ao mudar filtros ou página
+2. Adicionar log do retorno da API para diagnóstico:
+```typescript
+console.log('[cost-engine] Olist search result:', JSON.stringify({
+  searchTerm, 
+  found: data.retorno?.produtos?.length || 0,
+  firstProduct: data.retorno?.produtos?.[0]?.produto?.codigo
+}));
+```
 
-### Bulk Reimport/Resync em Background (v2 - Self-Chaining)
+3. Garantir que `0` não seja tratado como falsy -- usar checagem explícita `!== null && !== undefined && > 0`.
 
-**Arquitetura**: Edge Function com auto-invocação encadeada (self-chaining):
-1. Frontend cria job via `orders/bulk-reimport` → backend cria registro em `cost_bulk_jobs`, deleta caches, processa chunk de 10 pedidos
-2. Ao terminar chunk, a Edge Function se auto-invoca via `orders/bulk-reimport-continue` com `x-internal-key` auth
-3. Cada invocação processa 10 pedidos + 600ms delay entre cada → ~12s por chunk, bem dentro do timeout de 60s
-4. Progresso salvo em `cost_bulk_jobs` (processed_count, success_count, error_count)
-5. Frontend faz polling a cada 3s para mostrar progresso em tempo real
-6. Se fechar o navegador, o processamento continua server-side até completar
-7. Ao reabrir a página, o frontend detecta jobs ativos e retoma o polling
+### Arquivos a alterar
+
+- `supabase/functions/cost-engine/index.ts` -- apenas a função `fetchOlistCost` (~5 linhas)
