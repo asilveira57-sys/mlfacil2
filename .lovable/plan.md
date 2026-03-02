@@ -1,32 +1,41 @@
 
-## Plano: Adicionar Status da Venda no Módulo Custos / Pedidos
 
-### Problema Identificado
-O pedido `2000015130306570` aparece sem nome do comprador e sem indicação de que é uma devolução em andamento. A aba "Pedidos" do módulo de Custos não exibe o `order_status` da venda, impossibilitando identificar cancelamentos, devoluções, etc.
+## Plano: Correções no Módulo de Custos / Pedidos
 
-### O que será feito
+### Problemas Identificados
 
-**1. Adicionar coluna `order_status` ao retorno da API `cost-engine/orders`**
-- No `getOrderCosts` do edge function `cost-engine/index.ts`, fazer um JOIN com `meli_orders_cache` para trazer o campo `order_status` atualizado para cada pedido listado.
-- Para pedidos cancelados (que já vêm de `meli_orders_cache`), o status já está presente.
+1. **Filtro "Sem custo e-commerce" não funciona para pedidos sem custo billing**: O filtro padrão "Status Venda = Pagos" exclui pedidos com `fee_ml_source` = `pending`/`no_charges` do resultado. Ao selecionar "Sem custo e-commerce", esses pedidos ficam invisíveis porque o backend já os filtrou antes.
 
-**2. Exibir o status da venda na tabela do frontend**
-- Adicionar uma coluna "Status" na tabela de `CostOrders.tsx` com um Badge colorido:
-  - `paid` → verde "Pago"
-  - `cancelled` / `refunded` → vermelho "Cancelado" / "Reembolsado"
-  - outros → amarelo com o status traduzido
-- Posicionar a coluna logo após a data.
+2. **Seleção limitada à página atual**: Só é possível selecionar os 50 pedidos da página corrente. Falta opção de "Selecionar todos" (todas as páginas).
 
-**3. Adicionar filtro por status da venda no frontend**
-- O filtro `orderStatusFilter` já existe, mas será complementado para incluir opções como `refunded` e `partially_refunded`.
+### Correções
 
-**4. Otimização: Não re-sincronizar vendas entregues há mais de 30 dias**
-- No edge function `ml-sync-real-costs`, na lógica de `resync_single` e `handleReprocessPending`, antes de chamar a API do ML, verificar se o `order_status` é `delivered` e se `created_at_meli` tem mais de 30 dias. Se sim, pular a chamada e marcar como "frozen" (sem necessidade de atualização).
-- No webhook/worker, manter a atualização normalmente para pedidos recentes.
+**1. Corrigir filtro "Sem custo e-commerce"**
+
+No backend (`supabase/functions/cost-engine/index.ts`), quando `orderStatus` for `'paid'` (padrão), o filtro exclui `pending`/`no_charges`. Preciso ajustar a lógica para que, quando `orderStatus` for `'all'` ou quando o filtro de e-commerce estiver ativo, não excluir esses registros. A solução mais limpa: quando `orderStatus === 'paid'`, manter o filtro atual. Mas o filtro "Sem Custo" (`pending_cost`) já existe como opção separada no dropdown de Status Venda. O problema real é que "Sem custo e-commerce" filtra `cost_other = 0`, o que é diferente de "sem billing". Vou verificar se o filtro está funcionando corretamente dentro do escopo `paid`.
+
+Na verdade, o filtro "Sem custo e-commerce" (`cost_other = 0`) funciona dentro dos pedidos `paid` — ele mostra pedidos pagos que não têm custo e-commerce registrado. Se o usuário quer ver pedidos **sem custo de billing/comissão**, ele deve usar "Status Venda → Sem Custo". Vou renomear o filtro para ficar mais claro e garantir que o dropdown "Sem Custo" no Status Venda realmente funcione.
+
+**2. Adicionar "Selecionar todos de todas as páginas"**
+
+- Adicionar um banner que aparece quando todos da página estão selecionados: "Selecionar todos os {totalOrders} pedidos de todas as páginas?"
+- Implementar um estado `selectAllPages` que, ao ativar, busca todos os `order_id`s do backend (nova rota ou parâmetro `ids_only=true`) e os adiciona ao `selectedOrders`.
+- Alternativamente, no batch resync, quando `selectAllPages` estiver ativo, enviar os filtros para o backend processar em lote server-side ao invés de listar IDs no frontend.
+
+### Implementação
+
+**Backend** (`supabase/functions/cost-engine/index.ts`):
+- Adicionar suporte a `ids_only=true` na rota `/orders` que retorna apenas os `order_id`s sem paginação (para seleção total).
+
+**Frontend** (`src/components/custos/CostOrders.tsx`):
+- Quando o checkbox "selecionar todos" da página for marcado, mostrar banner: "Todos os {50} desta página selecionados. **Selecionar todos os {totalOrders}?**"
+- Ao clicar, buscar IDs via `ids_only=true` e popular `selectedOrders`.
+- Renomear ou esclarecer o filtro "Sem custo e-commerce" para evitar confusão com "Sem Custo" de billing.
+- Manter ambas as opções: selecionar página atual (checkbox header) e selecionar todas as páginas (banner).
 
 ### Detalhes Técnicos
 
-- **Sem migração de banco**: Os campos `order_status` e `created_at_meli` já existem em `meli_orders_cache`. Apenas precisamos cruzar os dados no retorno da API.
-- **Edge function `cost-engine`**: Após buscar os dados de `order_cost_breakdown_cache`, fazer batch lookup dos `order_id`s na `meli_orders_cache` para obter `order_status`.
-- **Edge function `ml-sync-real-costs`**: Adicionar guard clause para pedidos antigos entregues.
-- **Frontend**: Nova coluna + Badge com cores, sem impacto na paginação/ordenação existente.
+- A rota `ids_only` reutiliza os mesmos filtros existentes mas retorna só `order_id[]` sem limite de paginação
+- O batch resync continua sendo sequencial (1 por 1 com delay de 500ms) para evitar rate limit
+- O estado `selectAllPages` é resetado ao mudar filtros ou página
+
