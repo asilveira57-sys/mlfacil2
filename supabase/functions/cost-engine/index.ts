@@ -1555,11 +1555,11 @@ async function fetchErpCost(supabase: any, userId: string, body: any) {
   if (!seller_id) throw new Error('seller_id is required');
   if (!product_key) throw new Error('product_key is required');
 
-  // Find company_id from seller_id via marketplace_accounts
+  // Find company_id from seller_id via ml_accounts (source of truth)
   const { data: maData } = await supabase
-    .from('marketplace_accounts')
+    .from('ml_accounts')
     .select('company_id')
-    .eq('external_user_id', seller_id)
+    .eq('ml_user_id', seller_id)
     .limit(1)
     .single();
 
