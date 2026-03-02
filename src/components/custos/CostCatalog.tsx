@@ -9,7 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Search, AlertCircle, Check, RefreshCw, Download } from 'lucide-react';
 import { toast } from 'sonner';
-import { getCostCache, setCostCache, checkSellerChange } from '@/hooks/useCostModuleCache';
+import { getCostCache, setCostCache, checkSellerChange, invalidateCostCache } from '@/hooks/useCostModuleCache';
 
 interface CostCatalogProps {
   sellerId: string;
@@ -127,6 +127,7 @@ export function CostCatalog({ sellerId }: CostCatalogProps) {
       if (response.ok) {
         toast.success('Custo atualizado');
         setEditingKey(null);
+        invalidateCostCache('catalog');
         loadCatalog();
       } else {
         toast.error('Erro ao salvar custo');
@@ -165,6 +166,7 @@ export function CostCatalog({ sellerId }: CostCatalogProps) {
 
       if (data.success) {
         toast.success(`Custo importado do ERP: R$ ${Number(data.cost_value).toFixed(2)}`);
+        invalidateCostCache('catalog');
         loadCatalog();
       } else if (data.error === 'no_erp' || data.error === 'no_api_key') {
         toast.error(data.message, { duration: 6000 });
@@ -216,7 +218,7 @@ export function CostCatalog({ sellerId }: CostCatalogProps) {
             />
             <label htmlFor="onlyMissing" className="text-sm">Somente sem custo</label>
           </div>
-          <Button variant="outline" onClick={loadCatalog} disabled={loading}>
+          <Button variant="outline" onClick={() => { invalidateCostCache('catalog'); loadCatalog(); }} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </Button>
         </div>

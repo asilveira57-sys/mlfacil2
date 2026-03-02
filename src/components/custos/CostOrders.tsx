@@ -14,7 +14,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import { getCostCache, setCostCache, checkSellerChange } from '@/hooks/useCostModuleCache';
+import { getCostCache, setCostCache, checkSellerChange, invalidateCostCache } from '@/hooks/useCostModuleCache';
 
 interface CostOrdersProps {
   sellerId: string;
@@ -193,6 +193,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
           setActiveJobId(null);
           setSelectedOrders(new Set());
           setSelectAllPages(false);
+          invalidateCostCache('orders');
           loadOrders();
 
           if (job.status === 'done') {
@@ -490,6 +491,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
 
       if (response.ok) {
         toast.success('Custo e-commerce salvo com sucesso');
+        invalidateCostCache('orders');
         // Reload detail
         await loadOrderDetail(selectedOrder.order?.order_id);
         // Reload list
@@ -635,7 +637,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
               </SelectContent>
             </Select>
 
-            <Button variant="outline" onClick={loadOrders} disabled={loading}>
+            <Button variant="outline" onClick={() => { invalidateCostCache('orders'); loadOrders(); }} disabled={loading}>
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             </Button>
 
@@ -992,6 +994,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                                     });
                                     if (error) throw error;
                                     toast.success(`Pedido ${order.order_id} atualizado`);
+                                    invalidateCostCache('orders');
                                     loadOrders();
                                   } catch (err) {
                                     toast.error('Erro ao resincronizar');
@@ -1024,8 +1027,9 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                                         body: JSON.stringify({ seller_id: sellerId, order_id: order.order_id }),
                                       }
                                     );
-                                    if (response.ok) {
+                                     if (response.ok) {
                                       toast.success(`Pedido ${order.order_id} reimportado`);
+                                      invalidateCostCache('orders');
                                       loadOrders();
                                     } else {
                                       const err = await response.json().catch(() => ({}));
