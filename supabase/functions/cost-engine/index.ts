@@ -1623,7 +1623,12 @@ async function fetchOlistCost(apiKey: string, searchTerm: string): Promise<numbe
       formato: 'JSON',
     });
 
-    const response = await fetch(`${url}?${params}`);
+    // Tiny API requires POST with form-encoded body
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+    });
     const data = await response.json();
 
     console.log('[cost-engine] Olist search result:', JSON.stringify({
@@ -1631,10 +1636,41 @@ async function fetchOlistCost(apiKey: string, searchTerm: string): Promise<numbe
       status: data.retorno?.status,
       found: data.retorno?.produtos?.length || 0,
       firstProduct: data.retorno?.produtos?.[0]?.produto?.codigo,
+      statusProcessamento: data.retorno?.status_processamento,
+      codigoErro: data.retorno?.codigo_erro,
     }));
 
     if (data.retorno?.status !== 'OK' || !data.retorno?.produtos?.length) {
-      return null;
+      // Log full response for diagnosis (token expired, rate limit, etc.)
+      if (data.retorno?.status !== 'OK') {
+        console.warn('[cost-engine] Olist API non-OK response:', JSON.stringify(data.retorno));
+      }
+
+      // Fallback: retry with simplified search term (remove special chars)
+      const simplified = searchTerm.replace(/[^a-zA-Z0-9]/g, '');
+      if (simplified !== searchTerm && simplified.length >= 3) {
+        console.log('[cost-engine] Retrying Olist search with simplified term:', simplified);
+        const fallbackParams = new URLSearchParams({ token: apiKey, pesquisa: simplified, formato: 'JSON' });
+        const fallbackResp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: fallbackParams.toString(),
+        });
+        const fallbackData = await fallbackResp.json();
+        console.log('[cost-engine] Olist fallback result:', JSON.stringify({
+          simplified,
+          status: fallbackData.retorno?.status,
+          found: fallbackData.retorno?.produtos?.length || 0,
+        }));
+        if (fallbackData.retorno?.status === 'OK' && fallbackData.retorno?.produtos?.length) {
+          // Use fallback data - fall through to cost extraction below
+          Object.assign(data, fallbackData);
+        } else {
+          return null;
+        }
+      } else {
+        return null;
+      }
     }
 
     // Get the first matching product
