@@ -1,34 +1,32 @@
 
+## Plano: Adicionar Status da Venda no Módulo Custos / Pedidos
 
-## Problema Identificado com Evidência Concreta
+### Problema Identificado
+O pedido `2000015130306570` aparece sem nome do comprador e sem indicação de que é uma devolução em andamento. A aba "Pedidos" do módulo de Custos não exibe o `order_status` da venda, impossibilitando identificar cancelamentos, devoluções, etc.
 
-**Causa raiz**: Strategy 2 (billing_details_cache) está "fechando a porta" para Strategy 3 prematuramente.
+### O que será feito
 
-Para o pedido `2000015220508868`:
-- Strategy 1: `marketplace_fee` = 0 na API `/orders` → falha
-- Strategy 2: `meli_billing_details_cache` tem **apenas 1 registro**: "Tarifa de envio extra ou intermunicipal" = R$ 56,90 (frete). **Não tem o registro de comissão** porque o cache de billing está truncado.
-- Linhas 257-260: o código assume "tem registros de billing mas sem comissão → comissão é legitimamente 0" e marca `feeMLSource = "billing"`.
-- Strategy 3 (`/billing_info` API) **nunca é chamada** porque `feeMLSource` já não é `"pending"`.
+**1. Adicionar coluna `order_status` ao retorno da API `cost-engine/orders`**
+- No `getOrderCosts` do edge function `cost-engine/index.ts`, fazer um JOIN com `meli_orders_cache` para trazer o campo `order_status` atualizado para cada pedido listado.
+- Para pedidos cancelados (que já vêm de `meli_orders_cache`), o status já está presente.
 
-O print do ML mostra claramente R$ 75,16 de comissão (11,5%). O cache está incompleto.
+**2. Exibir o status da venda na tabela do frontend**
+- Adicionar uma coluna "Status" na tabela de `CostOrders.tsx` com um Badge colorido:
+  - `paid` → verde "Pago"
+  - `cancelled` / `refunded` → vermelho "Cancelado" / "Reembolsado"
+  - outros → amarelo com o status traduzido
+- Posicionar a coluna logo após a data.
 
-## Correção
+**3. Adicionar filtro por status da venda no frontend**
+- O filtro `orderStatusFilter` já existe, mas será complementado para incluir opções como `refunded` e `partially_refunded`.
 
-**Arquivo**: `supabase/functions/ml-sync-real-costs/index.ts`
+**4. Otimização: Não re-sincronizar vendas entregues há mais de 30 dias**
+- No edge function `ml-sync-real-costs`, na lógica de `resync_single` e `handleReprocessPending`, antes de chamar a API do ML, verificar se o `order_status` é `delivered` e se `created_at_meli` tem mais de 30 dias. Se sim, pular a chamada e marcar como "frozen" (sem necessidade de atualização).
+- No webhook/worker, manter a atualização normalmente para pedidos recentes.
 
-### 1. `handleResyncSingle` (linhas 233-263)
-**Remover** a lógica que assume "billing cache sem comissão = comissão é 0". Se Strategy 2 encontrar frete mas não comissão, NÃO marcar como `billing`. Manter `feeMLSource = "pending"` para que Strategy 3 (`/billing_info` API) seja chamada.
+### Detalhes Técnicos
 
-Mudança específica:
-- Linhas 256-261: remover o bloco `else { feeMLSource = "billing"; }`. Se o cache tem registros mas feeML continua 0, manter `feeMLSource = "pending"` e deixar Strategy 3 buscar a comissão via API.
-- Após Strategy 3, se `feeML` ainda for 0 mas tiver `shippingCostSeller > 0`, marcar como `"billing"` — porque nesse ponto todas as fontes foram consultadas.
-
-### 2. `handleReprocessPending` (linhas 570-610)
-Aplicar a mesma correção: remover a lógica que marca como "billing" quando o cache tem registros mas sem comissão. Permitir fallthrough para a chamada `/billing_info`.
-
-### 3. Adicionar Strategy 3 no batch
-Atualmente o batch (`handleReprocessPending`) só tem Strategy 1 e 2. Adicionar Strategy 3 (`/billing_info` API) idêntico ao do `resync_single`, para que o batch também consiga buscar comissão quando o cache está truncado.
-
-### 4. Finalização robusta
-Após todas as 3 estratégias: se `feeML` ainda é 0 mas existe `shippingCostSeller > 0`, marcar como `fee_ml_source = "billing"` com nota no `source_refs` indicando que todas as fontes foram consultadas. Isso evita o loop infinito sem assumir prematuramente que a comissão é 0.
-
+- **Sem migração de banco**: Os campos `order_status` e `created_at_meli` já existem em `meli_orders_cache`. Apenas precisamos cruzar os dados no retorno da API.
+- **Edge function `cost-engine`**: Após buscar os dados de `order_cost_breakdown_cache`, fazer batch lookup dos `order_id`s na `meli_orders_cache` para obter `order_status`.
+- **Edge function `ml-sync-real-costs`**: Adicionar guard clause para pedidos antigos entregues.
+- **Frontend**: Nova coluna + Badge com cores, sem impacto na paginação/ordenação existente.
