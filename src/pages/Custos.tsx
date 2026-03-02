@@ -5,14 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { DollarSign, Package, TrendingUp, Calculator, RefreshCw, Settings, BarChart3, FileSearch, AlertCircle } from 'lucide-react';
+import { DollarSign, Package, TrendingUp, Calculator, RefreshCw, Settings, BarChart3, FileSearch } from 'lucide-react';
 import { toast } from 'sonner';
 import { CostCatalog } from '@/components/custos/CostCatalog';
 import { CostSettings } from '@/components/custos/CostSettings';
 import { CostOrders } from '@/components/custos/CostOrders';
 import { CostAbcProfit } from '@/components/custos/CostAbcProfit';
 import { CostOrderDiagnostic } from '@/components/custos/CostOrderDiagnostic';
-import { CostOrdersNoCost } from '@/components/custos/CostOrdersNoCost';
+
 import { PageContainer } from "@/components/layout/PageContainer";
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { useCostSyncWatchdog } from '@/hooks/useCostSyncWatchdog';
@@ -58,8 +58,6 @@ export default function Custos() {
     // Invalidate stale caches when switching to data tabs
     if (activeTab === 'pedidos') {
       invalidateCostCache('orders');
-    } else if (activeTab === 'sem-custo') {
-      invalidateCostCache('no-cost');
     }
   }, [activeTab, sellerId, refreshSummary]);
 
@@ -131,10 +129,9 @@ export default function Custos() {
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="mb-6">
             <TabsTrigger value="resumo"><BarChart3 className="h-4 w-4 mr-2" />Resumo</TabsTrigger>
-            <TabsTrigger value="catalogo"><Package className="h-4 w-4 mr-2" />Catálogo</TabsTrigger>
+            <TabsTrigger value="catalogo"><Package className="h-4 w-4 mr-2" />Anúncios</TabsTrigger>
             <TabsTrigger value="pedidos"><DollarSign className="h-4 w-4 mr-2" />Pedidos</TabsTrigger>
             <TabsTrigger value="abc"><TrendingUp className="h-4 w-4 mr-2" />ABC por Lucro</TabsTrigger>
-            <TabsTrigger value="sem-custo"><AlertCircle className="h-4 w-4 mr-2" />Sem Custo</TabsTrigger>
             <TabsTrigger value="diagnostico"><FileSearch className="h-4 w-4 mr-2" />Diagnóstico</TabsTrigger>
             <TabsTrigger value="config"><Settings className="h-4 w-4 mr-2" />Configurações</TabsTrigger>
           </TabsList>
@@ -227,10 +224,6 @@ export default function Custos() {
 
           <TabsContent value="abc">
             <CostAbcProfit sellerId={sellerId || ''} />
-          </TabsContent>
-
-          <TabsContent value="sem-custo">
-            <CostOrdersNoCost sellerId={sellerId || ''} />
           </TabsContent>
 
           <TabsContent value="diagnostico">

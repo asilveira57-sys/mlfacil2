@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Search, AlertCircle, TrendingUp, TrendingDown, RefreshCw, CheckCircle2, DollarSign, Save, ArrowUpDown, ArrowUp, ArrowDown, Package, RotateCw, Square, CheckSquare, Loader2 } from 'lucide-react';
+import { Search, AlertCircle, TrendingUp, TrendingDown, RefreshCw, CheckCircle2, DollarSign, Save, ArrowUpDown, ArrowUp, ArrowDown, Package, RotateCw, Square, CheckSquare, Loader2, Copy, Trash2 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
@@ -88,6 +88,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
 
   const [resyncingOrder, setResyncingOrder] = useState<string | null>(null);
+  const [reimportingOrder, setReimportingOrder] = useState<string | null>(null);
 
   // Batch selection state
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
@@ -464,6 +465,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="paid">Pagos</SelectItem>
+                <SelectItem value="pending_cost">Sem Custo</SelectItem>
                 <SelectItem value="cancelled">Cancelados</SelectItem>
                 <SelectItem value="all">Todos</SelectItem>
               </SelectContent>
@@ -654,11 +656,27 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                               />
                             </TableCell>
                             <TableCell>{formatDate(order.created_at_meli)}</TableCell>
-                            <TableCell>
-                              <div className="font-mono text-xs">{order.order_id}</div>
-                              {order.shipment_id && (
-                                <div className="text-xs text-muted-foreground">{order.shipment_id}</div>
-                              )}
+                            <TableCell onClick={(e) => e.stopPropagation()}>
+                              <div className="flex items-center gap-1">
+                                <div>
+                                  <div className="font-mono text-xs">{order.order_id}</div>
+                                  {order.shipment_id && (
+                                    <div className="text-xs text-muted-foreground">{order.shipment_id}</div>
+                                  )}
+                                </div>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 w-6 p-0 opacity-50 hover:opacity-100"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(order.order_id);
+                                    toast.success('Número copiado');
+                                  }}
+                                  title="Copiar número do pedido"
+                                >
+                                  <Copy className="h-3 w-3" />
+                                </Button>
+                              </div>
                             </TableCell>
                             <TableCell>
                               {(() => {
@@ -749,30 +767,69 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                             </div>
                           </TableCell>
                           <TableCell>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              disabled={resyncingOrder === order.order_id}
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                setResyncingOrder(order.order_id);
-                                try {
-                                  const { data: result, error } = await supabase.functions.invoke('ml-sync-real-costs', {
-                                    body: { seller_id: sellerId, action: 'resync_single', order_id: order.order_id }
-                                  });
-                                  if (error) throw error;
-                                  toast.success(`Pedido ${order.order_id} atualizado`);
-                                  loadOrders();
-                                } catch (err) {
-                                  toast.error('Erro ao resincronizar');
-                                } finally {
-                                  setResyncingOrder(null);
-                                }
-                              }}
-                              title="Atualizar custos deste pedido"
-                            >
-                              <RotateCw className={`h-3 w-3 ${resyncingOrder === order.order_id ? 'animate-spin' : ''}`} />
-                            </Button>
+                            <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={resyncingOrder === order.order_id}
+                                onClick={async () => {
+                                  setResyncingOrder(order.order_id);
+                                  try {
+                                    const { data: result, error } = await supabase.functions.invoke('ml-sync-real-costs', {
+                                      body: { seller_id: sellerId, action: 'resync_single', order_id: order.order_id }
+                                    });
+                                    if (error) throw error;
+                                    toast.success(`Pedido ${order.order_id} atualizado`);
+                                    loadOrders();
+                                  } catch (err) {
+                                    toast.error('Erro ao resincronizar');
+                                  } finally {
+                                    setResyncingOrder(null);
+                                  }
+                                }}
+                                title="Atualizar custos deste pedido"
+                              >
+                                <RotateCw className={`h-3 w-3 ${resyncingOrder === order.order_id ? 'animate-spin' : ''}`} />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={reimportingOrder === order.order_id}
+                                onClick={async () => {
+                                  if (!confirm(`Reimportar pedido ${order.order_id}? Isso vai excluir e reimportar os dados.`)) return;
+                                  setReimportingOrder(order.order_id);
+                                  try {
+                                    const { data: { session } } = await supabase.auth.getSession();
+                                    if (!session) return;
+                                    const response = await fetch(
+                                      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders/reimport`,
+                                      {
+                                        method: 'POST',
+                                        headers: {
+                                          Authorization: `Bearer ${session.access_token}`,
+                                          'Content-Type': 'application/json',
+                                        },
+                                        body: JSON.stringify({ seller_id: sellerId, order_id: order.order_id }),
+                                      }
+                                    );
+                                    if (response.ok) {
+                                      toast.success(`Pedido ${order.order_id} reimportado`);
+                                      loadOrders();
+                                    } else {
+                                      const err = await response.json().catch(() => ({}));
+                                      toast.error(err.error || 'Erro ao reimportar');
+                                    }
+                                  } catch {
+                                    toast.error('Erro ao reimportar pedido');
+                                  } finally {
+                                    setReimportingOrder(null);
+                                  }
+                                }}
+                                title="Reimportar pedido (excluir e reimportar)"
+                              >
+                                <Trash2 className={`h-3 w-3 ${reimportingOrder === order.order_id ? 'animate-spin' : ''}`} />
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                         );
