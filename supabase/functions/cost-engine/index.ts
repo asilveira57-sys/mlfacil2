@@ -75,6 +75,9 @@ Deno.serve(async (req) => {
       case 'orders/update-manual-cost':
         result = await updateManualCost(supabase, user.id, body);
         break;
+      case 'orders/reimport':
+        result = await reimportOrder(supabase, user.id, body);
+        break;
       case 'calculate':
         // Start background calculation
         EdgeRuntime.waitUntil(
@@ -278,7 +281,7 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
   const ecommerceCost = params.ecommerce_cost; // with, without, all
   const shippingFilter = params.shipping_filter; // high, very_high, missing, all
   const billingFilter = params.billing_filter; // billing, pending, all
-  const orderStatus = params.order_status; // paid, cancelled, all
+  const orderStatus = params.order_status; // paid, cancelled, pending_cost, all
   const search = params.search || '';
   const page = parseInt(params.page || '1');
   const pageSize = parseInt(params.page_size || '50');
@@ -369,8 +372,12 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
     query = query.eq('status', status);
   }
 
-  // Default: only show billing + manual (exclude pending/no_charges)
-  if (!billingFilter || billingFilter === 'all') {
+  // Filter by billing source based on order status filter
+  if (orderStatus === 'pending_cost') {
+    // Show only orders without cost data
+    query = query.in('fee_ml_source', ['pending', 'no_charges']);
+  } else if (!billingFilter || billingFilter === 'all') {
+    // Default: show billing + manual (exclude pending/no_charges)
     query = query.in('fee_ml_source', ['billing', 'manual']);
   } else if (billingFilter === 'billing') {
     query = query.eq('fee_ml_source', 'billing');
@@ -1281,4 +1288,43 @@ async function updateManualCost(supabase: any, userId: string, body: any) {
     .eq('id', existing.id);
 
   return { success: true, profit_total: profitTotal, margin_percent: marginPercent };
+}
+
+// ================== REIMPORT ORDER ==================
+
+async function reimportOrder(supabase: any, userId: string, body: any) {
+  const { seller_id, order_id } = body;
+  if (!seller_id || !order_id) throw new Error('seller_id and order_id are required');
+
+  console.log(`[cost-engine] Reimporting order ${order_id} for seller ${seller_id}`);
+
+  // 1. Delete the cost breakdown
+  await supabase
+    .from('order_cost_breakdown_cache')
+    .delete()
+    .eq('seller_id', seller_id)
+    .eq('order_id', order_id);
+
+  // 2. Delete the financials cache
+  await supabase
+    .from('meli_order_financials_cache')
+    .delete()
+    .eq('seller_id', seller_id)
+    .eq('order_id', order_id);
+
+  // 3. Delete billing details cache
+  await supabase
+    .from('meli_billing_details_cache')
+    .delete()
+    .eq('seller_id', seller_id)
+    .eq('order_id', order_id);
+
+  // 4. Recalculate the order
+  try {
+    await calculateSingleOrder(supabase, userId, seller_id, order_id);
+  } catch (e) {
+    console.error(`[cost-engine] Error recalculating after reimport:`, e);
+  }
+
+  return { success: true, message: `Pedido ${order_id} reimportado com sucesso` };
 }
