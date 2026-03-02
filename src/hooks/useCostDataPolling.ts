@@ -12,6 +12,10 @@ interface CostSummaryData {
   incomplete_percent: number;
   cancelled_count: number;
   cancelled_vgv: number;
+  missing_cost_count?: number;
+  abc_a_percent?: number;
+  abc_b_percent?: number;
+  abc_c_percent?: number;
 }
 
 interface UseCostDataPollingOptions {
