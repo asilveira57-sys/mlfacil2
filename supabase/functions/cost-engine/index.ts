@@ -334,16 +334,22 @@ async function updateTaxConfig(supabase: any, userId: string, body: any) {
 
 async function getCatalog(supabase: any, userId: string, params: Record<string, string>) {
   const sellerId = params.seller_id;
-  const onlyMissing = params.only_missing === 'true';
   const search = params.search || '';
   const page = parseInt(params.page || '1');
   const pageSize = parseInt(params.page_size || '50');
+  const sortBy = params.sort_by || 'display_name';
+  const sortDir = params.sort_dir || 'asc';
+  const costFilter = params.cost_filter || 'all'; // all | with | without
+  const packagingFilter = params.packaging_filter || 'all'; // all | with | without
 
   if (!sellerId) throw new Error('seller_id is required');
 
+  // Resolve company for packaging cross-ref
+  const companyId = await resolveCompanyId(supabase, sellerId);
+
   let itemsQuery = supabase
     .from('meli_order_items_cache')
-    .select('product_key, item_id, variation_id, sku, title, title_short')
+    .select('product_key, item_id, variation_id, sku, title, title_short, thumbnail')
     .eq('seller_id', sellerId)
     .eq('user_id', userId);
 
@@ -365,32 +371,66 @@ async function getCatalog(supabase: any, userId: string, params: Record<string, 
         variation_id: item.variation_id,
         sku: item.sku,
         display_name: item.title_short || item.title || item.item_id,
+        thumbnail: item.thumbnail || null,
       });
     }
   }
 
+  // Fetch costs
   const costs = await fetchAllRows(
     supabase.from('product_cost_catalog').select('*').eq('seller_id', sellerId).eq('user_id', userId)
   );
-
   const costMap = new Map<string, any>(costs.map((c: any) => [c.product_key, c]));
+
+  // Fetch packaging links
+  let packagingLinkMap = new Map<string, string>();
+  if (companyId) {
+    const links = await fetchAllRows(
+      supabase.from('product_packaging_link')
+        .select('product_key, packaging_id')
+        .eq('company_id', companyId)
+        .eq('seller_id', sellerId)
+    );
+    for (const l of links) {
+      packagingLinkMap.set(l.product_key, l.packaging_id);
+    }
+  }
 
   let products = Array.from(productMap.values()).map(p => {
     const costEntry = costMap.get(p.product_key);
+    const hasPackaging = packagingLinkMap.has(p.product_key);
     return {
       ...p,
       cost_value: costEntry?.cost_value || 0,
       cost_source: costEntry?.cost_source || 'manual',
       has_cost: !!costEntry && Number(costEntry.cost_value) > 0,
+      has_packaging: hasPackaging,
       updated_at: costEntry?.updated_at || null,
     };
   });
 
-  if (onlyMissing) {
-    products = products.filter(p => !p.has_cost);
-  }
+  // Apply filters
+  if (costFilter === 'with') products = products.filter(p => p.has_cost);
+  else if (costFilter === 'without') products = products.filter(p => !p.has_cost);
 
-  products.sort((a, b) => (a.display_name || '').localeCompare(b.display_name || ''));
+  if (packagingFilter === 'with') products = products.filter(p => p.has_packaging);
+  else if (packagingFilter === 'without') products = products.filter(p => !p.has_packaging);
+
+  // Server-side sorting
+  const dir = sortDir === 'desc' ? -1 : 1;
+  products.sort((a, b) => {
+    switch (sortBy) {
+      case 'sku':
+        return dir * (a.sku || '').localeCompare(b.sku || '');
+      case 'cost_value':
+        return dir * ((a.cost_value || 0) - (b.cost_value || 0));
+      case 'has_cost':
+        return dir * (Number(a.has_cost) - Number(b.has_cost));
+      case 'display_name':
+      default:
+        return dir * (a.display_name || '').localeCompare(b.display_name || '');
+    }
+  });
 
   const total = products.length;
   const totalPages = Math.ceil(total / pageSize);
@@ -403,7 +443,10 @@ async function getCatalog(supabase: any, userId: string, params: Record<string, 
     page,
     page_size: pageSize,
     total_pages: totalPages,
-    missing_count: products.filter(p => !p.has_cost).length,
+    missing_count: Array.from(productMap.values()).filter(p => {
+      const costEntry = costMap.get(p.product_key);
+      return !costEntry || Number(costEntry.cost_value) <= 0;
+    }).length,
   };
 }
 
