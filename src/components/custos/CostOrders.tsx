@@ -92,6 +92,8 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
 
   // Batch selection state
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
+  const [selectAllPages, setSelectAllPages] = useState(false);
+  const [loadingAllIds, setLoadingAllIds] = useState(false);
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, currentOrderId: '' });
 
@@ -99,6 +101,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const someOnPageSelected = orders.some(o => selectedOrders.has(o.order_id));
 
   const toggleSelectAll = () => {
+    setSelectAllPages(false);
     setSelectedOrders(prev => {
       const next = new Set(prev);
       if (allOnPageSelected) {
@@ -111,12 +114,52 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   };
 
   const toggleSelectOrder = (orderId: string) => {
+    setSelectAllPages(false);
     setSelectedOrders(prev => {
       const next = new Set(prev);
       if (next.has(orderId)) next.delete(orderId);
       else next.add(orderId);
       return next;
     });
+  };
+
+  const handleSelectAllPages = async () => {
+    setLoadingAllIds(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const params = new URLSearchParams({
+        seller_id: sellerId,
+        period_days: periodDays,
+        search,
+        ids_only: 'true',
+      });
+
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+      if (profitFilter !== 'all') params.set('profit_type', profitFilter);
+      if (ecommerceFilter !== 'all') params.set('ecommerce_cost', ecommerceFilter);
+      if (shippingFilter !== 'all') params.set('shipping_filter', shippingFilter);
+      if (orderStatusFilter !== 'paid') params.set('order_status', orderStatusFilter);
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders?${params}`,
+        { headers: { Authorization: `Bearer ${session.access_token}` } }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        const allIds = data.order_ids || [];
+        setSelectedOrders(new Set(allIds));
+        setSelectAllPages(true);
+        toast.success(`${allIds.length} pedidos selecionados`);
+      }
+    } catch (error) {
+      console.error('Error fetching all IDs:', error);
+      toast.error('Erro ao selecionar todos os pedidos');
+    } finally {
+      setLoadingAllIds(false);
+    }
   };
 
   const handleBatchResync = async () => {
@@ -248,6 +291,11 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
       setLoading(false);
     }
   };
+
+  // Reset selectAllPages when filters/page change
+  useEffect(() => {
+    setSelectAllPages(false);
+  }, [periodDays, statusFilter, profitFilter, ecommerceFilter, shippingFilter, orderStatusFilter, page, search]);
 
   useEffect(() => {
     if (sellerId) {
@@ -519,10 +567,49 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
             </div>
           ) : (
             <>
+              {/* Select all pages banner */}
+              {allOnPageSelected && !selectAllPages && totalOrders > orders.length && !batchProcessing && (
+                <div className="flex items-center gap-2 p-3 mb-2 rounded-lg bg-primary/10 border border-primary/20 text-sm">
+                  <span>
+                    Todos os <strong>{orders.length}</strong> desta página estão selecionados.
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="link"
+                    className="p-0 h-auto font-semibold"
+                    onClick={handleSelectAllPages}
+                    disabled={loadingAllIds}
+                  >
+                    {loadingAllIds ? (
+                      <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />Carregando...</>
+                    ) : (
+                      <>Selecionar todos os {totalOrders.toLocaleString()} pedidos</>
+                    )}
+                  </Button>
+                </div>
+              )}
+
+              {selectAllPages && (
+                <div className="flex items-center gap-2 p-3 mb-2 rounded-lg bg-primary/10 border border-primary/20 text-sm">
+                  <CheckSquare className="h-4 w-4 text-primary" />
+                  <span>
+                    Todos os <strong>{selectedOrders.size.toLocaleString()}</strong> pedidos de todas as páginas estão selecionados.
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="link"
+                    className="p-0 h-auto"
+                    onClick={() => { setSelectAllPages(false); setSelectedOrders(new Set()); }}
+                  >
+                    Limpar seleção
+                  </Button>
+                </div>
+              )}
+
               {/* Batch action bar */}
               {selectedOrders.size > 0 && (
                 <div className="flex items-center gap-3 p-3 mb-2 rounded-lg bg-muted border">
-                  <span className="text-sm font-medium">{selectedOrders.size} selecionado(s)</span>
+                  <span className="text-sm font-medium">{selectedOrders.size.toLocaleString()} selecionado(s)</span>
                   <Button
                     size="sm"
                     onClick={handleBatchResync}
@@ -540,7 +627,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                       </>
                     )}
                   </Button>
-                  {!batchProcessing && (
+                  {!batchProcessing && !selectAllPages && (
                     <Button size="sm" variant="ghost" onClick={() => setSelectedOrders(new Set())}>
                       Limpar seleção
                     </Button>
