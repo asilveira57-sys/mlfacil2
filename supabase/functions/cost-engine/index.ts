@@ -760,12 +760,22 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
     // Preload all packaging links for this seller
     const allProductKeys = [...new Set(allItems.map((i: any) => i.product_key || `${i.item_id}:${i.variation_id || ''}`))];
 
+    // Preload existing breakdowns to use as fallback when financials cache is empty
+    const existingBreakdowns = await fetchWithBatchedIn(
+      supabase, 'order_cost_breakdown_cache',
+      'order_id, fee_ml, shipping_cost_seller, installments_cost, commission_cost, cost_shipping, receita_envio',
+      'order_id', orderIds,
+      [{ column: 'seller_id', value: sellerId }]
+    );
+    const existingBreakdownMap = new Map<string, any>(existingBreakdowns.map((b: any) => [b.order_id, b]));
+
     const breakdowns: any[] = [];
     const calcLogs: any[] = [];
 
     for (const order of orders) {
       const items = itemsByOrder.get(order.order_id) || [];
       const billing = financialsMap.get(order.order_id);
+      const existing = existingBreakdownMap.get(order.order_id);
       const orderProductKeys = items.map((i: any) => i.product_key);
 
       let costItemsTotal = 0;
@@ -783,13 +793,20 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
         ? await getPackagingForOrder(supabase, sellerId, companyId, orderProductKeys)
         : { total: 0, detail: [] };
 
-      // Billing data
+      // Billing data with fallback to existing breakdown (ml-sync-real-costs values)
       let commissionCost = 0, installmentsCost = 0, costShipping = 0, revenueShipping = 0;
       if (billing) {
         commissionCost = billing.cost_sale_fee || 0;
         installmentsCost = billing.cost_installment_fee || 0;
         costShipping = billing.cost_shipping_fee || 0;
         revenueShipping = billing.revenue_shipping || 0;
+      } else if (existing) {
+        // Fallback: use values previously synced by ml-sync-real-costs
+        commissionCost = Number(existing.fee_ml) || Number(existing.commission_cost) || 0;
+        installmentsCost = Number(existing.installments_cost) || 0;
+        costShipping = Number(existing.shipping_cost_seller) || Number(existing.cost_shipping) || 0;
+        revenueShipping = Number(existing.receita_envio) || 0;
+        console.log(`[cost-engine] Fallback for order ${order.order_id}: commission=${commissionCost}, shipping=${costShipping}, installments=${installmentsCost}`);
       }
 
       // Tax V2
@@ -840,6 +857,8 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
         profit_net: profitNet, margin_net: marginNet, missing_fields: missingFields,
         buyer_nickname: order.buyer_nickname || null, buyer_name: order.buyer_name || null,
         created_at_meli: order.created_at_meli || null,
+        // Preserve fee_ml from ml-sync-real-costs
+        fee_ml: existing?.fee_ml || commissionCost || null,
         // V2 fields
         cost_packaging_detail: packaging.detail.length > 0 ? packaging.detail : null,
         tax_percent_total: taxPercentTotal, tax_value: taxValue, difal_applied: difalApplied,
@@ -937,12 +956,27 @@ async function calculateSingleOrder(supabase: any, userId: string, sellerId: str
     .eq('order_id', orderId)
     .maybeSingle();
 
+  // Get existing breakdown for fallback (preserve ml-sync-real-costs values)
+  const { data: existingBreakdown } = await supabase
+    .from('order_cost_breakdown_cache')
+    .select('fee_ml, shipping_cost_seller, installments_cost, commission_cost, cost_shipping, receita_envio')
+    .eq('seller_id', sellerId)
+    .eq('order_id', orderId)
+    .maybeSingle();
+
   let commissionCost = 0, costShipping = 0, revenueShipping = 0, installmentsCost = 0;
   if (billing) {
     commissionCost = billing.cost_sale_fee || 0;
     costShipping = billing.cost_shipping_fee || 0;
     revenueShipping = billing.revenue_shipping || 0;
     installmentsCost = billing.cost_installment_fee || 0;
+  } else if (existingBreakdown) {
+    // Fallback: use values previously synced by ml-sync-real-costs
+    commissionCost = Number(existingBreakdown.fee_ml) || Number(existingBreakdown.commission_cost) || 0;
+    installmentsCost = Number(existingBreakdown.installments_cost) || 0;
+    costShipping = Number(existingBreakdown.shipping_cost_seller) || Number(existingBreakdown.cost_shipping) || 0;
+    revenueShipping = Number(existingBreakdown.receita_envio) || 0;
+    console.log(`[cost-engine] Single order fallback for ${orderId}: commission=${commissionCost}, shipping=${costShipping}`);
   }
 
   // Tax V2
