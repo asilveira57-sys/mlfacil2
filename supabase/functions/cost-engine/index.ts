@@ -1104,9 +1104,6 @@ async function getSummary(supabase: any, userId: string, params: Record<string, 
   const periodDays = parseInt(params.period_days || '30');
   if (!sellerId) throw new Error('seller_id is required');
 
-  const dateFrom = new Date();
-  dateFrom.setDate(dateFrom.getDate() - periodDays);
-
   // Support date_from/date_to params for custom date ranges
   const dateFrom = params.date_from || (() => {
     const d = new Date();
