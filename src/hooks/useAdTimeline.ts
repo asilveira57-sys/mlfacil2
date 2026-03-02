@@ -77,7 +77,7 @@ export function useAdTimelineStats(workspaceId: string | null, filters: Timeline
           const batchIds = itemIds.slice(i, i + batchSize);
           const { data: listings } = await supabase
             .from('meli_listings_cache')
-            .select('item_id, title, thumbnail, price, status, available_quantity')
+            .select('item_id, title, thumbnail, price, status, available_quantity, sku, variation_id')
             .in('item_id', batchIds);
           
           listings?.forEach(l => listingMap.set(l.item_id, l));
