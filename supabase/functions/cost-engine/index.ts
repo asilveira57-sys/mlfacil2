@@ -1583,23 +1583,46 @@ async function fetchErpCost(supabase: any, userId: string, body: any) {
     return { success: false, error: 'no_api_key', message: 'É necessário configurar a API Key do ERP em Configurações > Empresas para atualizar custos.' };
   }
 
-  const searchTerm = sku || item_id || product_key;
+  // Build list of unique search terms to try (SKU, item_id, product_key, partial SKU)
+  const searchTerms: string[] = [];
+  const addTerm = (t: string | undefined | null) => {
+    if (t && t.trim() && !searchTerms.includes(t.trim())) searchTerms.push(t.trim());
+  };
+  addTerm(sku);
+  addTerm(item_id);
+  addTerm(product_key);
+  // Also try partial SKU - first part before any special chars
+  if (sku) {
+    const partial = sku.replace(/[^a-zA-Z0-9]/g, '');
+    addTerm(partial);
+    // Try first 6+ chars as prefix match
+    if (partial.length > 6) addTerm(partial.substring(0, Math.ceil(partial.length * 0.6)));
+  }
+
   let costValue: number | null = null;
   let costSource = erpData.provider;
+  let matchedTerm: string | null = null;
 
   if (erpData.provider === 'olist') {
-    // Olist (Tiny ERP) API
-    costValue = await fetchOlistCost(erpData.api_key, searchTerm);
+    // Try each search term until we find the product
+    for (const term of searchTerms) {
+      costValue = await fetchOlistCost(erpData.api_key, term);
+      if (costValue !== null) {
+        matchedTerm = term;
+        break;
+      }
+    }
   } else if (erpData.provider === 'bling') {
-    // Bling API v3
-    costValue = await fetchBlingCost(erpData.api_key, searchTerm);
+    costValue = await fetchBlingCost(erpData.api_key, searchTerms[0] || product_key);
   } else {
     return { success: false, error: 'unsupported_provider', message: `Provedor ERP "${erpData.provider}" não suportado para busca de custos.` };
   }
 
   if (costValue === null) {
-    return { success: false, error: 'not_found', message: `Produto não encontrado no ${erpData.provider === 'olist' ? 'Olist (Tiny)' : 'Bling'} com o termo "${searchTerm}".` };
+    return { success: false, error: 'not_found', message: `Produto não encontrado no ${erpData.provider === 'olist' ? 'Olist (Tiny)' : 'Bling'} com os termos: ${searchTerms.join(', ')}` };
   }
+
+  console.log('[cost-engine] ERP cost found:', JSON.stringify({ matchedTerm, costValue, searchTerms }));
 
   // Save the cost to the catalog
   await supabase.from('product_cost_catalog').upsert({
@@ -1641,36 +1664,10 @@ async function fetchOlistCost(apiKey: string, searchTerm: string): Promise<numbe
     }));
 
     if (data.retorno?.status !== 'OK' || !data.retorno?.produtos?.length) {
-      // Log full response for diagnosis (token expired, rate limit, etc.)
       if (data.retorno?.status !== 'OK') {
         console.warn('[cost-engine] Olist API non-OK response:', JSON.stringify(data.retorno));
       }
-
-      // Fallback: retry with simplified search term (remove special chars)
-      const simplified = searchTerm.replace(/[^a-zA-Z0-9]/g, '');
-      if (simplified !== searchTerm && simplified.length >= 3) {
-        console.log('[cost-engine] Retrying Olist search with simplified term:', simplified);
-        const fallbackParams = new URLSearchParams({ token: apiKey, pesquisa: simplified, formato: 'JSON' });
-        const fallbackResp = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: fallbackParams.toString(),
-        });
-        const fallbackData = await fallbackResp.json();
-        console.log('[cost-engine] Olist fallback result:', JSON.stringify({
-          simplified,
-          status: fallbackData.retorno?.status,
-          found: fallbackData.retorno?.produtos?.length || 0,
-        }));
-        if (fallbackData.retorno?.status === 'OK' && fallbackData.retorno?.produtos?.length) {
-          // Use fallback data - fall through to cost extraction below
-          Object.assign(data, fallbackData);
-        } else {
-          return null;
-        }
-      } else {
-        return null;
-      }
+      return null;
     }
 
     // Get the first matching product
