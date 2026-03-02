@@ -1,55 +1,51 @@
 
 
-## Analise: Por que o sistema não encontra o produto no Olist
+## Diagnóstico: Catálogo de Custos -- Produto Não Encontrado no ERP
 
-### Problemas identificados
+### Causa raiz identificada
 
-**Problema 1: O campo `preco_custo_medio` não está sendo lido**
+A API do Tiny (Olist) **exige requisições POST com dados form-encoded**, mas o sistema está fazendo **GET com query string**. A documentação oficial do Tiny especifica:
 
-A API do Tiny/Olist retorna dois campos de custo:
-- `preco_custo` (Preço custo) -- na screenshot do usuário: **0,00**
-- `preco_custo_medio` (Custo médio) -- na screenshot: **45,00**
-
-O codigo atual (linha 1638) faz:
-```typescript
-const cost = parseFloat(product.preco_custo) || parseFloat(product.preco) || null;
+```text
+Método: POST
+Content-Type: application/x-www-form-urlencoded
+Body: token=XXX&pesquisa=RM110X74MCBR&formato=JSON
 ```
 
-Ele tenta `preco_custo` (que é 0), depois cai pro `preco` (preço de venda, 93,01). Nunca verifica `preco_custo_medio`. E como `preco_custo` = 0, o `parseFloat` retorna 0, que é falsy em JS, então cai pro `preco`. Mas o check `cost > 0` no final devolveria 93,01 (preço de venda), que está errado -- ou se `preco_custo` fosse lido como `0` e `preco` como preço de venda, retornaria o preço de venda errado.
-
-Precisa adicionar `preco_custo_medio` na cascata de fallback.
-
-**Problema 2: A pesquisa pode não encontrar o produto**
-
-O parâmetro `pesquisa` da API Tiny busca por "Nome ou código (ou parte) do produto". O `searchTerm` é construído como `sku || item_id || product_key`.
-
-O `product_key` no catálogo de custos vem do Mercado Livre (formato `MLB_ITEM_ID` ou similar), e o `item_id` também é do ML. Se o SKU estiver preenchido (ex: "RM110X74MCBR"), ele usa o SKU -- que deveria bater com o campo `codigo` no Tiny.
-
-Esse caso pode funcionar se o SKU do ML for igual ao codigo do Tiny. Mas se não existir na resposta, retorna `null`. Preciso adicionar logs para diagnosticar se a busca retorna ou não.
-
-### Correção proposta
-
-**No `fetchOlistCost` (linhas 1617-1643):**
-
-1. Adicionar `preco_custo_medio` na cascata de custo:
-```typescript
-const cost = parseFloat(product.preco_custo) 
-  || parseFloat(product.preco_custo_medio) 
-  || parseFloat(product.preco) 
-  || null;
+O código atual faz:
+```text
+GET https://api.tiny.com.br/api2/produtos.pesquisa.php?token=XXX&pesquisa=RM110X74MCBR&formato=JSON
 ```
 
-2. Adicionar log do retorno da API para diagnóstico:
+A API do Tiny pode aceitar GET em algumas situações mas retornar resultados vazios ou inconsistentes. O método correto é POST com form-encoded body.
+
+### Plano de correção
+
+**Arquivo:** `supabase/functions/cost-engine/index.ts` -- função `fetchOlistCost`
+
+1. **Mudar de GET para POST com form-encoded body:**
+   - Usar `method: 'POST'` com `Content-Type: application/x-www-form-urlencoded`
+   - Enviar `token`, `pesquisa` e `formato` no body, não na URL
+
+2. **Adicionar fallback de busca:** Se a primeira pesquisa por SKU retornar vazio, tentar uma segunda busca removendo caracteres especiais ou usando apenas parte do código (ex: sem o prefixo/sufixo)
+
+3. **Melhorar logs de diagnóstico:** Logar a resposta completa da API quando `status !== 'OK'` para identificar erros silenciosos (token expirado, rate limit, etc.)
+
+### Código da correção
+
+A função `fetchOlistCost` será atualizada de:
 ```typescript
-console.log('[cost-engine] Olist search result:', JSON.stringify({
-  searchTerm, 
-  found: data.retorno?.produtos?.length || 0,
-  firstProduct: data.retorno?.produtos?.[0]?.produto?.codigo
-}));
+const response = await fetch(`${url}?${params}`);
 ```
 
-3. Garantir que `0` não seja tratado como falsy -- usar checagem explícita `!== null && !== undefined && > 0`.
+Para:
+```typescript
+const response = await fetch(url, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  body: params.toString(),
+});
+```
 
-### Arquivos a alterar
+Apenas ~5 linhas alteradas no edge function. Redeploy automático.
 
-- `supabase/functions/cost-engine/index.ts` -- apenas a função `fetchOlistCost` (~5 linhas)
