@@ -103,6 +103,9 @@ Deno.serve(async (req) => {
       case 'trends-margin':
         result = await getTrendsWithMargin(supabase, user.id, params);
         break;
+      case 'catalog/fetch-erp-cost':
+        result = await fetchErpCost(supabase, user.id, body);
+        break;
       default:
         return new Response(JSON.stringify({ error: 'Unknown endpoint' }), {
           status: 404,
@@ -1341,4 +1344,132 @@ async function reimportOrder(supabase: any, userId: string, body: any) {
   }
 
   return { success: true, message: `Pedido ${order_id} reimportado com sucesso` };
+}
+
+// ================== FETCH ERP COST ==================
+
+async function fetchErpCost(supabase: any, userId: string, body: any) {
+  const { seller_id, product_key, sku, item_id } = body;
+  if (!seller_id) throw new Error('seller_id is required');
+  if (!product_key) throw new Error('product_key is required');
+
+  // Find company_id from seller_id via marketplace_accounts
+  const { data: maData } = await supabase
+    .from('marketplace_accounts')
+    .select('company_id')
+    .eq('external_user_id', seller_id)
+    .limit(1)
+    .single();
+
+  if (!maData?.company_id) {
+    throw new Error('Conta marketplace não encontrada para este seller');
+  }
+
+  // Get ERP integration for this company
+  const { data: erpData } = await supabase
+    .from('erp_integrations')
+    .select('provider, api_key, status')
+    .eq('company_id', maData.company_id)
+    .limit(1)
+    .single();
+
+  if (!erpData) {
+    return { success: false, error: 'no_erp', message: 'É necessário configurar a API Key do ERP em Configurações > Empresas para atualizar custos.' };
+  }
+
+  if (!erpData.api_key) {
+    return { success: false, error: 'no_api_key', message: 'É necessário configurar a API Key do ERP em Configurações > Empresas para atualizar custos.' };
+  }
+
+  const searchTerm = sku || item_id || product_key;
+  let costValue: number | null = null;
+  let costSource = erpData.provider;
+
+  if (erpData.provider === 'olist') {
+    // Olist (Tiny ERP) API
+    costValue = await fetchOlistCost(erpData.api_key, searchTerm);
+  } else if (erpData.provider === 'bling') {
+    // Bling API v3
+    costValue = await fetchBlingCost(erpData.api_key, searchTerm);
+  } else {
+    return { success: false, error: 'unsupported_provider', message: `Provedor ERP "${erpData.provider}" não suportado para busca de custos.` };
+  }
+
+  if (costValue === null) {
+    return { success: false, error: 'not_found', message: `Produto não encontrado no ${erpData.provider === 'olist' ? 'Olist (Tiny)' : 'Bling'} com o termo "${searchTerm}".` };
+  }
+
+  // Save the cost to the catalog
+  await supabase.from('product_cost_catalog').upsert({
+    user_id: userId,
+    seller_id,
+    product_key,
+    cost_value: costValue,
+    cost_source: costSource,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'seller_id,product_key' });
+
+  return { success: true, cost_value: costValue, cost_source: costSource };
+}
+
+async function fetchOlistCost(apiKey: string, searchTerm: string): Promise<number | null> {
+  try {
+    const url = `https://api.tiny.com.br/api2/produtos.pesquisa.php`;
+    const params = new URLSearchParams({
+      token: apiKey,
+      pesquisa: searchTerm,
+      formato: 'JSON',
+    });
+
+    const response = await fetch(`${url}?${params}`);
+    const data = await response.json();
+
+    if (data.retorno?.status !== 'OK' || !data.retorno?.produtos?.length) {
+      return null;
+    }
+
+    // Get the first matching product
+    const product = data.retorno.produtos[0]?.produto;
+    if (!product) return null;
+
+    // Prefer preco_custo, fallback to preco
+    const cost = parseFloat(product.preco_custo) || parseFloat(product.preco) || null;
+    return cost && cost > 0 ? cost : null;
+  } catch (error) {
+    console.error('[cost-engine] Olist API error:', error);
+    return null;
+  }
+}
+
+async function fetchBlingCost(apiKey: string, searchTerm: string): Promise<number | null> {
+  try {
+    const url = `https://api.bling.com.br/Api/v3/produtos`;
+    const params = new URLSearchParams({
+      codigo: searchTerm,
+      limite: '1',
+    });
+
+    const response = await fetch(`${url}?${params}`, {
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Accept': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.error(`[cost-engine] Bling API returned ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    const product = data.data?.[0];
+    if (!product) return null;
+
+    // Bling returns precoCusto
+    const cost = parseFloat(product.precoCusto) || parseFloat(product.preco) || null;
+    return cost && cost > 0 ? cost : null;
+  } catch (error) {
+    console.error('[cost-engine] Bling API error:', error);
+    return null;
+  }
 }
