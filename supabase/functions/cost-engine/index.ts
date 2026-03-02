@@ -78,6 +78,13 @@ Deno.serve(async (req) => {
       case 'orders/reimport':
         result = await reimportOrder(supabase, user.id, body);
         break;
+      case 'orders/bulk-reimport':
+        // Background bulk reimport with rate limit handling
+        EdgeRuntime.waitUntil(
+          bulkReimportOrders(supabase, user.id, body.seller_id, body.order_ids || [])
+        );
+        result = { status: 'processing', total: (body.order_ids || []).length, message: 'Reimportação em massa iniciada em background' };
+        break;
       case 'calculate':
         // Start background calculation
         EdgeRuntime.waitUntil(
@@ -1344,6 +1351,56 @@ async function reimportOrder(supabase: any, userId: string, body: any) {
   }
 
   return { success: true, message: `Pedido ${order_id} reimportado com sucesso` };
+}
+
+// ================== BULK REIMPORT ORDERS ==================
+
+async function bulkReimportOrders(supabase: any, userId: string, sellerId: string, orderIds: string[]) {
+  if (!sellerId || !orderIds.length) return;
+
+  console.log(`[cost-engine] Bulk reimport started: ${orderIds.length} orders for seller ${sellerId}`);
+
+  let successCount = 0;
+  let errorCount = 0;
+  const BATCH_SIZE = 50; // Delete in batches of 50
+  const DELAY_MS = 600; // 600ms between recalculations to avoid rate limits
+
+  // Step 1: Bulk delete all cached data in batches
+  for (let i = 0; i < orderIds.length; i += BATCH_SIZE) {
+    const batch = orderIds.slice(i, i + BATCH_SIZE);
+
+    await Promise.all([
+      supabase.from('order_cost_breakdown_cache').delete().eq('seller_id', sellerId).in('order_id', batch),
+      supabase.from('meli_order_financials_cache').delete().eq('seller_id', sellerId).in('order_id', batch),
+      supabase.from('meli_billing_details_cache').delete().eq('seller_id', sellerId).in('order_id', batch),
+    ]);
+
+    console.log(`[cost-engine] Bulk reimport: deleted cache for batch ${i / BATCH_SIZE + 1} (${batch.length} orders)`);
+  }
+
+  // Step 2: Recalculate each order sequentially with rate limit delay
+  for (let i = 0; i < orderIds.length; i++) {
+    const orderId = orderIds[i];
+    try {
+      await calculateSingleOrder(supabase, userId, sellerId, orderId);
+      successCount++;
+    } catch (e) {
+      console.error(`[cost-engine] Bulk reimport error for ${orderId}:`, e);
+      errorCount++;
+    }
+
+    // Rate limit delay
+    if (i < orderIds.length - 1) {
+      await new Promise(r => setTimeout(r, DELAY_MS));
+    }
+
+    // Log progress every 50 orders
+    if ((i + 1) % 50 === 0) {
+      console.log(`[cost-engine] Bulk reimport progress: ${i + 1}/${orderIds.length} (${successCount} ok, ${errorCount} errors)`);
+    }
+  }
+
+  console.log(`[cost-engine] Bulk reimport completed: ${successCount} success, ${errorCount} errors out of ${orderIds.length} total`);
 }
 
 // ================== FETCH ERP COST ==================
