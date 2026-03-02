@@ -557,7 +557,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
               )}
 
               <div className="border rounded-lg overflow-hidden">
-                <Table>
+                <Table className="[&_td]:px-2 [&_td]:py-1.5 [&_th]:px-2 [&_th]:py-2">
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-10">
@@ -625,7 +625,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                         </div>
                       </TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead className="w-10"></TableHead>
+                      <TableHead className="w-16"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
