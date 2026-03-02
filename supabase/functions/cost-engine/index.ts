@@ -1626,6 +1626,13 @@ async function fetchOlistCost(apiKey: string, searchTerm: string): Promise<numbe
     const response = await fetch(`${url}?${params}`);
     const data = await response.json();
 
+    console.log('[cost-engine] Olist search result:', JSON.stringify({
+      searchTerm,
+      status: data.retorno?.status,
+      found: data.retorno?.produtos?.length || 0,
+      firstProduct: data.retorno?.produtos?.[0]?.produto?.codigo,
+    }));
+
     if (data.retorno?.status !== 'OK' || !data.retorno?.produtos?.length) {
       return null;
     }
@@ -1634,9 +1641,26 @@ async function fetchOlistCost(apiKey: string, searchTerm: string): Promise<numbe
     const product = data.retorno.produtos[0]?.produto;
     if (!product) return null;
 
-    // Prefer preco_custo, fallback to preco
-    const cost = parseFloat(product.preco_custo) || parseFloat(product.preco) || null;
-    return cost && cost > 0 ? cost : null;
+    // Prefer preco_custo > preco_custo_medio > preco (sale price as last resort)
+    // Use explicit checks because parseFloat('0') returns 0 which is falsy
+    const precoCusto = parseFloat(product.preco_custo);
+    const precoCustoMedio = parseFloat(product.preco_custo_medio);
+    const precoVenda = parseFloat(product.preco);
+
+    const cost = (precoCusto > 0 ? precoCusto : null)
+      ?? (precoCustoMedio > 0 ? precoCustoMedio : null)
+      ?? (precoVenda > 0 ? precoVenda : null);
+
+    console.log('[cost-engine] Olist cost extraction:', JSON.stringify({
+      searchTerm,
+      codigo: product.codigo,
+      preco_custo: product.preco_custo,
+      preco_custo_medio: product.preco_custo_medio,
+      preco: product.preco,
+      selectedCost: cost,
+    }));
+
+    return cost ?? null;
   } catch (error) {
     console.error('[cost-engine] Olist API error:', error);
     return null;
