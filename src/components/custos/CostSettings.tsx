@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { RefreshCw, DollarSign, Package, Play, Pause, RotateCcw, AlertCircle, Clock, Loader2, Database, FileText, AlertTriangle, Zap, CheckCircle2, FastForward, Plus, Pencil, Trash2, Receipt } from "lucide-react";
+import { RefreshCw, DollarSign, Package, Play, Pause, RotateCcw, AlertCircle, Clock, Loader2, Database, FileText, AlertTriangle, Zap, CheckCircle2, FastForward, Plus, Pencil, Trash2, Receipt, Download } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 interface CostSettingsProps { sellerId: string; }
@@ -43,6 +43,10 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(() => localStorage.getItem("cost_watchdog_enabled") !== "false");
   const [currentAutoStep, setCurrentAutoStep] = useState<string | null>(null);
 
+  // Historical import state
+  const [historicalJob, setHistoricalJob] = useState<any>(null);
+  const [startingHistorical, setStartingHistorical] = useState(false);
+
   // Packaging V2 state
   const [packagingList, setPackagingList] = useState<PackagingType[]>([]);
   const [packagingLoading, setPackagingLoading] = useState(false);
@@ -68,9 +72,10 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     loadBackfillState();
     loadPackaging();
     loadTaxConfig();
+    loadHistoricalJobStatus();
     setLoading(false);
 
-    pollIntervalRef.current = setInterval(() => { loadRealCostsStatus(); loadBillingStatus(); loadBackfillState(); }, 3000);
+    pollIntervalRef.current = setInterval(() => { loadRealCostsStatus(); loadBillingStatus(); loadBackfillState(); loadHistoricalJobStatus(); }, 3000);
     return () => { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); };
   }, [sellerId]);
 
@@ -86,6 +91,32 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
   const loadRealCostsStatus = async () => { try { const { data } = await supabase.functions.invoke("ml-sync-real-costs", { body: { seller_id: sellerId, action: "status" } }); if (data?.state) setRealCostsState(data.state); if (data?.coverage) setCoverage(data.coverage); } catch {} };
   const loadBillingStatus = async () => { try { const { data } = await supabase.functions.invoke("ml-sync-billing-details", { body: { seller_id: sellerId, action: "status" } }); if (data) setBillingStatus(data); } catch {} };
   const loadBackfillState = async () => { try { const { data } = await supabase.from("meli_backfill_sync_state" as any).select("*").eq("seller_id", sellerId).maybeSingle(); if (data) setBackfillState(data as any); } catch {} };
+
+  const loadHistoricalJobStatus = async () => {
+    try {
+      const { data, error } = await supabase.functions.invoke("orders-historical-import", { body: { seller_id: sellerId, action: "status" } });
+      if (data?.job) setHistoricalJob(data.job);
+      else setHistoricalJob(null);
+    } catch {}
+  };
+
+  const handleStartHistoricalImport = async () => {
+    setStartingHistorical(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("orders-historical-import", { body: { seller_id: sellerId, action: "start", days_back: 365 } });
+      if (error) throw error;
+      if (data?.ok) {
+        toast.success("Importação histórica iniciada! O processo roda em background.");
+        loadHistoricalJobStatus();
+      } else {
+        toast.error(data?.error || "Erro ao iniciar importação");
+      }
+    } catch (err: any) {
+      toast.error("Erro ao iniciar importação: " + (err?.message || "Erro"));
+    } finally {
+      setStartingHistorical(false);
+    }
+  };
 
   const loadPackaging = async () => {
     setPackagingLoading(true);
@@ -411,6 +442,78 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
 
         {/* ---- ABA SINCRONIZAÇÃO ---- */}
         <TabsContent value="sync" className="space-y-6">
+          {/* Step 0: Historical Orders Import */}
+          <Card className="border-2 border-primary/20">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2"><Download className="h-5 w-5" />Importar Pedidos (1 ano)</CardTitle>
+                  <CardDescription>Importa o histórico completo de pedidos do Mercado Livre (até 365 dias)</CardDescription>
+                </div>
+                {historicalJob?.status === "running" && <Badge className="bg-blue-500 text-white animate-pulse">Importando</Badge>}
+                {historicalJob?.status === "done" && <Badge className="bg-green-500 text-white">Concluído</Badge>}
+                {historicalJob?.status === "pending" && <Badge variant="outline" className="border-yellow-500 text-yellow-600">Agendado</Badge>}
+                {historicalJob?.status === "error" && <Badge variant="destructive">Erro</Badge>}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {historicalJob && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                  <div className="p-3 bg-muted rounded-lg">
+                    <p className="text-2xl font-bold">{(historicalJob.processed_orders || 0).toLocaleString()}</p>
+                    <p className="text-xs text-muted-foreground">Pedidos Importados</p>
+                  </div>
+                  <div className="p-3 bg-muted rounded-lg">
+                    <p className="text-2xl font-bold">{(historicalJob.total_orders || 0).toLocaleString()}</p>
+                    <p className="text-xs text-muted-foreground">Total Estimado</p>
+                  </div>
+                  <div className="p-3 bg-muted rounded-lg">
+                    <p className="text-sm font-medium">{historicalJob.started_at ? new Date(historicalJob.started_at).toLocaleDateString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : "—"}</p>
+                    <p className="text-xs text-muted-foreground">Início</p>
+                  </div>
+                  <div className="p-3 bg-muted rounded-lg">
+                    <p className="text-sm font-medium">{historicalJob.completed_at ? new Date(historicalJob.completed_at).toLocaleDateString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : "—"}</p>
+                    <p className="text-xs text-muted-foreground">Conclusão</p>
+                  </div>
+                </div>
+              )}
+              {historicalJob?.status === "running" && historicalJob.total_orders > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span>Progresso</span>
+                    <span className="font-medium">{Math.round((historicalJob.processed_orders / historicalJob.total_orders) * 100)}%</span>
+                  </div>
+                  <Progress value={Math.round((historicalJob.processed_orders / historicalJob.total_orders) * 100)} className="h-2" />
+                </div>
+              )}
+              {historicalJob?.error_message && (
+                <div className="flex items-center gap-2 p-3 bg-destructive/10 border border-destructive/30 rounded-lg text-sm">
+                  <AlertCircle className="h-4 w-4 text-destructive" />
+                  <span className="text-destructive">{historicalJob.error_message}</span>
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={handleStartHistoricalImport}
+                  disabled={startingHistorical || historicalJob?.status === "running"}
+                  className="gap-2"
+                >
+                  {startingHistorical || historicalJob?.status === "running" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4" />
+                  )}
+                  {historicalJob?.status === "done" ? "Reimportar Pedidos (1 ano)" : "Importar Pedidos (1 ano)"}
+                </Button>
+                {historicalJob?.status === "done" && (
+                  <span className="text-sm text-muted-foreground">
+                    ✓ {historicalJob.processed_orders?.toLocaleString()} pedidos importados
+                  </span>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Step 1: Billing */}
           <Card className="border-2 border-primary/20">
             <CardHeader>

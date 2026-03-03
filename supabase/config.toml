@@ -245,3 +245,6 @@ verify_jwt = false
 
 [functions.mp-sync-movements]
 verify_jwt = false
+
+[functions.orders-historical-import]
+verify_jwt = false

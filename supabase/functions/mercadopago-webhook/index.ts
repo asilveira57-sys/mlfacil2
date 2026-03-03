@@ -156,6 +156,46 @@ Deno.serve(async (req) => {
         }
 
         console.log("[Webhook] Payment recorded successfully");
+
+        // Schedule historical orders import (02:00 BRT next day)
+        try {
+          const scheduledFor = new Date();
+          scheduledFor.setUTCHours(5, 0, 0, 0); // 02:00 BRT = 05:00 UTC
+          if (scheduledFor < new Date()) {
+            scheduledFor.setDate(scheduledFor.getDate() + 1);
+          }
+
+          // Get seller_id from user's ML accounts
+          const { data: mlAccounts } = await supabase
+            .from("ml_accounts")
+            .select("ml_user_id")
+            .eq("user_id", refData.user_id)
+            .eq("is_active", true);
+
+          for (const account of mlAccounts || []) {
+            // Check if there's already a pending/running job
+            const { data: existingJob } = await supabase
+              .from("orders_historical_sync_jobs")
+              .select("id")
+              .eq("seller_id", account.ml_user_id)
+              .in("status", ["pending", "running"])
+              .maybeSingle();
+
+            if (!existingJob) {
+              await supabase.from("orders_historical_sync_jobs").insert({
+                seller_id: account.ml_user_id,
+                user_id: refData.user_id,
+                job_type: "historical_365d",
+                status: "pending",
+                days_back: 365,
+                scheduled_for: scheduledFor.toISOString(),
+              });
+              console.log(`[Webhook] Scheduled historical import for ${account.ml_user_id} at ${scheduledFor.toISOString()}`);
+            }
+          }
+        } catch (histErr) {
+          console.error("[Webhook] Error scheduling historical import:", histErr);
+        }
       }
 
       return new Response("OK", { status: 200 });
