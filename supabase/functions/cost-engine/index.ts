@@ -25,8 +25,8 @@ Deno.serve(async (req) => {
     const params = Object.fromEntries(url.searchParams.entries());
     const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
 
-    // Internal continuation endpoint (no user auth needed, uses service key auth)
-    if (path === 'orders/bulk-reimport-continue') {
+    // Internal endpoints (no user auth needed, uses service key auth)
+    if (path === 'orders/bulk-reimport-continue' || path.startsWith('_internal/')) {
       const internalKey = req.headers.get('x-internal-key');
       if (internalKey !== supabaseServiceKey) {
         return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -34,6 +34,24 @@ Deno.serve(async (req) => {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
+      
+      // Internal: calculate costs (called from historical-import)
+      if (path === '_internal/calculate') {
+        const userId = body.user_id;
+        const sellerId = body.seller_id;
+        const periodDays = body.period_days || 365;
+        if (!userId || !sellerId) {
+          return new Response(JSON.stringify({ error: 'user_id and seller_id required' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        EdgeRuntime.waitUntil(calculateCosts(supabase, userId, sellerId, periodDays));
+        return new Response(JSON.stringify({ status: 'processing', message: 'Internal calculate started' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Default: continue-bulk reimport
       const result = await continueBulkReimportJob(supabase, body.job_id);
       return new Response(JSON.stringify(result), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
