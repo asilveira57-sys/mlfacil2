@@ -39,6 +39,8 @@ export function CostDateFilter({ value, onChange }: CostDateFilterProps) {
   const handleQuick = (days: number, label: string) => {
     const to = new Date();
     const from = days === 1 ? subDays(to, 1) : subDays(to, days);
+    setCustomFrom(from);
+    setCustomTo(to);
     onChange({ from, to, label, periodDays: days });
   };
 
