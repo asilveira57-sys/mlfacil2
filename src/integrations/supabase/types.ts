@@ -9184,6 +9184,63 @@ export type Database = {
         }
         Relationships: []
       }
+      orders_historical_sync_jobs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          current_offset: number | null
+          days_back: number
+          error_message: string | null
+          id: string
+          job_type: string
+          last_heartbeat_at: string | null
+          processed_orders: number | null
+          scheduled_for: string | null
+          seller_id: string
+          started_at: string | null
+          status: string
+          total_orders: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          current_offset?: number | null
+          days_back?: number
+          error_message?: string | null
+          id?: string
+          job_type?: string
+          last_heartbeat_at?: string | null
+          processed_orders?: number | null
+          scheduled_for?: string | null
+          seller_id: string
+          started_at?: string | null
+          status?: string
+          total_orders?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          current_offset?: number | null
+          days_back?: number
+          error_message?: string | null
+          id?: string
+          job_type?: string
+          last_heartbeat_at?: string | null
+          processed_orders?: number | null
+          scheduled_for?: string | null
+          seller_id?: string
+          started_at?: string | null
+          status?: string
+          total_orders?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       packaging_types: {
         Row: {
           company_id: string

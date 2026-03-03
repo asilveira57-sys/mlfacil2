@@ -85,6 +85,39 @@ serve(async (req) => {
   try {
     console.log(`[nightly-sync] Starting at ${new Date().toISOString()}`);
 
+    // Process pending historical import jobs
+    try {
+      const { data: pendingJobs } = await supabaseAdmin
+        .from("orders_historical_sync_jobs")
+        .select("id, seller_id")
+        .eq("status", "pending")
+        .lte("scheduled_for", new Date().toISOString())
+        .order("created_at", { ascending: true })
+        .limit(5);
+
+      if (pendingJobs && pendingJobs.length > 0) {
+        console.log(`[nightly-sync] Found ${pendingJobs.length} pending historical import jobs`);
+        for (const job of pendingJobs) {
+          try {
+            await fetch(`${SUPABASE_URL}/functions/v1/orders-historical-import`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-internal-key": SUPABASE_SERVICE_ROLE_KEY,
+              },
+              body: JSON.stringify({ seller_id: job.seller_id, action: "start" }),
+            });
+            console.log(`[nightly-sync] Triggered historical import for ${job.seller_id}`);
+            await sleep(2000);
+          } catch (err) {
+            console.error(`[nightly-sync] Failed to trigger historical import for ${job.seller_id}:`, err);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[nightly-sync] Error checking historical jobs:", err);
+    }
+
     // Check and acquire lock
     const { data: scheduler, error: fetchError } = await supabaseAdmin
       .from('sync_scheduler')
