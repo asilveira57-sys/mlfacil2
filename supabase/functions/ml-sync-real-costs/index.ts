@@ -151,11 +151,9 @@ async function handleReset(supabase: any, userId: string, sellerId: string, cors
       has_real_financial: false,
       real_cost_synced_at: null,
       commission_cost: 0,
-      shipping_cost_seller: 0,
       installments_cost: 0,
       adjustments: 0,
       cost_fees: 0,
-      cost_shipping: 0,
     })
     .eq("seller_id", sellerId)
     .eq("user_id", userId);

@@ -495,7 +495,7 @@ async function processBackfill(supabase: any, userId: string, sellerId: string):
 
     await supabase
       .from('order_cost_breakdown_cache')
-      .upsert(records, { onConflict: 'seller_id,order_id' });
+      .upsert(records, { onConflict: 'seller_id,order_id', ignoreDuplicates: true });
 
     console.log(`[costs-nightly] Backfilled ${records.length} orders for ${sellerId}`);
 
