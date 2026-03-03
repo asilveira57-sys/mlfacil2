@@ -145,6 +145,52 @@ export default function ClonarAnuncio() {
     // Fetch origin in BACKGROUND
     await safeLog('origin_fetch_attempt', { correlation_id: corrId, item_id: itemId });
 
+    // Helper: Edge Function fallback for origin load
+    const tryEdgeFallback = async (reason: string, httpStatus?: number): Promise<boolean> => {
+      try {
+        const { data } = await supabase.functions.invoke('mktpfacil-clone', {
+          body: { action: 'load_source', item_id: itemId, correlation_id: corrId, source_input_raw: sourceUrl },
+        });
+        if (data?.snapshot) {
+          const snap = data.snapshot;
+          const attrs = snap.attributes || [];
+          const dims = extractDimensions(attrs);
+          const safeAttrs = attrs.filter((a: any) => !FORBIDDEN_ATTRIBUTES.has(a.id?.toUpperCase()));
+
+          const op: OriginPayload = {
+            origin_status: 'complete',
+            item_id: snap.item_id,
+            title: snap.title,
+            description: snap.description,
+            price: snap.price,
+            available_quantity: snap.available_quantity,
+            condition: snap.condition,
+            category_id: snap.category_id,
+            listing_type_id: snap.listing_type_id,
+            pictures: snap.pictures,
+            attributes: safeAttrs,
+            package_height: dims.height,
+            package_width: dims.width,
+            package_length: dims.length,
+            package_weight: dims.weight,
+            sku: extractIdentifier(attrs, 'SKU', 'SELLER_SKU'),
+            gtin: extractIdentifier(attrs, 'GTIN', 'EAN'),
+            thumbnail: snap.thumbnail,
+          };
+          setOriginPayload(op);
+          setOriginStatus('complete');
+          await safeLog('origin_fetch_result', {
+            correlation_id: corrId, status: 'complete', source: 'edge_fallback',
+            reason, runtime_version: data.runtime_version || null,
+            ...(httpStatus ? { http_status: httpStatus } : {}),
+          });
+          updateDraftOrigin(op);
+          return true;
+        }
+      } catch (_) { /* fallback also failed */ }
+      return false;
+    };
+
     try {
       const itemUrl = `https://api.mercadolibre.com/items/${itemId}?include_attributes=all`;
       const descUrl = `https://api.mercadolibre.com/items/${itemId}/description`;
@@ -154,66 +200,40 @@ export default function ClonarAnuncio() {
         fetch(descUrl, { headers: { Accept: 'application/json' } }),
       ]);
 
-      // CORS fallback
+      // CORS TypeError fallback
       if (itemRes.status === 'rejected' && itemRes.reason instanceof TypeError) {
-        // Try edge function fallback
-        try {
-          const { data } = await supabase.functions.invoke('mktpfacil-clone', {
-            body: { action: 'load_source', item_id: itemId, correlation_id: corrId, source_input_raw: sourceUrl },
-          });
-          if (data?.snapshot) {
-            const snap = data.snapshot;
-            const attrs = snap.attributes || [];
-            const dims = extractDimensions(attrs);
-            const safeAttrs = attrs.filter((a: any) => !FORBIDDEN_ATTRIBUTES.has(a.id?.toUpperCase()));
-
-            const op: OriginPayload = {
-              origin_status: 'complete',
-              item_id: snap.item_id,
-              title: snap.title,
-              description: snap.description,
-              price: snap.price,
-              available_quantity: snap.available_quantity,
-              condition: snap.condition,
-              category_id: snap.category_id,
-              listing_type_id: snap.listing_type_id,
-              pictures: snap.pictures,
-              attributes: safeAttrs,
-              package_height: dims.height,
-              package_width: dims.width,
-              package_length: dims.length,
-              package_weight: dims.weight,
-              sku: extractIdentifier(attrs, 'SKU', 'SELLER_SKU'),
-              gtin: extractIdentifier(attrs, 'GTIN', 'EAN'),
-              thumbnail: snap.thumbnail,
-            };
-            setOriginPayload(op);
-            setOriginStatus('complete');
-            await safeLog('origin_fetch_result', { correlation_id: corrId, status: 'complete', source: 'edge_fallback' });
-            updateDraftOrigin(op);
-            return;
-          }
-        } catch (_) { /* fallback also failed */ }
-
-        setOriginPayload({ origin_status: 'unavailable' });
-        setOriginStatus('unavailable');
-        await safeLog('origin_fetch_result', { correlation_id: corrId, status: 'unavailable', reason: 'cors_and_fallback_failed' });
+        const ok = await tryEdgeFallback('cors_typeerror');
+        if (!ok) {
+          setOriginPayload({ origin_status: 'unavailable' });
+          setOriginStatus('unavailable');
+          await safeLog('origin_fetch_result', { correlation_id: corrId, status: 'unavailable', reason: 'cors_and_fallback_failed' });
+        }
         return;
       }
 
+      // Network rejected fallback
       if (itemRes.status === 'rejected') {
-        setOriginPayload({ origin_status: 'unavailable' });
-        setOriginStatus('unavailable');
-        await safeLog('origin_fetch_result', { correlation_id: corrId, status: 'unavailable', reason: 'network_error' });
+        const ok = await tryEdgeFallback('network_rejected');
+        if (!ok) {
+          setOriginPayload({ origin_status: 'unavailable' });
+          setOriginStatus('unavailable');
+          await safeLog('origin_fetch_result', { correlation_id: corrId, status: 'unavailable', reason: 'network_rejected_and_fallback_failed' });
+        }
         return;
       }
 
       const itemResponse = itemRes.value;
+
+      // HTTP not-ok fallback (403, 404, 5xx, etc.)
       if (!itemResponse.ok) {
-        const body = await itemResponse.text().catch(() => '');
-        setOriginPayload({ origin_status: 'unavailable' });
-        setOriginStatus('unavailable');
-        await safeLog('origin_fetch_result', { correlation_id: corrId, status: 'unavailable', http_status: itemResponse.status, snippet: body.substring(0, 200) });
+        const httpStatus = itemResponse.status;
+        const bodySnippet = await itemResponse.text().catch(() => '');
+        const ok = await tryEdgeFallback('http_not_ok', httpStatus);
+        if (!ok) {
+          setOriginPayload({ origin_status: 'unavailable' });
+          setOriginStatus('unavailable');
+          await safeLog('origin_fetch_result', { correlation_id: corrId, status: 'unavailable', reason: 'http_not_ok_and_fallback_failed', http_status: httpStatus, snippet: bodySnippet.substring(0, 200) });
+        }
         return;
       }
 
@@ -264,13 +284,17 @@ export default function ClonarAnuncio() {
 
       setOriginPayload(op);
       setOriginStatus(finalStatus);
-      await safeLog('origin_fetch_result', { correlation_id: corrId, status: finalStatus, pictures: pictures.length, has_description: !!description });
+      await safeLog('origin_fetch_result', { correlation_id: corrId, status: finalStatus, source: 'browser_direct', pictures: pictures.length, has_description: !!description });
       updateDraftOrigin(op);
 
     } catch (err: unknown) {
-      setOriginPayload({ origin_status: 'unavailable' });
-      setOriginStatus('unavailable');
-      await safeLog('origin_fetch_result', { correlation_id: corrId, status: 'unavailable', error: (err as Error).message });
+      // Generic catch — also try edge fallback
+      const ok = await tryEdgeFallback('generic_catch');
+      if (!ok) {
+        setOriginPayload({ origin_status: 'unavailable' });
+        setOriginStatus('unavailable');
+        await safeLog('origin_fetch_result', { correlation_id: corrId, status: 'unavailable', reason: 'generic_catch_and_fallback_failed', error: (err as Error).message });
+      }
     }
   }, [sourceUrl, safeLog]);
 

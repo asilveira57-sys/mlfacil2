@@ -51,6 +51,8 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries
   throw lastError || new Error('Max retries reached');
 }
 
+const CLONE_RUNTIME_VERSION = Deno.env.get('MKTPS_CLONE_RUNTIME_VERSION') || '2025-07-04-fallback-v2';
+
 function respond(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -685,12 +687,12 @@ Deno.serve(async (req) => {
           has_catalog: !!snapshot.catalog_product_id,
         });
 
-        return respond({ snapshot, correlation_id: corrId, log_insert_results: logResults });
+        return respond({ snapshot, correlation_id: corrId, runtime_version: CLONE_RUNTIME_VERSION, log_insert_results: logResults });
       } catch (loadErr) {
         const errMsg = (loadErr as Error).message;
         await auditLog(supabase, { level: 'error', area: 'clone_anuncio', action: 'load_source_error', userId, success: false, message: errMsg, meta: { item_id, correlation_id: corrId } });
         await logEvent(supabase, userId, 'source', item_id, 'source_load_error', 'error', errMsg, { correlation_id: corrId });
-        return respond({ error: errMsg, correlation_id: corrId }, 200);
+        return respond({ error: errMsg, correlation_id: corrId, runtime_version: CLONE_RUNTIME_VERSION }, 200);
       }
     }
 
