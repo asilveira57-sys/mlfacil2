@@ -92,147 +92,193 @@ async function logEvent(
 }
 
 // ============================================
-// ACTION: Load source — ISOLATED public fetch (NO token, NO global client)
+// MLB Extraction from raw input (URLs, catalog links, etc.)
 // ============================================
 
 /**
- * Fetch puro e isolado — NÃO usa mlClient, NÃO usa axios, NÃO usa supabase.functions.invoke.
- * Apenas fetch nativo do Deno, sem nenhum header de autorização.
+ * Extracts a real MLB item ID from various URL formats:
+ * - Direct: MLB1234567890
+ * - URL path: /MLB-1234567890-...
+ * - pdp_filters: item_id:MLB1234567890 or item_id%3AMLB1234567890
+ * - Query param: item_id=MLB1234567890
+ * - Encoded content
  */
-async function mlPublicFetchItem(itemId: string, supabase: any, userId: string, correlationId: string): Promise<any> {
-  const url = `https://api.mercadolibre.com/items/${itemId}?include_attributes=all`;
+function extractMLBFromInput(raw: string | undefined | null): string | null {
+  if (!raw || typeof raw !== 'string') return null;
 
-  // (B) log antes do fetch
-  await logEvent(supabase, userId, 'source', itemId, 'ml_request_prepare', 'info',
-    `Preparing public fetch for ${itemId}`, {
-      correlation_id: correlationId,
-      endpoint: url,
-      used_token: false,
-    });
+  // Normalize: add protocol if missing
+  let input = raw.trim();
+  if (input.startsWith('www.')) input = 'https://' + input;
 
+  // Try decoding first (handles %3A etc)
+  let decoded = input;
+  try { decoded = decodeURIComponent(input); } catch (_) {}
+
+  // Pattern 1: pdp_filters=item_id:MLBnnn or item_id%3AMLBnnn
+  const pdpMatch = decoded.match(/item_id[:%3A]+(MLB\d{8,})/i);
+  if (pdpMatch) return pdpMatch[1].toUpperCase();
+
+  // Pattern 2: query param ?item_id=MLBnnn
+  const paramMatch = decoded.match(/[?&]item_id=(MLB\d{8,})/i);
+  if (paramMatch) return paramMatch[1].toUpperCase();
+
+  // Pattern 3: URL path /MLB-1234567890 or /MLB1234567890
+  const pathMatch = decoded.match(/\/(MLB)-?(\d{8,})/i);
+  if (pathMatch) return `MLB${pathMatch[2]}`;
+
+  // Pattern 4: standalone MLB ID anywhere in string (word boundary)
+  const standaloneMatch = decoded.match(/\b(MLB\d{8,})\b/i);
+  if (standaloneMatch) return standaloneMatch[1].toUpperCase();
+
+  return null;
+}
+
+// ============================================
+// ML Public API helper
+// ============================================
+
+async function mlRequest(
+  endpoint: string,
+  supabase: any,
+  userId: string,
+  correlationId: string,
+  label: string,
+): Promise<{ ok: boolean; status: number; data: any }> {
+  const url = `https://api.mercadolibre.com${endpoint}`;
   const start = Date.now();
 
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: { 'Accept': 'application/json' },
-  });
+  await logEvent(supabase, userId, 'source', label, 'ml_request_prepare', 'info',
+    `Preparing public fetch: ${endpoint}`, { correlation_id: correlationId, endpoint: url, used_token: false });
+
+  let response: Response;
+  try {
+    response = await fetchWithRetry(url, { method: 'GET', headers: { 'Accept': 'application/json' } });
+  } catch (err) {
+    const elapsed = Date.now() - start;
+    await logEvent(supabase, userId, 'source', label, 'ml_request_result', 'error',
+      `Fetch failed: ${(err as Error).message} in ${elapsed}ms`, { correlation_id: correlationId, endpoint: url, elapsed_ms: elapsed, error: (err as Error).message });
+    throw err;
+  }
 
   const body = await response.text();
   const elapsed = Date.now() - start;
 
-  // (C) log depois do fetch
-  await logEvent(supabase, userId, 'source', itemId, 'ml_request_result',
+  await logEvent(supabase, userId, 'source', label, 'ml_request_result',
     response.ok ? 'info' : 'error',
-    `Public fetch ${itemId}: HTTP ${response.status} in ${elapsed}ms`, {
-      correlation_id: correlationId,
-      endpoint: url,
-      used_token: false,
-      http_status: response.status,
-      elapsed_ms: elapsed,
+    `Fetch ${label}: HTTP ${response.status} in ${elapsed}ms`, {
+      correlation_id: correlationId, endpoint: url, used_token: false,
+      http_status: response.status, elapsed_ms: elapsed,
       response_body_snippet: body.substring(0, 2000),
     });
 
-  if (!response.ok) {
-    if (response.status === 404) {
-      throw new Error(`Anúncio ${itemId} não encontrado. Verifique se o ID está correto. IDs do tipo MLBU (catálogo) não são suportados — use o link completo do anúncio para que o MLB seja extraído automaticamente.`);
-    }
-    if (response.status === 403) {
-      throw new Error(`Anúncio ${itemId} está bloqueado por políticas do Mercado Livre (HTTP 403 via fetch público sem token). Isso pode ser bloqueio por IP do servidor.`);
-    }
-    throw new Error(`Falha ao buscar item ${itemId} (HTTP ${response.status}). Tente novamente em alguns instantes.`);
-  }
+  let data: any = null;
+  try { data = JSON.parse(body); } catch (_) { data = body; }
 
-  return JSON.parse(body);
+  return { ok: response.ok, status: response.status, data };
 }
+
+// ============================================
+// ACTION: Load source — ISOLATED public fetch (NO token, NO global client)
+// ============================================
 
 async function loadSource(itemId: string, supabase: any, userId: string, correlationId: string, sourceInputRaw?: string) {
   const totalStart = Date.now();
 
-  // === STEP 1: Diagnostic — 2 fetches, 1 log ===
+  // === STEP 0: Validate/normalize item ID ===
+  let effectiveItemId = itemId;
+
+  // If the item_id looks like MLBU or catalog, try to extract MLB from raw input immediately
+  if (effectiveItemId && !effectiveItemId.toUpperCase().startsWith('MLB')) {
+    const extracted = extractMLBFromInput(sourceInputRaw);
+    if (extracted) {
+      await logEvent(supabase, userId, 'source', effectiveItemId, 'source_item_id_recovered', 'info',
+        `Replaced non-MLB ID "${effectiveItemId}" with extracted "${extracted}" from raw input`, {
+          correlation_id: correlationId, original_id: effectiveItemId, recovered_id: extracted, source_input_raw: sourceInputRaw?.substring(0, 500),
+        });
+      effectiveItemId = extracted;
+    }
+  }
+
+  // === STEP 1: Diagnostic — site + item check ===
   let siteStatus = 0;
   let siteSnippet = '';
   let itemStatus = 0;
   let itemSnippet = '';
 
   try {
-    const siteRes = await fetch('https://api.mercadolibre.com/sites/MLB', {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' },
-    });
+    const siteRes = await fetch('https://api.mercadolibre.com/sites/MLB', { method: 'GET', headers: { 'Accept': 'application/json' } });
     siteStatus = siteRes.status;
-    const siteBody = await siteRes.text();
-    siteSnippet = siteBody.substring(0, 200);
-  } catch (e) {
-    siteSnippet = `FETCH_ERROR: ${(e as Error).message}`;
-  }
+    siteSnippet = (await siteRes.text()).substring(0, 200);
+  } catch (e) { siteSnippet = `FETCH_ERROR: ${(e as Error).message}`; }
 
   try {
-    const itemRes = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' },
-    });
+    const itemRes = await fetch(`https://api.mercadolibre.com/items/${effectiveItemId}`, { method: 'GET', headers: { 'Accept': 'application/json' } });
     itemStatus = itemRes.status;
-    const itemBody = await itemRes.text();
-    itemSnippet = itemBody.substring(0, 400);
-  } catch (e) {
-    itemSnippet = `FETCH_ERROR: ${(e as Error).message}`;
-  }
+    itemSnippet = (await itemRes.text()).substring(0, 400);
+  } catch (e) { itemSnippet = `FETCH_ERROR: ${(e as Error).message}`; }
 
-  const elapsedTotal = Date.now() - totalStart;
+  const elapsedDiag = Date.now() - totalStart;
 
-  // Write single diagnostic log
-  await logEvent(supabase, userId, 'source', itemId, 'load_source_diag', 'info',
-    `Diag: site=${siteStatus} item=${itemStatus} elapsed=${elapsedTotal}ms`, {
-      correlation_id: correlationId,
-      item_id: itemId,
-      site_status: siteStatus,
-      site_snippet: siteSnippet,
-      item_status: itemStatus,
-      item_snippet: itemSnippet,
-      used_token: false,
-      elapsed_ms_total: elapsedTotal,
+  await logEvent(supabase, userId, 'source', effectiveItemId, 'load_source_diag', 'info',
+    `Diag: site=${siteStatus} item=${itemStatus} elapsed=${elapsedDiag}ms`, {
+      correlation_id: correlationId, item_id: effectiveItemId, original_item_id: itemId,
+      source_input_raw: sourceInputRaw?.substring(0, 500),
+      site_status: siteStatus, site_snippet: siteSnippet,
+      item_status: itemStatus, item_snippet: itemSnippet,
+      used_token: false, elapsed_ms_total: elapsedDiag,
     });
 
-  // If item fetch failed, throw with details for UI
+  // === STEP 1.5: If item fetch failed, try MLB recovery from raw input ===
+  if (itemStatus !== 200 && sourceInputRaw) {
+    const recoveredId = extractMLBFromInput(sourceInputRaw);
+    if (recoveredId && recoveredId !== effectiveItemId) {
+      await logEvent(supabase, userId, 'source', effectiveItemId, 'source_item_id_recovered', 'info',
+        `Item ${effectiveItemId} failed (HTTP ${itemStatus}), recovered "${recoveredId}" from raw input`, {
+          correlation_id: correlationId, original_id: effectiveItemId, recovered_id: recoveredId,
+          source_input_raw: sourceInputRaw.substring(0, 500),
+        });
+
+      // Re-check the recovered ID
+      const recheckRes = await fetch(`https://api.mercadolibre.com/items/${recoveredId}`, { method: 'GET', headers: { 'Accept': 'application/json' } });
+      if (recheckRes.ok) {
+        effectiveItemId = recoveredId;
+        itemStatus = recheckRes.status;
+        itemSnippet = (await recheckRes.text()).substring(0, 400);
+      } else {
+        // Recovery also failed
+        await logEvent(supabase, userId, 'source', recoveredId, 'source_recovery_also_failed', 'warn',
+          `Recovered ID ${recoveredId} also failed (HTTP ${recheckRes.status})`, { correlation_id: correlationId });
+      }
+    }
+  }
+
+  // If still failing, throw with details
   if (itemStatus !== 200) {
-    throw new Error(`Falha ao carregar (HTTP ${itemStatus}): ${itemSnippet}`);
+    throw new Error(`Falha ao carregar anúncio (HTTP ${itemStatus}). ID tentado: ${effectiveItemId}. Verifique se o link é de um anúncio válido do Mercado Livre.`);
   }
 
-  // === STEP 2: Parse item from successful fetch — re-fetch with attributes ===
-  const fullRes = await fetch(`https://api.mercadolibre.com/items/${itemId}?include_attributes=all`, {
-    method: 'GET',
-    headers: { 'Accept': 'application/json' },
-  });
-  if (!fullRes.ok) {
-    throw new Error(`Falha ao carregar detalhes (HTTP ${fullRes.status})`);
+  // === STEP 2: Full fetch with attributes ===
+  const fullResult = await mlRequest(`/items/${effectiveItemId}?include_attributes=all`, supabase, userId, correlationId, effectiveItemId);
+  if (!fullResult.ok) {
+    throw new Error(`Falha ao carregar detalhes (HTTP ${fullResult.status})`);
   }
-  const item = await fullRes.json();
+  const item = fullResult.data;
 
-  // Fetch description (public)
+  // Fetch description (public, best-effort)
   let description = '';
   try {
-    const descRes = await fetch(`https://api.mercadolibre.com/items/${itemId}/description`, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' },
-    });
-    if (descRes.ok) {
-      const descData = await descRes.json();
-      description = descData.plain_text || descData.text || '';
+    const descResult = await mlRequest(`/items/${effectiveItemId}/description`, supabase, userId, correlationId, `${effectiveItemId}/desc`);
+    if (descResult.ok) {
+      description = descResult.data.plain_text || descResult.data.text || '';
     }
   } catch (_) {}
 
-  // Fetch category name
+  // Fetch category name (best-effort)
   let categoryName = '';
   try {
     if (item.category_id) {
-      const catRes = await fetch(`https://api.mercadolibre.com/categories/${item.category_id}`, {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' },
-      });
-      if (catRes.ok) {
-        const catData = await catRes.json();
-        categoryName = catData.name || '';
-      }
+      const catResult = await mlRequest(`/categories/${item.category_id}`, supabase, userId, correlationId, item.category_id);
+      if (catResult.ok) categoryName = catResult.data.name || '';
     }
   } catch (_) {}
 
@@ -254,18 +300,12 @@ async function loadSource(itemId: string, supabase: any, userId: string, correla
       secure_url: p.secure_url || p.url,
     })),
     attributes: (item.attributes || []).map((a: any) => ({
-      id: a.id,
-      name: a.name,
-      value_id: a.value_id,
-      value_name: a.value_name,
+      id: a.id, name: a.name, value_id: a.value_id, value_name: a.value_name,
     })),
     variations: (item.variations || []).map((v: any) => ({
       id: v.id,
       attribute_combinations: (v.attribute_combinations || []).map((ac: any) => ({
-        id: ac.id,
-        name: ac.name,
-        value_id: ac.value_id,
-        value_name: ac.value_name,
+        id: ac.id, name: ac.name, value_id: ac.value_id, value_name: ac.value_name,
       })),
       available_quantity: v.available_quantity || 0,
       price: v.price || item.price || 0,
