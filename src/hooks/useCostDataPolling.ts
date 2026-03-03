@@ -25,6 +25,10 @@ export interface CostSummaryData {
   total_cost_other?: number;
   total_receita_produtos?: number;
   total_receita_envio?: number;
+  // Coverage metrics (from V2 RPC)
+  orders_imported?: number;
+  orders_calculated?: number;
+  coverage_percent?: number;
 }
 
 interface UseCostDataPollingOptions {

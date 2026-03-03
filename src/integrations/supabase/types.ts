@@ -3867,6 +3867,66 @@ export type Database = {
         }
         Relationships: []
       }
+      cost_calc_jobs: {
+        Row: {
+          batch_size: number
+          created_at: string
+          date_from: string
+          date_to: string
+          finished_at: string | null
+          id: string
+          last_error: string | null
+          last_heartbeat: string | null
+          offset: number
+          period_days: number | null
+          processed_orders: number
+          seller_id: string
+          started_at: string | null
+          status: string
+          total_orders: number | null
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          batch_size?: number
+          created_at?: string
+          date_from: string
+          date_to: string
+          finished_at?: string | null
+          id?: string
+          last_error?: string | null
+          last_heartbeat?: string | null
+          offset?: number
+          period_days?: number | null
+          processed_orders?: number
+          seller_id: string
+          started_at?: string | null
+          status?: string
+          total_orders?: number | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          batch_size?: number
+          created_at?: string
+          date_from?: string
+          date_to?: string
+          finished_at?: string | null
+          id?: string
+          last_error?: string | null
+          last_heartbeat?: string | null
+          offset?: number
+          period_days?: number | null
+          processed_orders?: number
+          seller_id?: string
+          started_at?: string | null
+          status?: string
+          total_orders?: number | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       cost_calculation_logs: {
         Row: {
           company_id: string | null
@@ -16909,6 +16969,10 @@ export type Database = {
           p_seller_id: string
           p_user_id: string
         }
+        Returns: Json
+      }
+      get_cost_summary_v2: {
+        Args: { p_date_from: string; p_date_to: string; p_seller_id: string }
         Returns: Json
       }
       get_global_ads_metrics: { Args: never; Returns: Json }

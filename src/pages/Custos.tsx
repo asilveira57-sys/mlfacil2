@@ -4,7 +4,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { DollarSign, Package, TrendingUp, RefreshCw, Settings, BarChart3, FileSearch } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
+import { DollarSign, Package, TrendingUp, RefreshCw, Settings, BarChart3, FileSearch, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { CostCatalog } from '@/components/custos/CostCatalog';
 import { CostSettings } from '@/components/custos/CostSettings';
@@ -19,6 +20,7 @@ import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { useCostSyncWatchdog } from '@/hooks/useCostSyncWatchdog';
 import { useCostWatchdogPreferences } from '@/hooks/useCostWatchdogPreferences';
 import { useCostDataPolling } from '@/hooks/useCostDataPolling';
+import { useCostCalcJob } from '@/hooks/useCostCalcJob';
 import { invalidateCostCache } from '@/hooks/useCostModuleCache';
 import { useModuleFeedbackIntegration } from '@/hooks/useModuleFeedbackIntegration';
 import { FeedbackPromptCard } from '@/components/feedback';
@@ -28,7 +30,6 @@ export default function Custos() {
   const { sellerId, loading: accountsLoading, initialized } = useActiveAccount();
   const [activeTab, setActiveTab] = useState('resumo');
   const feedback = useModuleFeedbackIntegration('precificacao-custos');
-  const [isCalculating, setIsCalculating] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange>(getDefaultDateRange);
   
   // Watchdog integration
@@ -44,79 +45,47 @@ export default function Custos() {
     periodDays: dateRange.periodDays,
   });
 
+  // Job-based calculation
+  const { job, isActive, starting, progress, startCalc } = useCostCalcJob({
+    sellerId,
+    onComplete: () => {
+      toast.success('Recálculo concluído!');
+      invalidateCostCache('orders');
+      refreshSummary();
+    },
+  });
+
   // Redirect to auth if not logged in
   useEffect(() => {
     const checkAuth = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        navigate('/auth');
-      }
+      if (!session) navigate('/auth');
     };
     checkAuth();
   }, [navigate]);
 
-  // Invalidate cache and refresh when switching tabs
+  // Refresh when switching tabs
   useEffect(() => {
-    if (activeTab === 'resumo' && sellerId) {
-      refreshSummary();
-    }
-    if (activeTab === 'pedidos') {
-      invalidateCostCache('orders');
-    }
+    if (activeTab === 'resumo' && sellerId) refreshSummary();
+    if (activeTab === 'pedidos') invalidateCostCache('orders');
   }, [activeTab, sellerId, refreshSummary]);
 
   const handleCalculate = async () => {
     if (!sellerId) return;
-
-    setIsCalculating(true);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/calculate`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ seller_id: sellerId, period_days: dateRange.periodDays }),
-        }
-      );
-
-      if (response.ok) {
-        toast.success('Cálculo iniciado em background. Atualizando automaticamente...');
-        // Intelligent polling: check every 3s until order_count changes or 60s elapsed
-        const initialCount = summary?.order_count ?? -1;
-        let elapsed = 0;
-        const pollInterval = setInterval(() => {
-          elapsed += 3000;
-          refreshSummary();
-          if (elapsed >= 60000) {
-            clearInterval(pollInterval);
-            setIsCalculating(false);
-            toast.info('Recálculo pode ainda estar processando. O dashboard será atualizado automaticamente.');
-          }
-        }, 3000);
-        // Also watch for summary changes to stop early
-        const checkDone = setInterval(() => {
-          if (summary && summary.order_count !== initialCount && initialCount !== -1) {
-            clearInterval(pollInterval);
-            clearInterval(checkDone);
-            setIsCalculating(false);
-            toast.success('Recálculo concluído!');
-          }
-          if (!isCalculating) clearInterval(checkDone);
-        }, 3500);
-      }
-    } catch (error) {
-      toast.error('Erro ao iniciar cálculo');
-      setIsCalculating(false);
+    const result = await startCalc(
+      dateRange.periodDays,
+      dateRange.from.toISOString(),
+      dateRange.to.toISOString()
+    );
+    if (result?.total_orders === 0) {
+      toast.info('Nenhum pedido encontrado no período selecionado.');
+    } else if (result?.job_id) {
+      toast.success(`Recálculo iniciado: ${result.total_orders} pedidos`);
+    } else if (result?.message) {
+      toast.info(result.message);
     }
   };
 
-  // Loading state while accounts are being fetched
   if (!initialized || accountsLoading) {
     return (
       <PageContainer title="Módulo de Custos">
@@ -129,10 +98,24 @@ export default function Custos() {
   }
 
   const headerContent = (
-    <Button onClick={handleCalculate} disabled={isCalculating || !sellerId}>
-      <RefreshCw className={`h-4 w-4 mr-2 ${isCalculating ? 'animate-spin' : ''}`} />
-      {isCalculating ? 'Calculando...' : 'Recalcular'}
-    </Button>
+    <div className="flex items-center gap-3">
+      {isActive && job && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Progress value={progress} className="w-32 h-2" />
+          <span>{job.processed_orders}/{job.total_orders || '?'}</span>
+        </div>
+      )}
+      {job?.status === 'error' && (
+        <div className="flex items-center gap-1 text-sm text-destructive">
+          <AlertCircle className="h-4 w-4" />
+          <span title={job.last_error || ''}>Erro</span>
+        </div>
+      )}
+      <Button onClick={handleCalculate} disabled={isActive || starting || !sellerId} size="sm">
+        <RefreshCw className={`h-4 w-4 mr-2 ${isActive || starting ? 'animate-spin' : ''}`} />
+        {isActive ? 'Calculando...' : starting ? 'Iniciando...' : 'Recalcular'}
+      </Button>
+    </div>
   );
 
   return (
@@ -160,7 +143,7 @@ export default function Custos() {
               summary={summary}
               loading={summaryLoading}
               onCalculate={handleCalculate}
-              isCalculating={isCalculating}
+              isCalculating={isActive || starting}
               dateLabel={dateRange.label}
             />
           </TabsContent>

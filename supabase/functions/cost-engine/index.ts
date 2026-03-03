@@ -35,7 +35,7 @@ Deno.serve(async (req) => {
         });
       }
       
-      // Internal: calculate costs (called from historical-import)
+    // Internal: calculate costs (called from historical-import) — legacy, creates job now
       if (path === '_internal/calculate') {
         const userId = body.user_id;
         const sellerId = body.seller_id;
@@ -45,13 +45,27 @@ Deno.serve(async (req) => {
             status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
-        EdgeRuntime.waitUntil(calculateCostsBatch(supabase, supabaseUrl, supabaseServiceKey, userId, sellerId, periodDays, 0));
-        return new Response(JSON.stringify({ status: 'processing', message: 'Internal calculate started' }), {
+        const jobResult = await createCalcJob(supabase, supabaseUrl, supabaseServiceKey, userId, sellerId, periodDays);
+        return new Response(JSON.stringify(jobResult), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      // Internal: calculate-batch continuation (self-chaining)
+      // Internal: run-job continuation (self-chaining with persistent job)
+      if (path === '_internal/run-job') {
+        const { job_id } = body;
+        if (!job_id) {
+          return new Response(JSON.stringify({ error: 'job_id required' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        EdgeRuntime.waitUntil(executeCalcJobBatch(supabase, supabaseUrl, supabaseServiceKey, job_id));
+        return new Response(JSON.stringify({ status: 'processing', job_id }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Legacy: calculate-batch (redirect to job-based)
       if (path === '_internal/calculate-batch') {
         const { user_id: bUserId, seller_id: bSellerId, period_days: bPeriod, offset: bOffset } = body;
         if (!bUserId || !bSellerId) {
@@ -59,8 +73,8 @@ Deno.serve(async (req) => {
             status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
-        EdgeRuntime.waitUntil(calculateCostsBatch(supabase, supabaseUrl, supabaseServiceKey, bUserId, bSellerId, bPeriod || 365, bOffset || 0));
-        return new Response(JSON.stringify({ status: 'processing', offset: bOffset }), {
+        const jobResult = await createCalcJob(supabase, supabaseUrl, supabaseServiceKey, bUserId, bSellerId, bPeriod || 365);
+        return new Response(JSON.stringify(jobResult), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
@@ -134,10 +148,13 @@ Deno.serve(async (req) => {
 
       // ---- CALCULATE ----
       case 'calculate':
-        EdgeRuntime.waitUntil(
-          calculateCostsBatch(supabase, supabaseUrl, supabaseServiceKey, user.id, body.seller_id, body.period_days || 30, 0)
-        );
-        result = { status: 'processing', message: 'Cálculo iniciado em background' };
+      case 'recalculate': {
+        const periodDays = body.period_days || 30;
+        result = await createCalcJob(supabase, supabaseUrl, supabaseServiceKey, user.id, body.seller_id, periodDays, body.date_from, body.date_to);
+        break;
+      }
+      case 'calc-job-status':
+        result = await getCalcJobStatus(supabase, user.id, params);
         break;
       case 'calculate-order':
         result = await calculateSingleOrder(supabase, user.id, body.seller_id, body.order_id);
@@ -522,6 +539,7 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
   dateFrom.setDate(dateFrom.getDate() - periodDays);
   const dateFromStr = dateFrom.toISOString();
 
+  // Cancelled orders (separate path)
   if (orderStatus === 'cancelled') {
     const cancelledOrders = await fetchAllRows(
       supabase.from('meli_orders_cache')
@@ -540,6 +558,7 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
       buyer_nickname: o.buyer_nickname, buyer_name: o.buyer_name, created_at_meli: o.created_at_meli,
       shipping_cost_seller: 0, commission_cost: 0, receita_envio: 0, shipping_balance: 0,
       revenue_net: 0, cost_net: 0, profit_net: 0, margin_net: 0, missing_fields: [], fee_ml_source: 'cancelled',
+      has_breakdown: false,
     }));
 
     if (search) {
@@ -556,63 +575,80 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
     return { orders: results.slice(offset, offset + pageSize), total, page, page_size: pageSize, total_pages: totalPages };
   }
 
-  let query = supabase
-    .from('order_cost_breakdown_cache')
-    .select('*')
+  // ====== BASE: meli_orders_cache (always shows imported orders) ======
+  let baseQuery = supabase
+    .from('meli_orders_cache')
+    .select('order_id, shipment_id, total_amount, buyer_nickname, buyer_name, created_at_meli, order_status')
     .eq('seller_id', sellerId)
-    .eq('user_id', userId)
+    .eq('order_status', 'paid')
     .gte('created_at_meli', dateFromStr)
     .order('created_at_meli', { ascending: false });
 
-  if (status) query = query.eq('status', status);
+  if (search) {
+    baseQuery = baseQuery.or(`order_id.ilike.%${search}%,shipment_id.ilike.%${search}%,buyer_nickname.ilike.%${search}%`);
+  }
+
+  const baseOrders = await fetchAllRows(baseQuery);
+
+  // Fetch all breakdowns for this period
+  const breakdownOrderIds = baseOrders.map((o: any) => o.order_id);
+  let breakdowns: any[] = [];
+  if (breakdownOrderIds.length > 0) {
+    breakdowns = await fetchWithBatchedIn(
+      supabase, 'order_cost_breakdown_cache', '*',
+      'order_id', breakdownOrderIds,
+      [{ column: 'seller_id', value: sellerId }]
+    );
+  }
+  const breakdownMap = new Map<string, any>(breakdowns.map((b: any) => [b.order_id, b]));
+
+  // Merge: base orders + breakdown data
+  let results = baseOrders.map((o: any) => {
+    const b = breakdownMap.get(o.order_id);
+    if (b) {
+      return {
+        ...b,
+        order_status: o.order_status || 'paid',
+        has_breakdown: true,
+      };
+    }
+    // No breakdown yet — show order with "pending" status
+    return {
+      id: o.order_id,
+      order_id: o.order_id,
+      shipment_id: o.shipment_id,
+      revenue_total: o.total_amount || 0,
+      cost_total: 0, cost_fees: 0, cost_shipping: 0, cost_other: 0, cost_items_total: 0, cost_packaging: 0,
+      profit_total: 0, margin_percent: 0, missing_cost_items_count: 0,
+      status: 'pending_calc',
+      order_status: o.order_status || 'paid',
+      buyer_nickname: o.buyer_nickname, buyer_name: o.buyer_name, created_at_meli: o.created_at_meli,
+      shipping_cost_seller: 0, commission_cost: 0, receita_envio: 0, shipping_balance: 0,
+      revenue_net: 0, cost_net: 0, profit_net: 0, margin_net: 0,
+      missing_fields: ['pending_calc'], fee_ml_source: null,
+      has_breakdown: false,
+    };
+  });
+
+  // Apply filters that depend on breakdown data
+  if (status) results = results.filter((r: any) => r.status === status);
+  if (profitType === 'lucro') results = results.filter((r: any) => r.has_breakdown && r.profit_total >= 0);
+  else if (profitType === 'prejuizo') results = results.filter((r: any) => r.has_breakdown && r.profit_total < 0);
+  if (ecommerceCost === 'with') results = results.filter((r: any) => (r.cost_other || 0) > 0);
+  else if (ecommerceCost === 'without') results = results.filter((r: any) => !r.cost_other || r.cost_other === 0);
+  if (shippingFilter === 'high') results = results.filter((r: any) => (r.shipping_cost_seller || 0) >= 100);
+  else if (shippingFilter === 'very_high') results = results.filter((r: any) => (r.shipping_cost_seller || 0) >= 300);
+  else if (shippingFilter === 'missing') results = results.filter((r: any) => (r.shipping_cost_seller || 0) === 0 && r.has_breakdown);
+
+  if (billingFilter === 'billing') results = results.filter((r: any) => r.fee_ml_source === 'billing');
+  else if (billingFilter === 'manual') results = results.filter((r: any) => r.fee_ml_source === 'manual');
+  else if (billingFilter === 'pending') results = results.filter((r: any) => !r.has_breakdown || r.fee_ml_source === 'pending');
 
   if (orderStatus === 'pending_cost') {
-    query = query.in('fee_ml_source', ['pending', 'no_charges']);
-  } else if (orderStatus === 'all') {
-    // no filter
-  } else if (ecommerceCost === 'without') {
-    // no filter
-  } else if (!billingFilter || billingFilter === 'all') {
-    query = query.in('fee_ml_source', ['billing', 'manual']);
-  } else if (billingFilter === 'billing') {
-    query = query.eq('fee_ml_source', 'billing');
-  } else if (billingFilter === 'manual') {
-    query = query.eq('fee_ml_source', 'manual');
+    results = results.filter((r: any) => !r.has_breakdown || r.fee_ml_source === 'pending' || r.fee_ml_source === 'no_charges');
   }
 
-  if (ecommerceCost === 'with') query = query.gt('cost_other', 0);
-  else if (ecommerceCost === 'without') query = query.or('cost_other.is.null,cost_other.eq.0');
-  else if (ecommerceCost === 'zero_total') query = query.lte('cost_total', 0);
-
-  if (shippingFilter === 'high') query = query.gte('shipping_cost_seller', 100);
-  else if (shippingFilter === 'very_high') query = query.gte('shipping_cost_seller', 300);
-  else if (shippingFilter === 'missing') query = query.or('shipping_cost_seller.is.null,shipping_cost_seller.eq.0');
-
-  if (search) query = query.or(`order_id.ilike.%${search}%,shipment_id.ilike.%${search}%,buyer_nickname.ilike.%${search}%`);
-
-  const results_raw = await fetchAllRows(query);
-
-  const orderIds = results_raw.map((r: any) => r.order_id).filter(Boolean);
-  let orderStatusMap = new Map<string, string>();
-  if (orderIds.length > 0) {
-    const statusRows = await fetchWithBatchedIn(
-      supabase, 'meli_orders_cache', 'order_id, order_status',
-      'order_id', orderIds, [{ column: 'seller_id', value: sellerId }]
-    );
-    orderStatusMap = new Map(statusRows.map((r: any) => [r.order_id, r.order_status]));
-  }
-
-  let results = results_raw.map((r: any) => ({ ...r, order_status: orderStatusMap.get(r.order_id) || 'paid' }));
-
-  if (profitType === 'lucro') results = results.filter((r: any) => r.profit_total >= 0);
-  else if (profitType === 'prejuizo') results = results.filter((r: any) => r.profit_total < 0);
-
-  if (shippingFilter === 'missing') {
-    results = results.filter((r: any) =>
-      r.missing_fields?.includes('sem_frete_cobrado') || (r.shipping_cost_seller === 0 || r.shipping_cost_seller === null)
-    );
-  }
-
+  // Sort
   const validSortKeys = ['created_at_meli', 'revenue_total', 'cost_total', 'shipping_cost_seller', 'profit_total', 'margin_percent'];
   if (validSortKeys.includes(sortBy)) {
     results.sort((a: any, b: any) => {
@@ -1192,6 +1228,365 @@ async function updateProductAggregates(supabase: any, userId: string, sellerId: 
   }
 }
 
+// ================== JOB-BASED CALCULATION ==================
+
+async function createCalcJob(
+  supabase: any, supabaseUrl: string, serviceKey: string,
+  userId: string, sellerId: string, periodDays: number,
+  dateFromParam?: string, dateToParam?: string
+) {
+  if (!sellerId) throw new Error('seller_id is required');
+
+  const dateFrom = dateFromParam ? new Date(dateFromParam) : (() => { const d = new Date(); d.setDate(d.getDate() - periodDays); return d; })();
+  const dateTo = dateToParam ? new Date(dateToParam) : new Date();
+
+  console.log(`[cost-engine] createCalcJob: seller=${sellerId}, period=${periodDays}d, from=${dateFrom.toISOString()}, to=${dateTo.toISOString()}`);
+
+  // Check for existing running job
+  const { data: existingJob } = await supabase
+    .from('cost_calc_jobs')
+    .select('*')
+    .eq('seller_id', sellerId)
+    .in('status', ['queued', 'running'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingJob) {
+    console.log(`[cost-engine] Existing job found: ${existingJob.id} (status=${existingJob.status})`);
+    return { status: existingJob.status, job_id: existingJob.id, message: 'Job já em andamento' };
+  }
+
+  // Count total orders for this period
+  const { count } = await supabase
+    .from('meli_orders_cache')
+    .select('order_id', { count: 'exact', head: true })
+    .eq('seller_id', sellerId)
+    .eq('order_status', 'paid')
+    .gte('created_at_meli', dateFrom.toISOString())
+    .lte('created_at_meli', dateTo.toISOString());
+
+  const totalOrders = count || 0;
+  if (totalOrders === 0) {
+    return { status: 'done', job_id: null, message: 'Nenhum pedido encontrado no período', total_orders: 0 };
+  }
+
+  // Create job
+  const { data: job, error: jobErr } = await supabase.from('cost_calc_jobs').insert({
+    seller_id: sellerId,
+    user_id: userId,
+    date_from: dateFrom.toISOString(),
+    date_to: dateTo.toISOString(),
+    period_days: periodDays,
+    status: 'queued',
+    total_orders: totalOrders,
+    batch_size: BATCH_PAGE_SIZE,
+  }).select().single();
+
+  if (jobErr) throw new Error(`Failed to create job: ${jobErr.message}`);
+
+  console.log(`[cost-engine] Job created: ${job.id}, total_orders=${totalOrders}`);
+
+  // Start first batch via self-call
+  EdgeRuntime.waitUntil(
+    fetch(`${supabaseUrl}/functions/v1/cost-engine/_internal/run-job`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-internal-key': serviceKey },
+      body: JSON.stringify({ job_id: job.id }),
+    }).catch(err => console.error(`[cost-engine] Failed to start job:`, err))
+  );
+
+  return { status: 'queued', job_id: job.id, total_orders: totalOrders, message: 'Cálculo iniciado' };
+}
+
+async function getCalcJobStatus(supabase: any, userId: string, params: Record<string, string>) {
+  const jobId = params.job_id;
+  const sellerId = params.seller_id;
+
+  let query = supabase.from('cost_calc_jobs').select('*');
+  if (jobId) {
+    query = query.eq('id', jobId);
+  } else if (sellerId) {
+    query = query.eq('seller_id', sellerId).order('created_at', { ascending: false }).limit(1);
+  } else {
+    throw new Error('job_id or seller_id required');
+  }
+
+  const { data, error } = await query.maybeSingle();
+  if (error) throw error;
+  return data || { status: 'none' };
+}
+
+async function executeCalcJobBatch(supabase: any, supabaseUrl: string, serviceKey: string, jobId: string) {
+  const startTime = Date.now();
+  console.log(`[cost-engine] executeCalcJobBatch: job=${jobId}`);
+
+  try {
+    const { data: job, error: jobErr } = await supabase.from('cost_calc_jobs').select('*').eq('id', jobId).single();
+    if (jobErr || !job) { console.error('[cost-engine] Job not found:', jobId); return; }
+    if (job.status === 'done' || job.status === 'error' || job.status === 'cancelled') {
+      console.log(`[cost-engine] Job ${jobId} already ${job.status}, skipping`);
+      return;
+    }
+
+    // Mark as running
+    await supabase.from('cost_calc_jobs').update({
+      status: 'running',
+      started_at: job.started_at || new Date().toISOString(),
+      last_heartbeat: new Date().toISOString(),
+    }).eq('id', jobId);
+
+    const sellerId = job.seller_id;
+    const userId = job.user_id;
+    const offset = job.offset;
+    const batchSize = job.batch_size || BATCH_PAGE_SIZE;
+    const dateFrom = job.date_from;
+    const dateTo = job.date_to;
+
+    // Fetch batch
+    const { data: orders, error: fetchErr } = await supabase
+      .from('meli_orders_cache')
+      .select('order_id, shipment_id, total_amount, buyer_nickname, buyer_name, created_at_meli, shipping_state')
+      .eq('seller_id', sellerId)
+      .eq('order_status', 'paid')
+      .gte('created_at_meli', dateFrom)
+      .lte('created_at_meli', dateTo)
+      .order('created_at_meli', { ascending: true })
+      .range(offset, offset + batchSize - 1);
+
+    if (fetchErr) {
+      console.error('[cost-engine] Failed to fetch orders:', fetchErr.message);
+      await supabase.from('cost_calc_jobs').update({ status: 'error', last_error: fetchErr.message }).eq('id', jobId);
+      return;
+    }
+
+    if (!orders || orders.length === 0) {
+      console.log(`[cost-engine] No more orders at offset=${offset}. Running aggregates...`);
+      await updateProductAggregates(supabase, userId, sellerId, job.period_days || 30);
+      await supabase.from('cost_calc_jobs').update({
+        status: 'done', finished_at: new Date().toISOString(),
+        last_heartbeat: new Date().toISOString(),
+      }).eq('id', jobId);
+      console.log(`[cost-engine] Job ${jobId} completed successfully`);
+      return;
+    }
+
+    console.log(`[cost-engine] Job ${jobId}: processing ${orders.length} orders (offset=${offset})`);
+
+    // === Process batch (same logic as calculateCostsBatch) ===
+    const companyId = await resolveCompanyId(supabase, sellerId);
+    const taxConfig = companyId ? await getTaxForCompany(supabase, companyId) : null;
+
+    const orderIds = orders.map((o: any) => o.order_id);
+    const allItems = await fetchWithBatchedIn(
+      supabase, 'meli_order_items_cache',
+      'order_id, product_key, item_id, variation_id, quantity, unit_price',
+      'order_id', orderIds,
+      [{ column: 'seller_id', value: sellerId }]
+    );
+
+    const costs = await fetchAllRows(
+      supabase.from('product_cost_catalog').select('product_key, cost_value').eq('seller_id', sellerId)
+    );
+    const costMap = new Map<string, number>(costs.map((c: any) => [c.product_key, Number(c.cost_value) || 0]));
+
+    const financials = await fetchWithBatchedIn(
+      supabase, 'meli_order_financials_cache',
+      'order_id, revenue_products, revenue_shipping, cost_sale_fee, cost_shipping_fee, cost_installment_fee, cost_cancellations',
+      'order_id', orderIds,
+      [{ column: 'seller_id', value: sellerId }]
+    );
+    const financialsMap = new Map<string, any>(financials.map((f: any) => [f.order_id, f]));
+
+    const itemsByOrder = new Map<string, any[]>();
+    for (const item of allItems) {
+      const key = item.product_key || `${item.item_id}:${item.variation_id || ''}`;
+      const itemWithKey = { ...item, product_key: key };
+      if (!itemsByOrder.has(item.order_id)) itemsByOrder.set(item.order_id, []);
+      itemsByOrder.get(item.order_id)!.push(itemWithKey);
+    }
+
+    const allProductKeys = [...new Set(allItems.map((i: any) => i.product_key || `${i.item_id}:${i.variation_id || ''}`))];
+    let packagingLinksByProduct = new Map<string, string>();
+    let packagingTypesMap = new Map<string, any>();
+    if (companyId && allProductKeys.length > 0) {
+      const allLinks = await fetchWithBatchedIn(
+        supabase, 'product_packaging_link', 'product_key, packaging_id',
+        'product_key', allProductKeys,
+        [{ column: 'seller_id', value: sellerId }, { column: 'company_id', value: companyId }]
+      );
+      for (const link of allLinks) {
+        if (!packagingLinksByProduct.has(link.product_key)) {
+          packagingLinksByProduct.set(link.product_key, link.packaging_id);
+        }
+      }
+      const uniquePkgIds = [...new Set(allLinks.map((l: any) => l.packaging_id))];
+      if (uniquePkgIds.length > 0) {
+        const pkgRows = await fetchWithBatchedIn(supabase, 'packaging_types', 'id, name, cost_value, is_active', 'id', uniquePkgIds);
+        for (const p of pkgRows) { if (p.is_active) packagingTypesMap.set(p.id, p); }
+      }
+    }
+
+    function getPackagingFromCache(productKeys: string[]): { total: number; detail: any[] } {
+      let total = 0; const detail: any[] = [];
+      for (const pk of productKeys) {
+        const pkgId = packagingLinksByProduct.get(pk);
+        if (!pkgId) continue;
+        const pkg = packagingTypesMap.get(pkgId);
+        if (pkg) { total += Number(pkg.cost_value) || 0; detail.push({ product_key: pk, packaging_name: pkg.name, cost: Number(pkg.cost_value) || 0 }); }
+      }
+      return { total, detail };
+    }
+
+    const existingBreakdowns = await fetchWithBatchedIn(
+      supabase, 'order_cost_breakdown_cache',
+      'order_id, fee_ml, shipping_cost_seller, installments_cost, commission_cost, cost_shipping, receita_envio',
+      'order_id', orderIds,
+      [{ column: 'seller_id', value: sellerId }]
+    );
+    const existingBreakdownMap = new Map<string, any>(existingBreakdowns.map((b: any) => [b.order_id, b]));
+
+    const breakdowns: any[] = [];
+    const calcLogs: any[] = [];
+
+    for (const order of orders) {
+      const items = itemsByOrder.get(order.order_id) || [];
+      const billing = financialsMap.get(order.order_id);
+      const existing = existingBreakdownMap.get(order.order_id);
+      const orderProductKeys = items.map((i: any) => i.product_key);
+
+      let costItemsTotal = 0, missingCount = 0;
+      for (const item of items) {
+        const unitCost = costMap.get(item.product_key) || 0;
+        costItemsTotal += unitCost * item.quantity;
+        if (unitCost === 0) missingCount++;
+      }
+
+      const baseRevenue = Number(order.total_amount) || 0;
+      const packaging = companyId ? getPackagingFromCache(orderProductKeys) : { total: 0, detail: [] };
+
+      let commissionCost = 0, installmentsCost = 0, costShipping = 0, revenueShipping = 0;
+      if (billing) {
+        commissionCost = billing.cost_sale_fee || 0;
+        installmentsCost = billing.cost_installment_fee || 0;
+        costShipping = billing.cost_shipping_fee || 0;
+        revenueShipping = billing.revenue_shipping || 0;
+      } else if (existing) {
+        commissionCost = Number(existing.fee_ml) || Number(existing.commission_cost) || 0;
+        installmentsCost = Number(existing.installments_cost) || 0;
+        costShipping = Number(existing.shipping_cost_seller) || Number(existing.cost_shipping) || 0;
+        revenueShipping = Number(existing.receita_envio) || 0;
+      }
+
+      let taxPercentTotal = 0, taxValue = 0, difalApplied = false;
+      if (taxConfig) {
+        taxPercentTotal = Number(taxConfig.das_icms_percent || 0) + Number(taxConfig.pis_percent || 0) +
+          Number(taxConfig.cofins_percent || 0) + Number(taxConfig.irpj_percent || 0) + Number(taxConfig.csll_percent || 0);
+        if (taxConfig.difal_enabled && taxConfig.origin_state) {
+          const destState = order.shipping_state || '';
+          if (destState && destState !== taxConfig.origin_state) {
+            taxPercentTotal += Number(taxConfig.difal_percent || 0);
+            difalApplied = true;
+          }
+        }
+        taxValue = baseRevenue * (taxPercentTotal / 100);
+      }
+
+      const revenue = baseRevenue;
+      const revenueNet = revenue - revenueShipping;
+      const costNet = costItemsTotal + packaging.total + commissionCost + taxValue;
+      const profitNet = revenueNet - costNet;
+      const marginNet = revenueNet > 0 ? (profitNet / revenueNet) * 100 : 0;
+      const shippingBalance = revenueShipping - costShipping;
+
+      const missingFields: string[] = [];
+      if (missingCount > 0) missingFields.push('sem_custo_produto');
+      if (!billing) missingFields.push('sem_billing_real');
+      if (costShipping === 0 && order.shipment_id) missingFields.push('sem_frete_cobrado');
+
+      const costTotal = costItemsTotal + packaging.total + commissionCost + costShipping + taxValue;
+
+      breakdowns.push({
+        user_id: userId, seller_id: sellerId, order_id: order.order_id, shipment_id: order.shipment_id,
+        calculated_at: new Date().toISOString(), revenue_total: revenue,
+        cost_items_total: costItemsTotal, cost_packaging: packaging.total, cost_fees: commissionCost,
+        cost_shipping: costShipping, cost_other: 0, cost_total: costTotal,
+        profit_total: profitNet, margin_percent: marginNet,
+        missing_cost_items_count: missingCount, status: missingCount > 0 ? 'incompleto' : (billing ? 'ok' : 'pending'),
+        commission_cost: commissionCost, installments_cost: installmentsCost,
+        shipping_cost_seller: costShipping, receita_envio: revenueShipping,
+        shipping_balance: shippingBalance, revenue_net: revenueNet, cost_net: costNet,
+        profit_net: profitNet, margin_net: marginNet, missing_fields: missingFields,
+        buyer_nickname: order.buyer_nickname || null, buyer_name: order.buyer_name || null,
+        created_at_meli: order.created_at_meli || null,
+        fee_ml: existing?.fee_ml || commissionCost || null,
+        cost_packaging_detail: packaging.detail.length > 0 ? packaging.detail : null,
+        tax_percent_total: taxPercentTotal, tax_value: taxValue, difal_applied: difalApplied,
+        last_recalculated_at: new Date().toISOString(),
+      });
+
+      if (companyId) {
+        calcLogs.push({
+          company_id: companyId, seller_id: sellerId, order_id: order.order_id,
+          receita: revenue, custo_produto: costItemsTotal, embalagem: packaging.total,
+          imposto_percent_total: taxPercentTotal, imposto_valor: taxValue,
+          difal_enabled: taxConfig?.difal_enabled || false, difal_applied: difalApplied,
+          origin_state: taxConfig?.origin_state || null, destination_state: order.shipping_state || null,
+          lucro_final: profitNet, margem_final: marginNet,
+        });
+      }
+    }
+
+    // Batch upsert
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < breakdowns.length; i += BATCH_SIZE) {
+      await supabase.from('order_cost_breakdown_cache').upsert(breakdowns.slice(i, i + BATCH_SIZE), { onConflict: 'seller_id,order_id' });
+    }
+    for (let i = 0; i < calcLogs.length; i += BATCH_SIZE) {
+      await supabase.from('cost_calculation_logs').insert(calcLogs.slice(i, i + BATCH_SIZE));
+    }
+
+    const newOffset = offset + orders.length;
+    const newProcessed = (job.processed_orders || 0) + orders.length;
+    const elapsed = Date.now() - startTime;
+
+    console.log(`[cost-engine] Job ${jobId}: batch done, ${orders.length} orders in ${elapsed}ms. Total processed: ${newProcessed}/${job.total_orders}`);
+
+    // Update job state
+    await supabase.from('cost_calc_jobs').update({
+      offset: newOffset,
+      processed_orders: newProcessed,
+      last_heartbeat: new Date().toISOString(),
+    }).eq('id', jobId);
+
+    // Chain next batch or finalize
+    if (orders.length >= batchSize) {
+      console.log(`[cost-engine] Job ${jobId}: chaining next batch at offset=${newOffset}`);
+      await fetch(`${supabaseUrl}/functions/v1/cost-engine/_internal/run-job`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-internal-key': serviceKey },
+        body: JSON.stringify({ job_id: jobId }),
+      }).catch(err => console.error(`[cost-engine] Failed to chain:`, err));
+    } else {
+      console.log(`[cost-engine] Job ${jobId}: last batch. Running aggregates...`);
+      await updateProductAggregates(supabase, userId, sellerId, job.period_days || 30);
+      await supabase.from('cost_calc_jobs').update({
+        status: 'done', finished_at: new Date().toISOString(),
+        last_heartbeat: new Date().toISOString(),
+        processed_orders: newProcessed,
+      }).eq('id', jobId);
+      console.log(`[cost-engine] Job ${jobId}: COMPLETED. ${newProcessed} orders processed.`);
+    }
+  } catch (error: any) {
+    console.error(`[cost-engine] Job ${jobId} error:`, error);
+    await supabase.from('cost_calc_jobs').update({
+      status: 'error',
+      last_error: error?.message || 'Unknown error',
+      last_heartbeat: new Date().toISOString(),
+    }).eq('id', jobId);
+  }
+}
+
 // ================== SUMMARY ==================
 
 async function getSummary(supabase: any, userId: string, params: Record<string, string>) {
@@ -1199,7 +1594,6 @@ async function getSummary(supabase: any, userId: string, params: Record<string, 
   const periodDays = parseInt(params.period_days || '30');
   if (!sellerId) throw new Error('seller_id is required');
 
-  // Support date_from/date_to params for custom date ranges
   const dateFrom = params.date_from || (() => {
     const d = new Date();
     d.setDate(d.getDate() - periodDays);
@@ -1207,26 +1601,15 @@ async function getSummary(supabase: any, userId: string, params: Record<string, 
   })();
   const dateTo = params.date_to || new Date().toISOString();
 
-  // Use server-side aggregation RPCs for speed (single query instead of fetching all rows)
-  const [costResult, cancelledResult] = await Promise.all([
-    supabase.rpc('get_cost_summary', {
-      p_seller_id: sellerId,
-      p_user_id: userId,
-      p_date_from: dateFrom,
-      p_date_to: dateTo,
-    }),
-    supabase.rpc('get_cancelled_orders_summary', {
-      p_seller_id: sellerId,
-      p_date_from: dateFrom,
-      p_date_to: dateTo,
-    }),
-  ]);
+  // Use the new V2 RPC that includes coverage metrics
+  const { data: summaryData, error: summaryErr } = await supabase.rpc('get_cost_summary_v2', {
+    p_seller_id: sellerId,
+    p_date_from: dateFrom,
+    p_date_to: dateTo,
+  });
 
-  if (costResult.error) throw costResult.error;
-  if (cancelledResult.error) throw cancelledResult.error;
-
-  const s = costResult.data || {};
-  const c = cancelledResult.data || {};
+  if (summaryErr) throw summaryErr;
+  const s = summaryData || {};
 
   // ABC summary from cache
   const { data: abcData } = await supabase
@@ -1242,25 +1625,7 @@ async function getSummary(supabase: any, userId: string, params: Record<string, 
 
   return {
     summary: {
-      total_revenue: s.total_revenue || 0,
-      total_cost: s.total_cost || 0,
-      total_profit: s.total_profit || 0,
-      total_tax: s.total_tax || 0,
-      total_packaging: s.total_packaging || 0,
-      total_cost_product: s.total_cost_product || 0,
-      total_cost_shipping: s.total_cost_shipping || 0,
-      total_cost_marketplace: s.total_cost_marketplace || 0,
-      total_installments: s.total_installments || 0,
-      total_cost_other: s.total_cost_other || 0,
-      total_receita_produtos: s.total_receita_produtos || 0,
-      total_receita_envio: s.total_receita_envio || 0,
-      avg_margin: s.avg_margin || 0,
-      order_count: s.order_count || 0,
-      incomplete_count: s.incomplete_count || 0,
-      incomplete_percent: s.incomplete_percent || 0,
-      missing_cost_count: s.missing_cost_count || 0,
-      cancelled_count: c.cancelled_count || 0,
-      cancelled_vgv: c.cancelled_vgv || 0,
+      ...s,
       abc_a_percent: abcTotal > 0 ? (abcACount / abcTotal) * 100 : 0,
       abc_b_percent: abcTotal > 0 ? (abcBCount / abcTotal) * 100 : 0,
       abc_c_percent: abcTotal > 0 ? (abcCCount / abcTotal) * 100 : 0,
