@@ -45,8 +45,22 @@ Deno.serve(async (req) => {
             status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
-        EdgeRuntime.waitUntil(calculateCosts(supabase, userId, sellerId, periodDays));
+        EdgeRuntime.waitUntil(calculateCostsBatch(supabase, supabaseUrl, supabaseServiceKey, userId, sellerId, periodDays, 0));
         return new Response(JSON.stringify({ status: 'processing', message: 'Internal calculate started' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Internal: calculate-batch continuation (self-chaining)
+      if (path === '_internal/calculate-batch') {
+        const { user_id: bUserId, seller_id: bSellerId, period_days: bPeriod, offset: bOffset } = body;
+        if (!bUserId || !bSellerId) {
+          return new Response(JSON.stringify({ error: 'user_id and seller_id required' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        EdgeRuntime.waitUntil(calculateCostsBatch(supabase, supabaseUrl, supabaseServiceKey, bUserId, bSellerId, bPeriod || 365, bOffset || 0));
+        return new Response(JSON.stringify({ status: 'processing', offset: bOffset }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
@@ -121,7 +135,7 @@ Deno.serve(async (req) => {
       // ---- CALCULATE ----
       case 'calculate':
         EdgeRuntime.waitUntil(
-          calculateCosts(supabase, user.id, body.seller_id, body.period_days || 30)
+          calculateCostsBatch(supabase, supabaseUrl, supabaseServiceKey, user.id, body.seller_id, body.period_days || 30, 0)
         );
         result = { status: 'processing', message: 'Cálculo iniciado em background' };
         break;
@@ -712,38 +726,47 @@ async function getTaxForCompany(supabase: any, companyId: string): Promise<any> 
   return data;
 }
 
-async function calculateCosts(supabase: any, userId: string, sellerId: string, periodDays: number) {
-  console.log(`[cost-engine] Starting V2 calculation for seller ${sellerId}, period ${periodDays} days`);
+const BATCH_PAGE_SIZE = 500;
+
+async function calculateCostsBatch(
+  supabase: any, supabaseUrl: string, serviceKey: string,
+  userId: string, sellerId: string, periodDays: number, offset: number
+) {
+  console.log(`[cost-engine] Batch calculation: seller=${sellerId}, period=${periodDays}d, offset=${offset}`);
 
   try {
     const dateFrom = new Date();
     dateFrom.setDate(dateFrom.getDate() - periodDays);
     const dateFromStr = dateFrom.toISOString();
 
-    const companyId = await resolveCompanyId(supabase, sellerId);
-    const taxConfig = companyId ? await getTaxForCompany(supabase, companyId) : null;
+    // Fetch this batch of orders using .range()
+    const { data: orders, error: fetchErr } = await supabase
+      .from('meli_orders_cache')
+      .select('order_id, shipment_id, total_amount, buyer_nickname, buyer_name, created_at_meli, shipping_state')
+      .eq('seller_id', sellerId)
+      .eq('user_id', userId)
+      .eq('order_status', 'paid')
+      .gte('created_at_meli', dateFromStr)
+      .order('created_at_meli', { ascending: true })
+      .range(offset, offset + BATCH_PAGE_SIZE - 1);
 
-    let orders: any[];
-    try {
-      orders = await fetchAllRows(
-        supabase.from('meli_orders_cache')
-          .select('order_id, shipment_id, total_amount, buyer_nickname, buyer_name, created_at_meli, shipping_state')
-          .eq('seller_id', sellerId)
-          .eq('user_id', userId)
-          .eq('order_status', 'paid')
-          .gte('created_at_meli', dateFromStr)
-      );
-    } catch (fetchErr: any) {
-      console.error('[cost-engine] CRITICAL: Failed to fetch orders, aborting to prevent zero-overwrite:', fetchErr?.message);
+    if (fetchErr) {
+      console.error('[cost-engine] CRITICAL: Failed to fetch orders batch, aborting:', fetchErr.message);
       return;
     }
 
     if (!orders || orders.length === 0) {
-      console.log('[cost-engine] No orders found, skipping calculation');
+      console.log(`[cost-engine] No more orders at offset=${offset}. Running aggregates...`);
+      await updateProductAggregates(supabase, userId, sellerId, periodDays);
+      console.log(`[cost-engine] Full calculation chain completed for seller ${sellerId}`);
       return;
     }
 
-    console.log(`[cost-engine] Found ${orders.length} orders to process`);
+    console.log(`[cost-engine] Processing batch: ${orders.length} orders (offset=${offset})`);
+
+    // Preloads (lightweight, ~3 queries, safe to repeat each batch)
+    const companyId = await resolveCompanyId(supabase, sellerId);
+    const taxConfig = companyId ? await getTaxForCompany(supabase, companyId) : null;
 
     const orderIds = orders.map((o: any) => o.order_id);
     const allItems = await fetchWithBatchedIn(
@@ -775,22 +798,18 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
       itemsByOrder.get(item.order_id)!.push(itemWithKey);
     }
 
-    // Preload all packaging links for this seller (BULK - avoids N+1 queries)
+    // Bulk preload packaging (2 queries)
     const allProductKeys = [...new Set(allItems.map((i: any) => i.product_key || `${i.item_id}:${i.variation_id || ''}`))];
-
-    // Bulk preload packaging: 2 queries total instead of N queries
-    let packagingLinksByProduct = new Map<string, string>(); // product_key -> packaging_id
-    let packagingTypesMap = new Map<string, any>(); // packaging_id -> { name, cost_value }
+    let packagingLinksByProduct = new Map<string, string>();
+    let packagingTypesMap = new Map<string, any>();
     if (companyId && allProductKeys.length > 0) {
       const allLinks = await fetchWithBatchedIn(
         supabase, 'product_packaging_link', 'product_key, packaging_id',
         'product_key', allProductKeys,
         [{ column: 'seller_id', value: sellerId }, { column: 'company_id', value: companyId }]
       );
-      const seenKeys = new Set<string>();
       for (const link of allLinks) {
-        if (!seenKeys.has(link.product_key)) {
-          seenKeys.add(link.product_key);
+        if (!packagingLinksByProduct.has(link.product_key)) {
           packagingLinksByProduct.set(link.product_key, link.packaging_id);
         }
       }
@@ -804,10 +823,8 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
           if (p.is_active) packagingTypesMap.set(p.id, p);
         }
       }
-      console.log(`[cost-engine] Preloaded ${allLinks.length} packaging links, ${packagingTypesMap.size} active packaging types`);
     }
 
-    // Helper: get packaging from preloaded maps (0 queries)
     function getPackagingFromCache(productKeys: string[]): { total: number; detail: any[] } {
       let total = 0;
       const detail: any[] = [];
@@ -823,7 +840,7 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
       return { total, detail };
     }
 
-    // Preload existing breakdowns to use as fallback when financials cache is empty
+    // Preload existing breakdowns for fallback
     const existingBreakdowns = await fetchWithBatchedIn(
       supabase, 'order_cost_breakdown_cache',
       'order_id, fee_ml, shipping_cost_seller, installments_cost, commission_cost, cost_shipping, receita_envio',
@@ -850,13 +867,10 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
       }
 
       const baseRevenue = Number(order.total_amount) || 0;
-
-      // Packaging V2 (from preloaded cache - 0 queries)
       const packaging = companyId
         ? getPackagingFromCache(orderProductKeys)
         : { total: 0, detail: [] };
 
-      // Billing data with fallback to existing breakdown (ml-sync-real-costs values)
       let commissionCost = 0, installmentsCost = 0, costShipping = 0, revenueShipping = 0;
       if (billing) {
         commissionCost = billing.cost_sale_fee || 0;
@@ -864,22 +878,18 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
         costShipping = billing.cost_shipping_fee || 0;
         revenueShipping = billing.revenue_shipping || 0;
       } else if (existing) {
-        // Fallback: use values previously synced by ml-sync-real-costs
         commissionCost = Number(existing.fee_ml) || Number(existing.commission_cost) || 0;
         installmentsCost = Number(existing.installments_cost) || 0;
         costShipping = Number(existing.shipping_cost_seller) || Number(existing.cost_shipping) || 0;
         revenueShipping = Number(existing.receita_envio) || 0;
-        console.log(`[cost-engine] Fallback for order ${order.order_id}: commission=${commissionCost}, shipping=${costShipping}, installments=${installmentsCost}`);
       }
 
-      // Tax V2
       let taxPercentTotal = 0;
       let taxValue = 0;
       let difalApplied = false;
       if (taxConfig) {
         taxPercentTotal = Number(taxConfig.das_icms_percent || 0) + Number(taxConfig.pis_percent || 0) +
           Number(taxConfig.cofins_percent || 0) + Number(taxConfig.irpj_percent || 0) + Number(taxConfig.csll_percent || 0);
-
         if (taxConfig.difal_enabled && taxConfig.origin_state) {
           const destState = order.shipping_state || '';
           if (destState && destState !== taxConfig.origin_state) {
@@ -887,7 +897,6 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
             difalApplied = true;
           }
         }
-
         taxValue = baseRevenue * (taxPercentTotal / 100);
       }
 
@@ -920,15 +929,12 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
         profit_net: profitNet, margin_net: marginNet, missing_fields: missingFields,
         buyer_nickname: order.buyer_nickname || null, buyer_name: order.buyer_name || null,
         created_at_meli: order.created_at_meli || null,
-        // Preserve fee_ml from ml-sync-real-costs
         fee_ml: existing?.fee_ml || commissionCost || null,
-        // V2 fields
         cost_packaging_detail: packaging.detail.length > 0 ? packaging.detail : null,
         tax_percent_total: taxPercentTotal, tax_value: taxValue, difal_applied: difalApplied,
         last_recalculated_at: new Date().toISOString(),
       });
 
-      // Log entry
       if (companyId) {
         calcLogs.push({
           company_id: companyId, seller_id: sellerId, order_id: order.order_id,
@@ -955,11 +961,37 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
       await supabase.from('cost_calculation_logs').insert(batch);
     }
 
-    console.log(`[cost-engine] V2 Calculation completed: ${breakdowns.length} orders, ${calcLogs.length} logs`);
+    console.log(`[cost-engine] Batch done: ${breakdowns.length} orders processed at offset=${offset}`);
 
-    await updateProductAggregates(supabase, userId, sellerId, periodDays);
+    // Self-chain: if we got a full page, there might be more orders
+    if (orders.length === BATCH_PAGE_SIZE) {
+      const nextOffset = offset + BATCH_PAGE_SIZE;
+      console.log(`[cost-engine] Chaining next batch at offset=${nextOffset}`);
+      try {
+        await fetch(`${supabaseUrl}/functions/v1/cost-engine/_internal/calculate-batch`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-internal-key': serviceKey,
+          },
+          body: JSON.stringify({
+            user_id: userId,
+            seller_id: sellerId,
+            period_days: periodDays,
+            offset: nextOffset,
+          }),
+        });
+      } catch (chainErr: any) {
+        console.error(`[cost-engine] Failed to chain next batch:`, chainErr?.message);
+      }
+    } else {
+      // Last batch - run aggregates
+      console.log(`[cost-engine] Last batch reached (${orders.length} < ${BATCH_PAGE_SIZE}). Running aggregates...`);
+      await updateProductAggregates(supabase, userId, sellerId, periodDays);
+      console.log(`[cost-engine] Full calculation chain completed for seller ${sellerId}`);
+    }
   } catch (error) {
-    console.error('[cost-engine] Calculation error:', error);
+    console.error('[cost-engine] Batch calculation error:', error);
   }
 }
 
