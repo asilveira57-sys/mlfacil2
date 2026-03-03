@@ -1,60 +1,51 @@
 
 
-# Diagnóstico: calculateCosts timeout silencioso em 4398 pedidos
+## Plano: Corrigir apagamento de dados de frete e destravar cálculo de custos
 
-## Causa Raiz Confirmada
+### Problema identificado
 
-Dados no banco:
-- `meli_orders_cache`: **4.398 pedidos pagos** (2025-03-03 a 2026-03-03)
-- `order_cost_breakdown_cache`: **598 registros** (somente Jan-Mar 2026)
-- Último cálculo completado: **403 pedidos** (provavelmente período de 30d)
+Tres processos estao sobrescrevendo dados de frete validos com zeros:
 
-O `calculateCosts` com `period_days=365` tenta processar 4.398 pedidos numa única invocação:
-- 9 batches para buscar items (fetchWithBatchedIn)
-- 9 batches para buscar financials
-- 9 batches para buscar breakdowns existentes
-- **44 batch upserts** para salvar breakdowns (100 por batch)
-- **44 batch inserts** para logs
-- Mais o `updateProductAggregates`
+1. **`costs-nightly-sync` backfill** (linha 496-498): Faz `upsert` de registros com `cost_shipping: 0` para todos os pedidos, mesmo os que ja tinham frete real calculado. Esse e o culpado principal.
 
-Total: ~120+ operações sequenciais ao banco. A Edge Function atinge o timeout (~60-150s) e **morre silenciosamente** no meio dos upserts. Resultado: apenas parte dos breakdowns é salva.
+2. **`ml-sync-real-costs` handleReset** (linha 144-163): Ao resetar, zera `shipping_cost_seller`, `cost_shipping` e todos os campos financeiros indiscriminadamente.
 
-## Plano de Correção
+3. **`cost-engine` recalculo** (linha 910-921): Quando nao encontra billing e o breakdown existente ja foi zerado pelo backfill, perpetua os zeros.
 
-### 1. Auto-chaining no calculateCosts (fix principal)
-**Arquivo**: `supabase/functions/cost-engine/index.ts`
+### Correcoes
 
-Modificar `calculateCosts` para processar no máximo **500 pedidos por invocação**:
-- Aceitar parâmetro `offset` (default 0)
-- Buscar orders com `.range(offset, offset+499)` em vez de `fetchAllRows`
-- Após processar e salvar o batch, fazer self-call via `_internal/calculate-batch` com `offset + 500`
-- Quando não houver mais pedidos, chamar `updateProductAggregates`
+#### Arquivo 1: `supabase/functions/costs-nightly-sync/index.ts`
 
-Fluxo:
-```text
-calculate (offset=0)
-  → processa orders 0-499, upsert, self-call
-_internal/calculate-batch (offset=500)
-  → processa orders 500-999, upsert, self-call
-_internal/calculate-batch (offset=1000)
-  ...continua até acabar...
-_internal/calculate-batch (offset=4000)
-  → processa orders 4000-4397, upsert, updateAggregates, FIM
+**Mudanca**: Na funcao `processBackfill` (linha 496-498), trocar `upsert` por `upsert` com `ignoreDuplicates: true`. Assim o backfill so cria registros para pedidos que **nao tem** breakdown ainda, sem nunca sobrescrever dados existentes.
+
+```typescript
+// De:
+.upsert(records, { onConflict: 'seller_id,order_id' });
+// Para:
+.upsert(records, { onConflict: 'seller_id,order_id', ignoreDuplicates: true });
 ```
 
-### 2. Dados compartilhados entre batches
-O preload de packaging, tax config, e product costs são feitos **uma vez** no primeiro batch e passados via body para os batches seguintes (são poucos KB). Ou, mais simples, cada batch refaz esses preloads (são apenas 2-3 queries rápidas e leves).
+#### Arquivo 2: `supabase/functions/ml-sync-real-costs/index.ts`
 
-### 3. Endpoint _internal/calculate-batch
-Novo case no switch de `_internal/`:
-- Recebe: `seller_id, user_id, period_days, offset`
-- Autenticado via `x-internal-key` (service role)
-- Chama a mesma lógica de processamento com offset
+**Mudanca**: Na funcao `handleReset` (linha 144-163), remover o zeramento de `shipping_cost_seller` e `cost_shipping`. O reset so deve limpar campos de comissao/billing, nao frete que veio da API de envios.
 
-### Arquivos a editar
-| Arquivo | Mudança |
-|---------|---------|
-| `supabase/functions/cost-engine/index.ts` | Auto-chaining no calculateCosts com batches de 500 |
+```typescript
+// Remover estas linhas do update:
+shipping_cost_seller: 0,
+cost_shipping: 0,
+```
 
-O frontend (`Custos.tsx`) já tem polling inteligente implementado, não precisa mudar.
+#### Arquivo 3: `supabase/functions/cost-engine/index.ts`
+
+**Mudanca**: No upsert de breakdowns (linha 987-992), adicionar guarda de protecao: antes de gravar, se o novo `cost_shipping` for 0 mas o registro existente tiver valor > 0, preservar o valor existente. Isso funciona como rede de seguranca contra qualquer regressao futura.
+
+Logica: buscar breakdowns existentes do batch antes do upsert, e para cada breakdown com `cost_shipping === 0`, verificar se o existente tem valor. Se sim, usar o valor existente.
+
+### Resultado esperado
+
+- Backfill noturno nunca mais sobrescreve dados de frete
+- Reset manual nao apaga frete real
+- Cost-engine preserva frete existente quando nao tem billing novo
+- Os 1998 pedidos com "frete ausente" param de perder dados
+- Job de calculo consegue prosseguir sem encontrar dados zerados
 
