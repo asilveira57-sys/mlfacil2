@@ -775,8 +775,53 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
       itemsByOrder.get(item.order_id)!.push(itemWithKey);
     }
 
-    // Preload all packaging links for this seller
+    // Preload all packaging links for this seller (BULK - avoids N+1 queries)
     const allProductKeys = [...new Set(allItems.map((i: any) => i.product_key || `${i.item_id}:${i.variation_id || ''}`))];
+
+    // Bulk preload packaging: 2 queries total instead of N queries
+    let packagingLinksByProduct = new Map<string, string>(); // product_key -> packaging_id
+    let packagingTypesMap = new Map<string, any>(); // packaging_id -> { name, cost_value }
+    if (companyId && allProductKeys.length > 0) {
+      const allLinks = await fetchWithBatchedIn(
+        supabase, 'product_packaging_link', 'product_key, packaging_id',
+        'product_key', allProductKeys,
+        [{ column: 'seller_id', value: sellerId }, { column: 'company_id', value: companyId }]
+      );
+      const seenKeys = new Set<string>();
+      for (const link of allLinks) {
+        if (!seenKeys.has(link.product_key)) {
+          seenKeys.add(link.product_key);
+          packagingLinksByProduct.set(link.product_key, link.packaging_id);
+        }
+      }
+      const uniquePkgIds = [...new Set(allLinks.map((l: any) => l.packaging_id))];
+      if (uniquePkgIds.length > 0) {
+        const pkgRows = await fetchWithBatchedIn(
+          supabase, 'packaging_types', 'id, name, cost_value, is_active',
+          'id', uniquePkgIds
+        );
+        for (const p of pkgRows) {
+          if (p.is_active) packagingTypesMap.set(p.id, p);
+        }
+      }
+      console.log(`[cost-engine] Preloaded ${allLinks.length} packaging links, ${packagingTypesMap.size} active packaging types`);
+    }
+
+    // Helper: get packaging from preloaded maps (0 queries)
+    function getPackagingFromCache(productKeys: string[]): { total: number; detail: any[] } {
+      let total = 0;
+      const detail: any[] = [];
+      for (const pk of productKeys) {
+        const pkgId = packagingLinksByProduct.get(pk);
+        if (!pkgId) continue;
+        const pkg = packagingTypesMap.get(pkgId);
+        if (pkg) {
+          total += Number(pkg.cost_value) || 0;
+          detail.push({ product_key: pk, packaging_name: pkg.name, cost: Number(pkg.cost_value) || 0 });
+        }
+      }
+      return { total, detail };
+    }
 
     // Preload existing breakdowns to use as fallback when financials cache is empty
     const existingBreakdowns = await fetchWithBatchedIn(
@@ -806,9 +851,9 @@ async function calculateCosts(supabase: any, userId: string, sellerId: string, p
 
       const baseRevenue = Number(order.total_amount) || 0;
 
-      // Packaging V2
+      // Packaging V2 (from preloaded cache - 0 queries)
       const packaging = companyId
-        ? await getPackagingForOrder(supabase, sellerId, companyId, orderProductKeys)
+        ? getPackagingFromCache(orderProductKeys)
         : { total: 0, detail: [] };
 
       // Billing data with fallback to existing breakdown (ml-sync-real-costs values)

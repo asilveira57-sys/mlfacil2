@@ -86,11 +86,29 @@ export default function Custos() {
       );
 
       if (response.ok) {
-        toast.success('Cálculo iniciado em background');
-        setTimeout(() => {
+        toast.success('Cálculo iniciado em background. Atualizando automaticamente...');
+        // Intelligent polling: check every 3s until order_count changes or 60s elapsed
+        const initialCount = summary?.order_count ?? -1;
+        let elapsed = 0;
+        const pollInterval = setInterval(() => {
+          elapsed += 3000;
           refreshSummary();
-          setIsCalculating(false);
-        }, 5000);
+          if (elapsed >= 60000) {
+            clearInterval(pollInterval);
+            setIsCalculating(false);
+            toast.info('Recálculo pode ainda estar processando. O dashboard será atualizado automaticamente.');
+          }
+        }, 3000);
+        // Also watch for summary changes to stop early
+        const checkDone = setInterval(() => {
+          if (summary && summary.order_count !== initialCount && initialCount !== -1) {
+            clearInterval(pollInterval);
+            clearInterval(checkDone);
+            setIsCalculating(false);
+            toast.success('Recálculo concluído!');
+          }
+          if (!isCalculating) clearInterval(checkDone);
+        }, 3500);
       }
     } catch (error) {
       toast.error('Erro ao iniciar cálculo');
