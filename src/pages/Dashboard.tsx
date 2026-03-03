@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
@@ -7,6 +7,7 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import { SalesDashboard } from "@/components/SalesDashboard";
 import { DashboardModulesGrid } from "@/components/dashboard/DashboardModulesGrid";
 import { DashboardOnboarding } from "@/components/dashboard/DashboardOnboarding";
+import { DashboardReconnectingState } from "@/components/dashboard/DashboardReconnectingState";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { useToast } from "@/hooks/use-toast";
 import { useModuleFeedbackIntegration } from "@/hooks/useModuleFeedbackIntegration";
@@ -18,8 +19,9 @@ const Dashboard = () => {
   const { toast } = useToast();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [reconnected, setReconnected] = useState(false);
 
-  const { activeAccount, sellerId, loading: accountLoading, initialized, refreshAccounts } = useActiveAccount();
+  const { activeAccount, sellerId, loading: accountLoading, initialized, accounts, refreshAccounts } = useActiveAccount();
   const feedback = useModuleFeedbackIntegration('dashboard-analises');
 
   useEffect(() => {
@@ -53,11 +55,7 @@ const Dashboard = () => {
       let { data: { session } } = await supabase.auth.getSession();
       
       if (!session) {
-        toast({
-          title: "Sessão expirada",
-          description: "Faça login novamente para continuar",
-          variant: "destructive",
-        });
+        toast({ title: "Sessão expirada", description: "Faça login novamente", variant: "destructive" });
         navigate("/auth");
         return;
       }
@@ -69,17 +67,11 @@ const Dashboard = () => {
 
       if (response.error?.message?.includes('401') || response.error?.status === 401) {
         const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-        
         if (refreshError || !refreshData.session) {
-          toast({
-            title: "Sessão expirada",
-            description: "Faça login novamente para continuar",
-            variant: "destructive",
-          });
+          toast({ title: "Sessão expirada", description: "Faça login novamente", variant: "destructive" });
           navigate("/auth");
           return;
         }
-        
         session = refreshData.session;
         response = await supabase.functions.invoke('ml-auth-url', {
           body: { frontendOrigin: window.location.origin },
@@ -87,10 +79,7 @@ const Dashboard = () => {
         });
       }
 
-      if (response.error) {
-        throw response.error;
-      }
-
+      if (response.error) throw response.error;
       if (response.data?.authUrl) {
         window.location.href = response.data.authUrl;
       } else {
@@ -98,14 +87,17 @@ const Dashboard = () => {
       }
     } catch (error: any) {
       console.error('Erro ao conectar com ML:', error);
-      const errorMsg = error?.message || "Não foi possível iniciar a conexão com o Mercado Livre";
       toast({
         title: "Erro ao conectar",
-        description: errorMsg,
+        description: error?.message || "Não foi possível iniciar a conexão",
         variant: "destructive",
       });
     }
   };
+
+  const handleReconnected = useCallback(() => {
+    setReconnected(true);
+  }, []);
 
   if (loading || accountLoading || !initialized) {
     return (
@@ -115,21 +107,30 @@ const Dashboard = () => {
     );
   }
 
+  // Determine dashboard state
+  const hasAnyAccount = accounts.length > 0;
+  const needsReconnect = activeAccount && (activeAccount.status === 'attention' || activeAccount.status === 'disconnected') && !reconnected;
+
   return (
     <PageContainer 
       title={t('dashboard:title')} 
       subtitle={t('dashboard:subtitle')}
     >
       <div className="p-4 lg:p-6 space-y-6">
-        {activeAccount ? (
+        {!hasAnyAccount ? (
+          // No accounts at all → first-time onboarding
+          <DashboardOnboarding onConnectML={handleConnectML} />
+        ) : needsReconnect ? (
+          // Has account but token expired → reconnecting state
+          <DashboardReconnectingState 
+            accountId={activeAccount.id} 
+            onReconnected={handleReconnected}
+          />
+        ) : (
+          // Connected and ready
           <>
-            {/* Sales Dashboard - Analytics */}
             <SalesDashboard />
-
-            {/* Modules Grid */}
             <DashboardModulesGrid />
-
-            {/* Feedback Prompt */}
             {feedback.ready && (
               <FeedbackPromptCard
                 kind="module"
@@ -140,8 +141,6 @@ const Dashboard = () => {
               />
             )}
           </>
-        ) : (
-          <DashboardOnboarding onConnectML={handleConnectML} />
         )}
       </div>
     </PageContainer>
