@@ -920,6 +920,15 @@ async function calculateCostsBatch(
         revenueShipping = Number(existing.receita_envio) || 0;
       }
 
+      // Safety guard: never overwrite non-zero shipping with zero
+      if (costShipping === 0 && existing) {
+        const existingShipping = Number(existing.shipping_cost_seller) || Number(existing.cost_shipping) || 0;
+        if (existingShipping > 0) {
+          costShipping = existingShipping;
+          console.log(`[cost-engine] Preserved existing shipping ${existingShipping} for order ${order.order_id}`);
+        }
+      }
+
       let taxPercentTotal = 0;
       let taxValue = 0;
       let difalApplied = false;
