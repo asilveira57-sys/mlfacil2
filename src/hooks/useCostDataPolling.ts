@@ -25,7 +25,6 @@ export interface CostSummaryData {
   total_cost_other?: number;
   total_receita_produtos?: number;
   total_receita_envio?: number;
-  // Coverage metrics (from V2 RPC)
   orders_imported?: number;
   orders_calculated?: number;
   coverage_percent?: number;
@@ -59,22 +58,45 @@ export function useCostDataPolling({
 
     try {
       setLoading(true);
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
+      
+      // Calculate date range
+      const computedDateTo = dateTo || new Date().toISOString();
+      const computedDateFrom = dateFrom || new Date(Date.now() - periodDays * 86400000).toISOString();
 
-      const queryParams = new URLSearchParams({ seller_id: sellerId, period_days: String(periodDays) });
-      if (dateFrom) queryParams.set('date_from', dateFrom);
-      if (dateTo) queryParams.set('date_to', dateTo);
+      // Call the RPC directly instead of going through the edge function
+      const { data: summaryData, error } = await supabase.rpc('get_cost_summary_v2', {
+        p_seller_id: sellerId,
+        p_date_from: computedDateFrom,
+        p_date_to: computedDateTo,
+      });
 
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/summary?${queryParams}`,
-        { headers: { Authorization: `Bearer ${session.access_token}` } }
-      );
+      if (error) {
+        console.error("[CostDataPolling] RPC error:", error);
+        return;
+      }
 
-      if (response.ok) {
-        const data = await response.json();
-        // API returns { summary: { ... } }, extract the nested summary
-        const newSummary = data.summary || null;
+      if (summaryData) {
+        const s = (Array.isArray(summaryData) ? summaryData[0] : summaryData) as Record<string, any>;
+        const newSummary: CostSummaryData = {
+          total_revenue: s?.total_sold || 0,
+          total_cost: s?.total_cost_total || 0,
+          total_profit: s?.profit_operation || 0,
+          avg_margin: s?.margin_avg || 0,
+          order_count: s?.orders_imported || 0,
+          incomplete_percent: 0,
+          cancelled_count: 0,
+          cancelled_vgv: 0,
+          total_cost_product: s?.total_cost_product || 0,
+          total_cost_shipping: s?.total_cost_shipping || 0,
+          total_cost_marketplace: s?.total_cost_marketplace || 0,
+          total_tax: s?.total_cost_tax || 0,
+          total_packaging: s?.total_cost_packaging || 0,
+          orders_imported: s?.orders_imported || 0,
+          orders_calculated: s?.orders_calculated || 0,
+          coverage_percent: s?.orders_imported > 0
+            ? Math.round((s?.orders_calculated / s?.orders_imported) * 100)
+            : 0,
+        };
         setSummary(newSummary);
         setLastUpdate(new Date());
         onSummaryUpdate?.(newSummary);
@@ -90,8 +112,6 @@ export function useCostDataPolling({
   useEffect(() => {
     const handleVisibilityChange = () => {
       isVisibleRef.current = document.visibilityState === "visible";
-      
-      // Fetch immediately when tab becomes visible
       if (isVisibleRef.current && sellerId && enabled) {
         fetchSummary();
       }
@@ -113,10 +133,8 @@ export function useCostDataPolling({
       return;
     }
 
-    // Initial fetch
     fetchSummary();
 
-    // Set up polling
     intervalRef.current = setInterval(() => {
       if (isVisibleRef.current) {
         fetchSummary();

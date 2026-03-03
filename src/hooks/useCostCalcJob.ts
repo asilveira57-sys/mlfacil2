@@ -26,16 +26,15 @@ export function useCostCalcJob({ sellerId, onComplete }: UseCalcJobOptions) {
 
   const pollJob = useCallback(async (jobId: string) => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
+      // Query the cost_calc_jobs table directly instead of calling edge function
+      const { data, error } = await supabase
+        .from('cost_calc_jobs')
+        .select('*')
+        .eq('id', jobId)
+        .maybeSingle();
 
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/calc-job-status?job_id=${jobId}`,
-        { headers: { Authorization: `Bearer ${session.access_token}` } }
-      );
-      if (!res.ok) return;
-      const data = await res.json();
-      setJob(data);
+      if (error || !data) return;
+      setJob(data as unknown as CalcJob);
 
       if (data.status === 'done' || data.status === 'error' || data.status === 'cancelled') {
         if (pollRef.current) clearInterval(pollRef.current);
@@ -50,7 +49,7 @@ export function useCostCalcJob({ sellerId, onComplete }: UseCalcJobOptions) {
   const startPolling = useCallback((jobId: string) => {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(() => pollJob(jobId), 3000);
-    pollJob(jobId); // immediate first poll
+    pollJob(jobId);
   }, [pollJob]);
 
   // Check for active job on mount
@@ -58,16 +57,18 @@ export function useCostCalcJob({ sellerId, onComplete }: UseCalcJobOptions) {
     if (!sellerId) return;
     const checkActive = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) return;
-        const res = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/calc-job-status?seller_id=${sellerId}`,
-          { headers: { Authorization: `Bearer ${session.access_token}` } }
-        );
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data?.id && (data.status === 'queued' || data.status === 'running')) {
-          setJob(data);
+        const { data, error } = await supabase
+          .from('cost_calc_jobs')
+          .select('*')
+          .eq('seller_id', sellerId)
+          .in('status', ['queued', 'running'])
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (error || !data) return;
+        if (data.status === 'queued' || data.status === 'running') {
+          setJob(data as unknown as CalcJob);
           startPolling(data.id);
         }
       } catch { /* ignore */ }
@@ -83,30 +84,28 @@ export function useCostCalcJob({ sellerId, onComplete }: UseCalcJobOptions) {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/recalculate`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            seller_id: sellerId,
-            period_days: periodDays,
-            date_from: dateFrom,
-            date_to: dateTo,
-          }),
-        }
-      );
+      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'rfckrbqwdsejicjlxqdv';
+      const baseUrl = `https://${projectId}.supabase.co`;
+
+      const res = await fetch(`${baseUrl}/functions/v1/cost-engine/recalculate`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          seller_id: sellerId,
+          period_days: periodDays,
+          date_from: dateFrom,
+          date_to: dateTo,
+        }),
+      });
 
       if (res.ok) {
         const data = await res.json();
-        if (data.job_id) {
-          setJob({ ...data, id: data.job_id, processed_orders: 0 });
+        if (data?.job_id) {
+          setJob({ ...data, id: data.job_id, processed_orders: 0 } as CalcJob);
           startPolling(data.job_id);
-        } else {
-          setJob(null);
         }
         return data;
       }
