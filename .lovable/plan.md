@@ -1,77 +1,66 @@
 
 
-# Diagnóstico e Plano: Importação Histórica de 1 Ano pós-Pagamento
+# Diagnóstico: Recalcular falha silenciosamente + Filtros exibem dados iguais
 
-## Diagnóstico
+## Causa Raiz Confirmada
 
-A conta Adeconex SP (`1411095727`) só possui ~50 dias de dados porque:
+Verificação no banco de dados:
+- `meli_orders_cache`: **4.397 pedidos pagos** desde 03/03/2025 (importação histórica funcionou)
+- `order_cost_breakdown_cache`: **apenas 597 registros** desde 12/01/2026 (nunca recalculou o período completo)
 
-1. **Bootstrap**: No OAuth, o sistema importa apenas 30 dias (`bootstrap_30d` em `ml-oauth-callback`)
-2. **Nightly sync**: O `orders-nightly-sync` sincroniza apenas os últimos 30 dias (`SYNC_DAYS = 30`)
-3. **Pós-pagamento**: O webhook `mercadopago-webhook` cria/atualiza a subscription mas **não dispara nenhuma importação histórica de 1 ano**
-4. **Botões manuais**: Os botões "Últimos 12 Meses" e "Histórico Completo" na aba Sincronização sincronizam apenas **billing details** (taxas/comissões), não os **pedidos** em si
+O "Recalcular" **parece funcionar** (retorna 200, toast aparece), mas a função `calculateCosts` **falha silenciosamente** quando processa muitos pedidos porque:
 
-Ou seja: **não existe nenhum mecanismo para importar pedidos de 1 ano**. Billing sem pedidos é inútil — o dashboard precisa dos pedidos na `meli_orders_cache` para calcular custos.
+1. **N+1 queries de embalagem**: A função `getPackagingForOrder()` é chamada **individualmente para cada pedido** dentro do loop (linha 810-812). Para 4.000+ pedidos, são 4.000+ queries ao banco, causando timeout da Edge Function (~60s).
 
-## Plano de Implementação
+2. **Código morto**: Na linha 779, a variável `allProductKeys` é calculada corretamente para preload, mas **nunca é usada** -- o preload de embalagem nunca foi implementado.
 
-### 1. Nova Edge Function: `orders-historical-import`
-Importação de pedidos de até 365 dias, com:
-- Processamento em lotes de 50 pedidos por chamada
-- Auto-encadeamento (chama a si mesma via `/continue`) para sobreviver ao timeout de 60s
-- Rate limit: delay de 500ms entre requests, 2s entre páginas
-- Estado persistido em `sync_jobs` (job_type: `historical_365d`)
-- Parâmetros: `seller_id`, `days_back` (default 365)
-- Reutiliza a mesma lógica de upsert do `orders-nightly-sync` (orders + items + item details)
+3. **Timer fixo de 5 segundos**: O frontend espera apenas 5s antes de atualizar o dashboard. Para 4.000 pedidos, o cálculo leva minutos (quando não dá timeout).
 
-### 2. Trigger pós-pagamento no Webhook
-No `mercadopago-webhook`, após aprovação do pagamento (linha ~158):
-- Criar um job `historical_365d` na tabela `sync_jobs`
-- **Não executar imediatamente** — marcar `scheduled_for` como próxima janela noturna (02:00 BRT)
-- Para execução imediata (admin/teste), permitir invocação manual
+4. **30d = 60d = 365d**: Como o breakdown cache só tem 597 registros (últimos ~50 dias), qualquer filtro acima de 50 dias retorna os mesmos dados.
 
-### 3. Nightly Sync expandido
-Alterar `orders-nightly-sync` para:
-- Antes de processar o ciclo normal de 30 dias, verificar se existem jobs `historical_365d` pendentes na `sync_jobs`
-- Se existir, processar o historical import primeiro (com limite de tempo de ~4 minutos por conta)
-- Se não completar, auto-encadear para a próxima execução
+## Plano de Correção
 
-### 4. Botão manual na UI (CostSettings)
-Adicionar na aba Sincronização:
-- Botão "Importar Pedidos (1 ano)" que invoca `orders-historical-import` diretamente
-- Progress bar mostrando % de pedidos importados (via polling de `sync_jobs`)
-- Este botão será usado agora para forçar a importação da Adeconex SP
+### 1. Otimizar `calculateCosts` -- Preload de embalagem em bulk (critical fix)
+**Arquivo**: `supabase/functions/cost-engine/index.ts`
 
-### 5. Billing após pedidos
-Após conclusão do import de pedidos, o sistema deve automaticamente disparar:
-- `ml-sync-billing-details` (scope: history)
-- `ml-sync-real-costs` (action: backfill_missing)
+Usar a variável `allProductKeys` (já computada na linha 779) para fazer UMA ÚNICA query de packaging links + packaging_types. Substituir as chamadas individuais `getPackagingForOrder()` dentro do loop por lookup no Map pré-carregado.
 
-Isso garante que custos e taxas sejam preenchidos para todos os pedidos importados.
-
-### Arquivos a criar/editar
-
-| Arquivo | Ação |
-|---------|------|
-| `supabase/functions/orders-historical-import/index.ts` | **Criar** — nova edge function |
-| `supabase/functions/mercadopago-webhook/index.ts` | **Editar** — trigger pós-pagamento |
-| `supabase/functions/orders-nightly-sync/index.ts` | **Editar** — processar jobs pendentes |
-| `src/components/custos/CostSettings.tsx` | **Editar** — botão + progress de importação |
-
-### Fluxo resumido
-
-```text
-Seller conecta conta
-  └─> Bootstrap 30d (já existe)
-
-Seller paga plano
-  └─> Webhook cria job historical_365d (scheduled_for: 02:00 BRT)
-  └─> Nightly sync processa o job durante a madrugada
-      └─> Importa pedidos de 365 dias em lotes
-      └─> Ao concluir, dispara billing + real costs sync
-
-Admin precisa forçar agora
-  └─> Botão "Importar Pedidos (1 ano)" na aba Sincronização
-      └─> Executa orders-historical-import imediatamente
+Antes (pseudocódigo):
 ```
+for each order:
+  packaging = await getPackagingForOrder(...)  // 1 query per order!
+```
+
+Depois:
+```
+// Preload ALL packaging links for ALL product keys (1 query)
+const allLinks = fetchWithBatchedIn(product_packaging_link, allProductKeys)
+const allPkgTypes = fetch packaging_types for unique IDs (1 query)
+const packagingMap = buildMap(allLinks, allPkgTypes)
+
+for each order:
+  packaging = lookupFromMap(packagingMap, orderProductKeys)  // 0 queries
+```
+
+### 2. Implementar auto-chaining para cálculos grandes
+**Arquivo**: `supabase/functions/cost-engine/index.ts`
+
+Para períodos com mais de 1.000 pedidos, processar em lotes de 500 e auto-encadear via `_internal/calculate-continue`, usando a mesma estratégia do `orders-historical-import`. Persistir progresso em campo da resposta.
+
+### 3. Melhorar feedback no frontend
+**Arquivo**: `src/pages/Custos.tsx`
+
+Substituir o `setTimeout(5000)` por polling inteligente: verificar o summary a cada 3 segundos até que `order_count` mude ou 60 segundos se passem. Mostrar indicador de progresso real.
+
+### 4. Corrigir cálculo duplicado de shipping no RPC
+**Arquivo**: Migration SQL para `get_cost_summary`
+
+A linha 23 do RPC soma `cost_shipping + shipping_cost_seller` -- esses campos frequentemente contêm o mesmo valor (fallback um do outro), causando **duplicação do custo de frete** no dashboard.
+
+### Arquivos a editar
+| Arquivo | Mudança |
+|---------|---------|
+| `supabase/functions/cost-engine/index.ts` | Preload bulk de packaging + auto-chaining para cálculos grandes |
+| `src/pages/Custos.tsx` | Polling inteligente ao invés de timer fixo de 5s |
+| Migration SQL | Corrigir soma duplicada de frete no `get_cost_summary` |
 
