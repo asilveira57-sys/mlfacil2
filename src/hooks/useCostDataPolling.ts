@@ -78,24 +78,25 @@ export function useCostDataPolling({
       if (summaryData) {
         const s = (Array.isArray(summaryData) ? summaryData[0] : summaryData) as Record<string, any>;
         const newSummary: CostSummaryData = {
-          total_revenue: s?.total_sold || 0,
-          total_cost: s?.total_cost_total || 0,
-          total_profit: s?.profit_operation || 0,
-          avg_margin: s?.margin_avg || 0,
+          total_revenue: s?.total_revenue || 0,
+          total_cost: s?.total_cost || 0,
+          total_profit: s?.total_profit || 0,
+          avg_margin: s?.avg_margin || 0,
           order_count: s?.orders_imported || 0,
-          incomplete_percent: 0,
-          cancelled_count: 0,
-          cancelled_vgv: 0,
+          incomplete_percent: s?.incomplete_percent || 0,
+          cancelled_count: s?.cancelled_count || 0,
+          cancelled_vgv: s?.cancelled_vgv || 0,
+          missing_cost_count: s?.missing_cost_count || 0,
           total_cost_product: s?.total_cost_product || 0,
           total_cost_shipping: s?.total_cost_shipping || 0,
           total_cost_marketplace: s?.total_cost_marketplace || 0,
           total_tax: s?.total_cost_tax || 0,
           total_packaging: s?.total_cost_packaging || 0,
+          total_installments: s?.total_installments || 0,
+          total_cost_other: s?.total_cost_other || 0,
           orders_imported: s?.orders_imported || 0,
           orders_calculated: s?.orders_calculated || 0,
-          coverage_percent: s?.orders_imported > 0
-            ? Math.round((s?.orders_calculated / s?.orders_imported) * 100)
-            : 0,
+          coverage_percent: s?.coverage_percent || 0,
         };
         setSummary(newSummary);
         setLastUpdate(new Date());
