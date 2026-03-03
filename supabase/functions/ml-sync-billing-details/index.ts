@@ -1,7 +1,7 @@
 // @ts-nocheck - Deno types not available in build context
 // Force clean redeploy v4 - fix Deno.core.runMicrotasks error
 import { createClient } from "npm:@supabase/supabase-js@2";
-
+import { assertMlApiAccess } from "../_shared/ml-api-gate.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -54,7 +54,6 @@ Deno.serve(async (req) => {
     }
 
     // ML API Access Gate
-    const { assertMlApiAccess } = await import("../_shared/ml-api-gate.ts");
     const gate = await assertMlApiAccess(supabase, user.id);
     if (!gate.allowed) {
       console.log(`[ml-sync-billing-details] Access denied: ${gate.reason}`);
