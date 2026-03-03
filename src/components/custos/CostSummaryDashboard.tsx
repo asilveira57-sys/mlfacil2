@@ -157,12 +157,27 @@ export function CostSummaryDashboard({
         </div>
       </div>
 
-      {/* Section 3: Secondary Indicators */}
+      {/* Section 3: Coverage + Secondary Indicators */}
       <div>
         <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wide">
           Indicadores
         </h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+          {/* Coverage Card */}
+          {(s.orders_imported != null && s.orders_imported > 0) && (
+            <SecondaryCard
+              label="Cobertura do Cálculo"
+              value={`${s.coverage_percent?.toFixed(0) || 0}%`}
+              subtitle={`${s.orders_calculated || 0} de ${s.orders_imported} pedidos`}
+              className={
+                (s.coverage_percent || 0) >= 95
+                  ? 'bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800'
+                  : 'border-warning/30 bg-warning/5'
+              }
+              valueColor={(s.coverage_percent || 0) >= 95 ? 'text-green-600' : 'text-warning'}
+              icon={(s.coverage_percent || 0) < 95 ? <AlertTriangle className="h-4 w-4 text-warning" /> : undefined}
+            />
+          )}
           <SecondaryCard
             label="Classe A"
             value={`${(s.abc_a_percent || 0).toFixed(0)}%`}

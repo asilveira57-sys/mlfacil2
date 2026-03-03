@@ -52,6 +52,7 @@ interface OrderCost {
   tax_value?: number;
   tax_percent_total?: number;
   difal_applied?: boolean;
+  has_breakdown?: boolean;
 }
 
 interface OrderDetail {
@@ -967,7 +968,11 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                             </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-1 flex-wrap">
-                              {order.status === 'ok' ? (
+                              {order.status === 'pending_calc' || !order.has_breakdown ? (
+                                <Badge variant="outline" className="text-amber-600 border-amber-400 bg-amber-50">
+                                  Pendente
+                                </Badge>
+                              ) : order.status === 'ok' ? (
                                 <Badge variant="outline" className="text-green-600 border-green-600">OK</Badge>
                               ) : (
                                 <Badge variant="outline" className="flex items-center gap-1 w-fit text-orange-600 border-orange-300">
