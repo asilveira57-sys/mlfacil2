@@ -103,6 +103,9 @@ export default function Custos() {
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Progress value={progress} className="w-32 h-2" />
           <span>{job.processed_orders}/{job.total_orders || '?'}</span>
+          <span className="text-xs opacity-70">
+            {dateRange.from.toLocaleDateString('pt-BR')} — {dateRange.to.toLocaleDateString('pt-BR')}
+          </span>
         </div>
       )}
       {job?.status === 'error' && (
