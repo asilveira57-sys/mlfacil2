@@ -444,6 +444,25 @@ Deno.serve(async (req) => {
           console.error("[historical-import] Failed to trigger billing sync:", err);
         }
 
+        // Trigger cost-engine/calculate to populate order_cost_breakdown_cache
+        try {
+          await fetch(`${SUPABASE_URL}/functions/v1/cost-engine/_internal/calculate`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-internal-key": SUPABASE_SERVICE_ROLE_KEY,
+            },
+            body: JSON.stringify({
+              user_id: account.user_id,
+              seller_id: job.seller_id,
+              period_days: job.days_back || 365,
+            }),
+          });
+          console.log(`[historical-import] Triggered cost-engine/calculate for ${job.seller_id} with period_days=${job.days_back || 365}`);
+        } catch (err) {
+          console.error("[historical-import] Failed to trigger cost-engine/calculate:", err);
+        }
+
         return new Response(JSON.stringify({
           ok: true,
           status: "done",
