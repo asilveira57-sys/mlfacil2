@@ -42,20 +42,49 @@ function withFallbackFamilyName(payload: Record<string, unknown>): Record<string
 function normalizeTitleForMl(title: string): string {
   // Remove accents (NFD decompose + strip combining marks)
   let t = title.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  // Remove special characters not accepted by ML (keep letters, digits, basic punctuation, spaces)
-  t = t.replace(/[^a-zA-Z0-9 ,.\-\/()&+!:]/g, '');
-  // Collapse multiple spaces
+  // Remove special characters not accepted by ML
+  // Keep: letters, digits, spaces, and basic punctuation: , . - / ( ) & + ! : # % @ ' "
+  t = t.replace(/[^a-zA-Z0-9 ,.\-\/()&+!:#%@'"]/g, '');
+  // Collapse multiple spaces and trim
   t = t.trim().replace(/\s{2,}/g, ' ');
-  // Limit to 60 chars
-  return t.substring(0, 60);
+  // Limit to 60 chars, avoid cutting mid-word
+  if (t.length > 60) {
+    t = t.substring(0, 60);
+    const lastSpace = t.lastIndexOf(' ');
+    if (lastSpace > 40) t = t.substring(0, lastSpace);
+  }
+  return t.trim();
+}
+
+function buildFallbackTitle(payload: Record<string, unknown>): string {
+  // Try family_name first
+  const fn = payload.family_name as string | undefined;
+  if (fn && typeof fn === 'string' && fn.trim()) {
+    const normalized = normalizeTitleForMl(fn.trim());
+    if (normalized) return normalized;
+  }
+  // Fallback to "Produto <category_id>"
+  const catId = payload.category_id as string | undefined;
+  if (catId && typeof catId === 'string' && catId.trim()) {
+    return `Produto ${catId.trim()}`.substring(0, 60);
+  }
+  // Final fallback
+  return 'Produto Mercado Livre';
 }
 
 function sanitizePayloadTitle(payload: Record<string, unknown>): Record<string, unknown> {
   const title = payload.title as string | undefined;
-  if (!title || typeof title !== 'string') return payload;
+  if (!title || typeof title !== 'string' || !title.trim()) {
+    // No title at all — use fallback
+    payload.title = buildFallbackTitle(payload);
+    return payload;
+  }
   const sanitized = normalizeTitleForMl(title);
-  if (sanitized && sanitized !== title) {
+  if (sanitized) {
     payload.title = sanitized;
+  } else {
+    // Normalization emptied the title — use fallback
+    payload.title = buildFallbackTitle(payload);
   }
   return payload;
 }
@@ -90,11 +119,11 @@ async function createMlItemWithRetry(
   });
   const data1 = await res1.json();
 
-  if (!res1.ok && hasTitleInvalidFieldError(data1) && payload.title) {
-    // Retry with aggressively normalized title
-    const normalized = normalizeTitleForMl(payload.title as string);
-    if (normalized && normalized !== payload.title) {
-      const retryPayload = { ...payload, title: normalized };
+  if (!res1.ok && hasTitleInvalidFieldError(data1)) {
+    // Retry with fallback title
+    const fallbackTitle = buildFallbackTitle(payload);
+    if (fallbackTitle && fallbackTitle !== payload.title) {
+      const retryPayload = { ...payload, title: fallbackTitle };
       const res2 = await fetchWithRetry('https://api.mercadolibre.com/items', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
