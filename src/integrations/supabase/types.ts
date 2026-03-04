@@ -4057,6 +4057,330 @@ export type Database = {
           },
         ]
       }
+      email_categories: {
+        Row: {
+          can_user_opt_out: boolean
+          created_at: string
+          default_opt_in: boolean
+          description: string | null
+          id: string
+          key: string
+          name: string
+        }
+        Insert: {
+          can_user_opt_out?: boolean
+          created_at?: string
+          default_opt_in?: boolean
+          description?: string | null
+          id?: string
+          key: string
+          name: string
+        }
+        Update: {
+          can_user_opt_out?: boolean
+          created_at?: string
+          default_opt_in?: boolean
+          description?: string | null
+          id?: string
+          key?: string
+          name?: string
+        }
+        Relationships: []
+      }
+      email_logs: {
+        Row: {
+          action: Database["public"]["Enums"]["email_log_action"]
+          campaign_id: string | null
+          company_id: string | null
+          created_at: string
+          details_json: Json | null
+          email: string | null
+          event_key: string | null
+          id: string
+          message: string | null
+          queue_id: string | null
+          schedule_key: string | null
+          source_id: string | null
+          source_type: Database["public"]["Enums"]["email_source_type"] | null
+          template_id: string | null
+          user_id: string | null
+        }
+        Insert: {
+          action: Database["public"]["Enums"]["email_log_action"]
+          campaign_id?: string | null
+          company_id?: string | null
+          created_at?: string
+          details_json?: Json | null
+          email?: string | null
+          event_key?: string | null
+          id?: string
+          message?: string | null
+          queue_id?: string | null
+          schedule_key?: string | null
+          source_id?: string | null
+          source_type?: Database["public"]["Enums"]["email_source_type"] | null
+          template_id?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          action?: Database["public"]["Enums"]["email_log_action"]
+          campaign_id?: string | null
+          company_id?: string | null
+          created_at?: string
+          details_json?: Json | null
+          email?: string | null
+          event_key?: string | null
+          id?: string
+          message?: string | null
+          queue_id?: string | null
+          schedule_key?: string | null
+          source_id?: string | null
+          source_type?: Database["public"]["Enums"]["email_source_type"] | null
+          template_id?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      email_provider_settings: {
+        Row: {
+          api_key_encrypted: string | null
+          created_at: string
+          domain_verified: boolean
+          from_email: string
+          from_name: string
+          id: string
+          is_enabled: boolean
+          last_test_at: string | null
+          last_test_error: string | null
+          last_test_status:
+            | Database["public"]["Enums"]["email_test_status"]
+            | null
+          provider_type: Database["public"]["Enums"]["email_provider_type"]
+          reply_to_email: string | null
+          smtp_host: string | null
+          smtp_password_encrypted: string | null
+          smtp_port: number | null
+          smtp_username: string | null
+          updated_at: string
+        }
+        Insert: {
+          api_key_encrypted?: string | null
+          created_at?: string
+          domain_verified?: boolean
+          from_email?: string
+          from_name?: string
+          id?: string
+          is_enabled?: boolean
+          last_test_at?: string | null
+          last_test_error?: string | null
+          last_test_status?:
+            | Database["public"]["Enums"]["email_test_status"]
+            | null
+          provider_type?: Database["public"]["Enums"]["email_provider_type"]
+          reply_to_email?: string | null
+          smtp_host?: string | null
+          smtp_password_encrypted?: string | null
+          smtp_port?: number | null
+          smtp_username?: string | null
+          updated_at?: string
+        }
+        Update: {
+          api_key_encrypted?: string | null
+          created_at?: string
+          domain_verified?: boolean
+          from_email?: string
+          from_name?: string
+          id?: string
+          is_enabled?: boolean
+          last_test_at?: string | null
+          last_test_error?: string | null
+          last_test_status?:
+            | Database["public"]["Enums"]["email_test_status"]
+            | null
+          provider_type?: Database["public"]["Enums"]["email_provider_type"]
+          reply_to_email?: string | null
+          smtp_host?: string | null
+          smtp_password_encrypted?: string | null
+          smtp_port?: number | null
+          smtp_username?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      email_queue: {
+        Row: {
+          attempt_count: number
+          body_html_resolved: string
+          body_text_resolved: string
+          company_id: string | null
+          created_at: string
+          error: string | null
+          id: string
+          max_attempts: number
+          next_retry_at: string | null
+          priority: number
+          provider_message_id: string | null
+          sent_at: string | null
+          source_id: string | null
+          source_type: Database["public"]["Enums"]["email_source_type"]
+          status: Database["public"]["Enums"]["email_queue_status"]
+          subject_resolved: string
+          template_id: string | null
+          to_email: string
+          updated_at: string
+          user_id: string | null
+          variables_json: Json
+        }
+        Insert: {
+          attempt_count?: number
+          body_html_resolved?: string
+          body_text_resolved?: string
+          company_id?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          max_attempts?: number
+          next_retry_at?: string | null
+          priority?: number
+          provider_message_id?: string | null
+          sent_at?: string | null
+          source_id?: string | null
+          source_type: Database["public"]["Enums"]["email_source_type"]
+          status?: Database["public"]["Enums"]["email_queue_status"]
+          subject_resolved?: string
+          template_id?: string | null
+          to_email: string
+          updated_at?: string
+          user_id?: string | null
+          variables_json?: Json
+        }
+        Update: {
+          attempt_count?: number
+          body_html_resolved?: string
+          body_text_resolved?: string
+          company_id?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          max_attempts?: number
+          next_retry_at?: string | null
+          priority?: number
+          provider_message_id?: string | null
+          sent_at?: string | null
+          source_id?: string | null
+          source_type?: Database["public"]["Enums"]["email_source_type"]
+          status?: Database["public"]["Enums"]["email_queue_status"]
+          subject_resolved?: string
+          template_id?: string | null
+          to_email?: string
+          updated_at?: string
+          user_id?: string | null
+          variables_json?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_queue_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "email_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      email_template_versions: {
+        Row: {
+          body_html: string
+          body_text: string
+          created_at: string
+          id: string
+          subject: string
+          template_id: string
+          variables_schema_json: Json
+          version: number
+        }
+        Insert: {
+          body_html?: string
+          body_text?: string
+          created_at?: string
+          id?: string
+          subject?: string
+          template_id: string
+          variables_schema_json?: Json
+          version: number
+        }
+        Update: {
+          body_html?: string
+          body_text?: string
+          created_at?: string
+          id?: string
+          subject?: string
+          template_id?: string
+          variables_schema_json?: Json
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_template_versions_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "email_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      email_templates: {
+        Row: {
+          body_html: string
+          body_text: string
+          category_id: string
+          created_at: string
+          id: string
+          is_enabled: boolean
+          key: string
+          name: string
+          subject: string
+          updated_at: string
+          variables_schema_json: Json
+          version: number
+        }
+        Insert: {
+          body_html?: string
+          body_text?: string
+          category_id: string
+          created_at?: string
+          id?: string
+          is_enabled?: boolean
+          key: string
+          name: string
+          subject?: string
+          updated_at?: string
+          variables_schema_json?: Json
+          version?: number
+        }
+        Update: {
+          body_html?: string
+          body_text?: string
+          category_id?: string
+          created_at?: string
+          id?: string
+          is_enabled?: boolean
+          key?: string
+          name?: string
+          subject?: string
+          updated_at?: string
+          variables_schema_json?: Json
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_templates_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "email_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       erp_integrations: {
         Row: {
           api_key: string | null
@@ -15698,6 +16022,38 @@ export type Database = {
         }
         Relationships: []
       }
+      user_email_preferences: {
+        Row: {
+          category_id: string
+          id: string
+          is_opted_in: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          category_id: string
+          id?: string
+          is_opted_in?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          category_id?: string
+          id?: string
+          is_opted_in?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_email_preferences_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "email_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_feature_flags: {
         Row: {
           created_at: string
@@ -17242,6 +17598,28 @@ export type Database = {
     Enums: {
       app_role: "admin" | "seller"
       billing_cycle: "monthly" | "quarterly" | "semiannual" | "annual"
+      email_log_action:
+        | "enqueue"
+        | "dequeue"
+        | "send_attempt"
+        | "sent"
+        | "fail"
+        | "cancel"
+        | "skip_opt_out"
+        | "dedup_block"
+        | "throttle_block"
+        | "invalid_email"
+      email_provider_type:
+        | "SMTP"
+        | "RESEND"
+        | "SENDGRID"
+        | "SES"
+        | "MAILGUN"
+        | "POSTMARK"
+        | "BREVO"
+      email_queue_status: "queued" | "sending" | "sent" | "failed" | "cancelled"
+      email_source_type: "event" | "schedule" | "campaign" | "manual_test"
+      email_test_status: "ok" | "fail"
       ml_account_role: "none" | "owner" | "collaborator"
       module_layer:
         | "admin"
@@ -17454,6 +17832,30 @@ export const Constants = {
     Enums: {
       app_role: ["admin", "seller"],
       billing_cycle: ["monthly", "quarterly", "semiannual", "annual"],
+      email_log_action: [
+        "enqueue",
+        "dequeue",
+        "send_attempt",
+        "sent",
+        "fail",
+        "cancel",
+        "skip_opt_out",
+        "dedup_block",
+        "throttle_block",
+        "invalid_email",
+      ],
+      email_provider_type: [
+        "SMTP",
+        "RESEND",
+        "SENDGRID",
+        "SES",
+        "MAILGUN",
+        "POSTMARK",
+        "BREVO",
+      ],
+      email_queue_status: ["queued", "sending", "sent", "failed", "cancelled"],
+      email_source_type: ["event", "schedule", "campaign", "manual_test"],
+      email_test_status: ["ok", "fail"],
       ml_account_role: ["none", "owner", "collaborator"],
       module_layer: [
         "admin",
