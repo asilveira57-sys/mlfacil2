@@ -221,3 +221,59 @@ export function useEmailLogs() {
     },
   });
 }
+
+// Event Rule type
+export interface EmailEventRule {
+  id: string;
+  event_key: string;
+  template_id: string;
+  is_enabled: boolean;
+  scope: 'user' | 'company' | 'both';
+  cooldown_minutes: number;
+  max_per_day: number;
+  template_name?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Event Rules
+export function useEmailEventRules() {
+  const queryClient = useQueryClient();
+
+  const query = useQuery({
+    queryKey: ['admin', 'email-event-rules'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('email_event_rules')
+        .select('*, email_templates(name)')
+        .order('event_key');
+      if (error) throw error;
+      return (data || []).map((r: any) => ({
+        ...r,
+        template_name: r.email_templates?.name,
+        email_templates: undefined,
+      })) as EmailEventRule[];
+    },
+  });
+
+  const updateRule = useMutation({
+    mutationFn: async ({ id, ...updates }: Partial<EmailEventRule> & { id: string }) => {
+      const { template_name, ...cleanUpdates } = updates as any;
+      const { data, error } = await supabase
+        .from('email_event_rules')
+        .update(cleanUpdates)
+        .eq('id', id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'email-event-rules'] });
+      toast.success('Regra atualizada');
+    },
+    onError: (err) => toast.error(`Erro: ${err.message}`),
+  });
+
+  return { ...query, updateRule };
+}
