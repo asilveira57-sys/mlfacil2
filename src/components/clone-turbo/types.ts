@@ -26,6 +26,7 @@ export interface OriginPayload {
   seller_id?: string;
   thumbnail?: string;
   catalog_product_id?: string;
+  family_name?: string;
 }
 
 export interface UserPayload {
@@ -44,6 +45,7 @@ export interface UserPayload {
   package_width?: number | string;
   package_length?: number | string;
   package_weight?: number | string;
+  family_name?: string;
 }
 
 export interface CloneDraft {
@@ -135,5 +137,6 @@ export function buildMergedPayload(origin: OriginPayload, user: UserPayload) {
     package_weight,
     sku: str(user.sku) || str(origin.sku),
     gtin: str(user.gtin) || str(origin.gtin),
+    family_name: str(user.family_name) || str(origin.family_name),
   };
 }

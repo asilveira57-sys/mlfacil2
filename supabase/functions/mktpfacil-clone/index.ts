@@ -11,7 +11,7 @@ const corsHeaders = {
 // ============================================
 const FORBIDDEN_BODY_FIELDS = new Set([
   'catalog_listing', 'catalog_product_id', 'product_id',
-  'parent_item_id', 'family_name',
+  'parent_item_id',
 ]);
 
 const FORBIDDEN_ATTRIBUTES = new Set([
@@ -450,6 +450,7 @@ async function buildSnapshot(item: any, effectiveItemId: string, supabase: any, 
     thumbnail: item.thumbnail || item.secure_thumbnail || '',
     catalog_product_id: item.catalog_product_id || null,
     catalog_listing: item.catalog_listing || false,
+    family_name: item.family_name || null,
   };
 
   const logResults = { load_source_diag: true };
@@ -543,6 +544,7 @@ async function processClone(
         pictures: snapshot.pictures || [],
         attributes: (snapshot.attributes || []).filter((a: any) => isAttributeSafe(a.id)),
         currency_id: snapshot.currency_id || 'BRL',
+        family_name: snapshot.family_name || undefined,
       },
       status: 'queued',
     });
@@ -614,6 +616,11 @@ async function processClone(
         return attr;
       }),
     };
+
+    // Add family_name if present
+    if (unitSnap.family_name) {
+      postBody.family_name = unitSnap.family_name;
+    }
 
     // Add description if available
     if (unitSnap.description) {
