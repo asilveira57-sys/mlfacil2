@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { enqueueEmailEvent } from "../_shared/email-trigger.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -306,6 +307,22 @@ serve(async (req) => {
     }
 
     console.log('ML OAuth completed successfully');
+
+    // Trigger marketplace_connected email event (fail-safe)
+    await enqueueEmailEvent(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+      {
+        event_key: 'marketplace_connected',
+        user_id: userId,
+        company_id: resolvedCompanyId || undefined,
+        variables: {
+          user_name: userData.nickname || 'Usuário',
+          marketplace_name: 'Mercado Livre',
+          account_nickname: userData.nickname || mlUserIdStr,
+        },
+      }
+    );
 
     // Redirect back to frontend dashboard with success flag
     const redirectUrl = new URL(`${frontendOrigin}/dashboard`);

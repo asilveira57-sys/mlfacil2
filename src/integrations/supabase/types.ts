@@ -4057,6 +4057,68 @@ export type Database = {
           },
         ]
       }
+      email_analytics_daily: {
+        Row: {
+          avg_send_time_ms: number | null
+          created_at: string
+          id: string
+          metric_date: string
+          top_event_key: string | null
+          top_template_id: string | null
+          total_campaigns: number
+          total_cancelled: number
+          total_events: number
+          total_failed: number
+          total_queued: number
+          total_retried: number
+          total_schedules: number
+          total_sent: number
+          updated_at: string
+        }
+        Insert: {
+          avg_send_time_ms?: number | null
+          created_at?: string
+          id?: string
+          metric_date?: string
+          top_event_key?: string | null
+          top_template_id?: string | null
+          total_campaigns?: number
+          total_cancelled?: number
+          total_events?: number
+          total_failed?: number
+          total_queued?: number
+          total_retried?: number
+          total_schedules?: number
+          total_sent?: number
+          updated_at?: string
+        }
+        Update: {
+          avg_send_time_ms?: number | null
+          created_at?: string
+          id?: string
+          metric_date?: string
+          top_event_key?: string | null
+          top_template_id?: string | null
+          total_campaigns?: number
+          total_cancelled?: number
+          total_events?: number
+          total_failed?: number
+          total_queued?: number
+          total_retried?: number
+          total_schedules?: number
+          total_sent?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_analytics_daily_top_template_id_fkey"
+            columns: ["top_template_id"]
+            isOneToOne: false
+            referencedRelation: "email_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       email_campaign_recipients: {
         Row: {
           campaign_id: string
@@ -17457,6 +17519,10 @@ export type Database = {
           p_target_user_id: string
         }
         Returns: Json
+      }
+      aggregate_email_analytics: {
+        Args: { p_date?: string }
+        Returns: undefined
       }
       calculate_category_eligibility: {
         Args: {
