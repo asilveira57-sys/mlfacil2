@@ -198,6 +198,7 @@ export default function ClonarAnuncio() {
           thumbnail: item.thumbnail || item.secure_thumbnail || '',
           seller_id: String(item.seller_id || ''),
           catalog_product_id: item.catalog_product_id || undefined,
+          family_name: item.family_name || undefined,
         };
         setOriginPayload(op);
         setOriginStatus('complete');
@@ -298,6 +299,11 @@ export default function ClonarAnuncio() {
       // Safe attributes
       if (merged.attributes.length > 0) {
         mlPayload.attributes = merged.attributes;
+      }
+
+      // family_name (required by some categories)
+      if (merged.family_name) {
+        mlPayload.family_name = merged.family_name;
       }
 
       // POST via edge function (needs token)
