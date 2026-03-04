@@ -40,7 +40,24 @@ function withFallbackFamilyName(payload: Record<string, unknown>): Record<string
 }
 
 function normalizeTitleForMl(title: string): string {
-  return title.trim().replace(/\s{2,}/g, ' ').substring(0, 60);
+  // Remove accents (NFD decompose + strip combining marks)
+  let t = title.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  // Remove special characters not accepted by ML (keep letters, digits, basic punctuation, spaces)
+  t = t.replace(/[^a-zA-Z0-9 ,.\-\/()&+!:]/g, '');
+  // Collapse multiple spaces
+  t = t.trim().replace(/\s{2,}/g, ' ');
+  // Limit to 60 chars
+  return t.substring(0, 60);
+}
+
+function sanitizePayloadTitle(payload: Record<string, unknown>): Record<string, unknown> {
+  const title = payload.title as string | undefined;
+  if (!title || typeof title !== 'string') return payload;
+  const sanitized = normalizeTitleForMl(title);
+  if (sanitized && sanitized !== title) {
+    payload.title = sanitized;
+  }
+  return payload;
 }
 
 function hasTitleInvalidFieldError(errorBody: Record<string, unknown>): boolean {
@@ -61,6 +78,11 @@ async function createMlItemWithRetry(
   accessToken: string,
   payload: Record<string, unknown>,
 ): Promise<{ response: Response; data: any; usedTitleFallback: boolean }> {
+  // Pre-sanitize title before first attempt
+  const originalTitle = payload.title as string | undefined;
+  sanitizePayloadTitle(payload);
+  const preSanitized = payload.title !== originalTitle;
+
   const res1 = await fetchWithRetry('https://api.mercadolibre.com/items', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -69,8 +91,9 @@ async function createMlItemWithRetry(
   const data1 = await res1.json();
 
   if (!res1.ok && hasTitleInvalidFieldError(data1) && payload.title) {
+    // Retry with aggressively normalized title
     const normalized = normalizeTitleForMl(payload.title as string);
-    if (normalized !== payload.title) {
+    if (normalized && normalized !== payload.title) {
       const retryPayload = { ...payload, title: normalized };
       const res2 = await fetchWithRetry('https://api.mercadolibre.com/items', {
         method: 'POST',
@@ -82,7 +105,7 @@ async function createMlItemWithRetry(
     }
   }
 
-  return { response: res1, data: data1, usedTitleFallback: false };
+  return { response: res1, data: data1, usedTitleFallback: preSanitized };
 }
 
 // ============================================
