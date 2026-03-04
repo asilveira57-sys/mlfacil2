@@ -136,7 +136,7 @@ function extractMLBFromInput(raw: string | undefined | null): string | null {
 }
 
 // ============================================
-// ML Public API helper
+// ML Public API helper (with optional auth token)
 // ============================================
 
 async function mlRequest(
@@ -145,20 +145,25 @@ async function mlRequest(
   userId: string,
   correlationId: string,
   label: string,
-): Promise<{ ok: boolean; status: number; data: any }> {
+  accessToken?: string,
+): Promise<{ ok: boolean; status: number; data: any; usedToken: boolean }> {
   const url = `https://api.mercadolibre.com${endpoint}`;
   const start = Date.now();
+  const usedToken = !!accessToken;
+
+  const headers: Record<string, string> = { 'Accept': 'application/json' };
+  if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
 
   await logEvent(supabase, userId, 'source', label, 'ml_request_prepare', 'info',
-    `Preparing public fetch: ${endpoint}`, { correlation_id: correlationId, endpoint: url, used_token: false });
+    `Preparing ${usedToken ? 'authenticated' : 'public'} fetch: ${endpoint}`, { correlation_id: correlationId, endpoint: url, used_token: usedToken });
 
   let response: Response;
   try {
-    response = await fetchWithRetry(url, { method: 'GET', headers: { 'Accept': 'application/json' } });
+    response = await fetchWithRetry(url, { method: 'GET', headers });
   } catch (err) {
     const elapsed = Date.now() - start;
     await logEvent(supabase, userId, 'source', label, 'ml_request_result', 'error',
-      `Fetch failed: ${(err as Error).message} in ${elapsed}ms`, { correlation_id: correlationId, endpoint: url, elapsed_ms: elapsed, error: (err as Error).message });
+      `Fetch failed: ${(err as Error).message} in ${elapsed}ms`, { correlation_id: correlationId, endpoint: url, elapsed_ms: elapsed, error: (err as Error).message, used_token: usedToken });
     throw err;
   }
 
@@ -168,7 +173,7 @@ async function mlRequest(
   await logEvent(supabase, userId, 'source', label, 'ml_request_result',
     response.ok ? 'info' : 'error',
     `Fetch ${label}: HTTP ${response.status} in ${elapsed}ms`, {
-      correlation_id: correlationId, endpoint: url, used_token: false,
+      correlation_id: correlationId, endpoint: url, used_token: usedToken,
       http_status: response.status, elapsed_ms: elapsed,
       response_body_snippet: body.substring(0, 2000),
     });
@@ -176,7 +181,81 @@ async function mlRequest(
   let data: any = null;
   try { data = JSON.parse(body); } catch (_) { data = body; }
 
-  return { ok: response.ok, status: response.status, data };
+  return { ok: response.ok, status: response.status, data, usedToken };
+}
+
+// ============================================
+// Authenticated fallback: try user's ML tokens on 403
+// ============================================
+
+async function getValidTokenForRead(
+  supabase: any,
+  userId: string,
+  correlationId: string,
+): Promise<string | null> {
+  // Fetch all active ML accounts for this user
+  const { data: accounts, error } = await supabase
+    .from('ml_accounts')
+    .select('id, ml_user_id, access_token, refresh_token, token_expires_at')
+    .eq('user_id', userId)
+    .eq('is_active', true)
+    .order('updated_at', { ascending: false });
+
+  if (error || !accounts || accounts.length === 0) {
+    await logEvent(supabase, userId, 'source', 'auth_fallback', 'no_ml_accounts', 'warn',
+      'No active ML accounts found for authenticated fallback', { correlation_id: correlationId });
+    return null;
+  }
+
+  for (const account of accounts) {
+    let token = account.access_token;
+
+    // Check if token is expired and try refresh
+    if (new Date(account.token_expires_at) < new Date()) {
+      try {
+        const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+        const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        const svcClient = createClient(supabaseUrl, serviceKey);
+
+        const refreshRes = await svcClient.functions.invoke('ml-token-refresh', {
+          body: { account_id: account.id },
+        });
+        if (refreshRes.data?.access_token) {
+          token = refreshRes.data.access_token;
+          await logEvent(supabase, userId, 'source', 'auth_fallback', 'token_refreshed', 'info',
+            `Token refreshed for account ${account.ml_user_id}`, { correlation_id: correlationId, account_id: account.id });
+        } else {
+          await logEvent(supabase, userId, 'source', 'auth_fallback', 'token_refresh_failed', 'warn',
+            `Token refresh failed for ${account.ml_user_id}, skipping`, { correlation_id: correlationId, account_id: account.id });
+          continue;
+        }
+      } catch (err) {
+        await logEvent(supabase, userId, 'source', 'auth_fallback', 'token_refresh_error', 'warn',
+          `Refresh error for ${account.ml_user_id}: ${(err as Error).message}`, { correlation_id: correlationId, account_id: account.id });
+        continue;
+      }
+    }
+
+    // Quick validation: try a lightweight call
+    try {
+      const testRes = await fetch(`https://api.mercadolibre.com/users/me`, {
+        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+      });
+      const testBody = await testRes.text();
+      if (testRes.ok) {
+        await logEvent(supabase, userId, 'source', 'auth_fallback', 'token_valid', 'info',
+          `Valid token found for ${account.ml_user_id}`, { correlation_id: correlationId, account_id: account.id });
+        return token;
+      }
+      // 401/403 means this token is bad
+      await logEvent(supabase, userId, 'source', 'auth_fallback', 'token_invalid', 'warn',
+        `Token for ${account.ml_user_id} returned ${testRes.status}`, { correlation_id: correlationId, account_id: account.id, status: testRes.status });
+    } catch (_) {
+      // Network error, try next
+    }
+  }
+
+  return null;
 }
 
 // ============================================
@@ -254,22 +333,76 @@ async function loadSource(itemId: string, supabase: any, userId: string, correla
     }
   }
 
-  // If still failing, throw with details
+  // If still failing after recovery, try authenticated fallback for 403
+  if (itemStatus === 403) {
+    await logEvent(supabase, userId, 'source', effectiveItemId, 'load_source_403_auth_fallback', 'info',
+      `Public fetch returned 403 (PolicyAgent), attempting authenticated fallback`, { correlation_id: correlationId });
+
+    const authToken = await getValidTokenForRead(supabase, userId, correlationId);
+    if (authToken) {
+      try {
+        const authItemRes = await fetch(`https://api.mercadolibre.com/items/${effectiveItemId}`, {
+          method: 'GET', headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${authToken}` },
+        });
+        if (authItemRes.ok) {
+          itemStatus = authItemRes.status;
+          itemSnippet = (await authItemRes.text()).substring(0, 400);
+          await logEvent(supabase, userId, 'source', effectiveItemId, 'load_source_403_auth_success', 'info',
+            `Authenticated fallback succeeded for ${effectiveItemId}`, { correlation_id: correlationId });
+        } else {
+          const authBody = await authItemRes.text();
+          await logEvent(supabase, userId, 'source', effectiveItemId, 'load_source_403_auth_failed', 'warn',
+            `Authenticated fallback also failed: HTTP ${authItemRes.status}`, { correlation_id: correlationId, status: authItemRes.status, snippet: authBody.substring(0, 300) });
+        }
+      } catch (authErr) {
+        await logEvent(supabase, userId, 'source', effectiveItemId, 'load_source_403_auth_error', 'error',
+          `Auth fallback fetch error: ${(authErr as Error).message}`, { correlation_id: correlationId });
+      }
+    }
+  }
+
   if (itemStatus !== 200) {
     throw new Error(`Falha ao carregar anúncio (HTTP ${itemStatus}). ID tentado: ${effectiveItemId}. Verifique se o link é de um anúncio válido do Mercado Livre.`);
   }
 
+  // Determine if we need an auth token for subsequent requests (attributes, description)
+  let readToken: string | undefined;
+  // If the diagnostic item fetch needed auth OR returned 403 initially, use auth for all subsequent calls
+  const needsAuth = itemSnippet.includes('PolicyAgent') || siteSnippet.includes('PolicyAgent');
+  if (needsAuth) {
+    const token = await getValidTokenForRead(supabase, userId, correlationId);
+    if (token) readToken = token;
+  }
+
   // === STEP 2: Full fetch with attributes ===
-  const fullResult = await mlRequest(`/items/${effectiveItemId}?include_attributes=all`, supabase, userId, correlationId, effectiveItemId);
+  const fullResult = await mlRequest(`/items/${effectiveItemId}?include_attributes=all`, supabase, userId, correlationId, effectiveItemId, readToken);
   if (!fullResult.ok) {
+    // If 403 on full fetch and no token yet, try auth
+    if (fullResult.status === 403 && !readToken) {
+      const fallbackToken = await getValidTokenForRead(supabase, userId, correlationId);
+      if (fallbackToken) {
+        const retryResult = await mlRequest(`/items/${effectiveItemId}?include_attributes=all`, supabase, userId, correlationId, effectiveItemId, fallbackToken);
+        if (retryResult.ok) {
+          readToken = fallbackToken;
+          // Continue with retryResult below
+          const item = retryResult.data;
+          return await buildSnapshot(item, effectiveItemId, supabase, userId, correlationId, readToken);
+        }
+      }
+    }
     throw new Error(`Falha ao carregar detalhes (HTTP ${fullResult.status})`);
   }
   const item = fullResult.data;
 
-  // Fetch description (public, best-effort)
+  return await buildSnapshot(item, effectiveItemId, supabase, userId, correlationId, readToken);
+}
+
+// Build snapshot from item data
+async function buildSnapshot(item: any, effectiveItemId: string, supabase: any, userId: string, correlationId: string, readToken?: string) {
+  // Fetch description (best-effort)
   let description = '';
   try {
-    const descResult = await mlRequest(`/items/${effectiveItemId}/description`, supabase, userId, correlationId, `${effectiveItemId}/desc`);
+    const descResult = await mlRequest(`/items/${effectiveItemId}/description`, supabase, userId, correlationId, `${effectiveItemId}/desc`, readToken);
     if (descResult.ok) {
       description = descResult.data.plain_text || descResult.data.text || '';
     }
@@ -663,11 +796,11 @@ Deno.serve(async (req) => {
     });
 
     const token = authHeader.replace('Bearer ', '');
-    const { data: claimsData, error: claimsErr } = await supabase.auth.getClaims(token);
-    if (claimsErr || !claimsData?.claims) {
+    const { data: { user }, error: userErr } = await supabase.auth.getUser(token);
+    if (userErr || !user) {
       return respond({ error: 'Token inválido' }, 401);
     }
-    const userId = claimsData.claims.sub as string;
+    const userId = user.id as string;
 
     // Parse body
     const body = await req.json();
