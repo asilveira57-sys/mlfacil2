@@ -38,9 +38,7 @@ export default function ZPLConverter() {
   const [selectedFullProdutoSubType, setSelectedFullProdutoSubType] = useState(() => {
     return localStorage.getItem('zpl_full_produto_subtype') || "";
   });
-  const [quality, setQuality] = useState<'normal' | 'high' | 'max'>(() => {
-    return (localStorage.getItem('zpl_quality_preference') as 'normal' | 'high' | 'max') || 'high';
-  });
+  const [quality, setQuality] = useState<'normal'>('normal');
   const [outputFormat, setOutputFormat] = useState<'pdf_png' | 'pdf_vector'>(() => {
     return (localStorage.getItem('zpl_output_format') as 'pdf_png' | 'pdf_vector') || 'pdf_png';
   });
@@ -84,9 +82,8 @@ export default function ZPLConverter() {
 
   // Map quality to scale factor (supersampling)
   // Using fixed DPMM=8 and scaling dimensions for consistent physical size
-  const getQualityScale = (q: 'normal' | 'high' | 'max') => {
-    const scaleMap = { normal: 1, high: 2, max: 3 };
-    return scaleMap[q];
+  const getQualityScale = (q: 'normal') => {
+    return 1;
   };
 
   const convertSingleLabel = async (
@@ -218,7 +215,7 @@ export default function ZPLConverter() {
         return;
       }
 
-      const qualityLabel = quality === 'max' ? 'máxima (3x)' : quality === 'high' ? 'alta (2x)' : 'normal';
+      const qualityLabel = 'normal';
       toast.info(`Processando ${labels.length} etiqueta(s) em qualidade ${qualityLabel}${useVectorPdf ? ' (PDF vetorial)' : ''}...`);
 
       if (useVectorPdf) {
@@ -490,28 +487,21 @@ export default function ZPLConverter() {
                         </TooltipTrigger>
                         <TooltipContent className="max-w-xs">
                           <p className="text-xs">
-                            <strong>Normal (203 DPI):</strong> Mais rápido, ideal para testes<br/>
-                            <strong>Alta (300 DPI):</strong> Boa qualidade para impressão<br/>
-                            <strong>Máxima (600 DPI):</strong> Melhor qualidade, mais lento
+                            <strong>Normal (203 DPI):</strong> Resolução padrão para impressoras térmicas
                           </p>
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
                   </Label>
                   <Select 
-                    value={quality} 
-                    onValueChange={(value: 'normal' | 'high' | 'max') => {
-                      setQuality(value);
-                      localStorage.setItem('zpl_quality_preference', value);
-                    }}
+                    value="normal" 
+                    disabled
                   >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="normal">Normal (203 DPI)</SelectItem>
-                      <SelectItem value="high">Alta (300 DPI)</SelectItem>
-                      <SelectItem value="max">Máxima (600 DPI)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
