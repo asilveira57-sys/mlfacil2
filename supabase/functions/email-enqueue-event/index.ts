@@ -20,17 +20,27 @@ serve(async (req) => {
   const startMs = Date.now();
 
   try {
-    // Auth check
+    // Auth check - allow service-role (internal) or user JWT
     const authHeader = req.headers.get("Authorization") ?? "";
-    const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user }, error: authErr } = await userClient.auth.getUser();
-    if (authErr || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+    let callerId: string | null = null;
+
+    // Check if it's a service-role call (internal from other edge functions)
+    const token = authHeader.replace("Bearer ", "");
+    if (token === supabaseServiceKey) {
+      // Internal call - trusted, use user_id from body
+      callerId = null; // will be set from body below
+    } else {
+      const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
+        global: { headers: { Authorization: authHeader } },
       });
+      const { data: { user }, error: authErr } = await userClient.auth.getUser();
+      if (authErr || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      callerId = user.id;
     }
 
     const body = await req.json();
@@ -43,7 +53,13 @@ serve(async (req) => {
       });
     }
 
-    const targetUserId = user_id || user.id;
+    const targetUserId = user_id || callerId;
+    if (!targetUserId) {
+      return new Response(JSON.stringify({ error: "user_id required for internal calls" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     const logBase = { source_type: "event" as const, event_key, user_id: targetUserId, company_id };
 
     // 1. Find event rule
@@ -281,7 +297,7 @@ serve(async (req) => {
       level: "info",
       area: "email",
       action: "enqueue_event",
-      userId: user.id,
+      userId: callerId || targetUserId,
       success: true,
       message: `Event ${event_key} enqueued for ${email}`,
       meta: { event_key, queue_id: queueItem.id, template_key: template.key },
