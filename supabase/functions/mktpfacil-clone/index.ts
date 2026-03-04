@@ -28,6 +28,17 @@ function isAttributeSafe(attrId: string): boolean {
   return !FORBIDDEN_ATTRIBUTES.has(id) && !DUPLICATE_ATTRIBUTES.has(id);
 }
 
+function withFallbackFamilyName(payload: Record<string, unknown>): Record<string, unknown> {
+  const fn = payload.family_name as string | undefined;
+  if (!fn || (typeof fn === 'string' && !fn.trim())) {
+    const title = payload.title as string | undefined;
+    if (title && title.trim()) {
+      payload.family_name = title.trim().substring(0, 120);
+    }
+  }
+  return payload;
+}
+
 // ============================================
 // Helpers
 // ============================================
@@ -622,6 +633,9 @@ async function processClone(
       postBody.family_name = unitSnap.family_name;
     }
 
+    // Fallback: family_name from title if missing
+    withFallbackFamilyName(postBody);
+
     // Add description if available
     if (unitSnap.description) {
       // Description is sent separately after item creation
@@ -869,8 +883,8 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Remove forbidden fields
-      const cleanPayload = { ...payload };
+      // Fallback family_name from title + remove forbidden fields
+      const cleanPayload = withFallbackFamilyName({ ...payload });
       for (const field of FORBIDDEN_BODY_FIELDS) {
         delete cleanPayload[field];
       }
