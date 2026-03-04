@@ -17697,7 +17697,13 @@ export type Database = {
         | "MAILGUN"
         | "POSTMARK"
         | "BREVO"
-      email_queue_status: "queued" | "sending" | "sent" | "failed" | "cancelled"
+      email_queue_status:
+        | "queued"
+        | "sending"
+        | "sent"
+        | "failed"
+        | "retry"
+        | "cancelled"
       email_scope: "user" | "company" | "both"
       email_source_type: "event" | "schedule" | "campaign" | "manual_test"
       email_test_status: "ok" | "fail"
@@ -17934,7 +17940,14 @@ export const Constants = {
         "POSTMARK",
         "BREVO",
       ],
-      email_queue_status: ["queued", "sending", "sent", "failed", "cancelled"],
+      email_queue_status: [
+        "queued",
+        "sending",
+        "sent",
+        "failed",
+        "retry",
+        "cancelled",
+      ],
       email_scope: ["user", "company", "both"],
       email_source_type: ["event", "schedule", "campaign", "manual_test"],
       email_test_status: ["ok", "fail"],
