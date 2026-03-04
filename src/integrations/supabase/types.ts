@@ -4087,6 +4087,86 @@ export type Database = {
         }
         Relationships: []
       }
+      email_event_dedup: {
+        Row: {
+          company_id: string | null
+          created_at: string
+          dedup_key: string
+          event_key: string
+          id: string
+          last_sent_at: string
+          sent_count_day: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          company_id?: string | null
+          created_at?: string
+          dedup_key?: string
+          event_key: string
+          id?: string
+          last_sent_at?: string
+          sent_count_day?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          company_id?: string | null
+          created_at?: string
+          dedup_key?: string
+          event_key?: string
+          id?: string
+          last_sent_at?: string
+          sent_count_day?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      email_event_rules: {
+        Row: {
+          cooldown_minutes: number
+          created_at: string
+          event_key: string
+          id: string
+          is_enabled: boolean
+          max_per_day: number
+          scope: Database["public"]["Enums"]["email_scope"]
+          template_id: string
+          updated_at: string
+        }
+        Insert: {
+          cooldown_minutes?: number
+          created_at?: string
+          event_key: string
+          id?: string
+          is_enabled?: boolean
+          max_per_day?: number
+          scope?: Database["public"]["Enums"]["email_scope"]
+          template_id: string
+          updated_at?: string
+        }
+        Update: {
+          cooldown_minutes?: number
+          created_at?: string
+          event_key?: string
+          id?: string
+          is_enabled?: boolean
+          max_per_day?: number
+          scope?: Database["public"]["Enums"]["email_scope"]
+          template_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_event_rules_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "email_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       email_logs: {
         Row: {
           action: Database["public"]["Enums"]["email_log_action"]
@@ -17618,6 +17698,7 @@ export type Database = {
         | "POSTMARK"
         | "BREVO"
       email_queue_status: "queued" | "sending" | "sent" | "failed" | "cancelled"
+      email_scope: "user" | "company" | "both"
       email_source_type: "event" | "schedule" | "campaign" | "manual_test"
       email_test_status: "ok" | "fail"
       ml_account_role: "none" | "owner" | "collaborator"
@@ -17854,6 +17935,7 @@ export const Constants = {
         "BREVO",
       ],
       email_queue_status: ["queued", "sending", "sent", "failed", "cancelled"],
+      email_scope: ["user", "company", "both"],
       email_source_type: ["event", "schedule", "campaign", "manual_test"],
       email_test_status: ["ok", "fail"],
       ml_account_role: ["none", "owner", "collaborator"],
