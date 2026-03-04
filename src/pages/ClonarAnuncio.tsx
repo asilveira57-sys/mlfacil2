@@ -142,118 +142,52 @@ export default function ClonarAnuncio() {
       }
     } catch (_) { /* fail-safe, form still works */ }
 
-    // ========== Helper: Edge fallback ==========
-    const tryEdgeFallback = async (reason: string, extra: Record<string, unknown> = {}): Promise<boolean> => {
-      await safeLog('edge_fallback_attempt', { correlation_id: corrId, item_id: itemId, reason, ...extra });
-      try {
-        const { data, error: fnError } = await supabase.functions.invoke('mktpfacil-clone', {
-          body: { action: 'load_source', item_id: itemId, correlation_id: corrId, source_input_raw: sourceUrl },
-        });
-        if (fnError) throw new Error(fnError.message || 'Edge function error');
+    // ========== SERVER-FIRST: ad-item-snapshot ==========
+    const activeAccount = accounts.find(a => a.id === selectedAccountId);
+    await safeLog('origin_fetch_attempt', { correlation_id: corrId, item_id: itemId, strategy: 'ad-item-snapshot' });
 
-        if (data?.snapshot) {
-          const snap = data.snapshot;
-          const attrs = snap.attributes || [];
-          const dims = extractDimensions(attrs);
-          const safeAttrs = attrs.filter((a: any) => !FORBIDDEN_ATTRIBUTES.has(a.id?.toUpperCase()));
-          const op: OriginPayload = {
-            origin_status: 'complete',
-            item_id: snap.item_id,
-            title: snap.title,
-            description: snap.description,
-            price: snap.price,
-            available_quantity: snap.available_quantity,
-            condition: snap.condition,
-            category_id: snap.category_id,
-            listing_type_id: snap.listing_type_id,
-            pictures: snap.pictures,
-            attributes: safeAttrs,
-            package_height: dims.height,
-            package_width: dims.width,
-            package_length: dims.length,
-            package_weight: dims.weight,
-            sku: extractIdentifier(attrs, 'SKU', 'SELLER_SKU'),
-            gtin: extractIdentifier(attrs, 'GTIN', 'EAN'),
-            thumbnail: snap.thumbnail,
-            seller_id: String(snap.seller_id || ''),
-            catalog_product_id: snap.catalog_product_id || undefined,
-          };
-          setOriginPayload(op);
-          setOriginStatus('complete');
-          await safeLog('origin_fetch_result', {
-            correlation_id: corrId, status: 'complete', source: 'edge_fallback', reason,
-            runtime_version: data.runtime_version || null,
-            pictures: (snap.pictures || []).length,
-            has_description: !!snap.description,
-          });
-          updateDraftOrigin(op);
-          return true;
-        }
-        // Edge returned but no snapshot
-        await safeLog('origin_fetch_result', {
-          correlation_id: corrId, status: 'no_snapshot', source: 'edge_fallback', reason,
-          runtime_version: data?.runtime_version || null,
-          error: data?.error || null,
-          http_status: data?.http_status || null,
-        });
-        return false;
-      } catch (edgeErr: unknown) {
-        await safeLog('edge_fallback_error', {
-          correlation_id: corrId, reason, error: (edgeErr as Error).message,
-        });
-        return false;
-      }
-    };
-
-    // ========== BROWSER-FIRST with Edge Fallback ==========
-    await safeLog('origin_fetch_attempt', { correlation_id: corrId, item_id: itemId, strategy: 'browser_first_edge_fallback' });
-
-    let browserOk = false;
     try {
-      const publicRes = await fetch(`https://api.mercadolibre.com/items/${itemId}?include_attributes=all`, {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' },
+      const { data, error: fnError } = await supabase.functions.invoke('ad-item-snapshot', {
+        body: {
+          item_id: itemId,
+          id_type: itemId.startsWith('MLBU') ? 'MLBU' : 'MLB',
+          seller_id: activeAccount?.ml_user_id || '',
+          source_input_raw: sourceUrl,
+        },
       });
 
-      if (!publicRes.ok) {
-        // HTTP non-OK (e.g. 403 PolicyAgent) → edge fallback
-        const fallbackOk = await tryEdgeFallback('http_not_ok', { http_status: publicRes.status });
-        if (!fallbackOk) {
-          setOriginPayload({ origin_status: 'unavailable' });
-          setOriginStatus('unavailable');
-        }
-        browserOk = fallbackOk;
-      } else {
-        // Browser fetch succeeded — build payload directly
-        const itemData = await publicRes.json();
+      if (fnError) throw new Error(fnError.message || 'Edge function error');
 
-        // Fetch description (best-effort, public)
-        let description = '';
-        try {
-          const descRes = await fetch(`https://api.mercadolibre.com/items/${itemId}/description`);
-          if (descRes.ok) {
-            const descData = await descRes.json();
-            description = descData.plain_text || descData.text || '';
-          }
-        } catch (_) { /* optional */ }
+      if (data?.success && data?.item) {
+        const item = data.item;
+        const resolvedId = data.resolved_item_id || item.id || itemId;
+        setSourceItemId(resolvedId);
 
-        const attrs = itemData.attributes || [];
+        const attrs = item.attributes || [];
         const dims = extractDimensions(attrs);
         const safeAttrs = attrs.filter((a: any) => !FORBIDDEN_ATTRIBUTES.has(a.id?.toUpperCase()));
 
+        // Pictures with thumbnail fallback
+        let pictures = (item.pictures || []).map((p: any) => ({
+          id: p.id, url: p.url || p.secure_url, secure_url: p.secure_url || p.url,
+        })).filter((p: any) => p.secure_url);
+
+        if (pictures.length === 0 && (item.thumbnail || item.secure_thumbnail)) {
+          const thumbUrl = (item.secure_thumbnail || item.thumbnail || '').replace(/^http:\/\//i, 'https://');
+          pictures = [{ id: 'thumb', url: thumbUrl, secure_url: thumbUrl }];
+        }
+
         const op: OriginPayload = {
           origin_status: 'complete',
-          item_id: itemData.id,
-          title: itemData.title || '',
-          description,
-          price: itemData.price || 0,
-          available_quantity: itemData.available_quantity || 0,
-          condition: itemData.condition || 'new',
-          category_id: itemData.category_id || '',
-          listing_type_id: itemData.listing_type_id || 'gold_special',
-          pictures: (itemData.pictures || []).map((p: any) => ({
-            id: p.id, url: p.url || p.secure_url, secure_url: p.secure_url || p.url,
-          })),
+          item_id: resolvedId,
+          title: item.title || '',
+          description: data.description || item.description || '',
+          price: item.price || 0,
+          available_quantity: item.available_quantity || 0,
+          condition: item.condition || 'new',
+          category_id: item.category_id || '',
+          listing_type_id: item.listing_type_id || 'gold_special',
+          pictures,
           attributes: safeAttrs,
           package_height: dims.height,
           package_width: dims.width,
@@ -261,38 +195,41 @@ export default function ClonarAnuncio() {
           package_weight: dims.weight,
           sku: extractIdentifier(attrs, 'SKU', 'SELLER_SKU'),
           gtin: extractIdentifier(attrs, 'GTIN', 'EAN'),
-          thumbnail: itemData.thumbnail || itemData.secure_thumbnail || '',
-          seller_id: String(itemData.seller_id || ''),
-          catalog_product_id: itemData.catalog_product_id || undefined,
+          thumbnail: item.thumbnail || item.secure_thumbnail || '',
+          seller_id: String(item.seller_id || ''),
+          catalog_product_id: item.catalog_product_id || undefined,
         };
         setOriginPayload(op);
         setOriginStatus('complete');
         await safeLog('origin_fetch_result', {
-          correlation_id: corrId, status: 'complete', source: 'browser_direct',
-          pictures: (itemData.pictures || []).length,
-          has_description: !!description,
+          correlation_id: corrId, status: 'complete', source: 'ad-item-snapshot',
+          resolved_item_id: resolvedId,
+          pictures_source: data.capture_log?.pictures_source || (pictures.length > 0 ? 'api' : 'none'),
+          pictures_count: pictures.length,
+          has_description: !!(data.description || item.description),
+          category_name: data.category_name || null,
         });
         updateDraftOrigin(op);
-        browserOk = true;
-      }
-    } catch (err: unknown) {
-      // CORS TypeError or network rejection → edge fallback
-      const isCors = err instanceof TypeError && (err.message.includes('fetch') || err.message.includes('CORS') || err.message.includes('NetworkError'));
-      const reason = isCors ? 'cors_typeerror' : 'network_rejected';
-      const fallbackOk = await tryEdgeFallback(reason, { error: (err as Error).message });
-      if (!fallbackOk) {
+      } else {
+        // Edge returned but no item
         setOriginPayload({ origin_status: 'unavailable' });
         setOriginStatus('unavailable');
+        await safeLog('origin_fetch_result', {
+          correlation_id: corrId, status: 'unavailable', source: 'ad-item-snapshot',
+          error: data?.error || 'no_item_returned',
+          http_status: data?.http_status || null,
+        });
       }
-      browserOk = fallbackOk;
-    }
-
-    if (!browserOk) {
+    } catch (err: unknown) {
+      const msg = (err as Error).message || 'Erro desconhecido';
+      setOriginPayload({ origin_status: 'unavailable' });
+      setOriginStatus('unavailable');
       await safeLog('origin_fetch_result', {
-        correlation_id: corrId, status: 'unavailable', source: 'all_strategies_failed',
+        correlation_id: corrId, status: 'unavailable', source: 'ad-item-snapshot',
+        error: msg,
       });
     }
-  }, [sourceUrl, safeLog]);
+  }, [sourceUrl, accounts, selectedAccountId, safeLog]);
 
   const updateDraftOrigin = useCallback(async (op: OriginPayload) => {
     if (!draftId) return;
