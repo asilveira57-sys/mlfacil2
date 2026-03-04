@@ -39,6 +39,52 @@ function withFallbackFamilyName(payload: Record<string, unknown>): Record<string
   return payload;
 }
 
+function normalizeTitleForMl(title: string): string {
+  return title.trim().replace(/\s{2,}/g, ' ').substring(0, 60);
+}
+
+function hasTitleInvalidFieldError(errorBody: Record<string, unknown>): boolean {
+  const msg = String(errorBody?.message || '').toLowerCase();
+  const err = String(errorBody?.error || '').toLowerCase();
+  const combined = msg + ' ' + err;
+  if (!combined.includes('invalid_fields') && !combined.includes('invalid')) return false;
+  if (combined.includes('title')) return true;
+  const causes = (errorBody?.cause as any[]) || [];
+  for (const c of causes) {
+    const refs = JSON.stringify(c?.references || c?.code || c?.message || '').toLowerCase();
+    if (refs.includes('title')) return true;
+  }
+  return false;
+}
+
+async function createMlItemWithRetry(
+  accessToken: string,
+  payload: Record<string, unknown>,
+): Promise<{ response: Response; data: any; usedTitleFallback: boolean }> {
+  const res1 = await fetchWithRetry('https://api.mercadolibre.com/items', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data1 = await res1.json();
+
+  if (!res1.ok && hasTitleInvalidFieldError(data1) && payload.title) {
+    const normalized = normalizeTitleForMl(payload.title as string);
+    if (normalized !== payload.title) {
+      const retryPayload = { ...payload, title: normalized };
+      const res2 = await fetchWithRetry('https://api.mercadolibre.com/items', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(retryPayload),
+      });
+      const data2 = await res2.json();
+      return { response: res2, data: data2, usedTitleFallback: true };
+    }
+  }
+
+  return { response: res1, data: data1, usedTitleFallback: false };
+}
+
 // ============================================
 // Helpers
 // ============================================
@@ -656,19 +702,7 @@ async function processClone(
     try {
       await logEvent(supabase, userId, 'unit', `${job.id}:${unit.unit_index}`, 'publish_attempt', 'info', `Publicando unidade ${unit.unit_index}`);
 
-      const createRes = await fetchWithRetry(
-        `https://api.mercadolibre.com/items`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(postBody),
-        }
-      );
-
-      const createData = await createRes.json();
+      const { response: createRes, data: createData, usedTitleFallback } = await createMlItemWithRetry(accessToken, postBody);
 
       if (!createRes.ok) {
         const errorMsg = createData?.message || createData?.error || JSON.stringify(createData?.cause || createData);
@@ -693,6 +727,7 @@ async function processClone(
         await logEvent(supabase, userId, 'unit', `${job.id}:${unit.unit_index}`, 'publish_failed', 'error', errorMsg, {
           status: createRes.status,
           error_code: errorCode,
+          used_title_fallback: usedTitleFallback,
         });
 
         failedCount++;
@@ -736,6 +771,7 @@ async function processClone(
       await logEvent(supabase, userId, 'unit', `${job.id}:${unit.unit_index}`, 'publish_success', 'info', `Item criado: ${newItemId}`, {
         destination_item_id: newItemId,
         permalink,
+        used_title_fallback: usedTitleFallback,
       });
 
       createdCount++;
@@ -889,19 +925,13 @@ Deno.serve(async (req) => {
         delete cleanPayload[field];
       }
 
-      // POST to ML
+      // POST to ML with title retry
       try {
-        const createRes = await fetchWithRetry('https://api.mercadolibre.com/items', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify(cleanPayload),
-        });
-
-        const createData = await createRes.json();
+        const { response: createRes, data: createData, usedTitleFallback } = await createMlItemWithRetry(accessToken, cleanPayload);
 
         if (!createRes.ok) {
           await logEvent(supabase, userId, 'publish', source_item_id || 'unknown', 'publish_item_error', 'error',
-            `POST /items falhou: HTTP ${createRes.status}`, { correlation_id: corrId, http_status: createRes.status, error_body: createData });
+            `POST /items falhou: HTTP ${createRes.status}`, { correlation_id: corrId, http_status: createRes.status, error_body: createData, used_title_fallback: usedTitleFallback });
 
           return respond({
             status: 'error',
@@ -925,7 +955,7 @@ Deno.serve(async (req) => {
         }
 
         await logEvent(supabase, userId, 'publish', newItemId, 'publish_item_success', 'info',
-          `Item publicado: ${newItemId}`, { correlation_id: corrId, item_id: newItemId, permalink: createData.permalink });
+          `Item publicado: ${newItemId}`, { correlation_id: corrId, item_id: newItemId, permalink: createData.permalink, used_title_fallback: usedTitleFallback });
 
         return respond({
           status: 'success',
