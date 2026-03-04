@@ -4057,6 +4057,127 @@ export type Database = {
           },
         ]
       }
+      email_campaign_recipients: {
+        Row: {
+          campaign_id: string
+          created_at: string
+          email: string
+          error: string | null
+          id: string
+          queue_id: string | null
+          sent_at: string | null
+          status: string
+          user_id: string | null
+          variables_json: Json | null
+        }
+        Insert: {
+          campaign_id: string
+          created_at?: string
+          email: string
+          error?: string | null
+          id?: string
+          queue_id?: string | null
+          sent_at?: string | null
+          status?: string
+          user_id?: string | null
+          variables_json?: Json | null
+        }
+        Update: {
+          campaign_id?: string
+          created_at?: string
+          email?: string
+          error?: string | null
+          id?: string
+          queue_id?: string | null
+          sent_at?: string | null
+          status?: string
+          user_id?: string | null
+          variables_json?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_campaign_recipients_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "email_campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      email_campaigns: {
+        Row: {
+          audience_json: Json
+          click_count: number | null
+          completed_at: string | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          failed_count: number | null
+          id: string
+          name: string
+          open_count: number | null
+          scheduled_at: string | null
+          sent_count: number | null
+          started_at: string | null
+          status: Database["public"]["Enums"]["email_campaign_status"]
+          template_id: string
+          throttle_per_minute: number
+          total_recipients: number | null
+          updated_at: string
+          variables_default: Json | null
+        }
+        Insert: {
+          audience_json?: Json
+          click_count?: number | null
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          failed_count?: number | null
+          id?: string
+          name: string
+          open_count?: number | null
+          scheduled_at?: string | null
+          sent_count?: number | null
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["email_campaign_status"]
+          template_id: string
+          throttle_per_minute?: number
+          total_recipients?: number | null
+          updated_at?: string
+          variables_default?: Json | null
+        }
+        Update: {
+          audience_json?: Json
+          click_count?: number | null
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          failed_count?: number | null
+          id?: string
+          name?: string
+          open_count?: number | null
+          scheduled_at?: string | null
+          sent_count?: number | null
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["email_campaign_status"]
+          template_id?: string
+          throttle_per_minute?: number
+          total_recipients?: number | null
+          updated_at?: string
+          variables_default?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_campaigns_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "email_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       email_categories: {
         Row: {
           can_user_opt_out: boolean
@@ -17678,6 +17799,13 @@ export type Database = {
     Enums: {
       app_role: "admin" | "seller"
       billing_cycle: "monthly" | "quarterly" | "semiannual" | "annual"
+      email_campaign_status:
+        | "draft"
+        | "scheduled"
+        | "running"
+        | "paused"
+        | "completed"
+        | "cancelled"
       email_log_action:
         | "enqueue"
         | "dequeue"
@@ -17919,6 +18047,14 @@ export const Constants = {
     Enums: {
       app_role: ["admin", "seller"],
       billing_cycle: ["monthly", "quarterly", "semiannual", "annual"],
+      email_campaign_status: [
+        "draft",
+        "scheduled",
+        "running",
+        "paused",
+        "completed",
+        "cancelled",
+      ],
       email_log_action: [
         "enqueue",
         "dequeue",
