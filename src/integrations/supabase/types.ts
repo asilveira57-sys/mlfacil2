@@ -18338,14 +18338,24 @@ export type Database = {
         Args: { p_notification_id: string }
         Returns: undefined
       }
+      rpc_activate_subscription: {
+        Args: {
+          p_mp_subscription_id?: string
+          p_plan_code: string
+          p_tenant_id: string
+        }
+        Returns: Json
+      }
       rpc_apply_paid_upgrade: {
         Args: { p_quote_id: string; p_tenant_id: string }
         Returns: Json
       }
+      rpc_cancel_subscription: { Args: { p_tenant_id: string }; Returns: Json }
       rpc_check_downgrade_allowed: {
-        Args: { p_tenant_id: string; p_to_plan_id: string }
+        Args: { p_target_plan_id: string; p_tenant_id: string }
         Returns: Json
       }
+      rpc_check_renewal_cycle: { Args: { p_tenant_id: string }; Returns: Json }
       rpc_compute_sales_30d: { Args: { p_tenant_id: string }; Returns: Json }
       rpc_compute_trial_eligibility: {
         Args: { p_tenant_id: string }
@@ -18364,39 +18374,21 @@ export type Database = {
         Args: { p_tenant_id: string; p_to_plan_id: string }
         Returns: Json
       }
-      rpc_get_compatible_plans: {
-        Args: { p_sales_30d: number }
-        Returns: {
-          code: string
-          created_at: string
-          display_order: number
-          id: string
-          is_active: boolean
-          is_enterprise: boolean
-          max_sales_30d: number | null
-          mercado_pago_plan_id: string | null
-          min_sales_30d: number
-          name: string
-        }[]
-        SetofOptions: {
-          from: "*"
-          to: "tenant_plans"
-          isOneToOne: false
-          isSetofReturn: true
-        }
-      }
-      rpc_get_required_plan: {
-        Args: { p_sales_30d_total: number }
-        Returns: string
-      }
+      rpc_get_compatible_plans: { Args: { p_sales_30d: number }; Returns: Json }
+      rpc_get_required_plan: { Args: { p_sales_30d: number }; Returns: Json }
       rpc_mark_sync_job_status: {
         Args: { p_job_id: string; p_metadata_patch?: Json; p_status: string }
+        Returns: Json
+      }
+      rpc_on_account_connected: {
+        Args: { p_account_id: string; p_tenant_id: string }
         Returns: Json
       }
       rpc_require_billing_after_payment: {
         Args: { p_tenant_id: string }
         Returns: Json
       }
+      rpc_start_tenant_trial: { Args: { p_tenant_id: string }; Returns: Json }
       select_plan: { Args: { p_plan_id: string }; Returns: Json }
       set_user_active_context: {
         Args: {
