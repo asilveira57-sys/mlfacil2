@@ -15846,6 +15846,7 @@ export type Database = {
         Row: {
           code: string
           created_at: string
+          display_order: number
           id: string
           is_active: boolean
           is_enterprise: boolean
@@ -15857,6 +15858,7 @@ export type Database = {
         Insert: {
           code: string
           created_at?: string
+          display_order?: number
           id?: string
           is_active?: boolean
           is_enterprise?: boolean
@@ -15868,6 +15870,7 @@ export type Database = {
         Update: {
           code?: string
           created_at?: string
+          display_order?: number
           id?: string
           is_active?: boolean
           is_enterprise?: boolean
@@ -18366,6 +18369,7 @@ export type Database = {
         Returns: {
           code: string
           created_at: string
+          display_order: number
           id: string
           is_active: boolean
           is_enterprise: boolean
