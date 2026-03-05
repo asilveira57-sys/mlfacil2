@@ -13,7 +13,7 @@ import { AccountChangeInvalidator } from "@/components/layout/AccountChangeInval
 import { AppShellLayout } from "@/components/layout/AppShellLayout";
 import { OnboardingWizard } from "@/components/onboarding";
 import { WelcomeOnboardingGate } from "@/components/welcome";
-import { TrialExpiredPaywall, ModuleAccessGuard } from "@/components/access";
+import { TrialExpiredPaywall, BillingDataGate, ModuleAccessGuard } from "@/components/access";
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { SeoHead } from "@/components/seo/SeoHead";
 import Index from "./pages/Index";
@@ -147,6 +147,7 @@ const App = () => {
               <OnboardingWizard />
               <WelcomeOnboardingGate />
               <TrialExpiredPaywall />
+              <BillingDataGate />
               <ModuleAccessGuard>
               <Routes>
                 {/* Public routes (no shell) */}

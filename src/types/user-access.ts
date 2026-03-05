@@ -44,6 +44,10 @@ export interface FeatureFlags {
   requires_payment: boolean;
   has_active_subscription: boolean;
   
+  // Dados Fiscais
+  billing_complete: boolean;
+  requires_billing: boolean;
+  
   // Mercado Livre
   ml_connected: boolean;
   ml_is_owner: boolean;

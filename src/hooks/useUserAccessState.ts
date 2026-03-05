@@ -42,6 +42,8 @@ interface UseUserAccessStateReturn {
   mlApiAccessAllowed: boolean;
   mlApiAccessReason: string | null;
   mlApiAccessMessage: string | null;
+  billingComplete: boolean;
+  requiresBilling: boolean;
 }
 
 export function useUserAccessState(): UseUserAccessStateReturn {
@@ -203,5 +205,7 @@ export function useUserAccessState(): UseUserAccessStateReturn {
     mlApiAccessAllowed: flags?.ml_api_access_allowed ?? false,
     mlApiAccessReason: flags?.ml_api_access_reason ?? null,
     mlApiAccessMessage: flags?.ml_api_access_message ?? null,
+    billingComplete: (flags as any)?.billing_complete ?? false,
+    requiresBilling: (flags as any)?.requires_billing ?? false,
   };
 }
