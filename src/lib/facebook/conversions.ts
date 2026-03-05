@@ -71,6 +71,12 @@ export async function sendConversionEvent(event: FacebookEventData): Promise<boo
     });
 
     if (error) {
+      // Silently handle transient 503/boot errors - non-critical tracking
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes('Service Unavailable') || msg.includes('BOOT_ERROR')) {
+        console.warn('[FB CAPI] Transient edge function error, skipping');
+        return false;
+      }
       console.error('[FB CAPI] Error:', error);
       return false;
     }
