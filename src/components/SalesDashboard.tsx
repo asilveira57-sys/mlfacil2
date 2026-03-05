@@ -106,8 +106,11 @@ interface SalesData {
 interface SyncJob {
   id: string;
   status: string;
-  total_records: number;
-  processed_records: number;
+  metadata: {
+    total_records?: number;
+    processed_records?: number;
+    [key: string]: unknown;
+  };
 }
 
 interface DateFilter {
@@ -372,7 +375,7 @@ export function SalesDashboard() {
       const poll = async () => {
         const { data, error } = await supabase
           .from('sync_jobs')
-          .select('id, status, total_records, processed_records')
+          .select('id, status, metadata')
           .eq('id', jobId)
           .maybeSingle();
 
@@ -381,11 +384,11 @@ export function SalesDashboard() {
           return;
         }
 
-        setSyncJob(data);
+        setSyncJob(data as unknown as SyncJob);
 
-        if (data.status === 'done') {
+        if (data.status === 'success') {
           resolve(true);
-        } else if (data.status === 'error') {
+        } else if (data.status === 'failed') {
           resolve(false);
         } else {
           setTimeout(poll, 1500);
@@ -538,17 +541,17 @@ export function SalesDashboard() {
 
   // Show onboarding sync screen
   if (showOnboarding) {
-    const progress = syncJob && syncJob.total_records > 0 
-      ? (syncJob.processed_records / syncJob.total_records) * 100 
-      : 0;
+    const totalRec = (syncJob?.metadata?.total_records as number) || 0;
+    const processedRec = (syncJob?.metadata?.processed_records as number) || 0;
+    const progress = totalRec > 0 ? (processedRec / totalRec) * 100 : 0;
 
     return (
       <OnboardingSync
         sellerNickname={salesData?.seller?.nickname}
         progress={progress}
-        processedRecords={syncJob?.processed_records || 0}
-        totalRecords={syncJob?.total_records || 0}
-        status={syncJob?.status || "processing"}
+        processedRecords={processedRec}
+        totalRecords={totalRec}
+        status={syncJob?.status || "running"}
         phase={syncPhase}
       />
     );

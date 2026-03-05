@@ -2004,39 +2004,39 @@ export type Database = {
         Row: {
           action: string
           created_at: string
-          details: Json | null
-          entity_id: string
-          entity_type: string
+          entity_id: string | null
+          entity_type: string | null
           id: string
+          metadata: Json
+          tenant_id: string | null
           user_id: string | null
-          workspace_id: string
         }
         Insert: {
           action: string
           created_at?: string
-          details?: Json | null
-          entity_id: string
-          entity_type: string
+          entity_id?: string | null
+          entity_type?: string | null
           id?: string
+          metadata?: Json
+          tenant_id?: string | null
           user_id?: string | null
-          workspace_id: string
         }
         Update: {
           action?: string
           created_at?: string
-          details?: Json | null
-          entity_id?: string
-          entity_type?: string
+          entity_id?: string | null
+          entity_type?: string | null
           id?: string
+          metadata?: Json
+          tenant_id?: string | null
           user_id?: string | null
-          workspace_id?: string
         }
         Relationships: [
           {
-            foreignKeyName: "audit_logs_workspace_id_fkey"
-            columns: ["workspace_id"]
+            foreignKeyName: "audit_logs_tenant_id_fkey"
+            columns: ["tenant_id"]
             isOneToOne: false
-            referencedRelation: "workspaces"
+            referencedRelation: "tenants"
             referencedColumns: ["id"]
           },
         ]
@@ -6852,6 +6852,56 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      meli_accounts: {
+        Row: {
+          connected_at: string
+          country: string
+          created_at: string
+          id: string
+          last_sync_at: string | null
+          meli_user_id: string
+          nickname: string
+          status: string
+          status_reason: string | null
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          connected_at?: string
+          country?: string
+          created_at?: string
+          id?: string
+          last_sync_at?: string | null
+          meli_user_id: string
+          nickname: string
+          status?: string
+          status_reason?: string | null
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          connected_at?: string
+          country?: string
+          created_at?: string
+          id?: string
+          last_sync_at?: string | null
+          meli_user_id?: string
+          nickname?: string
+          status?: string
+          status_reason?: string | null
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meli_accounts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
             referencedColumns: ["id"]
           },
         ]
@@ -14571,88 +14621,53 @@ export type Database = {
       }
       sync_jobs: {
         Row: {
-          company_id: string | null
-          completed_at: string | null
           created_at: string
-          error_message: string | null
+          created_by_user_id: string | null
+          finished_at: string | null
           id: string
-          job_type: string
+          lock_reason: string | null
           locked_after_success: boolean
-          metadata: Json | null
-          ml_account_id: string | null
-          processed_records: number | null
-          scope: string | null
-          seller_id: string
+          metadata: Json
+          module: string
+          scope: string
           started_at: string | null
           status: string
-          total_records: number | null
-          updated_at: string | null
-          user_id: string
-          window_end: string | null
-          window_start: string | null
+          tenant_id: string
         }
         Insert: {
-          company_id?: string | null
-          completed_at?: string | null
           created_at?: string
-          error_message?: string | null
+          created_by_user_id?: string | null
+          finished_at?: string | null
           id?: string
-          job_type?: string
+          lock_reason?: string | null
           locked_after_success?: boolean
-          metadata?: Json | null
-          ml_account_id?: string | null
-          processed_records?: number | null
-          scope?: string | null
-          seller_id: string
+          metadata?: Json
+          module: string
+          scope: string
           started_at?: string | null
           status?: string
-          total_records?: number | null
-          updated_at?: string | null
-          user_id: string
-          window_end?: string | null
-          window_start?: string | null
+          tenant_id: string
         }
         Update: {
-          company_id?: string | null
-          completed_at?: string | null
           created_at?: string
-          error_message?: string | null
+          created_by_user_id?: string | null
+          finished_at?: string | null
           id?: string
-          job_type?: string
+          lock_reason?: string | null
           locked_after_success?: boolean
-          metadata?: Json | null
-          ml_account_id?: string | null
-          processed_records?: number | null
-          scope?: string | null
-          seller_id?: string
+          metadata?: Json
+          module?: string
+          scope?: string
           started_at?: string | null
           status?: string
-          total_records?: number | null
-          updated_at?: string | null
-          user_id?: string
-          window_end?: string | null
-          window_start?: string | null
+          tenant_id?: string
         }
         Relationships: [
           {
-            foreignKeyName: "sync_jobs_company_id_fkey"
-            columns: ["company_id"]
+            foreignKeyName: "sync_jobs_tenant_id_fkey"
+            columns: ["tenant_id"]
             isOneToOne: false
-            referencedRelation: "companies"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "sync_jobs_ml_account_id_fkey"
-            columns: ["ml_account_id"]
-            isOneToOne: false
-            referencedRelation: "ml_accounts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "sync_jobs_ml_account_id_fkey"
-            columns: ["ml_account_id"]
-            isOneToOne: false
-            referencedRelation: "unified_marketplace_accounts"
+            referencedRelation: "tenants"
             referencedColumns: ["id"]
           },
         ]
@@ -15634,6 +15649,83 @@ export type Database = {
           },
         ]
       }
+      tenant_billing_profile: {
+        Row: {
+          address_complement: string | null
+          address_line: string | null
+          address_number: string | null
+          city: string | null
+          cnpj: string | null
+          company_name: string | null
+          cpf: string | null
+          created_at: string
+          email: string | null
+          full_name: string | null
+          id: string
+          is_complete: boolean
+          neighborhood: string | null
+          person_type: string | null
+          phone: string | null
+          state: string | null
+          tenant_id: string
+          trade_name: string | null
+          updated_at: string
+          zip_code: string | null
+        }
+        Insert: {
+          address_complement?: string | null
+          address_line?: string | null
+          address_number?: string | null
+          city?: string | null
+          cnpj?: string | null
+          company_name?: string | null
+          cpf?: string | null
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id?: string
+          is_complete?: boolean
+          neighborhood?: string | null
+          person_type?: string | null
+          phone?: string | null
+          state?: string | null
+          tenant_id: string
+          trade_name?: string | null
+          updated_at?: string
+          zip_code?: string | null
+        }
+        Update: {
+          address_complement?: string | null
+          address_line?: string | null
+          address_number?: string | null
+          city?: string | null
+          cnpj?: string | null
+          company_name?: string | null
+          cpf?: string | null
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id?: string
+          is_complete?: boolean
+          neighborhood?: string | null
+          person_type?: string | null
+          phone?: string | null
+          state?: string | null
+          tenant_id?: string
+          trade_name?: string | null
+          updated_at?: string
+          zip_code?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_billing_profile_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: true
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tenant_limit_log: {
         Row: {
           account_id: string | null
@@ -15675,6 +15767,247 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      tenant_limits_state: {
+        Row: {
+          blocked_actions: Json
+          is_over_limit: boolean
+          over_limit_detected_at: string | null
+          required_plan_id: string | null
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          blocked_actions?: Json
+          is_over_limit?: boolean
+          over_limit_detected_at?: string | null
+          required_plan_id?: string | null
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          blocked_actions?: Json
+          is_over_limit?: boolean
+          over_limit_detected_at?: string | null
+          required_plan_id?: string | null
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_limits_state_required_plan_id_fkey"
+            columns: ["required_plan_id"]
+            isOneToOne: false
+            referencedRelation: "tenant_plans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_limits_state_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: true
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenant_members: {
+        Row: {
+          created_at: string
+          id: string
+          role: string
+          tenant_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role?: string
+          tenant_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: string
+          tenant_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_members_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenant_plans: {
+        Row: {
+          code: string
+          created_at: string
+          id: string
+          is_active: boolean
+          max_sales_30d: number | null
+          min_sales_30d: number
+          monthly_price_cents: number
+          name: string
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          max_sales_30d?: number | null
+          min_sales_30d?: number
+          monthly_price_cents?: number
+          name: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          max_sales_30d?: number | null
+          min_sales_30d?: number
+          monthly_price_cents?: number
+          name?: string
+        }
+        Relationships: []
+      }
+      tenant_subscription: {
+        Row: {
+          created_at: string
+          current_period_end: string | null
+          current_period_start: string | null
+          id: string
+          payment_confirmed_at: string | null
+          plan_id: string
+          status: string
+          tenant_id: string
+          trial_eligible: boolean
+          trial_eligible_reason: string | null
+          trial_end: string | null
+          trial_start: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          current_period_end?: string | null
+          current_period_start?: string | null
+          id?: string
+          payment_confirmed_at?: string | null
+          plan_id: string
+          status?: string
+          tenant_id: string
+          trial_eligible?: boolean
+          trial_eligible_reason?: string | null
+          trial_end?: string | null
+          trial_start?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          current_period_end?: string | null
+          current_period_start?: string | null
+          id?: string
+          payment_confirmed_at?: string | null
+          plan_id?: string
+          status?: string
+          tenant_id?: string
+          trial_eligible?: boolean
+          trial_eligible_reason?: string | null
+          trial_end?: string | null
+          trial_start?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_subscription_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "tenant_plans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_subscription_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: true
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenant_usage_snapshot: {
+        Row: {
+          computed_at: string
+          created_at: string
+          id: string
+          period_end: string
+          period_start: string
+          sales_30d_by_account: Json
+          sales_30d_total: number
+          source: string
+          tenant_id: string
+        }
+        Insert: {
+          computed_at?: string
+          created_at?: string
+          id?: string
+          period_end: string
+          period_start: string
+          sales_30d_by_account?: Json
+          sales_30d_total?: number
+          source?: string
+          tenant_id: string
+        }
+        Update: {
+          computed_at?: string
+          created_at?: string
+          id?: string
+          period_end?: string
+          period_start?: string
+          sales_30d_by_account?: Json
+          sales_30d_total?: number
+          source?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_usage_snapshot_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenants: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          owner_user_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          owner_user_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          owner_user_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       testimonial_candidates: {
         Row: {
@@ -16145,6 +16478,79 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      upgrade_quotes: {
+        Row: {
+          amount_due_cents: number
+          created_at: string
+          currency: string
+          cycle_total_seconds: number
+          diff_monthly_cents: number
+          expires_at: string
+          from_plan_id: string
+          id: string
+          paid_at: string | null
+          proration_factor: number
+          remaining_seconds_in_cycle: number
+          status: string
+          tenant_id: string
+          to_plan_id: string
+        }
+        Insert: {
+          amount_due_cents: number
+          created_at?: string
+          currency?: string
+          cycle_total_seconds: number
+          diff_monthly_cents: number
+          expires_at: string
+          from_plan_id: string
+          id?: string
+          paid_at?: string | null
+          proration_factor: number
+          remaining_seconds_in_cycle: number
+          status?: string
+          tenant_id: string
+          to_plan_id: string
+        }
+        Update: {
+          amount_due_cents?: number
+          created_at?: string
+          currency?: string
+          cycle_total_seconds?: number
+          diff_monthly_cents?: number
+          expires_at?: string
+          from_plan_id?: string
+          id?: string
+          paid_at?: string | null
+          proration_factor?: number
+          remaining_seconds_in_cycle?: number
+          status?: string
+          tenant_id?: string
+          to_plan_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "upgrade_quotes_from_plan_id_fkey"
+            columns: ["from_plan_id"]
+            isOneToOne: false
+            referencedRelation: "tenant_plans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "upgrade_quotes_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "upgrade_quotes_to_plan_id_fkey"
+            columns: ["to_plan_id"]
+            isOneToOne: false
+            referencedRelation: "tenant_plans"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_access_state: {
         Row: {
@@ -17886,6 +18292,10 @@ export type Database = {
         Args: { _company_id: string; _user_id: string }
         Returns: boolean
       }
+      is_tenant_member: {
+        Args: { _tenant_id: string; _user_id: string }
+        Returns: boolean
+      }
       is_workspace_member: {
         Args: { _user_id: string; _workspace_id: string }
         Returns: boolean
@@ -17921,6 +18331,40 @@ export type Database = {
       resolve_notification: {
         Args: { p_notification_id: string }
         Returns: undefined
+      }
+      rpc_apply_paid_upgrade: {
+        Args: { p_quote_id: string; p_tenant_id: string }
+        Returns: Json
+      }
+      rpc_compute_sales_30d: { Args: { p_tenant_id: string }; Returns: Json }
+      rpc_compute_trial_eligibility: {
+        Args: { p_tenant_id: string }
+        Returns: Json
+      }
+      rpc_create_sync_job: {
+        Args: {
+          p_metadata?: Json
+          p_module: string
+          p_scope: string
+          p_tenant_id: string
+        }
+        Returns: Json
+      }
+      rpc_create_upgrade_quote: {
+        Args: { p_tenant_id: string; p_to_plan_id: string }
+        Returns: Json
+      }
+      rpc_get_required_plan: {
+        Args: { p_sales_30d_total: number }
+        Returns: string
+      }
+      rpc_mark_sync_job_status: {
+        Args: { p_job_id: string; p_metadata_patch?: Json; p_status: string }
+        Returns: Json
+      }
+      rpc_require_billing_after_payment: {
+        Args: { p_tenant_id: string }
+        Returns: Json
       }
       select_plan: { Args: { p_plan_id: string }; Returns: Json }
       set_user_active_context: {
