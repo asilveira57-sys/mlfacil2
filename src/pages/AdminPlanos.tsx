@@ -11,9 +11,31 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useBillingAdmin } from "@/hooks/useBillingAdmin";
 import { formatPriceBRL, getPeriodLabel, getModeLabel } from "@/hooks/useBillingPlans";
-import { ArrowLeft, Save, Eye, EyeOff, Check, X, RefreshCw, Plus, Trash2, Link } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { ArrowLeft, Save, Eye, EyeOff, Check, X, RefreshCw, Plus, Trash2, Link, Zap, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import type { PriceMode, PricePeriod, AdminPlanPrice } from "@/types/billing";
+
+interface MPSyncMatch {
+  tenant_plan_id: string;
+  tenant_plan_code: string;
+  tenant_plan_name: string;
+  mp_plan_id: string;
+  mp_plan_reason: string;
+  mp_plan_status: string;
+  mp_amount: number;
+  mp_currency: string;
+  already_linked: boolean;
+}
+
+interface MPSyncResult {
+  mp_plans_found: number;
+  matches: MPSyncMatch[];
+  unmatched_mp: Array<{ mp_plan_id: string; mp_plan_reason: string; mp_plan_status: string; mp_amount: number }>;
+  applied: number;
+  tenant_plans: Array<{ id: string; code: string; name: string; current_mp_id: string | null; is_enterprise: boolean }>;
+}
 
 export default function AdminPlanos() {
   const navigate = useNavigate();
@@ -50,8 +72,60 @@ export default function AdminPlanos() {
     auto_renew: false,
   });
 
+  // MP Sync states
+  const [mpSyncResult, setMpSyncResult] = useState<MPSyncResult | null>(null);
+  const [mpSyncLoading, setMpSyncLoading] = useState(false);
+  const [manualMappings, setManualMappings] = useState<Record<string, string>>({});
+
   const volumePlans = plans.filter(p => p.category === 'volume');
   const zplPlans = plans.filter(p => p.category === 'zpl');
+
+  const handleMPSync = async (autoApply = false) => {
+    try {
+      setMpSyncLoading(true);
+      const { data, error } = await supabase.functions.invoke('mp-sync-tenant-plans', {
+        body: { auto_apply: autoApply },
+      });
+      if (error) throw error;
+      setMpSyncResult(data);
+      if (autoApply && data.applied > 0) {
+        toast.success(`${data.applied} plano(s) vinculado(s) com sucesso`);
+      } else if (autoApply && data.applied === 0) {
+        toast.info('Nenhum novo vínculo necessário');
+      }
+    } catch (err) {
+      console.error('[MP Sync]', err);
+      toast.error('Erro ao sincronizar com Mercado Pago');
+    } finally {
+      setMpSyncLoading(false);
+    }
+  };
+
+  const handleManualMapping = async () => {
+    const mappings = Object.entries(manualMappings)
+      .filter(([_, mpId]) => mpId.trim())
+      .map(([tenantPlanId, mpId]) => ({ tenant_plan_id: tenantPlanId, mp_plan_id: mpId.trim() }));
+    
+    if (mappings.length === 0) {
+      toast.error('Nenhum mapeamento definido');
+      return;
+    }
+
+    try {
+      setMpSyncLoading(true);
+      const { data, error } = await supabase.functions.invoke('mp-sync-tenant-plans', {
+        body: { manual_mapping: mappings },
+      });
+      if (error) throw error;
+      setMpSyncResult(data);
+      setManualMappings({});
+      toast.success(`${data.applied} plano(s) vinculado(s) manualmente`);
+    } catch (err) {
+      toast.error('Erro ao aplicar mapeamento manual');
+    } finally {
+      setMpSyncLoading(false);
+    }
+  };
 
   const handleAmountSave = async (priceId: string) => {
     const cents = Math.round(parseFloat(editingAmount) * 100);
@@ -369,6 +443,10 @@ export default function AdminPlanos() {
           <TabsList className="mb-4">
             <TabsTrigger value="volume">Planos por Volume ({volumePlans.length})</TabsTrigger>
             <TabsTrigger value="zpl">Plano ZPL ({zplPlans.length})</TabsTrigger>
+            <TabsTrigger value="mp-sync">
+              <Zap className="w-3 h-3 mr-1" />
+              Sync Mercado Pago
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="volume">
@@ -467,6 +545,237 @@ export default function AdminPlanos() {
                 </AccordionItem>
               ))}
             </Accordion>
+          </TabsContent>
+
+          {/* MP Sync Tab */}
+          <TabsContent value="mp-sync">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg">Sincronizar Planos com Mercado Pago</CardTitle>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleMPSync(false)}
+                      disabled={mpSyncLoading}
+                    >
+                      {mpSyncLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+                      Buscar Planos MP
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => handleMPSync(true)}
+                      disabled={mpSyncLoading}
+                    >
+                      {mpSyncLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Zap className="w-4 h-4 mr-2" />}
+                      Auto-vincular
+                    </Button>
+                  </div>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Busca planos ativos no Mercado Pago e vincula automaticamente à tabela tenant_plans pelo nome.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Current Status */}
+                {mpSyncResult && (
+                  <>
+                    <div className="grid grid-cols-3 gap-4">
+                      <Card className="p-4">
+                        <p className="text-2xl font-bold">{mpSyncResult.mp_plans_found}</p>
+                        <p className="text-xs text-muted-foreground">Planos encontrados no MP</p>
+                      </Card>
+                      <Card className="p-4">
+                        <p className="text-2xl font-bold text-primary">{mpSyncResult.matches.length}</p>
+                        <p className="text-xs text-muted-foreground">Matches automáticos</p>
+                      </Card>
+                      <Card className="p-4">
+                        <p className="text-2xl font-bold">{mpSyncResult.applied}</p>
+                        <p className="text-xs text-muted-foreground">Aplicados nesta execução</p>
+                      </Card>
+                    </div>
+
+                    {/* Matches Table */}
+                    {mpSyncResult.matches.length > 0 && (
+                      <div>
+                        <h3 className="text-sm font-semibold mb-2">Matches Encontrados</h3>
+                        <div className="border rounded-lg overflow-hidden">
+                          <table className="w-full text-sm">
+                            <thead className="bg-muted/50">
+                              <tr>
+                                <th className="px-3 py-2 text-left">Plano Local</th>
+                                <th className="px-3 py-2 text-left">Plano MP (reason)</th>
+                                <th className="px-3 py-2 text-left">MP Plan ID</th>
+                                <th className="px-3 py-2 text-right">Valor MP</th>
+                                <th className="px-3 py-2 text-center">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {mpSyncResult.matches.map((m) => (
+                                <tr key={m.mp_plan_id} className="border-t">
+                                  <td className="px-3 py-2">
+                                    <span className="font-medium">{m.tenant_plan_name}</span>
+                                    <span className="text-xs text-muted-foreground ml-1">({m.tenant_plan_code})</span>
+                                  </td>
+                                  <td className="px-3 py-2 text-xs">{m.mp_plan_reason}</td>
+                                  <td className="px-3 py-2">
+                                    <code className="text-xs bg-muted px-1 py-0.5 rounded">{m.mp_plan_id}</code>
+                                  </td>
+                                  <td className="px-3 py-2 text-right">
+                                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: m.mp_currency }).format(m.mp_amount)}
+                                  </td>
+                                  <td className="px-3 py-2 text-center">
+                                    {m.already_linked ? (
+                                      <Badge className="bg-primary text-primary-foreground text-[9px]">
+                                        <CheckCircle className="w-3 h-3 mr-1" />
+                                        Vinculado
+                                      </Badge>
+                                    ) : (
+                                      <Badge variant="secondary" className="text-[9px]">
+                                        <AlertCircle className="w-3 h-3 mr-1" />
+                                        Pendente
+                                      </Badge>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Unmatched MP Plans */}
+                    {mpSyncResult.unmatched_mp.length > 0 && (
+                      <div>
+                        <h3 className="text-sm font-semibold mb-2">Planos MP sem match ({mpSyncResult.unmatched_mp.length})</h3>
+                        <div className="border rounded-lg overflow-hidden">
+                          <table className="w-full text-sm">
+                            <thead className="bg-muted/50">
+                              <tr>
+                                <th className="px-3 py-2 text-left">MP Plan ID</th>
+                                <th className="px-3 py-2 text-left">Reason</th>
+                                <th className="px-3 py-2 text-right">Valor</th>
+                                <th className="px-3 py-2 text-left">Vincular a</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {mpSyncResult.unmatched_mp.map((u) => (
+                                <tr key={u.mp_plan_id} className="border-t">
+                                  <td className="px-3 py-2">
+                                    <code className="text-xs bg-muted px-1 py-0.5 rounded">{u.mp_plan_id}</code>
+                                  </td>
+                                  <td className="px-3 py-2 text-xs">{u.mp_plan_reason}</td>
+                                  <td className="px-3 py-2 text-right">
+                                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(u.mp_amount)}
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <Select
+                                      value={manualMappings[mpSyncResult.tenant_plans.find(tp => !tp.is_enterprise)?.id || ''] || ''}
+                                      onValueChange={(tpId) => {
+                                        setManualMappings(prev => ({ ...prev, [tpId]: u.mp_plan_id }));
+                                      }}
+                                    >
+                                      <SelectTrigger className="h-7 text-xs w-48">
+                                        <SelectValue placeholder="Selecionar plano..." />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {mpSyncResult.tenant_plans
+                                          .filter(tp => !tp.is_enterprise)
+                                          .map(tp => (
+                                            <SelectItem key={tp.id} value={tp.id}>
+                                              {tp.name} {tp.current_mp_id ? '✓' : ''}
+                                            </SelectItem>
+                                          ))
+                                        }
+                                      </SelectContent>
+                                    </Select>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        {Object.keys(manualMappings).length > 0 && (
+                          <div className="flex justify-end mt-3">
+                            <Button size="sm" onClick={handleManualMapping} disabled={mpSyncLoading}>
+                              {mpSyncLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                              Aplicar Mapeamento Manual
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Current tenant_plans status */}
+                    <div>
+                      <h3 className="text-sm font-semibold mb-2">Status Atual dos Tenant Plans</h3>
+                      <div className="border rounded-lg overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/50">
+                            <tr>
+                              <th className="px-3 py-2 text-left">Plano</th>
+                              <th className="px-3 py-2 text-left">Code</th>
+                              <th className="px-3 py-2 text-left">MP Plan ID</th>
+                              <th className="px-3 py-2 text-center">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {mpSyncResult.tenant_plans.map(tp => (
+                              <tr key={tp.id} className="border-t">
+                                <td className="px-3 py-2 font-medium">{tp.name}</td>
+                                <td className="px-3 py-2">
+                                  <code className="text-xs bg-muted px-1 py-0.5 rounded">{tp.code}</code>
+                                </td>
+                                <td className="px-3 py-2">
+                                  {tp.current_mp_id ? (
+                                    <code className="text-xs bg-muted px-1 py-0.5 rounded">{tp.current_mp_id}</code>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground italic">
+                                      {tp.is_enterprise ? 'Enterprise (sem checkout)' : 'Não vinculado'}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 text-center">
+                                  {tp.is_enterprise ? (
+                                    <Badge variant="outline" className="text-[9px]">Enterprise</Badge>
+                                  ) : tp.current_mp_id ? (
+                                    <Badge className="bg-primary text-primary-foreground text-[9px]">
+                                      <CheckCircle className="w-3 h-3 mr-1" />
+                                      OK
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="destructive" className="text-[9px]">
+                                      <AlertCircle className="w-3 h-3 mr-1" />
+                                      Pendente
+                                    </Badge>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {!mpSyncResult && !mpSyncLoading && (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <Zap className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                    <p className="text-sm">Clique em "Buscar Planos MP" para iniciar a sincronização</p>
+                  </div>
+                )}
+
+                {mpSyncLoading && !mpSyncResult && (
+                  <div className="text-center py-12">
+                    <Loader2 className="w-8 h-8 mx-auto mb-3 animate-spin text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">Buscando planos no Mercado Pago...</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </div>
