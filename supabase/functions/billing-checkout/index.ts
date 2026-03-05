@@ -18,7 +18,7 @@ serve(async (req) => {
     const mpAccessToken = Deno.env.get("MERCADOPAGO_ACCESS_TOKEN");
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Auth - get user
+    // Auth
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -33,31 +33,57 @@ serve(async (req) => {
       });
     }
 
-    const { plan_code, success_url, failure_url } = await req.json();
+    const { offer_id, success_url, failure_url } = await req.json();
 
-    if (!plan_code) {
-      return new Response(JSON.stringify({ error: "plan_code is required" }), {
+    if (!offer_id) {
+      return new Response(JSON.stringify({ error: "offer_id is required" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400,
       });
     }
 
-    // Get plan from plan_tiers
-    const { data: plan, error: planError } = await supabase
-      .from("plan_tiers")
-      .select("*")
-      .eq("code", plan_code)
+    // Try to resolve offer from plan_offers first, then plan_addon_offers
+    let offer: any = null;
+    let tier: any = null;
+    let addon: any = null;
+    let entitlementType = "tier";
+
+    // Check plan_offers
+    const { data: planOffer } = await supabase
+      .from("plan_offers")
+      .select("*, plan_tiers!inner(*)")
+      .eq("id", offer_id)
       .eq("is_active", true)
       .single();
 
-    if (planError || !plan) {
-      return new Response(JSON.stringify({ error: "Plano não encontrado" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 404,
-      });
+    if (planOffer) {
+      offer = planOffer;
+      tier = planOffer.plan_tiers;
+      entitlementType = "tier";
+
+      if (tier.is_enterprise) {
+        return new Response(JSON.stringify({ error: "Plano enterprise requer contato comercial", is_enterprise: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400,
+        });
+      }
+    } else {
+      // Check plan_addon_offers
+      const { data: addonOffer } = await supabase
+        .from("plan_addon_offers")
+        .select("*, plan_addons!inner(*)")
+        .eq("id", offer_id)
+        .eq("is_active", true)
+        .single();
+
+      if (addonOffer) {
+        offer = addonOffer;
+        addon = addonOffer.plan_addons;
+        entitlementType = "addon";
+      }
     }
 
-    if (plan.is_enterprise) {
-      return new Response(JSON.stringify({ error: "Plano enterprise requer contato comercial", is_enterprise: true }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400,
+    if (!offer) {
+      return new Response(JSON.stringify({ error: "Oferta não encontrada ou inativa" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 404,
       });
     }
 
@@ -67,58 +93,105 @@ serve(async (req) => {
       });
     }
 
-    // Get tenant_id for user
-    const { data: tenant } = await supabase
-      .from("tenants")
-      .select("id")
-      .eq("owner_user_id", user.id)
+    // Get tenant_id
+    const { data: tenantMember } = await supabase
+      .from("tenant_members")
+      .select("tenant_id")
+      .eq("user_id", user.id)
+      .limit(1)
       .single();
 
-    const tenantId = tenant?.id || user.id; // fallback
+    const tenantId = tenantMember?.tenant_id || user.id;
     const baseUrl = success_url?.split("/auth")[0] || "https://mlfacil2.lovable.app";
-    const externalRef = `${tenantId}:${plan_code}`;
+
+    // Build external_reference: type:tier_or_addon_code:offer_code:tenant_id:user_id
+    const entityCode = entitlementType === "tier" ? tier.code : `addon_${addon.code}`;
+    const externalRef = `${entityCode}:${offer.offer_code}:${tenantId}:${user.id}`;
+
+    const offerName = entitlementType === "tier"
+      ? `${tier.name} - ${offer.offer_code}`
+      : `${addon.name} - ${offer.offer_code}`;
 
     let initPoint: string | null = null;
     let mpData: any;
 
-    if (plan.mercado_pago_plan_id) {
-      // ─── SUBSCRIPTION (preapproval with plan) ───
-      const preapprovalBody = {
-        preapproval_plan_id: plan.mercado_pago_plan_id,
-        payer_email: user.email,
-        external_reference: externalRef,
-        back_url: success_url || `${baseUrl}/auth?payment=success`,
-      };
+    await auditLog(supabase, {
+      level: "info", area: "billing", action: "checkout_initiated",
+      userId: user.id, success: true,
+      message: `Checkout iniciado: ${offerName}`,
+      meta: { offer_id, entitlement_type: entitlementType, entity_code: entityCode, offer_code: offer.offer_code, billing_mode: offer.billing_mode },
+    });
 
-      const mpRes = await fetch("https://api.mercadopago.com/preapproval", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${mpAccessToken}` },
-        body: JSON.stringify(preapprovalBody),
-      });
+    if (offer.billing_mode === "recurring") {
+      // ─── RECURRING: preapproval ───
+      if (offer.mp_product_ref) {
+        // Use existing MP plan
+        const preapprovalBody = {
+          preapproval_plan_id: offer.mp_product_ref,
+          payer_email: user.email,
+          external_reference: externalRef,
+          back_url: success_url || `${baseUrl}/auth?payment=success`,
+        };
 
-      mpData = await mpRes.json();
-      initPoint = mpData.init_point || mpData.sandbox_init_point || null;
+        const mpRes = await fetch("https://api.mercadopago.com/preapproval", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${mpAccessToken}` },
+          body: JSON.stringify(preapprovalBody),
+        });
 
-      if (!mpRes.ok || !initPoint) {
+        mpData = await mpRes.json();
+        initPoint = mpData.init_point || mpData.sandbox_init_point || null;
+      } else {
+        // Create ad-hoc preapproval plan
+        const autoRecurring: any = {
+          frequency: 1,
+          frequency_type: "months",
+          transaction_amount: Number(offer.price_brl),
+          currency_id: "BRL",
+        };
+
+        if (offer.period_months === 12) {
+          autoRecurring.repetitions = 12;
+        }
+
+        const planBody = {
+          reason: offerName,
+          auto_recurring: autoRecurring,
+          external_reference: externalRef,
+          back_url: success_url || `${baseUrl}/auth?payment=success`,
+          payer_email: user.email,
+        };
+
+        const mpRes = await fetch("https://api.mercadopago.com/preapproval", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${mpAccessToken}` },
+          body: JSON.stringify(planBody),
+        });
+
+        mpData = await mpRes.json();
+        initPoint = mpData.init_point || mpData.sandbox_init_point || null;
+      }
+
+      if (!initPoint) {
         await auditLog(supabase, {
-          level: "error", area: "billing", action: "checkout_preapproval_error",
+          level: "error", area: "billing", action: "checkout_recurring_error",
           userId: user.id, success: false,
           message: "Falha ao criar assinatura MP",
-          meta: { plan_code, mp_response: mpData },
+          meta: { offer_id, mp_response: mpData },
         });
         return new Response(JSON.stringify({ error: "Falha ao criar checkout", details: mpData }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500,
         });
       }
     } else {
-      // ─── ONE-TIME (preference) - fallback if no MP plan ID ───
+      // ─── ONE-TIME: preference ───
       const preferenceBody = {
         items: [{
-          title: plan.name,
-          description: `Plano ${plan.name}`,
+          title: offerName,
+          description: `${offerName} - ${offer.period_months} mês(es)`,
           quantity: 1,
           currency_id: "BRL",
-          unit_price: 0.01, // Placeholder - real price from MP
+          unit_price: Number(offer.price_brl),
         }],
         payer: { email: user.email },
         back_urls: {
@@ -140,12 +213,12 @@ serve(async (req) => {
       mpData = await mpRes.json();
       initPoint = mpData.init_point || mpData.sandbox_init_point || null;
 
-      if (!mpRes.ok || !initPoint) {
+      if (!initPoint) {
         await auditLog(supabase, {
           level: "error", area: "billing", action: "checkout_preference_error",
           userId: user.id, success: false,
           message: "Falha ao criar preferência MP",
-          meta: { plan_code, mp_response: mpData },
+          meta: { offer_id, mp_response: mpData },
         });
         return new Response(JSON.stringify({ error: "Falha ao criar checkout", details: mpData }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500,
@@ -156,15 +229,16 @@ serve(async (req) => {
     await auditLog(supabase, {
       level: "info", area: "billing", action: "checkout_created",
       userId: user.id, success: true,
-      message: `Checkout criado para plano ${plan_code}`,
-      meta: { plan_code, mp_id: mpData.id, has_mp_plan: !!plan.mercado_pago_plan_id },
+      message: `Checkout criado: ${offerName}`,
+      meta: { offer_id, mp_id: mpData.id, billing_mode: offer.billing_mode, external_reference: externalRef },
     });
 
     return new Response(JSON.stringify({
       status: "created",
       init_point: initPoint,
       provider_id: mpData.id,
-      plan_code,
+      offer_id,
+      billing_mode: offer.billing_mode,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (error: unknown) {

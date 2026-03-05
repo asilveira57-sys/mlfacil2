@@ -4,57 +4,63 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Cache-Control": "public, max-age=600, s-maxage=1800", // 10min client, 30min CDN
+  "Cache-Control": "public, max-age=600, s-maxage=1800",
 };
 
-interface PlanPrice {
-  id: string;
-  mode: string;
-  period: string;
-  amount_cents: number;
-  currency: string;
-  badge_text: string | null;
-  ui_order: number;
-}
-
-interface Plan {
-  id: string;
-  slug: string;
-  name: string;
-  description: string | null;
-  features: string[];
-  category: string;
-  prices: PlanPrice[];
-}
-
 serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    console.log("[billing-public-plans] Starting request");
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-    // Fetch published plans with prices using correct column names
-    const { data: viewData, error: viewError } = await supabase
-      .from("public_plans_v1")
+    // Fetch tiers with offers
+    const { data: tiers, error: tiersError } = await supabase
+      .from("plan_tiers")
       .select("*")
-      .eq("visible", true)
-      .order("plan_sort_order")
-      .order("price_sort_order");
+      .eq("is_active", true)
+      .order("display_order");
 
-    if (viewError) {
-      console.error("[billing-public-plans] Error fetching plans:", viewError);
-      throw viewError;
-    }
+    if (tiersError) throw tiersError;
 
-    console.log(`[billing-public-plans] Fetched ${viewData?.length || 0} price entries`);
+    const { data: offers, error: offersError } = await supabase
+      .from("plan_offers")
+      .select("*")
+      .eq("is_active", true)
+      .eq("is_visible", true)
+      .order("billing_mode")
+      .order("period_months");
+
+    if (offersError) throw offersError;
+
+    // Fetch addons with offers
+    const { data: addons, error: addonsError } = await supabase
+      .from("plan_addons")
+      .select("*")
+      .eq("is_active", true)
+      .order("display_order");
+
+    if (addonsError) throw addonsError;
+
+    const { data: addonOffers, error: aoError } = await supabase
+      .from("plan_addon_offers")
+      .select("*")
+      .eq("is_active", true)
+      .eq("is_visible", true)
+      .order("billing_mode")
+      .order("period_months");
+
+    if (aoError) throw aoError;
+
+    // Fetch settings
+    const { data: settingsData } = await supabase
+      .from("plan_settings")
+      .select("*")
+      .eq("key", "global")
+      .single();
 
     // Fetch trial policy
     const { data: trialData } = await supabase
@@ -63,97 +69,71 @@ serve(async (req) => {
       .eq("is_active", true)
       .single();
 
-    // Group by plan
-    const plansMap = new Map<string, Plan>();
+    // Build response
+    const tiersWithOffers = (tiers || []).map((tier: any) => ({
+      id: tier.id,
+      code: tier.code,
+      name: tier.display_name || tier.name,
+      description: tier.description,
+      min_orders_30d: tier.min_orders_30d,
+      max_orders_30d: tier.max_orders_30d,
+      is_enterprise: tier.is_enterprise,
+      display_order: tier.display_order,
+      offers: (offers || [])
+        .filter((o: any) => o.tier_id === tier.id)
+        .map((o: any) => ({
+          id: o.id,
+          offer_code: o.offer_code,
+          billing_mode: o.billing_mode,
+          period_months: o.period_months,
+          price_brl: Number(o.price_brl),
+          badge_text: o.badge_text,
+          is_campaign: o.is_campaign,
+          mp_product_ref: o.mp_product_ref,
+        })),
+    }));
 
-    viewData?.forEach((row: {
-      plan_id: string;
-      slug: string;
-      name: string;
-      description: string | null;
-      features: unknown;
-      category: string;
-      price_id: string;
-      mode: string;
-      period: string;
-      price_cents: number;
-      currency: string;
-      badge_text: string | null;
-      price_sort_order: number;
-      is_campaign: boolean;
-    }) => {
-      if (!plansMap.has(row.slug)) {
-        // Parse features - ensure they're strings
-        let features: string[] = [];
-        if (Array.isArray(row.features)) {
-          features = row.features.map((f: unknown) => String(f));
-        }
-        
-        plansMap.set(row.slug, {
-          id: row.plan_id,
-          slug: row.slug,
-          name: row.name,
-          description: row.description,
-          features,
-          category: row.category,
-          prices: [],
-        });
-      }
+    const addonsWithOffers = (addons || []).map((addon: any) => ({
+      id: addon.id,
+      code: addon.code,
+      name: addon.name,
+      description: addon.description,
+      display_order: addon.display_order,
+      offers: (addonOffers || [])
+        .filter((o: any) => o.addon_id === addon.id)
+        .map((o: any) => ({
+          id: o.id,
+          offer_code: o.offer_code,
+          billing_mode: o.billing_mode,
+          period_months: o.period_months,
+          price_brl: Number(o.price_brl),
+          badge_text: o.badge_text,
+          is_campaign: o.is_campaign,
+          mp_product_ref: o.mp_product_ref,
+        })),
+    }));
 
-      const plan = plansMap.get(row.slug)!;
-
-      if (row.price_id) {
-        plan.prices.push({
-          id: row.price_id,
-          mode: row.mode,
-          period: row.period,
-          amount_cents: row.price_cents,
-          currency: row.currency || "BRL",
-          badge_text: row.badge_text,
-          ui_order: row.price_sort_order || 0,
-        });
-      }
+    return new Response(JSON.stringify({
+      tiers: tiersWithOffers,
+      addons: addonsWithOffers,
+      settings: {
+        enable_annual_campaign: settingsData?.enable_annual_campaign ?? false,
+      },
+      trial_policy: trialData ? {
+        trial_days: trialData.trial_days,
+        requires_card: trialData.requires_card,
+        one_trial_per_account: trialData.one_trial_per_account,
+      } : null,
+    }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 200,
     });
 
-    // Convert to array and sort
-    const plans = Array.from(plansMap.values())
-      .filter(p => p.prices.length > 0) // Only plans with visible prices
-      .sort((a, b) => {
-        if (a.category !== b.category) {
-          return a.category === "volume" ? -1 : 1;
-        }
-        return 0;
-      });
-
-    console.log(`[billing-public-plans] Returning ${plans.length} plans`);
-
-    return new Response(
-      JSON.stringify({
-        plans,
-        settings: {
-          annual_enabled: false,
-          ui_copy: {},
-        },
-        trial_policy: trialData ? {
-          trial_days: trialData.trial_days,
-          requires_card: trialData.requires_card,
-          one_trial_per_account: trialData.one_trial_per_account,
-        } : null,
-      }),
-      {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 200,
-      }
-    );
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
     console.error("[billing-public-plans] Error:", errorMessage);
-    return new Response(
-      JSON.stringify({ error: errorMessage }),
-      {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 500,
-      }
-    );
+    return new Response(JSON.stringify({ error: errorMessage }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500,
+    });
   }
 });

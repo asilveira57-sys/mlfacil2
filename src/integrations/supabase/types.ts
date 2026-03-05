@@ -18636,6 +18636,19 @@ export type Database = {
         Args: { p_notification_id: string }
         Returns: undefined
       }
+      rpc_activate_entitlement: {
+        Args: {
+          p_addon_code?: string
+          p_auto_renew?: boolean
+          p_entitlement_type: string
+          p_external_reference?: string
+          p_offer_code?: string
+          p_payment_id?: string
+          p_tenant_id: string
+          p_tier_code?: string
+        }
+        Returns: Json
+      }
       rpc_activate_subscription: {
         Args: {
           p_mp_subscription_id?: string
@@ -18651,6 +18664,10 @@ export type Database = {
       rpc_cancel_subscription: { Args: { p_tenant_id: string }; Returns: Json }
       rpc_check_downgrade_allowed: {
         Args: { p_target_plan_id: string; p_tenant_id: string }
+        Returns: Json
+      }
+      rpc_check_entitlement_expiry: {
+        Args: { p_tenant_id: string }
         Returns: Json
       }
       rpc_check_renewal_cycle: { Args: { p_tenant_id: string }; Returns: Json }
@@ -18674,12 +18691,22 @@ export type Database = {
       }
       rpc_get_compatible_plans: { Args: { p_sales_30d: number }; Returns: Json }
       rpc_get_required_plan: { Args: { p_sales_30d: number }; Returns: Json }
+      rpc_get_required_tier: { Args: { p_sales_30d: number }; Returns: Json }
       rpc_mark_sync_job_status: {
         Args: { p_job_id: string; p_metadata_patch?: Json; p_status: string }
         Returns: Json
       }
       rpc_on_account_connected: {
         Args: { p_account_id: string; p_tenant_id: string }
+        Returns: Json
+      }
+      rpc_renew_entitlement: {
+        Args: {
+          p_entitlement_type: string
+          p_external_reference?: string
+          p_payment_id?: string
+          p_tenant_id: string
+        }
         Returns: Json
       }
       rpc_require_billing_after_payment: {
