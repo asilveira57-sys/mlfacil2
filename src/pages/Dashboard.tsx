@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { User } from "@supabase/supabase-js";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { SalesDashboard } from "@/components/SalesDashboard";
+import { ActivationSpeedometer } from "@/components/dashboard/ActivationSpeedometer";
 import { DashboardModulesGrid } from "@/components/dashboard/DashboardModulesGrid";
 import { DashboardOnboarding } from "@/components/dashboard/DashboardOnboarding";
 import { DashboardReconnectingState } from "@/components/dashboard/DashboardReconnectingState";
@@ -129,6 +130,7 @@ const Dashboard = () => {
         ) : (
           // Connected and ready
           <>
+            <ActivationSpeedometer />
             <SalesDashboard />
             <DashboardModulesGrid />
             {feedback.ready && (

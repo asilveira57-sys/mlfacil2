@@ -14568,11 +14568,16 @@ export type Database = {
           error_message: string | null
           id: string
           job_type: string
+          locked_after_success: boolean
+          metadata: Json | null
           ml_account_id: string | null
           processed_records: number | null
+          scope: string | null
           seller_id: string
+          started_at: string | null
           status: string
           total_records: number | null
+          updated_at: string | null
           user_id: string
           window_end: string | null
           window_start: string | null
@@ -14584,11 +14589,16 @@ export type Database = {
           error_message?: string | null
           id?: string
           job_type?: string
+          locked_after_success?: boolean
+          metadata?: Json | null
           ml_account_id?: string | null
           processed_records?: number | null
+          scope?: string | null
           seller_id: string
+          started_at?: string | null
           status?: string
           total_records?: number | null
+          updated_at?: string | null
           user_id: string
           window_end?: string | null
           window_start?: string | null
@@ -14600,11 +14610,16 @@ export type Database = {
           error_message?: string | null
           id?: string
           job_type?: string
+          locked_after_success?: boolean
+          metadata?: Json | null
           ml_account_id?: string | null
           processed_records?: number | null
+          scope?: string | null
           seller_id?: string
+          started_at?: string | null
           status?: string
           total_records?: number | null
+          updated_at?: string | null
           user_id?: string
           window_end?: string | null
           window_start?: string | null
@@ -17547,6 +17562,10 @@ export type Database = {
         Args: { _user_id: string; _workspace_id: string }
         Returns: boolean
       }
+      can_start_sync: {
+        Args: { p_company_id: string; p_job_type: string; p_scope: string }
+        Returns: Json
+      }
       check_ml_api_access: { Args: { p_user_id: string }; Returns: Json }
       check_permission: {
         Args: { p_company_id: string; p_feature_key: string; p_user_id: string }
@@ -17756,6 +17775,7 @@ export type Database = {
         Args: { p_email: string; p_full_name?: string; p_user_id: string }
         Returns: Json
       }
+      is_billing_complete: { Args: { p_user_id: string }; Returns: boolean }
       is_company_member: {
         Args: { _company_id: string; _user_id: string }
         Returns: boolean

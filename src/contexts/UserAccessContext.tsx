@@ -41,6 +41,8 @@ interface UserAccessContextValue {
   mlApiAccessAllowed: boolean;
   mlApiAccessReason: string | null;
   mlApiAccessMessage: string | null;
+  billingComplete: boolean;
+  requiresBilling: boolean;
 }
 
 const UserAccessContext = createContext<UserAccessContextValue | undefined>(undefined);
