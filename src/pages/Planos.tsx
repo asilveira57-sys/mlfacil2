@@ -6,7 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LandingHeader, LandingFooter } from "@/components/landing";
 import { useBillingPlans, useBillingCheckout, formatPriceBRL, getPeriodLabel } from "@/hooks/useBillingPlans";
-import { usePlanCta } from "@/hooks/usePlanCta";
+import { useTenantPlanCta } from "@/hooks/useTenantPlanCta";
+import { useTenantCheckout } from "@/hooks/useTenantCheckout";
 import { useUserAccess } from "@/contexts/UserAccessContext";
 import { useUserSalesVolume, isPlanTooSmall } from "@/hooks/useUserSalesVolume";
 import { toast } from "sonner";
@@ -74,9 +75,10 @@ const Planos = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { volumePlans, zplPlan, settings, loading: isLoading, error } = useBillingPlans();
-  const { checkout, loading: checkoutLoading } = useBillingCheckout();
+  const { checkout: legacyCheckout, loading: checkoutLoading } = useBillingCheckout();
   const { isAuthenticated, trialActive, trialExpired, flags } = useUserAccess();
-  const { getCtaConfig, handleCtaClick, isLoading: ctaLoading } = usePlanCta();
+  const { getCtaConfig, handleCtaClick, isLoading: ctaLoading } = useTenantPlanCta();
+  const { checkout: tenantCheckout, loading: tenantCheckoutLoading } = useTenantCheckout();
   const { totalSales30d } = useUserSalesVolume();
 
   const [selectedTierSlug, setSelectedTierSlug] = useState<string | null>(null);
@@ -129,8 +131,8 @@ const Planos = () => {
   }, [selectedPlan, settings]);
 
   const tierInfo = VOLUME_TIERS.find((t) => t.slug === selectedTierSlug);
-  const ctaConfig = getCtaConfig("avulso");
-  const ctaConfigSub = getCtaConfig("assinatura");
+  const isSelectedEnterprise = tierInfo && (tierInfo as any).isEnterprise === true;
+  const ctaConfigTenant = getCtaConfig(isSelectedEnterprise || false);
 
   const handleSelectTier = (slug: string) => {
     setSelectedTierSlug(slug);
@@ -148,8 +150,12 @@ const Planos = () => {
   };
 
   const handlePriceClick = (price: PlanPrice, mode: "avulso" | "assinatura") => {
-    const config = mode === "assinatura" ? ctaConfigSub : ctaConfig;
-    handleCtaClick(config, price.id, selectedPlan?.slug, mode, price.period);
+    // Use legacy checkout for price-based flow (ZPL, etc)
+    legacyCheckout(price.id);
+  };
+
+  const handleTenantPlanClick = (planSlug: string) => {
+    handleCtaClick(ctaConfigTenant, planSlug);
   };
 
   // Loading state
@@ -395,7 +401,7 @@ const Planos = () => {
                               disabled={ctaLoading || checkoutLoading}
                               onClick={() => handlePriceClick(price, "avulso")}
                             >
-                              {ctaConfig.label}
+                              {ctaConfigTenant.label}
                             </Button>
                           </CardContent>
                         </Card>
@@ -448,7 +454,7 @@ const Planos = () => {
                               disabled={ctaLoading || checkoutLoading}
                               onClick={() => handlePriceClick(price, "assinatura")}
                             >
-                              {ctaConfigSub.label}
+                              {ctaConfigTenant.label}
                             </Button>
                           </CardContent>
                         </Card>
@@ -552,7 +558,7 @@ const Planos = () => {
                               key={price.id}
                               variant="outline"
                               className="justify-between h-auto py-3"
-                              onClick={() => checkout(price.id)}
+                              onClick={() => legacyCheckout(price.id)}
                               disabled={checkoutLoading}
                             >
                               <span className="text-sm">{getPeriodLabel(price.period)}</span>
@@ -586,7 +592,7 @@ const Planos = () => {
                               key={price.id}
                               variant="outline"
                               className="justify-between h-auto py-3"
-                              onClick={() => checkout(price.id)}
+                              onClick={() => legacyCheckout(price.id)}
                               disabled={checkoutLoading}
                             >
                               <span className="text-sm">Mensal</span>

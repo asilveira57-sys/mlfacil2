@@ -1,15 +1,12 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { auditLog } from '../_shared/audit-log.ts';
 
 const MP_API_URL = "https://api.mercadopago.com";
 
 Deno.serve(async (req) => {
+  // Webhooks don't need CORS but respond to any method
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { status: 200 });
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -21,192 +18,146 @@ Deno.serve(async (req) => {
     const body = await req.json();
     console.log("[Webhook] Received:", JSON.stringify(body));
 
-    // Mercado Pago sends different types of notifications
     const { type, data, action } = body;
 
-    // Payment notification
-    if (type === "payment" && data?.id) {
-      const paymentId = data.id;
-      
-      // Fetch payment details from MP API
-      const mpResponse = await fetch(`${MP_API_URL}/v1/payments/${paymentId}`, {
-        headers: {
-          "Authorization": `Bearer ${mpAccessToken}`,
-        },
+    // ─── PREAPPROVAL (subscription) notifications ───
+    if (type === "subscription_preapproval" && data?.id) {
+      const preapprovalId = data.id;
+
+      const mpRes = await fetch(`${MP_API_URL}/preapproval/${preapprovalId}`, {
+        headers: { Authorization: `Bearer ${mpAccessToken}` },
       });
 
-      if (!mpResponse.ok) {
-        console.error("[Webhook] Failed to fetch payment:", await mpResponse.text());
+      if (!mpRes.ok) {
+        console.error("[Webhook] Failed to fetch preapproval:", await mpRes.text());
         return new Response("OK", { status: 200 });
       }
 
-      const payment = await mpResponse.json();
-      console.log("[Webhook] Payment details:", {
+      const preapproval = await mpRes.json();
+      console.log("[Webhook] Preapproval:", {
+        id: preapproval.id,
+        status: preapproval.status,
+        preapproval_plan_id: preapproval.preapproval_plan_id,
+        payer_email: preapproval.payer_email,
+        external_reference: preapproval.external_reference,
+      });
+
+      // Parse external_reference: "tenant_id:plan_code"
+      const extRef = preapproval.external_reference || "";
+      const [tenantId, planCode] = extRef.split(":");
+
+      if (!tenantId || !planCode) {
+        console.error("[Webhook] Invalid external_reference:", extRef);
+        return new Response("OK", { status: 200 });
+      }
+
+      if (preapproval.status === "authorized") {
+        // Activate subscription
+        const { data: result, error } = await supabase.rpc("rpc_activate_subscription", {
+          p_tenant_id: tenantId,
+          p_plan_code: planCode,
+          p_mp_subscription_id: preapprovalId,
+        });
+
+        if (error) {
+          console.error("[Webhook] rpc_activate_subscription error:", error);
+        } else {
+          console.log("[Webhook] Subscription activated:", result);
+        }
+      } else if (preapproval.status === "cancelled") {
+        // Cancel subscription
+        const { data: result, error } = await supabase.rpc("rpc_cancel_subscription", {
+          p_tenant_id: tenantId,
+        });
+        console.log("[Webhook] Subscription canceled:", result, error);
+      } else if (preapproval.status === "paused") {
+        // Mark as past_due
+        await supabase
+          .from("tenant_subscription")
+          .update({ status: "past_due", updated_at: new Date().toISOString() })
+          .eq("tenant_id", tenantId);
+
+        await auditLog(supabase, {
+          level: "warn", area: "billing", action: "subscription_paused",
+          userId: null, success: true,
+          message: `Assinatura pausada para tenant ${tenantId}`,
+          meta: { tenant_id: tenantId, preapproval_id: preapprovalId },
+        });
+      }
+
+      return new Response("OK", { status: 200 });
+    }
+
+    // ─── PAYMENT notifications (one-time / preference) ───
+    if (type === "payment" && data?.id) {
+      const paymentId = data.id;
+
+      const mpRes = await fetch(`${MP_API_URL}/v1/payments/${paymentId}`, {
+        headers: { Authorization: `Bearer ${mpAccessToken}` },
+      });
+
+      if (!mpRes.ok) {
+        console.error("[Webhook] Failed to fetch payment:", await mpRes.text());
+        return new Response("OK", { status: 200 });
+      }
+
+      const payment = await mpRes.json();
+      console.log("[Webhook] Payment:", {
         id: payment.id,
         status: payment.status,
         external_reference: payment.external_reference,
       });
 
-      // Parse external_reference
-      let refData: {
-        user_id: string;
-        plan_price_id: string;
-        voucher_id?: string;
-        discount_cents?: number;
-      };
+      // Parse external_reference: "tenant_id:plan_code"
+      const extRef = payment.external_reference || "";
+      const [tenantId, planCode] = extRef.split(":");
 
-      try {
-        refData = JSON.parse(payment.external_reference || "{}");
-      } catch {
-        console.error("[Webhook] Invalid external_reference");
+      if (!tenantId || !planCode) {
+        console.error("[Webhook] Invalid external_reference:", extRef);
         return new Response("OK", { status: 200 });
       }
 
-      if (!refData.user_id || !refData.plan_price_id) {
-        console.error("[Webhook] Missing user_id or plan_price_id");
-        return new Response("OK", { status: 200 });
-      }
-
-      // Get plan price details
-      const { data: priceData } = await supabase
-        .from("plan_prices")
-        .select("*, plans(*)")
-        .eq("id", refData.plan_price_id)
-        .single();
-
-      if (!priceData) {
-        console.error("[Webhook] Plan price not found");
-        return new Response("OK", { status: 200 });
-      }
-
-      const plan = priceData.plans as any;
-
-      // Only process approved payments
       if (payment.status === "approved") {
-        const now = new Date();
-        const periodEnd = new Date(now);
-        periodEnd.setDate(periodEnd.getDate() + priceData.duration_days);
-
-        // Create or update subscription
-        const { data: existingSub } = await supabase
-          .from("subscriptions")
-          .select("id")
-          .eq("user_id", refData.user_id)
-          .single();
-
-        if (existingSub) {
-          // Update existing subscription
-          await supabase
-            .from("subscriptions")
-            .update({
-              plan_id: plan.id,
-              plan_price_id: priceData.id,
-              plan_type: plan.plan_type,
-              plan_name: plan.name,
-              plan_price_cents: priceData.price_cents,
-              status: "active",
-              billing_cycle: priceData.billing_cycle,
-              current_period_start: now.toISOString(),
-              current_period_end: periodEnd.toISOString(),
-              gateway: "mercadopago",
-              updated_at: now.toISOString(),
-            })
-            .eq("id", existingSub.id);
-          
-          console.log("[Webhook] Subscription updated:", existingSub.id);
-        } else {
-          // Create new subscription
-          const { data: newSub } = await supabase
-            .from("subscriptions")
-            .insert({
-              user_id: refData.user_id,
-              plan_id: plan.id,
-              plan_price_id: priceData.id,
-              plan_type: plan.plan_type,
-              plan_name: plan.name,
-              plan_price_cents: priceData.price_cents,
-              status: "active",
-              billing_cycle: priceData.billing_cycle,
-              current_period_start: now.toISOString(),
-              current_period_end: periodEnd.toISOString(),
-              gateway: "mercadopago",
-            })
-            .select()
-            .single();
-          
-          console.log("[Webhook] Subscription created:", newSub?.id);
-        }
-
-        // Record payment
-        await supabase.from("payments").insert({
-          user_id: refData.user_id,
-          voucher_id: refData.voucher_id || null,
-          amount_cents: priceData.price_cents,
-          discount_cents: refData.discount_cents || 0,
-          final_amount_cents: Math.round(payment.transaction_amount * 100),
-          mercadopago_payment_id: String(payment.id),
-          mercadopago_status: payment.status,
-          payment_method: payment.payment_type_id,
-          paid_at: now.toISOString(),
+        const { data: result, error } = await supabase.rpc("rpc_activate_subscription", {
+          p_tenant_id: tenantId,
+          p_plan_code: planCode,
+          p_mp_subscription_id: String(payment.id),
         });
 
-        // Update voucher usage if used
-        if (refData.voucher_id) {
-          await supabase.rpc("increment_voucher_usage", { voucher_id: refData.voucher_id });
+        if (error) {
+          console.error("[Webhook] rpc_activate_subscription error:", error);
+        } else {
+          console.log("[Webhook] Subscription activated via payment:", result);
         }
 
-        console.log("[Webhook] Payment recorded successfully");
-
-        // Schedule historical orders import (02:00 BRT next day)
+        // Schedule historical import for all accounts
         try {
-          const scheduledFor = new Date();
-          scheduledFor.setUTCHours(5, 0, 0, 0); // 02:00 BRT = 05:00 UTC
-          if (scheduledFor < new Date()) {
-            scheduledFor.setDate(scheduledFor.getDate() + 1);
+          const { data: accounts } = await supabase
+            .from("meli_accounts")
+            .select("meli_user_id")
+            .eq("tenant_id", tenantId)
+            .eq("status", "active");
+
+          for (const acc of accounts || []) {
+            await supabase.rpc("rpc_create_sync_job", {
+              p_tenant_id: tenantId,
+              p_module: "costs_orders_import",
+              p_scope: "last_12m",
+              p_metadata: { seller_id: acc.meli_user_id, trigger: "payment_confirmed" },
+            });
           }
-
-          // Get seller_id from user's ML accounts
-          const { data: mlAccounts } = await supabase
-            .from("ml_accounts")
-            .select("ml_user_id")
-            .eq("user_id", refData.user_id)
-            .eq("is_active", true);
-
-          for (const account of mlAccounts || []) {
-            // Check if there's already a pending/running job
-            const { data: existingJob } = await supabase
-              .from("orders_historical_sync_jobs")
-              .select("id")
-              .eq("seller_id", account.ml_user_id)
-              .in("status", ["pending", "running"])
-              .maybeSingle();
-
-            if (!existingJob) {
-              await supabase.from("orders_historical_sync_jobs").insert({
-                seller_id: account.ml_user_id,
-                user_id: refData.user_id,
-                job_type: "historical_365d",
-                status: "pending",
-                days_back: 365,
-                scheduled_for: scheduledFor.toISOString(),
-              });
-              console.log(`[Webhook] Scheduled historical import for ${account.ml_user_id} at ${scheduledFor.toISOString()}`);
-            }
-          }
-        } catch (histErr) {
-          console.error("[Webhook] Error scheduling historical import:", histErr);
+        } catch (e) {
+          console.error("[Webhook] Error scheduling historical import:", e);
         }
       }
 
       return new Response("OK", { status: 200 });
     }
 
-    // Just acknowledge other notification types
+    // Acknowledge other types
     return new Response("OK", { status: 200 });
-
   } catch (err) {
     console.error("[Webhook] Error:", err);
-    // Always return 200 to prevent MP from retrying
     return new Response("OK", { status: 200 });
   }
 });
