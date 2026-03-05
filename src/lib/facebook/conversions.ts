@@ -71,24 +71,16 @@ export async function sendConversionEvent(event: FacebookEventData): Promise<boo
     });
 
     if (error) {
-      // Non-critical tracking - silently handle all edge function errors
-      const msg = error instanceof Error ? error.message : String(error);
-      const isTransient = msg.includes('Service Unavailable') || 
-        msg.includes('BOOT_ERROR') || 
-        msg.includes('non-2xx status code') ||
-        (error as any)?.name === 'FunctionsHttpError';
-      if (isTransient) {
-        console.warn('[FB CAPI] Edge function error (non-critical), skipping:', msg);
-        return false;
-      }
-      console.error('[FB CAPI] Error:', error);
+      // Facebook tracking is non-critical — silently ignore ALL errors
+      console.warn('[FB CAPI] Edge function error (non-critical), skipping');
       return false;
     }
 
     console.log('[FB CAPI] Event sent successfully:', event.eventName, data);
     return true;
   } catch (error) {
-    console.error('[FB CAPI] Exception:', error);
+    // Facebook tracking is non-critical — silently ignore ALL errors
+    console.warn('[FB CAPI] Exception (non-critical), skipping');
     return false;
   }
 }
