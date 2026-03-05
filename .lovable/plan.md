@@ -1,51 +1,45 @@
 
 
-## Plano: Corrigir apagamento de dados de frete e destravar cálculo de custos
+## Plano: Botão "Importar 30 dias" + Remover Passo 2
 
-### Problema identificado
+### Contexto
+A aba Sincronização do módulo de Custos (`CostSettings.tsx`) possui hoje:
+- **Step 0**: Botão "Importar Pedidos (1 ano)" — chama `orders-historical-import` com `days_back: 365`
+- **Step 1**: Sincronizar Taxas (Billing) — `ml-sync-billing-details`
+- **Step 2**: Calcular Custos Reais — `ml-sync-real-costs` (causa sobreposição de dados)
 
-Tres processos estao sobrescrevendo dados de frete validos com zeros:
+### Alterações
 
-1. **`costs-nightly-sync` backfill** (linha 496-498): Faz `upsert` de registros com `cost_shipping: 0` para todos os pedidos, mesmo os que ja tinham frete real calculado. Esse e o culpado principal.
+#### 1. Adicionar botão "Importar Pedidos (30 dias)"
+**Arquivo: `src/components/custos/CostSettings.tsx`**
 
-2. **`ml-sync-real-costs` handleReset** (linha 144-163): Ao resetar, zera `shipping_cost_seller`, `cost_shipping` e todos os campos financeiros indiscriminadamente.
+- Criar `handleStartHistoricalImport30d` — igual ao existente mas com `days_back: 30`
+- Adicionar estado `startingHistorical30d` para loading independente
+- No Card do Step 0, adicionar um segundo botão "Importar Pedidos (30 dias)" ao lado do botão de 1 ano
+- O botão de 30 dias fica **sempre habilitado** (respeitando apenas loading e job running)
+- O botão de 1 ano fica **desabilitado** enquanto o usuário estiver em trial (sem assinatura paga)
 
-3. **`cost-engine` recalculo** (linha 910-921): Quando nao encontra billing e o breakdown existente ja foi zerado pelo backfill, perpetua os zeros.
+#### 2. Regra de habilitação do botão de 1 ano
+- Importar o hook `useUserAccessState` no componente
+- Ler `flags.has_active_subscription` para determinar se o usuário já pagou
+- Se `has_active_subscription === false`, desabilitar o botão de 1 ano e mostrar tooltip/texto: *"Disponível após ativação do plano"*
+- Se `has_active_subscription === true`, botão habilitado normalmente
 
-### Correcoes
-
-#### Arquivo 1: `supabase/functions/costs-nightly-sync/index.ts`
-
-**Mudanca**: Na funcao `processBackfill` (linha 496-498), trocar `upsert` por `upsert` com `ignoreDuplicates: true`. Assim o backfill so cria registros para pedidos que **nao tem** breakdown ainda, sem nunca sobrescrever dados existentes.
-
-```typescript
-// De:
-.upsert(records, { onConflict: 'seller_id,order_id' });
-// Para:
-.upsert(records, { onConflict: 'seller_id,order_id', ignoreDuplicates: true });
-```
-
-#### Arquivo 2: `supabase/functions/ml-sync-real-costs/index.ts`
-
-**Mudanca**: Na funcao `handleReset` (linha 144-163), remover o zeramento de `shipping_cost_seller` e `cost_shipping`. O reset so deve limpar campos de comissao/billing, nao frete que veio da API de envios.
-
-```typescript
-// Remover estas linhas do update:
-shipping_cost_seller: 0,
-cost_shipping: 0,
-```
-
-#### Arquivo 3: `supabase/functions/cost-engine/index.ts`
-
-**Mudanca**: No upsert de breakdowns (linha 987-992), adicionar guarda de protecao: antes de gravar, se o novo `cost_shipping` for 0 mas o registro existente tiver valor > 0, preservar o valor existente. Isso funciona como rede de seguranca contra qualquer regressao futura.
-
-Logica: buscar breakdowns existentes do batch antes do upsert, e para cada breakdown com `cost_shipping === 0`, verificar se o existente tem valor. Se sim, usar o valor existente.
+#### 3. Remover Passo 2 (Opção A)
+- Remover todo o bloco JSX do Card "Passo 2: Calcular Custos Reais" (linhas ~557-606)
+- Remover estados e funções relacionados que ficam órfãos:
+  - `realCostsState`, `coverage`, `backfillState`, `syncScope`
+  - `loadRealCostsStatus`, `loadBackfillState`
+  - `handleBackfillMissing`, `handleStartSync`, `handleContinueSync`, `handlePauseSync`, `handleResetSync`, `handleResetProgressOnly`
+  - `getStatusBadge`, `formatLastActivity`
+  - Variáveis derivadas: `progressPercent`, `isRunningOrPaused`, `canStart`, `allComplete`
+  - Dialogs de reset (`showResetConfirm`, `showResetProgressConfirm`)
+- Remover referências a `ml-sync-real-costs` do polling no `useEffect`
+- **Manter** o Passo 1 (Billing) intacto — ele é seguro e alimenta o cache de billing
 
 ### Resultado esperado
-
-- Backfill noturno nunca mais sobrescreve dados de frete
-- Reset manual nao apaga frete real
-- Cost-engine preserva frete existente quando nao tem billing novo
-- Os 1998 pedidos com "frete ausente" param de perder dados
-- Job de calculo consegue prosseguir sem encontrar dados zerados
+A aba Sincronização terá:
+1. **Importar Pedidos** — com dois botões: "30 dias" (sempre disponível) e "1 ano" (bloqueado em trial)
+2. **Passo 1: Sincronizar Taxas (Billing)** — mantido como está
+3. ~~Passo 2~~ — removido
 
