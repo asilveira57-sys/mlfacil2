@@ -15842,41 +15842,94 @@ export type Database = {
           },
         ]
       }
+      tenant_payments: {
+        Row: {
+          amount: number
+          created_at: string
+          currency: string
+          external_reference: string | null
+          id: string
+          paid_at: string | null
+          payment_id: string
+          provider: string
+          raw: Json | null
+          status: string
+          tenant_id: string
+        }
+        Insert: {
+          amount?: number
+          created_at?: string
+          currency?: string
+          external_reference?: string | null
+          id?: string
+          paid_at?: string | null
+          payment_id: string
+          provider?: string
+          raw?: Json | null
+          status?: string
+          tenant_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          currency?: string
+          external_reference?: string | null
+          id?: string
+          paid_at?: string | null
+          payment_id?: string
+          provider?: string
+          raw?: Json | null
+          status?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_payments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tenant_plans: {
         Row: {
           code: string
           created_at: string
+          display_name: string | null
           display_order: number
           id: string
           is_active: boolean
           is_enterprise: boolean
-          max_sales_30d: number | null
+          max_orders_30d: number | null
           mercado_pago_plan_id: string | null
-          min_sales_30d: number
+          min_orders_30d: number
           name: string
         }
         Insert: {
           code: string
           created_at?: string
+          display_name?: string | null
           display_order?: number
           id?: string
           is_active?: boolean
           is_enterprise?: boolean
-          max_sales_30d?: number | null
+          max_orders_30d?: number | null
           mercado_pago_plan_id?: string | null
-          min_sales_30d?: number
+          min_orders_30d?: number
           name: string
         }
         Update: {
           code?: string
           created_at?: string
+          display_name?: string | null
           display_order?: number
           id?: string
           is_active?: boolean
           is_enterprise?: boolean
-          max_sales_30d?: number | null
+          max_orders_30d?: number | null
           mercado_pago_plan_id?: string | null
-          min_sales_30d?: number
+          min_orders_30d?: number
           name?: string
         }
         Relationships: []
@@ -15887,7 +15940,12 @@ export type Database = {
           current_period_end: string | null
           current_period_start: string | null
           id: string
+          last_payment_external_reference: string | null
+          last_payment_id: string | null
+          payment_approved_at: string | null
           payment_confirmed_at: string | null
+          payment_method: string | null
+          payment_provider: string | null
           plan_id: string
           status: string
           tenant_id: string
@@ -15902,7 +15960,12 @@ export type Database = {
           current_period_end?: string | null
           current_period_start?: string | null
           id?: string
+          last_payment_external_reference?: string | null
+          last_payment_id?: string | null
+          payment_approved_at?: string | null
           payment_confirmed_at?: string | null
+          payment_method?: string | null
+          payment_provider?: string | null
           plan_id: string
           status?: string
           tenant_id: string
@@ -15917,7 +15980,12 @@ export type Database = {
           current_period_end?: string | null
           current_period_start?: string | null
           id?: string
+          last_payment_external_reference?: string | null
+          last_payment_id?: string | null
+          payment_approved_at?: string | null
           payment_confirmed_at?: string | null
+          payment_method?: string | null
+          payment_provider?: string | null
           plan_id?: string
           status?: string
           tenant_id?: string

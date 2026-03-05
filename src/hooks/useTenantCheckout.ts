@@ -6,9 +6,9 @@ export interface TenantPlan {
   id: string;
   code: string;
   name: string;
-  min_sales_30d: number;
-  max_sales_30d: number | null;
-  mercado_pago_plan_id: string | null;
+  display_name: string | null;
+  min_orders_30d: number;
+  max_orders_30d: number | null;
   is_enterprise: boolean;
   display_order: number;
 }
