@@ -6,6 +6,8 @@ import { User } from "@supabase/supabase-js";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { SalesDashboard } from "@/components/SalesDashboard";
 import { ActivationSpeedometer } from "@/components/dashboard/ActivationSpeedometer";
+import { PlanLimitBanner } from "@/components/access/PlanLimitBanner";
+import { useTenantLimits } from "@/hooks/useTenantLimits";
 import { DashboardModulesGrid } from "@/components/dashboard/DashboardModulesGrid";
 import { DashboardOnboarding } from "@/components/dashboard/DashboardOnboarding";
 import { DashboardReconnectingState } from "@/components/dashboard/DashboardReconnectingState";
@@ -13,6 +15,12 @@ import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { useToast } from "@/hooks/use-toast";
 import { useModuleFeedbackIntegration } from "@/hooks/useModuleFeedbackIntegration";
 import { FeedbackPromptCard } from "@/components/feedback";
+
+function DashboardPlanLimitSection({ companyId }: { companyId?: string | null }) {
+  const { limitCheck, loading } = useTenantLimits(companyId || undefined);
+  if (loading || !limitCheck) return null;
+  return <PlanLimitBanner limitCheck={limitCheck} />;
+}
 
 const Dashboard = () => {
   const { t } = useTranslation();
@@ -131,6 +139,7 @@ const Dashboard = () => {
           // Connected and ready
           <>
             <ActivationSpeedometer />
+            <DashboardPlanLimitSection companyId={activeAccount?.companyId} />
             <SalesDashboard />
             <DashboardModulesGrid />
             {feedback.ready && (
