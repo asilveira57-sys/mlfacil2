@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { logSyncEvent } from "../_shared/sync-audit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -87,6 +88,12 @@ Deno.serve(async (req) => {
         .maybeSingle();
 
       if (existingJob) {
+        await logSyncEvent(supabase, {
+          action: 'sync_skipped',
+          entityType: 'orders_sync',
+          entityId: existingJob.id,
+          metadata: { module: 'orders_sync', scope: 'last_12m', error_message: 'Job already in progress' },
+        });
         return new Response(JSON.stringify({ ok: false, error: "Job already in progress", job_id: existingJob.id }), {
           status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -429,6 +436,37 @@ Deno.serve(async (req) => {
 
         console.log(`[historical-import] Job ${job_id} COMPLETED: ${totalProcessed} orders`);
 
+        // Audit: sync_finished
+        await logSyncEvent(supabase, {
+          action: 'sync_finished',
+          entityType: 'orders_sync',
+          entityId: job_id,
+          userId: account.user_id,
+          metadata: {
+            module: 'orders_sync',
+            scope: 'last_12m',
+            job_id,
+            seller_id: job.seller_id,
+            orders_imported: totalProcessed,
+            finished_at: new Date().toISOString(),
+          },
+        });
+
+        // Gap 18: Reevaluate tenant limits
+        try {
+          const { data: mlAcc } = await supabase
+            .from('ml_accounts')
+            .select('company_id')
+            .eq('ml_user_id', job.seller_id)
+            .maybeSingle();
+          if (mlAcc?.company_id) {
+            await supabase.rpc('rpc_compute_sales_30d', { p_tenant_id: mlAcc.company_id });
+            console.log(`[historical-import] Computed sales 30d for tenant ${mlAcc.company_id}`);
+          }
+        } catch (err) {
+          console.warn('[historical-import] Failed to reevaluate tenant limits:', err);
+        }
+
         // Trigger billing sync after completion
         try {
           await fetch(`${SUPABASE_URL}/functions/v1/ml-sync-billing-details`, {
@@ -501,6 +539,11 @@ Deno.serve(async (req) => {
 
   } catch (err) {
     console.error("[historical-import] Fatal error:", err);
+    await logSyncEvent(supabase, {
+      action: 'sync_failed',
+      entityType: 'orders_sync',
+      metadata: { module: 'orders_sync', scope: 'last_12m', error_message: String(err) },
+    });
     return new Response(JSON.stringify({ ok: false, error: String(err) }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

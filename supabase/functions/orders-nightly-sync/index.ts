@@ -1,6 +1,7 @@
 // @ts-nocheck - Deno types not available in build context
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { logSyncEvent, syncStartTimer, syncDuration } from "../_shared/sync-audit.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -83,9 +84,15 @@ serve(async (req) => {
   const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
   try {
-    console.log(`[nightly-sync] Starting at ${new Date().toISOString()}`);
+    const timer = syncStartTimer();
+    console.log(`[nightly-sync] Starting at ${timer.startedAt}`);
 
-    // Process pending historical import jobs
+    await logSyncEvent(supabaseAdmin, {
+      action: 'sync_started',
+      entityType: 'orders_sync',
+      entityId: JOB_NAME,
+      metadata: { module: 'orders_sync', scope: 'nightly_30d', started_at: timer.startedAt },
+    });
     try {
       const { data: pendingJobs } = await supabaseAdmin
         .from("orders_historical_sync_jobs")
@@ -138,6 +145,12 @@ serve(async (req) => {
       const lockExpires = new Date(scheduler.lock_expires_at);
       if (lockExpires > new Date()) {
         console.log('[nightly-sync] Job is already running, skipping');
+        await logSyncEvent(supabaseAdmin, {
+          action: 'sync_skipped',
+          entityType: 'orders_sync',
+          entityId: JOB_NAME,
+          metadata: { module: 'orders_sync', scope: 'nightly_30d', error_message: 'Job already running' },
+        });
         return new Response(JSON.stringify({ 
           status: 'skipped', 
           reason: 'Job already running',
@@ -413,7 +426,7 @@ serve(async (req) => {
     }
 
     // Update scheduler with completion
-    const duration = Date.now() - startTime;
+    const duration = syncDuration(timer.startMs);
     stats.finished_at = new Date().toISOString();
     stats.duration_ms = duration;
 
@@ -422,13 +435,50 @@ serve(async (req) => {
       .update({
         status: 'idle',
         last_run_at: new Date().toISOString(),
-        next_run_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // Next day
+        next_run_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         lock_expires_at: null,
         locked_by: null,
         stats: stats,
         error_message: stats.accounts_failed > 0 ? `${stats.accounts_failed} accounts failed` : null,
       })
       .eq('job_name', JOB_NAME);
+
+    // Audit: sync_finished
+    await logSyncEvent(supabaseAdmin, {
+      action: 'sync_finished',
+      entityType: 'orders_sync',
+      entityId: JOB_NAME,
+      metadata: {
+        module: 'orders_sync',
+        scope: 'nightly_30d',
+        started_at: timer.startedAt,
+        finished_at: stats.finished_at,
+        duration_ms: duration,
+        orders_imported: stats.total_orders,
+        items_synced: stats.total_items,
+        accounts_processed: stats.accounts_processed,
+        accounts_failed: stats.accounts_failed,
+      },
+    });
+
+    // Gap 18: Reevaluate tenant limits after order sync
+    try {
+      const { data: allAccounts } = await supabaseAdmin
+        .from('ml_accounts')
+        .select('company_id')
+        .eq('is_active', true);
+      const tenantIds = [...new Set((allAccounts || []).map(a => a.company_id).filter(Boolean))];
+      for (const tenantId of tenantIds) {
+        try {
+          await supabaseAdmin.rpc('rpc_compute_sales_30d', { p_tenant_id: tenantId });
+          console.log(`[nightly-sync] Computed sales 30d for tenant ${tenantId}`);
+        } catch (err) {
+          console.warn(`[nightly-sync] Failed to compute sales for tenant ${tenantId}:`, err);
+        }
+      }
+    } catch (err) {
+      console.warn('[nightly-sync] Failed to reevaluate tenant limits:', err);
+    }
 
     console.log(`[nightly-sync] Completed in ${duration}ms:`, stats);
 
@@ -441,6 +491,13 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('[nightly-sync] Fatal error:', error);
+
+    await logSyncEvent(supabaseAdmin, {
+      action: 'sync_failed',
+      entityType: 'orders_sync',
+      entityId: JOB_NAME,
+      metadata: { module: 'orders_sync', scope: 'nightly_30d', error_message: String(error) },
+    });
 
     // Release lock on error
     await supabaseAdmin

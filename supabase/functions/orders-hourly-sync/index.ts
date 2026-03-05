@@ -1,6 +1,7 @@
 // @ts-nocheck - Deno types not available in build context
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { logSyncEvent, syncStartTimer, syncDuration } from "../_shared/sync-audit.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -82,9 +83,16 @@ serve(async (req) => {
   const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
   try {
-    console.log(`[hourly-sync] Starting at ${new Date().toISOString()}`);
+    const timer = syncStartTimer();
+    console.log(`[hourly-sync] Starting at ${timer.startedAt}`);
 
-    // Check and acquire lock
+    // Audit: sync_started
+    await logSyncEvent(supabaseAdmin, {
+      action: 'sync_started',
+      entityType: 'orders_sync',
+      entityId: JOB_NAME,
+      metadata: { module: 'orders_sync', scope: 'hourly_48h', started_at: timer.startedAt },
+    });
     const { data: scheduler, error: fetchError } = await supabaseAdmin
       .from('sync_scheduler')
       .select('*')
@@ -104,6 +112,12 @@ serve(async (req) => {
       const lockExpires = new Date(scheduler.lock_expires_at);
       if (lockExpires > new Date()) {
         console.log('[hourly-sync] Job is already running, skipping');
+        await logSyncEvent(supabaseAdmin, {
+          action: 'sync_skipped',
+          entityType: 'orders_sync',
+          entityId: JOB_NAME,
+          metadata: { module: 'orders_sync', scope: 'hourly_48h', error_message: 'Job already running' },
+        });
         return new Response(JSON.stringify({ 
           status: 'skipped', 
           reason: 'Job already running' 
@@ -332,7 +346,7 @@ serve(async (req) => {
     }
 
     // Update scheduler
-    const duration = Date.now() - startTime;
+    const duration = syncDuration(timer.startMs);
     stats.finished_at = new Date().toISOString();
     stats.duration_ms = duration;
 
@@ -349,6 +363,43 @@ serve(async (req) => {
       })
       .eq('job_name', JOB_NAME);
 
+    // Audit: sync_finished
+    await logSyncEvent(supabaseAdmin, {
+      action: 'sync_finished',
+      entityType: 'orders_sync',
+      entityId: JOB_NAME,
+      metadata: {
+        module: 'orders_sync',
+        scope: 'hourly_48h',
+        started_at: timer.startedAt,
+        finished_at: stats.finished_at,
+        duration_ms: duration,
+        orders_imported: stats.total_orders,
+        items_synced: stats.total_items,
+        accounts_processed: stats.accounts_processed,
+        accounts_failed: stats.accounts_failed,
+      },
+    });
+
+    // Gap 18: Reevaluate tenant limits after order sync
+    try {
+      const { data: allAccounts } = await supabaseAdmin
+        .from('ml_accounts')
+        .select('company_id')
+        .eq('is_active', true);
+      const tenantIds = [...new Set((allAccounts || []).map(a => a.company_id).filter(Boolean))];
+      for (const tenantId of tenantIds) {
+        try {
+          await supabaseAdmin.rpc('rpc_compute_sales_30d', { p_tenant_id: tenantId });
+          console.log(`[hourly-sync] Computed sales 30d for tenant ${tenantId}`);
+        } catch (err) {
+          console.warn(`[hourly-sync] Failed to compute sales for tenant ${tenantId}:`, err);
+        }
+      }
+    } catch (err) {
+      console.warn('[hourly-sync] Failed to reevaluate tenant limits:', err);
+    }
+
     console.log(`[hourly-sync] Completed in ${duration}ms:`, stats);
 
     return new Response(JSON.stringify({
@@ -360,6 +411,14 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('[hourly-sync] Fatal error:', error);
+
+    // Audit: sync_failed
+    await logSyncEvent(supabaseAdmin, {
+      action: 'sync_failed',
+      entityType: 'orders_sync',
+      entityId: JOB_NAME,
+      metadata: { module: 'orders_sync', scope: 'hourly_48h', error_message: String(error) },
+    });
 
     await supabaseAdmin
       .from('sync_scheduler')

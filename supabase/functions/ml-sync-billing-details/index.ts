@@ -2,6 +2,7 @@
 // Force clean redeploy v4 - fix Deno.core.runMicrotasks error
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { assertMlApiAccess } from "../_shared/ml-api-gate.ts";
+import { logSyncEvent, syncStartTimer, syncDuration } from "../_shared/sync-audit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -168,8 +169,17 @@ async function handleReset(supabase: any, userId: string, sellerId: string, cors
 }
 
 async function handleSync(supabase: any, userId: string, sellerId: string, scope: string, corsHeaders: any) {
-  const startTime = Date.now();
+  const timer = syncStartTimer();
+  const startTime = timer.startMs; // alias for runtime checks
   console.log(`[BillingDetails] Starting sync for seller ${sellerId}, scope: ${scope}`);
+
+  await logSyncEvent(supabase, {
+    action: 'sync_started',
+    userId,
+    entityType: 'billing_sync',
+    entityId: sellerId,
+    metadata: { module: 'billing_sync', scope, seller_id: sellerId, started_at: timer.startedAt },
+  });
 
   // Get or create sync state
   let { data: syncState } = await supabase
@@ -502,6 +512,23 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
       processed_periods: allPeriods.length,
     });
 
+    await logSyncEvent(supabase, {
+      action: 'sync_finished',
+      userId,
+      entityType: 'billing_sync',
+      entityId: sellerId,
+      metadata: {
+        module: 'billing_sync',
+        scope,
+        seller_id: sellerId,
+        started_at: timer.startedAt,
+        finished_at: new Date().toISOString(),
+        duration_ms: syncDuration(timer.startMs),
+        billing_rows: totalInserted,
+        pages_processed: periodsProcessed,
+      },
+    });
+
     console.log(`[BillingDetails] Sync complete. Periods: ${periodsProcessed}/${allPeriods.length}, Records: ${totalInserted}`);
 
     return new Response(JSON.stringify({
@@ -518,6 +545,13 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
     console.error(`[BillingDetails] Error:`, err);
     const message = err instanceof Error ? err.message : "Unknown error";
     await updateSyncState(supabase, sellerId, { status: "error", last_error: message });
+    await logSyncEvent(supabase, {
+      action: 'sync_failed',
+      userId,
+      entityType: 'billing_sync',
+      entityId: sellerId,
+      metadata: { module: 'billing_sync', scope, seller_id: sellerId, error_message: message },
+    });
     return new Response(JSON.stringify({ error: message }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
