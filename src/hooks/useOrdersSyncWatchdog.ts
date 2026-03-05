@@ -32,23 +32,21 @@ export function useOrdersSyncWatchdog(sellerId: string | null, enabled: boolean)
       // Get the most recent completed orders sync job
       const { data: lastJob } = await supabase
         .from("sync_jobs")
-        .select("completed_at, status")
-        .eq("seller_id", sellerId)
-        .eq("job_type", "orders")
-        .eq("status", "done")
-        .order("completed_at", { ascending: false })
+        .select("finished_at, status")
+        .eq("module", "costs_orders_import")
+        .eq("status", "success")
+        .order("finished_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      stateRef.current.lastSyncAt = lastJob?.completed_at || null;
+      stateRef.current.lastSyncAt = (lastJob as any)?.finished_at || null;
 
       // Check if there's a running sync job
       const { data: runningJob } = await supabase
         .from("sync_jobs")
         .select("id")
-        .eq("seller_id", sellerId)
-        .eq("job_type", "orders")
-        .in("status", ["pending", "processing"])
+        .eq("module", "costs_orders_import")
+        .in("status", ["queued", "running"])
         .limit(1)
         .maybeSingle();
 

@@ -419,9 +419,8 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       const { data: lastShipmentSync } = await supabase
         .from('sync_jobs')
         .select('created_at')
-        .eq('seller_id', sellerId)
-        .eq('job_type', 'shipments')
-        .eq('status', 'done')
+        .eq('module', 'labels_orders_list')
+        .eq('status', 'success')
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -456,25 +455,28 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       
       const { data: job } = await supabase
         .from('sync_jobs')
-        .select('status, processed_records, total_records')
+        .select('status, metadata')
         .eq('id', jobId)
         .maybeSingle();
       
       if (!job) continue;
+      const meta = (job.metadata as Record<string, unknown>) || {};
+      const procRec = (meta.processed_records as number) || 0;
+      const totRec = (meta.total_records as number) || 0;
       
-      if (job.status === 'done') {
-        console.log(`Job ${jobId} completed: ${job.processed_records}/${job.total_records}`);
+      if (job.status === 'success') {
+        console.log(`Job ${jobId} completed: ${procRec}/${totRec}`);
         return true;
       }
       
-      if (job.status === 'error') {
+      if (job.status === 'failed') {
         console.error(`Job ${jobId} failed`);
         return false;
       }
       
       // Update progress
-      if (!silent && job.total_records && job.processed_records) {
-        setSyncProgress(`${job.processed_records}/${job.total_records}`);
+      if (!silent && totRec && procRec) {
+        setSyncProgress(`${procRec}/${totRec}`);
       }
     }
     
@@ -1062,8 +1064,8 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       const { data: lastJob } = await supabase
         .from('sync_jobs')
         .select('created_at')
-        .eq('seller_id', sellerId)
-        .eq('status', 'done')
+        .eq('module', 'labels_orders_list')
+        .eq('status', 'success')
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();

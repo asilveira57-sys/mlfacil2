@@ -47,8 +47,11 @@ import {
 interface SyncJob {
   id: string;
   status: string;
-  total_records: number;
-  processed_records: number;
+  metadata: {
+    total_records?: number;
+    processed_records?: number;
+    [key: string]: unknown;
+  };
 }
 
 interface SyncDebugInfo {
@@ -252,7 +255,7 @@ const Home = () => {
     const poll = async () => {
       const { data, error } = await supabase
         .from('sync_jobs')
-        .select('id, status, total_records, processed_records')
+        .select('id, status, metadata')
         .eq('id', jobId)
         .maybeSingle();
 
@@ -261,16 +264,17 @@ const Home = () => {
         return;
       }
 
-      setSyncJob(data);
+      setSyncJob(data as unknown as SyncJob);
 
-      if (data.status === 'done') {
+      if (data.status === 'success') {
         setIsSyncing(false);
+        const meta = (data.metadata as Record<string, unknown>) || {};
         toast({
           title: "Sincronização concluída",
-          description: `${data.processed_records} pedidos sincronizados`,
+          description: `${(meta.processed_records as number) || 0} pedidos sincronizados`,
         });
         fetchSyncDebugInfo();
-      } else if (data.status === 'error') {
+      } else if (data.status === 'failed') {
         setIsSyncing(false);
         toast({
           title: "Erro na sincronização",
@@ -285,9 +289,9 @@ const Home = () => {
     poll();
   }, [toast, fetchSyncDebugInfo]);
 
-  const syncProgress = syncJob && syncJob.total_records > 0 
-    ? (syncJob.processed_records / syncJob.total_records) * 100 
-    : 0;
+  const totalRec = (syncJob?.metadata?.total_records as number) || 0;
+  const processedRec = (syncJob?.metadata?.processed_records as number) || 0;
+  const syncProgress = totalRec > 0 ? (processedRec / totalRec) * 100 : 0;
 
   const headerContent = useMemo(() => (
     <div className="flex items-center gap-2">
@@ -390,7 +394,7 @@ const Home = () => {
                         Sincronizando...
                       </span>
                       <span className="text-muted-foreground">
-                        {syncJob.processed_records} / {syncJob.total_records}
+                        {processedRec} / {totalRec}
                       </span>
                     </div>
                     <Progress value={syncProgress} className="h-2" />
