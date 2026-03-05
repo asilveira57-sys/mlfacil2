@@ -15848,9 +15848,10 @@ export type Database = {
           created_at: string
           id: string
           is_active: boolean
+          is_enterprise: boolean
           max_sales_30d: number | null
+          mercado_pago_plan_id: string | null
           min_sales_30d: number
-          monthly_price_cents: number
           name: string
         }
         Insert: {
@@ -15858,9 +15859,10 @@ export type Database = {
           created_at?: string
           id?: string
           is_active?: boolean
+          is_enterprise?: boolean
           max_sales_30d?: number | null
+          mercado_pago_plan_id?: string | null
           min_sales_30d?: number
-          monthly_price_cents?: number
           name: string
         }
         Update: {
@@ -15868,9 +15870,10 @@ export type Database = {
           created_at?: string
           id?: string
           is_active?: boolean
+          is_enterprise?: boolean
           max_sales_30d?: number | null
+          mercado_pago_plan_id?: string | null
           min_sales_30d?: number
-          monthly_price_cents?: number
           name?: string
         }
         Relationships: []
@@ -18336,6 +18339,10 @@ export type Database = {
         Args: { p_quote_id: string; p_tenant_id: string }
         Returns: Json
       }
+      rpc_check_downgrade_allowed: {
+        Args: { p_tenant_id: string; p_to_plan_id: string }
+        Returns: Json
+      }
       rpc_compute_sales_30d: { Args: { p_tenant_id: string }; Returns: Json }
       rpc_compute_trial_eligibility: {
         Args: { p_tenant_id: string }
@@ -18353,6 +18360,26 @@ export type Database = {
       rpc_create_upgrade_quote: {
         Args: { p_tenant_id: string; p_to_plan_id: string }
         Returns: Json
+      }
+      rpc_get_compatible_plans: {
+        Args: { p_sales_30d: number }
+        Returns: {
+          code: string
+          created_at: string
+          id: string
+          is_active: boolean
+          is_enterprise: boolean
+          max_sales_30d: number | null
+          mercado_pago_plan_id: string | null
+          min_sales_30d: number
+          name: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "tenant_plans"
+          isOneToOne: false
+          isSetofReturn: true
+        }
       }
       rpc_get_required_plan: {
         Args: { p_sales_30d_total: number }

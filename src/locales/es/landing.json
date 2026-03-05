@@ -280,20 +280,20 @@
     "per_month": "/mes",
     "most_popular": "Más popular",
     "plan_names": {
-      "ate-50-vendas": "Hasta 50 ventas",
-      "51-300-vendas": "51 a 300 ventas",
-      "301-700-vendas": "301 a 700 ventas",
-      "701-1500-vendas": "701 a 1500 ventas",
-      "1501-3000-vendas": "1501 a 3000 ventas",
-      "acima-3000-vendas": "Más de 3000 ventas"
+      "ate-50": "Hasta 50 pedidos",
+      "51-300": "51 a 300 pedidos",
+      "301-700": "301 a 700 pedidos",
+      "701-1500": "701 a 1500 pedidos",
+      "1501-3000": "1501 a 3000 pedidos",
+      "acima-3000": "Más de 3000 pedidos"
     },
     "plan_descriptions": {
-      "ate-50-vendas": "Ideal para principiantes",
-      "51-300-vendas": "Para vendedores en crecimiento",
-      "301-700-vendas": "Para negocios consolidados",
-      "701-1500-vendas": "Para operaciones medianas",
-      "1501-3000-vendas": "Para alto volumen de ventas",
-      "acima-3000-vendas": "Para operaciones enterprise"
+      "ate-50": "Ideal para principiantes",
+      "51-300": "Para vendedores en crecimiento",
+      "301-700": "Para negocios consolidados",
+      "701-1500": "Para operaciones medianas",
+      "1501-3000": "Para alto volumen de ventas",
+      "acima-3000": "Para operaciones enterprise"
     },
     "plan_features": {
       "dashboard_completo": "Dashboard completo",
