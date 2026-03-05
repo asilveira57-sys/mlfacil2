@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { format, subDays } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
+import { useUserAccess } from '@/contexts/UserAccessContext';
+import { TrialModuleGate } from '@/components/access/TrialModuleGate';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -74,6 +76,8 @@ const periodDays: Record<string, number> = {
 export default function Publicidade() {
   const navigate = useNavigate();
   const { sellerId, activeAccount, loading: accountLoading, initialized } = useActiveAccount();
+  const { flags, trialActive } = useUserAccess();
+  const isTrial = trialActive && !flags?.has_active_subscription;
   const feedback = useModuleFeedbackIntegration('gestao-anuncios');
   const [workspaceId, setWorkspaceId] = useState<string>();
   const [filters, setFilters] = useState<AdsFilterState>({});
@@ -281,6 +285,11 @@ export default function Publicidade() {
       subtitle="Analytics e inteligência de campanhas publicitárias"
       headerContent={headerContent}
     >
+      <TrialModuleGate
+        feature="Sincronização de campanhas ADS"
+        message="Durante o período de teste, a sincronização de campanhas ADS está desativada. Dados já importados continuam visíveis. Ative seu plano para sincronizar automaticamente."
+        soft
+      >
       <div className="p-4 lg:p-6 space-y-6">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <div className="flex items-center justify-between flex-wrap gap-4">
@@ -634,6 +643,7 @@ export default function Publicidade() {
           />
         )}
       </div>
+      </TrialModuleGate>
     </PageContainer>
   );
 }

@@ -230,8 +230,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     
     switch (periodFilter) {
       case 'all':
-        // "Todos" - no date limit, fetch everything
-        return { dateFrom: null, dateTo: null };
+        // Cap to 30 days max — shipping labels only deal with recent open orders
+        dateFrom = startOfDay(subDays(nowBrasilia, 30));
+        dateTo = endOfDay(nowBrasilia);
+        break;
       case 'today_sales': {
         // "Hoje" (vendas) - filter by created_at_meli of current day
         const todayStart = startOfDay(nowBrasilia);
