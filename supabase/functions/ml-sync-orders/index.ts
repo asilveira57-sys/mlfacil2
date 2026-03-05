@@ -489,6 +489,86 @@ async function processOrdersInBackground(
 
     console.log(`[Job ${jobId}] Sync complete: ${processed} orders, ${allOrderItems.length} items`);
 
+    // ====== ENRICH MISSING BUYER NAMES ======
+    // The search API sometimes doesn't return buyer.first_name/last_name
+    // Fetch individual order details for orders missing buyer_name
+    try {
+      const { data: ordersMissingBuyer } = await supabaseAdmin
+        .from('meli_orders_cache')
+        .select('order_id')
+        .eq('seller_id', sellerId)
+        .is('buyer_name', null)
+        .not('order_status', 'eq', 'cancelled')
+        .order('created_at_meli', { ascending: false })
+        .limit(50);
+
+      if (ordersMissingBuyer && ordersMissingBuyer.length > 0) {
+        console.log(`[Job ${jobId}] Enriching buyer names for ${ordersMissingBuyer.length} orders...`);
+        let enriched = 0;
+
+        for (const row of ordersMissingBuyer) {
+          try {
+            const resp = await fetch(`https://api.mercadolibre.com/orders/${row.order_id}`, {
+              headers: { Authorization: `Bearer ${accessToken}` },
+            });
+            if (resp.ok) {
+              const detail = await resp.json();
+              const buyerName = detail.buyer?.first_name && detail.buyer?.last_name
+                ? `${detail.buyer.first_name} ${detail.buyer.last_name}`.trim()
+                : detail.buyer?.nickname || null;
+              if (buyerName) {
+                await supabaseAdmin
+                  .from('meli_orders_cache')
+                  .update({ buyer_name: buyerName, buyer_nickname: detail.buyer?.nickname || null })
+                  .eq('seller_id', sellerId)
+                  .eq('order_id', row.order_id);
+                enriched++;
+              }
+            } else if (resp.status === 429) {
+              console.log(`[Job ${jobId}] Rate limited during buyer enrichment, stopping`);
+              break;
+            }
+            await sleep(200); // Rate limit: 5 req/s
+          } catch { /* skip */ }
+        }
+        console.log(`[Job ${jobId}] Enriched ${enriched}/${ordersMissingBuyer.length} buyer names`);
+      }
+    } catch (enrichErr) {
+      console.warn(`[Job ${jobId}] Buyer enrichment error (non-fatal):`, enrichErr);
+    }
+
+    // ====== AUTO-TRIGGER BILLING & COST SYNC ======
+    // This ensures billing data is populated without relying on client-side watchdog
+    try {
+      console.log(`[Job ${jobId}] Triggering billing sync...`);
+      const billingResp = await supabaseAdmin.functions.invoke('ml-sync-billing-details', {
+        body: { seller_id: sellerId, action: 'sync', scope: 'recent' },
+      });
+      if (billingResp.error) {
+        console.warn(`[Job ${jobId}] Billing sync error:`, billingResp.error);
+      } else {
+        console.log(`[Job ${jobId}] Billing sync triggered successfully`);
+      }
+
+      // Wait for billing to process before triggering cost backfill
+      await sleep(3000);
+
+      console.log(`[Job ${jobId}] Triggering cost backfill...`);
+      await supabaseAdmin.functions.invoke('ml-sync-real-costs', {
+        body: { seller_id: sellerId, action: 'backfill_missing' },
+      });
+
+      await sleep(2000);
+
+      // Reprocess pending orders that now have billing data
+      await supabaseAdmin.functions.invoke('ml-sync-real-costs', {
+        body: { seller_id: sellerId, action: 'reprocess_pending' },
+      });
+      console.log(`[Job ${jobId}] Cost sync pipeline completed`);
+    } catch (syncErr) {
+      console.warn(`[Job ${jobId}] Post-sync billing/cost error (non-fatal):`, syncErr);
+    }
+
     // Mark job as done
     await supabaseAdmin.from('sync_jobs').update({
       status: 'done',
