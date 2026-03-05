@@ -85,7 +85,7 @@ const Consultoria = () => {
 
   // TODO: Replace with actual Mercado Pago payment links
   const handlePackageClick = (packageKey: string) => {
-    const whatsappNumber = "5511999999999"; // Replace with actual number
+    const whatsappNumber = "5527997622425";
     const message = encodeURIComponent(`Olá! Tenho interesse no pacote de consultoria: ${packageKey}`);
     window.open(`https://wa.me/${whatsappNumber}?text=${message}`, '_blank');
   };
@@ -286,9 +286,11 @@ const Consultoria = () => {
                   size="lg"
                   variant="outline"
                   className="text-base px-8 py-6 bg-transparent border-primary-foreground/30 text-primary-foreground hover:bg-primary-foreground/10"
-                  onClick={() => navigate("/")}
+                  asChild
                 >
-                  {t('cta.btn_secondary')}
+                  <a href="https://www.mktpfacil.com/contato">
+                    {t('cta.btn_secondary')}
+                  </a>
                 </Button>
               </div>
             </div>

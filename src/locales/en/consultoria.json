@@ -32,7 +32,7 @@
     "basic": {
       "name": "Express Diagnosis",
       "description": "Quick analysis of your operation with practical recommendations.",
-      "price": "$60",
+      "price": "Custom pricing",
       "duration": "1 session of 1h30",
       "features": [
         "Complete ML account analysis",
@@ -47,7 +47,7 @@
       "name": "Strategic Mentoring",
       "badge": "Most popular",
       "description": "Intensive follow-up to transform your results.",
-      "price": "$180",
+      "price": "Custom pricing",
       "duration": "4 sessions of 1h (monthly)",
       "features": [
         "Everything in Express Diagnosis",
