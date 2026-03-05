@@ -32,7 +32,7 @@
     "basic": {
       "name": "Diagnóstico Express",
       "description": "Análisis rápido de tu operación con recomendaciones prácticas.",
-      "price": "USD 60",
+      "price": "Bajo consulta",
       "duration": "1 sesión de 1h30",
       "features": [
         "Análisis completo de la cuenta ML",
@@ -47,7 +47,7 @@
       "name": "Mentoría Estratégica",
       "badge": "Más popular",
       "description": "Seguimiento intensivo para transformar tus resultados.",
-      "price": "USD 180",
+      "price": "Bajo consulta",
       "duration": "4 sesiones de 1h (mensual)",
       "features": [
         "Todo del Diagnóstico Express",
