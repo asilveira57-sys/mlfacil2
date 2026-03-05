@@ -34,12 +34,12 @@ import type { Plan, PlanPrice } from "@/types/billing";
 
 // Tier definitions matching DB slugs
 const VOLUME_TIERS = [
-  { slug: "ate-50-vendas", label: "Até 50 pedidos/mês", desc: "Ideal para quem está começando no marketplace." },
-  { slug: "51-300-vendas", label: "51 a 300 pedidos/mês", desc: "Para operações em crescimento com volume moderado." },
-  { slug: "301-700-vendas", label: "301 a 700 pedidos/mês", desc: "Operações consolidadas com bom volume de vendas." },
-  { slug: "701-1500-vendas", label: "701 a 1.500 pedidos/mês", desc: "Sellers de alto volume com operação robusta." },
-  { slug: "1501-3000-vendas", label: "1.501 a 3.000 pedidos/mês", desc: "Grandes operações com volume intenso." },
-  { slug: "acima-3000-vendas", label: "Acima de 3.000 pedidos/mês", desc: "Volume enterprise. Entre em contato." },
+  { slug: "ate-50", label: "Até 50 pedidos/mês", desc: "Ideal para quem está começando no marketplace." },
+  { slug: "51-300", label: "51 a 300 pedidos/mês", desc: "Para operações em crescimento com volume moderado." },
+  { slug: "301-700", label: "301 a 700 pedidos/mês", desc: "Operações consolidadas com bom volume de vendas." },
+  { slug: "701-1500", label: "701 a 1.500 pedidos/mês", desc: "Sellers de alto volume com operação robusta." },
+  { slug: "1501-3000", label: "1.501 a 3.000 pedidos/mês", desc: "Grandes operações com volume intenso." },
+  { slug: "acima-3000", label: "Acima de 3.000 pedidos/mês", desc: "Volume enterprise. Entre em contato.", isEnterprise: true },
 ];
 
 const INCLUDED_FEATURES = [
@@ -268,7 +268,7 @@ const Planos = () => {
                 const plan = volumePlans.find((p) => p.slug === tier.slug);
                 const tooSmall = isAuthenticated && plan && isPlanTooSmall(plan.slug, totalSales30d);
                 const isSelected = selectedTierSlug === tier.slug;
-                const isConsulta = tier.slug === "acima-3000-vendas";
+                const isConsulta = (tier as any).isEnterprise === true;
 
                 return (
                   <div

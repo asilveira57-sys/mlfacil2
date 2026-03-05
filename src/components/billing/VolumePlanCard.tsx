@@ -27,7 +27,7 @@ export function VolumePlanCard({
   onCheckout, 
   checkoutLoading 
 }: VolumePlanCardProps) {
-  const isPopular = plan.slug === '51-300-vendas' || plan.slug === '301-700-vendas';
+  const isPopular = plan.slug === '51-300' || plan.slug === '301-700';
   
   // Convert selected period to internal format and find price
   const internalPeriod = periodMap[selectedPeriod] || 'mensal';

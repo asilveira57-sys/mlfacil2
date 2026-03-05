@@ -13,12 +13,12 @@ interface SalesVolumeData {
  * Order matters: first match wins (ascending).
  */
 const PLAN_THRESHOLDS: { slug: string; maxSales: number }[] = [
-  { slug: 'ate-50-vendas', maxSales: 50 },
-  { slug: '51-300-vendas', maxSales: 300 },
-  { slug: '301-700-vendas', maxSales: 700 },
-  { slug: '701-1500-vendas', maxSales: 1500 },
-  { slug: '1501-3000-vendas', maxSales: 3000 },
-  { slug: 'acima-3000-vendas', maxSales: Infinity },
+  { slug: 'ate-50', maxSales: 50 },
+  { slug: '51-300', maxSales: 300 },
+  { slug: '301-700', maxSales: 700 },
+  { slug: '701-1500', maxSales: 1500 },
+  { slug: '1501-3000', maxSales: 3000 },
+  { slug: 'acima-3000', maxSales: Infinity },
 ];
 
 function getMinimumPlanSlug(totalSales: number): string | null {
@@ -26,7 +26,7 @@ function getMinimumPlanSlug(totalSales: number): string | null {
   for (const tier of PLAN_THRESHOLDS) {
     if (totalSales <= tier.maxSales) return tier.slug;
   }
-  return 'acima-3000-vendas';
+  return 'acima-3000';
 }
 
 /**
