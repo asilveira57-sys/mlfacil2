@@ -11,16 +11,15 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { RefreshCw, DollarSign, Package, Play, Pause, RotateCcw, AlertCircle, Clock, Loader2, Database, FileText, AlertTriangle, Zap, CheckCircle2, FastForward, Plus, Pencil, Trash2, Receipt, Download } from "lucide-react";
+import { RefreshCw, DollarSign, Package, Play, Pause, RotateCcw, AlertCircle, Clock, Loader2, Database, FileText, AlertTriangle, Zap, CheckCircle2, FastForward, Plus, Pencil, Trash2, Receipt, Download, Lock } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { useUserAccess } from "@/contexts/UserAccessContext";
 
 interface CostSettingsProps { sellerId: string; }
 
-interface RealCostsSyncState { status: string; processed: number; total: number; cursor_offset: number; scope_days: number | null; last_error: string | null; last_heartbeat_at: string | null; stats_json: { billing?: number; pending?: number; with_shipping?: number } | null; }
-interface BackfillSyncState { status: string; cursor_offset: number; total_orders: number; processed_orders: number; with_billing: number; last_heartbeat_at: string | null; }
-interface CoverageStats { total_paid: number; with_real_billing: number; with_pending_billing: number; total_processed: number; coverage_percent: number; }
 interface BillingSyncState { status: string; scope: string | null; periods_offset: number; total_periods: number; processed_periods: number; last_error: string | null; last_heartbeat_at: string | null; }
 interface BillingStatus { total_details: number; unique_orders_with_billing: number; unique_shipments_with_billing?: number; periods_count?: number; oldest_period: string | null; newest_period: string | null; last_sync_at: string | null; sync_state?: BillingSyncState | null; }
 
@@ -31,21 +30,13 @@ const STATES = ['AC','AL','AM','AP','BA','CE','DF','ES','GO','MA','MG','MS','MT'
 
 export function CostSettings({ sellerId }: CostSettingsProps) {
   const [loading, setLoading] = useState(true);
-  const [realCostsState, setRealCostsState] = useState<RealCostsSyncState | null>(null);
-  const [backfillState, setBackfillState] = useState<BackfillSyncState | null>(null);
-  const [coverage, setCoverage] = useState<CoverageStats & { missing_breakdown?: number }>({ total_paid: 0, with_real_billing: 0, with_pending_billing: 0, total_processed: 0, coverage_percent: 0 });
   const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null);
-  const [syncScope, setSyncScope] = useState<string>("all");
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const [showResetProgressConfirm, setShowResetProgressConfirm] = useState(false);
   const [syncingBilling, setSyncingBilling] = useState(false);
-  const [backfilling, setBackfilling] = useState(false);
-  const [autoSyncEnabled, setAutoSyncEnabled] = useState(() => localStorage.getItem("cost_watchdog_enabled") !== "false");
-  const [currentAutoStep, setCurrentAutoStep] = useState<string | null>(null);
 
   // Historical import state
   const [historicalJob, setHistoricalJob] = useState<any>(null);
   const [startingHistorical, setStartingHistorical] = useState(false);
+  const [startingHistorical30d, setStartingHistorical30d] = useState(false);
 
   // Packaging V2 state
   const [packagingList, setPackagingList] = useState<PackagingType[]>([]);
@@ -63,34 +54,23 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastBillingScope = useRef<string>("history");
 
-  useEffect(() => { localStorage.setItem("cost_watchdog_seller_id", sellerId); window.dispatchEvent(new Event("cost_watchdog_update")); }, [sellerId]);
-  useEffect(() => { localStorage.setItem("cost_watchdog_enabled", autoSyncEnabled ? "true" : "false"); window.dispatchEvent(new Event("cost_watchdog_update")); }, [autoSyncEnabled]);
+  // Access control
+  const { flags } = useUserAccess();
+  const hasActiveSubscription = flags?.has_active_subscription ?? false;
 
   useEffect(() => {
-    loadRealCostsStatus();
     loadBillingStatus();
-    loadBackfillState();
     loadPackaging();
     loadTaxConfig();
     loadHistoricalJobStatus();
     setLoading(false);
 
-    pollIntervalRef.current = setInterval(() => { loadRealCostsStatus(); loadBillingStatus(); loadBackfillState(); loadHistoricalJobStatus(); }, 3000);
+    pollIntervalRef.current = setInterval(() => { loadBillingStatus(); loadHistoricalJobStatus(); }, 3000);
     return () => { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); };
   }, [sellerId]);
 
-  useEffect(() => {
-    const billingSyncState = billingStatus?.sync_state;
-    if (billingSyncState?.status === 'running' || billingSyncState?.status === 'paused') setCurrentAutoStep("billing");
-    else if (backfillState?.status === 'running' || backfillState?.status === 'paused') setCurrentAutoStep("backfill");
-    else if (realCostsState?.status === 'running' || realCostsState?.status === 'paused') setCurrentAutoStep("realcosts");
-    else setCurrentAutoStep(null);
-  }, [billingStatus, backfillState, realCostsState, coverage]);
-
   // ---- Loaders ----
-  const loadRealCostsStatus = async () => { try { const { data } = await supabase.functions.invoke("ml-sync-real-costs", { body: { seller_id: sellerId, action: "status" } }); if (data?.state) setRealCostsState(data.state); if (data?.coverage) setCoverage(data.coverage); } catch {} };
   const loadBillingStatus = async () => { try { const { data } = await supabase.functions.invoke("ml-sync-billing-details", { body: { seller_id: sellerId, action: "status" } }); if (data) setBillingStatus(data); } catch {} };
-  const loadBackfillState = async () => { try { const { data } = await supabase.from("meli_backfill_sync_state" as any).select("*").eq("seller_id", sellerId).maybeSingle(); if (data) setBackfillState(data as any); } catch {} };
 
   const loadHistoricalJobStatus = async () => {
     try {
@@ -115,6 +95,24 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
       toast.error("Erro ao iniciar importação: " + (err?.message || "Erro"));
     } finally {
       setStartingHistorical(false);
+    }
+  };
+
+  const handleStartHistoricalImport30d = async () => {
+    setStartingHistorical30d(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("orders-historical-import", { body: { seller_id: sellerId, action: "start", days_back: 30 } });
+      if (error) throw error;
+      if (data?.ok) {
+        toast.success("Importação dos últimos 30 dias iniciada!");
+        loadHistoricalJobStatus();
+      } else {
+        toast.error(data?.error || "Erro ao iniciar importação");
+      }
+    } catch (err: any) {
+      toast.error("Erro ao iniciar importação: " + (err?.message || "Erro"));
+    } finally {
+      setStartingHistorical30d(false);
     }
   };
 
@@ -146,7 +144,6 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     } catch {} finally { setTaxLoading(false); }
   };
 
-  // ---- Packaging actions ----
   const handleSavePackaging = async () => {
     setSavingPackaging(true);
     try {
@@ -173,7 +170,6 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     } catch {}
   };
 
-  // ---- Tax actions ----
   const handleSaveTax = async () => {
     setSavingTax(true);
     try {
@@ -188,7 +184,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     } catch { toast.error('Erro ao salvar impostos'); } finally { setSavingTax(false); }
   };
 
-  // ---- Sync actions (same as before) ----
+  // ---- Sync actions ----
   const handleSyncBilling = async (scope: string = "recent") => {
     setSyncingBilling(true); lastBillingScope.current = scope;
     try {
@@ -199,33 +195,6 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
       else toast.success(`Billing sincronizado: ${data?.records_inserted || 0} registros`);
       loadBillingStatus();
     } catch (err: any) { toast.error("Erro ao sincronizar billing: " + (err?.message || "Erro")); } finally { setSyncingBilling(false); }
-  };
-
-  const handleBackfillMissing = async () => {
-    setBackfilling(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("ml-sync-real-costs", { body: { seller_id: sellerId, action: "backfill_missing", scope_days: syncScope === "all" ? null : parseInt(syncScope) } });
-      if (error) throw error;
-      toast.success(data?.message || "Backfill concluído");
-      loadRealCostsStatus(); loadBackfillState();
-    } catch (err: any) { toast.error("Erro no backfill"); } finally { setBackfilling(false); }
-  };
-
-  const handleStartSync = async () => { try { await supabase.functions.invoke("ml-sync-real-costs", { body: { seller_id: sellerId, action: "start", scope_days: syncScope === "all" ? null : parseInt(syncScope) } }); toast.success("Sincronização iniciada"); loadRealCostsStatus(); } catch { toast.error("Erro"); } };
-  const handleContinueSync = async (forceResume = false) => { try { const { data } = await supabase.functions.invoke("ml-sync-real-costs", { body: { seller_id: sellerId, action: "continue", force_resume: forceResume } }); if (data?.message?.includes("complete")) toast.success("Concluída!"); loadRealCostsStatus(); } catch {} };
-  const handlePauseSync = async () => { setAutoSyncEnabled(false); try { await supabase.functions.invoke("ml-sync-real-costs", { body: { seller_id: sellerId, action: "pause" } }); toast.info("Pausado"); loadRealCostsStatus(); } catch {} };
-  const handleResetSync = async () => { try { await supabase.functions.invoke("ml-sync-real-costs", { body: { seller_id: sellerId, action: "reset" } }); await supabase.from("meli_backfill_sync_state" as any).delete().eq("seller_id", sellerId); toast.success("Resetado"); setRealCostsState(null); setBackfillState(null); setShowResetConfirm(false); loadRealCostsStatus(); } catch {} };
-  const handleResetProgressOnly = async () => { try { await supabase.from("meli_real_costs_sync_state" as any).delete().eq("seller_id", sellerId); await supabase.from("meli_backfill_sync_state" as any).delete().eq("seller_id", sellerId); await supabase.from("meli_billing_details_sync_state" as any).delete().eq("seller_id", sellerId); toast.success("Progresso resetado"); setRealCostsState(null); setBackfillState(null); setShowResetProgressConfirm(false); loadRealCostsStatus(); loadBillingStatus(); loadBackfillState(); } catch {} };
-
-  const getStatusBadge = () => {
-    if (!realCostsState) return <Badge variant="secondary">Não iniciado</Badge>;
-    switch (realCostsState.status) {
-      case 'running': return <Badge className="bg-blue-500 text-white animate-pulse">Processando</Badge>;
-      case 'paused': return <Badge variant="outline" className="border-yellow-500 text-yellow-600">Pausado</Badge>;
-      case 'done': return <Badge className="bg-green-500 text-white">Concluído</Badge>;
-      case 'error': return <Badge variant="destructive">Erro</Badge>;
-      default: return <Badge variant="secondary">Aguardando</Badge>;
-    }
   };
 
   const getBillingSyncBadge = () => {
@@ -239,50 +208,17 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
     }
   };
 
-  const formatLastActivity = () => {
-    if (!realCostsState?.last_heartbeat_at) return null;
-    const diff = Date.now() - new Date(realCostsState.last_heartbeat_at).getTime();
-    if (diff < 60000) return "agora";
-    if (diff < 3600000) return `há ${Math.floor(diff / 60000)} min`;
-    return `há ${Math.floor(diff / 3600000)}h`;
-  };
-
   if (loading) return <div className="space-y-4"><Skeleton className="h-48 w-full" /><Skeleton className="h-48 w-full" /></div>;
 
-  const progressPercent = realCostsState?.total > 0 ? Math.round((realCostsState.processed / realCostsState.total) * 100) : 0;
-  const isRunningOrPaused = realCostsState?.status === 'running' || realCostsState?.status === 'paused';
-  const canStart = !realCostsState || realCostsState.status === 'idle' || realCostsState.status === 'done' || realCostsState.status === 'error';
   const billingSyncState = billingStatus?.sync_state;
   const billingProgress = billingSyncState?.total_periods > 0 ? Math.round((billingSyncState.processed_periods / billingSyncState.total_periods) * 100) : 0;
   const isBillingSyncing = billingSyncState?.status === 'running' || billingSyncState?.status === 'paused';
-  const allComplete = (coverage.missing_breakdown || 0) === 0 && coverage.with_real_billing > 0 && coverage.with_real_billing >= coverage.total_paid * 0.9;
+  const isJobRunning = historicalJob?.status === "running";
 
   const totalTaxPercent = taxConfig.das_icms_percent + taxConfig.pis_percent + taxConfig.cofins_percent + taxConfig.irpj_percent + taxConfig.csll_percent;
 
   return (
     <div className="space-y-6">
-      {/* Auto-Sync Banner */}
-      <Card className={autoSyncEnabled ? "border-2 border-green-500/30 bg-green-50/30 dark:bg-green-900/10" : ""}>
-        <CardContent className="py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Zap className={`h-5 w-5 ${autoSyncEnabled ? 'text-green-500' : 'text-muted-foreground'}`} />
-              <div>
-                <p className="font-medium">Sincronização Automática</p>
-                <p className="text-sm text-muted-foreground">
-                  {autoSyncEnabled ? (currentAutoStep ? (currentAutoStep === 'billing' ? 'Sincronizando billing...' : currentAutoStep === 'backfill' ? 'Criando registros...' : 'Calculando custos...') : (allComplete ? "✓ Completo!" : "Monitorando")) : "Pausado"}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              {currentAutoStep && autoSyncEnabled && <Loader2 className="h-4 w-4 animate-spin text-green-500" />}
-              {allComplete && autoSyncEnabled && <CheckCircle2 className="h-5 w-5 text-green-500" />}
-              <Switch checked={autoSyncEnabled} onCheckedChange={setAutoSyncEnabled} />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* TABS: Embalagens | Impostos | Sincronização */}
       <Tabs defaultValue="packaging" className="w-full">
         <TabsList className="grid w-full grid-cols-3">
@@ -447,8 +383,8 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="flex items-center gap-2"><Download className="h-5 w-5" />Importar Pedidos (1 ano)</CardTitle>
-                  <CardDescription>Importa o histórico completo de pedidos do Mercado Livre (até 365 dias)</CardDescription>
+                  <CardTitle className="flex items-center gap-2"><Download className="h-5 w-5" />Importar Pedidos</CardTitle>
+                  <CardDescription>Importa o histórico de pedidos do Mercado Livre</CardDescription>
                 </div>
                 {historicalJob?.status === "running" && <Badge className="bg-blue-500 text-white animate-pulse">Importando</Badge>}
                 {historicalJob?.status === "done" && <Badge className="bg-green-500 text-white">Concluído</Badge>}
@@ -492,19 +428,51 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
                   <span className="text-destructive">{historicalJob.error_message}</span>
                 </div>
               )}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* 30 days button — always enabled */}
                 <Button
-                  onClick={handleStartHistoricalImport}
-                  disabled={startingHistorical || historicalJob?.status === "running"}
+                  onClick={handleStartHistoricalImport30d}
+                  disabled={startingHistorical30d || isJobRunning}
                   className="gap-2"
+                  variant="outline"
                 >
-                  {startingHistorical || historicalJob?.status === "running" ? (
+                  {startingHistorical30d || isJobRunning ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <Download className="h-4 w-4" />
                   )}
-                  {historicalJob?.status === "done" ? "Reimportar Pedidos (1 ano)" : "Importar Pedidos (1 ano)"}
+                  Importar Pedidos (30 dias)
                 </Button>
+
+                {/* 1 year button — disabled during trial */}
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex">
+                        <Button
+                          onClick={handleStartHistoricalImport}
+                          disabled={startingHistorical || isJobRunning || !hasActiveSubscription}
+                          className="gap-2"
+                        >
+                          {startingHistorical || isJobRunning ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : !hasActiveSubscription ? (
+                            <Lock className="h-4 w-4" />
+                          ) : (
+                            <Download className="h-4 w-4" />
+                          )}
+                          {historicalJob?.status === "done" ? "Reimportar Pedidos (1 ano)" : "Importar Pedidos (1 ano)"}
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    {!hasActiveSubscription && (
+                      <TooltipContent>
+                        <p>Disponível após ativação do plano</p>
+                      </TooltipContent>
+                    )}
+                  </Tooltip>
+                </TooltipProvider>
+
                 {historicalJob?.status === "done" && (
                   <span className="text-sm text-muted-foreground">
                     ✓ {historicalJob.processed_orders?.toLocaleString()} pedidos importados
@@ -553,57 +521,6 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
               </div>
             </CardContent>
           </Card>
-
-          {/* Step 2: Calculate */}
-          <Card className="border-2 border-primary/20">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><DollarSign className="h-5 w-5" />Passo 2: Calcular Custos Reais</CardTitle>
-              <CardDescription>Cruza billing com pedidos para calcular custo total</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
-                <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800"><p className="text-2xl font-bold text-green-600">{coverage.with_real_billing.toLocaleString()}</p><p className="text-xs text-green-700 dark:text-green-400">Com Taxa Real</p></div>
-                <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800"><p className="text-2xl font-bold text-amber-600">{coverage.with_pending_billing.toLocaleString()}</p><p className="text-xs text-amber-700 dark:text-amber-400">Pendente</p></div>
-                <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800"><p className="text-2xl font-bold text-red-600">{(coverage.missing_breakdown || 0).toLocaleString()}</p><p className="text-xs text-red-700 dark:text-red-400">Sem Registro</p></div>
-                <div className="p-3 bg-muted rounded-lg"><p className="text-2xl font-bold">{coverage.total_paid.toLocaleString()}</p><p className="text-xs text-muted-foreground">Total Pedidos</p></div>
-                <div className="p-3 bg-muted rounded-lg"><p className="text-2xl font-bold">{coverage.coverage_percent}%</p><p className="text-xs text-muted-foreground">Cobertura Real</p></div>
-              </div>
-              {(coverage.missing_breakdown || 0) > 0 && (
-                <div className="flex items-center justify-between p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                  <div className="flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-red-600" /><span className="text-sm text-red-700 dark:text-red-300"><strong>{coverage.missing_breakdown?.toLocaleString()}</strong> pedidos sem registro de custo</span></div>
-                  <Button onClick={handleBackfillMissing} disabled={backfilling || backfillState?.status === 'running'} size="sm" variant="outline" className="gap-2 border-red-300 text-red-700 hover:bg-red-100">
-                    {backfilling ? <Loader2 className="h-3 w-3 animate-spin" /> : null}Criar Registros
-                  </Button>
-                </div>
-              )}
-              <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
-                <div><p className="text-sm font-medium">Status</p><p className="text-xs text-muted-foreground">{coverage.total_processed.toLocaleString()} processados</p></div>
-                {getStatusBadge()}
-              </div>
-              {isRunningOrPaused && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm"><span>Progresso</span><span className="font-medium">{progressPercent}%</span></div>
-                  <Progress value={progressPercent} className="h-2" />
-                </div>
-              )}
-              {formatLastActivity() && <p className="text-xs text-muted-foreground text-right">Última atividade: {formatLastActivity()}</p>}
-              {canStart && (
-                <div className="flex items-center gap-4">
-                  <Label className="text-sm">Escopo:</Label>
-                  <Select value={syncScope} onValueChange={setSyncScope}><SelectTrigger className="w-48"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">Todos os pedidos</SelectItem><SelectItem value="60">Últimos 60 dias</SelectItem><SelectItem value="90">Últimos 90 dias</SelectItem><SelectItem value="180">Últimos 180 dias</SelectItem></SelectContent></Select>
-                </div>
-              )}
-              <div className="flex flex-wrap gap-2">
-                {canStart && <Button onClick={handleStartSync} className="gap-2"><Play className="h-4 w-4" />Calcular Custos Reais</Button>}
-                {realCostsState?.status === 'running' && <Button variant="outline" onClick={handlePauseSync} className="gap-2"><Pause className="h-4 w-4" />Pausar</Button>}
-                {realCostsState?.status === 'paused' && !autoSyncEnabled && (
-                  <><Button onClick={() => handleContinueSync(false)} className="gap-2"><Play className="h-4 w-4" />Continuar</Button><Button variant="outline" onClick={() => handleContinueSync(true)} className="gap-2"><RefreshCw className="h-4 w-4" />Forçar</Button></>
-                )}
-                {isRunningOrPaused && <Button variant="ghost" onClick={() => setShowResetConfirm(true)} className="gap-2 text-destructive hover:text-destructive"><RotateCcw className="h-4 w-4" />Resetar</Button>}
-                {realCostsState?.status === 'done' && <Button variant="outline" onClick={handleStartSync} className="gap-2"><RefreshCw className="h-4 w-4" />Recalcular</Button>}
-              </div>
-            </CardContent>
-          </Card>
         </TabsContent>
       </Tabs>
 
@@ -628,25 +545,6 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Reset Dialogs */}
-      <AlertDialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>Resetar sincronização?</AlertDialogTitle><AlertDialogDescription>Apaga todo o progresso e custos calculados.</AlertDialogDescription></AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <Button variant="outline" onClick={() => { setShowResetConfirm(false); setShowResetProgressConfirm(true); }}>Resetar Apenas Progresso</Button>
-            <AlertDialogAction onClick={handleResetSync} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Resetar Tudo</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={showResetProgressConfirm} onOpenChange={setShowResetProgressConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>Resetar apenas progresso?</AlertDialogTitle><AlertDialogDescription>Os custos calculados serão mantidos.</AlertDialogDescription></AlertDialogHeader>
-          <AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={handleResetProgressOnly}>Resetar Progresso</AlertDialogAction></AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
