@@ -52,11 +52,13 @@
 6. ✅ Linha do Tempo: banner de trial informando limitação a 30d
 7. ✅ Etiquetas: filtro "Todos" agora capped a 30 dias
 
-### Fase 3 — Multi-conta e upgrade
-8. Multi-conta: soma de vendas
-9. Estados de conta (active/pending_upgrade)
-10. Upgrade com pró-rata
-11. Crescimento natural → bloqueio
+### Fase 3 — Multi-conta e upgrade ✅
+8. ✅ Multi-conta: soma de vendas (get_tenant_total_sales + check_tenant_plan_limit)
+9. ✅ Estados de conta (account_state enum: active/pending_upgrade/disabled/error)
+10. ✅ Upgrade com pró-rata (calculate_prorata_upgrade + execute_plan_upgrade)
+11. ✅ Crescimento natural → bloqueio (PlanLimitBanner + useTenantLimits)
+12. ✅ Aviso pré-conexão de nova conta (AccountConnectionWarning)
+13. ✅ Audit log (tenant_limit_log)
 
 ### Fase 4 — Landing e onboarding
 12. Revisar landing (3 CTAs)

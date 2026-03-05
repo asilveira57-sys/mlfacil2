@@ -286,8 +286,8 @@ export default function Publicidade() {
       headerContent={headerContent}
     >
       <TrialModuleGate
-        feature="Sincronização de campanhas ADS"
-        message="Durante o período de teste, a sincronização de campanhas ADS está desativada. Dados já importados continuam visíveis. Ative seu plano para sincronizar automaticamente."
+        feature="Histórico de campanhas ADS"
+        message="Durante o período de teste, o módulo ADS exibe dados dos últimos 30 dias. Ative seu plano para acessar o histórico completo e sincronização automática."
         soft
       >
       <div className="p-4 lg:p-6 space-y-6">

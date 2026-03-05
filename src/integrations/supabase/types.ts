@@ -6795,14 +6795,17 @@ export type Database = {
         Row: {
           access_token: string | null
           account_label: string
+          account_state: Database["public"]["Enums"]["account_state"] | null
           company_id: string
           created_at: string | null
           external_user_id: string | null
           id: string
           is_active: boolean | null
+          last_sales_check_at: string | null
           last_sync_at: string | null
           provider: string
           refresh_token: string | null
+          sales_30d: number | null
           status: string
           token_expires_at: string | null
           updated_at: string | null
@@ -6810,14 +6813,17 @@ export type Database = {
         Insert: {
           access_token?: string | null
           account_label: string
+          account_state?: Database["public"]["Enums"]["account_state"] | null
           company_id: string
           created_at?: string | null
           external_user_id?: string | null
           id?: string
           is_active?: boolean | null
+          last_sales_check_at?: string | null
           last_sync_at?: string | null
           provider?: string
           refresh_token?: string | null
+          sales_30d?: number | null
           status?: string
           token_expires_at?: string | null
           updated_at?: string | null
@@ -6825,14 +6831,17 @@ export type Database = {
         Update: {
           access_token?: string | null
           account_label?: string
+          account_state?: Database["public"]["Enums"]["account_state"] | null
           company_id?: string
           created_at?: string | null
           external_user_id?: string | null
           id?: string
           is_active?: boolean | null
+          last_sales_check_at?: string | null
           last_sync_at?: string | null
           provider?: string
           refresh_token?: string | null
+          sales_30d?: number | null
           status?: string
           token_expires_at?: string | null
           updated_at?: string | null
@@ -15592,6 +15601,48 @@ export type Database = {
           },
         ]
       }
+      tenant_limit_log: {
+        Row: {
+          account_id: string | null
+          company_id: string
+          created_at: string | null
+          details: Json | null
+          event_type: string
+          id: string
+        }
+        Insert: {
+          account_id?: string | null
+          company_id: string
+          created_at?: string | null
+          details?: Json | null
+          event_type: string
+          id?: string
+        }
+        Update: {
+          account_id?: string | null
+          company_id?: string
+          created_at?: string | null
+          details?: Json | null
+          event_type?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_limit_log_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "marketplace_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_limit_log_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       testimonial_candidates: {
         Row: {
           admin_notes: string | null
@@ -17554,6 +17605,10 @@ export type Database = {
           units_sold: number
         }[]
       }
+      calculate_prorata_upgrade: {
+        Args: { p_company_id: string; p_new_plan_id: string }
+        Returns: Json
+      }
       can_edit_tasks: {
         Args: { _user_id: string; _workspace_id: string }
         Returns: boolean
@@ -17572,6 +17627,7 @@ export type Database = {
         Returns: boolean
       }
       check_snoozed_notifications: { Args: never; Returns: undefined }
+      check_tenant_plan_limit: { Args: { p_company_id: string }; Returns: Json }
       count_orders_needing_cost_sync: {
         Args: { p_seller_id: string }
         Returns: {
@@ -17588,6 +17644,10 @@ export type Database = {
         }[]
       }
       ensure_workspace: { Args: { p_user_id: string }; Returns: Json }
+      execute_plan_upgrade: {
+        Args: { p_company_id: string; p_new_plan_id: string }
+        Returns: Json
+      }
       generate_blog_slug: { Args: { title: string }; Returns: string }
       generate_category_slug: { Args: { name: string }; Returns: string }
       generate_retrospective_snapshot: {
@@ -17713,6 +17773,15 @@ export type Database = {
         }
         Returns: Json
       }
+      get_tenant_total_sales: {
+        Args: { p_company_id: string }
+        Returns: {
+          accounts_count: number
+          accounts_detail: Json
+          total_revenue_30d: number
+          total_sales_30d: number
+        }[]
+      }
       get_user_feature_flags: { Args: { p_user_id: string }; Returns: Json }
       get_user_full_context: { Args: { p_user_id: string }; Returns: Json }
       get_user_menu: {
@@ -17799,6 +17868,10 @@ export type Database = {
         }
         Returns: string
       }
+      on_account_connected_check_limit: {
+        Args: { p_account_id: string; p_company_id: string }
+        Returns: Json
+      }
       register_system_log: {
         Args: {
           p_action: string
@@ -17883,6 +17956,7 @@ export type Database = {
       }
     }
     Enums: {
+      account_state: "active" | "pending_upgrade" | "disabled" | "error"
       app_role: "admin" | "seller"
       billing_cycle: "monthly" | "quarterly" | "semiannual" | "annual"
       email_campaign_status:
@@ -18131,6 +18205,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      account_state: ["active", "pending_upgrade", "disabled", "error"],
       app_role: ["admin", "seller"],
       billing_cycle: ["monthly", "quarterly", "semiannual", "annual"],
       email_campaign_status: [
