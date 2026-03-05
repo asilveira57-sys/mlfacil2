@@ -60,7 +60,7 @@ export function LandingHero() {
             ))}
           </div>
 
-          {/* CTAs */}
+          {/* CTAs — 3 buttons */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-12">
             <Button
               size="lg"
@@ -73,6 +73,17 @@ export function LandingHero() {
             <Button
               size="lg"
               variant="outline"
+              className="text-base px-8 py-6 gap-2"
+              onClick={() => {
+                const el = document.querySelector("#planos");
+                if (el) el.scrollIntoView({ behavior: "smooth" });
+              }}
+            >
+              {t('hero.cta_plans', 'Ver planos')}
+            </Button>
+            <Button
+              size="lg"
+              variant="ghost"
               className="text-base px-8 py-6 gap-2"
               onClick={() => {
                 const el = document.querySelector("#como-funciona") || document.querySelector("#demo");

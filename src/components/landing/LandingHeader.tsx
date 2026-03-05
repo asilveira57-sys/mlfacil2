@@ -86,7 +86,7 @@ export function LandingHeader() {
             ))}
           </nav>
 
-          {/* Desktop CTAs */}
+          {/* Desktop CTAs — Login, Cadastro, Planos */}
           <div className="hidden md:flex items-center gap-3">
             <LanguageSwitcher variant="compact" />
             <Button 
@@ -95,8 +95,20 @@ export function LandingHeader() {
             >
               {t('header.btn_entrar')}
             </Button>
-            <Button onClick={() => navigate("/auth")}>
+            <Button 
+              variant="outline"
+              onClick={() => navigate("/auth?tab=signup")}
+            >
               {t('header.btn_criar_conta')}
+            </Button>
+            <Button 
+              onClick={() => {
+                const el = document.querySelector("#planos");
+                if (el) el.scrollIntoView({ behavior: "smooth" });
+                else navigate("/#planos");
+              }}
+            >
+              {t('header.menu_planos', 'Planos')}
             </Button>
           </div>
 
@@ -126,15 +138,26 @@ export function LandingHeader() {
                     <LanguageSwitcher variant="full" />
                   </div>
                   <Button 
-                    variant="outline" 
+                    variant="ghost" 
                     onClick={() => { navigate("/auth"); setMobileMenuOpen(false); }}
                   >
                     {t('header.btn_entrar')}
                   </Button>
                   <Button 
-                    onClick={() => { navigate("/auth"); setMobileMenuOpen(false); }}
+                    variant="outline" 
+                    onClick={() => { navigate("/auth?tab=signup"); setMobileMenuOpen(false); }}
                   >
                     {t('header.btn_criar_conta')}
+                  </Button>
+                  <Button 
+                    onClick={() => { 
+                      const el = document.querySelector("#planos");
+                      if (el) el.scrollIntoView({ behavior: "smooth" });
+                      else navigate("/#planos");
+                      setMobileMenuOpen(false); 
+                    }}
+                  >
+                    {t('header.menu_planos', 'Planos')}
                   </Button>
                 </div>
               </div>
