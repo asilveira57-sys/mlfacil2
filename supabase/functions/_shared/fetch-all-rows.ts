@@ -14,17 +14,31 @@ const PAGE_SIZE = 1000;
  *   supabase.from('orders').select('*').eq('seller_id', sellerId)
  * );
  */
-export async function fetchAllRows<T = any>(baseQuery: any): Promise<T[]> {
+export async function fetchAllRows<T = any>(baseQuery: any, maxRetries = 2): Promise<T[]> {
   const allData: T[] = [];
   let from = 0;
   let hasMore = true;
 
   while (hasMore) {
-    const { data, error } = await baseQuery.range(from, from + PAGE_SIZE - 1);
+    let lastError: any = null;
+    let data: T[] | null = null;
 
-    if (error) {
-      console.error('[fetchAllRows] Error:', error);
-      throw error;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const { data: d, error } = await baseQuery.range(from, from + PAGE_SIZE - 1);
+      if (!error) {
+        data = d;
+        lastError = null;
+        break;
+      }
+      lastError = error;
+      const errMsg = typeof error === 'object' ? (error.message || JSON.stringify(error)) : String(error);
+      const isTransient = errMsg.includes('502') || errMsg.includes('Bad gateway') || errMsg.includes('503') || errMsg.includes('BOOT_ERROR');
+      if (!isTransient || attempt === maxRetries) {
+        console.error('[fetchAllRows] Error:', error);
+        throw error;
+      }
+      console.warn(`[fetchAllRows] Transient error (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${(attempt + 1) * 500}ms...`);
+      await new Promise(r => setTimeout(r, (attempt + 1) * 500));
     }
 
     if (!data || data.length === 0) {

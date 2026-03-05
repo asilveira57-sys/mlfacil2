@@ -211,9 +211,18 @@ Deno.serve(async (req) => {
     });
   } catch (error: unknown) {
     console.error('[cost-engine] Error:', error);
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    return new Response(JSON.stringify({ error: message }), {
-      status: 500,
+    let message = 'Unknown error';
+    if (error instanceof Error) {
+      message = error.message;
+    } else if (error && typeof error === 'object') {
+      message = (error as any).message || (error as any).error_description || JSON.stringify(error);
+    } else if (typeof error === 'string') {
+      message = error;
+    }
+    // Detect transient 502/503 errors
+    const isTransient = message.includes('Bad gateway') || message.includes('502') || message.includes('503') || message.includes('BOOT_ERROR');
+    return new Response(JSON.stringify({ error: isTransient ? 'Serviço temporariamente indisponível. Tente novamente em alguns segundos.' : message }), {
+      status: isTransient ? 503 : 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
