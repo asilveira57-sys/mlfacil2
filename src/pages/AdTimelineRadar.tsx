@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { TrialModuleGate } from "@/components/access/TrialModuleGate";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -283,6 +284,11 @@ export default function AdTimelineRadar() {
       title="Linha do Tempo"
       subtitle="Radar de anúncios por intervalo de vendas"
     >
+      <TrialModuleGate
+        feature="Histórico completo da Linha do Tempo"
+        message="Durante o período de teste, a Linha do Tempo utiliza apenas 30 dias de histórico. Ative seu plano para acessar o histórico completo de 1 ano."
+        soft
+      >
       <div className="p-6 space-y-6">
         {/* Summary Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -606,6 +612,7 @@ export default function AdTimelineRadar() {
           isLoading={createActionMutation.isPending}
         />
       )}
+      </TrialModuleGate>
     </PageContainer>
   );
 }

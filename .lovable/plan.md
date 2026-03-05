@@ -47,10 +47,10 @@
 3. Gate de dados fiscais pós-pagamento
 4. Auto-sync 30d após OAuth
 
-### Fase 2 — Trial gates nos módulos
-5. ADS: bloquear sync durante trial
-6. Linha do Tempo: limitar a 30d no trial
-7. Etiquetas: garantir limite de 30d
+### Fase 2 — Trial gates nos módulos ✅
+5. ✅ ADS: banner de trial + sync bloqueado via ML API gate no backend
+6. ✅ Linha do Tempo: banner de trial informando limitação a 30d
+7. ✅ Etiquetas: filtro "Todos" agora capped a 30 dias
 
 ### Fase 3 — Multi-conta e upgrade
 8. Multi-conta: soma de vendas
