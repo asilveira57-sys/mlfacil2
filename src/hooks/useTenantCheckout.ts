@@ -23,7 +23,7 @@ export interface TenantCheckoutResponse {
 }
 
 /**
- * Hook for tenant-based billing checkout using tenant_plans.
+ * Hook for tenant-based billing checkout using plan_tiers.
  * Uses plan_code instead of plan_price_id.
  */
 export function useTenantCheckout() {
@@ -87,10 +87,10 @@ export function useTenantCheckout() {
 /**
  * Fetch compatible plans for a given sales volume from RPC.
  */
-export async function fetchCompatiblePlans(sales30d: number): Promise<TenantPlan[]> {
+export async function fetchCompatiblePlans(orders30d: number): Promise<TenantPlan[]> {
   try {
     const { data, error } = await supabase.rpc('rpc_get_compatible_plans', {
-      p_sales_30d: sales30d,
+      p_sales_30d: orders30d,
     });
     if (error) throw error;
     return (data as any) || [];

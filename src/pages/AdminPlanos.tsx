@@ -574,7 +574,7 @@ export default function AdminPlanos() {
                   </div>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Busca planos ativos no Mercado Pago e vincula automaticamente à tabela tenant_plans pelo nome.
+                  Busca planos ativos no Mercado Pago e vincula automaticamente à tabela plan_tiers pelo nome.
                 </p>
               </CardHeader>
               <CardContent className="space-y-6">
@@ -708,9 +708,9 @@ export default function AdminPlanos() {
                       </div>
                     )}
 
-                    {/* Current tenant_plans status */}
+                    {/* Current plan_tiers status */}
                     <div>
-                      <h3 className="text-sm font-semibold mb-2">Status Atual dos Tenant Plans</h3>
+                      <h3 className="text-sm font-semibold mb-2">Status Atual das Faixas (Plan Tiers)</h3>
                       <div className="border rounded-lg overflow-hidden">
                         <table className="w-full text-sm">
                           <thead className="bg-muted/50">

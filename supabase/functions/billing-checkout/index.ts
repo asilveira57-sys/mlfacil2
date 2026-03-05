@@ -41,9 +41,9 @@ serve(async (req) => {
       });
     }
 
-    // Get plan from tenant_plans
+    // Get plan from plan_tiers
     const { data: plan, error: planError } = await supabase
-      .from("tenant_plans")
+      .from("plan_tiers")
       .select("*")
       .eq("code", plan_code)
       .eq("is_active", true)
