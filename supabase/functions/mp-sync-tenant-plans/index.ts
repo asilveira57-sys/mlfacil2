@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 serve(async (req) => {
@@ -33,9 +33,12 @@ serve(async (req) => {
     }
 
     // Check admin role
-    const adminEmails = (Deno.env.get("ADMIN_EMAILS") || "").split(",").map(e => e.trim().toLowerCase());
-    if (!adminEmails.includes(user.email?.toLowerCase() || "")) {
-      return new Response(JSON.stringify({ error: "Forbidden" }), {
+    const adminEmails = (Deno.env.get("ADMIN_EMAILS") || "").split(",").map(e => e.trim().toLowerCase()).filter(e => e.length > 0);
+    const userEmail = (user.email || "").toLowerCase();
+    console.log(`[mp-sync] User email: ${userEmail}, Admin emails configured: ${adminEmails.length}`);
+    if (!adminEmails.includes(userEmail)) {
+      console.warn(`[mp-sync] Forbidden: ${userEmail} not in admin list`);
+      return new Response(JSON.stringify({ error: "Forbidden", detail: `Email ${userEmail} is not an admin` }), {
         status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

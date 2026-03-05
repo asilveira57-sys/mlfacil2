@@ -71,10 +71,14 @@ export async function sendConversionEvent(event: FacebookEventData): Promise<boo
     });
 
     if (error) {
-      // Silently handle transient 503/boot errors - non-critical tracking
+      // Non-critical tracking - silently handle all edge function errors
       const msg = error instanceof Error ? error.message : String(error);
-      if (msg.includes('Service Unavailable') || msg.includes('BOOT_ERROR')) {
-        console.warn('[FB CAPI] Transient edge function error, skipping');
+      const isTransient = msg.includes('Service Unavailable') || 
+        msg.includes('BOOT_ERROR') || 
+        msg.includes('non-2xx status code') ||
+        (error as any)?.name === 'FunctionsHttpError';
+      if (isTransient) {
+        console.warn('[FB CAPI] Edge function error (non-critical), skipping:', msg);
         return false;
       }
       console.error('[FB CAPI] Error:', error);
