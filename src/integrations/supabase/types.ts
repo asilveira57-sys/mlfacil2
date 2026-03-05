@@ -10076,6 +10076,157 @@ export type Database = {
           },
         ]
       }
+      plan_addon_offers: {
+        Row: {
+          addon_id: string
+          badge_text: string | null
+          billing_mode: string
+          created_at: string
+          id: string
+          is_active: boolean
+          is_campaign: boolean
+          is_visible: boolean
+          mp_product_ref: string | null
+          mp_sync_enabled: boolean
+          offer_code: string
+          period_months: number
+          price_brl: number
+          updated_at: string
+        }
+        Insert: {
+          addon_id: string
+          badge_text?: string | null
+          billing_mode?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          is_campaign?: boolean
+          is_visible?: boolean
+          mp_product_ref?: string | null
+          mp_sync_enabled?: boolean
+          offer_code: string
+          period_months?: number
+          price_brl?: number
+          updated_at?: string
+        }
+        Update: {
+          addon_id?: string
+          badge_text?: string | null
+          billing_mode?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          is_campaign?: boolean
+          is_visible?: boolean
+          mp_product_ref?: string | null
+          mp_sync_enabled?: boolean
+          offer_code?: string
+          period_months?: number
+          price_brl?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "plan_addon_offers_addon_id_fkey"
+            columns: ["addon_id"]
+            isOneToOne: false
+            referencedRelation: "plan_addons"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      plan_addons: {
+        Row: {
+          code: string
+          created_at: string
+          description: string | null
+          display_order: number
+          id: string
+          is_active: boolean
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          description?: string | null
+          display_order?: number
+          id?: string
+          is_active?: boolean
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          description?: string | null
+          display_order?: number
+          id?: string
+          is_active?: boolean
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      plan_offers: {
+        Row: {
+          badge_text: string | null
+          billing_mode: string
+          created_at: string
+          id: string
+          is_active: boolean
+          is_campaign: boolean
+          is_visible: boolean
+          mp_product_ref: string | null
+          mp_sync_enabled: boolean
+          offer_code: string
+          period_months: number
+          price_brl: number
+          tier_id: string
+          updated_at: string
+        }
+        Insert: {
+          badge_text?: string | null
+          billing_mode?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          is_campaign?: boolean
+          is_visible?: boolean
+          mp_product_ref?: string | null
+          mp_sync_enabled?: boolean
+          offer_code: string
+          period_months?: number
+          price_brl?: number
+          tier_id: string
+          updated_at?: string
+        }
+        Update: {
+          badge_text?: string | null
+          billing_mode?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          is_campaign?: boolean
+          is_visible?: boolean
+          mp_product_ref?: string | null
+          mp_sync_enabled?: boolean
+          offer_code?: string
+          period_months?: number
+          price_brl?: number
+          tier_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "plan_offers_tier_id_fkey"
+            columns: ["tier_id"]
+            isOneToOne: false
+            referencedRelation: "plan_tiers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       plan_prices: {
         Row: {
           auto_renew: boolean
@@ -10166,6 +10317,51 @@ export type Database = {
           enable_annual_campaign?: boolean
           key?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      plan_tiers: {
+        Row: {
+          code: string
+          created_at: string
+          description: string | null
+          display_name: string | null
+          display_order: number
+          id: string
+          is_active: boolean
+          is_enterprise: boolean
+          max_orders_30d: number | null
+          mercado_pago_plan_id: string | null
+          min_orders_30d: number
+          name: string
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          description?: string | null
+          display_name?: string | null
+          display_order?: number
+          id?: string
+          is_active?: boolean
+          is_enterprise?: boolean
+          max_orders_30d?: number | null
+          mercado_pago_plan_id?: string | null
+          min_orders_30d?: number
+          name: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          description?: string | null
+          display_name?: string | null
+          display_order?: number
+          id?: string
+          is_active?: boolean
+          is_enterprise?: boolean
+          max_orders_30d?: number | null
+          mercado_pago_plan_id?: string | null
+          min_orders_30d?: number
+          name?: string
         }
         Relationships: []
       }
@@ -15726,6 +15922,82 @@ export type Database = {
           },
         ]
       }
+      tenant_entitlements: {
+        Row: {
+          addon_id: string | null
+          auto_renew: boolean
+          created_at: string
+          current_period_end: string | null
+          current_period_start: string | null
+          entitlement_type: string
+          id: string
+          last_external_reference: string | null
+          last_payment_id: string | null
+          offer_id: string | null
+          source: string
+          status: string
+          tenant_id: string
+          tier_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          addon_id?: string | null
+          auto_renew?: boolean
+          created_at?: string
+          current_period_end?: string | null
+          current_period_start?: string | null
+          entitlement_type: string
+          id?: string
+          last_external_reference?: string | null
+          last_payment_id?: string | null
+          offer_id?: string | null
+          source?: string
+          status?: string
+          tenant_id: string
+          tier_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          addon_id?: string | null
+          auto_renew?: boolean
+          created_at?: string
+          current_period_end?: string | null
+          current_period_start?: string | null
+          entitlement_type?: string
+          id?: string
+          last_external_reference?: string | null
+          last_payment_id?: string | null
+          offer_id?: string | null
+          source?: string
+          status?: string
+          tenant_id?: string
+          tier_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_entitlements_addon_id_fkey"
+            columns: ["addon_id"]
+            isOneToOne: false
+            referencedRelation: "plan_addons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_entitlements_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_entitlements_tier_id_fkey"
+            columns: ["tier_id"]
+            isOneToOne: false
+            referencedRelation: "plan_tiers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tenant_limit_log: {
         Row: {
           account_id: string | null
@@ -15798,7 +16070,7 @@ export type Database = {
             foreignKeyName: "tenant_limits_state_required_plan_id_fkey"
             columns: ["required_plan_id"]
             isOneToOne: false
-            referencedRelation: "tenant_plans"
+            referencedRelation: "plan_tiers"
             referencedColumns: ["id"]
           },
           {
@@ -15844,7 +16116,7 @@ export type Database = {
       }
       tenant_payments: {
         Row: {
-          amount: number
+          amount_brl: number
           created_at: string
           currency: string
           external_reference: string | null
@@ -15857,7 +16129,7 @@ export type Database = {
           tenant_id: string
         }
         Insert: {
-          amount?: number
+          amount_brl?: number
           created_at?: string
           currency?: string
           external_reference?: string | null
@@ -15870,7 +16142,7 @@ export type Database = {
           tenant_id: string
         }
         Update: {
-          amount?: number
+          amount_brl?: number
           created_at?: string
           currency?: string
           external_reference?: string | null
@@ -15891,48 +16163,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      tenant_plans: {
-        Row: {
-          code: string
-          created_at: string
-          display_name: string | null
-          display_order: number
-          id: string
-          is_active: boolean
-          is_enterprise: boolean
-          max_orders_30d: number | null
-          mercado_pago_plan_id: string | null
-          min_orders_30d: number
-          name: string
-        }
-        Insert: {
-          code: string
-          created_at?: string
-          display_name?: string | null
-          display_order?: number
-          id?: string
-          is_active?: boolean
-          is_enterprise?: boolean
-          max_orders_30d?: number | null
-          mercado_pago_plan_id?: string | null
-          min_orders_30d?: number
-          name: string
-        }
-        Update: {
-          code?: string
-          created_at?: string
-          display_name?: string | null
-          display_order?: number
-          id?: string
-          is_active?: boolean
-          is_enterprise?: boolean
-          max_orders_30d?: number | null
-          mercado_pago_plan_id?: string | null
-          min_orders_30d?: number
-          name?: string
-        }
-        Relationships: []
       }
       tenant_subscription: {
         Row: {
@@ -16000,7 +16230,7 @@ export type Database = {
             foreignKeyName: "tenant_subscription_plan_id_fkey"
             columns: ["plan_id"]
             isOneToOne: false
-            referencedRelation: "tenant_plans"
+            referencedRelation: "plan_tiers"
             referencedColumns: ["id"]
           },
           {
@@ -16607,7 +16837,7 @@ export type Database = {
             foreignKeyName: "upgrade_quotes_from_plan_id_fkey"
             columns: ["from_plan_id"]
             isOneToOne: false
-            referencedRelation: "tenant_plans"
+            referencedRelation: "plan_tiers"
             referencedColumns: ["id"]
           },
           {
@@ -16621,7 +16851,7 @@ export type Database = {
             foreignKeyName: "upgrade_quotes_to_plan_id_fkey"
             columns: ["to_plan_id"]
             isOneToOne: false
-            referencedRelation: "tenant_plans"
+            referencedRelation: "plan_tiers"
             referencedColumns: ["id"]
           },
         ]

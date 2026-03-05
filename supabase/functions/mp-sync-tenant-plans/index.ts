@@ -82,15 +82,15 @@ serve(async (req) => {
 
     console.log(`[mp-sync-tenant-plans] Found ${mpPlans.length} active MP plans`);
 
-    // 2. Fetch tenant_plans
+    // 2. Fetch plan_tiers
     const { data: tenantPlans, error: tpError } = await supabase
-      .from("tenant_plans")
+      .from("plan_tiers")
       .select("*")
       .order("display_order");
 
     if (tpError) throw tpError;
 
-    // 3. Match MP plans to tenant_plans by reason (name matching)
+    // 3. Match MP plans to plan_tiers by reason (name matching)
     const matches: Array<{
       tenant_plan_id: string;
       tenant_plan_code: string;
@@ -171,7 +171,7 @@ serve(async (req) => {
       for (const match of matches) {
         if (!match.already_linked) {
           const { error: updateError } = await supabase
-            .from("tenant_plans")
+            .from("plan_tiers")
             .update({ mercado_pago_plan_id: match.mp_plan_id })
             .eq("id", match.tenant_plan_id);
 
@@ -189,7 +189,7 @@ serve(async (req) => {
       for (const mapping of body.manual_mapping) {
         if (mapping.tenant_plan_id && mapping.mp_plan_id) {
           const { error: updateError } = await supabase
-            .from("tenant_plans")
+            .from("plan_tiers")
             .update({ mercado_pago_plan_id: mapping.mp_plan_id })
             .eq("id", mapping.tenant_plan_id);
 

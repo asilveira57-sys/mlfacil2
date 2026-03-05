@@ -72,10 +72,13 @@ Deno.serve(async (req) => {
         console.log("[Webhook] Subscription canceled:", result, error);
       } else if (preapproval.status === "paused") {
         // Mark as past_due
+        // Update tier entitlement to past_due
         await supabase
-          .from("tenant_subscription")
+          .from("tenant_entitlements")
           .update({ status: "past_due", updated_at: new Date().toISOString() })
-          .eq("tenant_id", tenantId);
+          .eq("tenant_id", tenantId)
+          .eq("entitlement_type", "tier")
+          .in("status", ["active", "trial"]);
 
         await auditLog(supabase, {
           level: "warn", area: "billing", action: "subscription_paused",
