@@ -4,46 +4,49 @@ import { supabase } from '@/integrations/supabase/client';
 interface SalesVolumeData {
   totalSales30d: number;
   accountBreakdown: { sellerId: string; nickname: string | null; sales30d: number }[];
-  minimumPlanSlug: string | null;
+  minimumTierCode: string | null;
   loading: boolean;
 }
 
 /**
- * Slug-based sales thresholds for each plan tier.
- * Order matters: first match wins (ascending).
+ * Tier-code-based thresholds matching plan_tiers codes.
  */
-const PLAN_THRESHOLDS: { slug: string; maxSales: number }[] = [
-  { slug: 'ate-50', maxSales: 50 },
-  { slug: '51-300', maxSales: 300 },
-  { slug: '301-700', maxSales: 700 },
-  { slug: '701-1500', maxSales: 1500 },
-  { slug: '1501-3000', maxSales: 3000 },
-  { slug: 'acima-3000', maxSales: Infinity },
+const TIER_THRESHOLDS: { code: string; maxSales: number }[] = [
+  { code: 'volume_ate_50', maxSales: 50 },
+  { code: 'volume_51_300', maxSales: 300 },
+  { code: 'volume_301_700', maxSales: 700 },
+  { code: 'volume_701_1500', maxSales: 1500 },
+  { code: 'volume_1501_3000', maxSales: 3000 },
+  { code: 'volume_acima_3000', maxSales: Infinity },
 ];
 
-function getMinimumPlanSlug(totalSales: number): string | null {
+function getMinimumTierCode(totalSales: number): string | null {
   if (totalSales <= 0) return null;
-  for (const tier of PLAN_THRESHOLDS) {
-    if (totalSales <= tier.maxSales) return tier.slug;
+  for (const tier of TIER_THRESHOLDS) {
+    if (totalSales <= tier.maxSales) return tier.code;
   }
-  return 'acima-3000';
+  return 'volume_acima_3000';
 }
 
 /**
- * Returns true if a plan with the given slug is too small for the user's sales volume.
+ * Returns true if a tier with the given code is too small for the user's sales volume.
  */
-export function isPlanTooSmall(planSlug: string, totalSales: number): boolean {
+export function isTierTooSmall(tierCode: string, totalSales: number): boolean {
   if (totalSales <= 0) return false;
-  const planTier = PLAN_THRESHOLDS.find(t => t.slug === planSlug);
-  if (!planTier) return false; // unknown plan (e.g. ZPL)
-  return totalSales > planTier.maxSales;
+  const tier = TIER_THRESHOLDS.find(t => t.code === tierCode);
+  if (!tier) return false;
+  return totalSales > tier.maxSales;
+}
+
+// Keep legacy export for backward compat
+export function isPlanTooSmall(planSlug: string, totalSales: number): boolean {
+  return isTierTooSmall(planSlug, totalSales);
 }
 
 async function fetchSalesVolume(): Promise<Omit<SalesVolumeData, 'loading'>> {
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { totalSales30d: 0, accountBreakdown: [], minimumPlanSlug: null };
+  if (!user) return { totalSales30d: 0, accountBreakdown: [], minimumTierCode: null };
 
-  // Get all active ML accounts
   const { data: accounts } = await supabase
     .from('ml_accounts')
     .select('ml_user_id, nickname')
@@ -51,14 +54,13 @@ async function fetchSalesVolume(): Promise<Omit<SalesVolumeData, 'loading'>> {
     .eq('is_active', true);
 
   if (!accounts || accounts.length === 0) {
-    return { totalSales30d: 0, accountBreakdown: [], minimumPlanSlug: null };
+    return { totalSales30d: 0, accountBreakdown: [], minimumTierCode: null };
   }
 
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
   const dateFrom = thirtyDaysAgo.toISOString();
 
-  // Count orders per account in parallel
   const breakdown = await Promise.all(
     accounts.map(async (acc) => {
       const { count } = await supabase
@@ -77,9 +79,9 @@ async function fetchSalesVolume(): Promise<Omit<SalesVolumeData, 'loading'>> {
   );
 
   const totalSales30d = breakdown.reduce((sum, b) => sum + b.sales30d, 0);
-  const minimumPlanSlug = getMinimumPlanSlug(totalSales30d);
+  const minimumTierCode = getMinimumTierCode(totalSales30d);
 
-  return { totalSales30d, accountBreakdown: breakdown, minimumPlanSlug };
+  return { totalSales30d, accountBreakdown: breakdown, minimumTierCode };
 }
 
 export function useUserSalesVolume() {
@@ -94,7 +96,9 @@ export function useUserSalesVolume() {
   return {
     totalSales30d: query.data?.totalSales30d ?? 0,
     accountBreakdown: query.data?.accountBreakdown ?? [],
-    minimumPlanSlug: query.data?.minimumPlanSlug ?? null,
+    minimumTierCode: query.data?.minimumTierCode ?? null,
+    // Legacy alias
+    minimumPlanSlug: query.data?.minimumTierCode ?? null,
     loading: query.isLoading,
     error: query.error,
   };
