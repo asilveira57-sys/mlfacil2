@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
 import { User } from "@supabase/supabase-js";
@@ -10,6 +10,7 @@ import { PlanLimitBanner } from "@/components/access/PlanLimitBanner";
 import { useTenantLimits } from "@/hooks/useTenantLimits";
 import { DashboardModulesGrid } from "@/components/dashboard/DashboardModulesGrid";
 import { DashboardOnboarding } from "@/components/dashboard/DashboardOnboarding";
+import { WelcomeScreen } from "@/components/onboarding/WelcomeScreen";
 import { DashboardReconnectingState } from "@/components/dashboard/DashboardReconnectingState";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { useToast } from "@/hooks/use-toast";
@@ -29,6 +30,9 @@ const Dashboard = () => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [reconnected, setReconnected] = useState(false);
+  const [searchParams] = useSearchParams();
+  const isFirstAccess = searchParams.get('welcome') === '1';
+  const [showWelcome, setShowWelcome] = useState(isFirstAccess);
 
   const { activeAccount, sellerId, loading: accountLoading, initialized, accounts, refreshAccounts } = useActiveAccount();
   const feedback = useModuleFeedbackIntegration('dashboard-analises');
@@ -126,7 +130,12 @@ const Dashboard = () => {
       subtitle={t('dashboard:subtitle')}
     >
       <div className="p-4 lg:p-6 space-y-6">
-        {!hasAnyAccount ? (
+        {showWelcome ? (
+          <WelcomeScreen
+            userName={user?.user_metadata?.full_name || user?.email?.split('@')[0]}
+            onContinue={() => setShowWelcome(false)}
+          />
+        ) : !hasAnyAccount ? (
           // No accounts at all → first-time onboarding
           <DashboardOnboarding onConnectML={handleConnectML} />
         ) : needsReconnect ? (

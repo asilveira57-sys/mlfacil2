@@ -60,7 +60,7 @@
 12. ✅ Aviso pré-conexão de nova conta (AccountConnectionWarning)
 13. ✅ Audit log (tenant_limit_log)
 
-### Fase 4 — Landing e onboarding
-12. Revisar landing (3 CTAs)
-13. Welcome screen pós-confirmação
-14. Proteção contra abuso (logs)
+### Fase 4 — Landing e onboarding ✅
+14. ✅ Landing com 3 CTAs (Login, Cadastro, Planos) no header e hero
+15. ✅ Welcome screen pós-confirmação de email (WelcomeScreen + aviso ML)
+16. ✅ Proteção contra abuso (system_audit_log + tenant_limit_log)
