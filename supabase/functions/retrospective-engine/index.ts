@@ -641,11 +641,16 @@ Deno.serve(async (req) => {
                 .maybeSingle();
 
               // Build summary
-              const summaryJson = buildSummaryJson(
+              const summaryJson = await buildSummaryJson(
+                supabase,
                 snapshot,
                 baseline,
                 rule,
-                trialStatus
+                trialStatus,
+                tenant.id,
+                company.id,
+                periodStart,
+                periodEnd
               );
 
               // Create retrospective
