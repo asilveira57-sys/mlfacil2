@@ -60,7 +60,7 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
     const moduleKey = getModuleKeyFromRoute(location.pathname);
     
     // Routes that don't require module access check
-    const publicRoutes = ['/dashboard', '/settings', '/auth', '/'];
+    const publicRoutes = ['/dashboard', '/settings', '/auth', '/criar-acesso', '/primeiro-acesso', '/reconnecting', '/'];
     if (publicRoutes.includes(location.pathname)) return;
 
     // If route is not in module map, allow it (might be a misc route)

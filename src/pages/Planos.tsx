@@ -94,7 +94,7 @@ const Planos = () => {
       const params = new URLSearchParams();
       if (selectedTierCode) params.set('plan', selectedTierCode);
       params.set('offer', offer.offer_code);
-      navigate(`/auth?${params.toString()}`);
+      navigate(`/criar-acesso?${params.toString()}`);
       return;
     }
     checkout(offer.id);
