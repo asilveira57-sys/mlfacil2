@@ -688,6 +688,21 @@ Deno.serve(async (req) => {
                   .eq("id", target.id);
               }
 
+              // Trigger report generation (HTML + Slides)
+              try {
+                const reportGenUrl = `${supabaseUrl}/functions/v1/retrospective-report-gen`;
+                await fetch(reportGenUrl, {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${serviceKey}`,
+                  },
+                  body: JSON.stringify({ retrospective_id: retro.id }),
+                });
+              } catch (genErr: any) {
+                console.error(`[retro-engine] Report gen error: ${genErr.message}`);
+              }
+
               // Register platform event
               await supabase.from("account_events").insert({
                 user_id: tenant.id,
