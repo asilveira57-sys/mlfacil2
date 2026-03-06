@@ -573,7 +573,7 @@ Deno.serve(async (req) => {
               // Check if already generated for this rule + company + period
               const periodStart = toDateStr(anchorDate);
               const periodEnd = toDateStr(
-                addDays(anchorDate, rule.period_days)
+                 addDays(anchorDate, effectiveRule.period_days)
               );
 
               const { data: existing } = await supabase
