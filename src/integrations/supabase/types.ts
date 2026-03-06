@@ -262,6 +262,51 @@ export type Database = {
         }
         Relationships: []
       }
+      account_events: {
+        Row: {
+          company_id: string | null
+          created_at: string
+          event_data: Json | null
+          event_type: string
+          id: string
+          tenant_id: string | null
+          user_id: string
+        }
+        Insert: {
+          company_id?: string | null
+          created_at?: string
+          event_data?: Json | null
+          event_type: string
+          id?: string
+          tenant_id?: string | null
+          user_id: string
+        }
+        Update: {
+          company_id?: string | null
+          created_at?: string
+          event_data?: Json | null
+          event_type?: string
+          id?: string
+          tenant_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "account_events_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "account_events_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ad_lifecycle_actions: {
         Row: {
           action_status: string
@@ -2804,6 +2849,10 @@ export type Database = {
           display_name: string
           id: string
           is_active: boolean | null
+          logo_medium_url: string | null
+          logo_original_url: string | null
+          logo_small_url: string | null
+          logo_url: string | null
           trial_ends_at: string | null
           trial_started_at: string | null
           trial_status: string | null
@@ -2816,6 +2865,10 @@ export type Database = {
           display_name: string
           id?: string
           is_active?: boolean | null
+          logo_medium_url?: string | null
+          logo_original_url?: string | null
+          logo_small_url?: string | null
+          logo_url?: string | null
           trial_ends_at?: string | null
           trial_started_at?: string | null
           trial_status?: string | null
@@ -2828,6 +2881,10 @@ export type Database = {
           display_name?: string
           id?: string
           is_active?: boolean | null
+          logo_medium_url?: string | null
+          logo_original_url?: string | null
+          logo_small_url?: string | null
+          logo_url?: string | null
           trial_ends_at?: string | null
           trial_started_at?: string | null
           trial_status?: string | null
@@ -13239,6 +13296,69 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      seller_initial_snapshot: {
+        Row: {
+          active_listings: number | null
+          ads_roas_last_30_days: number | null
+          ads_spend_last_30_days: number | null
+          average_ticket: number | null
+          company_id: string | null
+          created_at: string
+          id: string
+          orders_last_30_days: number | null
+          products_count: number | null
+          revenue_last_30_days: number | null
+          seller_id: string
+          snapshot_date: string
+          tenant_id: string | null
+        }
+        Insert: {
+          active_listings?: number | null
+          ads_roas_last_30_days?: number | null
+          ads_spend_last_30_days?: number | null
+          average_ticket?: number | null
+          company_id?: string | null
+          created_at?: string
+          id?: string
+          orders_last_30_days?: number | null
+          products_count?: number | null
+          revenue_last_30_days?: number | null
+          seller_id: string
+          snapshot_date?: string
+          tenant_id?: string | null
+        }
+        Update: {
+          active_listings?: number | null
+          ads_roas_last_30_days?: number | null
+          ads_spend_last_30_days?: number | null
+          average_ticket?: number | null
+          company_id?: string | null
+          created_at?: string
+          id?: string
+          orders_last_30_days?: number | null
+          products_count?: number | null
+          revenue_last_30_days?: number | null
+          seller_id?: string
+          snapshot_date?: string
+          tenant_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "seller_initial_snapshot_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "seller_initial_snapshot_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       seller_item_sales_daily: {
         Row: {
