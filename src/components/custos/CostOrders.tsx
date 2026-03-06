@@ -930,7 +930,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                                 );
                               })()}
                             </TableCell>
-                            <TableCell>{order.buyer_nickname || order.buyer_name || '-'}</TableCell>
+                            <TableCell className="truncate max-w-0">{order.buyer_nickname || order.buyer_name || '-'}</TableCell>
                             <TableCell className="text-right font-medium">
                               {formatCurrency(order.revenue_total)}
                             </TableCell>
