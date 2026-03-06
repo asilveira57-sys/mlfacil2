@@ -1,212 +1,195 @@
 import { useState, useMemo } from 'react';
-import { format, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter, startOfYear, endOfYear, subMonths } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
+import { format } from 'date-fns';
 import { PageContainer } from '@/components/layout/PageContainer';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
-} from '@/components/ui/dialog';
-import {
-  History, FileText, Download, Trash2, Loader2, BarChart3, TrendingUp,
-  DollarSign, Target, Calendar, AlertCircle, Plus,
+  History, FileText, Trash2, Loader2, Calendar, AlertCircle,
+  Presentation, ExternalLink, Eye, Sparkles, Crown, Download,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useCurrentUserId } from '@/hooks/useCurrentUserId';
 import { useActiveSellerId, useActiveAccount } from '@/contexts/ActiveAccountContext';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import type { Retrospective } from '@/hooks/useRetrospectiveEngine';
+import { TrialRetrospectiveViewer } from '@/components/retrospective/TrialRetrospectiveViewer';
+
+// Also keep backward compat with old reports
 import {
   useRetrospectiveReports,
-  useGenerateRetrospective,
   useDeleteRetrospective,
   logPdfDownload,
-  RetrospectiveReport,
+  type RetrospectiveReport,
 } from '@/hooks/useRetrospective';
 import { RetrospectiveViewer } from '@/components/retrospective/RetrospectiveViewer';
+import { generateRetrospectivePdf } from '@/components/retrospective/RetrospectivePdfExporter';
 
-const TIPO_LABELS: Record<string, string> = {
+const TYPE_LABELS: Record<string, string> = {
+  trial_conversion: 'Trial — Conversão',
+  trial_summary: 'Trial — Resumo',
+  monthly: 'Mensal',
+  quarterly: 'Trimestral',
+  annual: 'Anual',
+  semester: 'Semestral',
   mensal: 'Mensal',
   trimestral: 'Trimestral',
   anual: 'Anual',
   ano_letivo: 'Ano Letivo',
 };
 
+// ─── Hook: seller retrospectives from new engine ───
+
+function useSellerRetrospectives(companyId: string | null) {
+  return useQuery({
+    queryKey: ['seller-retrospectives', companyId],
+    queryFn: async () => {
+      if (!companyId) return [];
+      const { data, error } = await supabase
+        .from('retrospectives')
+        .select('*')
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as Retrospective[];
+    },
+    enabled: !!companyId,
+  });
+}
+
+function useDeleteEngineRetro() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('retrospectives').delete().eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['seller-retrospectives'] }),
+  });
+}
+
 export default function Retrospectiva() {
   const userId = useCurrentUserId();
   const sellerId = useActiveSellerId();
   const { activeAccount } = useActiveAccount();
-  const accountName = activeAccount?.nickname || 'Minha Conta';
-  const { data: reports = [], isLoading } = useRetrospectiveReports(userId, sellerId);
-  const generateMut = useGenerateRetrospective();
-  const deleteMut = useDeleteRetrospective();
+  const companyId = activeAccount?.companyId ?? null;
 
-  const [showGenerate, setShowGenerate] = useState(false);
-  const [selectedReport, setSelectedReport] = useState<RetrospectiveReport | null>(null);
-  const [tipo, setTipo] = useState('mensal');
-  const [periodoInicio, setPeriodoInicio] = useState('');
-  const [periodoFim, setPeriodoFim] = useState('');
+  // New engine retrospectives
+  const { data: engineRetros = [], isLoading: loadingEngine } = useSellerRetrospectives(companyId);
+  const deleteEngineMut = useDeleteEngineRetro();
 
-  // Auto-fill dates based on tipo
-  const handleTipoChange = (newTipo: string) => {
-    setTipo(newTipo);
-    const now = new Date();
-    const lastMonth = subMonths(now, 1);
-    switch (newTipo) {
-      case 'mensal':
-        setPeriodoInicio(format(startOfMonth(lastMonth), 'yyyy-MM-dd'));
-        setPeriodoFim(format(endOfMonth(lastMonth), 'yyyy-MM-dd'));
-        break;
-      case 'trimestral':
-        const qStart = subMonths(startOfQuarter(now), 3);
-        setPeriodoInicio(format(qStart, 'yyyy-MM-dd'));
-        setPeriodoFim(format(endOfQuarter(subMonths(now, 1)), 'yyyy-MM-dd'));
-        break;
-      case 'anual':
-        const lastYear = now.getFullYear() - 1;
-        setPeriodoInicio(`${lastYear}-01-01`);
-        setPeriodoFim(`${lastYear}-12-31`);
-        break;
-      case 'ano_letivo':
-        const yearStart = now.getMonth() >= 7 ? now.getFullYear() - 1 : now.getFullYear() - 2;
-        setPeriodoInicio(`${yearStart}-08-01`);
-        setPeriodoFim(`${yearStart + 1}-07-31`);
-        break;
-    }
+  // Legacy reports (old system)
+  const { data: legacyReports = [], isLoading: loadingLegacy } = useRetrospectiveReports(userId, sellerId);
+  const deleteLegacyMut = useDeleteRetrospective();
+
+  const [selectedEngineRetro, setSelectedEngineRetro] = useState<Retrospective | null>(null);
+  const [selectedLegacyReport, setSelectedLegacyReport] = useState<RetrospectiveReport | null>(null);
+
+  const isLoading = loadingEngine || loadingLegacy;
+  const hasAny = engineRetros.length > 0 || legacyReports.length > 0;
+
+  const handleDeleteEngine = (r: Retrospective) => {
+    if (!confirm('Excluir este relatório?')) return;
+    deleteEngineMut.mutate(r.id, { onSuccess: () => toast.success('Excluído') });
   };
 
-  const handleGenerate = async () => {
-    if (!userId || !sellerId || !periodoInicio || !periodoFim) {
-      toast.error('Preencha todos os campos');
-      return;
-    }
-    try {
-      await generateMut.mutateAsync({
-        userId,
-        sellerId,
-        tipo,
-        periodoInicio,
-        periodoFim,
-        companyName: accountName || undefined,
-      });
-      toast.success('Retrospectiva gerada com sucesso!');
-      setShowGenerate(false);
-    } catch (err: any) {
-      toast.error(err.message || 'Erro ao gerar retrospectiva');
-    }
-  };
-
-  const handleDelete = (report: RetrospectiveReport) => {
+  const handleDeleteLegacy = (r: RetrospectiveReport) => {
     if (!confirm('Excluir este relatório?')) return;
     if (!userId) return;
-    deleteMut.mutate(
-      { id: report.id, userId },
-      { onSuccess: () => toast.success('Relatório excluído') }
-    );
+    deleteLegacyMut.mutate({ id: r.id, userId }, { onSuccess: () => toast.success('Excluído') });
   };
 
   return (
     <PageContainer>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold flex items-center gap-2">
-              <History className="h-6 w-6 text-primary" />
-              Retrospectiva Estratégica
-            </h1>
-            <p className="text-muted-foreground">
-              Relatórios históricos consolidados do seu negócio
-            </p>
-          </div>
-          <Button className="gap-2" onClick={() => { setShowGenerate(true); handleTipoChange('mensal'); }}>
-            <Plus className="h-4 w-4" />
-            Gerar Retrospectiva
-          </Button>
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <History className="h-6 w-6 text-primary" />
+            Retrospectiva Estratégica
+          </h1>
+          <p className="text-muted-foreground">
+            Relatórios de evolução e performance do seu negócio
+          </p>
         </div>
 
-        {/* Reports list */}
         {isLoading ? (
           <div className="flex justify-center py-16">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
-        ) : reports.length === 0 ? (
+        ) : !hasAny ? (
           <Card>
             <CardContent className="py-16 text-center">
               <FileText className="h-12 w-12 mx-auto text-muted-foreground/40 mb-4" />
-              <h3 className="text-lg font-medium mb-2">Nenhuma retrospectiva gerada</h3>
-              <p className="text-muted-foreground mb-4">
-                Gere seu primeiro relatório para visualizar a análise estratégica do período.
+              <h3 className="text-lg font-medium mb-2">Nenhuma retrospectiva disponível</h3>
+              <p className="text-muted-foreground">
+                Retrospectivas são geradas automaticamente conforme sua operação evolui.
               </p>
-              <Button onClick={() => { setShowGenerate(true); handleTipoChange('mensal'); }}>
-                Gerar Primeira Retrospectiva
-              </Button>
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {reports.map((report) => (
-              <ReportCard
-                key={report.id}
-                report={report}
-                onView={() => setSelectedReport(report)}
-                onDelete={() => handleDelete(report)}
-              />
-            ))}
+          <div className="space-y-6">
+            {/* Engine retrospectives (new) */}
+            {engineRetros.length > 0 && (
+              <div className="space-y-3">
+                {legacyReports.length > 0 && (
+                  <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                    Relatórios Automáticos
+                  </h2>
+                )}
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {engineRetros.map((r) => (
+                    <EngineReportCard
+                      key={r.id}
+                      report={r}
+                      onView={() => setSelectedEngineRetro(r)}
+                      onDelete={() => handleDeleteEngine(r)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Legacy reports */}
+            {legacyReports.length > 0 && (
+              <div className="space-y-3">
+                {engineRetros.length > 0 && (
+                  <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                    Relatórios Manuais
+                  </h2>
+                )}
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {legacyReports.map((r) => (
+                    <LegacyReportCard
+                      key={r.id}
+                      report={r}
+                      onView={() => setSelectedLegacyReport(r)}
+                      onDelete={() => handleDeleteLegacy(r)}
+                      userId={userId}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Generate dialog */}
-        <Dialog open={showGenerate} onOpenChange={setShowGenerate}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Gerar Retrospectiva</DialogTitle>
-              <DialogDescription>
-                Selecione o tipo e período para consolidar os dados.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Tipo de Período</Label>
-                <Select value={tipo} onValueChange={handleTipoChange}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="mensal">Mensal</SelectItem>
-                    <SelectItem value="trimestral">Trimestral</SelectItem>
-                    <SelectItem value="anual">Anual</SelectItem>
-                    <SelectItem value="ano_letivo">Ano Letivo</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label>Início</Label>
-                  <Input type="date" value={periodoInicio} onChange={(e) => setPeriodoInicio(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Fim</Label>
-                  <Input type="date" value={periodoFim} onChange={(e) => setPeriodoFim(e.target.value)} />
-                </div>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowGenerate(false)}>Cancelar</Button>
-              <Button onClick={handleGenerate} disabled={generateMut.isPending} className="gap-2">
-                {generateMut.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-                Gerar Retrospectiva
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        {/* Engine viewer (trial or standard) */}
+        {selectedEngineRetro && (
+          <TrialRetrospectiveViewer
+            report={selectedEngineRetro}
+            open={!!selectedEngineRetro}
+            onOpenChange={(open) => !open && setSelectedEngineRetro(null)}
+          />
+        )}
 
-        {/* Report viewer */}
-        {selectedReport && (
+        {/* Legacy viewer */}
+        {selectedLegacyReport && (
           <RetrospectiveViewer
-            report={selectedReport}
-            open={!!selectedReport}
-            onOpenChange={(open) => !open && setSelectedReport(null)}
+            report={selectedLegacyReport}
+            open={!!selectedLegacyReport}
+            onOpenChange={(open) => !open && setSelectedLegacyReport(null)}
             userId={userId}
           />
         )}
@@ -215,76 +198,219 @@ export default function Retrospectiva() {
   );
 }
 
-// ─── Report Card ───
-function ReportCard({
+// ─── Engine Report Card ───
+
+function EngineReportCard({
   report,
   onView,
   onDelete,
 }: {
+  report: Retrospective;
+  onView: () => void;
+  onDelete: () => void;
+}) {
+  const summary = report.summary_json as any;
+  const current = summary?.current;
+  const isTrialType = report.retrospective_type === 'trial_conversion' || report.retrospective_type === 'trial_summary';
+
+  return (
+    <Card
+      className="hover:border-primary/30 transition-colors cursor-pointer group"
+      onClick={onView}
+    >
+      <CardContent className="p-5">
+        {/* Top badges */}
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="text-xs">
+              {TYPE_LABELS[report.retrospective_type] || report.retrospective_type}
+            </Badge>
+            {isTrialType && (
+              <span className="text-xs">
+                {report.retrospective_type === 'trial_conversion' ? '🚀' : '✅'}
+              </span>
+            )}
+          </div>
+          {report.status === 'generated' && (
+            <Badge className="text-xs bg-primary/10 text-primary border-0">Pronto</Badge>
+          )}
+        </div>
+
+        {/* Title */}
+        <h3 className="font-semibold text-sm mb-1 line-clamp-1">{report.title}</h3>
+        <p className="text-xs text-muted-foreground flex items-center gap-1 mb-4">
+          <Calendar className="h-3 w-3" />
+          {report.period_start} — {report.period_end}
+        </p>
+
+        {/* KPIs */}
+        {current && report.status === 'generated' ? (
+          <div className="grid grid-cols-2 gap-3 text-sm mb-4">
+            <div>
+              <p className="text-muted-foreground text-xs">Faturamento</p>
+              <p className="font-semibold text-primary">
+                R$ {Number(current.revenue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Pedidos</p>
+              <p className="font-semibold">{current.orders || 0}</p>
+            </div>
+          </div>
+        ) : report.status === 'error' ? (
+          <p className="text-sm text-destructive flex items-center gap-1 mb-4">
+            <AlertCircle className="h-3.5 w-3.5" /> Erro ao processar
+          </p>
+        ) : null}
+
+        {/* Report links */}
+        {(report.html_url || report.presentation_url) && (
+          <div className="flex gap-2 mb-4">
+            {report.html_url && (
+              <a
+                href={report.html_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="text-xs text-primary hover:underline flex items-center gap-1"
+              >
+                <FileText className="h-3 w-3" /> Relatório
+                <ExternalLink className="h-2.5 w-2.5" />
+              </a>
+            )}
+            {report.presentation_url && (
+              <a
+                href={report.presentation_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="text-xs text-primary hover:underline flex items-center gap-1"
+              >
+                <Presentation className="h-3 w-3" /> Slides
+                <ExternalLink className="h-2.5 w-2.5" />
+              </a>
+            )}
+          </div>
+        )}
+
+        {/* Footer */}
+        <div className="flex justify-between items-center pt-3 border-t">
+          <span className="text-xs text-muted-foreground">
+            {format(new Date(report.created_at), "dd/MM/yyyy 'às' HH:mm")}
+          </span>
+          <div className="flex gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={(e) => { e.stopPropagation(); onView(); }}
+            >
+              <Eye className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Legacy Report Card ───
+
+function LegacyReportCard({
+  report,
+  onView,
+  onDelete,
+  userId,
+}: {
   report: RetrospectiveReport;
   onView: () => void;
   onDelete: () => void;
+  userId: string | null;
 }) {
   const snapshot = report.json_snapshot as any;
   const vendas = snapshot?.vendas;
 
+  const handleDownloadPdf = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    generateRetrospectivePdf(report);
+    if (userId) logPdfDownload(userId, report.id);
+  };
+
   return (
-    <Card className="hover:border-primary/30 transition-colors cursor-pointer" onClick={onView}>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <Badge variant="outline">{TIPO_LABELS[report.tipo] || report.tipo}</Badge>
-          <div className="flex gap-1">
-            {report.status === 'error' && (
-              <Badge variant="destructive" className="text-xs">Erro</Badge>
-            )}
-            {report.status === 'processing' && (
-              <Badge variant="secondary" className="text-xs gap-1">
-                <Loader2 className="h-3 w-3 animate-spin" /> Processando
-              </Badge>
-            )}
-          </div>
+    <Card className="hover:border-primary/30 transition-colors cursor-pointer group" onClick={onView}>
+      <CardContent className="p-5">
+        <div className="flex items-center justify-between mb-3">
+          <Badge variant="outline" className="text-xs">
+            {TYPE_LABELS[report.tipo] || report.tipo}
+          </Badge>
+          {report.status === 'error' && (
+            <Badge variant="destructive" className="text-xs">Erro</Badge>
+          )}
+          {report.status === 'processing' && (
+            <Badge variant="secondary" className="text-xs gap-1">
+              <Loader2 className="h-3 w-3 animate-spin" /> Processando
+            </Badge>
+          )}
         </div>
-        <CardTitle className="text-base mt-2">
-          <div className="flex items-center gap-2">
-            <Calendar className="h-4 w-4 text-muted-foreground" />
-            {format(new Date(report.periodo_inicio + 'T12:00:00'), 'dd/MM/yyyy')} — {format(new Date(report.periodo_fim + 'T12:00:00'), 'dd/MM/yyyy')}
-          </div>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
+
+        <p className="text-xs text-muted-foreground flex items-center gap-1 mb-4">
+          <Calendar className="h-3 w-3" />
+          {format(new Date(report.periodo_inicio + 'T12:00:00'), 'dd/MM/yyyy')} — {format(new Date(report.periodo_fim + 'T12:00:00'), 'dd/MM/yyyy')}
+        </p>
+
         {vendas && report.status === 'completed' ? (
-          <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="grid grid-cols-2 gap-3 text-sm mb-4">
             <div>
-              <p className="text-muted-foreground">Faturamento</p>
+              <p className="text-muted-foreground text-xs">Faturamento</p>
               <p className="font-semibold text-primary">
                 R$ {Number(vendas.faturamento || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </p>
             </div>
             <div>
-              <p className="text-muted-foreground">Pedidos</p>
+              <p className="text-muted-foreground text-xs">Pedidos</p>
               <p className="font-semibold">{vendas.total_pedidos || 0}</p>
             </div>
           </div>
         ) : report.status === 'error' ? (
-          <p className="text-sm text-destructive flex items-center gap-1">
+          <p className="text-sm text-destructive flex items-center gap-1 mb-4">
             <AlertCircle className="h-3.5 w-3.5" /> {report.error_message || 'Erro ao processar'}
           </p>
         ) : (
-          <p className="text-sm text-muted-foreground">Processando dados...</p>
+          <p className="text-sm text-muted-foreground mb-4">Processando dados...</p>
         )}
 
-        <div className="flex justify-between items-center mt-4 pt-3 border-t">
+        <div className="flex justify-between items-center pt-3 border-t">
           <span className="text-xs text-muted-foreground">
             {format(new Date(report.created_at), "dd/MM/yyyy 'às' HH:mm")}
           </span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-destructive"
-            onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
+          <div className="flex gap-1">
+            {report.status === 'completed' && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                onClick={handleDownloadPdf}
+              >
+                <Download className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
       </CardContent>
     </Card>
