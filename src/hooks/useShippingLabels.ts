@@ -321,6 +321,9 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     staleTime: 30000,
     refetchOnWindowFocus: false,
     placeholderData: (prev: any) => prev,
+    // Silent polling: refetch from DB every 60s to pick up cron-synced data
+    refetchInterval: 60000,
+    refetchIntervalInBackground: false,
   });
 
   const orders = ordersData?.orders ?? [];
@@ -1053,46 +1056,44 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
     return () => clearInterval(interval);
   }, [sellerId, refreshShipmentStatuses]);
 
-  // Auto-sync on first load with staleness check
+  // Auto-sync on first load: only fetch last sync time, skip heavy pipeline
+  // The server-side cron (shipping-labels-sync) handles the heavy sync now
   useEffect(() => {
     if (!sellerId || hasAutoSyncedRef.current) return;
     
     hasAutoSyncedRef.current = true;
     
-    const checkAndSync = async () => {
-      // Check last sync from database
-      const { data: lastJob } = await supabase
-        .from('sync_jobs')
-        .select('created_at')
-        .eq('module', 'labels_orders_list')
-        .eq('status', 'success')
-        .order('created_at', { ascending: false })
-        .limit(1)
+    const checkLastSync = async () => {
+      // Check last sync from scheduler (cron job)
+      const { data: scheduler } = await supabase
+        .from('sync_scheduler')
+        .select('last_run_at')
+        .eq('job_name', 'shipping-labels-sync')
         .maybeSingle();
       
-      const lastSync = lastJob?.created_at;
-      setLastSyncAt(lastSync || null);
-      
-      if (!lastSync) {
-        // Never synced - do visible sync
-        startSyncPipeline(false);
-        return;
+      if (scheduler?.last_run_at) {
+        setLastSyncAt(scheduler.last_run_at);
+      } else {
+        // Fallback: check sync_jobs
+        const { data: lastJob } = await supabase
+          .from('sync_jobs')
+          .select('created_at')
+          .eq('module', 'labels_orders_list')
+          .eq('status', 'success')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        
+        setLastSyncAt(lastJob?.created_at || null);
+        
+        // If never synced at all, trigger manual sync for first-time setup
+        if (!lastJob?.created_at) {
+          startSyncPipeline(false);
+        }
       }
-      
-      const staleMinutes = (Date.now() - new Date(lastSync).getTime()) / 60000;
-      
-      if (staleMinutes > 15) {
-        // Very stale - show minimal indicator
-        startSyncPipeline(false);
-      } else if (staleMinutes > 2) {
-        // Slightly stale - silent background sync
-        startSyncPipeline(true);
-      }
-      // else: Fresh data, no sync needed
     };
     
-    // Small delay to let UI render first with cached data
-    const timer = setTimeout(checkAndSync, 300);
+    const timer = setTimeout(checkLastSync, 300);
     return () => clearTimeout(timer);
   }, [sellerId, startSyncPipeline]);
 
