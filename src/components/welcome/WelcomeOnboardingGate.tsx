@@ -7,7 +7,8 @@ import { WelcomeOnboardingModal } from './WelcomeOnboardingModal';
 
 // Routes where we don't show the onboarding modal
 const EXCLUDED_PREFIXES = [
-  '/auth', '/planos', '/blog', '/consultoria',
+  '/auth', '/criar-acesso', '/primeiro-acesso', '/reconnecting',
+  '/planos', '/blog', '/consultoria',
   '/termos-de-uso', '/politica-de-privacidade', '/politica-de-cookies', '/lgpd',
   '/ferramentas', '/admin',
 ];

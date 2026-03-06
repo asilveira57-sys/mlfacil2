@@ -16,8 +16,12 @@ import { WelcomeOnboardingGate } from "@/components/welcome";
 import { TrialExpiredPaywall, BillingDataGate, ModuleAccessGuard } from "@/components/access";
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { SeoHead } from "@/components/seo/SeoHead";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
+import CriarAcesso from "./pages/CriarAcesso";
+import PrimeiroAcesso from "./pages/PrimeiroAcesso";
+import Reconnecting from "./pages/Reconnecting";
 import Dashboard from "./pages/Dashboard";
 import Home from "./pages/Home";
 import ShippingLabels from "./pages/ShippingLabels";
@@ -81,29 +85,19 @@ const App = () => {
   const [queryClient] = useState(() => new QueryClient({
     defaultOptions: {
       queries: {
-        // CRITICAL: Disable automatic refetching on window focus
         refetchOnWindowFocus: false,
-        // Disable refetch on reconnect (network recovery)
         refetchOnReconnect: false,
-        // STATIC MODE: Data never becomes stale automatically
         staleTime: Infinity,
-        // Keep unused data in cache for 24 hours
         gcTime: 24 * 60 * 60 * 1000,
-        // Don't retry failed queries automatically
         retry: 0,
-        // Prevent refetch on mount if data exists
         refetchOnMount: false,
       },
     },
   }));
   useEffect(() => {
     if (!import.meta.env.DEV) return;
-    // eslint-disable-next-line no-console
     console.info("[MOUNT] App");
-    return () => {
-      // eslint-disable-next-line no-console
-      console.info("[UNMOUNT] App");
-    };
+    return () => { console.info("[UNMOUNT] App"); };
   }, []);
 
   useEffect(() => {
@@ -114,17 +108,9 @@ const App = () => {
       const now = Date.now();
       if (now - lastLogAt < 250) return;
       lastLogAt = now;
-
       const query = event?.query;
       const key = query?.queryKey ? JSON.stringify(query.queryKey) : undefined;
-      // eslint-disable-next-line no-console
-      console.debug(
-        "[RQ]",
-        event?.type,
-        key,
-        query?.state?.fetchStatus,
-        query?.state?.status,
-      );
+      console.debug("[RQ]", event?.type, key, query?.state?.fetchStatus, query?.state?.status);
     });
 
     return () => unsubscribe();
@@ -150,11 +136,13 @@ const App = () => {
               <BillingDataGate />
               <ModuleAccessGuard>
               <Routes>
-                {/* Public routes (no shell) */}
+                {/* ===== Public routes (no shell, no auth) ===== */}
                 <Route path="/" element={<Index />} />
                 <Route path="/home" element={<Index />} />
                 <Route path="/planos" element={<Planos />} />
                 <Route path="/auth" element={<Auth />} />
+                <Route path="/criar-acesso" element={<CriarAcesso />} />
+                <Route path="/reconnecting" element={<Reconnecting />} />
                 <Route path="/blog" element={<Blog />} />
                 <Route path="/blog/:slug" element={<Blog />} />
                 <Route path="/blog/categoria/:slug" element={<Blog />} />
@@ -164,9 +152,8 @@ const App = () => {
                 <Route path="/politica-de-cookies" element={<PoliticaCookies />} />
                 <Route path="/lgpd" element={<Lgpd />} />
                 <Route path="/modulo/:slug" element={<ModuloDetalhe />} />
-                {/* Rota pública da dica de consultor */}
                 <Route path="/dica/:slug" element={<PublicTipPage />} />
-                {/* Public Tools routes (no shell) */}
+                {/* Public Tools */}
                 <Route path="/ferramentas/zpl" element={<ZplViewerTool />} />
                 <Route path="/ferramentas/tendencias" element={<TrendsLiteTool />} />
                 <Route path="/ferramentas/precificacao" element={<PricingSimulatorTool />} />
@@ -177,7 +164,10 @@ const App = () => {
                 <Route path="/central-de-ajuda" element={<PublicLayout><CentralDeAjuda /></PublicLayout>} />
                 <Route path="/central-de-ajuda/:slug" element={<PublicLayout><CentralDeAjudaArtigo /></PublicLayout>} />
 
-                {/* Dashboard routes (with persistent shell) */}
+                {/* ===== First access (auth required, onboarding page) ===== */}
+                <Route path="/primeiro-acesso" element={<PrimeiroAcesso />} />
+
+                {/* ===== Protected dashboard routes (with persistent shell) ===== */}
                 <Route element={<AppShellLayout />}>
                   <Route path="/inicio" element={<Home />} />
                   <Route path="/dashboard" element={<Dashboard />} />
@@ -200,14 +190,12 @@ const App = () => {
                   <Route path="/promocoes" element={<Promocoes />} />
                   <Route path="/mensagens" element={<MensagensPosVenda />} />
                   <Route path="/perguntas" element={<Perguntas />} />
-                  {/* Ad Timeline routes */}
                   <Route path="/anuncios/linha-do-tempo" element={<AdTimelineRadar />} />
                   <Route path="/anuncios/linha-do-tempo/:itemId" element={<AdTimelineDetail />} />
                   <Route path="/anuncios/acoes" element={<AdActionsCenter />} />
                   <Route path="/anuncios/clonar" element={<ClonarAnuncio />} />
                   <Route path="/ajuste-preco" element={<AjustePreco />} />
                   <Route path="/atacado" element={<Atacado />} />
-                  {/* Seed routes */}
                   <Route path="/seed" element={<Seed />} />
                   <Route path="/seed/:itemId" element={<Seed />} />
                   <Route path="/seed/sementes" element={<Seed />} />
@@ -218,7 +206,6 @@ const App = () => {
                   <Route path="/calendario-social" element={<SocialCalendar />} />
                   <Route path="/comissoes" element={<Comissoes />} />
                   <Route path="/retrospectiva" element={<Retrospectiva />} />
-                  {/* Financeiro routes */}
                   <Route path="/financeiro" element={<Financeiro />} />
                   <Route path="/financeiro/resumo" element={<Financeiro />} />
                   <Route path="/financeiro/recebimentos" element={<Financeiro />} />
@@ -226,10 +213,8 @@ const App = () => {
                   <Route path="/financeiro/conciliacao" element={<Financeiro />} />
                   <Route path="/financeiro/rotinas" element={<Financeiro />} />
                   <Route path="/financeiro/integracoes" element={<Financeiro />} />
-                  {/* Products module */}
                   <Route path="/produtos" element={<ProductsPage />} />
                   <Route path="/produtos/:id" element={<ProductDetailPage />} />
-                  {/* Admin routes (also inside persistent shell) */}
                   <Route path="/admin/*" element={<AdminRoute><Admin /></AdminRoute>} />
                   <Route path="/admin/planos" element={<AdminRoute><AdminPlanos /></AdminRoute>} />
                 </Route>

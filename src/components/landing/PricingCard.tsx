@@ -27,7 +27,7 @@ export function PricingCard({
   features,
   highlighted = false,
   ctaText = "Escolher plano",
-  ctaHref = "/auth"
+  ctaHref = "/criar-acesso"
 }: PricingCardProps) {
   const navigate = useNavigate();
   
