@@ -1527,6 +1527,21 @@ async function executeCalcJobBatch(supabase: any, supabaseUrl: string, serviceKe
         revenueShipping = Number(existing.receita_envio) || 0;
       }
 
+      // Safety guard: never overwrite non-zero commission with zero
+      if (commissionCost === 0 && existing) {
+        const existingCommission = Number(existing.fee_ml) || Number(existing.commission_cost) || 0;
+        if (existingCommission > 0) {
+          commissionCost = existingCommission;
+        }
+      }
+      // Safety guard: never overwrite non-zero shipping with zero
+      if (costShipping === 0 && existing) {
+        const existingShipping = Number(existing.shipping_cost_seller) || Number(existing.cost_shipping) || 0;
+        if (existingShipping > 0) {
+          costShipping = existingShipping;
+        }
+      }
+
       let taxPercentTotal = 0, taxValue = 0, difalApplied = false;
       if (taxConfig) {
         taxPercentTotal = Number(taxConfig.das_icms_percent || 0) + Number(taxConfig.pis_percent || 0) +
@@ -1572,6 +1587,7 @@ async function executeCalcJobBatch(supabase: any, supabaseUrl: string, serviceKe
         cost_packaging_detail: packaging.detail.length > 0 ? packaging.detail : null,
         tax_percent_total: taxPercentTotal, tax_value: taxValue, difal_applied: difalApplied,
         last_recalculated_at: new Date().toISOString(),
+        last_writer: 'cost-engine:job-batch',
       });
 
       if (companyId) {
@@ -1582,6 +1598,8 @@ async function executeCalcJobBatch(supabase: any, supabaseUrl: string, serviceKe
           difal_enabled: taxConfig?.difal_enabled || false, difal_applied: difalApplied,
           origin_state: taxConfig?.origin_state || null, destination_state: order.shipping_state || null,
           lucro_final: profitNet, margem_final: marginNet,
+          comissao_ml: commissionCost, frete_seller: costShipping,
+          fee_ml_source: billing ? 'billing' : 'fallback', writer: 'cost-engine:job-batch',
         });
       }
     }
