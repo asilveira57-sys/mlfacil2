@@ -209,12 +209,137 @@ async function generateSnapshot(
 
 // ─── Build summary JSON for a retrospective ───
 
-function buildSummaryJson(
+async function countModuleUsage(
+  supabase: any,
+  tenantId: string,
+  companyId: string,
+  periodStart: string,
+  periodEnd: string
+): Promise<Record<string, number>> {
+  const { data: events } = await supabase
+    .from("account_events")
+    .select("module, event_type")
+    .eq("company_id", companyId)
+    .gte("created_at", periodStart)
+    .lte("created_at", periodEnd);
+
+  const moduleCounts: Record<string, number> = {};
+  for (const e of events || []) {
+    const mod = e.module || "geral";
+    moduleCounts[mod] = (moduleCounts[mod] || 0) + 1;
+  }
+  return moduleCounts;
+}
+
+function buildTrialNarrative(
+  current: Record<string, unknown>,
+  baseline: Record<string, unknown> | null,
+  moduleUsage: Record<string, number>,
+  isConversion: boolean
+): Record<string, unknown> {
+  const ordersNow = Number(current.orders_count || 0);
+  const revenueNow = Number(current.revenue_total || 0);
+  const profitNow = Number(current.estimated_profit || 0);
+  const listingsNow = Number(current.active_listings || 0);
+  const productsNow = Number(current.products_count || 0);
+  const marginNow = Number(current.average_margin || 0);
+
+  const ordersBase = Number(baseline?.orders_count || 0);
+  const revenueBase = Number(baseline?.revenue_total || 0);
+
+  const totalEvents = Object.values(moduleUsage).reduce((s, v) => s + v, 0);
+  const modulesUsed = Object.keys(moduleUsage);
+
+  // Detect opportunities
+  const opportunities: string[] = [];
+  if (marginNow < 15) opportunities.push("Sua margem está abaixo de 15%. Há espaço para otimizar custos e preços.");
+  if (Number(current.ads_spend || 0) === 0) opportunities.push("Você ainda não usa publicidade. Campanhas de ADS podem acelerar suas vendas.");
+  if (Number(current.acos || 0) > 30) opportunities.push("Seu ACOS está acima de 30%. Otimizar campanhas pode melhorar o retorno.");
+  if (Number(current.cancellations_count || 0) > ordersNow * 0.05) opportunities.push("Taxa de cancelamento acima de 5%. Revisar qualidade e descrições pode reduzir devoluções.");
+  if (listingsNow < 20) opportunities.push("Poucos anúncios ativos. Expandir o catálogo pode aumentar a exposição.");
+
+  // Growth projection (30-day extrapolation)
+  const dailyRevenue = revenueNow / 14;
+  const projectedMonthly = dailyRevenue * 30;
+  const projectedAnnual = dailyRevenue * 365;
+
+  // Build narrative sections
+  const narrative: Record<string, unknown> = {
+    opening: {
+      headline: isConversion
+        ? "Seus primeiros 14 dias já revelaram o potencial da sua operação"
+        : "Resumo dos seus primeiros 14 dias na plataforma",
+      initial_state: `Quando você conectou sua conta, sua operação tinha ${ordersBase} pedidos registrados e R$ ${revenueBase.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} em faturamento.`,
+      analysis: `O sistema analisou ${productsNow} produtos, ${listingsNow} anúncios ativos e processou ${totalEvents} ações nos módulos da plataforma.`,
+    },
+    performance: {
+      orders_period: ordersNow,
+      revenue_period: revenueNow,
+      profit_period: profitNow,
+      margin_period: marginNow,
+      ticket_period: Number(current.average_ticket || 0),
+    },
+    module_usage: {
+      total_actions: totalEvents,
+      modules_used: modulesUsed,
+      breakdown: moduleUsage,
+      engagement_level: totalEvents > 50 ? "alto" : totalEvents > 20 ? "moderado" : "inicial",
+    },
+    discoveries: {
+      products_analyzed: productsNow,
+      listings_active: listingsNow,
+      opportunities_found: opportunities.length,
+      opportunities,
+    },
+    projections: {
+      monthly_revenue_estimate: projectedMonthly,
+      annual_revenue_estimate: projectedAnnual,
+      monthly_profit_estimate: profitNow > 0 ? (profitNow / 14) * 30 : null,
+      growth_potential: ordersBase > 0
+        ? `${(((ordersNow - ordersBase) / ordersBase) * 100).toFixed(1)}% de crescimento nos primeiros 14 dias`
+        : "Dados iniciais sendo coletados para projeção",
+    },
+  };
+
+  if (isConversion) {
+    narrative.cta = {
+      type: "trial_conversion",
+      show_upgrade_button: true,
+      headline: "Continue transformando dados em resultado",
+      primary_message: `Em apenas 14 dias, o sistema já identificou ${opportunities.length} oportunidade(s) de melhoria na sua operação. Continuar usando permite que essas descobertas se transformem em resultado real.`,
+      supporting_points: [
+        `${productsNow} produtos monitorados em tempo real`,
+        `${totalEvents} ações executadas automaticamente`,
+        opportunities.length > 0
+          ? `${opportunities.length} oportunidade(s) de otimização identificadas`
+          : "Operação saudável – manter monitoramento contínuo",
+        `Projeção de R$ ${projectedMonthly.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} de faturamento mensal`,
+      ],
+      urgency: "Seu período de teste está acabando. Ative seu plano para não perder o acompanhamento contínuo da sua operação.",
+    };
+  } else {
+    narrative.cta = {
+      type: "trial_summary",
+      show_upgrade_button: false,
+      headline: "Obrigado por fazer parte da plataforma",
+      primary_message: `Aqui está o resumo dos seus primeiros 14 dias. Seu plano já está ativo e o sistema continuará monitorando e otimizando sua operação automaticamente.`,
+    };
+  }
+
+  return narrative;
+}
+
+async function buildSummaryJson(
+  supabase: any,
   currentSnapshot: Record<string, unknown>,
   baselineSnapshot: Record<string, unknown> | null,
   rule: Rule,
-  trialStatus: string
-): Record<string, unknown> {
+  trialStatus: string,
+  tenantId: string,
+  companyId: string,
+  periodStart: string,
+  periodEnd: string
+): Promise<Record<string, unknown>> {
   const summary: Record<string, unknown> = {
     type: rule.retrospective_type,
     period_days: rule.period_days,
@@ -230,6 +355,10 @@ function buildSummaryJson(
       profit: currentSnapshot.estimated_profit,
       listings: currentSnapshot.active_listings,
       products: currentSnapshot.products_count,
+      cancellations: currentSnapshot.cancellations_count,
+      cancellations_value: currentSnapshot.cancellations_value,
+      total_fees: currentSnapshot.total_fees,
+      total_cost: currentSnapshot.total_cost,
     },
     trial_status: trialStatus,
   };
@@ -260,14 +389,17 @@ function buildSummaryJson(
     };
   }
 
-  // CTA for trial conversion
-  if (rule.retrospective_type === "trial_conversion" && trialStatus === "in_trial") {
-    summary.cta = {
-      type: "trial_conversion",
-      message:
-        "Sua operação já evoluiu com o sistema. Continue usando para transformar descobertas em resultado real.",
-      show_upgrade_button: true,
-    };
+  // Trial-specific enrichment
+  const isTrialType = rule.retrospective_type === "trial_conversion" || rule.retrospective_type === "trial_summary";
+  if (isTrialType) {
+    const moduleUsage = await countModuleUsage(supabase, tenantId, companyId, periodStart, periodEnd);
+    const isConversion = rule.retrospective_type === "trial_conversion" && trialStatus === "in_trial";
+    summary.trial_narrative = buildTrialNarrative(
+      currentSnapshot,
+      baselineSnapshot,
+      moduleUsage,
+      isConversion
+    );
   }
 
   return summary;
