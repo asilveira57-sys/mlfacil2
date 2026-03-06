@@ -1,97 +1,107 @@
-import { Auth as SupabaseAuth } from "@supabase/auth-ui-react";
-import { ThemeSupa } from "@supabase/auth-ui-shared";
-import { supabase } from "@/integrations/supabase/client";
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BarChart3, DollarSign, LayoutDashboard, Settings2, MailCheck } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { BarChart3, DollarSign, LayoutDashboard, Settings2, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
 
 const Auth = () => {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const currentYear = new Date().getFullYear();
-  const [showVerifyEmail, setShowVerifyEmail] = useState(false);
-  const [signupEmail, setSignupEmail] = useState('');
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  // Forgot password state
+  const [forgotMode, setForgotMode] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
 
   useEffect(() => {
-    // Check session on mount (once)
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        navigate("/dashboard");
+        console.info("[Auth] User already authenticated, redirecting to /dashboard");
+        navigate("/dashboard", { replace: true });
+      } else {
+        setCheckingSession(false);
       }
     });
 
-    // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      // Redirect to dashboard on sign in (only if email is confirmed)
       if (event === "SIGNED_IN" && session) {
-        navigate("/dashboard");
-      }
-      // Redirect to home page on sign out
-      if (event === "SIGNED_OUT") {
-        navigate("/");
-      }
-      // Show verify email message after signup
-      if (event === "SIGNED_OUT" || event === "INITIAL_SESSION") {
-        // noop
+        console.info("[Auth] SIGNED_IN event, redirecting to /dashboard");
+        navigate("/dashboard", { replace: true });
       }
     });
 
-    // Intercept signup to show verification message
-    const originalSignUp = supabase.auth.signUp.bind(supabase.auth);
-    supabase.auth.signUp = async (credentials) => {
-      const result = await originalSignUp(credentials);
-      // If signup succeeded but user needs email confirmation
-      if (result.data?.user && !result.data.user.email_confirmed_at && !result.error) {
-        setSignupEmail(result.data.user.email || '');
-        setShowVerifyEmail(true);
-      }
-      return result;
-    };
-
-    return () => {
-      subscription.unsubscribe();
-      supabase.auth.signUp = originalSignUp;
-    };
+    return () => subscription.unsubscribe();
   }, [navigate]);
 
-  // Build localization object based on current language
-  const getLocalization = () => {
-    return {
-      variables: {
-        sign_in: {
-          email_label: t('auth:email'),
-          password_label: t('auth:password'),
-          email_input_placeholder: t('auth:email_placeholder', { defaultValue: 'seu@email.com' }),
-          password_input_placeholder: t('auth:password_placeholder', { defaultValue: 'Sua senha' }),
-          button_label: t('auth:sign_in'),
-          loading_button_label: t('auth:signing_in', { defaultValue: 'Entrando...' }),
-          social_provider_text: t('auth:or_continue_with') + " {{provider}}",
-          link_text: t('auth:has_account') + " " + t('auth:sign_in'),
-        },
-        sign_up: {
-          email_label: t('auth:email'),
-          password_label: t('auth:password'),
-          email_input_placeholder: t('auth:email_placeholder', { defaultValue: 'seu@email.com' }),
-          password_input_placeholder: t('auth:password_placeholder', { defaultValue: 'Escolha uma senha' }),
-          button_label: t('auth:create_account'),
-          loading_button_label: t('auth:creating_account', { defaultValue: 'Criando conta...' }),
-          social_provider_text: t('auth:or_continue_with') + " {{provider}}",
-          link_text: t('auth:no_account') + " " + t('auth:sign_up'),
-          confirmation_text: t('auth:check_inbox'),
-        },
-        forgotten_password: {
-          email_label: t('auth:email'),
-          password_label: t('auth:password'),
-          email_input_placeholder: t('auth:email_placeholder', { defaultValue: 'seu@email.com' }),
-          button_label: t('auth:reset_password'),
-          loading_button_label: t('auth:sending_reset', { defaultValue: 'Enviando instruções...' }),
-          link_text: t('auth:forgot_password'),
-          confirmation_text: t('auth:check_inbox'),
-        },
-      },
-    };
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !password) return;
+
+    setLoading(true);
+    console.info("[Auth] Login attempt for:", email);
+
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        console.warn("[Auth] Login failed:", error.message);
+        if (error.message.includes("Email not confirmed")) {
+          toast.error("E-mail não verificado. Verifique sua caixa de entrada.");
+        } else {
+          toast.error(t("auth:invalid_credentials"));
+        }
+      } else {
+        console.info("[Auth] Login successful for:", email);
+      }
+    } catch (err: any) {
+      console.error("[Auth] Login error:", err);
+      toast.error("Erro inesperado ao fazer login.");
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotEmail) return;
+
+    setForgotLoading(true);
+    console.info("[Auth] Password reset requested for:", forgotEmail);
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) throw error;
+      setForgotSent(true);
+      console.info("[Auth] Password reset email sent to:", forgotEmail);
+    } catch (err: any) {
+      console.error("[Auth] Password reset error:", err);
+      toast.error("Erro ao enviar e-mail de recuperação.");
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  if (checkingSession) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-muted to-background flex">
@@ -111,10 +121,8 @@ const Auth = () => {
                 <DollarSign className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-xl font-semibold mb-2">{t('auth:features.complete_analysis_title')}</h3>
-                <p className="text-primary-foreground/80 leading-relaxed">
-                  {t('auth:features.complete_analysis_desc')}
-                </p>
+                <h3 className="text-xl font-semibold mb-2">{t("auth:features.complete_analysis_title")}</h3>
+                <p className="text-primary-foreground/80 leading-relaxed">{t("auth:features.complete_analysis_desc")}</p>
               </div>
             </div>
             
@@ -123,10 +131,8 @@ const Auth = () => {
                 <LayoutDashboard className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-xl font-semibold mb-2">{t('auth:features.ranking_title')}</h3>
-                <p className="text-primary-foreground/80 leading-relaxed">
-                  {t('auth:features.ranking_desc')}
-                </p>
+                <h3 className="text-xl font-semibold mb-2">{t("auth:features.ranking_title")}</h3>
+                <p className="text-primary-foreground/80 leading-relaxed">{t("auth:features.ranking_desc")}</p>
               </div>
             </div>
             
@@ -135,21 +141,19 @@ const Auth = () => {
                 <Settings2 className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-xl font-semibold mb-2">{t('auth:features.integration_title')}</h3>
-                <p className="text-primary-foreground/80 leading-relaxed">
-                  {t('auth:features.integration_desc')}
-                </p>
+                <h3 className="text-xl font-semibold mb-2">{t("auth:features.integration_title")}</h3>
+                <p className="text-primary-foreground/80 leading-relaxed">{t("auth:features.integration_desc")}</p>
               </div>
             </div>
           </div>
         </div>
         
         <div className="text-sm text-primary-foreground/60">
-          {t('auth:copyright', { year: currentYear })}
+          {t("auth:copyright", { year: currentYear })}
         </div>
       </div>
 
-      {/* Right Side - Auth Form */}
+      {/* Right Side - Login Form */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-8">
         <div className="w-full max-w-md">
           <div className="lg:hidden mb-8 text-center">
@@ -162,88 +166,111 @@ const Auth = () => {
           </div>
 
           <div className="bg-card p-8 rounded-2xl shadow-elevated border border-border">
-            {showVerifyEmail ? (
-              <div className="text-center space-y-4 py-6">
-                <div className="flex justify-center">
-                  <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center">
-                    <MailCheck className="w-8 h-8 text-primary" />
-                  </div>
+            {forgotMode ? (
+              forgotSent ? (
+                <div className="text-center space-y-4 py-4">
+                  <h2 className="text-2xl font-bold text-card-foreground">{t("auth:email_sent")}</h2>
+                  <p className="text-muted-foreground text-sm">
+                    Enviamos um link de recuperação para <strong>{forgotEmail}</strong>.
+                    <br />Verifique sua caixa de entrada.
+                  </p>
+                  <button onClick={() => { setForgotMode(false); setForgotSent(false); }} className="text-sm text-primary hover:underline mt-4">
+                    Voltar ao login
+                  </button>
                 </div>
-                <h2 className="text-2xl font-bold text-card-foreground">
-                  {t('auth:verify_email')}
-                </h2>
-                <p className="text-muted-foreground text-sm max-w-sm mx-auto">
-                  {t('auth:verify_email_description')}
-                </p>
-                {signupEmail && (
-                  <p className="text-sm font-medium text-foreground">{signupEmail}</p>
-                )}
-                <button
-                  onClick={() => setShowVerifyEmail(false)}
-                  className="text-sm text-primary hover:underline mt-4"
-                >
-                  {t('auth:sign_in')}
-                </button>
-              </div>
+              ) : (
+                <>
+                  <div className="mb-6">
+                    <h2 className="text-2xl font-bold text-card-foreground mb-2">{t("auth:forgot_password_title")}</h2>
+                    <p className="text-muted-foreground text-sm">{t("auth:forgot_password_subtitle")}</p>
+                  </div>
+                  <form onSubmit={handleForgotPassword} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="forgot-email">{t("auth:email")}</Label>
+                      <Input
+                        id="forgot-email"
+                        type="email"
+                        placeholder={t("auth:email_placeholder")}
+                        value={forgotEmail}
+                        onChange={(e) => setForgotEmail(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <Button type="submit" className="w-full" disabled={forgotLoading}>
+                      {forgotLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                      {forgotLoading ? t("auth:sending_reset") : t("auth:reset_password")}
+                    </Button>
+                    <button type="button" onClick={() => setForgotMode(false)} className="text-sm text-primary hover:underline w-full text-center block">
+                      Voltar ao login
+                    </button>
+                  </form>
+                </>
+              )
             ) : (
-            <>
-            <div className="mb-8">
-              <h2 className="text-2xl font-bold text-card-foreground mb-2">
-                {t('auth:login_title')}
-              </h2>
-              <p className="text-muted-foreground">
-                {t('auth:login_subtitle')}
-              </p>
-            </div>
+              <>
+                <div className="mb-6">
+                  <h2 className="text-2xl font-bold text-card-foreground mb-2">{t("auth:login_title")}</h2>
+                  <p className="text-muted-foreground">{t("auth:login_subtitle")}</p>
+                </div>
 
-            <SupabaseAuth
-              supabaseClient={supabase}
-              appearance={{
-                theme: ThemeSupa,
-                variables: {
-                  default: {
-                    colors: {
-                      brand: "hsl(223 47% 23%)",
-                      brandAccent: "hsl(223 45% 35%)",
-                      brandButtonText: "hsl(210 40% 98%)",
-                      defaultButtonBackground: "hsl(210 40% 96%)",
-                      defaultButtonBackgroundHover: "hsl(210 40% 93%)",
-                      defaultButtonBorder: "hsl(214 32% 91%)",
-                      defaultButtonText: "hsl(222 47% 11%)",
-                      dividerBackground: "hsl(214 32% 91%)",
-                      inputBackground: "hsl(0 0% 100%)",
-                      inputBorder: "hsl(214 32% 91%)",
-                      inputBorderHover: "hsl(223 47% 23%)",
-                      inputBorderFocus: "hsl(223 47% 23%)",
-                      inputText: "hsl(222 47% 11%)",
-                      inputLabelText: "hsl(215 16% 47%)",
-                      inputPlaceholder: "hsl(215 16% 47%)",
-                    },
-                    space: {
-                      inputPadding: "12px",
-                      buttonPadding: "12px 16px",
-                    },
-                    borderWidths: {
-                      buttonBorderWidth: "1px",
-                      inputBorderWidth: "1px",
-                    },
-                    radii: {
-                      borderRadiusButton: "0.75rem",
-                      buttonBorderRadius: "0.75rem",
-                      inputBorderRadius: "0.75rem",
-                    },
-                  },
-                },
-                className: {
-                  button: "font-medium",
-                  input: "font-normal",
-                },
-              }}
-              providers={[]}
-              redirectTo={`${window.location.origin}/dashboard`}
-              localization={getLocalization()}
-            />
-            </>
+                <form onSubmit={handleLogin} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="email">{t("auth:email")}</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      placeholder={t("auth:email_placeholder")}
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                      autoComplete="email"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="password">{t("auth:password")}</Label>
+                    <div className="relative">
+                      <Input
+                        id="password"
+                        type={showPassword ? "text" : "password"}
+                        placeholder={t("auth:password_placeholder")}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                        autoComplete="current-password"
+                        className="pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button type="button" onClick={() => { setForgotMode(true); setForgotEmail(email); }} className="text-sm text-primary hover:underline">
+                      {t("auth:forgot_password")}
+                    </button>
+                  </div>
+
+                  <Button type="submit" className="w-full" disabled={loading}>
+                    {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                    {loading ? t("auth:signing_in") : t("auth:login")}
+                  </Button>
+                </form>
+
+                <div className="mt-6 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    {t("auth:no_account")}{" "}
+                    <Link to="/criar-acesso" className="text-primary font-medium hover:underline">
+                      Criar acesso
+                    </Link>
+                  </p>
+                </div>
+              </>
             )}
           </div>
         </div>
