@@ -658,7 +658,7 @@ async function getOrderCosts(supabase: any, userId: string, params: Record<strin
   }
 
   // Sort
-  const validSortKeys = ['created_at_meli', 'revenue_total', 'cost_total', 'shipping_cost_seller', 'profit_total', 'margin_percent'];
+  const validSortKeys = ['created_at_meli', 'revenue_total', 'cost_total', 'commission_cost', 'cost_items_total', 'shipping_cost_seller', 'profit_total', 'margin_percent'];
   if (validSortKeys.includes(sortBy)) {
     results.sort((a: any, b: any) => {
       let aVal: number, bVal: number;
