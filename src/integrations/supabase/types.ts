@@ -3929,6 +3929,7 @@ export type Database = {
       }
       cost_calculation_logs: {
         Row: {
+          comissao_ml: number | null
           company_id: string | null
           created_at: string | null
           custo_produto: number | null
@@ -3936,6 +3937,8 @@ export type Database = {
           difal_applied: boolean | null
           difal_enabled: boolean | null
           embalagem: number | null
+          fee_ml_source: string | null
+          frete_seller: number | null
           id: string
           imposto_percent_total: number | null
           imposto_valor: number | null
@@ -3945,8 +3948,10 @@ export type Database = {
           origin_state: string | null
           receita: number | null
           seller_id: string | null
+          writer: string | null
         }
         Insert: {
+          comissao_ml?: number | null
           company_id?: string | null
           created_at?: string | null
           custo_produto?: number | null
@@ -3954,6 +3959,8 @@ export type Database = {
           difal_applied?: boolean | null
           difal_enabled?: boolean | null
           embalagem?: number | null
+          fee_ml_source?: string | null
+          frete_seller?: number | null
           id?: string
           imposto_percent_total?: number | null
           imposto_valor?: number | null
@@ -3963,8 +3970,10 @@ export type Database = {
           origin_state?: string | null
           receita?: number | null
           seller_id?: string | null
+          writer?: string | null
         }
         Update: {
+          comissao_ml?: number | null
           company_id?: string | null
           created_at?: string | null
           custo_produto?: number | null
@@ -3972,6 +3981,8 @@ export type Database = {
           difal_applied?: boolean | null
           difal_enabled?: boolean | null
           embalagem?: number | null
+          fee_ml_source?: string | null
+          frete_seller?: number | null
           id?: string
           imposto_percent_total?: number | null
           imposto_valor?: number | null
@@ -3981,6 +3992,7 @@ export type Database = {
           origin_state?: string | null
           receita?: number | null
           seller_id?: string | null
+          writer?: string | null
         }
         Relationships: [
           {
@@ -9741,6 +9753,7 @@ export type Database = {
           installments_cost: number | null
           last_checked_at: string | null
           last_recalculated_at: string | null
+          last_writer: string | null
           margin_net: number | null
           margin_percent: number
           missing_cost_items_count: number
@@ -9799,6 +9812,7 @@ export type Database = {
           installments_cost?: number | null
           last_checked_at?: string | null
           last_recalculated_at?: string | null
+          last_writer?: string | null
           margin_net?: number | null
           margin_percent?: number
           missing_cost_items_count?: number
@@ -9857,6 +9871,7 @@ export type Database = {
           installments_cost?: number | null
           last_checked_at?: string | null
           last_recalculated_at?: string | null
+          last_writer?: string | null
           margin_net?: number | null
           margin_percent?: number
           missing_cost_items_count?: number
