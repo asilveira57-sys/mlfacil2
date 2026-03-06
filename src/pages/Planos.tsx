@@ -90,6 +90,13 @@ const Planos = () => {
   };
 
   const handleOfferClick = (offer: TierOffer) => {
+    if (!isAuthenticated) {
+      const params = new URLSearchParams();
+      if (selectedTierCode) params.set('plan', selectedTierCode);
+      params.set('offer', offer.offer_code);
+      navigate(`/auth?${params.toString()}`);
+      return;
+    }
     checkout(offer.id);
   };
 
