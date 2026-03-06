@@ -17666,6 +17666,62 @@ export type Database = {
         }
         Relationships: []
       }
+      user_dashboard_widgets: {
+        Row: {
+          altura: number
+          config_json: Json | null
+          created_at: string
+          fixado: boolean
+          id: string
+          largura: number
+          posicao_x: number
+          posicao_y: number
+          tenant_id: string
+          updated_at: string
+          user_id: string
+          visivel: boolean
+          widget_slug: string
+        }
+        Insert: {
+          altura?: number
+          config_json?: Json | null
+          created_at?: string
+          fixado?: boolean
+          id?: string
+          largura?: number
+          posicao_x?: number
+          posicao_y?: number
+          tenant_id: string
+          updated_at?: string
+          user_id: string
+          visivel?: boolean
+          widget_slug: string
+        }
+        Update: {
+          altura?: number
+          config_json?: Json | null
+          created_at?: string
+          fixado?: boolean
+          id?: string
+          largura?: number
+          posicao_x?: number
+          posicao_y?: number
+          tenant_id?: string
+          updated_at?: string
+          user_id?: string
+          visivel?: boolean
+          widget_slug?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_dashboard_widgets_widget_slug_fkey"
+            columns: ["widget_slug"]
+            isOneToOne: false
+            referencedRelation: "widget_catalog"
+            referencedColumns: ["slug"]
+          },
+        ]
+      }
       user_email_preferences: {
         Row: {
           category_id: string
@@ -18479,6 +18535,111 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      widget_catalog: {
+        Row: {
+          ativo: boolean
+          created_at: string
+          descricao: string | null
+          icone: string | null
+          id: string
+          modulo_dependente: string | null
+          nome: string
+          ordem: number
+          plano_minimo: string | null
+          slug: string
+          tamanho_padrao: string
+        }
+        Insert: {
+          ativo?: boolean
+          created_at?: string
+          descricao?: string | null
+          icone?: string | null
+          id?: string
+          modulo_dependente?: string | null
+          nome: string
+          ordem?: number
+          plano_minimo?: string | null
+          slug: string
+          tamanho_padrao?: string
+        }
+        Update: {
+          ativo?: boolean
+          created_at?: string
+          descricao?: string | null
+          icone?: string | null
+          id?: string
+          modulo_dependente?: string | null
+          nome?: string
+          ordem?: number
+          plano_minimo?: string | null
+          slug?: string
+          tamanho_padrao?: string
+        }
+        Relationships: []
+      }
+      widget_event_stream: {
+        Row: {
+          contexto: Json | null
+          created_at: string
+          evento: string
+          id: string
+          tenant_id: string
+          user_id: string
+          valor: string | null
+          widget_slug: string
+        }
+        Insert: {
+          contexto?: Json | null
+          created_at?: string
+          evento: string
+          id?: string
+          tenant_id: string
+          user_id: string
+          valor?: string | null
+          widget_slug: string
+        }
+        Update: {
+          contexto?: Json | null
+          created_at?: string
+          evento?: string
+          id?: string
+          tenant_id?: string
+          user_id?: string
+          valor?: string | null
+          widget_slug?: string
+        }
+        Relationships: []
+      }
+      widget_usage_logs: {
+        Row: {
+          acao: string
+          created_at: string
+          id: string
+          metadata: Json | null
+          tenant_id: string
+          user_id: string
+          widget_slug: string
+        }
+        Insert: {
+          acao: string
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          tenant_id: string
+          user_id: string
+          widget_slug: string
+        }
+        Update: {
+          acao?: string
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          tenant_id?: string
+          user_id?: string
+          widget_slug?: string
+        }
+        Relationships: []
       }
       workspace_accounts: {
         Row: {
