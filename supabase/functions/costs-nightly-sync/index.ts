@@ -491,6 +491,7 @@ async function processBackfill(supabase: any, userId: string, sellerId: string):
       profit_total: order.total_amount || 0,
       margin_percent: 100,
       calculated_at: new Date().toISOString(),
+      last_writer: 'costs-nightly-sync:backfill',
     }));
 
     await supabase
@@ -619,6 +620,7 @@ async function processRealCosts(supabase: any, userId: string, sellerId: string,
           margin_percent: marginPercent,
           has_real_financial: feeMLSource === 'billing',
           real_cost_synced_at: new Date().toISOString(),
+          last_writer: 'costs-nightly-sync:billing',
         })
         .eq('seller_id', sellerId)
         .eq('order_id', order.order_id);
