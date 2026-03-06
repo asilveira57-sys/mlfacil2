@@ -699,8 +699,8 @@ Deno.serve(async (req) => {
                 event_date: new Date().toISOString(),
                 event_data: {
                   retrospective_id: retro.id,
-                  type: rule.retrospective_type,
-                  period_days: rule.period_days,
+                  type: effectiveRule.retrospective_type,
+                  period_days: effectiveRule.period_days,
                   period_start: periodStart,
                   period_end: periodEnd,
                 },
@@ -711,7 +711,7 @@ Deno.serve(async (req) => {
                 tenant_id: tenant.id,
                 company_id: company.id,
                 retrospective_id: retro.id,
-                type: rule.retrospective_type,
+                type: effectiveRule.retrospective_type,
                 status: "generated",
               });
             } catch (err: any) {
