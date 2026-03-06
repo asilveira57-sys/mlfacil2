@@ -92,6 +92,7 @@ export function AppShellLayout() {
 
 
   return (
+    <ProtectedRoute>
     <PageHeaderContext.Provider value={contextValue}>
       <SidebarProvider defaultOpen={true}>
         <div className="min-h-screen flex w-full bg-background">
