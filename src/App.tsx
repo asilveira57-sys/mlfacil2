@@ -168,7 +168,7 @@ const App = () => {
                 <Route path="/primeiro-acesso" element={<PrimeiroAcesso />} />
 
                 {/* ===== Protected dashboard routes (with persistent shell) ===== */}
-                <Route element={<ProtectedRoute><AppShellLayout /></ProtectedRoute>}>
+                <Route element={<AppShellLayout />}>
                   <Route path="/inicio" element={<Home />} />
                   <Route path="/dashboard" element={<Dashboard />} />
                   <Route path="/shipping-labels" element={<ShippingLabels />} />
