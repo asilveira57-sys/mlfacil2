@@ -777,10 +777,10 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
               )}
 
               <div className="border rounded-lg overflow-hidden">
-                <Table className="[&_td]:px-2 [&_td]:py-1.5 [&_th]:px-2 [&_th]:py-2">
+                <Table className="table-fixed w-full [&_td]:px-1.5 [&_td]:py-1.5 [&_th]:px-1.5 [&_th]:py-2 text-xs">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-10">
+                      <TableHead className="w-[32px]">
                         <Checkbox
                           checked={allOnPageSelected}
                           onCheckedChange={toggleSelectAll}
@@ -788,7 +788,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                         />
                       </TableHead>
                       <TableHead 
-                        className="cursor-pointer select-none hover:bg-muted/80"
+                        className="w-[68px] cursor-pointer select-none hover:bg-muted/80"
                         onClick={() => handleSort('created_at_meli')}
                       >
                         <div className="flex items-center">
@@ -796,11 +796,11 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                           <SortIcon columnKey="created_at_meli" />
                         </div>
                       </TableHead>
-                      <TableHead>Pedido</TableHead>
-                      <TableHead>Status Venda</TableHead>
-                      <TableHead>Comprador</TableHead>
+                      <TableHead className="w-[120px]">Pedido</TableHead>
+                      <TableHead className="w-[70px]">Status Venda</TableHead>
+                      <TableHead className="w-auto truncate">Comprador</TableHead>
                       <TableHead 
-                        className="text-right cursor-pointer select-none hover:bg-muted/80"
+                        className="w-[80px] text-right cursor-pointer select-none hover:bg-muted/80"
                         onClick={() => handleSort('revenue_total')}
                       >
                         <div className="flex items-center justify-end">
@@ -809,36 +809,36 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                         </div>
                       </TableHead>
                       <TableHead 
-                        className="text-right cursor-pointer select-none hover:bg-muted/80"
+                        className="w-[80px] text-right cursor-pointer select-none hover:bg-muted/80"
                         onClick={() => handleSort('commission_cost')}
                       >
-                        <div className="flex items-center justify-end">
-                          Comissão ML
+                        <div className="flex items-center justify-end whitespace-nowrap">
+                          Comissão
                           <SortIcon columnKey="commission_cost" />
                         </div>
                       </TableHead>
                       <TableHead 
-                        className="text-right cursor-pointer select-none hover:bg-muted/80"
+                        className="w-[78px] text-right cursor-pointer select-none hover:bg-muted/80"
                         onClick={() => handleSort('cost_items_total')}
                       >
-                        <div className="flex items-center justify-end">
-                          Custo Merc.
+                        <div className="flex items-center justify-end whitespace-nowrap">
+                          Custo
                           <SortIcon columnKey="cost_items_total" />
                         </div>
                       </TableHead>
                       <TableHead 
-                        className="text-right cursor-pointer select-none hover:bg-muted/80"
+                        className="w-[76px] text-right cursor-pointer select-none hover:bg-muted/80"
                         onClick={() => handleSort('shipping_cost_seller')}
                       >
-                        <div className="flex items-center justify-end">
-                          Frete (ML)
+                        <div className="flex items-center justify-end whitespace-nowrap">
+                          Frete
                           <SortIcon columnKey="shipping_cost_seller" />
                         </div>
                       </TableHead>
-                      <TableHead className="text-right">Embalagem</TableHead>
-                      <TableHead className="text-right">Impostos</TableHead>
+                      <TableHead className="w-[68px] text-right">Embal.</TableHead>
+                      <TableHead className="w-[68px] text-right">Impostos</TableHead>
                       <TableHead 
-                        className="text-right cursor-pointer select-none hover:bg-muted/80"
+                        className="w-[80px] text-right cursor-pointer select-none hover:bg-muted/80"
                         onClick={() => handleSort('profit_total')}
                       >
                         <div className="flex items-center justify-end">
@@ -847,7 +847,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                         </div>
                       </TableHead>
                       <TableHead 
-                        className="text-right cursor-pointer select-none hover:bg-muted/80"
+                        className="w-[60px] text-right cursor-pointer select-none hover:bg-muted/80"
                         onClick={() => handleSort('margin_percent')}
                       >
                         <div className="flex items-center justify-end">
@@ -855,8 +855,8 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                           <SortIcon columnKey="margin_percent" />
                         </div>
                       </TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="w-16"></TableHead>
+                      <TableHead className="w-[72px]">Status</TableHead>
+                      <TableHead className="w-[52px]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
