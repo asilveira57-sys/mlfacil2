@@ -810,11 +810,20 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                       </TableHead>
                       <TableHead 
                         className="text-right cursor-pointer select-none hover:bg-muted/80"
-                        onClick={() => handleSort('cost_total')}
+                        onClick={() => handleSort('commission_cost')}
                       >
                         <div className="flex items-center justify-end">
-                          Custo
-                          <SortIcon columnKey="cost_total" />
+                          Comissão ML
+                          <SortIcon columnKey="commission_cost" />
+                        </div>
+                      </TableHead>
+                      <TableHead 
+                        className="text-right cursor-pointer select-none hover:bg-muted/80"
+                        onClick={() => handleSort('cost_items_total')}
+                      >
+                        <div className="flex items-center justify-end">
+                          Custo Merc.
+                          <SortIcon columnKey="cost_items_total" />
                         </div>
                       </TableHead>
                       <TableHead 
@@ -853,7 +862,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                   <TableBody>
                     {orders.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={15} className="text-center py-8 text-muted-foreground">
                           Nenhum pedido encontrado. Clique em "Recalcular" para processar.
                         </TableCell>
                       </TableRow>
@@ -925,8 +934,11 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                             <TableCell className="text-right font-medium">
                               {formatCurrency(order.revenue_total)}
                             </TableCell>
+                            <TableCell className="text-right text-orange-600">
+                              {formatCurrency(order.commission_cost || 0)}
+                            </TableCell>
                             <TableCell className="text-right text-destructive">
-                              {formatCurrency(order.cost_total)}
+                              {formatCurrency(order.cost_items_total || 0)}
                             </TableCell>
                             <TableCell className={cn(
                               "text-right",
