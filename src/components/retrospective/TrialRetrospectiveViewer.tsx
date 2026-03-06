@@ -8,7 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import {
   Rocket, TrendingUp, Target, ShoppingCart, DollarSign,
   BarChart3, Lightbulb, ArrowRight, Sparkles, Activity,
-  Package, AlertTriangle, Zap, Crown,
+  Package, AlertTriangle, Zap, Crown, FileText, Presentation, ExternalLink,
 } from 'lucide-react';
 import type { Retrospective } from '@/hooks/useRetrospectiveEngine';
 
@@ -56,6 +56,26 @@ export function TrialRetrospectiveViewer({ report, open, onOpenChange }: Props) 
             <Badge variant="outline" className="mt-3 border-primary/30 text-primary">
               <Crown className="h-3 w-3 mr-1" /> Período de Teste
             </Badge>
+          )}
+          {(report.html_url || report.presentation_url) && (
+            <div className="flex gap-2 justify-center mt-4">
+              {report.html_url && (
+                <Button variant="outline" size="sm" className="gap-1.5" asChild>
+                  <a href={report.html_url} target="_blank" rel="noopener noreferrer">
+                    <FileText className="h-3.5 w-3.5" /> Relatório HTML
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </Button>
+              )}
+              {report.presentation_url && (
+                <Button variant="outline" size="sm" className="gap-1.5" asChild>
+                  <a href={report.presentation_url} target="_blank" rel="noopener noreferrer">
+                    <Presentation className="h-3.5 w-3.5" /> Slides
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </Button>
+              )}
+            </div>
           )}
         </div>
 

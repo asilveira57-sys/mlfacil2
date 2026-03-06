@@ -196,6 +196,30 @@ export function useTriggerRetrospectiveEngine() {
   });
 }
 
+// ─── Generate reports (HTML/Slides) for a retrospective ───
+
+export function useGenerateRetrospectiveReports() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (retrospectiveId: string) => {
+      const result = await invokeEdgeFunction<{
+        ok: boolean;
+        html_url: string | null;
+        presentation_url: string | null;
+      }>('retrospective-report-gen', {
+        body: { retrospective_id: retrospectiveId },
+      });
+
+      if (!result.success) throw new Error(result.error || 'Erro ao gerar relatórios');
+      return result.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['retrospectives'] });
+    },
+  });
+}
+
 // ─── Delete retrospective ───
 
 export function useDeleteRetrospectiveNew() {

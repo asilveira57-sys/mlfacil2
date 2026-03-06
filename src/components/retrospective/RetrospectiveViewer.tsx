@@ -8,6 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Download, TrendingUp, TrendingDown, DollarSign, ShoppingCart,
   BarChart3, Target, Minus, ArrowUpRight, ArrowDownRight,
+  FileText, Presentation, ExternalLink,
 } from 'lucide-react';
 import { RetrospectiveReport, logPdfDownload } from '@/hooks/useRetrospective';
 import { generateRetrospectivePdf } from './RetrospectivePdfExporter';
@@ -63,9 +64,19 @@ export function RetrospectiveViewer({ report, open, onOpenChange, userId }: Prop
             <DialogTitle className="text-xl">
               Retrospectiva {report.tipo.charAt(0).toUpperCase() + report.tipo.slice(1)}
             </DialogTitle>
-            <Button variant="outline" size="sm" className="gap-2" onClick={handleDownloadPdf}>
-              <Download className="h-4 w-4" /> Baixar PDF
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" className="gap-2" onClick={handleDownloadPdf}>
+                <Download className="h-4 w-4" /> PDF
+              </Button>
+              {report.pdf_url && (
+                <Button variant="outline" size="sm" className="gap-1.5" asChild>
+                  <a href={report.pdf_url} target="_blank" rel="noopener noreferrer">
+                    <FileText className="h-3.5 w-3.5" /> HTML
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </Button>
+              )}
+            </div>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
             {report.periodo_inicio} — {report.periodo_fim}
