@@ -436,6 +436,7 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
     commission_cost: commissionCost, missing_fields: missingFields,
     cost_fees: costFees, cost_shipping: costShipping,
     cost_total: costTotal, profit_total: profitTotal, margin_percent: marginPercent,
+    last_writer: 'ml-sync-real-costs:resync_single',
   }, { onConflict: "seller_id,order_id" });
 
   return new Response(JSON.stringify({
@@ -842,6 +843,7 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
       commission_cost: commissionCost, missing_fields: missingFields,
       cost_fees: costFees, cost_shipping: costShipping,
       cost_total: costTotal, profit_total: profitTotal, margin_percent: marginPercent,
+      last_writer: 'ml-sync-real-costs:batch',
     });
     
     processedCount++;

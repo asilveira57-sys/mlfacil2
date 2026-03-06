@@ -5,13 +5,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
-import { DollarSign, Package, TrendingUp, RefreshCw, Settings, BarChart3, FileSearch, AlertCircle } from 'lucide-react';
+import { DollarSign, Package, TrendingUp, RefreshCw, Settings, BarChart3, FileSearch, AlertCircle, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { CostCatalog } from '@/components/custos/CostCatalog';
 import { CostSettings } from '@/components/custos/CostSettings';
 import { CostOrders } from '@/components/custos/CostOrders';
 import { CostAbcProfit } from '@/components/custos/CostAbcProfit';
 import { CostOrderDiagnostic } from '@/components/custos/CostOrderDiagnostic';
+import { CostWriteLog } from '@/components/custos/CostWriteLog';
 import { CostSummaryDashboard } from '@/components/custos/CostSummaryDashboard';
 import { CostDateFilter, getDefaultDateRange, type DateRange } from '@/components/custos/CostDateFilter';
 
@@ -136,6 +137,7 @@ export default function Custos() {
             <TabsTrigger value="abc"><TrendingUp className="h-4 w-4 mr-2" />ABC por Lucro</TabsTrigger>
             <TabsTrigger value="diagnostico"><FileSearch className="h-4 w-4 mr-2" />Diagnóstico</TabsTrigger>
             <TabsTrigger value="config"><Settings className="h-4 w-4 mr-2" />Configurações</TabsTrigger>
+            <TabsTrigger value="logs"><FileText className="h-4 w-4 mr-2" />Logs</TabsTrigger>
           </TabsList>
 
           <TabsContent value="resumo">
@@ -169,6 +171,10 @@ export default function Custos() {
 
           <TabsContent value="config">
             <CostSettings sellerId={sellerId || ''} />
+          </TabsContent>
+
+          <TabsContent value="logs">
+            <CostWriteLog sellerId={sellerId || ''} />
           </TabsContent>
         </Tabs>
 
