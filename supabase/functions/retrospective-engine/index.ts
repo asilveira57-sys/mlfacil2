@@ -551,8 +551,11 @@ Deno.serve(async (req) => {
         // Skip if days since anchor haven't reached the rule's period
         if (mode === "auto" && daysSinceAnchor < rule.period_days) continue;
 
-        // Skip trial_conversion for paid users (generate trial_summary instead)
-        if (rule.retrospective_type === "trial_conversion" && hasPaid) continue;
+        // For paid users at 14 days, mutate trial_conversion to trial_summary
+        let effectiveRule = rule;
+        if (rule.retrospective_type === "trial_conversion" && hasPaid) {
+          effectiveRule = { ...rule, retrospective_type: "trial_summary" };
+        }
 
         // Process per-company or consolidated
         const scope = rule.applies_to_scope; // 'company' or 'tenant'
