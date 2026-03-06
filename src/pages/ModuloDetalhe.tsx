@@ -184,7 +184,7 @@ const ModuloDetalhe = () => {
                   size="lg"
                   variant="secondary"
                   className="text-base px-8 py-6 gap-2"
-                  onClick={() => navigate("/auth")}
+                  onClick={() => navigate("/criar-acesso")}
                 >
                   {t("cta_button")}
                   <ArrowRight className="w-5 h-5" />
