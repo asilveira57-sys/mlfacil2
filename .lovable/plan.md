@@ -1,66 +1,44 @@
 
-# Plano Mestre — Jornada Completa do Seller
 
-## Status de cada item
+## Diagnóstico: Por que a sincronização de etiquetas demora tanto
 
-### ✅ Já existe no sistema
-| # | Item | Status |
-|---|------|--------|
-| 2 | Cadastro (email/senha + confirmação) | ✅ Implementado |
-| 4 | Painel inicial (dashboard) | ✅ Existe (sem velocímetro) |
-| 5 | Conexão ML via OAuth | ✅ Implementado |
-| 6 | Elegibilidade para teste (>10 vendas) | ✅ Verificação existe na company |
-| 8 | Módulo Etiquetas (vendas abertas) | ✅ Implementado |
-| 9 | Módulo Custos (sem Passo 2) | ✅ Atualizado agora |
-| 13 | Seleção automática de plano | ✅ `useUserSalesVolume` + filtro de planos |
-| 15 | Cadastro fiscal (PF/PJ) | ✅ `company_billing` existe |
-| 12 | Bloqueio pós-trial | ✅ Parcial (trial_expired bloqueia) |
+### Causa Raiz
+A sincronização de etiquetas é **100% client-driven** — quando o seller abre a página, o hook `useShippingLabels` executa um pipeline pesado de 6 fases:
+1. Importa pedidos via `ml-sync-orders` (Edge Function)
+2. Busca todos os shipment_ids no banco
+3. Verifica quais shipments estão faltando
+4. Sincroniza shipments faltantes via `ml-sync-shipments` (chamadas individuais à API do ML)
+5. Re-sincroniza shipments com status ativo (mais chamadas à API)
+6. Sincroniza notas fiscais via `ml-sync-invoices`
 
-### 🔶 Existe parcialmente / precisa ajuste
-| # | Item | O que falta |
-|---|------|-------------|
-| 1 | Landing com 3 botões | Landing existe mas precisa revisar CTAs |
-| 3 | Tela de boas-vindas (primeiro acesso) | Onboarding existe mas pode não ter welcome screen |
-| 7 | Sincronização inicial automática (30d) | Import manual existe, falta auto-trigger pós-OAuth |
-| 10 | Módulo ADS (sync pós-pagamento) | ADS existe, falta gate de trial |
-| 11 | Linha do Tempo (30d trial vs 1yr pago) | Módulo existe, falta limitar por trial |
-| 14 | Dados fiscais obrigatórios pós-pagamento | Tela existe, falta gate de bloqueio |
+O gargalo principal são as **fases 4 e 5**: cada shipment faz uma chamada individual à API do Mercado Livre com delay de 200ms entre elas. Com 100+ shipments, isso pode levar minutos.
 
-### 🔴 Precisa ser desenvolvido
-| # | Item | Descrição |
-|---|------|-----------|
-| 4b | Velocímetro de ativação | Widget de progresso no dashboard |
-| 9b | Tabela `sync_jobs` + lock após sucesso | Controle de execução de syncs |
-| 9c | Lock do botão 1 ano após sucesso | Bloquear re-execução pós-sucesso |
-| 16 | Multi-conta (soma de vendas) | Lógica de soma cross-account |
-| 17-18 | Estados de conta + aviso pré-conexão | Workflow de nova conta |
-| 19 | Verificação de limite + pending_upgrade | Gate automático |
-| 20 | Upgrade com pró-rata | Cálculo proporcional |
-| 21 | Crescimento natural → bloqueio | Detecção automática de excesso |
-| 22 | Proteção contra abuso (logs) | Audit trail de conexões/upgrades |
+Já existem crons para **pedidos** (`orders-hourly-sync` a cada hora) e **status de envio** (`shipping-status-sync` a cada 10 min), mas **nenhum cron sincroniza shipments novos** (dados de logística, receiver_name, label_available, etc.). O `shipping-status-sync` só atualiza shipments já existentes no cache.
 
-## Ordem sugerida de implementação
+### Plano de Solução
 
-### Fase 1 — Gates e bloqueios (impacto imediato)
-1. Velocímetro de ativação no dashboard
-2. Tabela `sync_jobs` + controle de locks
-3. Gate de dados fiscais pós-pagamento
-4. Auto-sync 30d após OAuth
+**1. Criar Edge Function `shipping-labels-sync`** (servidor)
+- Nova função que roda o pipeline completo de etiquetas no servidor (sem depender do browser):
+  - Para cada conta ativa, buscar pedidos recentes (últimos 7 dias) sem shipment no cache
+  - Buscar dados de shipment na API do ML em lotes
+  - Sincronizar notas fiscais em lotes
+  - Atualizar shipments com status ativo
+- Usa `SUPABASE_SERVICE_ROLE_KEY` e refresh de token automático
+- Registra progresso em `sync_scheduler` com job_name `shipping-labels-sync`
 
-### Fase 2 — Trial gates nos módulos ✅
-5. ✅ ADS: banner de trial + sync bloqueado via ML API gate no backend
-6. ✅ Linha do Tempo: banner de trial informando limitação a 30d
-7. ✅ Etiquetas: filtro "Todos" agora capped a 30 dias
+**2. Configurar cron jobs via `pg_cron`**
+- **07:00 BRT (10:00 UTC)**: Sync completo matinal — `shipping-labels-sync` processa todos os pedidos dos últimos 7 dias
+- **A cada 30 minutos**: Sync incremental — `shipping-labels-sync` processa apenas pedidos das últimas 6 horas + atualiza status ativos
 
-### Fase 3 — Multi-conta e upgrade ✅
-8. ✅ Multi-conta: soma de vendas (get_tenant_total_sales + check_tenant_plan_limit)
-9. ✅ Estados de conta (account_state enum: active/pending_upgrade/disabled/error)
-10. ✅ Upgrade com pró-rata (calculate_prorata_upgrade + execute_plan_upgrade)
-11. ✅ Crescimento natural → bloqueio (PlanLimitBanner + useTenantLimits)
-12. ✅ Aviso pré-conexão de nova conta (AccountConnectionWarning)
-13. ✅ Audit log (tenant_limit_log)
+**3. Otimizar o frontend (`useShippingLabels`)**
+- Remover o sync automático pesado no `useEffect` de auto-sync
+- Quando os dados do cron estão frescos (< 30 min), mostrar dados do cache direto sem sync
+- O botão "Atualizar agora" continua disponível para sync manual sob demanda
+- Adicionar polling silencioso com `refetchInterval` de 60s para pegar dados novos do banco sem chamar APIs externas
 
-### Fase 4 — Landing e onboarding ✅
-14. ✅ Landing com 3 CTAs (Login, Cadastro, Planos) no header e hero
-15. ✅ Welcome screen pós-confirmação de email (WelcomeScreen + aviso ML)
-16. ✅ Proteção contra abuso (system_audit_log + tenant_limit_log)
+### Resultado Esperado
+- Seller abre a página às 07:30 → dados já prontos do sync das 07:00, carregamento instantâneo
+- A cada 30 min os dados são atualizados automaticamente em background
+- Sem refresh na tela, sem indicador de loading (polling silencioso no banco)
+- Botão manual continua disponível como fallback
+
