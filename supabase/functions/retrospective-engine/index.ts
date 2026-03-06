@@ -581,7 +581,7 @@ Deno.serve(async (req) => {
                 .select("id")
                 .eq("tenant_id", tenant.id)
                 .eq("company_id", company.id)
-                .eq("retrospective_type", rule.retrospective_type)
+                .eq("retrospective_type", effectiveRule.retrospective_type)
                 .eq("period_start", periodStart)
                 .eq("period_end", periodEnd)
                 .limit(1);
@@ -629,7 +629,7 @@ Deno.serve(async (req) => {
                 sellerId,
                 periodStart,
                 periodEnd,
-                rule.retrospective_type
+                effectiveRule.retrospective_type
               );
 
               // Get baseline snapshot (onboarding_initial)
@@ -648,7 +648,7 @@ Deno.serve(async (req) => {
                 supabase,
                 snapshot,
                 baseline,
-                rule,
+                effectiveRule,
                 trialStatus,
                 tenant.id,
                 company.id,
@@ -657,7 +657,7 @@ Deno.serve(async (req) => {
               );
 
               // Create retrospective
-              const title = `${rule.name} – ${company.display_name || "Empresa"}`;
+              const title = `${effectiveRule.name} – ${company.display_name || "Empresa"}`;
 
               const { data: retro, error: retroErr } = await supabase
                 .from("retrospectives")
@@ -665,7 +665,7 @@ Deno.serve(async (req) => {
                   tenant_id: tenant.id,
                   company_id: company.id,
                   rule_id: rule.id,
-                  retrospective_type: rule.retrospective_type,
+                  retrospective_type: effectiveRule.retrospective_type,
                   title,
                   period_start: periodStart,
                   period_end: periodEnd,
