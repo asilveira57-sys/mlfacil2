@@ -267,8 +267,13 @@ export type Database = {
           company_id: string | null
           created_at: string
           event_data: Json | null
+          event_date: string | null
+          event_scope: string | null
+          event_source: string | null
           event_type: string
           id: string
+          marketplace_account_id: string | null
+          module: string | null
           tenant_id: string | null
           user_id: string
         }
@@ -276,8 +281,13 @@ export type Database = {
           company_id?: string | null
           created_at?: string
           event_data?: Json | null
+          event_date?: string | null
+          event_scope?: string | null
+          event_source?: string | null
           event_type: string
           id?: string
+          marketplace_account_id?: string | null
+          module?: string | null
           tenant_id?: string | null
           user_id: string
         }
@@ -285,8 +295,13 @@ export type Database = {
           company_id?: string | null
           created_at?: string
           event_data?: Json | null
+          event_date?: string | null
+          event_scope?: string | null
+          event_source?: string | null
           event_type?: string
           id?: string
+          marketplace_account_id?: string | null
+          module?: string | null
           tenant_id?: string | null
           user_id?: string
         }
@@ -2845,14 +2860,21 @@ export type Database = {
       companies: {
         Row: {
           billing_type: string
+          city: string | null
           created_at: string | null
           display_name: string
+          document_number: string | null
           id: string
           is_active: boolean | null
+          is_primary: boolean | null
+          legal_type: string | null
           logo_medium_url: string | null
           logo_original_url: string | null
           logo_small_url: string | null
+          logo_uploaded_at: string | null
           logo_url: string | null
+          state: string | null
+          tenant_id: string | null
           trial_ends_at: string | null
           trial_started_at: string | null
           trial_status: string | null
@@ -2861,14 +2883,21 @@ export type Database = {
         }
         Insert: {
           billing_type?: string
+          city?: string | null
           created_at?: string | null
           display_name: string
+          document_number?: string | null
           id?: string
           is_active?: boolean | null
+          is_primary?: boolean | null
+          legal_type?: string | null
           logo_medium_url?: string | null
           logo_original_url?: string | null
           logo_small_url?: string | null
+          logo_uploaded_at?: string | null
           logo_url?: string | null
+          state?: string | null
+          tenant_id?: string | null
           trial_ends_at?: string | null
           trial_started_at?: string | null
           trial_status?: string | null
@@ -2877,21 +2906,36 @@ export type Database = {
         }
         Update: {
           billing_type?: string
+          city?: string | null
           created_at?: string | null
           display_name?: string
+          document_number?: string | null
           id?: string
           is_active?: boolean | null
+          is_primary?: boolean | null
+          legal_type?: string | null
           logo_medium_url?: string | null
           logo_original_url?: string | null
           logo_small_url?: string | null
+          logo_uploaded_at?: string | null
           logo_url?: string | null
+          state?: string | null
+          tenant_id?: string | null
           trial_ends_at?: string | null
           trial_started_at?: string | null
           trial_status?: string | null
           updated_at?: string | null
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "companies_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       company_billing: {
         Row: {
@@ -12983,6 +13027,56 @@ export type Database = {
           },
         ]
       }
+      retrospective_delivery_log: {
+        Row: {
+          clicked_at: string | null
+          created_at: string
+          delivery_channel: string
+          error_message: string | null
+          id: string
+          opened_at: string | null
+          recipient_email: string | null
+          recipient_user_id: string | null
+          retrospective_id: string
+          sent_at: string | null
+          status: string
+        }
+        Insert: {
+          clicked_at?: string | null
+          created_at?: string
+          delivery_channel?: string
+          error_message?: string | null
+          id?: string
+          opened_at?: string | null
+          recipient_email?: string | null
+          recipient_user_id?: string | null
+          retrospective_id: string
+          sent_at?: string | null
+          status?: string
+        }
+        Update: {
+          clicked_at?: string | null
+          created_at?: string
+          delivery_channel?: string
+          error_message?: string | null
+          id?: string
+          opened_at?: string | null
+          recipient_email?: string | null
+          recipient_user_id?: string | null
+          retrospective_id?: string
+          sent_at?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "retrospective_delivery_log_retrospective_id_fkey"
+            columns: ["retrospective_id"]
+            isOneToOne: false
+            referencedRelation: "retrospectives"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       retrospective_reports: {
         Row: {
           company_name: string | null
@@ -13033,6 +13127,284 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      retrospective_rules: {
+        Row: {
+          applies_to_scope: string
+          auto_generate: boolean
+          auto_send: boolean
+          created_at: string
+          id: string
+          is_active: boolean
+          name: string
+          period_days: number
+          retrospective_type: string
+        }
+        Insert: {
+          applies_to_scope?: string
+          auto_generate?: boolean
+          auto_send?: boolean
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name: string
+          period_days: number
+          retrospective_type: string
+        }
+        Update: {
+          applies_to_scope?: string
+          auto_generate?: boolean
+          auto_send?: boolean
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          period_days?: number
+          retrospective_type?: string
+        }
+        Relationships: []
+      }
+      retrospective_snapshots: {
+        Row: {
+          acos: number | null
+          active_listings: number | null
+          ads_spend: number | null
+          average_margin: number | null
+          average_ticket: number | null
+          cancellations_count: number | null
+          cancellations_value: number | null
+          company_id: string | null
+          created_at: string
+          estimated_profit: number | null
+          id: string
+          marketplace_account_id: string | null
+          orders_count: number | null
+          period_end: string | null
+          period_start: string | null
+          products_count: number | null
+          revenue_total: number | null
+          roas: number | null
+          snapshot_date: string
+          snapshot_type: string
+          tacos: number | null
+          tenant_id: string
+          total_cost: number | null
+          total_fees: number | null
+        }
+        Insert: {
+          acos?: number | null
+          active_listings?: number | null
+          ads_spend?: number | null
+          average_margin?: number | null
+          average_ticket?: number | null
+          cancellations_count?: number | null
+          cancellations_value?: number | null
+          company_id?: string | null
+          created_at?: string
+          estimated_profit?: number | null
+          id?: string
+          marketplace_account_id?: string | null
+          orders_count?: number | null
+          period_end?: string | null
+          period_start?: string | null
+          products_count?: number | null
+          revenue_total?: number | null
+          roas?: number | null
+          snapshot_date?: string
+          snapshot_type: string
+          tacos?: number | null
+          tenant_id: string
+          total_cost?: number | null
+          total_fees?: number | null
+        }
+        Update: {
+          acos?: number | null
+          active_listings?: number | null
+          ads_spend?: number | null
+          average_margin?: number | null
+          average_ticket?: number | null
+          cancellations_count?: number | null
+          cancellations_value?: number | null
+          company_id?: string | null
+          created_at?: string
+          estimated_profit?: number | null
+          id?: string
+          marketplace_account_id?: string | null
+          orders_count?: number | null
+          period_end?: string | null
+          period_start?: string | null
+          products_count?: number | null
+          revenue_total?: number | null
+          roas?: number | null
+          snapshot_date?: string
+          snapshot_type?: string
+          tacos?: number | null
+          tenant_id?: string
+          total_cost?: number | null
+          total_fees?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "retrospective_snapshots_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "retrospective_snapshots_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      retrospective_targets: {
+        Row: {
+          anchor_date: string
+          company_id: string | null
+          created_at: string
+          due_date: string
+          id: string
+          rule_id: string | null
+          status: string
+          target_scope: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          anchor_date: string
+          company_id?: string | null
+          created_at?: string
+          due_date: string
+          id?: string
+          rule_id?: string | null
+          status?: string
+          target_scope?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          anchor_date?: string
+          company_id?: string | null
+          created_at?: string
+          due_date?: string
+          id?: string
+          rule_id?: string | null
+          status?: string
+          target_scope?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "retrospective_targets_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "retrospective_targets_rule_id_fkey"
+            columns: ["rule_id"]
+            isOneToOne: false
+            referencedRelation: "retrospective_rules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "retrospective_targets_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      retrospectives: {
+        Row: {
+          anchor_end_date: string | null
+          anchor_start_date: string | null
+          company_id: string | null
+          created_at: string
+          generated_at: string | null
+          html_url: string | null
+          id: string
+          pdf_url: string | null
+          period_end: string
+          period_start: string
+          presentation_url: string | null
+          retrospective_type: string
+          rule_id: string | null
+          sent_at: string | null
+          status: string
+          summary_json: Json | null
+          tenant_id: string
+          title: string
+        }
+        Insert: {
+          anchor_end_date?: string | null
+          anchor_start_date?: string | null
+          company_id?: string | null
+          created_at?: string
+          generated_at?: string | null
+          html_url?: string | null
+          id?: string
+          pdf_url?: string | null
+          period_end: string
+          period_start: string
+          presentation_url?: string | null
+          retrospective_type: string
+          rule_id?: string | null
+          sent_at?: string | null
+          status?: string
+          summary_json?: Json | null
+          tenant_id: string
+          title: string
+        }
+        Update: {
+          anchor_end_date?: string | null
+          anchor_start_date?: string | null
+          company_id?: string | null
+          created_at?: string
+          generated_at?: string | null
+          html_url?: string | null
+          id?: string
+          pdf_url?: string | null
+          period_end?: string
+          period_start?: string
+          presentation_url?: string | null
+          retrospective_type?: string
+          rule_id?: string | null
+          sent_at?: string | null
+          status?: string
+          summary_json?: Json | null
+          tenant_id?: string
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "retrospectives_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "retrospectives_rule_id_fkey"
+            columns: ["rule_id"]
+            isOneToOne: false
+            referencedRelation: "retrospective_rules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "retrospectives_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       role_menu_permissions: {
         Row: {
@@ -16299,6 +16671,56 @@ export type Database = {
           },
         ]
       }
+      tenant_plan_history: {
+        Row: {
+          billing_type: string
+          created_at: string
+          ended_at: string | null
+          id: string
+          is_current: boolean
+          payment_status: string
+          plan_id: string | null
+          plan_name_snapshot: string
+          sales_range_snapshot: string | null
+          started_at: string
+          tenant_id: string
+        }
+        Insert: {
+          billing_type?: string
+          created_at?: string
+          ended_at?: string | null
+          id?: string
+          is_current?: boolean
+          payment_status?: string
+          plan_id?: string | null
+          plan_name_snapshot: string
+          sales_range_snapshot?: string | null
+          started_at?: string
+          tenant_id: string
+        }
+        Update: {
+          billing_type?: string
+          created_at?: string
+          ended_at?: string | null
+          id?: string
+          is_current?: boolean
+          payment_status?: string
+          plan_id?: string | null
+          plan_name_snapshot?: string
+          sales_range_snapshot?: string | null
+          started_at?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_plan_history_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tenant_subscription: {
         Row: {
           created_at: string
@@ -16423,27 +16845,42 @@ export type Database = {
       }
       tenants: {
         Row: {
+          activated_at: string | null
           created_at: string
+          current_plan_id: string | null
+          first_payment_at: string | null
           id: string
           name: string
           owner_user_id: string
           status: string
+          trial_ends_at: string | null
+          trial_started_at: string | null
           updated_at: string
         }
         Insert: {
+          activated_at?: string | null
           created_at?: string
+          current_plan_id?: string | null
+          first_payment_at?: string | null
           id?: string
           name: string
           owner_user_id: string
           status?: string
+          trial_ends_at?: string | null
+          trial_started_at?: string | null
           updated_at?: string
         }
         Update: {
+          activated_at?: string | null
           created_at?: string
+          current_plan_id?: string | null
+          first_payment_at?: string | null
           id?: string
           name?: string
           owner_user_id?: string
           status?: string
+          trial_ends_at?: string | null
+          trial_started_at?: string | null
           updated_at?: string
         }
         Relationships: []
