@@ -827,6 +827,21 @@ Deno.serve(async (req) => {
 
             if (retroErr) throw retroErr;
 
+            // Trigger report generation (HTML + Slides)
+            try {
+              const reportGenUrl = `${supabaseUrl}/functions/v1/retrospective-report-gen`;
+              await fetch(reportGenUrl, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${serviceKey}`,
+                },
+                body: JSON.stringify({ retrospective_id: retro.id }),
+              });
+            } catch (genErr: any) {
+              console.error(`[retro-engine] Report gen error (consolidated): ${genErr.message}`);
+            }
+
             totalGenerated++;
             results.push({
               tenant_id: tenant.id,
