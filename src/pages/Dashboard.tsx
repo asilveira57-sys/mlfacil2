@@ -9,6 +9,7 @@ import { ActivationSpeedometer } from "@/components/dashboard/ActivationSpeedome
 import { PlanLimitBanner } from "@/components/access/PlanLimitBanner";
 import { useTenantLimits } from "@/hooks/useTenantLimits";
 import { DashboardModulesGrid } from "@/components/dashboard/DashboardModulesGrid";
+import { WidgetHubGrid } from "@/components/dashboard/widget-hub";
 import { DashboardOnboarding } from "@/components/dashboard/DashboardOnboarding";
 import { WelcomeScreen } from "@/components/onboarding/WelcomeScreen";
 import { DashboardReconnectingState } from "@/components/dashboard/DashboardReconnectingState";
@@ -147,6 +148,7 @@ const Dashboard = () => {
         ) : (
           // Connected and ready
           <>
+            <WidgetHubGrid />
             <ActivationSpeedometer />
             <DashboardPlanLimitSection companyId={activeAccount?.companyId} />
             <SalesDashboard />

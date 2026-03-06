@@ -28,12 +28,12 @@ const WIDGET_MAP: Record<string, React.LazyExoticComponent<any>> = {
   countdown: CountdownMini,
 };
 
-export function WidgetRenderer({ slug, config, size }: Props) {
+export function WidgetRenderer({ slug }: Props) {
   const Component = WIDGET_MAP[slug] ?? PlaceholderWidget;
 
   return (
     <Suspense fallback={<div className="h-20 animate-pulse rounded bg-muted/50" />}>
-      <Component config={config} size={size} slug={slug} />
+      <Component />
     </Suspense>
   );
 }
