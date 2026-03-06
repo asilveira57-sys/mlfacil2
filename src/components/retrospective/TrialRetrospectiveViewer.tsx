@@ -158,13 +158,13 @@ export function TrialRetrospectiveViewer({ report, open, onOpenChange }: Props) 
             {narrative?.discoveries?.opportunities?.length > 0 && (
               <div>
                 <h3 className="font-semibold text-lg flex items-center gap-2 mb-4">
-                  <Lightbulb className="h-5 w-5 text-yellow-500" />
+                  <Lightbulb className="h-5 w-5 text-accent-foreground" />
                   Oportunidades Identificadas
                 </h3>
                 <div className="space-y-2">
                   {narrative.discoveries.opportunities.map((opp: string, i: number) => (
-                    <div key={i} className="flex items-start gap-3 border rounded-lg p-3 bg-yellow-500/5">
-                      <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5 shrink-0" />
+                    <div key={i} className="flex items-start gap-3 border rounded-lg p-3 bg-accent/30">
+                      <AlertTriangle className="h-4 w-4 text-accent-foreground mt-0.5 shrink-0" />
                       <p className="text-sm">{opp}</p>
                     </div>
                   ))}
