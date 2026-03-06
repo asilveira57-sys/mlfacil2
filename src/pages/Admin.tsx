@@ -24,7 +24,7 @@ import { AdminAccessProfiles } from './admin/AdminAccessProfiles';
 import { AdminDailyMessages } from './admin/AdminDailyMessages';
 import { AdminRatings } from './admin/AdminRatings';
 import { AdminGlobalMetrics } from './admin/AdminGlobalMetrics';
-import Retrospectiva from './Retrospectiva';
+import { AdminRetrospectives } from './admin/AdminRetrospectives';
 import { AdminVisualIdentity } from '@/components/admin/AdminVisualIdentity';
 import { AdminCanalOficial } from './admin/AdminCanalOficial';
 import { AdminSocialCalendar } from './admin/AdminSocialCalendar';
@@ -130,7 +130,7 @@ export default function Admin() {
           <Route path="mensagem-dia" element={<AdminDailyMessages />} />
           <Route path="avaliacoes" element={<AdminRatings />} />
           <Route path="global-metrics" element={<AdminGlobalMetrics />} />
-          <Route path="retrospectiva" element={<Retrospectiva />} />
+          <Route path="retrospectiva" element={<AdminRetrospectives />} />
           <Route path="logs" element={<AdminAuditLogs />} />
           <Route path="identidade-visual" element={<AdminVisualIdentity />} />
           <Route path="dica-consultor" element={<AdminConsultantTips />} />
