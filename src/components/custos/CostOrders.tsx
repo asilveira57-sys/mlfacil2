@@ -45,6 +45,7 @@ interface OrderCost {
   cost_net: number;
   profit_net: number;
   margin_net: number;
+  cost_items_total: number;
   missing_fields: string[];
   fee_ml_source: string | null;
   order_status?: string;
@@ -87,7 +88,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const [savingExtra, setSavingExtra] = useState(false);
 
   // Sorting state
-  type SortKey = 'created_at_meli' | 'revenue_total' | 'cost_total' | 'shipping_cost_seller' | 'profit_total' | 'margin_percent' | null;
+  type SortKey = 'created_at_meli' | 'revenue_total' | 'commission_cost' | 'cost_items_total' | 'cost_total' | 'shipping_cost_seller' | 'profit_total' | 'margin_percent' | null;
   type SortDirection = 'asc' | 'desc' | null;
   const [sortKey, setSortKey] = useState<SortKey>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
