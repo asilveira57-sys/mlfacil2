@@ -149,5 +149,6 @@ export function AppShellLayout() {
         </div>
       </SidebarProvider>
     </PageHeaderContext.Provider>
+    </ProtectedRoute>
   );
 }
