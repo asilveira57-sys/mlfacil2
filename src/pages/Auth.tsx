@@ -2,107 +2,92 @@ import { useState, useEffect } from "react";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
-import { BarChart3, DollarSign, Target, TrendingUp, Eye, EyeOff, Loader2, Users, Shield } from "lucide-react";
+import { BarChart3, DollarSign, Target, TrendingUp, Eye, EyeOff, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import consultantPhoto from "@/assets/consultant-photo.png";
+import alexandrePhoto from "@/assets/alexandre-silveira.png";
+import seloML from "@/assets/selo-ml-certificado.png";
 
-const AuthLeftColumn = () => (
-  <div className="hidden lg:flex lg:w-[55%] relative overflow-hidden flex-col justify-between p-12 text-primary-foreground">
-    {/* Background layers */}
-    <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_hsl(223_47%_28%)_0%,_hsl(223_47%_18%)_50%,_hsl(223_50%_12%)_100%)]" />
-    
-    {/* Subtle grid/dashboard texture */}
-    <div className="absolute inset-0 opacity-[0.04]" style={{
-      backgroundImage: `
-        linear-gradient(hsl(210 40% 80%) 1px, transparent 1px),
-        linear-gradient(90deg, hsl(210 40% 80%) 1px, transparent 1px),
-        linear-gradient(hsl(210 40% 80%) 0.5px, transparent 0.5px),
-        linear-gradient(90deg, hsl(210 40% 80%) 0.5px, transparent 0.5px)
-      `,
-      backgroundSize: '60px 60px, 60px 60px, 15px 15px, 15px 15px',
-    }} />
-    
-    {/* Floating chart-like decorations */}
-    <div className="absolute top-20 right-12 w-32 h-20 opacity-[0.06] border border-white/20 rounded-lg" />
-    <div className="absolute bottom-40 right-20 w-24 h-16 opacity-[0.04] border border-white/20 rounded-lg" />
-    <div className="absolute top-1/3 right-8 w-1 h-32 opacity-[0.08] bg-gradient-to-b from-transparent via-white to-transparent" />
-    
-    {/* Smooth right-edge blend */}
-    <div className="absolute inset-y-0 right-0 w-24 bg-gradient-to-r from-transparent to-background z-10" />
-
-    <div className="relative z-20">
-      {/* Logo */}
-      <div className="flex items-center gap-3 mb-14">
-        <div className="w-11 h-11 bg-accent/90 rounded-xl flex items-center justify-center shadow-lg">
-          <BarChart3 className="w-6 h-6 text-white" />
-        </div>
-        <h1 className="text-2xl font-bold tracking-tight">MKTP Fácil</h1>
+const BenefitCard = ({ icon, title }: { icon: React.ReactNode; title: string }) => (
+  <div className="bg-white/[0.06] rounded-xl px-5 py-4 border border-white/[0.06]">
+    <div className="flex items-center gap-3">
+      <div className="w-9 h-9 rounded-full bg-accent/10 flex items-center justify-center flex-shrink-0">
+        {icon}
       </div>
-
-      {/* Benefit Cards */}
-      <div className="space-y-4">
-        <BenefitCard
-          icon={<DollarSign className="w-5 h-5" />}
-          title="Lucro real por produto"
-          description="Calcule margens considerando custos, comissões, taxas e frete antes de alterar preços."
-        />
-        <BenefitCard
-          icon={<Target className="w-5 h-5" />}
-          title="Análise de anúncios e posicionamento"
-          description="Visualize desempenho, estrutura e posicionamento dos produtos para decisões mais seguras."
-        />
-        <BenefitCard
-          icon={<TrendingUp className="w-5 h-5" />}
-          title="Visão clara da operação"
-          description="Acompanhe vendas, indicadores e movimentações do negócio com dados organizados."
-        />
-      </div>
-    </div>
-
-    <div className="relative z-20 space-y-5">
-      {/* Authority Card */}
-      <div className="bg-white/[0.07] backdrop-blur-sm rounded-2xl p-5 border border-white/[0.08] shadow-lg">
-        <div className="flex items-center gap-4">
-          <img
-            src={consultantPhoto}
-            alt="Alexandre Silveira"
-            className="w-14 h-14 rounded-full object-cover ring-2 ring-accent/40 shadow-md"
-          />
-          <div>
-            <p className="font-semibold text-base">Alexandre Silveira</p>
-            <p className="text-sm text-primary-foreground/70 leading-snug mt-0.5">
-              Consultor certificado do Mercado Livre
-              <br />
-              14 anos vendendo na plataforma
-            </p>
-          </div>
-          <Shield className="w-5 h-5 text-accent/70 ml-auto flex-shrink-0" />
-        </div>
-      </div>
-
-      {/* Activity line */}
-      <div className="flex items-start gap-3 px-1">
-        <Users className="w-4 h-4 text-primary-foreground/40 mt-0.5 flex-shrink-0" />
-        <p className="text-xs text-primary-foreground/50 leading-relaxed">
-          Sistema utilizado diariamente por vendedores do Mercado Livre para análise de operação, precificação e gestão estratégica.
-        </p>
-      </div>
+      <h3 className="font-medium text-[14px] text-primary-foreground/90">{title}</h3>
     </div>
   </div>
 );
 
-const BenefitCard = ({ icon, title, description }: { icon: React.ReactNode; title: string; description: string }) => (
-  <div className="bg-white/[0.06] backdrop-blur-sm rounded-xl p-5 border border-white/[0.07] shadow-sm hover:bg-white/[0.09] transition-colors duration-300">
-    <div className="flex items-start gap-4">
-      <div className="w-10 h-10 rounded-full bg-accent/15 flex items-center justify-center flex-shrink-0 mt-0.5">
-        {icon}
+const AuthLeftColumn = () => (
+  <div className="hidden lg:flex lg:w-[55%] relative overflow-hidden flex-col justify-between p-12 text-primary-foreground">
+    {/* Background — subtle radial gradient */}
+    <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_40%,_hsl(223_47%_26%)_0%,_hsl(223_50%_14%)_100%)]" />
+
+    {/* Faint grid texture */}
+    <div className="absolute inset-0 opacity-[0.03]" style={{
+      backgroundImage: `
+        linear-gradient(hsl(210 40% 80%) 1px, transparent 1px),
+        linear-gradient(90deg, hsl(210 40% 80%) 1px, transparent 1px)
+      `,
+      backgroundSize: '50px 50px',
+    }} />
+
+    {/* Soft edge blend into right column — narrow 60-80px */}
+    <div className="absolute inset-y-0 right-0 w-[70px] bg-gradient-to-r from-transparent to-background z-10" />
+
+    <div className="relative z-20">
+      {/* Logo */}
+      <div className="flex items-center gap-3 mb-16">
+        <div className="w-10 h-10 bg-accent/90 rounded-xl flex items-center justify-center">
+          <BarChart3 className="w-5 h-5 text-white" />
+        </div>
+        <h1 className="text-xl font-bold tracking-tight">MKTP Fácil</h1>
       </div>
-      <div>
-        <h3 className="font-semibold text-[15px] mb-1.5">{title}</h3>
-        <p className="text-sm text-primary-foreground/65 leading-relaxed">{description}</p>
+
+      {/* Benefit Cards — lightweight */}
+      <div className="space-y-3 max-w-sm">
+        <BenefitCard
+          icon={<DollarSign className="w-4 h-4 text-accent" />}
+          title="Lucro real por produto"
+        />
+        <BenefitCard
+          icon={<Target className="w-4 h-4 text-accent" />}
+          title="Análise de anúncios e posicionamento"
+        />
+        <BenefitCard
+          icon={<TrendingUp className="w-4 h-4 text-accent" />}
+          title="Visão clara da operação"
+        />
+      </div>
+    </div>
+
+    {/* Authority Card — compact, horizontal */}
+    <div className="relative z-20">
+      <div className="bg-white/[0.05] rounded-xl p-3.5 border border-white/[0.06] max-w-[380px]">
+        <div className="flex items-center gap-3">
+          <img
+            src={alexandrePhoto}
+            alt="Alexandre Silveira"
+            className="w-11 h-11 rounded-full object-cover ring-2 ring-white/10 flex-shrink-0"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-sm text-primary-foreground">Alexandre Silveira</p>
+            <p className="text-xs text-primary-foreground/60 leading-snug mt-0.5">
+              Consultor certificado do Mercado Livre
+            </p>
+            <p className="text-xs text-primary-foreground/50">
+              14 anos vendendo na plataforma
+            </p>
+          </div>
+          <img
+            src={seloML}
+            alt="Selo Consultoria Certificada Mercado Livre"
+            className="h-7 w-auto flex-shrink-0 opacity-80"
+          />
+        </div>
       </div>
     </div>
   </div>
@@ -183,14 +168,14 @@ const Auth = () => {
 
   if (checkingSession) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="h-screen flex items-center justify-center bg-background">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background flex">
+    <div className="h-screen overflow-hidden bg-background flex">
       <AuthLeftColumn />
 
       {/* Right Side - Login Form */}
@@ -199,14 +184,14 @@ const Auth = () => {
           {/* Mobile logo */}
           <div className="lg:hidden mb-10 text-center">
             <div className="flex items-center justify-center gap-3 mb-2">
-              <div className="w-11 h-11 bg-primary rounded-xl flex items-center justify-center">
-                <BarChart3 className="w-6 h-6 text-primary-foreground" />
+              <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
+                <BarChart3 className="w-5 h-5 text-primary-foreground" />
               </div>
-              <h1 className="text-2xl font-bold text-foreground tracking-tight">MKTP Fácil</h1>
+              <h1 className="text-xl font-bold text-foreground tracking-tight">MKTP Fácil</h1>
             </div>
           </div>
 
-          <div className="bg-card p-8 sm:p-10 rounded-2xl shadow-elevated border border-border/60">
+          <div className="bg-card p-8 sm:p-10 rounded-2xl shadow-lg border border-border/50">
             {forgotMode ? (
               forgotSent ? (
                 <div className="text-center space-y-4 py-4">
