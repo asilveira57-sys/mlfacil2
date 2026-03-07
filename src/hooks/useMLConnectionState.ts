@@ -36,7 +36,7 @@ async function logConnectionEvent(
 ) {
   if (!userId) return;
   try {
-    await supabase.from('account_events').insert({
+    await supabase.from('account_events').insert([{
       user_id: userId,
       event_type: eventType,
       module: 'dashboard',
@@ -44,7 +44,7 @@ async function logConnectionEvent(
       event_source: 'frontend',
       event_date: new Date().toISOString(),
       event_data: meta || {},
-    });
+    }]);
   } catch (_) {
     // fail-safe
   }
