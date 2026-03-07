@@ -51,7 +51,7 @@ const AuthLeftColumn = () => (
       </div>
 
       {/* Benefit Cards */}
-      <div className="space-y-2 max-w-sm">
+      <div className="space-y-2 max-w-md">
         <BenefitCard
           icon={<DollarSign className="w-4 h-4 text-accent" />}
           title="Lucro real por produto"
@@ -77,7 +77,7 @@ const AuthLeftColumn = () => (
 
     {/* Authority Card — compact, institutional */}
     <div className="relative z-20">
-      <div className="bg-white/[0.05] rounded-lg p-3 border border-white/[0.06] max-w-[370px]">
+      <div className="bg-white/[0.05] rounded-lg p-3 border border-white/[0.06] max-w-md">
         <div className="flex items-center gap-3">
           <img
             src={alexandrePhoto}
