@@ -77,23 +77,23 @@ const AuthLeftColumn = () => (
 
     {/* Authority Card — compact, institutional */}
     <div className="relative z-20">
-      <div className="bg-white/[0.05] rounded-lg px-3 py-2 border border-white/[0.06]">
-        <div className="flex items-center gap-2.5">
+      <div className="bg-white/[0.05] rounded-lg px-3 py-2.5 border border-white/[0.06] w-fit">
+        <div className="flex items-center gap-3">
           <img
             src={alexandrePhoto}
             alt="Alexandre Silveira"
-            className="w-9 h-9 rounded-full object-cover object-[center_20%] ring-2 ring-white/10 flex-shrink-0"
+            className="w-10 h-10 rounded-full object-cover object-[center_20%] ring-2 ring-white/10 flex-shrink-0"
           />
-          <div className="min-w-0 flex-1">
-            <p className="font-semibold text-[12px] text-primary-foreground leading-tight">Alexandre Silveira</p>
-            <p className="text-[10px] text-primary-foreground/55 leading-tight">
+          <div className="min-w-0">
+            <p className="font-semibold text-[13px] text-primary-foreground leading-tight">Alexandre Silveira</p>
+            <p className="text-[11px] text-primary-foreground/55 leading-tight mt-0.5">
               Consultor certificado do Mercado Livre · 14 anos na plataforma
             </p>
           </div>
           <img
             src={seloML}
             alt="Selo Consultoria Certificada Mercado Livre"
-            className="h-10 w-auto flex-shrink-0 opacity-90"
+            className="h-12 w-auto flex-shrink-0 opacity-90"
           />
         </div>
       </div>
