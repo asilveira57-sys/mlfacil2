@@ -1,66 +1,50 @@
 
-# Plano Mestre — Jornada Completa do Seller
 
-## Status de cada item
+## Mapa Atual do Onboarding — 3 Sistemas Sobrepostos
 
-### ✅ Já existe no sistema
-| # | Item | Status |
-|---|------|--------|
-| 2 | Cadastro (email/senha + confirmação) | ✅ Implementado |
-| 4 | Painel inicial (dashboard) | ✅ Existe (sem velocímetro) |
-| 5 | Conexão ML via OAuth | ✅ Implementado |
-| 6 | Elegibilidade para teste (>10 vendas) | ✅ Verificação existe na company |
-| 8 | Módulo Etiquetas (vendas abertas) | ✅ Implementado |
-| 9 | Módulo Custos (sem Passo 2) | ✅ Atualizado agora |
-| 13 | Seleção automática de plano | ✅ `useUserSalesVolume` + filtro de planos |
-| 15 | Cadastro fiscal (PF/PJ) | ✅ `company_billing` existe |
-| 12 | Bloqueio pós-trial | ✅ Parcial (trial_expired bloqueia) |
+Existem **3 sistemas de onboarding** coexistindo no projeto. Aqui está o que cada um faz:
 
-### 🔶 Existe parcialmente / precisa ajuste
-| # | Item | O que falta |
-|---|------|-------------|
-| 1 | Landing com 3 botões | Landing existe mas precisa revisar CTAs |
-| 3 | Tela de boas-vindas (primeiro acesso) | Onboarding existe mas pode não ter welcome screen |
-| 7 | Sincronização inicial automática (30d) | Import manual existe, falta auto-trigger pós-OAuth |
-| 10 | Módulo ADS (sync pós-pagamento) | ADS existe, falta gate de trial |
-| 11 | Linha do Tempo (30d trial vs 1yr pago) | Módulo existe, falta limitar por trial |
-| 14 | Dados fiscais obrigatórios pós-pagamento | Tela existe, falta gate de bloqueio |
+### 1. `/primeiro-acesso` — Tela principal de primeiro acesso (a que você pediu)
+- **Rota:** `/primeiro-acesso`
+- **Arquivo:** `src/pages/PrimeiroAcesso.tsx`
+- **7 etapas:** Validar conta → Dados da empresa → Logomarca → Preferências → Conexão ML → Importação → Ativar ambiente
+- **Tem barra de progresso lateral** com ícones e checklist (estilo velocímetro de ativação)
+- **Funciona:** Usuário confirma e-mail → `ProtectedRoute` detecta `onboarding_status !== completed` → redireciona para `/primeiro-acesso`
+- **Este é o fluxo correto que você quer manter**
 
-### 🔴 Precisa ser desenvolvido
-| # | Item | Descrição |
-|---|------|-----------|
-| 4b | Velocímetro de ativação | Widget de progresso no dashboard |
-| 9b | Tabela `sync_jobs` + lock após sucesso | Controle de execução de syncs |
-| 9c | Lock do botão 1 ano após sucesso | Bloquear re-execução pós-sucesso |
-| 16 | Multi-conta (soma de vendas) | Lógica de soma cross-account |
-| 17-18 | Estados de conta + aviso pré-conexão | Workflow de nova conta |
-| 19 | Verificação de limite + pending_upgrade | Gate automático |
-| 20 | Upgrade com pró-rata | Cálculo proporcional |
-| 21 | Crescimento natural → bloqueio | Detecção automática de excesso |
-| 22 | Proteção contra abuso (logs) | Audit trail de conexões/upgrades |
+### 2. `OnboardingWizard` — Modal antigo de boas-vindas (o que você quer remover)
+- **Arquivo:** `src/components/onboarding/OnboardingWizard.tsx`
+- **Renderizado globalmente** no `App.tsx` (linha 133)
+- **7 passos em modal:** Welcome → Objetivo → Conectar ML → Regras ML → Impressão → Acesso → Completo
+- **Conflito:** Aparece sobre qualquer página quando `requiresOnboarding === true`, competindo com o `/primeiro-acesso`
 
-## Ordem sugerida de implementação
+### 3. `WelcomeOnboardingGate` — Fluxo admin de boas-vindas por cards
+- **Arquivo:** `src/components/welcome/WelcomeOnboardingGate.tsx`
+- **Renderizado globalmente** no `App.tsx` (linha 134)
+- **Busca fluxos configurados pelo admin** e exibe modal com steps dinâmicos
+- **Já exclui** `/primeiro-acesso` da exibição
 
-### Fase 1 — Gates e bloqueios (impacto imediato)
-1. Velocímetro de ativação no dashboard
-2. Tabela `sync_jobs` + controle de locks
-3. Gate de dados fiscais pós-pagamento
-4. Auto-sync 30d após OAuth
+### 4. `ActivationSpeedometer` — Widget no Dashboard
+- **Arquivo:** `src/components/dashboard/ActivationSpeedometer.tsx`
+- **Exibido dentro do Dashboard** como card de progresso (5 etapas: conectar ML, importar vendas, etc.)
+- **Este é o "velocímetro" que você mencionou** — ele está no Dashboard, não é uma tela separada
 
-### Fase 2 — Trial gates nos módulos ✅
-5. ✅ ADS: banner de trial + sync bloqueado via ML API gate no backend
-6. ✅ Linha do Tempo: banner de trial informando limitação a 30d
-7. ✅ Etiquetas: filtro "Todos" agora capped a 30 dias
+---
 
-### Fase 3 — Multi-conta e upgrade ✅
-8. ✅ Multi-conta: soma de vendas (get_tenant_total_sales + check_tenant_plan_limit)
-9. ✅ Estados de conta (account_state enum: active/pending_upgrade/disabled/error)
-10. ✅ Upgrade com pró-rata (calculate_prorata_upgrade + execute_plan_upgrade)
-11. ✅ Crescimento natural → bloqueio (PlanLimitBanner + useTenantLimits)
-12. ✅ Aviso pré-conexão de nova conta (AccountConnectionWarning)
-13. ✅ Audit log (tenant_limit_log)
+## O Problema
 
-### Fase 4 — Landing e onboarding ✅
-14. ✅ Landing com 3 CTAs (Login, Cadastro, Planos) no header e hero
-15. ✅ Welcome screen pós-confirmação de email (WelcomeScreen + aviso ML)
-16. ✅ Proteção contra abuso (system_audit_log + tenant_limit_log)
+Quando o seller confirma o e-mail e entra, **dois sistemas competem**:
+1. O `OnboardingWizard` (modal antigo) aparece por cima de tudo
+2. O `ProtectedRoute` tenta redirecionar para `/primeiro-acesso`
+
+O modal antigo bloqueia a experiência do `/primeiro-acesso`.
+
+## Plano Proposto
+
+1. **Remover o `OnboardingWizard` do `App.tsx`** — tirar a linha que renderiza o modal antigo globalmente
+2. **Manter o `/primeiro-acesso`** como fluxo principal de onboarding (já funciona com as 7 etapas)
+3. **Manter o `WelcomeOnboardingGate`** (fluxo admin) — ele já não interfere com `/primeiro-acesso`
+4. **Manter o `ActivationSpeedometer`** no Dashboard — ele serve como lembrete pós-onboarding
+
+Resultado: seller confirma e-mail → cai direto no `/primeiro-acesso` → completa os passos → vai pro Dashboard onde vê o velocímetro de ativação.
+
