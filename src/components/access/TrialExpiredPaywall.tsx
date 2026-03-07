@@ -9,7 +9,16 @@ import { useUserAccess } from '@/contexts/UserAccessContext';
 export function TrialExpiredPaywall() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { trialExpired, flags, selectedPlan, loading, isAuthenticated } = useUserAccess();
+  
+  // Safely access context - may not be available during error recovery renders
+  let contextValue: ReturnType<typeof useUserAccess> | null = null;
+  try {
+    contextValue = useUserAccess();
+  } catch {
+    return null;
+  }
+  
+  const { trialExpired, flags, selectedPlan, loading, isAuthenticated } = contextValue;
 
   // Don't show on /planos page (user needs to browse plans freely)
   const isOnPlanosPage = location.pathname === '/planos';
