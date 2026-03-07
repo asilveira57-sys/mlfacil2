@@ -177,7 +177,7 @@ export default function MenuBuilderPage() {
     actions.updateModule.mutate({ id, updates: { is_active: active } });
   };
 
-  const handleCreateModule = (data: any) => {
+  const handleCreateModule = (data: Parameters<typeof actions.createModule.mutate>[0]) => {
     const maxSort = modules
       ? Math.max(0, ...modules.filter(m => m.parent_module_id === data.parent_module_id).map(m => m.sort_order))
       : 0;
