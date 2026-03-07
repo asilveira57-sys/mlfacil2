@@ -88,7 +88,7 @@ export function NewModuleDialog({ open, onOpenChange, onSubmit, parentId = null,
           {!parentId && (
             <div className="space-y-2">
               <Label>Camada</Label>
-              <Select value={layer} onValueChange={setLayer}>
+              <Select value={layer} onValueChange={(v) => setLayer(v as LayerValue)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {LAYER_OPTIONS.map(l => (
