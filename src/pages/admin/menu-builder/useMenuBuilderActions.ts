@@ -51,12 +51,12 @@ export function useMenuBuilderActions() {
       parent_module_id: string | null;
       sort_order: number;
     }) => {
-      const { error } = await supabase.from('system_modules').insert({
+      const { error } = await supabase.from('system_modules').insert([{
         ...data,
         is_active: true,
         is_internal_only: false,
-        status: 'active',
-      });
+        status: 'active' as const,
+      }]);
       if (error) throw error;
     },
     onSuccess: () => {
