@@ -20,7 +20,8 @@ import { useToast } from "@/hooks/use-toast";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { DashboardKpiCards } from "@/components/dashboard/DashboardKpiCards";
 import { DashboardQuickActions } from "@/components/dashboard/DashboardQuickActions";
-import { DashboardOnboarding } from "@/components/dashboard/DashboardOnboarding";
+import { MLConnectionCard } from "@/components/dashboard/MLConnectionCard";
+import { useMLConnectionState } from "@/hooks/useMLConnectionState";
 import { TrialBanner } from "@/components/access/TrialBanner";
 import { PriorityInbox } from "@/components/notifications";
 import { DailyMessageCard } from "@/components/daily-message";
@@ -70,6 +71,7 @@ const Home = () => {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const { activeAccount, sellerId, loading: accountLoading, initialized, refreshAccounts } = useActiveAccount();
+  const connectionInfo = useMLConnectionState();
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncJob, setSyncJob] = useState<SyncJob | null>(null);
@@ -467,7 +469,7 @@ const Home = () => {
     navigate
   ]);
 
-  if (loading || accountLoading || !initialized) {
+  if (loading || accountLoading || !initialized || connectionInfo.state === null) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
@@ -488,9 +490,12 @@ const Home = () => {
         {/* Daily Message */}
         <DailyMessageSection userId={user?.id} />
 
-        {/* Connected State */}
-        {activeAccount ? (
+        {/* Connection-aware content */}
+        {connectionInfo.state === 'CONNECTED' ? (
           <>
+            {/* Connected status bar */}
+            <MLConnectionCard connectionInfo={connectionInfo} />
+
             {/* Priority Inbox - Pending Actions */}
             <PriorityInbox sellerId={sellerId || undefined} />
 
@@ -511,8 +516,7 @@ const Home = () => {
             )}
           </>
         ) : (
-          /* Onboarding State */
-          <DashboardOnboarding onConnectML={handleConnectML} />
+          <MLConnectionCard connectionInfo={connectionInfo} />
         )}
       </div>
     </PageContainer>
