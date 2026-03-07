@@ -106,12 +106,15 @@ export function useUserAccessState(): UseUserAccessStateReturn {
     fetchStatus();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      // Only react to sign-out, not sign-in
       if (event === 'SIGNED_OUT') {
         setStatus(null);
         setIsAuthenticated(false);
+        initialLoadDoneRef.current = false;
+      } else if (event === 'SIGNED_IN') {
+        // Re-fetch after login so ProtectedRoute sees correct requiresOnboarding
+        fetchStatus();
       }
-      // SIGNED_IN and TOKEN_REFRESHED are intentionally ignored
+      // TOKEN_REFRESHED is intentionally ignored to avoid tab-switch cascades
     });
 
     return () => subscription.unsubscribe();
