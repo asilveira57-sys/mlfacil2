@@ -197,29 +197,29 @@ const CriarAcesso = () => {
       </div>
 
       {/* Right Column */}
-      <div className="w-full lg:w-[45%] flex items-center justify-center p-6 sm:p-8 lg:p-12">
-        <div className="w-full max-w-[420px]">
+      <div className="w-full lg:w-[45%] flex items-center justify-center p-4 sm:p-6 lg:p-8">
+        <div className="w-full max-w-[400px]">
           {/* Mobile logo */}
-          <div className="lg:hidden flex items-center justify-center gap-3 mb-10">
+          <div className="lg:hidden flex items-center justify-center gap-3 mb-6">
             <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center">
               <BarChart3 className="w-5 h-5 text-primary-foreground" />
             </div>
             <span className="text-xl font-semibold text-foreground tracking-tight">MKTP Fácil</span>
           </div>
 
-          <div className="bg-card rounded-2xl shadow-lg border border-border/50 p-8 sm:p-10">
+          <div className="bg-card rounded-2xl shadow-lg border border-border/50 p-6 sm:p-8">
             {showVerifyEmail ? (
               <VerifyEmailState email={signupEmail} t={t} />
             ) : (
               <>
-                <div className="mb-8">
-                  <h2 className="text-2xl font-bold text-card-foreground tracking-tight">Crie sua conta</h2>
-                  <p className="text-muted-foreground text-sm mt-1.5">
+                <div className="mb-5">
+                  <h2 className="text-xl font-bold text-card-foreground tracking-tight">Crie sua conta</h2>
+                  <p className="text-muted-foreground text-sm mt-1">
                     Comece a organizar sua operação no Mercado Livre.
                   </p>
                 </div>
 
-                <form onSubmit={handleSignup} className="space-y-5">
+                <form onSubmit={handleSignup} className="space-y-3.5">
                   <FieldGroup label="Nome completo" id="name">
                     <Input
                       id="name"
@@ -229,7 +229,7 @@ const CriarAcesso = () => {
                       onChange={(e) => setName(e.target.value)}
                       required
                       autoComplete="name"
-                      className="h-11"
+                      className="h-10"
                     />
                   </FieldGroup>
 
@@ -242,7 +242,7 @@ const CriarAcesso = () => {
                       onChange={(e) => setEmail(e.target.value)}
                       required
                       autoComplete="email"
-                      className="h-11"
+                      className="h-10"
                     />
                   </FieldGroup>
 
@@ -256,7 +256,7 @@ const CriarAcesso = () => {
                         onChange={(e) => setPassword(e.target.value)}
                         required
                         autoComplete="new-password"
-                        className="h-11 pr-10"
+                        className="h-10 pr-10"
                       />
                       <button
                         type="button"
@@ -277,18 +277,18 @@ const CriarAcesso = () => {
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       required
                       autoComplete="new-password"
-                      className="h-11"
+                      className="h-10"
                     />
                   </FieldGroup>
 
-                  <div className="flex items-start gap-2.5 pt-1">
+                  <div className="flex items-start gap-2.5">
                     <Checkbox
                       id="terms"
                       checked={acceptTerms}
                       onCheckedChange={(checked) => setAcceptTerms(checked === true)}
                       className="mt-0.5"
                     />
-                    <label htmlFor="terms" className="text-xs text-muted-foreground leading-relaxed cursor-pointer">
+                    <label htmlFor="terms" className="text-[11px] text-muted-foreground leading-relaxed cursor-pointer">
                       Ao criar sua conta você concorda com nossos{" "}
                       <Link to="/termos-de-uso" className="text-primary hover:underline" target="_blank">
                         Termos de Serviço
@@ -300,32 +300,14 @@ const CriarAcesso = () => {
                     </label>
                   </div>
 
-                  <Button type="submit" className="w-full h-11 text-sm font-medium" disabled={loading || !acceptTerms}>
+                  <Button type="submit" className="w-full h-10 text-sm font-medium" disabled={loading || !acceptTerms}>
                     {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
                     {loading ? "Criando conta..." : "Criar acesso"}
                   </Button>
                 </form>
 
-                {/* Trust text */}
-                <p className="text-center text-xs text-muted-foreground mt-4">
-                  Cadastro rápido e seguro.
-                </p>
-
-                {/* Authority badges */}
-                <div className="flex items-center justify-center gap-4 mt-5 pt-5 border-t border-border/50">
-                  <div className="flex items-center gap-1.5">
-                    <Award className="w-3.5 h-3.5 text-muted-foreground" />
-                    <span className="text-[11px] text-muted-foreground">Consultor certificado</span>
-                  </div>
-                  <div className="w-px h-3 bg-border" />
-                  <div className="flex items-center gap-1.5">
-                    <ShieldCheck className="w-3.5 h-3.5 text-muted-foreground" />
-                    <span className="text-[11px] text-muted-foreground">14 anos de mercado</span>
-                  </div>
-                </div>
-
                 {/* Login link */}
-                <div className="mt-6 text-center">
+                <div className="mt-4 text-center">
                   <p className="text-sm text-muted-foreground">
                     Já tem uma conta?{" "}
                     <Link to="/auth" className="text-primary font-medium hover:underline">
