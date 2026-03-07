@@ -11,7 +11,7 @@ import { CookieConsentGate } from "@/components/cookies/CookieConsentGate";
 import { RouteChangeCleanup } from "@/components/layout/RouteChangeCleanup";
 import { AccountChangeInvalidator } from "@/components/layout/AccountChangeInvalidator";
 import { AppShellLayout } from "@/components/layout/AppShellLayout";
-import { OnboardingWizard } from "@/components/onboarding";
+
 import { WelcomeOnboardingGate } from "@/components/welcome";
 import { TrialExpiredPaywall, BillingDataGate, ModuleAccessGuard } from "@/components/access";
 import { ScrollToTop } from "@/components/ScrollToTop";
@@ -130,7 +130,7 @@ const App = () => {
               <RouteChangeCleanup />
               <AccountChangeInvalidator />
               <SeoHead />
-              <OnboardingWizard />
+              
               <WelcomeOnboardingGate />
               <TrialExpiredPaywall />
               <BillingDataGate />
