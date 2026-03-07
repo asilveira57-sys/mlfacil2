@@ -467,11 +467,72 @@ Deno.serve(async (req) => {
 
     const { data: tenants, error: tenErr } = await tenantsQuery;
     if (tenErr) throw tenErr;
+
+    // Fallback: if no tenants found, try to find orphan companies (without tenant_id)
+    // and auto-create tenants for them
     if (!tenants || tenants.length === 0) {
-      return new Response(
-        JSON.stringify({ ok: true, message: "No active tenants", processed: 0 }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      console.log("[retro-engine] No tenants found, checking for orphan companies...");
+      
+      const { data: orphanCompanies } = await supabase
+        .from("companies")
+        .select("id, user_id, display_name, trial_started_at, trial_ends_at, created_at")
+        .is("tenant_id", null)
+        .eq("is_active", true);
+
+      if (!orphanCompanies || orphanCompanies.length === 0) {
+        return new Response(
+          JSON.stringify({ ok: true, message: "No active tenants or orphan companies", processed: 0 }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Group by user_id and create tenants
+      const userIds = [...new Set(orphanCompanies.map((c: any) => c.user_id))];
+      for (const userId of userIds) {
+        const firstCompany = orphanCompanies.find((c: any) => c.user_id === userId);
+        if (!firstCompany) continue;
+
+        const { data: newTenant } = await supabase
+          .from("tenants")
+          .insert({
+            name: firstCompany.display_name || "Empresa",
+            owner_user_id: userId,
+            status: "active",
+            trial_started_at: firstCompany.trial_started_at,
+            trial_ends_at: firstCompany.trial_ends_at,
+          })
+          .select("id")
+          .single();
+
+        if (newTenant) {
+          // Link all user companies
+          await supabase
+            .from("companies")
+            .update({ tenant_id: newTenant.id })
+            .eq("user_id", userId)
+            .is("tenant_id", null);
+
+          // Add owner membership
+          await supabase
+            .from("tenant_members")
+            .insert({ tenant_id: newTenant.id, user_id: userId, role: "owner" })
+            .select()
+            .maybeSingle();
+
+          console.log(`[retro-engine] Auto-created tenant ${newTenant.id} for user ${userId}`);
+        }
+      }
+
+      // Re-fetch tenants after auto-creation
+      const { data: freshTenants } = await tenantsQuery;
+      if (!freshTenants || freshTenants.length === 0) {
+        return new Response(
+          JSON.stringify({ ok: true, message: "No tenants after fallback", processed: 0 }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      // Replace tenants array reference
+      tenants.push(...freshTenants);
     }
 
     let totalProcessed = 0;
@@ -705,7 +766,8 @@ Deno.serve(async (req) => {
 
               // Register platform event
               await supabase.from("account_events").insert({
-                user_id: tenant.id,
+                user_id: tenant.owner_user_id,
+                tenant_id: tenant.id,
                 company_id: company.id,
                 event_type: "retrospective_generated",
                 event_scope: "company",

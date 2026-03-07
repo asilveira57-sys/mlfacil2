@@ -1,108 +1,66 @@
 
+# Plano Mestre — Jornada Completa do Seller
 
-## Diagnóstico Completo
+## Status de cada item
 
-### Causa Raiz: A tabela `tenants` está VAZIA
+### ✅ Já existe no sistema
+| # | Item | Status |
+|---|------|--------|
+| 2 | Cadastro (email/senha + confirmação) | ✅ Implementado |
+| 4 | Painel inicial (dashboard) | ✅ Existe (sem velocímetro) |
+| 5 | Conexão ML via OAuth | ✅ Implementado |
+| 6 | Elegibilidade para teste (>10 vendas) | ✅ Verificação existe na company |
+| 8 | Módulo Etiquetas (vendas abertas) | ✅ Implementado |
+| 9 | Módulo Custos (sem Passo 2) | ✅ Atualizado agora |
+| 13 | Seleção automática de plano | ✅ `useUserSalesVolume` + filtro de planos |
+| 15 | Cadastro fiscal (PF/PJ) | ✅ `company_billing` existe |
+| 12 | Bloqueio pós-trial | ✅ Parcial (trial_expired bloqueia) |
 
-O motor de retrospectivas (`retrospective-engine`) segue este fluxo:
-1. Busca tenants ativos → **0 resultados** → retorna "No active tenants" → nada é gerado
-2. Para cada tenant, busca companies com `tenant_id = tenant.id`
-3. Para cada company, busca seller_id via `marketplace_accounts` ou `ml_accounts`
+### 🔶 Existe parcialmente / precisa ajuste
+| # | Item | O que falta |
+|---|------|-------------|
+| 1 | Landing com 3 botões | Landing existe mas precisa revisar CTAs |
+| 3 | Tela de boas-vindas (primeiro acesso) | Onboarding existe mas pode não ter welcome screen |
+| 7 | Sincronização inicial automática (30d) | Import manual existe, falta auto-trigger pós-OAuth |
+| 10 | Módulo ADS (sync pós-pagamento) | ADS existe, falta gate de trial |
+| 11 | Linha do Tempo (30d trial vs 1yr pago) | Módulo existe, falta limitar por trial |
+| 14 | Dados fiscais obrigatórios pós-pagamento | Tela existe, falta gate de bloqueio |
 
-O problema é que **nenhuma company tem `tenant_id` preenchido** — todas estão com `tenant_id = NULL`. E a tabela `tenants` nunca foi populada. Logo o motor não encontra nenhum dado para processar.
+### 🔴 Precisa ser desenvolvido
+| # | Item | Descrição |
+|---|------|-----------|
+| 4b | Velocímetro de ativação | Widget de progresso no dashboard |
+| 9b | Tabela `sync_jobs` + lock após sucesso | Controle de execução de syncs |
+| 9c | Lock do botão 1 ano após sucesso | Bloquear re-execução pós-sucesso |
+| 16 | Multi-conta (soma de vendas) | Lógica de soma cross-account |
+| 17-18 | Estados de conta + aviso pré-conexão | Workflow de nova conta |
+| 19 | Verificação de limite + pending_upgrade | Gate automático |
+| 20 | Upgrade com pró-rata | Cálculo proporcional |
+| 21 | Crescimento natural → bloqueio | Detecção automática de excesso |
+| 22 | Proteção contra abuso (logs) | Audit trail de conexões/upgrades |
 
-Além disso, as RLS policies usam `is_tenant_member(auth.uid(), tenant_id)`, que também retorna `false` pois não existe tenant vinculado. Isso explica por que a busca no admin também não mostra resultados.
+## Ordem sugerida de implementação
 
-### Dados Atuais no Banco
+### Fase 1 — Gates e bloqueios (impacto imediato)
+1. Velocímetro de ativação no dashboard
+2. Tabela `sync_jobs` + controle de locks
+3. Gate de dados fiscais pós-pagamento
+4. Auto-sync 30d após OAuth
 
-| Tabela | Registros | Problema |
-|--------|-----------|----------|
-| `tenants` | **0** | Nunca populada |
-| `companies` | 5 (todas com `tenant_id = NULL`) | Sem vínculo com tenants |
-| `ml_accounts` | 4 (com `company_id` válido) | OK |
-| `marketplace_accounts` | **0** | Tabela vazia (fallback para ml_accounts funciona) |
-| `retrospectives` | **0** | Motor nunca gerou nada |
-| `retrospective_snapshots` | **0** | Idem |
-| `retrospective_rules` | 10 | OK, todas ativas |
+### Fase 2 — Trial gates nos módulos ✅
+5. ✅ ADS: banner de trial + sync bloqueado via ML API gate no backend
+6. ✅ Linha do Tempo: banner de trial informando limitação a 30d
+7. ✅ Etiquetas: filtro "Todos" agora capped a 30 dias
 
-### O que está quebrando a cadeia
+### Fase 3 — Multi-conta e upgrade ✅
+8. ✅ Multi-conta: soma de vendas (get_tenant_total_sales + check_tenant_plan_limit)
+9. ✅ Estados de conta (account_state enum: active/pending_upgrade/disabled/error)
+10. ✅ Upgrade com pró-rata (calculate_prorata_upgrade + execute_plan_upgrade)
+11. ✅ Crescimento natural → bloqueio (PlanLimitBanner + useTenantLimits)
+12. ✅ Aviso pré-conexão de nova conta (AccountConnectionWarning)
+13. ✅ Audit log (tenant_limit_log)
 
-```text
-tenants (vazio) → motor sai imediatamente
-companies.tenant_id (null) → JOIN com tenants falha
-RLS: is_tenant_member(uid, tenant_id) → tenant_id é null → acesso negado
-```
-
----
-
-## Plano de Correção
-
-### 1. Migration: Popular tenants e vincular companies
-
-Criar um tenant para cada `user_id` distinto na tabela `companies`, usando os dados de trial que já existem nas companies. Depois, atualizar `companies.tenant_id` com o tenant correspondente.
-
-```sql
--- Para cada user_id distinto em companies, criar um tenant
-INSERT INTO tenants (id, name, owner_user_id, status, trial_started_at, trial_ends_at, created_at, updated_at)
-SELECT
-  gen_random_uuid(),
-  c.display_name,
-  c.user_id,
-  'active',
-  c.trial_started_at,
-  c.trial_ends_at,
-  c.created_at,
-  now()
-FROM companies c
-WHERE c.is_primary = true AND c.user_id IS NOT NULL
-ON CONFLICT DO NOTHING;
-
--- Atualizar tenant_id nas companies
-UPDATE companies c SET tenant_id = t.id
-FROM tenants t WHERE t.owner_user_id = c.user_id AND c.tenant_id IS NULL;
-```
-
-### 2. Migration: Criar tenant_members para os owners
-
-```sql
-INSERT INTO tenant_members (tenant_id, user_id, role)
-SELECT id, owner_user_id, 'owner'
-FROM tenants
-ON CONFLICT DO NOTHING;
-```
-
-Isso resolve tanto o motor quanto as RLS policies.
-
-### 3. Trigger: Auto-criar tenant no signup de novos usuários
-
-Criar um trigger (ou ajustar o existente `handle_new_user_setup`) para que ao criar uma company, se não existir tenant, crie automaticamente e vincule.
-
-### 4. Atualizar o engine para fallback sem tenant
-
-Como medida de resiliência, ajustar o engine para também buscar companies sem tenant (usando `user_id` direto) caso o tenant não exista — evitando que o motor fique silenciosamente parado novamente.
-
-### 5. Ajustar RLS para admin acessar todas as retrospectivas
-
-Adicionar policy que permita admin (via `has_role`) ler todas as retrospectivas, independente de tenant:
-
-```sql
-CREATE POLICY "admin_read_all" ON retrospectives FOR SELECT
-USING (public.has_role(auth.uid(), 'admin'));
-```
-
-Mesma policy para `retrospective_snapshots`, `retrospective_targets`.
-
----
-
-## Resumo de Alterações
-
-| Componente | Mudança |
-|------------|---------|
-| **Migration SQL** | Popular `tenants` a partir de `companies`, vincular `tenant_id`, criar `tenant_members` |
-| **Migration SQL** | Trigger para auto-criar tenant ao criar company |
-| **Migration SQL** | RLS admin para retrospectives, snapshots, targets |
-| **Edge Function** `retrospective-engine` | Fallback para buscar companies sem tenant |
-
-### Resultado Esperado
-Após a migration, o botão "Forçar Geração" no admin vai encontrar os tenants, as companies vinculadas, os seller_ids via `ml_accounts`, e gerar as retrospectivas. O admin também poderá visualizar todos os resultados.
-
+### Fase 4 — Landing e onboarding ✅
+14. ✅ Landing com 3 CTAs (Login, Cadastro, Planos) no header e hero
+15. ✅ Welcome screen pós-confirmação de email (WelcomeScreen + aviso ML)
+16. ✅ Proteção contra abuso (system_audit_log + tenant_limit_log)
