@@ -16,12 +16,12 @@ const corsHeaders = {
 }
 
 const EMAIL_SUBJECTS: Record<string, string> = {
-  signup: 'Confirm your email',
-  invite: "You've been invited",
-  magiclink: 'Your login link',
-  recovery: 'Reset your password',
-  email_change: 'Confirm your new email',
-  reauthentication: 'Your verification code',
+  signup: 'Confirme seu e-mail',
+  invite: 'Você foi convidado para o MKTP Fácil',
+  magiclink: 'Seu link de acesso',
+  recovery: 'Redefinir sua senha',
+  email_change: 'Confirme a alteração de e-mail',
+  reauthentication: 'Seu código de verificação',
 }
 
 // Template mapping
@@ -35,7 +35,7 @@ const EMAIL_TEMPLATES: Record<string, React.ComponentType<any>> = {
 }
 
 // Configuration
-const SITE_NAME = "mlfacil2"
+const SITE_NAME = "MKTP Fácil"
 const SENDER_DOMAIN = "notify.www.mktpfacil.com"
 const ROOT_DOMAIN = "www.mktpfacil.com"
 const FROM_DOMAIN = "www.mktpfacil.com" // Domain shown in From address (may be root or sender subdomain)
