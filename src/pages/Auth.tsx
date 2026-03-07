@@ -11,21 +11,21 @@ import alexandrePhoto from "@/assets/alexandre-silveira.png";
 import seloML from "@/assets/selo-consultoria-ml.avif";
 
 const BenefitCard = ({ icon, title, description }: { icon: React.ReactNode; title: string; description: string }) => (
-  <div className="bg-white/[0.06] rounded-xl px-5 py-4 border border-white/[0.06]">
+  <div className="bg-white/[0.06] rounded-lg px-4 py-3 border border-white/[0.06]">
     <div className="flex items-start gap-3">
-      <div className="w-9 h-9 rounded-full bg-accent/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+      <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center flex-shrink-0 mt-0.5">
         {icon}
       </div>
       <div>
-        <h3 className="font-medium text-[14px] text-primary-foreground/90">{title}</h3>
-        <p className="text-[12px] text-primary-foreground/50 leading-relaxed mt-1">{description}</p>
+        <h3 className="font-medium text-[13px] text-primary-foreground/90">{title}</h3>
+        <p className="text-[11px] text-primary-foreground/50 leading-relaxed mt-0.5">{description}</p>
       </div>
     </div>
   </div>
 );
 
 const AuthLeftColumn = () => (
-  <div className="hidden lg:flex lg:w-[55%] relative overflow-hidden flex-col justify-between p-12 text-primary-foreground">
+  <div className="hidden lg:flex lg:w-[55%] relative overflow-hidden flex-col justify-center gap-8 p-10 pl-12 text-primary-foreground">
     {/* Background — subtle radial gradient */}
     <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_40%,_hsl(223_47%_26%)_0%,_hsl(223_50%_14%)_100%)]" />
 
@@ -38,22 +38,22 @@ const AuthLeftColumn = () => (
       backgroundSize: '50px 50px',
     }} />
 
-    {/* Soft edge blend into right column — narrow 60-80px */}
-    <div className="absolute inset-y-0 right-0 w-[80px] z-10" style={{
-      background: 'linear-gradient(to right, rgba(255,255,255,0) 0%, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.45) 75%, rgba(255,255,255,1) 100%)'
+    {/* Clean subtle edge — max 28px */}
+    <div className="absolute inset-y-0 right-0 w-[28px] z-10" style={{
+      background: 'linear-gradient(to right, transparent 0%, hsl(0 0% 100% / 0.15) 50%, hsl(var(--background)) 100%)'
     }} />
 
     <div className="relative z-20">
       {/* Logo */}
-      <div className="flex items-center gap-3 mb-16">
-        <div className="w-10 h-10 bg-accent/90 rounded-xl flex items-center justify-center">
-          <BarChart3 className="w-5 h-5 text-white" />
+      <div className="flex items-center gap-3 mb-6">
+        <div className="w-9 h-9 bg-accent/90 rounded-xl flex items-center justify-center">
+          <BarChart3 className="w-4.5 h-4.5 text-white" />
         </div>
-        <h1 className="text-xl font-bold tracking-tight">MKTP Fácil</h1>
+        <h1 className="text-lg font-bold tracking-tight">MKTP Fácil</h1>
       </div>
 
       {/* Benefit Cards — lightweight */}
-      <div className="space-y-3 max-w-sm">
+      <div className="space-y-2.5 max-w-sm">
         <BenefitCard
           icon={<DollarSign className="w-4 h-4 text-accent" />}
           title="Lucro real por produto"
@@ -72,28 +72,28 @@ const AuthLeftColumn = () => (
       </div>
     </div>
 
-    {/* Authority Card — compact, horizontal */}
+    {/* Authority Card — compact, institutional */}
     <div className="relative z-20">
-      <div className="bg-white/[0.05] rounded-xl p-3.5 border border-white/[0.06] max-w-[380px]">
+      <div className="bg-white/[0.05] rounded-lg p-3 border border-white/[0.06] max-w-[370px]">
         <div className="flex items-center gap-3">
           <img
             src={alexandrePhoto}
             alt="Alexandre Silveira"
-            className="w-11 h-11 rounded-full object-cover object-[center_20%] ring-2 ring-white/10 flex-shrink-0"
+            className="w-10 h-10 rounded-full object-cover object-[center_20%] ring-2 ring-white/10 flex-shrink-0"
           />
           <div className="min-w-0 flex-1">
-            <p className="font-semibold text-sm text-primary-foreground">Alexandre Silveira</p>
-            <p className="text-xs text-primary-foreground/60 leading-snug mt-0.5">
+            <p className="font-semibold text-[13px] text-primary-foreground">Alexandre Silveira</p>
+            <p className="text-[11px] text-primary-foreground/60 leading-snug mt-0.5">
               Consultor certificado do Mercado Livre
             </p>
-            <p className="text-xs text-primary-foreground/50">
+            <p className="text-[11px] text-primary-foreground/50">
               14 anos vendendo na plataforma
             </p>
           </div>
           <img
             src={seloML}
             alt="Selo Consultoria Certificada Mercado Livre"
-            className="h-7 w-auto flex-shrink-0 opacity-80"
+            className="h-12 w-auto flex-shrink-0 opacity-90"
           />
         </div>
       </div>
