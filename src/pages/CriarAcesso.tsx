@@ -2,12 +2,13 @@ import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
-import { BarChart3, Eye, EyeOff, Loader2, MailCheck, CheckCircle2 } from "lucide-react";
+import { BarChart3, Eye, EyeOff, Loader2, MailCheck, DollarSign, Target, BarChart2, Award, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
+import consultantPhoto from "@/assets/consultant-photo.png";
 
 const CriarAcesso = () => {
   const { t } = useTranslation();
@@ -22,15 +23,12 @@ const CriarAcesso = () => {
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [loading, setLoading] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
-
-  // Post-signup state
   const [showVerifyEmail, setShowVerifyEmail] = useState(false);
   const [signupEmail, setSignupEmail] = useState("");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        console.info("[CriarAcesso] User already authenticated, redirecting to /dashboard");
         navigate("/dashboard", { replace: true });
       } else {
         setCheckingSession(false);
@@ -55,7 +53,6 @@ const CriarAcesso = () => {
     }
 
     setLoading(true);
-    console.info("[CriarAcesso] Signup attempt for:", email);
 
     try {
       const { data, error } = await supabase.auth.signUp({
@@ -68,7 +65,6 @@ const CriarAcesso = () => {
       });
 
       if (error) {
-        console.warn("[CriarAcesso] Signup failed:", error.message);
         if (error.message.includes("already registered")) {
           toast.error(t("auth:email_already_registered"));
         } else {
@@ -77,18 +73,13 @@ const CriarAcesso = () => {
         return;
       }
 
-      // If email confirmation is required (user exists but not confirmed)
       if (data?.user && !data.user.email_confirmed_at) {
-        console.info("[CriarAcesso] Signup successful, email verification required");
         setSignupEmail(email);
         setShowVerifyEmail(true);
       } else if (data?.session) {
-        // Auto-confirmed (shouldn't happen per config, but handle gracefully)
-        console.info("[CriarAcesso] Signup successful with auto-confirm, redirecting");
         navigate("/primeiro-acesso", { replace: true });
       }
-    } catch (err: any) {
-      console.error("[CriarAcesso] Signup error:", err);
+    } catch {
       toast.error("Erro inesperado ao criar conta.");
     } finally {
       setLoading(false);
@@ -104,81 +95,96 @@ const CriarAcesso = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-muted to-background flex">
-      {/* Left Side - Branding */}
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-primary p-12 flex-col justify-between text-primary-foreground">
-        <div>
-          <div className="flex items-center gap-3 mb-12">
-            <div className="w-12 h-12 bg-accent rounded-xl flex items-center justify-center">
-              <BarChart3 className="w-7 h-7" />
+    <div className="min-h-screen flex bg-background">
+      {/* Left Column */}
+      <div className="hidden lg:flex lg:w-[45%] relative overflow-hidden flex-col justify-between p-12 xl:p-16"
+        style={{
+          background: "linear-gradient(165deg, hsl(223 47% 18%), hsl(223 50% 28%), hsl(223 45% 22%))",
+        }}
+      >
+        {/* Subtle pattern overlay */}
+        <div className="absolute inset-0 opacity-[0.03]"
+          style={{
+            backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)",
+            backgroundSize: "32px 32px",
+          }}
+        />
+
+        <div className="relative z-10 space-y-12">
+          {/* Logo */}
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-white/10 backdrop-blur flex items-center justify-center">
+              <BarChart3 className="w-5 h-5 text-white" />
             </div>
-            <h1 className="text-3xl font-bold">MKTP Fácil</h1>
+            <span className="text-xl font-semibold text-white tracking-tight">MKTP Fácil</span>
           </div>
 
-          <div className="space-y-6">
-            <h2 className="text-2xl font-bold">Comece sua jornada de sucesso</h2>
-            <div className="space-y-4">
-              {[
-                "Análise completa de custos e margens",
-                "Gestão inteligente de anúncios",
-                "Importação automática de vendas",
-                "Relatórios e métricas em tempo real",
-              ].map((item) => (
-                <div key={item} className="flex items-center gap-3">
-                  <CheckCircle2 className="w-5 h-5 text-accent flex-shrink-0" />
-                  <span className="text-primary-foreground/90">{item}</span>
+          {/* Hero text */}
+          <div className="space-y-5 max-w-md">
+            <h1 className="text-[2.5rem] leading-[1.1] font-bold text-white tracking-tight">
+              Consultoria aplicada ao Mercado Livre
+            </h1>
+            <p className="text-white/60 text-base leading-relaxed">
+              Sistema criado por consultor certificado que transforma práticas de consultoria em ferramentas para vendedores.
+            </p>
+          </div>
+
+          {/* Benefits */}
+          <div className="space-y-5">
+            {[
+              { icon: DollarSign, text: "Lucro real por produto" },
+              { icon: Target, text: "Estratégia para anúncios" },
+              { icon: BarChart2, text: "Dados claros da operação" },
+            ].map(({ icon: Icon, text }) => (
+              <div key={text} className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-md bg-white/10 flex items-center justify-center flex-shrink-0">
+                  <Icon className="w-4 h-4 text-accent-light" style={{ color: "hsl(189 85% 55%)" }} />
                 </div>
-              ))}
-            </div>
+                <span className="text-white/80 text-sm">{text}</span>
+              </div>
+            ))}
           </div>
         </div>
 
-        <div className="text-sm text-primary-foreground/60">
-          {t("auth:copyright", { year: currentYear })}
+        {/* Authority block */}
+        <div className="relative z-10 flex items-center gap-4 pt-8 border-t border-white/10">
+          <img
+            src={consultantPhoto}
+            alt="Consultor certificado"
+            className="w-14 h-14 rounded-full object-cover ring-2 ring-white/20"
+          />
+          <div>
+            <p className="text-white text-sm font-medium">Consultor certificado do Mercado Livre</p>
+            <p className="text-white/50 text-xs mt-0.5">14 anos vendendo na plataforma</p>
+          </div>
         </div>
       </div>
 
-      {/* Right Side - Signup Form */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-8">
-        <div className="w-full max-w-md">
-          <div className="lg:hidden mb-8 text-center">
-            <div className="flex items-center justify-center gap-3 mb-4">
-              <div className="w-12 h-12 bg-primary rounded-xl flex items-center justify-center">
-                <BarChart3 className="w-7 h-7 text-primary-foreground" />
-              </div>
-              <h1 className="text-3xl font-bold text-foreground">MKTP Fácil</h1>
+      {/* Right Column */}
+      <div className="w-full lg:w-[55%] flex items-center justify-center p-6 sm:p-8 lg:p-12">
+        <div className="w-full max-w-[420px]">
+          {/* Mobile logo */}
+          <div className="lg:hidden flex items-center justify-center gap-3 mb-10">
+            <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center">
+              <BarChart3 className="w-5 h-5 text-primary-foreground" />
             </div>
+            <span className="text-xl font-semibold text-foreground tracking-tight">MKTP Fácil</span>
           </div>
 
-          <div className="bg-card p-8 rounded-2xl shadow-elevated border border-border">
+          <div className="bg-card rounded-2xl shadow-lg border border-border/50 p-8 sm:p-10">
             {showVerifyEmail ? (
-              <div className="text-center space-y-4 py-6">
-                <div className="flex justify-center">
-                  <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center">
-                    <MailCheck className="w-8 h-8 text-primary" />
-                  </div>
-                </div>
-                <h2 className="text-2xl font-bold text-card-foreground">{t("auth:verify_email")}</h2>
-                <p className="text-muted-foreground text-sm max-w-sm mx-auto">
-                  {t("auth:verify_email_description")}
-                </p>
-                {signupEmail && (
-                  <p className="text-sm font-medium text-foreground">{signupEmail}</p>
-                )}
-                <Link to="/auth" className="text-sm text-primary hover:underline mt-4 inline-block">
-                  Ir para o login
-                </Link>
-              </div>
+              <VerifyEmailState email={signupEmail} t={t} />
             ) : (
               <>
-                <div className="mb-6">
-                  <h2 className="text-2xl font-bold text-card-foreground mb-2">{t("auth:register_title")}</h2>
-                  <p className="text-muted-foreground">{t("auth:register_subtitle")}</p>
+                <div className="mb-8">
+                  <h2 className="text-2xl font-bold text-card-foreground tracking-tight">Crie sua conta</h2>
+                  <p className="text-muted-foreground text-sm mt-1.5">
+                    Comece a organizar sua operação no Mercado Livre.
+                  </p>
                 </div>
 
-                <form onSubmit={handleSignup} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="name">Nome completo</Label>
+                <form onSubmit={handleSignup} className="space-y-5">
+                  <FieldGroup label="Nome completo" id="name">
                     <Input
                       id="name"
                       type="text"
@@ -187,97 +193,153 @@ const CriarAcesso = () => {
                       onChange={(e) => setName(e.target.value)}
                       required
                       autoComplete="name"
+                      className="h-11"
                     />
-                  </div>
+                  </FieldGroup>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="signup-email">{t("auth:email")}</Label>
+                  <FieldGroup label="E-mail" id="signup-email">
                     <Input
                       id="signup-email"
                       type="email"
-                      placeholder={t("auth:email_placeholder")}
+                      placeholder="seu@email.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       required
                       autoComplete="email"
+                      className="h-11"
                     />
-                  </div>
+                  </FieldGroup>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="signup-password">{t("auth:password")}</Label>
+                  <FieldGroup label="Senha" id="signup-password">
                     <div className="relative">
                       <Input
                         id="signup-password"
                         type={showPassword ? "text" : "password"}
-                        placeholder="Escolha uma senha"
+                        placeholder="Crie uma senha segura"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         required
                         autoComplete="new-password"
-                        className="pr-10"
+                        className="h-11 pr-10"
                       />
                       <button
                         type="button"
                         onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                       >
                         {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
-                  </div>
+                  </FieldGroup>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="confirm-password">{t("auth:confirm_password")}</Label>
+                  <FieldGroup label="Confirmar senha" id="confirm-password">
                     <Input
                       id="confirm-password"
                       type={showPassword ? "text" : "password"}
-                      placeholder="Confirme sua senha"
+                      placeholder="Repita sua senha"
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       required
                       autoComplete="new-password"
+                      className="h-11"
                     />
-                  </div>
+                  </FieldGroup>
 
-                  <div className="flex items-start gap-2">
+                  <div className="flex items-start gap-2.5 pt-1">
                     <Checkbox
                       id="terms"
                       checked={acceptTerms}
                       onCheckedChange={(checked) => setAcceptTerms(checked === true)}
+                      className="mt-0.5"
                     />
                     <label htmlFor="terms" className="text-xs text-muted-foreground leading-relaxed cursor-pointer">
-                      {t("auth:terms_agreement")}{" "}
+                      Ao criar sua conta você concorda com nossos{" "}
                       <Link to="/termos-de-uso" className="text-primary hover:underline" target="_blank">
-                        {t("auth:terms_of_service")}
+                        Termos de Serviço
                       </Link>{" "}
                       e{" "}
                       <Link to="/politica-de-privacidade" className="text-primary hover:underline" target="_blank">
-                        {t("auth:privacy_policy")}
+                        Política de Privacidade
                       </Link>.
                     </label>
                   </div>
 
-                  <Button type="submit" className="w-full" disabled={loading || !acceptTerms}>
+                  <Button type="submit" className="w-full h-11 text-sm font-medium" disabled={loading || !acceptTerms}>
                     {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-                    {loading ? t("auth:creating_account") : "Criar acesso"}
+                    {loading ? "Criando conta..." : "Criar acesso"}
                   </Button>
                 </form>
 
+                {/* Trust text */}
+                <p className="text-center text-xs text-muted-foreground mt-4">
+                  Cadastro rápido e seguro.
+                </p>
+
+                {/* Authority badges */}
+                <div className="flex items-center justify-center gap-4 mt-5 pt-5 border-t border-border/50">
+                  <div className="flex items-center gap-1.5">
+                    <Award className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span className="text-[11px] text-muted-foreground">Consultor certificado</span>
+                  </div>
+                  <div className="w-px h-3 bg-border" />
+                  <div className="flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span className="text-[11px] text-muted-foreground">14 anos de mercado</span>
+                  </div>
+                </div>
+
+                {/* Login link */}
                 <div className="mt-6 text-center">
                   <p className="text-sm text-muted-foreground">
-                    {t("auth:has_account")}{" "}
+                    Já tem uma conta?{" "}
                     <Link to="/auth" className="text-primary font-medium hover:underline">
-                      {t("auth:sign_in")}
+                      Entrar
                     </Link>
                   </p>
                 </div>
               </>
             )}
           </div>
+
+          {/* Copyright - mobile */}
+          <p className="lg:hidden text-center text-xs text-muted-foreground mt-6">
+            {t("auth:copyright", { year: currentYear })}
+          </p>
         </div>
       </div>
     </div>
   );
 };
+
+/* ─── Subcomponents ─── */
+
+function FieldGroup({ label, id, children }: { label: string; id: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id} className="text-xs font-medium text-foreground">{label}</Label>
+      {children}
+    </div>
+  );
+}
+
+function VerifyEmailState({ email, t }: { email: string; t: any }) {
+  return (
+    <div className="text-center space-y-4 py-6">
+      <div className="flex justify-center">
+        <div className="w-14 h-14 bg-primary/10 rounded-full flex items-center justify-center">
+          <MailCheck className="w-7 h-7 text-primary" />
+        </div>
+      </div>
+      <h2 className="text-xl font-bold text-card-foreground">{t("auth:verify_email")}</h2>
+      <p className="text-muted-foreground text-sm max-w-xs mx-auto">
+        {t("auth:verify_email_description")}
+      </p>
+      {email && <p className="text-sm font-medium text-foreground">{email}</p>}
+      <Link to="/auth" className="text-sm text-primary hover:underline mt-4 inline-block">
+        Ir para o login
+      </Link>
+    </div>
+  );
+}
 
 export default CriarAcesso;
