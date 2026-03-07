@@ -130,7 +130,7 @@ const App = () => {
               <RouteChangeCleanup />
               <AccountChangeInvalidator />
               <SeoHead />
-              <OnboardingWizard />
+              
               <WelcomeOnboardingGate />
               <TrialExpiredPaywall />
               <BillingDataGate />
