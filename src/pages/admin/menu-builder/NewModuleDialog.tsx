@@ -8,6 +8,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { LAYER_OPTIONS } from './types';
 
+type LayerValue = 'admin' | 'ferramentas' | 'marketplace' | 'operacional' | 'sistema' | 'financeiro';
+
 interface NewModuleDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -16,7 +18,7 @@ interface NewModuleDialogProps {
     key: string;
     icon_key: string;
     route: string | null;
-    layer: string;
+    layer: LayerValue;
     parent_module_id: string | null;
   }) => void;
   parentId?: string | null;
@@ -28,7 +30,7 @@ export function NewModuleDialog({ open, onOpenChange, onSubmit, parentId = null,
   const [key, setKey] = useState('');
   const [iconKey, setIconKey] = useState('Settings');
   const [route, setRoute] = useState('');
-  const [layer, setLayer] = useState('operacional');
+  const [layer, setLayer] = useState<LayerValue>('operacional');
 
   const handleSubmit = () => {
     if (!name.trim() || !key.trim()) return;
