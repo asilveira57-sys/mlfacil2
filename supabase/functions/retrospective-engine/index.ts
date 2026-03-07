@@ -766,7 +766,8 @@ Deno.serve(async (req) => {
 
               // Register platform event
               await supabase.from("account_events").insert({
-                user_id: tenant.id,
+                user_id: tenant.owner_user_id,
+                tenant_id: tenant.id,
                 company_id: company.id,
                 event_type: "retrospective_generated",
                 event_scope: "company",
