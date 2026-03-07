@@ -71,6 +71,7 @@ const Home = () => {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const { activeAccount, sellerId, loading: accountLoading, initialized, refreshAccounts } = useActiveAccount();
+  const connectionInfo = useMLConnectionState();
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncJob, setSyncJob] = useState<SyncJob | null>(null);
@@ -489,9 +490,12 @@ const Home = () => {
         {/* Daily Message */}
         <DailyMessageSection userId={user?.id} />
 
-        {/* Connected State */}
-        {activeAccount ? (
+        {/* Connection-aware content */}
+        {connectionInfo.state === 'CONNECTED' ? (
           <>
+            {/* Connected status bar */}
+            <MLConnectionCard connectionInfo={connectionInfo} />
+
             {/* Priority Inbox - Pending Actions */}
             <PriorityInbox sellerId={sellerId || undefined} />
 
@@ -512,8 +516,7 @@ const Home = () => {
             )}
           </>
         ) : (
-          /* Onboarding State */
-          <DashboardOnboarding onConnectML={handleConnectML} />
+          <MLConnectionCard connectionInfo={connectionInfo} />
         )}
       </div>
     </PageContainer>
