@@ -7,6 +7,28 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
+/**
+ * Generate a random code_verifier (43-128 chars, URL-safe)
+ * and derive the S256 code_challenge from it.
+ */
+async function generatePKCE() {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  const codeVerifier = base64UrlEncode(array);
+
+  const encoder = new TextEncoder();
+  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(codeVerifier));
+  const codeChallenge = base64UrlEncode(new Uint8Array(digest));
+
+  return { codeVerifier, codeChallenge };
+}
+
+function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -90,12 +112,17 @@ serve(async (req) => {
       throw new Error('ML_APP_ID not configured');
     }
 
-    // Generate state parameter with frontend origin, user ID, and company ID encoded
+    // Generate PKCE pair
+    const { codeVerifier, codeChallenge } = await generatePKCE();
+    console.log('PKCE generated, challenge method: S256');
+
+    // Generate state parameter with frontend origin, user ID, company ID, and code_verifier
     const stateData = {
       nonce: crypto.randomUUID(),
       origin: frontendOrigin,
-      userId: user.id, // Include user ID for secure server-side save
-      companyId: companyId || null, // Include company ID for linking
+      userId: user.id,
+      companyId: companyId || null,
+      cv: codeVerifier, // code_verifier for PKCE
     };
     const state = btoa(JSON.stringify(stateData));
 
@@ -107,8 +134,10 @@ serve(async (req) => {
     authUrl.searchParams.append('client_id', appId);
     authUrl.searchParams.append('redirect_uri', redirectUri);
     authUrl.searchParams.append('state', state);
+    authUrl.searchParams.append('code_challenge', codeChallenge);
+    authUrl.searchParams.append('code_challenge_method', 'S256');
 
-    console.log('Generated auth URL:', authUrl.toString());
+    console.log('Generated auth URL with PKCE');
 
     return new Response(
       JSON.stringify({ 
