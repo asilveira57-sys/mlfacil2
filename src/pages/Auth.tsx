@@ -25,7 +25,7 @@ const BenefitCard = ({ icon, title, description }: { icon: React.ReactNode; titl
 );
 
 const AuthLeftColumn = () => (
-  <div className="hidden lg:flex lg:w-[55%] relative overflow-hidden flex-col justify-center gap-5 p-10 pl-12 text-primary-foreground">
+  <div className="hidden lg:flex lg:w-[55%] relative overflow-hidden flex-col justify-center gap-5 p-10 pl-12 pr-10 text-primary-foreground">
     {/* Background — subtle radial gradient */}
     <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_40%,_hsl(223_47%_26%)_0%,_hsl(223_50%_14%)_100%)]" />
 
@@ -51,7 +51,7 @@ const AuthLeftColumn = () => (
       </div>
 
       {/* Benefit Cards */}
-      <div className="space-y-2 max-w-md">
+      <div className="space-y-2">
         <BenefitCard
           icon={<DollarSign className="w-4 h-4 text-accent" />}
           title="Lucro real por produto"
@@ -77,7 +77,7 @@ const AuthLeftColumn = () => (
 
     {/* Authority Card — compact, institutional */}
     <div className="relative z-20">
-      <div className="bg-white/[0.05] rounded-lg p-3 border border-white/[0.06] max-w-md">
+      <div className="bg-white/[0.05] rounded-lg p-3 border border-white/[0.06]">
         <div className="flex items-center gap-3">
           <img
             src={alexandrePhoto}
