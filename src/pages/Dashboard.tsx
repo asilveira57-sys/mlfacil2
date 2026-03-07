@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
@@ -10,11 +10,10 @@ import { PlanLimitBanner } from "@/components/access/PlanLimitBanner";
 import { useTenantLimits } from "@/hooks/useTenantLimits";
 import { DashboardModulesGrid } from "@/components/dashboard/DashboardModulesGrid";
 import { WidgetHubGrid } from "@/components/dashboard/widget-hub";
-import { DashboardOnboarding } from "@/components/dashboard/DashboardOnboarding";
 import { WelcomeScreen } from "@/components/onboarding/WelcomeScreen";
-import { DashboardReconnectingState } from "@/components/dashboard/DashboardReconnectingState";
+import { MLConnectionCard } from "@/components/dashboard/MLConnectionCard";
+import { useMLConnectionState } from "@/hooks/useMLConnectionState";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
-import { useToast } from "@/hooks/use-toast";
 import { useModuleFeedbackIntegration } from "@/hooks/useModuleFeedbackIntegration";
 import { FeedbackPromptCard } from "@/components/feedback";
 
@@ -27,15 +26,14 @@ function DashboardPlanLimitSection({ companyId }: { companyId?: string | null })
 const Dashboard = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { toast } = useToast();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [reconnected, setReconnected] = useState(false);
   const [searchParams] = useSearchParams();
   const isFirstAccess = searchParams.get('welcome') === '1';
   const [showWelcome, setShowWelcome] = useState(isFirstAccess);
 
-  const { activeAccount, sellerId, loading: accountLoading, initialized, accounts, refreshAccounts } = useActiveAccount();
+  const { activeAccount, loading: accountLoading, initialized } = useActiveAccount();
+  const connectionInfo = useMLConnectionState();
   const feedback = useModuleFeedbackIntegration('dashboard-analises');
 
   useEffect(() => {
@@ -59,61 +57,7 @@ const Dashboard = () => {
     return () => subscription.unsubscribe();
   }, [navigate]);
 
-  const handleConnectML = async () => {
-    try {
-      toast({
-        title: "Conectando...",
-        description: "Redirecionando para o Mercado Livre",
-      });
-
-      let { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session) {
-        toast({ title: "Sessão expirada", description: "Faça login novamente", variant: "destructive" });
-        navigate("/auth");
-        return;
-      }
-
-      let response = await supabase.functions.invoke('ml-auth-url', {
-        body: { frontendOrigin: window.location.origin },
-        headers: { Authorization: `Bearer ${session.access_token}` }
-      });
-
-      if (response.error?.message?.includes('401') || response.error?.status === 401) {
-        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-        if (refreshError || !refreshData.session) {
-          toast({ title: "Sessão expirada", description: "Faça login novamente", variant: "destructive" });
-          navigate("/auth");
-          return;
-        }
-        session = refreshData.session;
-        response = await supabase.functions.invoke('ml-auth-url', {
-          body: { frontendOrigin: window.location.origin },
-          headers: { Authorization: `Bearer ${session.access_token}` }
-        });
-      }
-
-      if (response.error) throw response.error;
-      if (response.data?.authUrl) {
-        window.location.href = response.data.authUrl;
-      } else {
-        throw new Error('URL de autorização não recebida');
-      }
-    } catch (error: any) {
-      console.error('Erro ao conectar com ML:', error);
-      toast({
-        title: "Erro ao conectar",
-        description: error?.message || "Não foi possível iniciar a conexão",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleReconnected = useCallback(() => {
-    setReconnected(true);
-  }, []);
-
-  if (loading || accountLoading || !initialized) {
+  if (loading || accountLoading || !initialized || connectionInfo.state === null) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
@@ -121,9 +65,8 @@ const Dashboard = () => {
     );
   }
 
-  // Determine dashboard state
-  const hasAnyAccount = accounts.length > 0;
-  const needsReconnect = activeAccount && (activeAccount.status === 'attention' || activeAccount.status === 'disconnected') && !reconnected;
+  // Determine what to render based on connection state
+  const isConnected = connectionInfo.state === 'CONNECTED';
 
   return (
     <PageContainer 
@@ -136,18 +79,10 @@ const Dashboard = () => {
             userName={user?.user_metadata?.full_name || user?.email?.split('@')[0]}
             onContinue={() => setShowWelcome(false)}
           />
-        ) : !hasAnyAccount ? (
-          // No accounts at all → first-time onboarding
-          <DashboardOnboarding onConnectML={handleConnectML} />
-        ) : needsReconnect ? (
-          // Has account but token expired → reconnecting state
-          <DashboardReconnectingState 
-            accountId={activeAccount.id} 
-            onReconnected={handleReconnected}
-          />
-        ) : (
-          // Connected and ready
+        ) : isConnected ? (
           <>
+            {/* Connected status bar */}
+            <MLConnectionCard connectionInfo={connectionInfo} />
             <WidgetHubGrid />
             <ActivationSpeedometer />
             <DashboardPlanLimitSection companyId={activeAccount?.companyId} />
@@ -163,6 +98,9 @@ const Dashboard = () => {
               />
             )}
           </>
+        ) : (
+          /* FIRST_CONNECTION, RECONNECTING, or RECONNECT_REQUIRED */
+          <MLConnectionCard connectionInfo={connectionInfo} />
         )}
       </div>
     </PageContainer>
