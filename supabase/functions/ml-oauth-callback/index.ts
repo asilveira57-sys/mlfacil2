@@ -24,10 +24,11 @@ serve(async (req) => {
 
     console.log('Processing OAuth callback with code');
 
-    // Parse state to get frontend origin, user_id, and company_id
+    // Parse state to get frontend origin, user_id, company_id, and code_verifier
     let frontendOrigin = 'https://lovable.dev';
     let userId = '';
     let companyId: string | null = null;
+    let codeVerifier = '';
     
     try {
       if (state) {
@@ -35,6 +36,7 @@ serve(async (req) => {
         frontendOrigin = stateData.origin || frontendOrigin;
         userId = stateData.userId || '';
         companyId = stateData.companyId || null;
+        codeVerifier = stateData.cv || '';
       }
     } catch (e) {
       console.log('Could not parse state, using default origin');
@@ -43,6 +45,7 @@ serve(async (req) => {
     console.log('Frontend origin:', frontendOrigin);
     console.log('User ID from state:', userId);
     console.log('Company ID from state:', companyId || 'none');
+    console.log('PKCE code_verifier present:', !!codeVerifier);
 
     if (!userId) {
       const errorUrl = new URL(`${frontendOrigin}/dashboard`);
@@ -50,19 +53,26 @@ serve(async (req) => {
       return Response.redirect(errorUrl.toString(), 302);
     }
 
-    // Exchange code for access token
+    // Exchange code for access token (with PKCE code_verifier)
+    const tokenParams: Record<string, string> = {
+      grant_type: 'authorization_code',
+      client_id: Deno.env.get('ML_APP_ID') || '',
+      client_secret: Deno.env.get('ML_SECRET_KEY') || '',
+      code: code,
+      redirect_uri: `${Deno.env.get('SUPABASE_URL')}/functions/v1/ml-oauth-callback`,
+    };
+
+    // Add code_verifier for PKCE (required by ML)
+    if (codeVerifier) {
+      tokenParams.code_verifier = codeVerifier;
+    }
+
     const tokenResponse = await fetch('https://api.mercadolibre.com/oauth/token', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        client_id: Deno.env.get('ML_APP_ID') || '',
-        client_secret: Deno.env.get('ML_SECRET_KEY') || '',
-        code: code,
-        redirect_uri: `${Deno.env.get('SUPABASE_URL')}/functions/v1/ml-oauth-callback`,
-      }),
+      body: new URLSearchParams(tokenParams),
     });
 
     if (!tokenResponse.ok) {
