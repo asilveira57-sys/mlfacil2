@@ -47,7 +47,7 @@ export function useMenuBuilderActions() {
       key: string;
       icon_key: string;
       route: string | null;
-      layer: string;
+      layer: 'admin' | 'ferramentas' | 'marketplace' | 'operacional' | 'sistema' | 'financeiro';
       parent_module_id: string | null;
       sort_order: number;
     }) => {

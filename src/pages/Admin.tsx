@@ -18,7 +18,7 @@ import { AdminModuleTags } from './admin/AdminModuleTags';
 import { AdminErpIntegrations } from './admin/AdminErpIntegrations';
 import { AdminInvoiceQueue } from './admin/AdminInvoiceQueue';
 import { AdminPages } from './admin/AdminPages';
-import AdminMenuBuilder from './admin/AdminMenuBuilder';
+import AdminMenuBuilder from './admin/menu-builder/MenuBuilderPage';
 import BlogAdmin from './BlogAdmin';
 import { AdminAccessProfiles } from './admin/AdminAccessProfiles';
 import { AdminDailyMessages } from './admin/AdminDailyMessages';
