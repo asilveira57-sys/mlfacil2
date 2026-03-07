@@ -2,13 +2,14 @@ import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
-import { BarChart3, Eye, EyeOff, Loader2, MailCheck, DollarSign, Target, BarChart2, Award, ShieldCheck } from "lucide-react";
+import { BarChart3, Eye, EyeOff, Loader2, MailCheck, DollarSign, Target, TrendingUp, Award, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import consultantPhoto from "@/assets/consultant-photo.png";
+import alexandrePhoto from "@/assets/alexandre-silveira.png";
+import seloML from "@/assets/selo-consultoria-ml.avif";
 
 const CriarAcesso = () => {
   const { t } = useTranslation();
