@@ -197,7 +197,7 @@ const CriarAcesso = () => {
       </div>
 
       {/* Right Column */}
-      <div className="w-full lg:w-[55%] flex items-center justify-center p-6 sm:p-8 lg:p-12">
+      <div className="w-full lg:w-[45%] flex items-center justify-center p-6 sm:p-8 lg:p-12">
         <div className="w-full max-w-[420px]">
           {/* Mobile logo */}
           <div className="lg:hidden flex items-center justify-center gap-3 mb-10">
