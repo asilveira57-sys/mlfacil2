@@ -43,7 +43,7 @@ async function logConnectionEvent(
       event_scope: 'connection_state',
       event_source: 'frontend',
       event_date: new Date().toISOString(),
-      event_data: meta || {},
+      event_data: (meta || {}) as any,
     }]);
   } catch (_) {
     // fail-safe
