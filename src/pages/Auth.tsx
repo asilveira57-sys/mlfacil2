@@ -8,15 +8,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import alexandrePhoto from "@/assets/alexandre-silveira.png";
-import seloML from "@/assets/selo-ml-certificado.png";
+import seloML from "@/assets/selo-consultoria-ml.avif";
 
-const BenefitCard = ({ icon, title }: { icon: React.ReactNode; title: string }) => (
+const BenefitCard = ({ icon, title, description }: { icon: React.ReactNode; title: string; description: string }) => (
   <div className="bg-white/[0.06] rounded-xl px-5 py-4 border border-white/[0.06]">
-    <div className="flex items-center gap-3">
-      <div className="w-9 h-9 rounded-full bg-accent/10 flex items-center justify-center flex-shrink-0">
+    <div className="flex items-start gap-3">
+      <div className="w-9 h-9 rounded-full bg-accent/10 flex items-center justify-center flex-shrink-0 mt-0.5">
         {icon}
       </div>
-      <h3 className="font-medium text-[14px] text-primary-foreground/90">{title}</h3>
+      <div>
+        <h3 className="font-medium text-[14px] text-primary-foreground/90">{title}</h3>
+        <p className="text-[12px] text-primary-foreground/50 leading-relaxed mt-1">{description}</p>
+      </div>
     </div>
   </div>
 );
@@ -36,7 +39,9 @@ const AuthLeftColumn = () => (
     }} />
 
     {/* Soft edge blend into right column — narrow 60-80px */}
-    <div className="absolute inset-y-0 right-0 w-[70px] bg-gradient-to-r from-transparent to-background z-10" />
+    <div className="absolute inset-y-0 right-0 w-[80px] z-10" style={{
+      background: 'linear-gradient(to right, rgba(255,255,255,0) 0%, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.45) 75%, rgba(255,255,255,1) 100%)'
+    }} />
 
     <div className="relative z-20">
       {/* Logo */}
@@ -52,14 +57,17 @@ const AuthLeftColumn = () => (
         <BenefitCard
           icon={<DollarSign className="w-4 h-4 text-accent" />}
           title="Lucro real por produto"
+          description="Calcule margens considerando custos, comissões, taxas e frete antes de alterar preços."
         />
         <BenefitCard
           icon={<Target className="w-4 h-4 text-accent" />}
           title="Análise de anúncios e posicionamento"
+          description="Visualize desempenho, estrutura e posicionamento dos produtos para decisões mais seguras."
         />
         <BenefitCard
           icon={<TrendingUp className="w-4 h-4 text-accent" />}
           title="Visão clara da operação"
+          description="Acompanhe vendas, indicadores e movimentações do negócio com dados organizados."
         />
       </div>
     </div>
@@ -71,7 +79,7 @@ const AuthLeftColumn = () => (
           <img
             src={alexandrePhoto}
             alt="Alexandre Silveira"
-            className="w-11 h-11 rounded-full object-cover ring-2 ring-white/10 flex-shrink-0"
+            className="w-11 h-11 rounded-full object-cover object-[center_20%] ring-2 ring-white/10 flex-shrink-0"
           />
           <div className="min-w-0 flex-1">
             <p className="font-semibold text-sm text-primary-foreground">Alexandre Silveira</p>
