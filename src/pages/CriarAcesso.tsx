@@ -96,67 +96,102 @@ const CriarAcesso = () => {
   }
 
   return (
-    <div className="min-h-screen flex bg-background">
-      {/* Left Column */}
-      <div className="hidden lg:flex lg:w-[45%] relative overflow-hidden flex-col justify-between p-12 xl:p-16"
-        style={{
-          background: "linear-gradient(165deg, hsl(223 47% 18%), hsl(223 50% 28%), hsl(223 45% 22%))",
-        }}
-      >
-        {/* Subtle pattern overlay */}
-        <div className="absolute inset-0 opacity-[0.03]"
-          style={{
-            backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)",
-            backgroundSize: "32px 32px",
-          }}
-        />
+    <div className="h-screen overflow-hidden bg-background flex">
+      {/* Left Column — matches Auth page pattern */}
+      <div className="hidden lg:flex lg:w-[55%] relative overflow-hidden flex-col justify-center gap-5 p-10 pl-12 pr-10 text-primary-foreground">
+        {/* Background */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_40%,_hsl(223_47%_26%)_0%,_hsl(223_50%_14%)_100%)]" />
 
-        <div className="relative z-10 space-y-12">
+        {/* Faint grid texture */}
+        <div className="absolute inset-0 opacity-[0.03]" style={{
+          backgroundImage: `
+            linear-gradient(hsl(210 40% 80%) 1px, transparent 1px),
+            linear-gradient(90deg, hsl(210 40% 80%) 1px, transparent 1px)
+          `,
+          backgroundSize: '50px 50px',
+        }} />
+
+        {/* Clean hard edge */}
+        <div className="absolute inset-y-0 right-0 w-px z-10 bg-border/20" />
+
+        <div className="relative z-20">
           {/* Logo */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-white/10 backdrop-blur flex items-center justify-center">
-              <BarChart3 className="w-5 h-5 text-white" />
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-9 h-9 bg-accent/90 rounded-xl flex items-center justify-center">
+              <BarChart3 className="w-4.5 h-4.5 text-white" />
             </div>
-            <span className="text-xl font-semibold text-white tracking-tight">MKTP Fácil</span>
+            <h1 className="text-lg font-bold tracking-tight">MKTP Fácil</h1>
           </div>
 
           {/* Hero text */}
-          <div className="space-y-5 max-w-md">
-            <h1 className="text-[2.5rem] leading-[1.1] font-bold text-white tracking-tight">
+          <div className="mb-4">
+            <h2 className="text-[1.5rem] leading-[1.15] font-bold text-primary-foreground tracking-tight">
               Consultoria aplicada ao Mercado Livre
-            </h1>
-            <p className="text-white/60 text-base leading-relaxed">
+            </h2>
+            <p className="text-primary-foreground/50 text-[13px] leading-relaxed mt-2">
               Sistema criado por consultor certificado que transforma práticas de consultoria em ferramentas para vendedores.
             </p>
           </div>
 
-          {/* Benefits */}
-          <div className="space-y-5">
-            {[
-              { icon: DollarSign, text: "Lucro real por produto" },
-              { icon: Target, text: "Estratégia para anúncios" },
-              { icon: BarChart2, text: "Dados claros da operação" },
-            ].map(({ icon: Icon, text }) => (
-              <div key={text} className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-md bg-white/10 flex items-center justify-center flex-shrink-0">
-                  <Icon className="w-4 h-4 text-accent-light" style={{ color: "hsl(189 85% 55%)" }} />
+          {/* Benefit Cards */}
+          <div className="space-y-2">
+            <div className="bg-white/[0.06] rounded-lg px-4 py-3 border border-white/[0.06]">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <DollarSign className="w-4 h-4 text-accent" />
                 </div>
-                <span className="text-white/80 text-sm">{text}</span>
+                <div>
+                  <h3 className="font-medium text-[13px] text-primary-foreground/90">Descubra o lucro real de cada venda</h3>
+                  <p className="text-[11px] text-primary-foreground/50 leading-relaxed mt-0.5">Pare de vender no escuro e entenda exatamente quanto sobra em cada produto considerando taxas, comissões e frete.</p>
+                </div>
               </div>
-            ))}
+            </div>
+            <div className="bg-white/[0.06] rounded-lg px-4 py-3 border border-white/[0.06]">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <Target className="w-4 h-4 text-accent" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-[13px] text-primary-foreground/90">Tome decisões mais inteligentes nos anúncios</h3>
+                  <p className="text-[11px] text-primary-foreground/50 leading-relaxed mt-0.5">Visualize desempenho, estrutura e posicionamento dos seus anúncios para vender mais sem aumentar custos.</p>
+                </div>
+              </div>
+            </div>
+            <div className="bg-white/[0.06] rounded-lg px-4 py-3 border border-white/[0.06]">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <TrendingUp className="w-4 h-4 text-accent" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-[13px] text-primary-foreground/90">Tenha clareza total da sua operação</h3>
+                  <p className="text-[11px] text-primary-foreground/50 leading-relaxed mt-0.5">Centralize vendas, custos e indicadores da sua loja em um único lugar para administrar seu negócio com segurança.</p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Authority block */}
-        <div className="relative z-10 flex items-center gap-4 pt-8 border-t border-white/10">
-          <img
-            src={consultantPhoto}
-            alt="Consultor certificado"
-            className="w-14 h-14 rounded-full object-cover ring-2 ring-white/20"
-          />
-          <div>
-            <p className="text-white text-sm font-medium">Consultor certificado do Mercado Livre</p>
-            <p className="text-white/50 text-xs mt-0.5">14 anos vendendo na plataforma</p>
+        {/* Authority Card — compact, matching Auth page */}
+        <div className="relative z-20">
+          <div className="bg-white/[0.05] rounded-lg px-3 py-2.5 border border-white/[0.06] w-fit">
+            <div className="flex items-center gap-3">
+              <img
+                src={alexandrePhoto}
+                alt="Alexandre Silveira"
+                className="w-10 h-10 rounded-full object-cover object-[center_20%] ring-2 ring-white/10 flex-shrink-0"
+              />
+              <div className="min-w-0">
+                <p className="font-semibold text-[13px] text-primary-foreground leading-tight">Alexandre Silveira</p>
+                <p className="text-[11px] text-primary-foreground/55 leading-tight mt-0.5">
+                  Consultor certificado do Mercado Livre · 14 anos na plataforma
+                </p>
+              </div>
+              <img
+                src={seloML}
+                alt="Selo Consultoria Certificada Mercado Livre"
+                className="h-12 w-auto flex-shrink-0 opacity-90"
+              />
+            </div>
           </div>
         </div>
       </div>
