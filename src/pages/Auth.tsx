@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { supabase } from "@/integrations/supabase/client";
-import { BarChart3, DollarSign, Target, TrendingUp, Eye, EyeOff, Loader2 } from "lucide-react";
+import { BarChart3, DollarSign, Target, TrendingUp, Lightbulb, Eye, EyeOff, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,7 +25,7 @@ const BenefitCard = ({ icon, title, description }: { icon: React.ReactNode; titl
 );
 
 const AuthLeftColumn = () => (
-  <div className="hidden lg:flex lg:w-[55%] relative overflow-hidden flex-col justify-center gap-8 p-10 pl-12 text-primary-foreground">
+  <div className="hidden lg:flex lg:w-[55%] relative overflow-hidden flex-col justify-center gap-5 p-10 pl-12 text-primary-foreground">
     {/* Background — subtle radial gradient */}
     <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_40%,_hsl(223_47%_26%)_0%,_hsl(223_50%_14%)_100%)]" />
 
@@ -38,10 +38,8 @@ const AuthLeftColumn = () => (
       backgroundSize: '50px 50px',
     }} />
 
-    {/* Clean subtle edge — max 28px */}
-    <div className="absolute inset-y-0 right-0 w-[28px] z-10" style={{
-      background: 'linear-gradient(to right, transparent 0%, hsl(0 0% 100% / 0.15) 50%, hsl(var(--background)) 100%)'
-    }} />
+    {/* Clean hard edge — no gradient */}
+    <div className="absolute inset-y-0 right-0 w-px z-10 bg-border/20" />
 
     <div className="relative z-20">
       {/* Logo */}
@@ -52,8 +50,8 @@ const AuthLeftColumn = () => (
         <h1 className="text-lg font-bold tracking-tight">MKTP Fácil</h1>
       </div>
 
-      {/* Benefit Cards — lightweight */}
-      <div className="space-y-2.5 max-w-sm">
+      {/* Benefit Cards */}
+      <div className="space-y-2 max-w-sm">
         <BenefitCard
           icon={<DollarSign className="w-4 h-4 text-accent" />}
           title="Lucro real por produto"
@@ -68,6 +66,11 @@ const AuthLeftColumn = () => (
           icon={<TrendingUp className="w-4 h-4 text-accent" />}
           title="Visão clara da operação"
           description="Acompanhe vendas, indicadores e movimentações do negócio com dados organizados."
+        />
+        <BenefitCard
+          icon={<Lightbulb className="w-4 h-4 text-accent" />}
+          title="Decisões baseadas em dados"
+          description="Transforme informações da sua operação em ações estratégicas para crescer no Mercado Livre."
         />
       </div>
     </div>
