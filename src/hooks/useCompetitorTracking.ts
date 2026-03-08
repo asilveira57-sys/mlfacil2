@@ -164,6 +164,10 @@ export function useCompetitorTracking(sellerId: string) {
   const addTracker = useCallback(async (data: {
     competitor_url: string;
     competitor_label: string;
+    competitor_external_id?: string;
+    competitor_title?: string;
+    competitor_thumbnail?: string | null;
+    initial_price?: number | null;
     marketplace?: string;
     min_price?: number;
     max_price?: number;

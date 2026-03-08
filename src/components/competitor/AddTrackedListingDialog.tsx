@@ -165,7 +165,7 @@ export function AddTrackedListingDialog({ sellerId, open, onOpenChange }: AddTra
                 <CheckCircle2 className="h-4 w-4" />
                 <span className="font-medium">Anúncio identificado</span>
                 {resolvedListing.is_catalog && (
-                  <span className="text-xs bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 px-1.5 py-0.5 rounded">Catálogo</span>
+                  <span className="text-xs bg-accent text-accent-foreground px-1.5 py-0.5 rounded">Catálogo</span>
                 )}
               </div>
               <div className="flex gap-3">
