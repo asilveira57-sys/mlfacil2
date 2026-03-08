@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Download, MapPin, ChevronRight, ArrowLeft, Loader2, DollarSign, Package, TrendingUp } from "lucide-react";
+import { Download, MapPin, ChevronRight, ArrowLeft, Loader2, DollarSign, Package, TrendingUp, Map } from "lucide-react";
+import { AbcMapDrawer, MapMarkerData } from "./AbcMapDrawer";
 import {
   Select,
   SelectContent,
