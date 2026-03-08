@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Download, MapPin, ChevronRight, ArrowLeft, Loader2, DollarSign, Package, TrendingUp } from "lucide-react";
+import { Download, MapPin, ChevronRight, ArrowLeft, Loader2, DollarSign, Package, TrendingUp, Map as MapIcon } from "lucide-react";
+import { AbcMapDrawer, MapMarkerData } from "./AbcMapDrawer";
 import {
   Select,
   SelectContent,
@@ -104,6 +105,9 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [enrichmentStatus, setEnrichmentStatus] = useState<string | null>(null);
+
+  // Map drawer state
+  const [mapDrawerOpen, setMapDrawerOpen] = useState(false);
 
   // Drawer state for geographic details
   const [selectedGeoItem, setSelectedGeoItem] = useState<AbcItem | null>(null);
@@ -452,10 +456,16 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
           </Select>
         </div>
 
-        <Button variant="outline" onClick={handleExportCSV} disabled={classifiedItems.length === 0}>
-          <Download className="h-4 w-4 mr-2" />
-          Exportar CSV
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setMapDrawerOpen(true)} disabled={classifiedItems.length === 0}>
+            <MapIcon className="h-4 w-4 mr-2" />
+            Ver Mapa
+          </Button>
+          <Button variant="outline" onClick={handleExportCSV} disabled={classifiedItems.length === 0}>
+            <Download className="h-4 w-4 mr-2" />
+            Exportar CSV
+          </Button>
+        </div>
       </div>
 
       {/* Breadcrumb navigation */}
@@ -553,6 +563,43 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
         sellerId={sellerId}
         dateFrom={filters.dateFrom}
         dateTo={filters.dateTo}
+      />
+
+      {/* Map Drawer */}
+      <AbcMapDrawer
+        open={mapDrawerOpen}
+        onOpenChange={setMapDrawerOpen}
+        title={
+          drillLevel === "uf"
+            ? "Mapa de Vendas por Estado"
+            : drillLevel === "city"
+            ? `Cidades de ${selectedUf}`
+            : `Bairros de ${selectedCity}`
+        }
+        subtitle={`${classifiedItems.length} ${drillLevel === "uf" ? "estados" : drillLevel === "city" ? "cidades" : "bairros"} • ${totals.totalOrders} pedidos`}
+        markers={classifiedItems.map((item) => ({
+          id: item.id,
+          name: item.id,
+          orders: item.orders,
+          units: item.units,
+          revenue: item.revenue,
+          classification: item.classification,
+        }))}
+        level={drillLevel}
+        selectedUf={selectedUf}
+        selectedCity={selectedCity}
+        onMarkerDrillDown={(marker) => {
+          setMapDrawerOpen(false);
+          if (drillLevel === "uf") {
+            setSelectedUf(marker.id);
+            setDrillLevel("city");
+          } else if (drillLevel === "city") {
+            setSelectedCity(marker.id);
+            setDrillLevel("neighborhood");
+          }
+          // Re-open map after drill
+          setTimeout(() => setMapDrawerOpen(true), 300);
+        }}
       />
     </div>
   );
