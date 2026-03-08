@@ -474,104 +474,124 @@ serve(async (req) => {
     }
 
     // =========================================================================
-    // ETAPA 3A: TENTATIVA A — API pública (SEM TOKEN — obrigatório)
+    // ETAPA 3: NOVA ESTRATÉGIA — Multi-get + Search + Fallbacks
+    // Ordem: A) Multi-get autenticado, B) Multi-get público, C) Search,
+    //        D) Single-get público legado, E) Cache
     // =========================================================================
-    const itemEndpoint = `https://api.mercadolibre.com/items/${resolvedItemId}`;
+    const multiGetEndpoint = `https://api.mercadolibre.com/items?ids=${resolvedItemId}&attributes=all`;
     const descEndpoint = `https://api.mercadolibre.com/items/${resolvedItemId}/description`;
-
-    const attemptA = await mlPublicFetch(supabase, user.id, {
-      attempt: 'A_public', endpoint: itemEndpoint,
-      item_id: resolvedItemId, source_input_raw: source_input_raw || item_id,
-    });
+    const searchEndpoint = `https://api.mercadolibre.com/sites/MLB/search?q=${resolvedItemId}&limit=1`;
+    const singleGetEndpoint = `https://api.mercadolibre.com/items/${resolvedItemId}`;
 
     let itemData: any = null;
     let description: string | undefined;
     let descriptionSource: 'api_public' | 'api_authenticated' | 'none' = 'none';
-    let fetchMethod: 'public' | 'authenticated' | 'cache' = 'public';
-    let bestAttemptStatus = attemptA.status;
-    let bestAttemptBody = attemptA.body_text || '';
-    let bestAttemptName = 'A_public';
+    let fetchMethod: 'public' | 'authenticated' | 'cache' | 'multi_get' | 'search' = 'public';
+    let bestAttemptStatus = 0;
+    let bestAttemptBody = '';
+    let bestAttemptName = 'none';
 
-    if (attemptA.ok && attemptA.data) {
-      itemData = attemptA.data;
-      fetchMethod = 'public';
-
-      // Fetch description (also public, no token)
-      const descResult = await mlPublicFetch(supabase, user.id, {
-        attempt: 'A_public_desc', endpoint: descEndpoint,
-        item_id: resolvedItemId, source_input_raw: source_input_raw || item_id,
-        timeout: 10000,
-      });
-      if (descResult.ok && descResult.data) {
-        description = descResult.data.plain_text || descResult.data.text || '';
-        descriptionSource = 'api_public';
-      }
-      captureLog.description_captured = !!description;
-      captureLog.description_source = descriptionSource;
-    }
-
-    // =========================================================================
-    // ETAPA 3B: TENTATIVA B — Token diagnostic (APENAS se A falhou)
-    // Apenas para diagnosticar se o bloqueio é por policy do ML.
-    // Nunca usado como fonte principal de dados para load_source.
-    // =========================================================================
-    if (!itemData && mlAccount?.access_token && [401, 403, 404].includes(attemptA.status)) {
-      console.log(`[ad-item-snapshot] Attempt A failed (${attemptA.status}), trying B_token_diagnostic`);
-
-      const attemptB = await mlAuthenticatedFetch(supabase, user.id, {
-        attempt: 'B_token_diagnostic', endpoint: itemEndpoint,
+    // --- A) Multi-get autenticado ---
+    if (mlAccount?.access_token) {
+      const attemptA = await mlAuthenticatedFetch(supabase, user.id, {
+        attempt: 'A_multiget_auth', endpoint: multiGetEndpoint,
         accessToken: mlAccount.access_token, item_id: resolvedItemId,
         source_input_raw: source_input_raw || item_id,
       });
 
-      if (attemptB.ok && attemptB.data) {
-        // Token diagnostic succeeded — use data but LOG that we had to use token
+      if (attemptA.ok && Array.isArray(attemptA.data) && attemptA.data[0]?.code === 200 && attemptA.data[0]?.body) {
+        itemData = attemptA.data[0].body;
+        fetchMethod = 'multi_get';
+        bestAttemptName = 'A_multiget_auth';
+      } else if (attemptA.ok && attemptA.data && !Array.isArray(attemptA.data) && attemptA.data.id) {
+        itemData = attemptA.data;
+        fetchMethod = 'multi_get';
+        bestAttemptName = 'A_multiget_auth';
+      } else {
+        bestAttemptStatus = attemptA.data?.[0]?.code || attemptA.status;
+        bestAttemptBody = attemptA.body_text || '';
+        bestAttemptName = 'A_multiget_auth';
+        console.log(`[ad-item-snapshot] Attempt A (multi-get auth) failed: ${bestAttemptStatus}`);
+      }
+    }
+
+    // --- B) Multi-get público ---
+    if (!itemData) {
+      const attemptB = await mlPublicFetch(supabase, user.id, {
+        attempt: 'B_multiget_public', endpoint: multiGetEndpoint,
+        item_id: resolvedItemId, source_input_raw: source_input_raw || item_id,
+      });
+
+      if (attemptB.ok && Array.isArray(attemptB.data) && attemptB.data[0]?.code === 200 && attemptB.data[0]?.body) {
+        itemData = attemptB.data[0].body;
+        fetchMethod = 'multi_get';
+        bestAttemptName = 'B_multiget_public';
+      } else if (attemptB.ok && attemptB.data && !Array.isArray(attemptB.data) && attemptB.data.id) {
         itemData = attemptB.data;
-        fetchMethod = 'authenticated';
-        bestAttemptStatus = attemptB.status;
-        bestAttemptBody = attemptB.body_text || '';
-        bestAttemptName = 'B_token_diagnostic';
-
-        // Log security alert: public failed but token worked
-        await logStep(supabase, {
-          user_id: user.id,
-          action: 'security_alert_token_needed',
-          level: 'warn',
-          message: `Item ${resolvedItemId} requer token (público bloqueado HTTP ${attemptA.status})`,
-          meta: {
-            item_id: resolvedItemId,
-            public_status: attemptA.status,
-            token_status: attemptB.status,
-            public_body_snippet: attemptA.body_text?.slice(0, 500),
-          },
-        });
-
-        // Fetch desc with token too
-        const descB = await mlAuthenticatedFetch(supabase, user.id, {
-          attempt: 'B_token_diagnostic_desc', endpoint: descEndpoint,
-          accessToken: mlAccount.access_token, item_id: resolvedItemId,
-        });
-        if (descB.ok && descB.data) {
-          description = descB.data.plain_text || descB.data.text || '';
-          descriptionSource = 'api_authenticated';
-        }
-        captureLog.description_captured = !!description;
-        captureLog.description_source = descriptionSource;
+        fetchMethod = 'multi_get';
+        bestAttemptName = 'B_multiget_public';
       } else {
         if (attemptB.status > 0) {
-          bestAttemptStatus = attemptB.status;
+          bestAttemptStatus = attemptB.data?.[0]?.code || attemptB.status;
           bestAttemptBody = attemptB.body_text || '';
-          bestAttemptName = 'B_token_diagnostic';
+          bestAttemptName = 'B_multiget_public';
+        }
+        console.log(`[ad-item-snapshot] Attempt B (multi-get public) failed: ${bestAttemptStatus}`);
+      }
+    }
+
+    // --- C) Search fallback ---
+    if (!itemData) {
+      const attemptC = mlAccount?.access_token
+        ? await mlAuthenticatedFetch(supabase, user.id, {
+            attempt: 'C_search_auth', endpoint: searchEndpoint,
+            accessToken: mlAccount.access_token, item_id: resolvedItemId,
+            source_input_raw: source_input_raw || item_id,
+          })
+        : await mlPublicFetch(supabase, user.id, {
+            attempt: 'C_search_public', endpoint: searchEndpoint,
+            item_id: resolvedItemId, source_input_raw: source_input_raw || item_id,
+          });
+
+      if (attemptC.ok && attemptC.data?.results?.[0]?.id === resolvedItemId) {
+        itemData = attemptC.data.results[0];
+        fetchMethod = 'search';
+        bestAttemptName = 'C_search';
+        console.log(`[ad-item-snapshot] Search fallback found item`);
+      } else {
+        if (attemptC.status > 0) {
+          bestAttemptStatus = attemptC.status;
+          bestAttemptBody = attemptC.body_text || '';
+          bestAttemptName = 'C_search';
+        }
+        console.log(`[ad-item-snapshot] Attempt C (search) failed`);
+      }
+    }
+
+    // --- D) Single-get público legado ---
+    if (!itemData) {
+      console.log(`[ad-item-snapshot] Trying D_legacy_single_get`);
+      const attemptD = await mlPublicFetch(supabase, user.id, {
+        attempt: 'D_legacy_public', endpoint: singleGetEndpoint,
+        item_id: resolvedItemId, source_input_raw: source_input_raw || item_id,
+      });
+
+      if (attemptD.ok && attemptD.data) {
+        itemData = attemptD.data;
+        fetchMethod = 'public';
+        bestAttemptName = 'D_legacy_public';
+      } else {
+        if (attemptD.status > 0) {
+          bestAttemptStatus = attemptD.status;
+          bestAttemptBody = attemptD.body_text || '';
+          bestAttemptName = 'D_legacy_public';
         }
       }
     }
 
-    // =========================================================================
-    // ETAPA 3C: TENTATIVA C — Cache fallback
-    // =========================================================================
+    // --- E) Cache fallback ---
     if (!itemData) {
-      console.log(`[ad-item-snapshot] Attempts A/B failed, trying C_cache_fallback`);
-
+      console.log(`[ad-item-snapshot] All API attempts failed, trying E_cache_fallback`);
       const { data: cachedItem } = await supabase
         .from("meli_listings_cache").select("*")
         .eq("item_id", resolvedItemId).single();
@@ -579,41 +599,42 @@ serve(async (req) => {
       if (cachedItem) {
         await logStep(supabase, {
           user_id: user.id, action: 'ml_request_result', message: 'Cache fallback hit',
-          meta: { attempt: 'C_cache_fallback', item_id: resolvedItemId, cache_found: true, used_token: false },
+          meta: { attempt: 'E_cache_fallback', item_id: resolvedItemId, cache_found: true },
         });
-
-        // Retry public one more time
-        const retryPublic = await mlPublicFetch(supabase, user.id, {
-          attempt: 'C_cache_retry_public', endpoint: itemEndpoint,
-          item_id: resolvedItemId,
-        });
-
-        if (retryPublic.ok && retryPublic.data) {
-          itemData = retryPublic.data;
-          fetchMethod = 'public';
-          const descRetry = await mlPublicFetch(supabase, user.id, {
-            attempt: 'C_cache_retry_desc', endpoint: descEndpoint,
-            item_id: resolvedItemId, timeout: 10000,
-          });
-          if (descRetry.ok && descRetry.data) {
-            description = descRetry.data.plain_text || descRetry.data.text || '';
-            descriptionSource = 'api_public';
-          }
-        } else {
-          // Use cached data
-          itemData = {
-            id: cachedItem.item_id, title: cachedItem.title, price: cachedItem.price,
-            thumbnail: cachedItem.thumbnail, status: cachedItem.status,
-            available_quantity: cachedItem.available_quantity, sold_quantity: cachedItem.sold_quantity,
-            category_id: cachedItem.category_id, seller_id: cachedItem.seller_id,
-            pictures: [], attributes: [],
-          };
-          fetchMethod = 'cache';
-          captureLog.errors.push('Using cache fallback - limited data (no pictures/attributes)');
-        }
-        captureLog.description_captured = !!description;
-        captureLog.description_source = descriptionSource;
+        itemData = {
+          id: cachedItem.item_id, title: cachedItem.title, price: cachedItem.price,
+          thumbnail: cachedItem.thumbnail, status: cachedItem.status,
+          available_quantity: cachedItem.available_quantity, sold_quantity: cachedItem.sold_quantity,
+          category_id: cachedItem.category_id, seller_id: cachedItem.seller_id,
+          pictures: [], attributes: [],
+        };
+        fetchMethod = 'cache';
+        bestAttemptName = 'E_cache_fallback';
+        captureLog.errors.push('Using cache fallback - limited data (no pictures/attributes)');
       }
+    }
+
+    // --- Fetch description (separate endpoint, not affected by PolicyAgent) ---
+    if (itemData) {
+      const descResult = await mlPublicFetch(supabase, user.id, {
+        attempt: `${bestAttemptName}_desc_public`, endpoint: descEndpoint,
+        item_id: resolvedItemId, timeout: 10000,
+      });
+      if (descResult.ok && descResult.data) {
+        description = descResult.data.plain_text || descResult.data.text || '';
+        descriptionSource = 'api_public';
+      } else if (mlAccount?.access_token) {
+        const descAuth = await mlAuthenticatedFetch(supabase, user.id, {
+          attempt: `${bestAttemptName}_desc_auth`, endpoint: descEndpoint,
+          accessToken: mlAccount.access_token, item_id: resolvedItemId,
+        });
+        if (descAuth.ok && descAuth.data) {
+          description = descAuth.data.plain_text || descAuth.data.text || '';
+          descriptionSource = 'api_authenticated';
+        }
+      }
+      captureLog.description_captured = !!description;
+      captureLog.description_source = descriptionSource;
     }
 
     // =========================================================================
