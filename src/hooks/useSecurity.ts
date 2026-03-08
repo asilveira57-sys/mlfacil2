@@ -132,11 +132,11 @@ export function useLogSecurityEvent() {
   return useMutation({
     mutationFn: async (event: Pick<SecurityEvent, 'event_type' | 'success' | 'metadata'> & Partial<SecurityEvent>) => {
       if (!userId) return;
-      const { error } = await supabase.from('security_events').insert({
+      const { error } = await supabase.from('security_events').insert([{
         user_id: userId,
         user_agent: navigator.userAgent,
         ...event,
-      });
+      }]);
       if (error) throw error;
     },
   });
