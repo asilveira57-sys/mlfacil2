@@ -59,7 +59,7 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
     if (isLoading) return;
     if (!isCollaborator) return; // Admin/owner has full access
 
-    const moduleKey = getModuleKeyFromRoute(location.pathname);
+    const moduleKey = getModuleKeyFromRouteSync(location.pathname);
     
     // Routes that don't require module access check
     const publicRoutes = ['/dashboard', '/settings', '/auth', '/criar-acesso', '/primeiro-acesso', '/reconnecting', '/'];
