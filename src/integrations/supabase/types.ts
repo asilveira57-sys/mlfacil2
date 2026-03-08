@@ -13549,6 +13549,48 @@ export type Database = {
           },
         ]
       }
+      security_events: {
+        Row: {
+          created_at: string
+          device_info: Json | null
+          event_type: string
+          id: string
+          ip_address: string | null
+          is_new_device: boolean | null
+          location: string | null
+          metadata: Json | null
+          success: boolean | null
+          user_agent: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          device_info?: Json | null
+          event_type: string
+          id?: string
+          ip_address?: string | null
+          is_new_device?: boolean | null
+          location?: string | null
+          metadata?: Json | null
+          success?: boolean | null
+          user_agent?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          device_info?: Json | null
+          event_type?: string
+          id?: string
+          ip_address?: string | null
+          is_new_device?: boolean | null
+          location?: string | null
+          metadata?: Json | null
+          success?: boolean | null
+          user_agent?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       seller_category_eligibility: {
         Row: {
           api_attempts_count: number
@@ -17949,6 +17991,42 @@ export type Database = {
           created_at?: string
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_security_settings: {
+        Row: {
+          created_at: string
+          id: string
+          last_password_change_at: string | null
+          login_alerts: boolean | null
+          new_device_alerts: boolean | null
+          password_change_alerts: boolean | null
+          trusted_devices: Json | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          last_password_change_at?: string | null
+          login_alerts?: boolean | null
+          new_device_alerts?: boolean | null
+          password_change_alerts?: boolean | null
+          trusted_devices?: Json | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          last_password_change_at?: string | null
+          login_alerts?: boolean | null
+          new_device_alerts?: boolean | null
+          password_change_alerts?: boolean | null
+          trusted_devices?: Json | null
           updated_at?: string
           user_id?: string
         }
