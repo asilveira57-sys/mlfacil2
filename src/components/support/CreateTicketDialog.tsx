@@ -79,9 +79,15 @@ export function CreateTicketDialog({
   const { toast } = useToast();
   const { currentWorkspace } = useWorkspace();
   
+  const MODULE_OPTIONS = [
+    'Dashboard', 'Vendas', 'Etiquetas', 'Radiografia', 'Custos',
+    'Precificação', 'Curva ABC', 'Mercado ADS', 'Configurações', 'Outro',
+  ];
+
   const [subject, setSubject] = useState('');
   const [category, setCategory] = useState<TicketCategory>('duvida');
   const [description, setDescription] = useState('');
+  const [selectedModule, setSelectedModule] = useState(context?.module || 'Outro');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [additionalFiles, setAdditionalFiles] = useState<File[]>([]);
 
@@ -134,7 +140,7 @@ export function CreateTicketDialog({
           category: CATEGORY_TO_DB[category] as 'bug' | 'question' | 'suggestion' | 'financial' | 'integration' | 'other',
           description: description.trim(),
           current_route: context?.route || null,
-          current_module: context?.module || null,
+          current_module: selectedModule || null,
           status: 'open' as const,
           priority: 'medium' as const,
           metadata: {
@@ -211,6 +217,7 @@ export function CreateTicketDialog({
       setSubject('');
       setCategory('duvida');
       setDescription('');
+      setSelectedModule(context?.module || 'Outro');
       setAdditionalFiles([]);
       onClearScreenshot();
       onOpenChange(false);
@@ -239,17 +246,28 @@ export function CreateTicketDialog({
         <div className="space-y-4 mt-4">
           {/* Context badges */}
           {context && (
-            <div className="flex flex-wrap gap-2">
+            <div className="flex items-center gap-2">
               <Badge variant="secondary" className="gap-1">
                 <MapPin className="h-3 w-3" />
                 {context.route}
               </Badge>
-              <Badge variant="secondary" className="gap-1">
-                <Layers className="h-3 w-3" />
-                {context.module}
-              </Badge>
             </div>
           )}
+
+          {/* Module selector */}
+          <div className="space-y-2">
+            <Label>Módulo</Label>
+            <Select value={selectedModule} onValueChange={setSelectedModule}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MODULE_OPTIONS.map((m) => (
+                  <SelectItem key={m} value={m}>{m}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
           {/* Subject */}
           <div className="space-y-2">
