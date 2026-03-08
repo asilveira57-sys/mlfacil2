@@ -569,6 +569,7 @@ export default function ClonarAnuncio() {
                 publishing={publishing}
                 published={published}
                 createdItemId={createdItemId}
+                accountId={accounts.find(a => a.id === selectedAccountId)?.ml_user_id || null}
               />
             )}
           </TabsContent>

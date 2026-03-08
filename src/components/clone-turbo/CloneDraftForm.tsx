@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import { Loader2, Send, AlertTriangle, Image as ImageIcon, Package, Tag, FileText, Ruler, ChevronDown, ChevronUp } from 'lucide-react';
 import { OriginStatusBadge } from './OriginStatusBadge';
+import { CategoryPicker } from './CategoryPicker';
 import type { OriginPayload, UserPayload, FieldError, OriginStatus } from './types';
 import { cn } from '@/lib/utils';
 
@@ -24,6 +25,7 @@ interface Props {
   publishing: boolean;
   published: boolean;
   createdItemId?: string;
+  accountId?: string | null;
 }
 
 function FieldWrapper({ id, label, errors, children, hint }: { id: string; label: string; errors: FieldError[]; children: React.ReactNode; hint?: string }) {
@@ -57,6 +59,7 @@ export function CloneDraftForm({
   publishing,
   published,
   createdItemId,
+  accountId,
 }: Props) {
   const [showAttributes, setShowAttributes] = useState(false);
   const [showDescription, setShowDescription] = useState(false);
@@ -111,12 +114,13 @@ export function CloneDraftForm({
               />
             </FieldWrapper>
 
-            <FieldWrapper id="category_id" label="Categoria" errors={fieldErrors} hint={originPayload.category_id ? `Origem: ${originPayload.category_id}` : undefined}>
-              <Input
-                id="category_id"
-                placeholder={originPayload.category_id || 'ID da categoria (ex: MLB1234)'}
-                value={userPayload.category_id || ''}
-                onChange={e => onUserPayloadChange({ category_id: e.target.value })}
+            <FieldWrapper id="category_id" label="Categoria" errors={fieldErrors} hint={originPayload.category_id ? `Origem: ${originPayload.category_name || originPayload.category_id}` : undefined}>
+              <CategoryPicker
+                accountId={accountId || null}
+                value={userPayload.category_id || originPayload.category_id || ''}
+                originCategoryId={originPayload.category_id}
+                originCategoryName={originPayload.category_name}
+                onSelect={(id) => onUserPayloadChange({ category_id: id })}
               />
             </FieldWrapper>
 
