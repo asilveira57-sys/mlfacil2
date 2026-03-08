@@ -201,6 +201,7 @@ export function SellerTrackingList({ sellerId }: SellerTrackingListProps) {
         open={addDialogOpen}
         onOpenChange={setAddDialogOpen}
         onAdd={addSellerResolved}
+        sellerId={sellerId}
       />
 
       {selectedSeller && (

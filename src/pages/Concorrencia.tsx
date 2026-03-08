@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -36,7 +36,15 @@ export default function Concorrencia() {
   const { activeAccount, sellerId, accounts, loading: accountLoading, initialized } = useActiveAccount();
   const selectedAccountId = activeAccount?.id || '';
   
-  const [activeTab, setActiveTab] = useState('tracked');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') || 'tracked';
+  const setActiveTab = useCallback((tab: string) => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', tab);
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
   const [antiCatalogModalOpen, setAntiCatalogModalOpen] = useState(false);
 
   // Redirect if no account
