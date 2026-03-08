@@ -302,6 +302,34 @@ export default function ClonarAnuncio() {
     const merged = buildMergedPayload(originPayload, userPayload);
     const corrId = correlationId || 'unknown';
 
+    // ── Client-side validation gate ──
+    const validationErrors: FieldError[] = [];
+    if (!merged.title || !merged.title.trim()) {
+      validationErrors.push({ field: 'title', message: 'Título é obrigatório.' });
+    }
+    if (!merged.category_id || !merged.category_id.trim()) {
+      validationErrors.push({ field: 'category_id', message: 'Categoria é obrigatória.' });
+    }
+    if (!merged.price || merged.price <= 0) {
+      validationErrors.push({ field: 'price', message: 'Preço deve ser maior que zero.' });
+    }
+    // family_name fallback: use title
+    const resolvedFamilyName = merged.family_name?.trim() || merged.title?.trim() || '';
+    if (!resolvedFamilyName) {
+      validationErrors.push({ field: 'family_name', message: 'Nome da família (family_name) é obrigatório. Preencha o título.' });
+    }
+
+    if (validationErrors.length > 0) {
+      setFieldErrors(validationErrors);
+      setPublishing(false);
+      await safeLog('publish_validation_blocked', {
+        correlation_id: corrId,
+        missing_fields: validationErrors.map(e => e.field),
+      });
+      toast.error('Campos obrigatórios faltando', { description: 'Preencha os campos destacados antes de publicar.' });
+      return;
+    }
+
     await safeLog('publish_attempt', { correlation_id: corrId, item_id: sourceItemId, account_id: selectedAccountId });
 
     try {
@@ -316,6 +344,7 @@ export default function ClonarAnuncio() {
         condition: merged.condition,
         listing_type_id: merged.listing_type_id,
         pictures: merged.pictures.map(p => ({ source: p.secure_url || p.url })),
+        family_name: resolvedFamilyName,
       };
 
       // Description
@@ -334,11 +363,6 @@ export default function ClonarAnuncio() {
       // Safe attributes
       if (merged.attributes.length > 0) {
         mlPayload.attributes = merged.attributes;
-      }
-
-      // family_name (required by some categories)
-      if (merged.family_name) {
-        mlPayload.family_name = merged.family_name;
       }
 
       // POST via edge function (needs token)
