@@ -1,8 +1,9 @@
-import { useRef, useCallback } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
   ImagePlus,
+  Paperclip,
   Check,
   Loader2,
   Bold,
@@ -14,7 +15,6 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { NOTE_COLORS } from '@/types/notes';
-import { useState } from 'react';
 
 interface NoteEditorToolbarProps {
   colorHex: string;
@@ -23,6 +23,7 @@ interface NoteEditorToolbarProps {
   onExecCommand: (command: string) => void;
   onColorChange: (hex: string) => void;
   onUploadImage: () => void;
+  onAttachFile?: () => void;
 }
 
 export function NoteEditorToolbar({
@@ -32,6 +33,7 @@ export function NoteEditorToolbar({
   onExecCommand,
   onColorChange,
   onUploadImage,
+  onAttachFile,
 }: NoteEditorToolbarProps) {
   const { t } = useTranslation('notes');
   const [showColorPicker, setShowColorPicker] = useState(false);
@@ -50,7 +52,7 @@ export function NoteEditorToolbar({
             <Bold className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>{t('actions.bold', 'Negrito')}</TooltipContent>
+        <TooltipContent side="bottom">{t('actions.bold', 'Negrito')}</TooltipContent>
       </Tooltip>
 
       <Tooltip>
@@ -59,7 +61,7 @@ export function NoteEditorToolbar({
             <Italic className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>{t('actions.italic', 'Itálico')}</TooltipContent>
+        <TooltipContent side="bottom">{t('actions.italic', 'Itálico')}</TooltipContent>
       </Tooltip>
 
       <Tooltip>
@@ -68,7 +70,7 @@ export function NoteEditorToolbar({
             <List className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>{t('actions.unordered_list', 'Lista')}</TooltipContent>
+        <TooltipContent side="bottom">{t('actions.unordered_list', 'Lista')}</TooltipContent>
       </Tooltip>
 
       <Tooltip>
@@ -77,24 +79,30 @@ export function NoteEditorToolbar({
             <ListOrdered className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>{t('actions.ordered_list', 'Lista numerada')}</TooltipContent>
+        <TooltipContent side="bottom">{t('actions.ordered_list', 'Lista numerada')}</TooltipContent>
       </Tooltip>
 
       <Separator orientation="vertical" className="h-5 mx-1" />
 
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={onUploadImage}
-          >
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onUploadImage}>
             <ImagePlus className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>{t('actions.upload_image')}</TooltipContent>
+        <TooltipContent side="bottom">{t('actions.upload_image', 'Inserir imagem')}</TooltipContent>
       </Tooltip>
+
+      {onAttachFile && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onAttachFile}>
+              <Paperclip className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{t('actions.attach_file', 'Anexar arquivo')}</TooltipContent>
+        </Tooltip>
+      )}
 
       <div className="flex-1" />
 
