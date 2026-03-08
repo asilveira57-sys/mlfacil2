@@ -42,14 +42,45 @@ function parseMLItemId(link: string): string | null {
   return null;
 }
 
-// Fetch public listing data from ML API
-async function fetchMLListingData(itemId: string): Promise<any> {
-  const response = await fetch(`https://api.mercadolibre.com/items/${itemId}`);
-  if (!response.ok) {
-    if (response.status === 404) return { status: 'not_found', is_available: false };
-    throw new Error(`ML API error: ${response.status}`);
+// Fetch listing data from ML API with auth fallback
+async function fetchMLListingData(itemId: string, accessToken?: string): Promise<any> {
+  // Try with auth token first (avoids PolicyAgent 403)
+  if (accessToken) {
+    try {
+      const res = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (res.ok) return await res.json();
+      if (res.status === 404) return { status: 'not_found', is_available: false };
+      console.log(`Auth fetch for ${itemId}: ${res.status}, trying public...`);
+    } catch (e) {
+      console.log(`Auth fetch error for ${itemId}: ${e}`);
+    }
   }
-  return await response.json();
+  // Try public endpoint
+  try {
+    const res = await fetch(`https://api.mercadolibre.com/items/${itemId}`);
+    if (res.ok) return await res.json();
+    if (res.status === 404) return { status: 'not_found', is_available: false };
+    console.log(`Public fetch for ${itemId}: ${res.status}, trying batch...`);
+  } catch (e) {
+    console.log(`Public fetch error for ${itemId}: ${e}`);
+  }
+  // Batch fallback (bypasses PolicyAgent)
+  try {
+    const headers: Record<string, string> = {};
+    if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+    const res = await fetch(`https://api.mercadolibre.com/items?ids=${itemId}&attributes=id,title,price,original_price,sold_quantity,available_quantity,status,thumbnail,category_id,permalink,shipping`, { headers });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data[0]?.code === 200 && data[0]?.body) {
+        return data[0].body;
+      }
+    }
+  } catch (e) {
+    console.log(`Batch fetch error for ${itemId}: ${e}`);
+  }
+  throw new Error(`ML API error: all fetch strategies failed for ${itemId}`);
 }
 
 function getState(data: any): string {
