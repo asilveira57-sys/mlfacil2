@@ -141,13 +141,37 @@ const Auth = () => {
 
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data: signInData, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
         if (error.message.includes("Email not confirmed")) {
           toast.error("E-mail não verificado. Verifique sua caixa de entrada.");
         } else {
           toast.error(t("auth:invalid_credentials"));
         }
+        // Log failed login attempt
+        try {
+          const { data: { user: currentUser } } = await supabase.auth.getUser();
+          if (currentUser) {
+            await supabase.from('security_events').insert([{
+              user_id: currentUser.id,
+              event_type: 'login',
+              user_agent: navigator.userAgent,
+              success: false,
+              metadata: { reason: error.message },
+            }]);
+          }
+        } catch { /* silent */ }
+      } else if (signInData?.user) {
+        // Log successful login
+        try {
+          await supabase.from('security_events').insert([{
+            user_id: signInData.user.id,
+            event_type: 'login',
+            user_agent: navigator.userAgent,
+            success: true,
+            metadata: { login_at: new Date().toISOString() },
+          }]);
+        } catch { /* silent */ }
       }
     } catch {
       toast.error("Erro inesperado ao fazer login.");

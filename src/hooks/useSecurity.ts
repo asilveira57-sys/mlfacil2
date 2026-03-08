@@ -183,7 +183,31 @@ export function useActiveSessions() {
         }
       }
       
-      return Array.from(sessionsMap.values());
+      const sessions = Array.from(sessionsMap.values());
+      
+      // If no sessions logged yet, show current session as fallback
+      if (sessions.length === 0) {
+        sessions.push({
+          id: 'current-session',
+          user_agent: currentUserAgent,
+          ip_address: null,
+          created_at: new Date().toISOString(),
+          is_current: true,
+        });
+        
+        // Also register the current session for future queries
+        try {
+          await supabase.from('security_events').insert([{
+            user_id: userId!,
+            event_type: 'login',
+            user_agent: currentUserAgent,
+            success: true,
+            metadata: { login_at: new Date().toISOString(), source: 'session_backfill' },
+          }]);
+        } catch { /* silent */ }
+      }
+      
+      return sessions;
     },
     enabled: !!userId,
   });
