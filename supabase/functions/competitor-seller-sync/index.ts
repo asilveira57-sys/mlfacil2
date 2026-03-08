@@ -468,14 +468,20 @@ async function handlePreview(_admin: any, body: any, accessToken?: string) {
   
   const resolved = await resolveSellerFromInput(input, accessToken);
   
-  // Quick search to get total items count
-  const searchRes = await fetchML(`/sites/MLB/search?seller_id=${resolved.ml_seller_id}&limit=1`, accessToken);
+  // Quick search to get total items count (graceful on 403)
+  let totalItems = 0;
+  try {
+    const searchRes = await fetchMLResilient(`/sites/MLB/search?seller_id=${resolved.ml_seller_id}&limit=1`, accessToken);
+    totalItems = searchRes?.paging?.total || 0;
+  } catch (e) {
+    console.log(`Could not fetch total items for ${resolved.ml_seller_id}: ${e}`);
+  }
   
   return new Response(JSON.stringify({
     ml_seller_id: resolved.ml_seller_id,
     ml_nickname: resolved.ml_nickname,
     reputation: resolved.reputation,
-    total_items: searchRes?.paging?.total || 0,
+    total_items: totalItems,
   }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 }
 
