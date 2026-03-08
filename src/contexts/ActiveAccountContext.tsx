@@ -329,8 +329,8 @@ export function ActiveAccountProvider({ children }: { children: ReactNode }) {
   // Listen for auth changes
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      // Only re-initialize on genuine SIGNED_IN (not token refresh or initial session)
-      if (event === 'SIGNED_IN' && !initializingRef.current && !initialized) {
+      // Re-initialize on genuine SIGNED_IN (covers re-login after logout)
+      if (event === 'SIGNED_IN' && !initializingRef.current) {
         initializingRef.current = false; // Reset to allow re-initialization
         initialize();
       } else if (event === 'SIGNED_OUT') {
