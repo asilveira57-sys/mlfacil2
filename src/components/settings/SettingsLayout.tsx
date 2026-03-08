@@ -9,6 +9,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageContainer } from "@/components/layout/PageContainer";
 
 import SettingsProfile from "@/components/settings/SettingsProfile";
+import SettingsSecurity from "@/components/settings/SettingsSecurity";
 import SettingsBilling from "@/components/settings/SettingsBilling";
 import SettingsCompanies from "@/components/settings/SettingsCompanies";
 import SettingsPlan from "@/components/settings/SettingsPlan";
@@ -31,7 +32,7 @@ interface SettingsTab {
 
 const settingsTabs: SettingsTab[] = [
   { id: "perfil", label: "Perfil", icon: User, component: SettingsProfile },
-  { id: "seguranca", label: "Segurança", icon: Shield, component: null },
+  { id: "seguranca", label: "Segurança", icon: Shield, component: SettingsSecurity },
   { id: "sessoes-ativas", label: "Sessões", icon: Activity, component: null },
   { id: "idioma", label: "Idioma", icon: Globe, component: SettingsLanguage },
   { id: "notificacoes", label: "Notificações", icon: Bell, component: null },
