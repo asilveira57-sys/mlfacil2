@@ -1,66 +1,116 @@
 
-# Plano Mestre — Jornada Completa do Seller
 
-## Status de cada item
+## Diagnóstico Completo: Módulos, Logs, Colaboradores e Permissões
 
-### ✅ Já existe no sistema
-| # | Item | Status |
-|---|------|--------|
-| 2 | Cadastro (email/senha + confirmação) | ✅ Implementado |
-| 4 | Painel inicial (dashboard) | ✅ Existe (sem velocímetro) |
-| 5 | Conexão ML via OAuth | ✅ Implementado |
-| 6 | Elegibilidade para teste (>10 vendas) | ✅ Verificação existe na company |
-| 8 | Módulo Etiquetas (vendas abertas) | ✅ Implementado |
-| 9 | Módulo Custos (sem Passo 2) | ✅ Atualizado agora |
-| 13 | Seleção automática de plano | ✅ `useUserSalesVolume` + filtro de planos |
-| 15 | Cadastro fiscal (PF/PJ) | ✅ `company_billing` existe |
-| 12 | Bloqueio pós-trial | ✅ Parcial (trial_expired bloqueia) |
+### Situação Atual
 
-### 🔶 Existe parcialmente / precisa ajuste
-| # | Item | O que falta |
-|---|------|-------------|
-| 1 | Landing com 3 botões | Landing existe mas precisa revisar CTAs |
-| 3 | Tela de boas-vindas (primeiro acesso) | Onboarding existe mas pode não ter welcome screen |
-| 7 | Sincronização inicial automática (30d) | Import manual existe, falta auto-trigger pós-OAuth |
-| 10 | Módulo ADS (sync pós-pagamento) | ADS existe, falta gate de trial |
-| 11 | Linha do Tempo (30d trial vs 1yr pago) | Módulo existe, falta limitar por trial |
-| 14 | Dados fiscais obrigatórios pós-pagamento | Tela existe, falta gate de bloqueio |
+**34 módulos ativos** (não-internos, com rota) existem na tabela `system_modules`. O sistema RBAC já funciona com a cadeia: `access_profiles` → `profile_permissions` → `system_features` → `system_modules`.
 
-### 🔴 Precisa ser desenvolvido
-| # | Item | Descrição |
-|---|------|-----------|
-| 4b | Velocímetro de ativação | Widget de progresso no dashboard |
-| 9b | Tabela `sync_jobs` + lock após sucesso | Controle de execução de syncs |
-| 9c | Lock do botão 1 ano após sucesso | Bloquear re-execução pós-sucesso |
-| 16 | Multi-conta (soma de vendas) | Lógica de soma cross-account |
-| 17-18 | Estados de conta + aviso pré-conexão | Workflow de nova conta |
-| 19 | Verificação de limite + pending_upgrade | Gate automático |
-| 20 | Upgrade com pró-rata | Cálculo proporcional |
-| 21 | Crescimento natural → bloqueio | Detecção automática de excesso |
-| 22 | Proteção contra abuso (logs) | Audit trail de conexões/upgrades |
+### Problemas Identificados
 
-## Ordem sugerida de implementação
+**1. MODULE_CATALOG em `src/types/collaborator.ts` está obsoleto**
+O arquivo usa keys antigas hardcoded (`vendas`, `tarefas`, `mercado_ads`, etc.) que **não correspondem** às keys reais do banco (`marketplace.sales.orders`, `operacional.tasks`, `marketplace.growth.ads`). Este catálogo é usado pelo `CollaboratorModuleGrid.tsx` mas está desconectado do sistema RBAC real.
 
-### Fase 1 — Gates e bloqueios (impacto imediato)
-1. Velocímetro de ativação no dashboard
-2. Tabela `sync_jobs` + controle de locks
-3. Gate de dados fiscais pós-pagamento
-4. Auto-sync 30d após OAuth
+**2. MODULE_ROUTE_MAP em `useCollaboratorAccess.ts` está incompleto**
+Faltam rotas para vários módulos novos:
+- Financeiro (6 módulos: resumo, recebimentos, movimentos, conciliacao, rotinas, integracoes)
+- Ferramentas (trends_lite, pricing_calc, commissions_calc, social_calendar, consultant_library)  
+- Marketplace: comissões, ajuste de preço, atacado, seed, etiqueta_full
+- Início, Sandbox
 
-### Fase 2 — Trial gates nos módulos ✅
-5. ✅ ADS: banner de trial + sync bloqueado via ML API gate no backend
-6. ✅ Linha do Tempo: banner de trial informando limitação a 30d
-7. ✅ Etiquetas: filtro "Todos" agora capped a 30 dias
+**3. `operacional.tasks` não tem features (0 registros)**
+Único módulo ativo sem nenhuma feature vinculada — colaboradores nunca teriam acesso via RBAC.
 
-### Fase 3 — Multi-conta e upgrade ✅
-8. ✅ Multi-conta: soma de vendas (get_tenant_total_sales + check_tenant_plan_limit)
-9. ✅ Estados de conta (account_state enum: active/pending_upgrade/disabled/error)
-10. ✅ Upgrade com pró-rata (calculate_prorata_upgrade + execute_plan_upgrade)
-11. ✅ Crescimento natural → bloqueio (PlanLimitBanner + useTenantLimits)
-12. ✅ Aviso pré-conexão de nova conta (AccountConnectionWarning)
-13. ✅ Audit log (tenant_limit_log)
+**4. `useCollaborators.ts` tem TODOs pendentes**
+- `createCollaborator`: "TODO: Assign profile via company_users + profile_permissions"
+- `updateModuleAccess`: apenas mostra toast, não faz nada
 
-### Fase 4 — Landing e onboarding ✅
-14. ✅ Landing com 3 CTAs (Login, Cadastro, Planos) no header e hero
-15. ✅ Welcome screen pós-confirmação de email (WelcomeScreen + aviso ML)
-16. ✅ Proteção contra abuso (system_audit_log + tenant_limit_log)
+**5. Desacoplamento menu vs. arquitetura**
+O `system_modules` já tem `sort_order`, `parent_module_id`, `name`, `icon_key` que são campos de apresentação. As keys (`marketplace.financial.costs`) são estáveis e usadas para permissões/logs. Renomear/reordenar via Menu Builder já é seguro. Porém, o `MODULE_ROUTE_MAP` hardcoded no frontend cria acoplamento — se uma rota mudar no banco, o guard quebra.
+
+---
+
+### Plano de Implementação
+
+#### Tarefa 1 — Gerar features para `operacional.tasks`
+- Migração SQL para inserir features (view, edit, execute) no módulo de Tarefas, igual aos demais módulos.
+
+#### Tarefa 2 — Eliminar MODULE_CATALOG hardcoded
+- Remover `MODULE_CATALOG` de `src/types/collaborator.ts`
+- `CollaboratorModuleGrid.tsx` deve consumir os módulos dinâmicos do banco via `useSystemModules()` (já existe) ou query direta a `system_modules` (filtrando `is_active=true`, `is_internal_only=false`, com rota)
+- Assim, quando o admin adicionar/remover módulos no Menu Builder, o grid de colaboradores reflete automaticamente
+
+#### Tarefa 3 — Tornar MODULE_ROUTE_MAP dinâmico
+- Substituir o mapa hardcoded em `useCollaboratorAccess.ts` por uma query ao banco: `system_modules` já tem `key` e `route`
+- O `getModuleKeyFromRoute` passará a usar esse mapa dinâmico
+- Com isso, renomear rotas no Menu Builder não quebra o guard
+
+#### Tarefa 4 — Completar fluxo de criação de colaborador
+- No `useCollaborators.ts`, ao criar colaborador:
+  1. Criar registro em `company_users` com `profile_id` selecionado
+  2. Remover o TODO e o sistema legado de `collaborator_module_access`
+- No `updateModuleAccess`, redirecionar para gestão de perfis (ou permitir troca de perfil do colaborador)
+
+#### Tarefa 5 — Registrar eventos importantes no ledger (`account_events`)
+Garantir que os seguintes marcos estejam sendo registrados:
+- `first_access` — primeiro login (já existe via onboarding)
+- `ml_connected` — conexão ML (verificar se existe)
+- `trial_started` / `trial_expired` — início/fim do trial
+- `plan_subscribed` — contratação de plano
+- `anniversary_30d` — 30 dias de uso (pode ser calculado por cron/retrospectiva)
+- Cada módulo deve registrar ações críticas via `useOnboardingEvents` ou equivalente
+
+#### Tarefa 6 — Validar cobertura de logs por módulo
+- Auditar se cada módulo está chamando `auditLog` ou `registerEvent` em ações importantes (criar, editar, deletar, importar)
+- Criar uma lista de cobertura e adicionar os logs faltantes
+
+---
+
+### Detalhes Técnicos
+
+**Migração SQL (Tarefas 1)**
+```sql
+-- Gerar features para operacional.tasks
+SELECT generate_module_features('operacional.tasks');
+-- (usa a função já existente no sistema)
+```
+
+**CollaboratorModuleGrid dinâmico (Tarefa 2)**
+```typescript
+// Buscar módulos do banco em vez de MODULE_CATALOG
+const { data: modules } = useQuery({
+  queryKey: ['collaborator-modules'],
+  queryFn: () => supabase
+    .from('system_modules')
+    .select('key, name, description, is_internal_only')
+    .eq('is_active', true)
+    .eq('is_internal_only', false)
+    .not('route', 'is', null)
+    .order('sort_order')
+});
+```
+
+**MODULE_ROUTE_MAP dinâmico (Tarefa 3)**
+```typescript
+// Em useCollaboratorAccess, carregar mapa do banco
+const { data } = await supabase
+  .from('system_modules')
+  .select('key, route')
+  .eq('is_active', true)
+  .not('route', 'is', null);
+
+const routeMap = new Map<string, string>();
+for (const m of data) routeMap.set(m.route, m.key);
+```
+
+### Arquivos Envolvidos
+
+| Arquivo | Alteração |
+|---------|-----------|
+| `src/types/collaborator.ts` | Remover MODULE_CATALOG hardcoded |
+| `src/components/settings/collaborators/CollaboratorModuleGrid.tsx` | Consumir módulos do banco |
+| `src/hooks/useCollaboratorAccess.ts` | MODULE_ROUTE_MAP dinâmico via query |
+| `src/hooks/useCollaborators.ts` | Completar criação com profile_id |
+| `src/hooks/useSystemModules.ts` | Expandir para incluir route/description |
+| Migração SQL | Features para operacional.tasks + eventos faltantes |
+
