@@ -72,6 +72,33 @@ export async function resolveListingFromLink(input: string): Promise<ResolvedLis
   throw new Error('Não foi possível identificar o anúncio. Cole o link de um anúncio ativo do Mercado Livre.');
 }
 
+/**
+ * Try to find a listing by searching the URL slug text.
+ */
+async function trySearchByUrlSlug(url: string): Promise<ResolvedListing | null> {
+  const slugMatch = url.match(/mercadolivre\.com\.br\/([^\/\?#]+)/i)
+    || url.match(/mercadolibre\.com[^\/]*\/([^\/\?#]+)/i);
+  if (!slugMatch) return null;
+
+  const slug = slugMatch[1]
+    .replace(/-MLB\d+.*$/i, '')
+    .replace(/-MLBU\d+.*$/i, '')
+    .replace(/-/g, ' ')
+    .substring(0, 60)
+    .trim();
+
+  if (!slug || slug.length < 5) return null;
+
+  try {
+    const searchRes = await fetchJSON(`${ML_API}/sites/MLB/search?q=${encodeURIComponent(slug)}&limit=1`);
+    if (searchRes?.results?.[0]?.id) {
+      return itemToResolved(searchRes.results[0], false);
+    }
+  } catch { /* fall through */ }
+
+  return null;
+}
+
 async function fetchItemById(itemId: string): Promise<ResolvedListing> {
   // Try individual endpoint
   try {
