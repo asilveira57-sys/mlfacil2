@@ -941,24 +941,31 @@ Deno.serve(async (req) => {
     const { action } = body;
 
     if (action === 'load_source') {
-      const { item_id, correlation_id, source_input_raw } = body;
+      const { item_id, correlation_id, source_input_raw, seller_id, ml_account_id } = body;
       if (!item_id) return respond({ error: 'item_id é obrigatório' }, 400);
       const corrId = correlation_id || crypto.randomUUID().substring(0, 8);
+      const preferredSellerId = seller_id || ml_account_id || null;
+
+      await logEvent(supabase, userId, 'source', item_id, 'load_source_request', 'info',
+        `load_source requested with preferred_seller_id=${preferredSellerId || 'none'}`, {
+          correlation_id: corrId, seller_id, ml_account_id, preferred_seller_id: preferredSellerId,
+        });
 
       try {
-        const { snapshot, logResults } = await loadSource(item_id, supabase, userId, corrId, source_input_raw);
+        const { snapshot, logResults } = await loadSource(item_id, supabase, userId, corrId, source_input_raw, preferredSellerId);
         await logEvent(supabase, userId, 'source', item_id, 'source_loaded', 'info', `Item ${item_id} carregado`, {
           correlation_id: corrId,
           pictures_count: snapshot.pictures?.length || 0,
           variations_count: snapshot.variations?.length || 0,
           has_catalog: !!snapshot.catalog_product_id,
+          preferred_seller_id: preferredSellerId,
         });
 
         return respond({ snapshot, correlation_id: corrId, runtime_version: CLONE_RUNTIME_VERSION, log_insert_results: logResults });
       } catch (loadErr) {
         const errMsg = (loadErr as Error).message;
-        await auditLog(supabase, { level: 'error', area: 'clone_anuncio', action: 'load_source_error', userId, success: false, message: errMsg, meta: { item_id, correlation_id: corrId } });
-        await logEvent(supabase, userId, 'source', item_id, 'source_load_error', 'error', errMsg, { correlation_id: corrId });
+        await auditLog(supabase, { level: 'error', area: 'clone_anuncio', action: 'load_source_error', userId, success: false, message: errMsg, meta: { item_id, correlation_id: corrId, preferred_seller_id: preferredSellerId } });
+        await logEvent(supabase, userId, 'source', item_id, 'source_load_error', 'error', errMsg, { correlation_id: corrId, preferred_seller_id: preferredSellerId });
         return respond({ error: errMsg, correlation_id: corrId, runtime_version: CLONE_RUNTIME_VERSION }, 200);
       }
     }
