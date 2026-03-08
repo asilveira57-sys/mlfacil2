@@ -22,6 +22,7 @@ import { SettingsTemplates } from "@/components/settings/SettingsTemplates";
 import { SettingsPrivacy } from "@/components/settings/SettingsPrivacy";
 import { SettingsAccessProfiles } from "@/components/settings/SettingsAccessProfiles";
 import { SettingsDailyMessage } from "@/components/settings/SettingsDailyMessage";
+import { SettingsNotifications } from "@/components/settings/SettingsNotifications";
 
 interface SettingsTab {
   id: string;
@@ -34,7 +35,7 @@ const settingsTabs: SettingsTab[] = [
   { id: "perfil", label: "Perfil", icon: User, component: SettingsProfile },
   { id: "seguranca", label: "Segurança", icon: Shield, component: SettingsSecurity },
   { id: "idioma", label: "Idioma", icon: Globe, component: SettingsLanguage },
-  { id: "notificacoes", label: "Notificações", icon: Bell, component: null },
+  { id: "notificacoes", label: "Notificações", icon: Bell, component: SettingsNotifications },
   { id: "colaboradores", label: "Colaboradores", icon: Users, component: CollaboratorsCard },
   { id: "perfis-acesso", label: "Perfis de Acesso", icon: ShieldCheck, component: SettingsAccessProfiles },
   { id: "personalizacao", label: "Personalização", icon: Palette, component: SettingsCustomization },
