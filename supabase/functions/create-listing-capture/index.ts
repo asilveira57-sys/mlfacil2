@@ -208,46 +208,7 @@ async function fetchDescriptionPublic(itemId: string, retries = 3): Promise<{
 // ============================================================================
 // BUSCA AUTENTICADA DE ITEM
 // ============================================================================
-async function fetchItemAuthenticated(itemId: string, accessToken: string): Promise<{
-  ok: boolean;
-  data?: any;
-  description?: string;
-  descriptionSource?: 'api_authenticated' | 'none';
-  error?: string;
-}> {
-  console.log(`[create-listing-capture] Fetching item AUTHENTICATED: ${itemId}`);
-  
-  const response = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  
-  if (!response.ok) {
-    return { ok: false, error: `Erro ao buscar item: ${response.status}` };
-  }
-  
-  const data = await response.json();
-  
-  // Também buscar descrição com autenticação
-  let description: string | undefined;
-  let descriptionSource: 'api_authenticated' | 'none' = 'none';
-  
-  try {
-    const descResponse = await fetch(`https://api.mercadolibre.com/items/${itemId}/description`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (descResponse.ok) {
-      const descData = await descResponse.json();
-      description = descData.plain_text || descData.text;
-      if (description) {
-        descriptionSource = 'api_authenticated';
-      }
-    }
-  } catch (e) {
-    console.log(`[create-listing-capture] Could not fetch description with auth`);
-  }
-  
-  return { ok: true, data, description, descriptionSource };
-}
+// (fetchItemAuthenticated removed — replaced by multi-get strategy above)
 
 // ============================================================================
 // PROCESSAR FOTOS (TODAS, não só thumbnail)
