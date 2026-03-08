@@ -74,6 +74,7 @@ export function FloatingSupportButton({ visible = true, className }: FloatingSup
 
   const location = useLocation();
   const navigate = useNavigate();
+  const unreadReplies = useUnreadTicketReplies();
 
   // Recalculate position on window resize
   useEffect(() => {
