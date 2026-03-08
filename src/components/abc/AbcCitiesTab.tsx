@@ -106,6 +106,9 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
   const [error, setError] = useState<string | null>(null);
   const [enrichmentStatus, setEnrichmentStatus] = useState<string | null>(null);
 
+  // Map drawer state
+  const [mapDrawerOpen, setMapDrawerOpen] = useState(false);
+
   // Drawer state for geographic details
   const [selectedGeoItem, setSelectedGeoItem] = useState<AbcItem | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
