@@ -372,7 +372,13 @@ async function fetchSellerListings(mlSellerId: string, accessToken?: string): Pr
 
   while (offset < 1000) {
     await delay(DELAY_MS);
-    const data = await fetchML(`/sites/MLB/search?seller_id=${mlSellerId}&offset=${offset}&limit=${limit}`, accessToken);
+    let data: any;
+    try {
+      data = await fetchMLResilient(`/sites/MLB/search?seller_id=${mlSellerId}&offset=${offset}&limit=${limit}`, accessToken);
+    } catch (e) {
+      console.log(`fetchSellerListings failed at offset=${offset}: ${e}`);
+      break;
+    }
     if (!data.results || data.results.length === 0) break;
     items.push(...data.results);
     offset += limit;
