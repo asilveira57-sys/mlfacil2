@@ -6,19 +6,27 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Search, Star, Package, UserPlus } from 'lucide-react';
-import { resolveSellerFromLink, ResolvedSeller } from '@/lib/meli/resolveSellerFromLink';
+import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+
+interface ResolvedPreview {
+  ml_seller_id: string;
+  ml_nickname: string;
+  reputation: any;
+  total_items: number;
+}
 
 interface AddCompetitorSellerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAdd: (resolvedSeller: ResolvedSeller, alias?: string) => Promise<boolean>;
+  onAdd: (resolvedSeller: ResolvedPreview, alias?: string) => Promise<boolean>;
+  sellerId: string;
 }
 
-export function AddCompetitorSellerDialog({ open, onOpenChange, onAdd }: AddCompetitorSellerDialogProps) {
+export function AddCompetitorSellerDialog({ open, onOpenChange, onAdd, sellerId }: AddCompetitorSellerDialogProps) {
   const [input, setInput] = useState('');
   const [alias, setAlias] = useState('');
-  const [preview, setPreview] = useState<ResolvedSeller | null>(null);
+  const [preview, setPreview] = useState<ResolvedPreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,8 +37,12 @@ export function AddCompetitorSellerDialog({ open, onOpenChange, onAdd }: AddComp
     setPreview(null);
     setError(null);
     try {
-      const result = await resolveSellerFromLink(input.trim());
-      setPreview(result);
+      const { data, error: fnError } = await supabase.functions.invoke('competitor-seller-sync', {
+        body: { action: 'preview', input: input.trim(), seller_id: sellerId },
+      });
+      if (fnError) throw fnError;
+      if (data?.error) throw new Error(data.error);
+      setPreview(data);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Erro ao buscar seller';
       setError(msg);

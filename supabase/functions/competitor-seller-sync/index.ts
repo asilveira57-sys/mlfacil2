@@ -52,8 +52,15 @@ async function getFreshAccessToken(supabaseAdmin: any, userId: string, sellerId:
   if (!mlAccount) return undefined;
 
   const tokenExpires = mlAccount.token_expires_at ? new Date(mlAccount.token_expires_at) : null;
-  
-  // Always refresh to ensure fresh token (ML tokens can be invalidated server-side)
+  const now = new Date();
+  const bufferMs = 30 * 60 * 1000; // 30 minutes
+
+  // Only refresh if token is expired or expires within 30 min
+  if (tokenExpires && tokenExpires.getTime() - now.getTime() > bufferMs) {
+    console.log(`Token still valid for seller ${sellerId}, expires at ${tokenExpires.toISOString()}`);
+    return mlAccount.access_token;
+  }
+
   console.log(`Refreshing ML token for seller ${sellerId}...`);
   const refreshed = await refreshMLToken(mlAccount.refresh_token);
   if (refreshed?.access_token) {

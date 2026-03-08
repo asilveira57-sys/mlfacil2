@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -59,7 +60,15 @@ export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) 
   const [statusFilter, setStatusFilter] = useState<'ativo' | 'pausado' | 'all'>('ativo');
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
   const [trackerToClone, setTrackerToClone] = useState<CompetitorTracker | null>(null);
-  const [viewMode, setViewMode] = useState<'listings' | 'sellers'>('listings');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const viewMode = (searchParams.get('view') as 'listings' | 'sellers') || 'listings';
+  const setViewMode = useCallback((mode: 'listings' | 'sellers') => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.set('view', mode);
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
 
   useEffect(() => {
     fetchTrackers(statusFilter);
