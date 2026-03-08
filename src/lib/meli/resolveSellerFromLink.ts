@@ -104,7 +104,7 @@ export async function resolveSellerFromLink(input: string): Promise<ResolvedSell
     console.log(`[resolveSellerFromLink] Extracted ${extracted.type}: ${extracted.id}`);
 
     if (extracted.type === 'MLB' || extracted.type === 'REGIONAL') {
-      // Fetch item to get seller_id
+      // Try fetching the item directly to get seller_id
       const itemData = await fetchItemData(extracted.id);
       if (itemData?.seller_id) {
         const userData = await fetchUserPublic(String(itemData.seller_id));
@@ -117,17 +117,32 @@ export async function resolveSellerFromLink(input: string): Promise<ResolvedSell
         };
       }
       
-      // If MLB failed but URL has MLBU, try catalog search
+      // Item fetch failed — try MLBU catalog search if present
       const mlbuMatch = trimmed.match(/(MLBU\d+)/i);
       if (mlbuMatch) {
-        return resolveFromCatalog(mlbuMatch[1].toUpperCase(), trimmed);
+        try {
+          return await resolveFromCatalog(mlbuMatch[1].toUpperCase(), trimmed);
+        } catch {
+          // Continue to slug fallback
+        }
       }
+      
+      // Fallback: search by URL slug to find the seller
+      const sellerFromSlug = await tryResolveFromUrlSlug(trimmed);
+      if (sellerFromSlug) return sellerFromSlug;
       
       throw new Error(`Não foi possível acessar o anúncio ${extracted.id}. Ele pode estar inativo ou removido.`);
     }
 
     if (extracted.type === 'MLBU') {
-      return resolveFromCatalog(extracted.id, trimmed);
+      // MLBU: try catalog search, then slug fallback
+      try {
+        return await resolveFromCatalog(extracted.id, trimmed);
+      } catch {
+        const sellerFromSlug = await tryResolveFromUrlSlug(trimmed);
+        if (sellerFromSlug) return sellerFromSlug;
+        throw new Error(`Não foi possível encontrar vendedores para o produto ${extracted.id}. Tente colar o link de um anúncio específico.`);
+      }
     }
   }
 
