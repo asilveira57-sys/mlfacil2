@@ -59,6 +59,7 @@ export function CloneDraftForm({
   publishing,
   published,
   createdItemId,
+  accountId,
 }: Props) {
   const [showAttributes, setShowAttributes] = useState(false);
   const [showDescription, setShowDescription] = useState(false);
@@ -113,12 +114,13 @@ export function CloneDraftForm({
               />
             </FieldWrapper>
 
-            <FieldWrapper id="category_id" label="Categoria" errors={fieldErrors} hint={originPayload.category_id ? `Origem: ${originPayload.category_id}` : undefined}>
-              <Input
-                id="category_id"
-                placeholder={originPayload.category_id || 'ID da categoria (ex: MLB1234)'}
-                value={userPayload.category_id || ''}
-                onChange={e => onUserPayloadChange({ category_id: e.target.value })}
+            <FieldWrapper id="category_id" label="Categoria" errors={fieldErrors} hint={originPayload.category_id ? `Origem: ${originPayload.category_name || originPayload.category_id}` : undefined}>
+              <CategoryPicker
+                accountId={accountId || null}
+                value={userPayload.category_id || originPayload.category_id || ''}
+                originCategoryId={originPayload.category_id}
+                originCategoryName={originPayload.category_name}
+                onSelect={(id) => onUserPayloadChange({ category_id: id })}
               />
             </FieldWrapper>
 
