@@ -45,6 +45,33 @@ function extractIdentifier(attributes: { id: string; value_name?: string }[], ..
   return undefined;
 }
 
+// ── Origin data validation helpers ──
+function hasCompleteOriginData(op: OriginPayload): boolean {
+  return !!(
+    op.title && op.title.trim().length > 0 &&
+    op.category_id && op.category_id.trim().length > 0 &&
+    (op.price ?? 0) > 0 &&
+    op.pictures && op.pictures.length > 0
+  );
+}
+
+function getOriginStatusFromPayload(op: OriginPayload): OriginStatus {
+  if (hasCompleteOriginData(op)) return 'complete';
+  const hasAny = !!(
+    op.title || op.description || op.category_id || (op.price ?? 0) > 0 || (op.pictures && op.pictures.length > 0)
+  );
+  return hasAny ? 'partial' : 'unavailable';
+}
+
+function getMissingRequiredFields(op: OriginPayload) {
+  return {
+    title: !op.title || op.title.trim().length === 0,
+    category_id: !op.category_id || op.category_id.trim().length === 0,
+    price: (op.price ?? 0) <= 0,
+    pictures: !op.pictures || op.pictures.length === 0,
+  };
+}
+
 export default function ClonarAnuncio() {
   const { data: accounts = [], isLoading: accountsLoading } = useMlAccounts({ onlyConnected: true });
 
@@ -206,10 +233,15 @@ export default function ClonarAnuncio() {
           catalog_product_id: item.catalog_product_id || undefined,
           family_name: item.family_name || undefined,
         };
+        // ── Validate origin completeness ──
+        const calculatedStatus = getOriginStatusFromPayload(op);
+        op.origin_status = calculatedStatus;
+        const missing = getMissingRequiredFields(op);
+
         setOriginPayload(op);
-        setOriginStatus('complete');
+        setOriginStatus(calculatedStatus);
         await safeLog('origin_fetch_result', {
-          correlation_id: corrId, status: 'complete', source: 'ad-item-snapshot',
+          correlation_id: corrId, status: calculatedStatus, source: 'ad-item-snapshot',
           resolved_item_id: resolvedId,
           pictures_source: data.capture_log?.pictures_source || (pictures.length > 0 ? 'api' : 'none'),
           pictures_count: pictures.length,
@@ -217,6 +249,7 @@ export default function ClonarAnuncio() {
           category_name: data.category_name || null,
           capture_account_id: captureAccount?.id || null,
           capture_seller_id: captureSellerId,
+          missing_required_fields: missing,
         });
         updateDraftOrigin(op);
       } else {
@@ -275,6 +308,34 @@ export default function ClonarAnuncio() {
     const merged = buildMergedPayload(originPayload, userPayload);
     const corrId = correlationId || 'unknown';
 
+    // ── Client-side validation gate ──
+    const validationErrors: FieldError[] = [];
+    if (!merged.title || !merged.title.trim()) {
+      validationErrors.push({ field: 'title', message: 'Título é obrigatório.' });
+    }
+    if (!merged.category_id || !merged.category_id.trim()) {
+      validationErrors.push({ field: 'category_id', message: 'Categoria é obrigatória.' });
+    }
+    if (!merged.price || merged.price <= 0) {
+      validationErrors.push({ field: 'price', message: 'Preço deve ser maior que zero.' });
+    }
+    // family_name fallback: use title
+    const resolvedFamilyName = merged.family_name?.trim() || merged.title?.trim() || '';
+    if (!resolvedFamilyName) {
+      validationErrors.push({ field: 'family_name', message: 'Nome da família (family_name) é obrigatório. Preencha o título.' });
+    }
+
+    if (validationErrors.length > 0) {
+      setFieldErrors(validationErrors);
+      setPublishing(false);
+      await safeLog('publish_validation_blocked', {
+        correlation_id: corrId,
+        missing_fields: validationErrors.map(e => e.field),
+      });
+      toast.error('Campos obrigatórios faltando', { description: 'Preencha os campos destacados antes de publicar.' });
+      return;
+    }
+
     await safeLog('publish_attempt', { correlation_id: corrId, item_id: sourceItemId, account_id: selectedAccountId });
 
     try {
@@ -289,6 +350,7 @@ export default function ClonarAnuncio() {
         condition: merged.condition,
         listing_type_id: merged.listing_type_id,
         pictures: merged.pictures.map(p => ({ source: p.secure_url || p.url })),
+        family_name: resolvedFamilyName,
       };
 
       // Description
@@ -307,11 +369,6 @@ export default function ClonarAnuncio() {
       // Safe attributes
       if (merged.attributes.length > 0) {
         mlPayload.attributes = merged.attributes;
-      }
-
-      // family_name (required by some categories)
-      if (merged.family_name) {
-        mlPayload.family_name = merged.family_name;
       }
 
       // POST via edge function (needs token)
