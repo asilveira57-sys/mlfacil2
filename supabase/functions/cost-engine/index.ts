@@ -1994,7 +1994,7 @@ async function processChunkAndContinue(supabase: any, jobId: string) {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${serviceKey}`,
+            'x-internal-key': serviceKey,
           },
           body: JSON.stringify({
             action: 'resync_single',
