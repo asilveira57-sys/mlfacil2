@@ -504,7 +504,7 @@ async function loadSource(itemId: string, supabase: any, userId: string, correla
   // If the diagnostic item fetch needed auth OR returned 403 initially, use auth for all subsequent calls
   const needsAuth = itemSnippet.includes('PolicyAgent') || siteSnippet.includes('PolicyAgent');
   if (needsAuth) {
-    const token = await getValidTokenForRead(supabase, userId, correlationId);
+    const token = await getValidTokenForRead(supabase, userId, correlationId, preferredSellerId);
     if (token) readToken = token;
   }
 
@@ -513,7 +513,7 @@ async function loadSource(itemId: string, supabase: any, userId: string, correla
   if (!fullResult.ok) {
     // If 403 on full fetch and no token yet, try auth
     if (fullResult.status === 403 && !readToken) {
-      const fallbackToken = await getValidTokenForRead(supabase, userId, correlationId);
+      const fallbackToken = await getValidTokenForRead(supabase, userId, correlationId, preferredSellerId);
       if (fallbackToken) {
         const retryResult = await mlRequest(`/items/${effectiveItemId}?include_attributes=all`, supabase, userId, correlationId, effectiveItemId, fallbackToken);
         if (retryResult.ok) {
