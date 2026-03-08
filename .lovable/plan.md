@@ -1,66 +1,36 @@
 
-# Plano Mestre — Jornada Completa do Seller
 
-## Status de cada item
+## Redirecionar Ferramentas do Sidebar para as Versões Internas
 
-### ✅ Já existe no sistema
-| # | Item | Status |
-|---|------|--------|
-| 2 | Cadastro (email/senha + confirmação) | ✅ Implementado |
-| 4 | Painel inicial (dashboard) | ✅ Existe (sem velocímetro) |
-| 5 | Conexão ML via OAuth | ✅ Implementado |
-| 6 | Elegibilidade para teste (>10 vendas) | ✅ Verificação existe na company |
-| 8 | Módulo Etiquetas (vendas abertas) | ✅ Implementado |
-| 9 | Módulo Custos (sem Passo 2) | ✅ Atualizado agora |
-| 13 | Seleção automática de plano | ✅ `useUserSalesVolume` + filtro de planos |
-| 15 | Cadastro fiscal (PF/PJ) | ✅ `company_billing` existe |
-| 12 | Bloqueio pós-trial | ✅ Parcial (trial_expired bloqueia) |
+### Situação Atual
 
-### 🔶 Existe parcialmente / precisa ajuste
-| # | Item | O que falta |
-|---|------|-------------|
-| 1 | Landing com 3 botões | Landing existe mas precisa revisar CTAs |
-| 3 | Tela de boas-vindas (primeiro acesso) | Onboarding existe mas pode não ter welcome screen |
-| 7 | Sincronização inicial automática (30d) | Import manual existe, falta auto-trigger pós-OAuth |
-| 10 | Módulo ADS (sync pós-pagamento) | ADS existe, falta gate de trial |
-| 11 | Linha do Tempo (30d trial vs 1yr pago) | Módulo existe, falta limitar por trial |
-| 14 | Dados fiscais obrigatórios pós-pagamento | Tela existe, falta gate de bloqueio |
+O sidebar tem 3 itens no grupo "Ferramentas" apontando para rotas **públicas** (`/ferramentas/*`), que carregam o `ToolsLayout` (layout público, fora do dashboard). Porém, já existem **versões internas completas** dessas mesmas ferramentas no ambiente autenticado:
 
-### 🔴 Precisa ser desenvolvido
-| # | Item | Descrição |
-|---|------|-----------|
-| 4b | Velocímetro de ativação | Widget de progresso no dashboard |
-| 9b | Tabela `sync_jobs` + lock após sucesso | Controle de execução de syncs |
-| 9c | Lock do botão 1 ano após sucesso | Bloquear re-execução pós-sucesso |
-| 16 | Multi-conta (soma de vendas) | Lógica de soma cross-account |
-| 17-18 | Estados de conta + aviso pré-conexão | Workflow de nova conta |
-| 19 | Verificação de limite + pending_upgrade | Gate automático |
-| 20 | Upgrade com pró-rata | Cálculo proporcional |
-| 21 | Crescimento natural → bloqueio | Detecção automática de excesso |
-| 22 | Proteção contra abuso (logs) | Audit trail de conexões/upgrades |
+| Item no Sidebar | Rota atual (pública) | Rota interna (já existe) | Página |
+|---|---|---|---|
+| Tendências Lite | `/ferramentas/tendencias` | `/tendencias` | `TendenciasV2` |
+| Calculadora de Precificação | `/ferramentas/precificacao` | `/precificacao` | `Precificacao` |
+| Comissões ML | `/ferramentas/comissoes` | `/comissoes` | `Comissoes` |
 
-## Ordem sugerida de implementação
+As versões internas já usam `PageContainer` (layout do dashboard), são mais completas (TendênciasV2 usa dados reais do seller, cache, API do ML), e permanecem dentro do shell autenticado.
 
-### Fase 1 — Gates e bloqueios (impacto imediato)
-1. Velocímetro de ativação no dashboard
-2. Tabela `sync_jobs` + controle de locks
-3. Gate de dados fiscais pós-pagamento
-4. Auto-sync 30d após OAuth
+### Plano
 
-### Fase 2 — Trial gates nos módulos ✅
-5. ✅ ADS: banner de trial + sync bloqueado via ML API gate no backend
-6. ✅ Linha do Tempo: banner de trial informando limitação a 30d
-7. ✅ Etiquetas: filtro "Todos" agora capped a 30 dias
+**1. Atualizar rotas no banco (`system_modules`)**
 
-### Fase 3 — Multi-conta e upgrade ✅
-8. ✅ Multi-conta: soma de vendas (get_tenant_total_sales + check_tenant_plan_limit)
-9. ✅ Estados de conta (account_state enum: active/pending_upgrade/disabled/error)
-10. ✅ Upgrade com pró-rata (calculate_prorata_upgrade + execute_plan_upgrade)
-11. ✅ Crescimento natural → bloqueio (PlanLimitBanner + useTenantLimits)
-12. ✅ Aviso pré-conexão de nova conta (AccountConnectionWarning)
-13. ✅ Audit log (tenant_limit_log)
+Executar um `UPDATE` para apontar os 3 itens do grupo Ferramentas para as rotas internas:
 
-### Fase 4 — Landing e onboarding ✅
-14. ✅ Landing com 3 CTAs (Login, Cadastro, Planos) no header e hero
-15. ✅ Welcome screen pós-confirmação de email (WelcomeScreen + aviso ML)
-16. ✅ Proteção contra abuso (system_audit_log + tenant_limit_log)
+- `ferramentas.trends_lite` → `/tendencias`
+- `ferramentas.pricing_calc` → `/precificacao`
+- `ferramentas.commissions_calc` → `/comissoes`
+
+Isso é tudo que precisa mudar -- o sidebar é dinâmico e vai refletir automaticamente.
+
+### Arquivos alterados
+
+Nenhum arquivo de código precisa ser alterado. Apenas uma migration SQL para atualizar as 3 rotas na tabela `system_modules`.
+
+### Resultado
+
+O usuário clica em "Tendências Lite" no sidebar e permanece dentro do dashboard, carregando a versão completa (`TendenciasV2`) com dados reais. O mesmo para Precificação e Comissões. As rotas públicas (`/ferramentas/*`) continuam existindo para visitantes não autenticados.
+
