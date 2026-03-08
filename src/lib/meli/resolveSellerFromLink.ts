@@ -115,6 +115,9 @@ async function tryResolveFromUrlSlug(url: string): Promise<ResolvedSeller | null
 }
 
 /**
+ * Get total active items for a seller.
+ */
+async function fetchSellerItemCount(sellerId: string): Promise<number> {
   try {
     const data = await fetchMLPublic(`/sites/MLB/search?seller_id=${sellerId}&limit=1`);
     return data?.paging?.total || 0;
