@@ -701,6 +701,61 @@ async function processOrderEvent(
     }
   }
 
+  // ===== PART 3.5: Notify new sale =====
+  if (orderStatus === "paid") {
+    try {
+      const accountInfo = await getCompanyNameForAccount(supabase, event.ml_user_id);
+      if (accountInfo) {
+        const today = new Date().toISOString().split("T")[0];
+        const groupKey = `new_sale_${event.ml_user_id}_${today}`;
+        const totalAmount = (orderData.total_amount as number) || 0;
+        const itemTitle = orderItems?.[0]?.item?.title || "produto";
+
+        // Count today's sales for this seller
+        const { count: salesToday } = await supabase
+          .from("meli_orders_cache")
+          .select("id", { count: "exact", head: true })
+          .eq("seller_id", event.ml_user_id)
+          .eq("order_status", "paid")
+          .gte("created_at_meli", `${today}T00:00:00`);
+
+        const salesCount = (salesToday || 0);
+        const notifTitle = salesCount > 1
+          ? `🎉 ${salesCount} vendas hoje na ${accountInfo.companyName}!`
+          : `🎉 Nova venda na ${accountInfo.companyName}!`;
+        const notifBody = salesCount > 1
+          ? `Última: ${itemTitle} — R$ ${totalAmount.toFixed(2)}`
+          : `${itemTitle} — R$ ${totalAmount.toFixed(2)}`;
+
+        const { data: existing } = await supabase
+          .from("app_notifications")
+          .select("id")
+          .eq("group_key", groupKey)
+          .eq("is_dismissed", false)
+          .maybeSingle();
+
+        if (existing) {
+          await supabase.from("app_notifications").update({ title: notifTitle, body: notifBody }).eq("id", existing.id);
+        } else {
+          await supabase.from("app_notifications").insert({
+            user_id: accountInfo.userId,
+            seller_id: event.ml_user_id,
+            title: notifTitle,
+            body: notifBody,
+            category: "system_alert",
+            priority: "normal",
+            action_url: "/etiquetas",
+            group_key: groupKey,
+            origin_module: "orders",
+          });
+        }
+        console.log(`[ml-worker] Sale notification created/updated for order ${orderId}`);
+      }
+    } catch (notifErr) {
+      console.error(`[ml-worker] Sale notification error:`, notifErr);
+    }
+  }
+
   // ===== PART 4: Automation (welcome messages) — only for paid orders =====
   if (orderStatus !== "paid") {
     await logEvent(supabase, event.id, "info", `Order ${orderId} cached (status: ${orderStatus}), skipping automation`);
