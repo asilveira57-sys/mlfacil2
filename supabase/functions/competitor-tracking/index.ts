@@ -210,7 +210,7 @@ Deno.serve(async (req) => {
           };
         } else {
           try {
-            listingData = await fetchMLListingData(competitorExternalId);
+            listingData = await fetchMLListingData(competitorExternalId, mlAccessToken);
           } catch (e) {
             console.error('Error fetching ML data:', e);
           }
@@ -331,7 +331,7 @@ Deno.serve(async (req) => {
         // Fetch current data from ML
         let currentData: any;
         try {
-          currentData = await fetchMLListingData(externalId);
+          currentData = await fetchMLListingData(externalId, mlAccessToken);
         } catch (e) {
           await supabaseClient.from('competitor_events').insert({
             tracker_id: tracker.id,
