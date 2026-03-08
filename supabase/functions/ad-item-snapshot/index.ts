@@ -454,15 +454,18 @@ serve(async (req) => {
     }
 
     // =========================================================================
-    // ETAPA 2: Buscar credenciais ML (para tentativa B diagnóstica apenas)
+    // ETAPA 2: Buscar credenciais ML (para tentativa A autenticada)
+    // Prioridade: ml_account_id → seller_id → qualquer conta ativa do user
     // =========================================================================
+    const preferredSellerId = ml_account_id || seller_id || null;
     let mlAccount: { access_token: string | null; ml_user_id: string } | null = null;
+
     if (ml_account_id) {
       const { data } = await supabase.from("ml_accounts").select("access_token, ml_user_id")
-        .eq("ml_user_id", ml_account_id).maybeSingle();
+        .eq("ml_user_id", ml_account_id).eq("user_id", user.id).maybeSingle();
       mlAccount = data;
     }
-    if (!mlAccount?.access_token && seller_id) {
+    if (!mlAccount?.access_token && seller_id && seller_id !== ml_account_id) {
       const { data } = await supabase.from("ml_accounts").select("access_token, ml_user_id")
         .eq("ml_user_id", String(seller_id)).eq("user_id", user.id).maybeSingle();
       mlAccount = data;
@@ -472,6 +475,17 @@ serve(async (req) => {
         .eq("user_id", user.id).not("access_token", "is", null).limit(1).maybeSingle();
       mlAccount = data;
     }
+
+    await logStep(supabase, {
+      user_id: user.id, action: 'token_selection',
+      message: `Token selected: ${mlAccount?.ml_user_id || 'none'}, preferred=${preferredSellerId || 'none'}`,
+      meta: {
+        preferred_seller_id: preferredSellerId,
+        selected_ml_user_id: mlAccount?.ml_user_id || null,
+        has_token: !!mlAccount?.access_token,
+        item_id: resolvedItemId,
+      },
+    });
 
     // =========================================================================
     // ETAPA 3: NOVA ESTRATÉGIA — Multi-get + Search + Fallbacks
