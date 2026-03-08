@@ -27,15 +27,25 @@ interface Tracker {
 
 // Parse item ID from ML link
 function parseMLItemId(link: string): string | null {
+  // Normalize: trim, take only URL part if pasted with extra text
+  const cleaned = link.trim();
+  
   const patterns = [
-    /\/p\/(MLB\d+)/i,
+    // /p/MLB12345 (product page)
+    /\/p\/(MLB-?\d+)/i,
+    // /MLB-12345-title or /MLB12345-title (listing page)
     /\/(MLB-?\d+)/i,
+    // Plain ID: MLB12345 or MLB-12345
     /^(MLB-?\d+)$/i,
+    // URL ending with -MLB12345678 (common sharing format)
+    /-(MLB\d{6,})/i,
+    // Fallback: any MLB + digits in the string
+    /(MLB-?\d{6,})/i,
   ];
   for (const pattern of patterns) {
-    const match = link.match(pattern);
+    const match = cleaned.match(pattern);
     if (match) {
-      return match[1].replace('-', '');
+      return match[1].replace(/-/g, '');
     }
   }
   return null;
@@ -142,14 +152,19 @@ Deno.serve(async (req) => {
         // Parse item ID from link
         const competitorExternalId = parseMLItemId(competitor_url);
         
+        if (!competitorExternalId) {
+          return new Response(JSON.stringify({ error: 'Não foi possível extrair o ID do anúncio a partir do link informado. Verifique se é um link válido do Mercado Livre.' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
         // Fetch initial data from ML
         let listingData: any = null;
-        if (competitorExternalId) {
-          try {
-            listingData = await fetchMLListingData(competitorExternalId);
-          } catch (e) {
-            console.error('Error fetching ML data:', e);
-          }
+        try {
+          listingData = await fetchMLListingData(competitorExternalId);
+        } catch (e) {
+          console.error('Error fetching ML data:', e);
         }
 
         const now = new Date();
