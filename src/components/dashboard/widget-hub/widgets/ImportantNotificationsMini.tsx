@@ -25,12 +25,18 @@ export default function ImportantNotificationsMini() {
         // Try to fetch from notifications table if it exists
         const { data } = await supabase
           .from('notifications')
-          .select('id, title, body, created_at, read')
+          .select('id, title, body, created_at')
           .eq('user_id', session.user.id)
           .order('created_at', { ascending: false })
           .limit(3);
 
-        setNotifications((data || []) as Notification[]);
+        setNotifications((data || []).map((n: any) => ({
+          id: n.id,
+          title: n.title,
+          body: n.body,
+          created_at: n.created_at,
+          read: false,
+        })));
       } catch {
         // Table may not exist, silently fail
         setNotifications([]);
