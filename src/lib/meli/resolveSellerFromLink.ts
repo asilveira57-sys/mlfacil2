@@ -34,7 +34,7 @@ async function fetchMLPublic(path: string): Promise<any> {
 /**
  * Try to fetch item data, with batch fallback.
  */
-async function fetchItemData(itemId: string): Promise<{ seller_id: number } | null> {
+async function fetchItemData(itemId: string): Promise<{ seller_id: number; title?: string } | null> {
   // Try individual endpoint first
   try {
     const data = await fetchMLPublic(`/items/${itemId}?attributes=id,seller_id,title`);
@@ -54,6 +54,26 @@ async function fetchItemData(itemId: string): Promise<{ seller_id: number } | nu
     }
   } catch (e) {
     console.log(`[resolveSellerFromLink] Batch fetch failed for ${itemId}`);
+  }
+
+  // Search API fallback — works when /items returns 403 (PolicyAgent)
+  try {
+    console.log(`[resolveSellerFromLink] Trying search fallback for ${itemId}...`);
+    const searchRes = await fetchMLPublic(`/sites/MLB/search?q=${encodeURIComponent(itemId)}&limit=5`);
+    // Look for exact match first
+    for (const r of searchRes?.results || []) {
+      const rId = String(r.id).replace(/-/g, '');
+      if (rId === itemId.replace(/-/g, '') && r.seller?.id) {
+        return { seller_id: r.seller.id, title: r.title };
+      }
+    }
+    // If no exact match, take first result with a seller
+    if (searchRes?.results?.[0]?.seller?.id) {
+      console.log(`[resolveSellerFromLink] No exact match for ${itemId}, using first search result`);
+      return { seller_id: searchRes.results[0].seller.id, title: searchRes.results[0].title };
+    }
+  } catch (e) {
+    console.log(`[resolveSellerFromLink] Search fallback failed for ${itemId}`);
   }
 
   return null;
