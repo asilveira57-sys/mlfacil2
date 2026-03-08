@@ -34,7 +34,7 @@ export function useNotePins({ workspaceId, moduleKey, companyId }: UseNotePinsOp
         .from('note_pins')
         .select('*')
         .eq('workspace_id', workspaceId)
-        .eq('module_key', moduleKey);
+        .or(`module_key.eq.${moduleKey},module_key.eq.__global__`);
 
       if (safeCompanyId) {
         query = query.or(`company_id.eq.${safeCompanyId},company_id.is.null`);

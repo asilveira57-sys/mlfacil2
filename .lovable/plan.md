@@ -1,77 +1,66 @@
 
+# Plano Mestre — Jornada Completa do Seller
 
-## Melhorias no Post-it: Plano de Implementação
+## Status de cada item
 
-### Resumo dos Requisitos
+### ✅ Já existe no sistema
+| # | Item | Status |
+|---|------|--------|
+| 2 | Cadastro (email/senha + confirmação) | ✅ Implementado |
+| 4 | Painel inicial (dashboard) | ✅ Existe (sem velocímetro) |
+| 5 | Conexão ML via OAuth | ✅ Implementado |
+| 6 | Elegibilidade para teste (>10 vendas) | ✅ Verificação existe na company |
+| 8 | Módulo Etiquetas (vendas abertas) | ✅ Implementado |
+| 9 | Módulo Custos (sem Passo 2) | ✅ Atualizado agora |
+| 13 | Seleção automática de plano | ✅ `useUserSalesVolume` + filtro de planos |
+| 15 | Cadastro fiscal (PF/PJ) | ✅ `company_billing` existe |
+| 12 | Bloqueio pós-trial | ✅ Parcial (trial_expired bloqueia) |
 
-1. **Botão flutuante**: Adicionar X para fechar + arrastar (drag) para reposicionar
-2. **Comportamento de visibilidade**: Sempre reaparece ao logar; preferência em Configurações (ativo/inativo)
-3. **Seletor de módulo**: Substituir "Fixar em: Dashboard" por um dropdown com todos os módulos + opção "Geral" (todos)
-4. **Enviar para tarefa**: Opção de enviar para tarefa geral OU para colaborador específico
-5. **Colar imagem / Anexo**: Integrar `useNoteAttachments` + paste handler no formulário rápido
+### 🔶 Existe parcialmente / precisa ajuste
+| # | Item | O que falta |
+|---|------|-------------|
+| 1 | Landing com 3 botões | Landing existe mas precisa revisar CTAs |
+| 3 | Tela de boas-vindas (primeiro acesso) | Onboarding existe mas pode não ter welcome screen |
+| 7 | Sincronização inicial automática (30d) | Import manual existe, falta auto-trigger pós-OAuth |
+| 10 | Módulo ADS (sync pós-pagamento) | ADS existe, falta gate de trial |
+| 11 | Linha do Tempo (30d trial vs 1yr pago) | Módulo existe, falta limitar por trial |
+| 14 | Dados fiscais obrigatórios pós-pagamento | Tela existe, falta gate de bloqueio |
 
----
+### 🔴 Precisa ser desenvolvido
+| # | Item | Descrição |
+|---|------|-----------|
+| 4b | Velocímetro de ativação | Widget de progresso no dashboard |
+| 9b | Tabela `sync_jobs` + lock após sucesso | Controle de execução de syncs |
+| 9c | Lock do botão 1 ano após sucesso | Bloquear re-execução pós-sucesso |
+| 16 | Multi-conta (soma de vendas) | Lógica de soma cross-account |
+| 17-18 | Estados de conta + aviso pré-conexão | Workflow de nova conta |
+| 19 | Verificação de limite + pending_upgrade | Gate automático |
+| 20 | Upgrade com pró-rata | Cálculo proporcional |
+| 21 | Crescimento natural → bloqueio | Detecção automática de excesso |
+| 22 | Proteção contra abuso (logs) | Audit trail de conexões/upgrades |
 
-### 1. FloatingPostItButton — Fechar + Arrastar
+## Ordem sugerida de implementação
 
-**Arquivo**: `src/components/notes/FloatingPostItButton.tsx`
+### Fase 1 — Gates e bloqueios (impacto imediato)
+1. Velocímetro de ativação no dashboard
+2. Tabela `sync_jobs` + controle de locks
+3. Gate de dados fiscais pós-pagamento
+4. Auto-sync 30d após OAuth
 
-- Adicionar estado `dismissed` (sessão) — ao clicar X, esconde até próximo login/reload
-- Implementar drag via `onPointerDown/Move/Up` para mover a posição do FAB (estado local `{x, y}` com `position: fixed`)
-- Persistir posição no `localStorage` para manter entre páginas
-- Ao recarregar a página, o botão reaparece (dismissed reseta)
+### Fase 2 — Trial gates nos módulos ✅
+5. ✅ ADS: banner de trial + sync bloqueado via ML API gate no backend
+6. ✅ Linha do Tempo: banner de trial informando limitação a 30d
+7. ✅ Etiquetas: filtro "Todos" agora capped a 30 dias
 
-### 2. Preferência em Configurações
+### Fase 3 — Multi-conta e upgrade ✅
+8. ✅ Multi-conta: soma de vendas (get_tenant_total_sales + check_tenant_plan_limit)
+9. ✅ Estados de conta (account_state enum: active/pending_upgrade/disabled/error)
+10. ✅ Upgrade com pró-rata (calculate_prorata_upgrade + execute_plan_upgrade)
+11. ✅ Crescimento natural → bloqueio (PlanLimitBanner + useTenantLimits)
+12. ✅ Aviso pré-conexão de nova conta (AccountConnectionWarning)
+13. ✅ Audit log (tenant_limit_log)
 
-**Já existe** `showPostItButton` em `useUtilitiesPreferences`. Apenas precisa garantir que a UI de Settings exiba o toggle. Verificar se já está no painel de configurações de widgets.
-
-### 3. Seletor de Módulo no QuickPostItForm
-
-**Arquivo**: `src/components/notes/QuickPostItForm.tsx`
-
-- Substituir o texto estático "📌 Fixar em: Dashboard" por um `Select` dropdown
-- Alimentado por `getAvailableModules()` do `useActiveModuleKey.ts`
-- Adicionar opção especial `"__global__"` = "Geral (todos os módulos)"
-- Default: módulo atual detectado automaticamente
-- Quando "Geral" selecionado, o `moduleKey` passa como `"__global__"` e o pin aparece em todos os módulos
-
-### 4. Enviar para Tarefa — Geral ou Colaborador
-
-**Arquivo**: `src/components/notes/ModulePostIt.tsx`
-
-- Transformar o botão "Enviar para Tarefas" em um dropdown com duas opções:
-  - "Tarefa Geral" (sem responsável)
-  - "Enviar para Colaborador" (abre seletor de membro do workspace)
-- Reutilizar hook de membros do workspace existente para listar colaboradores
-
-### 5. Colar Imagem + Anexo no QuickPostItForm
-
-**Arquivo**: `src/components/notes/QuickPostItForm.tsx`
-
-- Integrar `useNoteAttachments` — como a nota ainda não existe no momento da criação, usar fluxo em 2 etapas:
-  1. Capturar arquivos/imagens em estado temporário (clipboard paste + botão de anexo)
-  2. Após criar a nota, fazer upload dos arquivos pendentes
-- Adicionar `onPaste` handler no Textarea para capturar imagens do clipboard
-- Adicionar botão de anexo (ícone Paperclip) com input file hidden
-- Mostrar preview das imagens/arquivos pendentes antes de enviar
-
-### 6. ModuleNotesOverlay — Suporte a "Geral"
-
-**Arquivo**: `src/hooks/useNotePins.ts`
-
-- Na query de pins, incluir pins com `module_key = '__global__'` além do módulo atual
-- Isso faz post-its "Geral" aparecerem em qualquer página
-
----
-
-### Arquivos Afetados
-
-| Arquivo | Mudança |
-|---------|---------|
-| `FloatingPostItButton.tsx` | Drag + botão X + dismissed por sessão |
-| `QuickPostItForm.tsx` | Dropdown de módulo + paste de imagem + botão anexo |
-| `ModulePostIt.tsx` | Dropdown "enviar tarefa" com opção colaborador |
-| `useNotePins.ts` | Incluir `__global__` na query |
-| `useActiveModuleKey.ts` | Adicionar entrada `__global__` no MODULE_LABELS |
-| Locales (pt-BR, en, es) | Novas traduções |
-
+### Fase 4 — Landing e onboarding ✅
+14. ✅ Landing com 3 CTAs (Login, Cadastro, Planos) no header e hero
+15. ✅ Welcome screen pós-confirmação de email (WelcomeScreen + aviso ML)
+16. ✅ Proteção contra abuso (system_audit_log + tenant_limit_log)

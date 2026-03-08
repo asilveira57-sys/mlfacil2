@@ -47,10 +47,14 @@
   "postit": {
     "new_postit": "Novo Post-it",
     "title_placeholder": "Título...",
-    "content_placeholder": "Descrição rápida...",
+    "content_placeholder": "Descrição rápida... (cole imagens com Ctrl+V)",
     "pin_to_module": "Fixar em: {{module}}",
     "creating": "Criando...",
-    "create_and_pin": "Criar e Fixar"
+    "create_and_pin": "Criar e Fixar",
+    "close": "Fechar",
+    "global": "Geral (todos os módulos)",
+    "general_task": "Tarefa Geral",
+    "send_to_collaborator": "Enviar para colaborador"
   },
   "settings": {
     "title": "Bloco de Notas",

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pin, X, Send, Edit2, ChevronDown, ChevronUp, User } from 'lucide-react';
+import { Pin, X, Send, Edit2, ChevronDown, ChevronUp, User, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import type { Note } from '@/types/notes';
 
@@ -9,10 +10,11 @@ interface ModulePostItProps {
   note: Note & { pin?: any };
   onEdit: () => void;
   onUnpin: () => void;
-  onSendToTasks: () => void;
+  onSendToTasks: (assignTo?: string) => void;
+  workspaceMembers?: { id: string; name: string }[];
 }
 
-export function ModulePostIt({ note, onEdit, onUnpin, onSendToTasks }: ModulePostItProps) {
+export function ModulePostIt({ note, onEdit, onUnpin, onSendToTasks, workspaceMembers = [] }: ModulePostItProps) {
   const { t } = useTranslation('notes');
   const [expanded, setExpanded] = useState(false);
 
@@ -66,15 +68,34 @@ export function ModulePostIt({ note, onEdit, onUnpin, onSendToTasks }: ModulePos
             >
               <Edit2 className="h-3 w-3" />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              onClick={(e) => { e.stopPropagation(); onSendToTasks(); }}
-              title={t('actions.send_to_tasks')}
-            >
-              <Send className="h-3 w-3" />
-            </Button>
+
+            {/* Send to tasks dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={(e) => e.stopPropagation()}
+                  title={t('actions.send_to_tasks')}
+                >
+                  <Send className="h-3 w-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" onClick={(e) => e.stopPropagation()}>
+                <DropdownMenuItem onClick={() => onSendToTasks()}>
+                  <Users className="h-3.5 w-3.5 mr-2" />
+                  {t('postit.general_task', { defaultValue: 'Tarefa Geral' })}
+                </DropdownMenuItem>
+                {workspaceMembers.map((member) => (
+                  <DropdownMenuItem key={member.id} onClick={() => onSendToTasks(member.id)}>
+                    <User className="h-3.5 w-3.5 mr-2" />
+                    {member.name}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
             <div className="flex-1" />
             <Button
               variant="ghost"
