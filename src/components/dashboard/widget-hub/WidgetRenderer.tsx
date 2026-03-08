@@ -1,23 +1,36 @@
 import { lazy, Suspense } from 'react';
 
+// Retry wrapper for lazy imports — handles stale chunk hashes after deploys
+function lazyRetry(factory: () => Promise<any>) {
+  return lazy(() =>
+    factory().catch((err) => {
+      console.warn('Lazy import failed, retrying...', err);
+      // Force a fresh import by adding a cache-buster
+      return new Promise<any>((resolve) => {
+        setTimeout(() => resolve(factory()), 1500);
+      });
+    })
+  );
+}
+
 // Inline mini-widgets for catalog items
-const ClockMini = lazy(() => import('./widgets/ClockMini'));
-const WeatherMini = lazy(() => import('./widgets/WeatherMini'));
-const CalculatorMini = lazy(() => import('./widgets/CalculatorMini'));
-const NotesMini = lazy(() => import('./widgets/NotesMini'));
-const TasksMini = lazy(() => import('./widgets/TasksMini'));
-const CalendarMini = lazy(() => import('./widgets/CalendarMini'));
-const StopwatchMini = lazy(() => import('./widgets/StopwatchMini'));
-const CountdownMini = lazy(() => import('./widgets/CountdownMini'));
-const DollarRateMini = lazy(() => import('./widgets/DollarRateMini'));
-const CryptoRateMini = lazy(() => import('./widgets/CryptoRateMini'));
-const NewsMini = lazy(() => import('./widgets/NewsMini'));
-const SystemAlertsMini = lazy(() => import('./widgets/SystemAlertsMini'));
-const SalesSummaryMini = lazy(() => import('./widgets/SalesSummaryMini'));
-const FinancialSummaryMini = lazy(() => import('./widgets/FinancialSummaryMini'));
-const RecentOrdersMini = lazy(() => import('./widgets/RecentOrdersMini'));
-const ImportantNotificationsMini = lazy(() => import('./widgets/ImportantNotificationsMini'));
-const PlaceholderWidget = lazy(() => import('./widgets/PlaceholderWidget'));
+const ClockMini = lazyRetry(() => import('./widgets/ClockMini'));
+const WeatherMini = lazyRetry(() => import('./widgets/WeatherMini'));
+const CalculatorMini = lazyRetry(() => import('./widgets/CalculatorMini'));
+const NotesMini = lazyRetry(() => import('./widgets/NotesMini'));
+const TasksMini = lazyRetry(() => import('./widgets/TasksMini'));
+const CalendarMini = lazyRetry(() => import('./widgets/CalendarMini'));
+const StopwatchMini = lazyRetry(() => import('./widgets/StopwatchMini'));
+const CountdownMini = lazyRetry(() => import('./widgets/CountdownMini'));
+const DollarRateMini = lazyRetry(() => import('./widgets/DollarRateMini'));
+const CryptoRateMini = lazyRetry(() => import('./widgets/CryptoRateMini'));
+const NewsMini = lazyRetry(() => import('./widgets/NewsMini'));
+const SystemAlertsMini = lazyRetry(() => import('./widgets/SystemAlertsMini'));
+const SalesSummaryMini = lazyRetry(() => import('./widgets/SalesSummaryMini'));
+const FinancialSummaryMini = lazyRetry(() => import('./widgets/FinancialSummaryMini'));
+const RecentOrdersMini = lazyRetry(() => import('./widgets/RecentOrdersMini'));
+const ImportantNotificationsMini = lazyRetry(() => import('./widgets/ImportantNotificationsMini'));
+const PlaceholderWidget = lazyRetry(() => import('./widgets/PlaceholderWidget'));
 
 interface Props {
   slug: string;
