@@ -145,6 +145,7 @@ export function AppShellLayout() {
               <GlobalExplanatoryCardGate />
             </main>
           </SidebarInset>
+          <FloatingPostItButton visible={utilitiesPrefs.showPostItButton !== false} companyId={sellerId} />
           <FloatingSupportButton visible={utilitiesPrefs.showSupportButton} />
         </div>
       </SidebarProvider>
