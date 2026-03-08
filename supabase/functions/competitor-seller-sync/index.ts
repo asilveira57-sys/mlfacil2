@@ -481,7 +481,7 @@ async function handlePreview(_admin: any, body: any, accessToken?: string) {
     ml_seller_id: resolved.ml_seller_id,
     ml_nickname: resolved.ml_nickname,
     reputation: resolved.reputation,
-    total_items: searchRes?.paging?.total || 0,
+    total_items: totalItems,
   }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 }
 
