@@ -72,6 +72,33 @@ export function mapErrorToFields(errorBody: Record<string, unknown>): FieldError
   const causes = (errorBody.cause as any[]) || [];
   const message = (errorBody.message as string) || '';
   const error = (errorBody.error as string) || '';
+  const combined = `${message} ${error}`.toLowerCase();
+
+  // Special handling for title_invalid_fields_exhausted
+  if (error === 'title_invalid_fields_exhausted' || combined.includes('rejeitou o campo título')) {
+    const finalAttempt = errorBody.final_attempt as string || '';
+    errors.push({
+      field: 'title',
+      message: `Esta categoria não aceita título neste fluxo. Tente ajustar categoria/family_name.${finalAttempt ? ` (última tentativa: ${finalAttempt})` : ''}`,
+      cause: 'title_invalid_fields_exhausted',
+    });
+    errors.push({
+      field: 'category_id',
+      message: 'Considere trocar a categoria — a atual rejeita o título enviado.',
+      cause: 'title_invalid_fields_exhausted',
+    });
+    return errors;
+  }
+
+  // Check if invalid_fields mentions title specifically
+  if (combined.includes('invalid_fields') && combined.includes('title')) {
+    const finalAttempt = errorBody.final_attempt as string || '';
+    errors.push({
+      field: 'title',
+      message: `Campo título rejeitado pela categoria. Tente ajustar categoria/family_name.${finalAttempt ? ` (tentativa: ${finalAttempt})` : ''}`,
+      cause: 'title_invalid_fields',
+    });
+  }
 
   for (const cause of causes) {
     const code = (cause.code || cause.type || '').toLowerCase();

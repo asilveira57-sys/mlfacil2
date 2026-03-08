@@ -386,8 +386,8 @@ export default function ClonarAnuncio() {
       if (fnError) throw new Error(fnError.message || 'Erro ao publicar');
 
       if (data?.error || data?.status === 'error') {
-        // Map errors to fields
-        const errorBody = data.error_body || data;
+        // Map errors to fields — include final_attempt/used_title_fallback from backend
+        const errorBody = { ...(data.error_body || data), final_attempt: data.final_attempt, used_title_fallback: data.used_title_fallback };
         const mapped = mapErrorToFields(errorBody);
         setFieldErrors(mapped);
 
@@ -401,8 +401,9 @@ export default function ClonarAnuncio() {
           }).eq('id', draftId);
         }
 
-        await safeLog('publish_error', { correlation_id: corrId, error: errorBody, field_errors: mapped.map(e => e.field) });
-        toast.error('Erro ao publicar', { description: 'Corrija os campos destacados e tente novamente.' });
+        const attemptInfo = data.final_attempt ? ` (tentativa final: ${data.final_attempt})` : '';
+        await safeLog('publish_error', { correlation_id: corrId, error: errorBody, field_errors: mapped.map(e => e.field), final_attempt: data.final_attempt, used_title_fallback: data.used_title_fallback });
+        toast.error('Erro ao publicar', { description: `Corrija os campos destacados e tente novamente.${attemptInfo}` });
         return;
       }
 
