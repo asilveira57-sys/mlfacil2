@@ -138,14 +138,15 @@ Deno.serve(async (req) => {
         const topProduct = [...productMap.values()].sort((a, b) => b.qty - a.qty)[0]?.name || null;
 
         // === OPERAÇÃO ===
-        // Etiquetas pendentes: shipments com substatus 'ready_to_print' 
-        // (exatamente o que a página de Etiquetas mostra como "Para imprimir")
+        // Etiquetas pendentes: only count shipments from last 7 days to avoid stale records
+        const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
         const { count: etiquetasReadyToPrint } = await supabase
           .from("meli_shipments_cache")
           .select("*", { count: "exact", head: true })
           .eq("seller_id", sellerId)
           .eq("shipment_status", "ready_to_ship")
-          .eq("shipment_substatus", "ready_to_print");
+          .eq("shipment_substatus", "ready_to_print")
+          .gte("updated_at", sevenDaysAgo);
 
         // Também contar da print queue como backup
         const { count: etiquetasNaFila } = await supabase
@@ -190,17 +191,60 @@ Deno.serve(async (req) => {
         let cutoffColeta: string | null = null;
 
         if (accountId) {
+          // Check if we have a fresh cutoff for today (SP timezone)
+          const spNow = new Date(now.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+          const todayStr = `${spNow.getFullYear()}-${String(spNow.getMonth() + 1).padStart(2, "0")}-${String(spNow.getDate()).padStart(2, "0")}`;
+
           const { data: cutoffData } = await supabase
             .from("shipping_cutoff_cache")
-            .select("flex_cutoff_time, colecta_cutoff_time")
+            .select("flex_cutoff_time, colecta_cutoff_time, updated_at")
             .eq("seller_id", accountId)
             .eq("status", "ok")
             .order("updated_at", { ascending: false })
             .limit(1)
             .maybeSingle();
 
-          cutoffFlex = cutoffData?.flex_cutoff_time || null;
-          cutoffColeta = cutoffData?.colecta_cutoff_time || null;
+          const cutoffIsStale = !cutoffData || !cutoffData.updated_at.startsWith(todayStr);
+
+          if (cutoffIsStale && sellerId) {
+            // Trigger cutoff refresh
+            try {
+              console.log(`[sandbox-refresh] Triggering cutoff refresh for company=${company.id}`);
+              const refreshUrl = `${supabaseUrl}/functions/v1/meli-shipping-cutoff-refresh`;
+              await fetch(refreshUrl, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${serviceKey}`,
+                },
+                body: JSON.stringify({
+                  company_id: company.id,
+                  seller_id: accountId,
+                  ml_user_id: sellerId,
+                }),
+              });
+
+              // Re-read after refresh
+              const { data: freshCutoff } = await supabase
+                .from("shipping_cutoff_cache")
+                .select("flex_cutoff_time, colecta_cutoff_time")
+                .eq("seller_id", accountId)
+                .eq("status", "ok")
+                .order("updated_at", { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+              cutoffFlex = freshCutoff?.flex_cutoff_time || null;
+              cutoffColeta = freshCutoff?.colecta_cutoff_time || null;
+            } catch (cutoffErr: any) {
+              console.error(`[sandbox-refresh] Cutoff refresh failed for ${company.id}:`, cutoffErr.message);
+              cutoffFlex = cutoffData?.flex_cutoff_time || null;
+              cutoffColeta = cutoffData?.colecta_cutoff_time || null;
+            }
+          } else {
+            cutoffFlex = cutoffData?.flex_cutoff_time || null;
+            cutoffColeta = cutoffData?.colecta_cutoff_time || null;
+          }
         }
 
         const snapshot = {

@@ -58,14 +58,37 @@ export function useSandboxSnapshots() {
         .select('id, display_name')
         .in('id', companyIds);
 
-      // Get customization colors
+      // Get ml_accounts to map company_id → ml_account.id
+      const { data: mlAccounts } = await supabase
+        .from('ml_accounts')
+        .select('id, company_id')
+        .in('company_id', companyIds)
+        .eq('is_active', true);
+
+      // company_customization stores ml_account UUID as company_id
+      const mlAccountIds = (mlAccounts || []).map(a => a.id);
+      const allLookupIds = [...companyIds, ...mlAccountIds];
       const { data: customizations } = await supabase
         .from('company_customization')
         .select('company_id, color_key')
-        .in('company_id', companyIds);
+        .in('company_id', allLookupIds);
+
+      // Build reverse map: real company_id → color_key
+      const mlToCompany = new Map((mlAccounts || []).map(a => [a.id, a.company_id]));
+      const colorMap = new Map<string, string>();
+      (customizations || []).forEach(c => {
+        // Direct match (company_id)
+        if (companyIds.includes(c.company_id)) {
+          colorMap.set(c.company_id, c.color_key);
+        }
+        // Indirect match (ml_account UUID → real company_id)
+        const realCompanyId = mlToCompany.get(c.company_id);
+        if (realCompanyId && !colorMap.has(realCompanyId)) {
+          colorMap.set(realCompanyId, c.color_key);
+        }
+      });
 
       const companyMap = new Map((companies || []).map(c => [c.id, c.display_name]));
-      const colorMap = new Map((customizations || []).map(c => [c.company_id, c.color_key]));
 
       return snapshots
         .filter(s => s.snapshot_status !== 'no_account')
