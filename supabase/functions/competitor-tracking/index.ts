@@ -152,14 +152,19 @@ Deno.serve(async (req) => {
         // Parse item ID from link
         const competitorExternalId = parseMLItemId(competitor_url);
         
+        if (!competitorExternalId) {
+          return new Response(JSON.stringify({ error: 'Não foi possível extrair o ID do anúncio a partir do link informado. Verifique se é um link válido do Mercado Livre.' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
         // Fetch initial data from ML
         let listingData: any = null;
-        if (competitorExternalId) {
-          try {
-            listingData = await fetchMLListingData(competitorExternalId);
-          } catch (e) {
-            console.error('Error fetching ML data:', e);
-          }
+        try {
+          listingData = await fetchMLListingData(competitorExternalId);
+        } catch (e) {
+          console.error('Error fetching ML data:', e);
         }
 
         const now = new Date();
