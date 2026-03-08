@@ -407,15 +407,15 @@ const SettingsPlan = () => {
                                 <button
                                   key={offer.id}
                                   onClick={() => handleOfferSelect(tier.id, offer.id)}
-                                  className={`relative rounded-md border px-3 py-1.5 text-xs font-medium transition-all ${
+                                  className={`flex flex-col items-center gap-0.5 rounded-md border px-3 py-2 text-xs font-medium transition-all ${
                                     isSelected
                                       ? "border-primary bg-primary/10 text-primary"
                                       : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"
                                   }`}
                                 >
-                                  {getPeriodLabel(offer.period_months)}
+                                  <span>{getPeriodLabel(offer.period_months)}</span>
                                   {offer.badge_text && (
-                                    <span className="absolute -top-2 -right-1 text-[9px] bg-green-600 text-white px-1 rounded-full leading-tight">
+                                    <span className="text-[9px] leading-tight bg-green-600 text-white px-1.5 py-0.5 rounded-full whitespace-nowrap">
                                       {offer.badge_text}
                                     </span>
                                   )}
