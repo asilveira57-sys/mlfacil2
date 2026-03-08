@@ -25,28 +25,19 @@ interface Tracker {
   consecutive_failures: number;
 }
 
-// Parse item ID from ML link
+// Simple fallback parse (client should send pre-resolved ID)
 function parseMLItemId(link: string): string | null {
-  // Normalize: trim, take only URL part if pasted with extra text
   const cleaned = link.trim();
-  
   const patterns = [
-    // /p/MLB12345 (product page)
     /\/p\/(MLB-?\d+)/i,
-    // /MLB-12345-title or /MLB12345-title (listing page)
     /\/(MLB-?\d+)/i,
-    // Plain ID: MLB12345 or MLB-12345
     /^(MLB-?\d+)$/i,
-    // URL ending with -MLB12345678 (common sharing format)
     /-(MLB\d{6,})/i,
-    // Fallback: any MLB + digits in the string
     /(MLB-?\d{6,})/i,
   ];
   for (const pattern of patterns) {
     const match = cleaned.match(pattern);
-    if (match) {
-      return match[1].replace(/-/g, '');
-    }
+    if (match) return match[1].replace(/-/g, '');
   }
   return null;
 }
@@ -55,15 +46,12 @@ function parseMLItemId(link: string): string | null {
 async function fetchMLListingData(itemId: string): Promise<any> {
   const response = await fetch(`https://api.mercadolibre.com/items/${itemId}`);
   if (!response.ok) {
-    if (response.status === 404) {
-      return { status: 'not_found', is_available: false };
-    }
+    if (response.status === 404) return { status: 'not_found', is_available: false };
     throw new Error(`ML API error: ${response.status}`);
   }
   return await response.json();
 }
 
-// Determine state from ML data
 function getState(data: any): string {
   if (!data || data.status === 'not_found') return 'indisponivel';
   if (data.status === 'active') return 'ativo';
@@ -111,6 +99,10 @@ Deno.serve(async (req) => {
         const { 
           competitor_url, 
           competitor_label, 
+          competitor_external_id: clientExternalId,
+          competitor_title: clientTitle,
+          competitor_thumbnail: clientThumbnail,
+          initial_price,
           marketplace = 'mercadolivre',
           min_price, 
           max_price, 
@@ -133,7 +125,6 @@ Deno.serve(async (req) => {
           });
         }
 
-        // Validate check_interval_minutes
         if (check_interval_minutes < 60) {
           return new Response(JSON.stringify({ error: 'Intervalo mínimo de verificação é 60 minutos' }), {
             status: 400,
@@ -141,7 +132,6 @@ Deno.serve(async (req) => {
           });
         }
 
-        // Validate min/max price
         if (min_price && max_price && min_price > max_price) {
           return new Response(JSON.stringify({ error: 'Preço mínimo não pode ser maior que o máximo' }), {
             status: 400,
@@ -149,28 +139,38 @@ Deno.serve(async (req) => {
           });
         }
 
-        // Parse item ID from link
-        const competitorExternalId = parseMLItemId(competitor_url);
+        // Use client-provided ID, fallback to server parse
+        const competitorExternalId = clientExternalId || parseMLItemId(competitor_url);
         
         if (!competitorExternalId) {
-          return new Response(JSON.stringify({ error: 'Não foi possível extrair o ID do anúncio a partir do link informado. Verifique se é um link válido do Mercado Livre.' }), {
+          return new Response(JSON.stringify({ error: 'Não foi possível extrair o ID do anúncio. Verifique se é um link válido do Mercado Livre.' }), {
             status: 400,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
 
-        // Fetch initial data from ML
+        // If client sent pre-resolved data, use it; otherwise fetch from ML
         let listingData: any = null;
-        try {
-          listingData = await fetchMLListingData(competitorExternalId);
-        } catch (e) {
-          console.error('Error fetching ML data:', e);
+        if (clientTitle) {
+          // Client already resolved
+          listingData = {
+            id: competitorExternalId,
+            title: clientTitle,
+            thumbnail: clientThumbnail,
+            price: initial_price,
+            status: 'active',
+          };
+        } else {
+          try {
+            listingData = await fetchMLListingData(competitorExternalId);
+          } catch (e) {
+            console.error('Error fetching ML data:', e);
+          }
         }
 
         const now = new Date();
         const nextCheck = new Date(now.getTime() + check_interval_minutes * 60 * 1000);
 
-        // Insert tracker
         const insertData: any = {
           user_id: user.id,
           seller_id: sellerId,
@@ -226,7 +226,6 @@ Deno.serve(async (req) => {
           });
         }
 
-        // Insert tracker_created event
         await supabaseClient.from('competitor_events').insert({
           tracker_id: inserted.id,
           user_id: user.id,
@@ -257,8 +256,25 @@ Deno.serve(async (req) => {
           });
         }
 
-        if (!tracker.competitor_external_id) {
-          return new Response(JSON.stringify({ error: 'ID externo não disponível' }), {
+        // If external ID is missing, try to re-resolve from URL
+        let externalId = tracker.competitor_external_id;
+        if (!externalId && tracker.competitor_url) {
+          externalId = parseMLItemId(tracker.competitor_url);
+          if (externalId) {
+            await supabaseClient
+              .from('competitor_trackers')
+              .update({ competitor_external_id: externalId })
+              .eq('id', tracker.id);
+          }
+        }
+
+        if (!externalId) {
+          // Mark as error instead of just returning 400
+          await supabaseClient
+            .from('competitor_trackers')
+            .update({ status: 'erro' })
+            .eq('id', tracker.id);
+          return new Response(JSON.stringify({ error: 'Não foi possível identificar o ID do anúncio. Remova e adicione novamente com um link válido.' }), {
             status: 400,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
@@ -267,9 +283,8 @@ Deno.serve(async (req) => {
         // Fetch current data from ML
         let currentData: any;
         try {
-          currentData = await fetchMLListingData(tracker.competitor_external_id);
+          currentData = await fetchMLListingData(externalId);
         } catch (e) {
-          // Register failure event
           await supabaseClient.from('competitor_events').insert({
             tracker_id: tracker.id,
             user_id: user.id,
@@ -298,7 +313,6 @@ Deno.serve(async (req) => {
         const currentPrice = currentData.price || null;
         const currentState = getState(currentData);
 
-        // Calculate price delta
         let priceDelta = null;
         let priceDeltaPercent = null;
         let priceChanged = false;
@@ -312,7 +326,6 @@ Deno.serve(async (req) => {
         const now = new Date();
         const nextCheck = new Date(now.getTime() + tracker.check_interval_minutes * 60 * 1000);
 
-        // Update tracker
         const updateData: any = {
           last_known_price: currentPrice,
           last_known_state: currentState,
@@ -329,7 +342,6 @@ Deno.serve(async (req) => {
           .update(updateData)
           .eq('id', tracker.id);
 
-        // Insert snapshot
         await supabaseClient.from('competitor_snapshots').insert({
           tracker_id: tracker.id,
           price: currentPrice,
@@ -337,7 +349,6 @@ Deno.serve(async (req) => {
           source: 'api_publica',
         });
 
-        // Generate events and alerts
         const events: any[] = [];
         const alerts: any[] = [];
 
@@ -361,7 +372,6 @@ Deno.serve(async (req) => {
             body: `${tracker.competitor_label}: R$ ${previousPrice?.toFixed(2)} → R$ ${currentPrice.toFixed(2)} (${priceDelta! > 0 ? '+' : ''}${priceDeltaPercent?.toFixed(1)}%)`,
           });
 
-          // Check min/max limits
           if (tracker.min_price && currentPrice < tracker.min_price) {
             events.push({
               tracker_id: tracker.id,
@@ -391,18 +401,15 @@ Deno.serve(async (req) => {
             });
           }
 
-          // Create price action if reaction_mode is sugerir or auto_aplicar
           if (tracker.reaction_mode !== 'monitorar' && (priceDelta! < 0 || (priceDelta! > 0 && tracker.follow_price_up))) {
             let proposedPrice: number;
             
             if (priceDelta! < 0) {
-              // Competitor lowered price - undercut them
               proposedPrice = currentPrice - (tracker.undercut_amount || 0.10);
               if (tracker.min_price && proposedPrice < tracker.min_price) {
                 proposedPrice = tracker.min_price;
               }
             } else {
-              // Competitor raised price - follow up to max
               proposedPrice = currentPrice - (tracker.undercut_amount || 0.10);
               if (tracker.max_price && proposedPrice > tracker.max_price) {
                 proposedPrice = tracker.max_price;
@@ -422,7 +429,6 @@ Deno.serve(async (req) => {
           }
         }
 
-        // State change events
         if (previousState !== currentState) {
           if (currentState === 'indisponivel' && previousState === 'ativo') {
             events.push({
@@ -431,7 +437,6 @@ Deno.serve(async (req) => {
               event_type: 'became_unavailable',
               message: 'Anúncio ficou indisponível',
             });
-
             alerts.push({
               user_id: user.id,
               seller_id: sellerId,
@@ -447,7 +452,6 @@ Deno.serve(async (req) => {
               event_type: 'became_available',
               message: 'Anúncio voltou a ficar disponível',
             });
-
             alerts.push({
               user_id: user.id,
               seller_id: sellerId,
@@ -459,7 +463,6 @@ Deno.serve(async (req) => {
           }
         }
 
-        // Batch insert events and alerts
         if (events.length > 0) {
           await supabaseClient.from('competitor_events').insert(events);
         }
@@ -473,6 +476,50 @@ Deno.serve(async (req) => {
           current_price: currentPrice,
           previous_price: previousPrice,
           state: currentState,
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Repair orphan trackers
+      if (action === 'repair') {
+        const adminClient = createClient(
+          Deno.env.get('SUPABASE_URL') ?? '',
+          Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+        );
+
+        const { data: orphans } = await adminClient
+          .from('competitor_trackers')
+          .select('id, competitor_url, status')
+          .eq('user_id', user.id)
+          .eq('seller_id', sellerId)
+          .is('competitor_external_id', null);
+
+        let repaired = 0;
+        let failed = 0;
+
+        for (const orphan of (orphans || [])) {
+          const resolved = parseMLItemId(orphan.competitor_url || '');
+          if (resolved) {
+            await adminClient
+              .from('competitor_trackers')
+              .update({ competitor_external_id: resolved, status: 'ativo' })
+              .eq('id', orphan.id);
+            repaired++;
+          } else {
+            await adminClient
+              .from('competitor_trackers')
+              .update({ status: 'erro' })
+              .eq('id', orphan.id);
+            failed++;
+          }
+        }
+
+        return new Response(JSON.stringify({ 
+          success: true, 
+          total: (orphans || []).length,
+          repaired, 
+          failed 
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
@@ -511,7 +558,6 @@ Deno.serve(async (req) => {
           }
         }
 
-        // Validate check_interval_minutes
         if (filteredUpdates.check_interval_minutes && filteredUpdates.check_interval_minutes < 60) {
           return new Response(JSON.stringify({ error: 'Intervalo mínimo é 60 minutos' }), {
             status: 400,
@@ -534,7 +580,6 @@ Deno.serve(async (req) => {
           });
         }
 
-        // Record update event
         await supabaseClient.from('competitor_events').insert({
           tracker_id: tracker_id,
           user_id: user.id,
@@ -571,7 +616,6 @@ Deno.serve(async (req) => {
         };
 
         if (response_type === 'accept') {
-          // For now, just mark as applied - real integration pending
           updateData.applied_price = null;
         }
 

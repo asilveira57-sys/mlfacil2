@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Plus, Link } from 'lucide-react';
+import { Loader2, Plus, Link, Search, AlertTriangle, CheckCircle2, Image } from 'lucide-react';
 import { useCompetitorTracking } from '@/hooks/useCompetitorTracking';
 import { SellerListingBindingSection } from './SellerListingBindingSection';
+import { resolveListingFromLink, type ResolvedListing } from '@/lib/meli/resolveListingFromLink';
 
 interface AddTrackedListingDialogProps {
   sellerId: string;
@@ -28,6 +29,9 @@ export function AddTrackedListingDialog({ sellerId, open, onOpenChange }: AddTra
   const { addTracker } = useCompetitorTracking(sellerId);
   
   const [loading, setLoading] = useState(false);
+  const [resolving, setResolving] = useState(false);
+  const [resolvedListing, setResolvedListing] = useState<ResolvedListing | null>(null);
+  const [resolveError, setResolveError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     competitor_url: '',
     competitor_label: '',
@@ -40,15 +44,49 @@ export function AddTrackedListingDialog({ sellerId, open, onOpenChange }: AddTra
   const [sellerListing, setSellerListing] = useState<SellerListingValue | null>(null);
   const [followPriceUp, setFollowPriceUp] = useState(false);
 
+  // Debounced resolution when URL changes
+  useEffect(() => {
+    const url = formData.competitor_url.trim();
+    if (!url || url.length < 10) {
+      setResolvedListing(null);
+      setResolveError(null);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setResolving(true);
+      setResolveError(null);
+      setResolvedListing(null);
+      try {
+        const result = await resolveListingFromLink(url);
+        setResolvedListing(result);
+        // Auto-fill label if empty
+        if (!formData.competitor_label && result.title) {
+          setFormData(prev => ({ ...prev, competitor_label: result.title.substring(0, 60) }));
+        }
+      } catch (err: any) {
+        setResolveError(err.message || 'Erro ao resolver link');
+      } finally {
+        setResolving(false);
+      }
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, [formData.competitor_url]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.competitor_url || !formData.competitor_label) return;
+    if (!resolvedListing || !formData.competitor_label) return;
 
     setLoading(true);
     try {
       const result = await addTracker({
         competitor_url: formData.competitor_url,
         competitor_label: formData.competitor_label,
+        competitor_external_id: resolvedListing.mlb_id,
+        competitor_title: resolvedListing.title,
+        competitor_thumbnail: resolvedListing.thumbnail,
+        initial_price: resolvedListing.price,
         min_price: formData.min_price ? parseFloat(formData.min_price) : undefined,
         max_price: formData.max_price ? parseFloat(formData.max_price) : undefined,
         reaction_mode: formData.reaction_mode,
@@ -75,6 +113,8 @@ export function AddTrackedListingDialog({ sellerId, open, onOpenChange }: AddTra
         });
         setSellerListing(null);
         setFollowPriceUp(false);
+        setResolvedListing(null);
+        setResolveError(null);
         onOpenChange(false);
       }
     } finally {
@@ -109,11 +149,58 @@ export function AddTrackedListingDialog({ sellerId, open, onOpenChange }: AddTra
                 className="pl-10"
                 required
               />
+              {resolving && (
+                <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+              )}
             </div>
             <p className="text-xs text-muted-foreground">
               Aceita links de produto ou item (MLB...)
             </p>
           </div>
+
+          {/* Preview card */}
+          {resolvedListing && (
+            <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+              <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                <CheckCircle2 className="h-4 w-4" />
+                <span className="font-medium">Anúncio identificado</span>
+                {resolvedListing.is_catalog && (
+                  <span className="text-xs bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 px-1.5 py-0.5 rounded">Catálogo</span>
+                )}
+              </div>
+              <div className="flex gap-3">
+                {resolvedListing.thumbnail ? (
+                  <img 
+                    src={resolvedListing.thumbnail} 
+                    alt="" 
+                    className="w-14 h-14 rounded object-cover flex-shrink-0"
+                  />
+                ) : (
+                  <div className="w-14 h-14 rounded bg-muted flex items-center justify-center flex-shrink-0">
+                    <Image className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <p className="text-sm font-medium line-clamp-2">{resolvedListing.title}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    {resolvedListing.price && (
+                      <span className="text-sm font-semibold text-primary">
+                        R$ {resolvedListing.price.toFixed(2)}
+                      </span>
+                    )}
+                    <span className="text-xs text-muted-foreground">{resolvedListing.mlb_id}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {resolveError && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 text-destructive mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-destructive">{resolveError}</p>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="competitor_label">Nome do Concorrente *</Label>
@@ -253,7 +340,10 @@ export function AddTrackedListingDialog({ sellerId, open, onOpenChange }: AddTra
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={loading || !formData.competitor_url || !formData.competitor_label}>
+            <Button 
+              type="submit" 
+              disabled={loading || !resolvedListing || !formData.competitor_label}
+            >
               {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Adicionar
             </Button>
