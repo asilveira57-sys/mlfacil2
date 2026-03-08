@@ -456,10 +456,16 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
           </Select>
         </div>
 
-        <Button variant="outline" onClick={handleExportCSV} disabled={classifiedItems.length === 0}>
-          <Download className="h-4 w-4 mr-2" />
-          Exportar CSV
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setMapDrawerOpen(true)} disabled={classifiedItems.length === 0}>
+            <MapIcon className="h-4 w-4 mr-2" />
+            Ver Mapa
+          </Button>
+          <Button variant="outline" onClick={handleExportCSV} disabled={classifiedItems.length === 0}>
+            <Download className="h-4 w-4 mr-2" />
+            Exportar CSV
+          </Button>
+        </div>
       </div>
 
       {/* Breadcrumb navigation */}
