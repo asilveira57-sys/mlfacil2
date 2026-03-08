@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
-import { useCollaboratorAccess, getModuleKeyFromRoute } from '@/hooks/useCollaboratorAccess';
+import { useCollaboratorAccess, getModuleKeyFromRouteSync } from '@/hooks/useCollaboratorAccess';
+import { useModuleRouteMap } from '@/hooks/useSystemModules';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
