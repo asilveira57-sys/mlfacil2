@@ -549,6 +549,7 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
         emptyMessage={`Nenhum${drillLevel === "uf" ? " estado" : drillLevel === "city" ? "a cidade" : " bairro"} encontrado no período selecionado`}
         onRowClick={drillLevel !== "neighborhood" ? handleDrillDown : undefined}
         onDetailClick={handleOpenDetail}
+        onMapClick={drillLevel !== "neighborhood" ? handleOpenMapForItem : undefined}
       />
 
       {/* Drill hint */}
@@ -586,6 +587,8 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
         sellerId={sellerId}
         dateFrom={filters.dateFrom}
         dateTo={filters.dateTo}
+        onNavigateUp={drillLevel !== "uf" ? handleDrawerNavigateUp : undefined}
+        breadcrumbParts={getDrawerBreadcrumb()}
       />
 
       {/* Map Drawer */}
