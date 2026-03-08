@@ -198,6 +198,7 @@ export function NotesDrawer({ companyId }: NotesDrawerProps) {
             }}
             onPasteImage={handlePasteImage}
             onUploadImage={handleUploadImage}
+            onAttachFile={handleAttachFile}
           />
         ) : (
           <>
