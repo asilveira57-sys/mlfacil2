@@ -21,15 +21,15 @@ Deno.serve(async (req) => {
   const supabase = createClient(supabaseUrl, supabaseKey);
 
   try {
-    // Check for internal server-to-server call (from cost-engine)
-    const internalKey = req.headers.get("x-internal-key");
-    const isInternalCall = internalKey === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const authHeader = req.headers.get("Authorization");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const bearerToken = authHeader?.replace("Bearer ", "") || "";
 
     let user: { id: string };
     let body: Record<string, unknown>;
 
-    if (isInternalCall) {
-      // Internal call: trust user_id from body, skip JWT auth
+    // Check if this is an internal server-to-server call (service role key)
+    if (bearerToken === serviceRoleKey) {
       body = await req.json().catch(() => ({}));
       const bodyUserId = body.user_id as string;
       if (!bodyUserId) {
@@ -41,7 +41,6 @@ Deno.serve(async (req) => {
       console.log("[RealCosts] Internal call for user:", bodyUserId);
     } else {
       // External call: validate JWT
-      const authHeader = req.headers.get("Authorization");
       if (!authHeader || !authHeader.startsWith("Bearer ")) {
         return new Response(JSON.stringify({ error: "No authorization header" }), {
           status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
