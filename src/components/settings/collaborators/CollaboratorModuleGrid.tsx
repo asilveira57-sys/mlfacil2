@@ -1,7 +1,8 @@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { MODULE_CATALOG } from '@/types/collaborator';
+import { Loader2 } from 'lucide-react';
+import { usePermissionModules } from '@/hooks/useSystemModules';
 
 interface CollaboratorModuleGridProps {
   selectedModules: Record<string, boolean>;
@@ -14,6 +15,8 @@ export function CollaboratorModuleGrid({
   onChange,
   disabled = false
 }: CollaboratorModuleGridProps) {
+  const { data: modules = [], isLoading } = usePermissionModules();
+
   const handleToggle = (key: string, checked: boolean) => {
     onChange({
       ...selectedModules,
@@ -22,7 +25,7 @@ export function CollaboratorModuleGrid({
   };
 
   const handleSelectAll = () => {
-    const allEnabled = MODULE_CATALOG.reduce((acc, mod) => {
+    const allEnabled = modules.reduce((acc, mod) => {
       acc[mod.key] = true;
       return acc;
     }, {} as Record<string, boolean>);
@@ -30,7 +33,7 @@ export function CollaboratorModuleGrid({
   };
 
   const handleDeselectAll = () => {
-    const allDisabled = MODULE_CATALOG.reduce((acc, mod) => {
+    const allDisabled = modules.reduce((acc, mod) => {
       acc[mod.key] = false;
       return acc;
     }, {} as Record<string, boolean>);
@@ -39,11 +42,20 @@ export function CollaboratorModuleGrid({
 
   const enabledCount = Object.values(selectedModules).filter(Boolean).length;
 
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <span className="ml-2 text-sm text-muted-foreground">Carregando módulos...</span>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <Label className="text-sm font-medium">
-          Módulos habilitados ({enabledCount}/{MODULE_CATALOG.length})
+          Módulos habilitados ({enabledCount}/{modules.length})
         </Label>
         <div className="flex gap-2">
           <button
@@ -67,7 +79,7 @@ export function CollaboratorModuleGrid({
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        {MODULE_CATALOG.map((mod) => (
+        {modules.map((mod) => (
           <div
             key={mod.key}
             className={`flex items-start gap-3 p-3 rounded-lg border transition-colors ${
@@ -92,11 +104,6 @@ export function CollaboratorModuleGrid({
                 >
                   {mod.label}
                 </Label>
-                {mod.restricted && (
-                  <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                    Restrito
-                  </Badge>
-                )}
               </div>
               {mod.description && (
                 <p className="text-xs text-muted-foreground mt-0.5 truncate">

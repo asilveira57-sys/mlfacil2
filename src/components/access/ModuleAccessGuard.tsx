@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
-import { useCollaboratorAccess, getModuleKeyFromRoute } from '@/hooks/useCollaboratorAccess';
+import { useCollaboratorAccess, getModuleKeyFromRouteSync } from '@/hooks/useCollaboratorAccess';
+import { useModuleRouteMap } from '@/hooks/useSystemModules';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -17,6 +18,7 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { isCollaborator, isLoading, hasModuleAccess } = useCollaboratorAccess();
+  const { data: routeMap } = useModuleRouteMap();
   const [timedOut, setTimedOut] = useState(false);
   // Prevent full-screen "blank" on background refetches.
   // Once access has been resolved at least once, keep rendering children
@@ -53,11 +55,21 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
     return () => window.clearTimeout(t);
   }, [isLoading, location.pathname]);
 
+  // Pre-warm the route map cache for getModuleKeyFromRouteSync
+  useEffect(() => {
+    if (routeMap) {
+      // routeMap from useModuleRouteMap populates the react-query cache;
+      // but getModuleKeyFromRouteSync uses its own module-level cache.
+      // We trigger loadRouteMap to populate it.
+      import('@/hooks/useCollaboratorAccess').then(m => m.getModuleKeyFromRoute('/'));
+    }
+  }, [routeMap]);
+
   useEffect(() => {
     if (isLoading) return;
     if (!isCollaborator) return; // Admin/owner has full access
 
-    const moduleKey = getModuleKeyFromRoute(location.pathname);
+    const moduleKey = getModuleKeyFromRouteSync(location.pathname);
     
     // Routes that don't require module access check
     const publicRoutes = ['/dashboard', '/settings', '/auth', '/criar-acesso', '/primeiro-acesso', '/reconnecting', '/'];
