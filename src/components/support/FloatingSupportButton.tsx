@@ -4,7 +4,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { MessageCircle, X, Headphones, HelpCircle, BookOpen, GripVertical } from 'lucide-react';
+import { MessageCircle, X, Headphones, HelpCircle, BookOpen, ClipboardList } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { Button } from '@/components/ui/button';
 import {
@@ -15,6 +15,7 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom';
 import { CreateTicketDialog } from './CreateTicketDialog';
 import { SupportChatDialog } from './SupportChatDialog';
+import { useUnreadTicketReplies } from '@/hooks/useUnreadTicketReplies';
 import { cn } from '@/lib/utils';
 
 const POSITION_KEY = 'support-btn-position';
