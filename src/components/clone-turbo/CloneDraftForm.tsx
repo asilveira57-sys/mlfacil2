@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import { Loader2, Send, AlertTriangle, Image as ImageIcon, Package, Tag, FileText, Ruler, ChevronDown, ChevronUp } from 'lucide-react';
 import { OriginStatusBadge } from './OriginStatusBadge';
+import { CategoryPicker } from './CategoryPicker';
 import type { OriginPayload, UserPayload, FieldError, OriginStatus } from './types';
 import { cn } from '@/lib/utils';
 
@@ -24,6 +25,7 @@ interface Props {
   publishing: boolean;
   published: boolean;
   createdItemId?: string;
+  accountId?: string | null;
 }
 
 function FieldWrapper({ id, label, errors, children, hint }: { id: string; label: string; errors: FieldError[]; children: React.ReactNode; hint?: string }) {
