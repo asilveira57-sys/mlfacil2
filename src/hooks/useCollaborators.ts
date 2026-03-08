@@ -120,6 +120,7 @@ export function useCollaborators(workspaceId: string | null): UseCollaboratorsRe
           status: 'invited',
           invited_at: new Date().toISOString(),
           created_by: user.id,
+          profile_id: data.profileId || null,
         })
         .select()
         .single();
@@ -137,7 +138,6 @@ export function useCollaborators(workspaceId: string | null): UseCollaboratorsRe
         status: newCollab.status as CollaboratorStatus,
       };
 
-      // TODO: Assign profile via company_users + profile_permissions instead of old module access
       toast.success('Colaborador criado com sucesso!');
       await fetchCollaborators();
       return typedCollab;
