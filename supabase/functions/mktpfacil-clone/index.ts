@@ -103,38 +103,108 @@ function hasTitleInvalidFieldError(errorBody: Record<string, unknown>): boolean 
   return false;
 }
 
+interface RetryAttemptLog {
+  attempt_name: string;
+  used_title_fallback: boolean;
+  response_status: number;
+  response_error_snippet: string;
+  title_used: string;
+}
+
+interface CreateMlItemResult {
+  response: Response;
+  data: any;
+  usedTitleFallback: boolean;
+  finalAttempt: string;
+  allAttemptStatuses: RetryAttemptLog[];
+}
+
 async function createMlItemWithRetry(
   accessToken: string,
   payload: Record<string, unknown>,
-): Promise<{ response: Response; data: any; usedTitleFallback: boolean }> {
-  // Pre-sanitize title before first attempt
+  correlationId?: string,
+): Promise<CreateMlItemResult> {
+  const attempts: RetryAttemptLog[] = [];
+  const headers = { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
   const originalTitle = payload.title as string | undefined;
+
+  // Helper to attempt and record
+  async function attempt(name: string, p: Record<string, unknown>): Promise<{ res: Response; data: any; isTitleError: boolean }> {
+    const titleUsed = (p.title as string) || '(none)';
+    const res = await fetchWithRetry('https://api.mercadolibre.com/items', {
+      method: 'POST', headers, body: JSON.stringify(p),
+    });
+    const data = await res.json();
+    const isTitleError = !res.ok && hasTitleInvalidFieldError(data);
+    const snippet = res.ok ? '' : JSON.stringify(data?.cause || data?.message || data?.error || '').substring(0, 300);
+    attempts.push({
+      attempt_name: name,
+      used_title_fallback: name !== 'initial',
+      response_status: res.status,
+      response_error_snippet: snippet,
+      title_used: titleUsed.substring(0, 80),
+    });
+    console.log(`[createMlItemWithRetry] ${name}: HTTP ${res.status} title="${titleUsed.substring(0, 40)}" titleErr=${isTitleError} corr=${correlationId || '-'}`);
+    return { res, data, isTitleError };
+  }
+
+  // 1. Sanitized title (normalize)
   sanitizePayloadTitle(payload);
-  const preSanitized = payload.title !== originalTitle;
+  const r1 = await attempt('initial', payload);
+  if (r1.res.ok || !r1.isTitleError) {
+    return { response: r1.res, data: r1.data, usedTitleFallback: payload.title !== originalTitle, finalAttempt: 'initial', allAttemptStatuses: attempts };
+  }
 
-  const res1 = await fetchWithRetry('https://api.mercadolibre.com/items', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const data1 = await res1.json();
-
-  if (!res1.ok && hasTitleInvalidFieldError(data1)) {
-    // Retry with fallback title
-    const fallbackTitle = buildFallbackTitle(payload);
-    if (fallbackTitle && fallbackTitle !== payload.title) {
-      const retryPayload = { ...payload, title: fallbackTitle };
-      const res2 = await fetchWithRetry('https://api.mercadolibre.com/items', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(retryPayload),
-      });
-      const data2 = await res2.json();
-      return { response: res2, data: data2, usedTitleFallback: true };
+  // 2. Retry with heavily normalized title
+  const normalizedTitle = normalizeTitleForMl(originalTitle || '');
+  if (normalizedTitle && normalizedTitle !== payload.title) {
+    const r2 = await attempt('normalized_title', { ...payload, title: normalizedTitle });
+    if (r2.res.ok || !r2.isTitleError) {
+      return { response: r2.res, data: r2.data, usedTitleFallback: true, finalAttempt: 'normalized_title', allAttemptStatuses: attempts };
     }
   }
 
-  return { response: res1, data: data1, usedTitleFallback: preSanitized };
+  // 3. Retry with fallback title (from family_name or generic)
+  const fallbackTitle = buildFallbackTitle(payload);
+  if (fallbackTitle && fallbackTitle !== payload.title) {
+    const r3 = await attempt('fallback_title', { ...payload, title: fallbackTitle });
+    if (r3.res.ok || !r3.isTitleError) {
+      return { response: r3.res, data: r3.data, usedTitleFallback: true, finalAttempt: 'fallback_title', allAttemptStatuses: attempts };
+    }
+  }
+
+  // 4. Retry removing title entirely (only if family_name exists)
+  const familyName = payload.family_name as string | undefined;
+  if (familyName && familyName.trim()) {
+    const noTitlePayload = { ...payload };
+    delete noTitlePayload.title;
+    const r4 = await attempt('no_title_with_family', noTitlePayload);
+    if (r4.res.ok) {
+      return { response: r4.res, data: r4.data, usedTitleFallback: true, finalAttempt: 'no_title_with_family', allAttemptStatuses: attempts };
+    }
+    // If this attempt returned a DIFFERENT error (not title), return it
+    if (!r4.isTitleError) {
+      return { response: r4.res, data: r4.data, usedTitleFallback: true, finalAttempt: 'no_title_with_family', allAttemptStatuses: attempts };
+    }
+  }
+
+  // All attempts failed with title error
+  const lastAttempt = attempts[attempts.length - 1];
+  return {
+    response: new Response(JSON.stringify({
+      error: 'title_invalid_fields_exhausted',
+      message: 'Categoria/fluxo rejeitou o campo título. Revise categoria e family_name.',
+      cause: [{ code: 'title_invalid_fields', message: 'Todas as tentativas de título foram rejeitadas pela categoria.' }],
+    }), { status: 400, headers: { 'Content-Type': 'application/json' } }),
+    data: {
+      error: 'title_invalid_fields_exhausted',
+      message: 'Categoria/fluxo rejeitou o campo título. Revise categoria e family_name.',
+      cause: [{ code: 'title_invalid_fields', message: 'Todas as tentativas de título foram rejeitadas pela categoria.' }],
+    },
+    usedTitleFallback: true,
+    finalAttempt: lastAttempt.attempt_name,
+    allAttemptStatuses: attempts,
+  };
 }
 
 // ============================================
@@ -1009,13 +1079,28 @@ Deno.serve(async (req) => {
         delete cleanPayload[field];
       }
 
-      // POST to ML with title retry
+      // Block if both title and family_name empty
+      if (!(cleanPayload.title as string)?.trim() && !(cleanPayload.family_name as string)?.trim()) {
+        return respond({
+          status: 'error',
+          error: 'Título e family_name estão vazios. Preencha ao menos um.',
+          correlation_id: corrId,
+        }, 400);
+      }
+
+      // POST to ML with multi-step title retry
       try {
-        const { response: createRes, data: createData, usedTitleFallback } = await createMlItemWithRetry(accessToken, cleanPayload);
+        const { response: createRes, data: createData, usedTitleFallback, finalAttempt, allAttemptStatuses } =
+          await createMlItemWithRetry(accessToken, cleanPayload, corrId);
 
         if (!createRes.ok) {
           await logEvent(supabase, userId, 'publish', source_item_id || 'unknown', 'publish_item_error', 'error',
-            `POST /items falhou: HTTP ${createRes.status}`, { correlation_id: corrId, http_status: createRes.status, error_body: createData, used_title_fallback: usedTitleFallback });
+            `POST /items falhou: HTTP ${createRes.status} final_attempt=${finalAttempt}`, {
+              correlation_id: corrId, http_status: createRes.status, error_body: createData,
+              used_title_fallback: usedTitleFallback, final_attempt: finalAttempt,
+              all_attempt_statuses: allAttemptStatuses,
+              provider: 'mercadolibre', runtime_version: CLONE_RUNTIME_VERSION,
+            });
 
           return respond({
             status: 'error',
@@ -1023,6 +1108,9 @@ Deno.serve(async (req) => {
             error_body: createData,
             http_status: createRes.status,
             correlation_id: corrId,
+            final_attempt: finalAttempt,
+            all_attempt_statuses: allAttemptStatuses,
+            used_title_fallback: usedTitleFallback,
           });
         }
 
@@ -1039,7 +1127,12 @@ Deno.serve(async (req) => {
         }
 
         await logEvent(supabase, userId, 'publish', newItemId, 'publish_item_success', 'info',
-          `Item publicado: ${newItemId}`, { correlation_id: corrId, item_id: newItemId, permalink: createData.permalink, used_title_fallback: usedTitleFallback });
+          `Item publicado: ${newItemId}`, {
+            correlation_id: corrId, item_id: newItemId, permalink: createData.permalink,
+            used_title_fallback: usedTitleFallback, final_attempt: finalAttempt,
+            all_attempt_statuses: allAttemptStatuses,
+            provider: 'mercadolibre', runtime_version: CLONE_RUNTIME_VERSION,
+          });
 
         return respond({
           status: 'success',
@@ -1047,11 +1140,15 @@ Deno.serve(async (req) => {
           id: newItemId,
           permalink: createData.permalink,
           correlation_id: corrId,
+          final_attempt: finalAttempt,
+          used_title_fallback: usedTitleFallback,
         });
 
       } catch (publishErr) {
         const errMsg = (publishErr as Error).message;
-        await logEvent(supabase, userId, 'publish', source_item_id || 'unknown', 'publish_item_network_error', 'error', errMsg, { correlation_id: corrId });
+        await logEvent(supabase, userId, 'publish', source_item_id || 'unknown', 'publish_item_network_error', 'error', errMsg, {
+          correlation_id: corrId, provider: 'mercadolibre', runtime_version: CLONE_RUNTIME_VERSION,
+        });
         return respond({ error: errMsg, status: 'error', correlation_id: corrId });
       }
     }
