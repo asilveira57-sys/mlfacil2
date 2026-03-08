@@ -849,7 +849,7 @@ async function processClone(
     try {
       await logEvent(supabase, userId, 'unit', `${job.id}:${unit.unit_index}`, 'publish_attempt', 'info', `Publicando unidade ${unit.unit_index}`);
 
-      const { response: createRes, data: createData, usedTitleFallback } = await createMlItemWithRetry(accessToken, postBody);
+      const { response: createRes, data: createData, usedTitleFallback, finalAttempt, allAttemptStatuses } = await createMlItemWithRetry(accessToken, postBody);
 
       if (!createRes.ok) {
         const errorMsg = createData?.message || createData?.error || JSON.stringify(createData?.cause || createData);
