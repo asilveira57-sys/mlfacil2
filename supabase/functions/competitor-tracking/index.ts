@@ -42,14 +42,45 @@ function parseMLItemId(link: string): string | null {
   return null;
 }
 
-// Fetch public listing data from ML API
-async function fetchMLListingData(itemId: string): Promise<any> {
-  const response = await fetch(`https://api.mercadolibre.com/items/${itemId}`);
-  if (!response.ok) {
-    if (response.status === 404) return { status: 'not_found', is_available: false };
-    throw new Error(`ML API error: ${response.status}`);
+// Fetch listing data from ML API with auth fallback
+async function fetchMLListingData(itemId: string, accessToken?: string): Promise<any> {
+  // Try with auth token first (avoids PolicyAgent 403)
+  if (accessToken) {
+    try {
+      const res = await fetch(`https://api.mercadolibre.com/items/${itemId}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (res.ok) return await res.json();
+      if (res.status === 404) return { status: 'not_found', is_available: false };
+      console.log(`Auth fetch for ${itemId}: ${res.status}, trying public...`);
+    } catch (e) {
+      console.log(`Auth fetch error for ${itemId}: ${e}`);
+    }
   }
-  return await response.json();
+  // Try public endpoint
+  try {
+    const res = await fetch(`https://api.mercadolibre.com/items/${itemId}`);
+    if (res.ok) return await res.json();
+    if (res.status === 404) return { status: 'not_found', is_available: false };
+    console.log(`Public fetch for ${itemId}: ${res.status}, trying batch...`);
+  } catch (e) {
+    console.log(`Public fetch error for ${itemId}: ${e}`);
+  }
+  // Batch fallback (bypasses PolicyAgent)
+  try {
+    const headers: Record<string, string> = {};
+    if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+    const res = await fetch(`https://api.mercadolibre.com/items?ids=${itemId}&attributes=id,title,price,original_price,sold_quantity,available_quantity,status,thumbnail,category_id,permalink,shipping`, { headers });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data[0]?.code === 200 && data[0]?.body) {
+        return data[0].body;
+      }
+    }
+  } catch (e) {
+    console.log(`Batch fetch error for ${itemId}: ${e}`);
+  }
+  throw new Error(`ML API error: all fetch strategies failed for ${itemId}`);
 }
 
 function getState(data: any): string {
@@ -86,6 +117,23 @@ Deno.serve(async (req) => {
     if (req.method === 'POST') {
       const body = await req.json();
       const sellerId = body.seller_id;
+
+      // Get ML access token for authenticated API calls
+      let mlAccessToken: string | undefined;
+      if (sellerId) {
+        const adminClient = createClient(
+          Deno.env.get('SUPABASE_URL') ?? '',
+          Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+        );
+        const { data: mlAccount } = await adminClient
+          .from('ml_accounts')
+          .select('access_token')
+          .eq('user_id', user.id)
+          .eq('ml_user_id', sellerId)
+          .eq('is_active', true)
+          .single();
+        mlAccessToken = mlAccount?.access_token;
+      }
 
       if (!sellerId) {
         return new Response(JSON.stringify({ error: 'seller_id required' }), {
@@ -162,7 +210,7 @@ Deno.serve(async (req) => {
           };
         } else {
           try {
-            listingData = await fetchMLListingData(competitorExternalId);
+            listingData = await fetchMLListingData(competitorExternalId, mlAccessToken);
           } catch (e) {
             console.error('Error fetching ML data:', e);
           }
@@ -283,7 +331,7 @@ Deno.serve(async (req) => {
         // Fetch current data from ML
         let currentData: any;
         try {
-          currentData = await fetchMLListingData(externalId);
+          currentData = await fetchMLListingData(externalId, mlAccessToken);
         } catch (e) {
           await supabaseClient.from('competitor_events').insert({
             tracker_id: tracker.id,
