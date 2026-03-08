@@ -729,14 +729,13 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
       
       if (billingRows?.length) {
         for (const detail of billingRows) {
-          const ct = (detail.charge_type || "").toLowerCase();
           const amount = Math.abs(detail.gross_amount || 0);
-          if (ct.includes("custo por vender") || ct.includes("custo por cobrar") || ct.includes("sale_fee") || ct.includes("cargo por venta")) {
-            feeML += amount;
-          } else if (ct.includes("tarifa de envio") || ct.includes("envio extra") || ct.includes("envio intermunicipal") || ct.includes("shipping")) {
-            shippingCostSeller += amount;
-          } else if (ct.includes("taxa de parcelamento") || ct.includes("installment")) {
-            installmentsCost += amount;
+          const category = classifyBillingCharge(detail.charge_type || "");
+          switch (category) {
+            case "commission": feeML += amount; break;
+            case "shipping": shippingCostSeller += amount; break;
+            case "installments": installmentsCost += amount; break;
+            case "adjustments": adjustments += amount; break;
           }
         }
         if (feeML > 0) { feeMLSource = "billing"; sourceRefs.push("billing_details_cache"); updatedCount++; }
@@ -794,9 +793,13 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
                 const chargeInfo = item.charge_info || {};
                 const ct = (chargeInfo.transaction_detail || chargeInfo.concept_type || '').toLowerCase();
                 const amount = Math.abs(chargeInfo.detail_amount || 0);
-                if (ct.includes('custo por vender') || ct.includes('custo por cobrar') || ct.includes('sale_fee') || ct.includes('cargo por venta')) feeML += amount;
-                else if ((ct.includes('tarifa de envio') || ct.includes('envio extra') || ct.includes('envio intermunicipal') || ct.includes('shipping')) && shippingCostSeller === 0) shippingCostSeller = amount;
-                else if (ct.includes('taxa de parcelamento') || ct.includes('installment')) installmentsCost += amount;
+                const category = classifyBillingCharge(ct);
+                switch (category) {
+                  case "commission": feeML += amount; break;
+                  case "shipping": if (shippingCostSeller === 0) shippingCostSeller = amount; break;
+                  case "installments": installmentsCost += amount; break;
+                  case "adjustments": adjustments += amount; break;
+                }
               }
             }
             
