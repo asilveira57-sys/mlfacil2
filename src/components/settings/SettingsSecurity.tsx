@@ -8,12 +8,23 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import {
   Shield, KeyRound, Activity, Bell, Monitor,
-  Smartphone, Globe, CheckCircle2, XCircle, Eye, EyeOff,
+  Smartphone, Globe, CheckCircle2, XCircle, Eye, EyeOff, LogOut,
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { useSecurityEvents, useSecuritySettings, useChangePassword } from '@/hooks/useSecurity';
+import { useSecurityEvents, useSecuritySettings, useChangePassword, useActiveSessions, useSignOutOtherSessions } from '@/hooks/useSecurity';
 
 const EVENT_LABELS: Record<string, { label: string; icon: typeof Shield; color: string }> = {
   login: { label: 'Login realizado', icon: CheckCircle2, color: 'text-emerald-500' },
@@ -198,6 +209,151 @@ function AlertsSection() {
   );
 }
 
+function parseUserAgent(userAgent: string | null) {
+  if (!userAgent) return { browser: 'Desconhecido', os: 'Desconhecido' };
+  
+  let browser = 'Navegador';
+  let os = 'Sistema';
+  
+  // Browser detection
+  if (/edg/i.test(userAgent)) browser = 'Edge';
+  else if (/chrome/i.test(userAgent)) browser = 'Chrome';
+  else if (/safari/i.test(userAgent) && !/chrome/i.test(userAgent)) browser = 'Safari';
+  else if (/firefox/i.test(userAgent)) browser = 'Firefox';
+  else if (/opera|opr/i.test(userAgent)) browser = 'Opera';
+  
+  // OS detection
+  if (/windows/i.test(userAgent)) os = 'Windows';
+  else if (/mac os/i.test(userAgent)) os = 'macOS';
+  else if (/linux/i.test(userAgent)) os = 'Linux';
+  else if (/android/i.test(userAgent)) os = 'Android';
+  else if (/iphone|ipad/i.test(userAgent)) os = 'iOS';
+  
+  return { browser, os };
+}
+
+function ActiveSessionsSection() {
+  const { data: sessions, isLoading } = useActiveSessions();
+  const signOutOthers = useSignOutOtherSessions();
+
+  const otherSessionsCount = sessions?.filter(s => !s.is_current).length || 0;
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Monitor className="h-5 w-5 text-primary" />
+            Sessões Ativas
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {[...Array(3)].map((_, i) => (
+            <Skeleton key={i} className="h-14" />
+          ))}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-lg">
+          <Monitor className="h-5 w-5 text-primary" />
+          Sessões Ativas
+        </CardTitle>
+        <CardDescription>
+          Dispositivos conectados à sua conta
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {!sessions || sessions.length === 0 ? (
+          <div className="text-center py-6 text-muted-foreground">
+            <Monitor className="h-8 w-8 mx-auto mb-2 opacity-40" />
+            <p className="text-sm">Nenhuma sessão registrada</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {sessions.map((session) => {
+              const DeviceIcon = getDeviceIcon(session.user_agent);
+              const { browser, os } = parseUserAgent(session.user_agent);
+              
+              return (
+                <div
+                  key={session.id}
+                  className="flex items-center gap-3 py-3 px-3 rounded-md bg-muted/30 border border-border/50"
+                >
+                  <div className="flex-shrink-0 text-muted-foreground">
+                    <DeviceIcon className="h-5 w-5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{browser} · {os}</span>
+                      {session.is_current && (
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                          Sessão atual
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span>
+                        {formatDistanceToNow(new Date(session.created_at), {
+                          addSuffix: true,
+                          locale: ptBR,
+                        })}
+                      </span>
+                      {session.ip_address && (
+                        <>
+                          <span>•</span>
+                          <span>{session.ip_address}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {otherSessionsCount > 0 && (
+          <>
+            <Separator />
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" className="w-full" size="sm">
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Desconectar todos os outros dispositivos
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Desconectar outros dispositivos?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Isso vai encerrar a sessão em todos os outros dispositivos conectados à sua conta. 
+                    Você precisará fazer login novamente nesses dispositivos.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => signOutOthers.mutate()}
+                    disabled={signOutOthers.isPending}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    {signOutOthers.isPending ? 'Desconectando...' : 'Desconectar todos'}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function ActivityLogSection() {
   const { data: events, isLoading } = useSecurityEvents(30);
 
@@ -302,6 +458,7 @@ export default function SettingsSecurity() {
   return (
     <div className="space-y-6">
       <PasswordSection />
+      <ActiveSessionsSection />
       <AlertsSection />
       <ActivityLogSection />
     </div>

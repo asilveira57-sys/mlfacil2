@@ -33,7 +33,6 @@ interface SettingsTab {
 const settingsTabs: SettingsTab[] = [
   { id: "perfil", label: "Perfil", icon: User, component: SettingsProfile },
   { id: "seguranca", label: "Segurança", icon: Shield, component: SettingsSecurity },
-  { id: "sessoes-ativas", label: "Sessões", icon: Activity, component: null },
   { id: "idioma", label: "Idioma", icon: Globe, component: SettingsLanguage },
   { id: "notificacoes", label: "Notificações", icon: Bell, component: null },
   { id: "colaboradores", label: "Colaboradores", icon: Users, component: CollaboratorsCard },

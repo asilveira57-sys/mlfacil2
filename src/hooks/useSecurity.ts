@@ -142,3 +142,78 @@ export function useLogSecurityEvent() {
     },
   });
 }
+
+export interface ActiveSession {
+  id: string;
+  user_agent: string | null;
+  ip_address: string | null;
+  created_at: string;
+  is_current: boolean;
+}
+
+export function useActiveSessions() {
+  const userId = useCurrentUserId();
+
+  return useQuery({
+    queryKey: ['active-sessions', userId],
+    queryFn: async () => {
+      // Get recent login events to show as "active sessions"
+      const { data, error } = await supabase
+        .from('security_events')
+        .select('id, user_agent, ip_address, created_at')
+        .eq('user_id', userId!)
+        .eq('event_type', 'login')
+        .eq('success', true)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      
+      if (error) throw error;
+      
+      const currentUserAgent = navigator.userAgent;
+      
+      // Dedupe by user_agent (keep most recent per device)
+      const sessionsMap = new Map<string, ActiveSession>();
+      for (const event of data || []) {
+        const key = event.user_agent || event.id;
+        if (!sessionsMap.has(key)) {
+          sessionsMap.set(key, {
+            ...event,
+            is_current: event.user_agent === currentUserAgent,
+          });
+        }
+      }
+      
+      return Array.from(sessionsMap.values());
+    },
+    enabled: !!userId,
+  });
+}
+
+export function useSignOutOtherSessions() {
+  const userId = useCurrentUserId();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.auth.signOut({ scope: 'others' });
+      if (error) throw error;
+
+      // Log the event
+      await supabase.from('security_events').insert([{
+        user_id: userId!,
+        event_type: 'all_sessions_revoked',
+        user_agent: navigator.userAgent,
+        success: true,
+        metadata: { revoked_at: new Date().toISOString() } as Json,
+      }]);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['active-sessions', userId] });
+      queryClient.invalidateQueries({ queryKey: ['security-events', userId] });
+      toast.success('Todos os outros dispositivos foram desconectados');
+    },
+    onError: () => {
+      toast.error('Erro ao desconectar dispositivos');
+    },
+  });
+}
