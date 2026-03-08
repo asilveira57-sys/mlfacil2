@@ -67,13 +67,6 @@ const CATEGORIES: { value: TicketCategory; label: string }[] = [
   { value: 'integracao', label: 'Integração' },
   { value: 'outro', label: 'Outro' },
 ];
-  { value: 'erro', label: 'Erro no sistema' },
-  { value: 'duvida', label: 'Dúvida' },
-  { value: 'sugestao', label: 'Sugestão' },
-  { value: 'financeiro', label: 'Financeiro' },
-  { value: 'integracao', label: 'Integração' },
-  { value: 'outro', label: 'Outro' },
-];
 
 export function CreateTicketDialog({
   open,
