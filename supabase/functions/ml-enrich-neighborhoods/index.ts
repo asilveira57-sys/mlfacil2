@@ -32,20 +32,20 @@ async function enrichNeighborhoodsInBackground(
   userId: string
 ) {
   const BATCH_SIZE = 10; // Small batches to respect ViaCEP rate limit
-  const MAX_RECORDS = 200; // Max records per execution to avoid timeout
+  const MAX_RECORDS = 300; // Max records per execution to avoid timeout
   const DELAY_BETWEEN_CALLS = 400; // 400ms delay between ViaCEP calls
 
   try {
-    console.log(`[Enrich] Starting neighborhood enrichment for seller ${sellerId}`);
+    console.log(`[Enrich] Starting geographic enrichment for seller ${sellerId}`);
 
-    // Get unique zipcodes that need enrichment
+    // Get unique zipcodes that need enrichment (missing city OR neighborhood)
     const { data: pendingShipments, error: fetchError } = await supabaseAdmin
       .from('meli_shipments_cache')
       .select('shipping_zipcode')
       .eq('seller_id', sellerId)
       .not('shipping_zipcode', 'is', null)
       .neq('shipping_zipcode', '')
-      .or('shipping_neighborhood.is.null,shipping_neighborhood.eq.')
+      .or('shipping_city.is.null,shipping_city.eq.,shipping_neighborhood.is.null,shipping_neighborhood.eq.')
       .limit(MAX_RECORDS);
 
     if (fetchError) {
@@ -54,7 +54,7 @@ async function enrichNeighborhoodsInBackground(
     }
 
     if (!pendingShipments || pendingShipments.length === 0) {
-      console.log('[Enrich] No shipments need neighborhood enrichment');
+      console.log('[Enrich] No shipments need geographic enrichment');
       return;
     }
 
@@ -143,16 +143,13 @@ async function enrichNeighborhoodsInBackground(
             await sleep(DELAY_BETWEEN_CALLS);
           }
 
-          // Update shipments with this CEP
-          if (neighborhood) {
-            const updateData: Record<string, unknown> = {
-              shipping_neighborhood: neighborhood,
-            };
-            
-            // Also fill city and state if they're empty
-            if (city) updateData.shipping_city = city;
-            if (stateUf) updateData.shipping_state_uf = stateUf;
+          // Update shipments with this CEP — always fill city/state/neighborhood when available
+          const updateData: Record<string, unknown> = {};
+          if (neighborhood) updateData.shipping_neighborhood = neighborhood;
+          if (city) updateData.shipping_city = city;
+          if (stateUf) updateData.shipping_state_uf = stateUf;
 
+          if (Object.keys(updateData).length > 0) {
             const { error: updateError } = await supabaseAdmin
               .from('meli_shipments_cache')
               .update(updateData)
@@ -177,6 +174,24 @@ async function enrichNeighborhoodsInBackground(
     }
 
     console.log(`[Enrich] Completed: ${enriched} from ViaCEP, ${cached} from cache, ${errors} errors`);
+
+    // Self-chain: if we processed MAX_RECORDS, there may be more pending
+    if (uniqueCeps.length >= MAX_RECORDS) {
+      console.log(`[Enrich] Max records reached, self-chaining for remaining shipments`);
+      try {
+        const selfUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/ml-enrich-neighborhoods`;
+        await fetch(selfUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+          },
+          body: JSON.stringify({ seller_id: sellerId, user_id: userId }),
+        });
+      } catch (chainErr) {
+        console.warn('[Enrich] Self-chain failed:', chainErr);
+      }
+    }
 
   } catch (error) {
     console.error('[Enrich] Background enrichment error:', error);

@@ -501,6 +501,22 @@ Deno.serve(async (req) => {
           console.error("[historical-import] Failed to trigger cost-engine/calculate:", err);
         }
 
+        // Trigger shipment backfill to fill geographic data for ABC cities
+        try {
+          await fetch(`${SUPABASE_URL}/functions/v1/ml-backfill-shipments`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+              "x-internal-key": SUPABASE_SERVICE_ROLE_KEY,
+            },
+            body: JSON.stringify({ seller_id: job.seller_id, user_id: account.user_id }),
+          });
+          console.log(`[historical-import] Triggered shipment backfill for ${job.seller_id}`);
+        } catch (err) {
+          console.error("[historical-import] Failed to trigger shipment backfill:", err);
+        }
+
         return new Response(JSON.stringify({
           ok: true,
           status: "done",
