@@ -17,7 +17,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { MapPin, Package, Users, ShoppingCart } from "lucide-react";
+import { MapPin, Package, Users, ShoppingCart, ArrowLeft, ChevronRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { OrderDetailsDrawer } from "@/components/shipping/OrderDetailsDrawer";
@@ -36,11 +37,14 @@ interface AbcGeographicDetailDrawerProps {
   sellerId: string;
   dateFrom?: string;
   dateTo?: string;
+  onNavigateUp?: () => void;
+  breadcrumbParts?: string[];
 }
 
 interface ProductData {
   product_key: string;
   product_name: string;
+  thumbnail: string | null;
   quantity: number;
   revenue: number;
 }
@@ -69,6 +73,8 @@ export function AbcGeographicDetailDrawer({
   sellerId,
   dateFrom,
   dateTo,
+  onNavigateUp,
+  breadcrumbParts,
 }: AbcGeographicDetailDrawerProps) {
   const [products, setProducts] = useState<ProductData[]>([]);
   const [customers, setCustomers] = useState<CustomerData[]>([]);
@@ -164,7 +170,7 @@ export function AbcGeographicDetailDrawer({
 
       const { data: itemsData, error: itemsError } = await supabase
         .from("meli_order_items_cache")
-        .select("product_key, title, title_short, sku, item_id, quantity, unit_price")
+        .select("product_key, title, title_short, sku, item_id, quantity, unit_price, thumbnail")
         .eq("seller_id", sellerId)
         .in("order_id", validOrderIds);
 
@@ -173,15 +179,18 @@ export function AbcGeographicDetailDrawer({
       const productMap = new Map<string, ProductData>();
       for (const item of itemsData || []) {
         const key = item.product_key || item.item_id;
-        const name = item.sku || item.title_short || item.title || item.item_id;
+        const name = item.title_short || item.title || item.sku || item.item_id;
+        const thumb = (item as any).thumbnail || null;
         const existing = productMap.get(key);
         if (existing) {
           existing.quantity += item.quantity;
           existing.revenue += item.quantity * item.unit_price;
+          if (!existing.thumbnail && thumb) existing.thumbnail = thumb;
         } else {
           productMap.set(key, {
             product_key: key,
             product_name: name,
+            thumbnail: thumb,
             quantity: item.quantity,
             revenue: item.quantity * item.unit_price,
           });
@@ -267,17 +276,40 @@ export function AbcGeographicDetailDrawer({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-[800px] w-full max-h-[90vh] overflow-hidden">
           <DialogHeader className="border-b pb-4">
-            <div className="flex items-start justify-between">
-              <div className="space-y-1">
-                <DialogTitle className="flex items-center gap-2">
-                  <MapPin className="h-5 w-5" />
-                  {locationName}
-                </DialogTitle>
-                <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                  {getClassBadge(classification)}
-                  <span>{totals.orders} pedidos</span>
-                  <span>{totals.customers} clientes</span>
-                  <span className="font-medium">{formatCurrency(totals.revenue)}</span>
+            <div className="space-y-2">
+              {/* Breadcrumb + back button */}
+              {breadcrumbParts && breadcrumbParts.length > 1 && (
+                <div className="flex items-center gap-2">
+                  {onNavigateUp && (
+                    <Button variant="ghost" size="sm" className="h-7 px-2" onClick={onNavigateUp}>
+                      <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+                      Voltar
+                    </Button>
+                  )}
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    {breadcrumbParts.map((part, idx) => (
+                      <span key={idx} className="flex items-center">
+                        {idx > 0 && <ChevronRight className="h-3 w-3 mx-0.5" />}
+                        <span className={idx === breadcrumbParts.length - 1 ? "font-medium text-foreground" : ""}>
+                          {part}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="flex items-start justify-between">
+                <div className="space-y-1">
+                  <DialogTitle className="flex items-center gap-2">
+                    <MapPin className="h-5 w-5" />
+                    {locationName}
+                  </DialogTitle>
+                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                    {getClassBadge(classification)}
+                    <span>{totals.orders} pedidos</span>
+                    <span>{totals.customers} clientes</span>
+                    <span className="font-medium">{formatCurrency(totals.revenue)}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -307,7 +339,7 @@ export function AbcGeographicDetailDrawer({
                     <TableHeader>
                       <TableRow>
                         <TableHead>#</TableHead>
-                        <TableHead>Produto</TableHead>
+                        <TableHead colSpan={2}>Produto</TableHead>
                         <TableHead className="text-right">Qtd</TableHead>
                         <TableHead className="text-right">Valor</TableHead>
                       </TableRow>
@@ -316,6 +348,19 @@ export function AbcGeographicDetailDrawer({
                       {products.map((product, idx) => (
                         <TableRow key={product.product_key}>
                           <TableCell className="font-medium">{idx + 1}</TableCell>
+                          <TableCell className="w-10 pr-0">
+                            {product.thumbnail ? (
+                              <img
+                                src={product.thumbnail}
+                                alt={product.product_name}
+                                className="h-8 w-8 rounded object-cover"
+                              />
+                            ) : (
+                              <div className="h-8 w-8 rounded bg-muted flex items-center justify-center">
+                                <Package className="h-4 w-4 text-muted-foreground" />
+                              </div>
+                            )}
+                          </TableCell>
                           <TableCell className="max-w-[180px] truncate">
                             {product.product_name}
                           </TableCell>
