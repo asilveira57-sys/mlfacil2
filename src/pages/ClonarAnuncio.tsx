@@ -143,15 +143,21 @@ export default function ClonarAnuncio() {
     } catch (_) { /* fail-safe, form still works */ }
 
     // ========== SERVER-FIRST: ad-item-snapshot ==========
-    const activeAccount = accounts.find(a => a.id === selectedAccountId);
-    await safeLog('origin_fetch_attempt', { correlation_id: corrId, item_id: itemId, strategy: 'ad-item-snapshot' });
+    const captureAccount = accounts.find(a => a.id === selectedAccountId) || accounts[0];
+    const captureSellerId = captureAccount?.ml_user_id || '';
+    await safeLog('origin_fetch_attempt', {
+      correlation_id: corrId, item_id: itemId, strategy: 'ad-item-snapshot',
+      capture_account_id: captureAccount?.id || null,
+      capture_seller_id: captureSellerId,
+    });
 
     try {
       const { data, error: fnError } = await supabase.functions.invoke('ad-item-snapshot', {
         body: {
           item_id: itemId,
           id_type: itemId.startsWith('MLBU') ? 'MLBU' : 'MLB',
-          seller_id: activeAccount?.ml_user_id || '',
+          seller_id: captureSellerId,
+          ml_account_id: captureSellerId,
           source_input_raw: sourceUrl,
         },
       });
@@ -209,6 +215,8 @@ export default function ClonarAnuncio() {
           pictures_count: pictures.length,
           has_description: !!(data.description || item.description),
           category_name: data.category_name || null,
+          capture_account_id: captureAccount?.id || null,
+          capture_seller_id: captureSellerId,
         });
         updateDraftOrigin(op);
       } else {

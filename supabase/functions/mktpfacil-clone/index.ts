@@ -295,12 +295,14 @@ async function mlRequest(
 
 // ============================================
 // Authenticated fallback: try user's ML tokens on 403
+// Prioritizes preferredSellerId if provided.
 // ============================================
 
 async function getValidTokenForRead(
   supabase: any,
   userId: string,
   correlationId: string,
+  preferredSellerId?: string | null,
 ): Promise<string | null> {
   // Fetch all active ML accounts for this user
   const { data: accounts, error } = await supabase
@@ -312,11 +314,33 @@ async function getValidTokenForRead(
 
   if (error || !accounts || accounts.length === 0) {
     await logEvent(supabase, userId, 'source', 'auth_fallback', 'no_ml_accounts', 'warn',
+      'No active ML accounts found for authenticated fallback', { correlation_id: correlationId, preferred_seller_id: preferredSellerId });
+    return null;
+  }
+
+  // Sort: preferred seller first
+  const sorted = preferredSellerId
+    ? [...accounts].sort((a: any, b: any) => {
+        const aMatch = String(a.ml_user_id) === String(preferredSellerId) ? 0 : 1;
+        const bMatch = String(b.ml_user_id) === String(preferredSellerId) ? 0 : 1;
+        return aMatch - bMatch;
+      })
+    : accounts;
+
+  await logEvent(supabase, userId, 'source', 'auth_fallback', 'token_selection_order', 'info',
+    `Will try ${sorted.length} accounts, preferred=${preferredSellerId || 'none'}`, {
+      correlation_id: correlationId,
+      preferred_seller_id: preferredSellerId,
+      account_order: sorted.map((a: any) => a.ml_user_id),
+    });
+
+  if (error || !accounts || accounts.length === 0) {
+    await logEvent(supabase, userId, 'source', 'auth_fallback', 'no_ml_accounts', 'warn',
       'No active ML accounts found for authenticated fallback', { correlation_id: correlationId });
     return null;
   }
 
-  for (const account of accounts) {
+  for (const account of sorted) {
     let token = account.access_token;
 
     // Check if token is expired and try refresh
@@ -371,7 +395,7 @@ async function getValidTokenForRead(
 // ACTION: Load source — ISOLATED public fetch (NO token, NO global client)
 // ============================================
 
-async function loadSource(itemId: string, supabase: any, userId: string, correlationId: string, sourceInputRaw?: string) {
+async function loadSource(itemId: string, supabase: any, userId: string, correlationId: string, sourceInputRaw?: string, preferredSellerId?: string | null) {
   const totalStart = Date.now();
 
   // === STEP 0: Validate/normalize item ID ===
@@ -444,10 +468,11 @@ async function loadSource(itemId: string, supabase: any, userId: string, correla
 
   // If still failing after recovery, try authenticated fallback for 403
   if (itemStatus === 403) {
-    await logEvent(supabase, userId, 'source', effectiveItemId, 'load_source_403_auth_fallback', 'info',
-      `Public fetch returned 403 (PolicyAgent), attempting authenticated fallback`, { correlation_id: correlationId });
+     await logEvent(supabase, userId, 'source', effectiveItemId, 'load_source_403_auth_fallback', 'info',
+      `Public fetch returned 403 (PolicyAgent), attempting authenticated fallback with preferred=${preferredSellerId || 'none'}`, {
+        correlation_id: correlationId, preferred_seller_id: preferredSellerId });
 
-    const authToken = await getValidTokenForRead(supabase, userId, correlationId);
+    const authToken = await getValidTokenForRead(supabase, userId, correlationId, preferredSellerId);
     if (authToken) {
       try {
         const authItemRes = await fetch(`https://api.mercadolibre.com/items/${effectiveItemId}`, {
@@ -479,7 +504,7 @@ async function loadSource(itemId: string, supabase: any, userId: string, correla
   // If the diagnostic item fetch needed auth OR returned 403 initially, use auth for all subsequent calls
   const needsAuth = itemSnippet.includes('PolicyAgent') || siteSnippet.includes('PolicyAgent');
   if (needsAuth) {
-    const token = await getValidTokenForRead(supabase, userId, correlationId);
+    const token = await getValidTokenForRead(supabase, userId, correlationId, preferredSellerId);
     if (token) readToken = token;
   }
 
@@ -488,7 +513,7 @@ async function loadSource(itemId: string, supabase: any, userId: string, correla
   if (!fullResult.ok) {
     // If 403 on full fetch and no token yet, try auth
     if (fullResult.status === 403 && !readToken) {
-      const fallbackToken = await getValidTokenForRead(supabase, userId, correlationId);
+      const fallbackToken = await getValidTokenForRead(supabase, userId, correlationId, preferredSellerId);
       if (fallbackToken) {
         const retryResult = await mlRequest(`/items/${effectiveItemId}?include_attributes=all`, supabase, userId, correlationId, effectiveItemId, fallbackToken);
         if (retryResult.ok) {
@@ -916,24 +941,31 @@ Deno.serve(async (req) => {
     const { action } = body;
 
     if (action === 'load_source') {
-      const { item_id, correlation_id, source_input_raw } = body;
+      const { item_id, correlation_id, source_input_raw, seller_id, ml_account_id } = body;
       if (!item_id) return respond({ error: 'item_id é obrigatório' }, 400);
       const corrId = correlation_id || crypto.randomUUID().substring(0, 8);
+      const preferredSellerId = seller_id || ml_account_id || null;
+
+      await logEvent(supabase, userId, 'source', item_id, 'load_source_request', 'info',
+        `load_source requested with preferred_seller_id=${preferredSellerId || 'none'}`, {
+          correlation_id: corrId, seller_id, ml_account_id, preferred_seller_id: preferredSellerId,
+        });
 
       try {
-        const { snapshot, logResults } = await loadSource(item_id, supabase, userId, corrId, source_input_raw);
+        const { snapshot, logResults } = await loadSource(item_id, supabase, userId, corrId, source_input_raw, preferredSellerId);
         await logEvent(supabase, userId, 'source', item_id, 'source_loaded', 'info', `Item ${item_id} carregado`, {
           correlation_id: corrId,
           pictures_count: snapshot.pictures?.length || 0,
           variations_count: snapshot.variations?.length || 0,
           has_catalog: !!snapshot.catalog_product_id,
+          preferred_seller_id: preferredSellerId,
         });
 
         return respond({ snapshot, correlation_id: corrId, runtime_version: CLONE_RUNTIME_VERSION, log_insert_results: logResults });
       } catch (loadErr) {
         const errMsg = (loadErr as Error).message;
-        await auditLog(supabase, { level: 'error', area: 'clone_anuncio', action: 'load_source_error', userId, success: false, message: errMsg, meta: { item_id, correlation_id: corrId } });
-        await logEvent(supabase, userId, 'source', item_id, 'source_load_error', 'error', errMsg, { correlation_id: corrId });
+        await auditLog(supabase, { level: 'error', area: 'clone_anuncio', action: 'load_source_error', userId, success: false, message: errMsg, meta: { item_id, correlation_id: corrId, preferred_seller_id: preferredSellerId } });
+        await logEvent(supabase, userId, 'source', item_id, 'source_load_error', 'error', errMsg, { correlation_id: corrId, preferred_seller_id: preferredSellerId });
         return respond({ error: errMsg, correlation_id: corrId, runtime_version: CLONE_RUNTIME_VERSION }, 200);
       }
     }
