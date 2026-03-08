@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pin, X, Send, Edit2, ChevronDown, ChevronUp, User, Users } from 'lucide-react';
+import { Pin, X, Send, Edit2, ChevronDown, ChevronUp, User, Users, GripVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
@@ -8,42 +8,48 @@ import type { Note } from '@/types/notes';
 
 interface ModulePostItProps {
   note: Note & { pin?: any };
-  onEdit: () => void;
+  onEdit: (note: Note) => void;
   onUnpin: () => void;
   onSendToTasks: (assignTo?: string) => void;
   workspaceMembers?: { id: string; name: string }[];
+  /** Current drag offset, controlled by parent */
+  style?: React.CSSProperties;
 }
 
-export function ModulePostIt({ note, onEdit, onUnpin, onSendToTasks, workspaceMembers = [] }: ModulePostItProps) {
+export function ModulePostIt({ note, onEdit, onUnpin, onSendToTasks, workspaceMembers = [], style }: ModulePostItProps) {
   const { t } = useTranslation('notes');
   const [expanded, setExpanded] = useState(false);
 
   return (
     <div
       className={cn(
-        'rounded-lg shadow-md border transition-all cursor-pointer max-w-[240px]',
+        'rounded-lg shadow-md border transition-all max-w-[240px]',
         expanded ? 'max-h-[300px]' : 'max-h-[80px]'
       )}
       style={{
         backgroundColor: note.color_hex + '20',
         borderColor: note.color_hex + '60',
+        ...style,
       }}
     >
-      {/* Color accent bar */}
-      <div className="h-1 rounded-t-lg" style={{ backgroundColor: note.color_hex }} />
+      {/* Color accent bar — also serves as drag handle */}
+      <div
+        className="h-2 rounded-t-lg cursor-grab active:cursor-grabbing flex items-center justify-center"
+        style={{ backgroundColor: note.color_hex }}
+        data-drag-handle
+      >
+        <GripVertical className="h-3 w-3 text-white/70" />
+      </div>
 
       {/* Compact view */}
       <div
-        className="flex items-center gap-2 px-3 py-2"
+        className="flex items-center gap-2 px-3 py-2 cursor-pointer"
         onClick={() => setExpanded(!expanded)}
       >
         <Pin className="h-3 w-3 shrink-0" style={{ color: note.color_hex }} />
         <span className="text-xs font-medium truncate flex-1 text-foreground">
           {note.title || t('untitled')}
         </span>
-        {note.assigned_to && (
-          <User className="h-3 w-3 shrink-0 text-muted-foreground" />
-        )}
         {expanded ? (
           <ChevronUp className="h-3 w-3 shrink-0 text-muted-foreground" />
         ) : (
@@ -63,7 +69,7 @@ export function ModulePostIt({ note, onEdit, onUnpin, onSendToTasks, workspaceMe
               variant="ghost"
               size="icon"
               className="h-6 w-6"
-              onClick={(e) => { e.stopPropagation(); onEdit(); }}
+              onClick={(e) => { e.stopPropagation(); onEdit(note); }}
               title={t('actions.edit')}
             >
               <Edit2 className="h-3 w-3" />

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { StickyNote, Plus, Search } from 'lucide-react';
 import {
@@ -71,6 +71,19 @@ export function NotesDrawer({ companyId }: NotesDrawerProps) {
   });
 
   const { createTask } = useTasks(workspaceId ?? null);
+
+  // Listen for edit-note events from ModuleNotesOverlay
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.note) {
+        setEditingNote(detail.note as Note);
+        setOpen(true);
+      }
+    };
+    window.addEventListener('postit:edit-note', handler);
+    return () => window.removeEventListener('postit:edit-note', handler);
+  }, []);
 
   // Handle creating a new note
   const handleNewNote = useCallback(async () => {
