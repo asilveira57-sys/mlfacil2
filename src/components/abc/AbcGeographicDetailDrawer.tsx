@@ -17,7 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { MapPin, Package, Users, ShoppingCart, ArrowLeft, ChevronRight } from "lucide-react";
+import { MapPin, Package, Users, ShoppingCart, ArrowLeft, ChevronRight, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -180,7 +180,7 @@ export function AbcGeographicDetailDrawer({
       for (const item of itemsData || []) {
         const key = item.product_key || item.item_id;
         const name = item.title_short || item.title || item.sku || item.item_id;
-        const thumb = (item as any).thumbnail || null;
+        const thumb = item.thumbnail || null;
         const existing = productMap.get(key);
         if (existing) {
           existing.quantity += item.quantity;
@@ -455,7 +455,7 @@ export function AbcGeographicDetailDrawer({
                       {orders.map((order) => (
                         <TableRow 
                           key={order.order_id}
-                          className="cursor-pointer hover:bg-muted/50"
+                          className="cursor-pointer hover:bg-muted/50 group"
                           onClick={() => handleOrderClick(order.order_id)}
                         >
                           <TableCell className="text-sm">
@@ -463,8 +463,11 @@ export function AbcGeographicDetailDrawer({
                               locale: ptBR,
                             })}
                           </TableCell>
-                          <TableCell className="font-mono text-xs">
-                            {order.order_id}
+                          <TableCell>
+                            <span className="font-mono text-xs text-primary hover:underline flex items-center gap-1">
+                              {order.order_id}
+                              <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </span>
                           </TableCell>
                           <TableCell className="max-w-[120px] truncate text-sm">
                             {order.buyer_name}
