@@ -1,4 +1,3 @@
-import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,182 +5,103 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   CreditCard,
   CheckCircle2,
   Clock,
-  XCircle,
+  Lock,
   Sparkles,
   Zap,
   Crown,
-  Download,
+  Star,
   AlertTriangle,
   FileText,
   Calendar,
   TrendingUp,
+  MessageCircle,
 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { useNavigate } from "react-router-dom";
 import { useUserAccessState } from "@/hooks/useUserAccessState";
-import { useUserSalesVolume, isPlanTooSmall } from "@/hooks/useUserSalesVolume";
+import { useUserSalesVolume } from "@/hooks/useUserSalesVolume";
+import { useTierOffersCatalog, useOfferCheckout, formatPriceBRL, type PlanTier } from "@/hooks/useTierOffers";
 
-interface Plan {
-  id: string;
-  name: string;
-  slug: string;
-  category: string;
-  description: string;
-  features: string[];
-  sort_order: number;
-  prices: PlanPrice[];
-}
-
-interface PlanPrice {
-  id: string;
-  plan_id: string;
-  mode: string;
-  period: string;
-  price_cents: number;
-  currency: string;
-  recurring: boolean;
-  badge_text: string | null;
-  is_campaign: boolean;
-  mp_checkout_url: string | null;
-}
-
-interface Invoice {
-  id: string;
-  date: string;
-  description: string;
-  amount: number;
-  status: "paid" | "pending" | "failed";
-  invoice_url?: string;
-}
+const TIER_ICONS: Record<string, typeof Zap> = {
+  volume_ate_50: Zap,
+  volume_51_300: Zap,
+  volume_301_700: Sparkles,
+  volume_701_1500: TrendingUp,
+  volume_1501_3000: Star,
+  volume_acima_3000: Crown,
+};
 
 const SettingsPlan = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { flags, selectedPlan, trialActive, trialExpired, loading: userLoading } = useUserAccessState();
-  const { totalSales30d, accountBreakdown } = useUserSalesVolume();
-  const [plans, setPlans] = useState<Plan[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [invoicesLoading, setInvoicesLoading] = useState(true);
+  const { totalSales30d } = useUserSalesVolume();
+  const { data: catalog, isLoading: catalogLoading } = useTierOffersCatalog();
+  const { checkout, loading: checkoutLoading } = useOfferCheckout();
 
-  // Fetch plans from database
-  useEffect(() => {
-    const fetchPlans = async () => {
-      try {
-        // Fetch plans
-        const { data: plansData, error: plansError } = await supabase
-          .from('plans')
-          .select('id, name, slug, category, description, features, sort_order')
-          .eq('active', true)
-          .eq('category', 'volume') // Only volume plans for main display
-          .order('sort_order');
+  const tiers = catalog?.tiers ?? [];
+  const hasActiveSub = flags?.has_active_subscription ?? false;
+  const trialDaysRemaining = flags?.trial_days_remaining ?? 0;
+  const trialEndAt = flags?.trial_end_at;
 
-        if (plansError) throw plansError;
+  const formatDate = (date: string) => new Date(date).toLocaleDateString("pt-BR");
 
-        // Fetch prices
-        const { data: pricesData, error: pricesError } = await supabase
-          .from('plan_prices')
-          .select('id, plan_id, mode, period, price_cents, currency, recurring, badge_text, is_campaign, mp_checkout_url')
-          .eq('visible', true);
+  const formatCurrency = (cents: number) =>
+    (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
-        if (pricesError) throw pricesError;
-
-        // Combine plans with prices
-        const plansWithPrices: Plan[] = (plansData || []).map(plan => ({
-          ...plan,
-          features: Array.isArray(plan.features) 
-            ? (plan.features as unknown as string[])
-            : [],
-          prices: (pricesData || []).filter(p => p.plan_id === plan.id).map(p => ({
-            ...p,
-            badge_text: p.badge_text || null,
-            mp_checkout_url: p.mp_checkout_url || null,
-          })),
-        }));
-
-        setPlans(plansWithPrices);
-      } catch (error) {
-        console.error('[SettingsPlan] Error fetching plans:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchPlans();
-  }, []);
-
-  // Fetch invoices (placeholder - will integrate with Olist)
-  useEffect(() => {
-    const fetchInvoices = async () => {
-      // TODO: Integrate with Olist for real invoices
-      // For now, show placeholder data
-      setInvoices([]);
-      setInvoicesLoading(false);
-    };
-
-    fetchInvoices();
-  }, []);
-
-  const formatCurrency = (cents: number) => {
-    return (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const isTooSmall = (tier: PlanTier): boolean => {
+    if (tier.is_enterprise) return false;
+    if (totalSales30d <= 0) return false;
+    if (tier.max_orders_30d === null) return false;
+    return totalSales30d > tier.max_orders_30d;
   };
 
-  const formatDate = (date: string) => {
-    return new Date(date).toLocaleDateString("pt-BR");
+  const getRecommendedTierId = (): string | null => {
+    if (totalSales30d <= 0) return null;
+    const sorted = [...tiers].sort((a, b) => a.display_order - b.display_order);
+    for (const t of sorted) {
+      if (t.is_enterprise) continue;
+      if (t.max_orders_30d === null || totalSales30d <= t.max_orders_30d) return t.id;
+    }
+    return sorted.find(t => t.is_enterprise)?.id ?? null;
   };
 
-  const getStatusBadge = (status: Invoice["status"]) => {
-    switch (status) {
-      case "paid":
-        return (
-          <Badge variant="outline" className="bg-green-500/10 text-green-600 border-green-200">
-            <CheckCircle2 className="h-3 w-3 mr-1" />
-            {t('settings:plan.paid')}
-          </Badge>
-        );
-      case "pending":
-        return (
-          <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-200">
-            <Clock className="h-3 w-3 mr-1" />
-            {t('settings:plan.pending')}
-          </Badge>
-        );
-      case "failed":
-        return (
-          <Badge variant="outline" className="bg-red-500/10 text-red-600 border-red-200">
-            <XCircle className="h-3 w-3 mr-1" />
-            {t('settings:plan.failed')}
-          </Badge>
-        );
+  const recommendedTierId = getRecommendedTierId();
+
+  const getCheapestOffer = (tier: PlanTier) => {
+    if (!tier.offers || tier.offers.length === 0) return null;
+    return [...tier.offers].sort((a, b) => a.price_brl - b.price_brl)[0];
+  };
+
+  const handleChoosePlan = async (tier: PlanTier) => {
+    if (tier.is_enterprise) {
+      navigate("/contato");
+      return;
+    }
+    const offer = getCheapestOffer(tier);
+    if (offer) {
+      await checkout(offer.id);
     }
   };
 
-  const getPlanIcon = (index: number) => {
-    const icons = [Zap, Sparkles, TrendingUp, Crown, Crown, Crown];
-    return icons[Math.min(index, icons.length - 1)];
+  const getTierIcon = (tier: PlanTier) => TIER_ICONS[tier.code] || Zap;
+
+  const formatOrderRange = (tier: PlanTier): string => {
+    if (tier.is_enterprise) return "Acima de 3.000 vendas/mês";
+    if (tier.max_orders_30d === null) return `A partir de ${tier.min_orders_30d} vendas/mês`;
+    if (tier.min_orders_30d === 0) return `Até ${tier.max_orders_30d} vendas/mês`;
+    return `${tier.min_orders_30d} a ${tier.max_orders_30d} vendas/mês`;
   };
 
-  const getMonthlyPrice = (plan: Plan) => {
-    const monthlyPrice = plan.prices.find(p => p.mode === 'assinatura' && p.period === 'mensal');
-    return monthlyPrice?.price_cents || 0;
-  };
-
-  const isCurrentPlan = (planId: string) => {
-    return selectedPlan?.id === planId;
-  };
-
-  // Trial days remaining
-  const trialDaysRemaining = flags?.trial_days_remaining ?? 0;
-  const trialEndAt = flags?.trial_end_at;
+  const isLoading = catalogLoading || userLoading;
 
   return (
     <div className="space-y-6">
@@ -223,6 +143,11 @@ const SettingsPlan = () => {
                   <Badge variant="destructive" className="mt-3">
                     {t('settings:plan.trial_ending_soon')}
                   </Badge>
+                )}
+                {trialActive && (
+                  <p className="text-xs text-muted-foreground mt-3">
+                    Você pode contratar um plano a qualquer momento, mesmo durante o teste.
+                  </p>
                 )}
               </div>
             </div>
@@ -277,10 +202,18 @@ const SettingsPlan = () => {
         </Card>
       )}
 
+      {/* Sales Volume Info */}
+      {totalSales30d > 0 && (
+        <div className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
+          <TrendingUp className="h-4 w-4" />
+          <span>Seu volume consolidado: <strong className="text-foreground">{totalSales30d.toLocaleString("pt-BR")} vendas</strong> nos últimos 30 dias</span>
+        </div>
+      )}
+
       {/* Available Plans */}
       <div>
         <h3 className="text-lg font-medium mb-4">{t('settings:plan.available_plans')}</h3>
-        {loading ? (
+        {isLoading ? (
           <div className="grid gap-4 md:grid-cols-3">
             {[1, 2, 3].map((i) => (
               <Card key={i}>
@@ -301,77 +234,107 @@ const SettingsPlan = () => {
               </Card>
             ))}
           </div>
+        ) : tiers.length === 0 ? (
+          <Card>
+            <CardContent className="py-8 text-center text-muted-foreground">
+              Nenhum plano disponível no momento.
+            </CardContent>
+          </Card>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {plans.slice(0, 6).map((plan, index) => {
-              const PlanIcon = getPlanIcon(index);
-              const monthlyPrice = getMonthlyPrice(plan);
-              const isCurrent = isCurrentPlan(plan.id);
-              const isPopular = index === 1;
-              const tooSmall = isPlanTooSmall(plan.slug, totalSales30d);
+            {tiers
+              .sort((a, b) => a.display_order - b.display_order)
+              .map((tier) => {
+                const tooSmall = isTooSmall(tier);
+                const isRecommended = tier.id === recommendedTierId;
+                const cheapest = getCheapestOffer(tier);
+                const TierIcon = getTierIcon(tier);
 
-              return (
-                <Card
-                  key={plan.id}
-                  className={`relative ${isCurrent ? "border-primary ring-1 ring-primary" : ""} ${
-                    isPopular ? "shadow-lg" : ""
-                  } ${tooSmall ? "opacity-60" : ""}`}
-                >
-                  {isPopular && (
-                    <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                      <Badge className="bg-primary text-primary-foreground">
-                        {t('settings:plan.most_popular')}
-                      </Badge>
-                    </div>
-                  )}
-                  <CardHeader className="text-center pb-2">
-                    <div className="mx-auto h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center mb-2">
-                      <PlanIcon className="h-6 w-6 text-primary" />
-                    </div>
-                    <CardTitle className="text-lg">{plan.name}</CardTitle>
-                    <CardDescription className="text-xs">{plan.description}</CardDescription>
-                    <div className="pt-2">
-                      <span className="text-3xl font-bold">{formatCurrency(monthlyPrice)}</span>
-                      <span className="text-muted-foreground">/{t('settings:plan.month')}</span>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <ul className="space-y-2">
-                      {plan.features.slice(0, 5).map((feature, idx) => (
-                        <li key={idx} className="flex items-center gap-2 text-sm">
-                          <CheckCircle2 className="h-4 w-4 text-green-500 flex-shrink-0" />
-                          <span>{feature}</span>
-                        </li>
-                      ))}
-                    </ul>
-
-                    {tooSmall && (
-                      <div className="p-2.5 rounded-lg bg-destructive/10 border border-destructive/20">
-                        <div className="flex items-start gap-2">
-                          <AlertTriangle className="w-4 h-4 text-destructive flex-shrink-0 mt-0.5" />
-                          <p className="text-[11px] leading-tight text-destructive">
-                            Seu volume ({totalSales30d} vendas) excede este plano. Deslogue contas para contratar.
-                          </p>
-                        </div>
+                return (
+                  <Card
+                    key={tier.id}
+                    className={`relative transition-all ${
+                      isRecommended ? "border-primary ring-1 ring-primary shadow-lg" : ""
+                    } ${tooSmall ? "opacity-60" : ""}`}
+                  >
+                    {isRecommended && (
+                      <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                        <Badge className="bg-primary text-primary-foreground">Recomendado</Badge>
                       </div>
                     )}
+                    <CardHeader className="text-center pb-2">
+                      <div className="mx-auto h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center mb-2">
+                        <TierIcon className="h-6 w-6 text-primary" />
+                      </div>
+                      <CardTitle className="text-lg">{tier.name}</CardTitle>
+                      <CardDescription className="text-xs">{formatOrderRange(tier)}</CardDescription>
+                      <div className="pt-2">
+                        {tier.is_enterprise ? (
+                          <span className="text-lg font-semibold text-muted-foreground">Sob consulta</span>
+                        ) : cheapest ? (
+                          <>
+                            <span className="text-3xl font-bold">{formatPriceBRL(cheapest.price_brl)}</span>
+                            <span className="text-muted-foreground text-sm">
+                              {cheapest.period_months === 1 ? "/mês" : `/${cheapest.period_months}m`}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </div>
+                      {tier.description && (
+                        <p className="text-xs text-muted-foreground mt-1">{tier.description}</p>
+                      )}
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {tooSmall && (
+                        <div className="p-2.5 rounded-lg bg-destructive/10 border border-destructive/20">
+                          <div className="flex items-start gap-2">
+                            <AlertTriangle className="w-4 h-4 text-destructive flex-shrink-0 mt-0.5" />
+                            <p className="text-[11px] leading-tight text-destructive">
+                              Seu volume ({totalSales30d.toLocaleString("pt-BR")} vendas) excede o limite deste plano.
+                            </p>
+                          </div>
+                        </div>
+                      )}
 
-                    <Button
-                      className="w-full"
-                      variant={isCurrent ? "outline" : "default"}
-                      disabled={isCurrent || tooSmall}
-                    >
-                      {isCurrent 
-                        ? t('settings:plan.current') 
-                        : tooSmall 
-                          ? 'Plano insuficiente'
-                          : t('settings:plan.choose_plan')
-                      }
-                    </Button>
-                  </CardContent>
-                </Card>
-              );
-            })}
+                      <TooltipProvider>
+                        {tooSmall ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button className="w-full" variant="outline" disabled>
+                                <Lock className="h-4 w-4 mr-2" />
+                                Volume acima do limite
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Seu volume de vendas ({totalSales30d.toLocaleString("pt-BR")}) excede o limite deste plano.</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        ) : tier.is_enterprise ? (
+                          <Button
+                            className="w-full"
+                            variant="outline"
+                            onClick={() => navigate("/contato")}
+                          >
+                            <MessageCircle className="h-4 w-4 mr-2" />
+                            Fale conosco
+                          </Button>
+                        ) : (
+                          <Button
+                            className="w-full"
+                            variant={isRecommended ? "default" : "outline"}
+                            disabled={checkoutLoading}
+                            onClick={() => handleChoosePlan(tier)}
+                          >
+                            {checkoutLoading ? "Processando..." : t('settings:plan.choose_plan')}
+                          </Button>
+                        )}
+                      </TooltipProvider>
+                    </CardContent>
+                  </Card>
+                );
+              })}
           </div>
         )}
       </div>
@@ -390,54 +353,15 @@ const SettingsPlan = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {invoicesLoading ? (
-            <div className="space-y-3">
-              {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
-            </div>
-          ) : invoices.length === 0 ? (
-            <div className="text-center py-8">
-              <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
-              <p className="text-muted-foreground">
-                {t('settings:plan.no_invoices')}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {t('settings:plan.invoices_available_after_payment')}
-              </p>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t('settings:plan.date')}</TableHead>
-                  <TableHead>{t('settings:plan.description')}</TableHead>
-                  <TableHead>{t('settings:plan.amount')}</TableHead>
-                  <TableHead>{t('settings:plan.status')}</TableHead>
-                  <TableHead className="text-right">{t('settings:plan.actions')}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {invoices.map((invoice) => (
-                  <TableRow key={invoice.id}>
-                    <TableCell className="font-medium">{formatDate(invoice.date)}</TableCell>
-                    <TableCell>{invoice.description}</TableCell>
-                    <TableCell>{formatCurrency(invoice.amount)}</TableCell>
-                    <TableCell>{getStatusBadge(invoice.status)}</TableCell>
-                    <TableCell className="text-right">
-                      {invoice.status === "paid" && invoice.invoice_url && (
-                        <Button variant="ghost" size="sm" asChild>
-                          <a href={invoice.invoice_url} target="_blank" rel="noopener noreferrer">
-                            <Download className="h-4 w-4" />
-                          </a>
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
+          <div className="text-center py-8">
+            <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
+            <p className="text-muted-foreground">
+              {t('settings:plan.no_invoices')}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {t('settings:plan.invoices_available_after_payment')}
+            </p>
+          </div>
         </CardContent>
       </Card>
 
