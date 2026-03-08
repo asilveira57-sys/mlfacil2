@@ -286,6 +286,7 @@ Deno.serve(async (req) => {
           cutoff_flex_time: cutoffFlex,
           cutoff_coleta_time: cutoffColeta,
           estoque_critico: 0,
+          vendas_despachar_amanha: vendasDespacharAmanha || 0,
           snapshot_status: "ok",
           snapshot_error: null,
           updated_at: new Date().toISOString(),
