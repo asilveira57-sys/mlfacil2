@@ -3,8 +3,9 @@
  * Toggle floating support button visibility + ticket management
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -18,8 +19,25 @@ import { useUtilitiesPreferences } from '@/hooks/useUtilitiesPreferences';
 export function SettingsSupport() {
   const { t } = useTranslation();
   const { preferences, loading, updatePreferences } = useUtilitiesPreferences();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+
+  // Auto-open ticket from URL param
+  useEffect(() => {
+    const ticketId = searchParams.get('ticket');
+    if (ticketId) {
+      setSelectedTicketId(ticketId);
+    }
+  }, [searchParams]);
+
+  const handleBack = () => {
+    setSelectedTicketId(null);
+    // Remove ticket param from URL
+    const newParams = new URLSearchParams(searchParams);
+    newParams.delete('ticket');
+    setSearchParams(newParams, { replace: true });
+  };
 
   const handleToggleSupportButton = (checked: boolean) => {
     updatePreferences({ showSupportButton: checked });
@@ -29,7 +47,7 @@ export function SettingsSupport() {
     return (
       <SupportTicketDetail
         ticketId={selectedTicketId}
-        onBack={() => setSelectedTicketId(null)}
+        onBack={handleBack}
       />
     );
   }

@@ -208,6 +208,15 @@ export function CreateTicketDialog({
         new_value: { status: 'open', category },
       });
 
+      // Trigger email notifications (admin + seller)
+      try {
+        await supabase.functions.invoke('support-notify', {
+          body: { type: 'opened', ticket_id: ticket.id },
+        });
+      } catch (emailErr) {
+        console.warn('[CreateTicket] Email notify failed:', emailErr);
+      }
+
       toast({
         title: 'Chamado aberto com sucesso!',
         description: `Ticket #${ticket.id.slice(0, 8)} criado. Acompanhe pelo painel de suporte.`,

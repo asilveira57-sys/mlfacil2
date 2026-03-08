@@ -1,5 +1,6 @@
-import { useEffect, lazy, Suspense } from 'react';
+import { useEffect } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { useOpenTicketsCount } from '@/hooks/useOpenTicketsCount';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
@@ -74,6 +75,7 @@ const adminTabs = [
 export default function Admin() {
   const navigate = useNavigate();
   const location = useLocation();
+  const openTicketsCount = useOpenTicketsCount();
   
   // Determine active tab from path
   const pathParts = location.pathname.split('/admin/');
@@ -103,6 +105,11 @@ export default function Admin() {
                 >
                   <tab.icon className="h-4 w-4" />
                   <span className="hidden sm:inline">{tab.label}</span>
+                  {tab.id === 'suporte' && openTicketsCount > 0 && (
+                    <span className="ml-1 h-5 min-w-[20px] px-1 rounded-full bg-destructive text-destructive-foreground text-xs font-bold flex items-center justify-center">
+                      {openTicketsCount}
+                    </span>
+                  )}
                 </TabsTrigger>
               ))}
             </TabsList>
