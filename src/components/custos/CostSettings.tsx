@@ -59,20 +59,22 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
   const hasActiveSubscription = flags?.has_active_subscription ?? false;
 
   useEffect(() => {
+    if (!sellerId) { setLoading(false); return; }
     loadBillingStatus();
     loadPackaging();
     loadTaxConfig();
     loadHistoricalJobStatus();
     setLoading(false);
 
-    pollIntervalRef.current = setInterval(() => { loadBillingStatus(); loadHistoricalJobStatus(); }, 3000);
+    pollIntervalRef.current = setInterval(() => { if (sellerId) { loadBillingStatus(); loadHistoricalJobStatus(); } }, 3000);
     return () => { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); };
   }, [sellerId]);
 
   // ---- Loaders ----
-  const loadBillingStatus = async () => { try { const { data } = await supabase.functions.invoke("ml-sync-billing-details", { body: { seller_id: sellerId, action: "status" } }); if (data) setBillingStatus(data); } catch {} };
+  const loadBillingStatus = async () => { if (!sellerId) return; try { const { data } = await supabase.functions.invoke("ml-sync-billing-details", { body: { seller_id: sellerId, action: "status" } }); if (data) setBillingStatus(data); } catch {} };
 
   const loadHistoricalJobStatus = async () => {
+    if (!sellerId) return;
     try {
       const { data, error } = await supabase.functions.invoke("orders-historical-import", { body: { seller_id: sellerId, action: "status" } });
       if (data?.job) setHistoricalJob(data.job);
@@ -188,7 +190,8 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
   const handleSyncBilling = async (scope: string = "recent") => {
     setSyncingBilling(true); lastBillingScope.current = scope;
     try {
-      toast.info(scope === "history" ? "Sincronizando histórico completo..." : "Sincronizando últimos 12 meses...");
+      const scopeLabel = scope === "history" ? "histórico completo" : scope === "30d" ? "últimos 30 dias" : "últimos 12 meses";
+      toast.info(`Sincronizando ${scopeLabel}...`);
       const { data, error } = await supabase.functions.invoke("ml-sync-billing-details", { body: { seller_id: sellerId, action: "sync", scope } });
       if (error) throw error;
       if (data?.status === 'paused') toast.info(`Billing pausado (${data.periods_processed || 0} períodos).`);
@@ -512,12 +515,35 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
                 <span className="text-amber-700 dark:text-amber-300">O Mercado Livre disponibiliza billing 24 a 48h após a venda.</span>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <Button onClick={() => handleSyncBilling("recent")} disabled={syncingBilling || isBillingSyncing} variant="outline" className="gap-2">
-                  {syncingBilling ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}Últimos 12 Meses
+                <Button onClick={() => handleSyncBilling("30d")} disabled={syncingBilling || isBillingSyncing} className="gap-2">
+                  {syncingBilling && lastBillingScope.current === "30d" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}Últimos 30 Dias
                 </Button>
-                <Button onClick={() => handleSyncBilling("history")} disabled={syncingBilling || isBillingSyncing} className="gap-2">
-                  {syncingBilling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}Histórico Completo
-                </Button>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span>
+                        <Button onClick={() => handleSyncBilling("recent")} disabled={syncingBilling || isBillingSyncing || !hasActiveSubscription} variant="outline" className="gap-2">
+                          {syncingBilling && lastBillingScope.current === "recent" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}Últimos 12 Meses
+                          {!hasActiveSubscription && <Lock className="h-3.5 w-3.5 ml-1 text-muted-foreground" />}
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    {!hasActiveSubscription && <TooltipContent>Disponível após ativar um plano</TooltipContent>}
+                  </Tooltip>
+                </TooltipProvider>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span>
+                        <Button onClick={() => handleSyncBilling("history")} disabled={syncingBilling || isBillingSyncing || !hasActiveSubscription} variant="outline" className="gap-2">
+                          {syncingBilling && lastBillingScope.current === "history" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}Histórico Completo
+                          {!hasActiveSubscription && <Lock className="h-3.5 w-3.5 ml-1 text-muted-foreground" />}
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    {!hasActiveSubscription && <TooltipContent>Disponível após ativar um plano</TooltipContent>}
+                  </Tooltip>
+                </TooltipProvider>
               </div>
             </CardContent>
           </Card>

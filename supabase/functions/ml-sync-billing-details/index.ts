@@ -338,7 +338,7 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
         hasMorePeriods = false;
       } else {
         tempOffset += PERIODS_PER_PAGE;
-        if (scope === "recent" && tempOffset >= PERIODS_PER_PAGE) {
+        if ((scope === "recent" || scope === "30d") && tempOffset >= PERIODS_PER_PAGE) {
           hasMorePeriods = false;
         }
       }
@@ -347,7 +347,21 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
       await delay(12000);
     }
 
-    console.log(`[BillingDetails] Total periods found: ${allPeriods.length}`);
+    // For scope "30d", filter periods to only those within last 30 days
+    if (scope === "30d" && allPeriods.length > 0) {
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      const cutoff = thirtyDaysAgo.toISOString().slice(0, 7); // "YYYY-MM"
+      const before = allPeriods.length;
+      allPeriods = allPeriods.filter((p: any) => {
+        // period key format varies; compare by date_from or key
+        const periodDate = p.date_from || p.key || "";
+        return periodDate >= cutoff;
+      });
+      console.log(`[BillingDetails] 30d filter: ${before} -> ${allPeriods.length} periods (cutoff: ${cutoff})`);
+    }
+
+    console.log(`[BillingDetails] Total periods to process: ${allPeriods.length}`);
     
     // Update total periods in state
     await supabase.from("meli_billing_details_sync_state").update({
