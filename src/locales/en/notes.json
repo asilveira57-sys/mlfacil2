@@ -44,9 +44,18 @@
     "sent_success": "Note sent to tasks",
     "sent_error": "Error sending to tasks"
   },
+  "postit": {
+    "new_postit": "New Post-it",
+    "title_placeholder": "Title...",
+    "content_placeholder": "Quick description...",
+    "pin_to_module": "Pin to: {{module}}",
+    "creating": "Creating...",
+    "create_and_pin": "Create & Pin"
+  },
   "settings": {
     "title": "Notepad",
     "description": "Enable or disable the notepad in the header.",
-    "show_in_header": "Show in header"
+    "show_in_header": "Show in header",
+    "show_postit_button": "Show floating Post-it button"
   }
 }
