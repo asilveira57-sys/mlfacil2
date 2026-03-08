@@ -328,12 +328,35 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
   };
 
   const handleOpenDetail = (item: AbcItem) => {
-    // Store the current drill context along with the item
-    setSelectedGeoItem({
-      ...item,
-      // Store current context for location building
-    });
+    setSelectedGeoItem(item);
     setDrawerOpen(true);
+  };
+
+  const handleOpenMapForItem = (item: AbcItem) => {
+    // Drill into the item first, then open map
+    if (drillLevel === "uf") {
+      setSelectedUf(item.id);
+      setDrillLevel("city");
+    } else if (drillLevel === "city") {
+      setSelectedCity(item.id);
+      setDrillLevel("neighborhood");
+    }
+    setTimeout(() => setMapDrawerOpen(true), 200);
+  };
+
+  // Handle navigating up from within the detail drawer
+  const handleDrawerNavigateUp = () => {
+    setDrawerOpen(false);
+    handleDrillUp();
+  };
+
+  // Build breadcrumb for the drawer
+  const getDrawerBreadcrumb = (): string[] => {
+    const parts = ["Brasil"];
+    if (selectedUf) parts.push(selectedUf);
+    if (selectedCity) parts.push(selectedCity);
+    if (selectedGeoItem) parts.push(selectedGeoItem.id);
+    return parts;
   };
 
   // Build location object based on current drill level and selected item
@@ -457,7 +480,7 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setMapDrawerOpen(true)} disabled={classifiedItems.length === 0}>
+          <Button onClick={() => setMapDrawerOpen(true)} disabled={classifiedItems.length === 0}>
             <MapIcon className="h-4 w-4 mr-2" />
             Ver Mapa
           </Button>
@@ -526,6 +549,7 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
         emptyMessage={`Nenhum${drillLevel === "uf" ? " estado" : drillLevel === "city" ? "a cidade" : " bairro"} encontrado no período selecionado`}
         onRowClick={drillLevel !== "neighborhood" ? handleDrillDown : undefined}
         onDetailClick={handleOpenDetail}
+        onMapClick={drillLevel !== "neighborhood" ? handleOpenMapForItem : undefined}
       />
 
       {/* Drill hint */}
@@ -563,6 +587,8 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
         sellerId={sellerId}
         dateFrom={filters.dateFrom}
         dateTo={filters.dateTo}
+        onNavigateUp={drillLevel !== "uf" ? handleDrawerNavigateUp : undefined}
+        breadcrumbParts={getDrawerBreadcrumb()}
       />
 
       {/* Map Drawer */}
