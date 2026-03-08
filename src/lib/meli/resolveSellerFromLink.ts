@@ -66,17 +66,6 @@ async function fetchUserPublic(sellerId: string | number): Promise<{ id: number;
   return fetchMLPublic(`/users/${sellerId}`);
 }
 
-/**
- * Get total active items for a seller.
- */
-async function fetchSellerItemCountInner(sellerId: string): Promise<number> {
-  try {
-    const data = await fetchMLPublic(`/sites/MLB/search?seller_id=${sellerId}&limit=1`);
-    return data?.paging?.total || 0;
-  } catch {
-    return 0;
-  }
-}
 
 /**
  * Try to resolve a seller from the URL slug (title portion of ML URLs).
