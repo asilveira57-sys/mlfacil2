@@ -55,6 +55,16 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
     return () => window.clearTimeout(t);
   }, [isLoading, location.pathname]);
 
+  // Pre-warm the route map cache for getModuleKeyFromRouteSync
+  useEffect(() => {
+    if (routeMap) {
+      // routeMap from useModuleRouteMap populates the react-query cache;
+      // but getModuleKeyFromRouteSync uses its own module-level cache.
+      // We trigger loadRouteMap to populate it.
+      import('@/hooks/useCollaboratorAccess').then(m => m.getModuleKeyFromRoute('/'));
+    }
+  }, [routeMap]);
+
   useEffect(() => {
     if (isLoading) return;
     if (!isCollaborator) return; // Admin/owner has full access
