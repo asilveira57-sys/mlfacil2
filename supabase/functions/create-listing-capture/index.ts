@@ -79,7 +79,77 @@ async function resolveMLBUtoMLB(mlbuId: string, accessToken?: string): Promise<{
 }
 
 // ============================================================================
-// BUSCA PÚBLICA DE ITEM
+// MULTI-GET FETCH — Bypasses PolicyAgent on /items/{id}
+// Returns data from /items?ids={id}&attributes=all
+// ============================================================================
+async function fetchItemMultiGet(itemId: string, accessToken?: string): Promise<{
+  ok: boolean;
+  data?: any;
+  error?: string;
+  status?: number;
+  method: string;
+}> {
+  const url = `https://api.mercadolibre.com/items?ids=${itemId}&attributes=all`;
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (accessToken) {
+    headers['Authorization'] = `Bearer ${accessToken}`;
+  }
+  const label = accessToken ? 'multi-get-auth' : 'multi-get-public';
+  console.log(`[create-listing-capture] Fetching item ${label}: ${itemId}`);
+
+  try {
+    const response = await fetch(url, { headers });
+    const results = await response.json();
+
+    if (Array.isArray(results) && results[0]?.code === 200 && results[0]?.body) {
+      console.log(`[create-listing-capture] ${label} SUCCESS: ${itemId}, pictures=${results[0].body.pictures?.length || 0}`);
+      return { ok: true, data: results[0].body, status: 200, method: label };
+    }
+    // Some ML responses return object directly
+    if (!Array.isArray(results) && results?.id) {
+      return { ok: true, data: results, status: 200, method: label };
+    }
+
+    const code = results?.[0]?.code || response.status;
+    console.log(`[create-listing-capture] ${label} failed: ${code}`);
+    return { ok: false, error: `Multi-get failed: ${code}`, status: code, method: label };
+  } catch (e: any) {
+    console.log(`[create-listing-capture] ${label} error: ${e.message}`);
+    return { ok: false, error: e.message, status: 0, method: label };
+  }
+}
+
+// ============================================================================
+// SEARCH FALLBACK — Uses /sites/MLB/search?q={id}
+// ============================================================================
+async function fetchItemSearch(itemId: string, accessToken?: string): Promise<{
+  ok: boolean;
+  data?: any;
+  error?: string;
+}> {
+  const url = `https://api.mercadolibre.com/sites/MLB/search?q=${itemId}&limit=1`;
+  const headers: Record<string, string> = {};
+  if (accessToken) {
+    headers['Authorization'] = `Bearer ${accessToken}`;
+  }
+  console.log(`[create-listing-capture] Fetching item via SEARCH: ${itemId}`);
+
+  try {
+    const response = await fetch(url, { headers });
+    const searchData = await response.json();
+
+    if (searchData.results?.[0]?.id === itemId) {
+      console.log(`[create-listing-capture] Search found item: ${itemId}`);
+      return { ok: true, data: searchData.results[0] };
+    }
+    return { ok: false, error: 'Item not found in search' };
+  } catch (e: any) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// ============================================================================
+// LEGACY SINGLE-GET (último recurso)
 // ============================================================================
 async function fetchItemPublic(itemId: string): Promise<{
   ok: boolean;
@@ -87,22 +157,16 @@ async function fetchItemPublic(itemId: string): Promise<{
   error?: string;
   status?: number;
 }> {
-  console.log(`[create-listing-capture] Fetching item PUBLIC: ${itemId}`);
+  console.log(`[create-listing-capture] Fetching item LEGACY PUBLIC: ${itemId}`);
   
   const response = await fetch(`https://api.mercadolibre.com/items/${itemId}`);
   
   if (!response.ok) {
-    const errorText = await response.text().catch(() => "");
-    console.log(`[create-listing-capture] Public fetch failed: ${response.status}`);
-    return {
-      ok: false,
-      error: `Item não encontrado: ${itemId}`,
-      status: response.status,
-    };
+    console.log(`[create-listing-capture] Legacy public fetch failed: ${response.status}`);
+    return { ok: false, error: `Item não encontrado: ${itemId}`, status: response.status };
   }
   
   const data = await response.json();
-  console.log(`[create-listing-capture] Public fetch SUCCESS: ${itemId}, pictures=${data.pictures?.length || 0}`);
   return { ok: true, data };
 }
 
@@ -339,69 +403,71 @@ serve(async (req) => {
     }
 
     // =========================================================================
-    // ETAPA 3: Buscar dados do item
+    // ETAPA 3: Buscar dados do item (Multi-get → Search → Legacy → Fail)
     // =========================================================================
     let itemData: any = null;
     let description: string | undefined;
     let descriptionSource: 'api_public' | 'api_authenticated' | 'none' = 'none';
-    
-    // Primeiro, tentar busca pública
-    const publicResult = await fetchItemPublic(resolvedItemId);
-    
-    if (!publicResult.ok) {
-      // Tentar busca autenticada como fallback
-      if (mlAccount?.access_token) {
-        const authResult = await fetchItemAuthenticated(resolvedItemId, mlAccount.access_token);
-        if (authResult.ok) {
-          itemData = authResult.data;
-          description = authResult.description;
-          descriptionSource = authResult.descriptionSource || 'none';
-        } else {
-          captureLog.errors.push('Falha ao buscar item via API pública e autenticada');
-          return new Response(JSON.stringify({
-            success: false,
-            error: "ITEM_NOT_FOUND",
-            message: `Não foi possível encontrar o anúncio: ${resolvedItemId}`,
-            user_guidance: "Verifique se o link está correto e se o anúncio ainda está ativo.",
-          }), {
-            status: 200,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-      } else {
-        return new Response(JSON.stringify({
-          success: false,
-          error: "ITEM_NOT_FOUND",
-          message: `Item não encontrado: ${resolvedItemId}`,
-        }), {
-          status: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+
+    // A) Multi-get autenticado
+    if (mlAccount?.access_token) {
+      const mgAuth = await fetchItemMultiGet(resolvedItemId, mlAccount.access_token);
+      if (mgAuth.ok) itemData = mgAuth.data;
+    }
+
+    // B) Multi-get público
+    if (!itemData) {
+      const mgPublic = await fetchItemMultiGet(resolvedItemId);
+      if (mgPublic.ok) itemData = mgPublic.data;
+    }
+
+    // C) Search fallback
+    if (!itemData) {
+      const searchResult = await fetchItemSearch(resolvedItemId, mlAccount?.access_token || undefined);
+      if (searchResult.ok) itemData = searchResult.data;
+    }
+
+    // D) Legacy single-get público
+    if (!itemData) {
+      const legacyResult = await fetchItemPublic(resolvedItemId);
+      if (legacyResult.ok) itemData = legacyResult.data;
+    }
+
+    // All attempts failed
+    if (!itemData) {
+      captureLog.errors.push('Falha ao buscar item via todas as estratégias (multi-get, search, legacy)');
+      return new Response(JSON.stringify({
+        success: false,
+        error: "ITEM_NOT_FOUND",
+        message: `Não foi possível encontrar o anúncio: ${resolvedItemId}`,
+        user_guidance: "Verifique se o link está correto e se o anúncio ainda está ativo.",
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Fetch description (separate endpoint, not blocked by PolicyAgent)
+    const descResult = await fetchDescriptionPublic(resolvedItemId);
+    description = descResult.text;
+    descriptionSource = descResult.source;
+    if (descResult.error) {
+      captureLog.errors.push(descResult.error);
+    }
+
+    // If public description failed, try authenticated
+    if (!description && mlAccount?.access_token) {
+      try {
+        const descResponse = await fetch(`https://api.mercadolibre.com/items/${resolvedItemId}/description`, {
+          headers: { Authorization: `Bearer ${mlAccount.access_token}` },
         });
-      }
-    } else {
-      itemData = publicResult.data;
-      
-      // Determinar se o item é do usuário logado
-      const isOwnItem = mlAccount?.ml_user_id && String(itemData.seller_id) === String(mlAccount.ml_user_id);
-      
-      if (isOwnItem && mlAccount?.access_token) {
-        // Item INTERNO: buscar dados extras com autenticação
-        console.log(`[create-listing-capture] Item is INTERNAL - fetching with auth`);
-        const authResult = await fetchItemAuthenticated(resolvedItemId, mlAccount.access_token);
-        if (authResult.ok) {
-          itemData = authResult.data;
-          description = authResult.description;
-          descriptionSource = authResult.descriptionSource || 'none';
+        if (descResponse.ok) {
+          const descData = await descResponse.json();
+          description = descData.plain_text || descData.text;
+          if (description) descriptionSource = 'api_authenticated';
         }
-      } else {
-        // Item EXTERNO: buscar descrição publicamente
-        console.log(`[create-listing-capture] Item is EXTERNAL - fetching public description`);
-        const descResult = await fetchDescriptionPublic(resolvedItemId);
-        description = descResult.text;
-        descriptionSource = descResult.source;
-        if (descResult.error) {
-          captureLog.errors.push(descResult.error);
-        }
+      } catch (e) {
+        console.log(`[create-listing-capture] Auth description fetch failed`);
       }
     }
     
