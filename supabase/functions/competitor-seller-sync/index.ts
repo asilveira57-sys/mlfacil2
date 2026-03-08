@@ -369,21 +369,68 @@ async function fetchSellerListings(mlSellerId: string, accessToken?: string): Pr
   const items: any[] = [];
   let offset = 0;
   const limit = 50;
+  let useUserEndpoint = false;
 
   while (offset < 1000) {
     await delay(DELAY_MS);
     let data: any;
-    try {
-      data = await fetchMLResilient(`/sites/MLB/search?seller_id=${mlSellerId}&offset=${offset}&limit=${limit}`, accessToken);
-    } catch (e) {
-      console.log(`fetchSellerListings failed at offset=${offset}: ${e}`);
-      break;
+    
+    if (!useUserEndpoint) {
+      // Primary: /sites/MLB/search
+      try {
+        data = await fetchMLResilient(`/sites/MLB/search?seller_id=${mlSellerId}&offset=${offset}&limit=${limit}`, accessToken);
+      } catch (e) {
+        console.log(`Search API failed at offset=${offset}: ${e}, switching to /users endpoint...`);
+        useUserEndpoint = true;
+      }
     }
-    if (!data.results || data.results.length === 0) break;
+    
+    if (useUserEndpoint) {
+      // Fallback: /users/{id}/items/search (less blocked by PolicyAgent)
+      try {
+        const userSearchData = await fetchMLResilient(`/users/${mlSellerId}/items/search?status=active&offset=${offset}&limit=${limit}`, accessToken);
+        // This endpoint returns { results: [item_ids], paging: {...} }
+        const itemIds = userSearchData?.results || [];
+        if (itemIds.length === 0) break;
+        
+        // Fetch full item data via multiget batch
+        const enriched = await enrichItemsBatch(itemIds, accessToken);
+        for (const id of itemIds) {
+          const itemData = enriched.get(id);
+          if (itemData) {
+            items.push({
+              id: itemData.id,
+              title: itemData.title,
+              price: itemData.price,
+              original_price: itemData.original_price,
+              sold_quantity: itemData.sold_quantity,
+              available_quantity: itemData.available_quantity,
+              category_id: itemData.category_id,
+              listing_type_id: itemData.listing_type_id,
+              condition: itemData.condition,
+              status: itemData.status,
+              thumbnail: itemData.thumbnail,
+              permalink: itemData.permalink,
+              shipping: itemData.shipping,
+            });
+          }
+        }
+        offset += limit;
+        if (offset >= (userSearchData.paging?.total || 0)) break;
+        continue;
+      } catch (e2) {
+        console.log(`User items endpoint also failed at offset=${offset}: ${e2}`);
+        break;
+      }
+    }
+
+    if (!data || !data.results || data.results.length === 0) break;
     items.push(...data.results);
     offset += limit;
     if (offset >= (data.paging?.total || 0)) break;
   }
+  
+  console.log(`fetchSellerListings for ${mlSellerId}: found ${items.length} items (useUserEndpoint=${useUserEndpoint})`);
   return items;
 }
 

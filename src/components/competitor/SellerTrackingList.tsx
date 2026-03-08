@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -37,9 +37,22 @@ export function SellerTrackingList({ sellerId }: SellerTrackingListProps) {
   const [aliasValue, setAliasValue] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ativo' | 'pausado' | 'all'>('ativo');
 
+  const prevSellerIdRef = useRef(sellerId);
+  const hasFetchedRef = useRef(false);
+  const prevStatusFilterRef = useRef(statusFilter);
+
   useEffect(() => {
+    const sellerChanged = prevSellerIdRef.current !== sellerId;
+    const statusChanged = prevStatusFilterRef.current !== statusFilter;
+    
+    if (hasFetchedRef.current && !sellerChanged && !statusChanged) return;
+    
+    prevSellerIdRef.current = sellerId;
+    prevStatusFilterRef.current = statusFilter;
+    hasFetchedRef.current = true;
+    
     fetchSellers(statusFilter);
-  }, [fetchSellers, statusFilter]);
+  }, [fetchSellers, statusFilter, sellerId]);
 
   const handleOpenDetail = (seller: CompetitorSeller) => {
     setSelectedSeller(seller);

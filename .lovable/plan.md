@@ -1,62 +1,66 @@
 
+# Plano Mestre — Jornada Completa do Seller
 
-## Plano: Fix Refresh na Concorrência + 0 Anúncios no Seller
+## Status de cada item
 
-### Problema 1: Refresh ao trocar aba/view dentro da página
+### ✅ Já existe no sistema
+| # | Item | Status |
+|---|------|--------|
+| 2 | Cadastro (email/senha + confirmação) | ✅ Implementado |
+| 4 | Painel inicial (dashboard) | ✅ Existe (sem velocímetro) |
+| 5 | Conexão ML via OAuth | ✅ Implementado |
+| 6 | Elegibilidade para teste (>10 vendas) | ✅ Verificação existe na company |
+| 8 | Módulo Etiquetas (vendas abertas) | ✅ Implementado |
+| 9 | Módulo Custos (sem Passo 2) | ✅ Atualizado agora |
+| 13 | Seleção automática de plano | ✅ `useUserSalesVolume` + filtro de planos |
+| 15 | Cadastro fiscal (PF/PJ) | ✅ `company_billing` existe |
+| 12 | Bloqueio pós-trial | ✅ Parcial (trial_expired bloqueia) |
 
-**Causa raiz**: `TrackedCompetitorsTab` tem um `useEffect` (linha 73-76) que chama `fetchTrackers` e `fetchOverview` com `fetchTrackers` e `fetchOverview` como dependências. Quando `setViewMode` atualiza o `searchParams`, o hook `useSearchParams` causa re-render do componente. O `useEffect` re-executa porque `fetchTrackers`/`fetchOverview` são recriados a cada render do hook `useCompetitorTracking` (que usa `useState` internamente, mas `fetchTrackers` tem `sellerId` como dep e é `useCallback` — estável). 
+### 🔶 Existe parcialmente / precisa ajuste
+| # | Item | O que falta |
+|---|------|-------------|
+| 1 | Landing com 3 botões | Landing existe mas precisa revisar CTAs |
+| 3 | Tela de boas-vindas (primeiro acesso) | Onboarding existe mas pode não ter welcome screen |
+| 7 | Sincronização inicial automática (30d) | Import manual existe, falta auto-trigger pós-OAuth |
+| 10 | Módulo ADS (sync pós-pagamento) | ADS existe, falta gate de trial |
+| 11 | Linha do Tempo (30d trial vs 1yr pago) | Módulo existe, falta limitar por trial |
+| 14 | Dados fiscais obrigatórios pós-pagamento | Tela existe, falta gate de bloqueio |
 
-Porém, o problema principal é que **qualquer mudança no `searchParams`** (ex: `view=sellers`) causa re-render em `TrackedCompetitorsTab` porque ele chama `useSearchParams`. Isso causa o `useEffect` disparar novamente (mesmo que deps sejam estáveis, a mudança de URL causa unmount/remount de subcomponentes via `TabsContent`).
+### 🔴 Precisa ser desenvolvido
+| # | Item | Descrição |
+|---|------|-----------|
+| 4b | Velocímetro de ativação | Widget de progresso no dashboard |
+| 9b | Tabela `sync_jobs` + lock após sucesso | Controle de execução de syncs |
+| 9c | Lock do botão 1 ano após sucesso | Bloquear re-execução pós-sucesso |
+| 16 | Multi-conta (soma de vendas) | Lógica de soma cross-account |
+| 17-18 | Estados de conta + aviso pré-conexão | Workflow de nova conta |
+| 19 | Verificação de limite + pending_upgrade | Gate automático |
+| 20 | Upgrade com pró-rata | Cálculo proporcional |
+| 21 | Crescimento natural → bloqueio | Detecção automática de excesso |
+| 22 | Proteção contra abuso (logs) | Audit trail de conexões/upgrades |
 
-**Mesma causa no `SellerTrackingList`**: linha 40-42, `useEffect` com `fetchSellers` como dep. Toda vez que o componente monta (ao trocar de view), dispara fetch.
+## Ordem sugerida de implementação
 
-**Solução**:
-- Mover o fetch para um nível estável: usar `useRef` para evitar re-fetch se os dados já existem
-- Adicionar guard no `useEffect` para só buscar se `sellers.length === 0` (primeiro mount) ou se explicitamente solicitado
-- No `TrackedCompetitorsTab`, usar `forceUpdate: false` pattern — guardar dados em ref e só re-fetch se `sellerId` realmente mudar
+### Fase 1 — Gates e bloqueios (impacto imediato)
+1. Velocímetro de ativação no dashboard
+2. Tabela `sync_jobs` + controle de locks
+3. Gate de dados fiscais pós-pagamento
+4. Auto-sync 30d após OAuth
 
-### Problema 2: Seller adicionado com 0 anúncios
+### Fase 2 — Trial gates nos módulos ✅
+5. ✅ ADS: banner de trial + sync bloqueado via ML API gate no backend
+6. ✅ Linha do Tempo: banner de trial informando limitação a 30d
+7. ✅ Etiquetas: filtro "Todos" agora capped a 30 dias
 
-**Causa raiz**: `fetchSellerListings` usa `/sites/MLB/search?seller_id=X` que retorna 403 (PolicyAgent). O `fetchMLResilient` tenta com auth e depois sem auth — ambos falham. O `catch` no loop faz `break`, retornando array vazio. Resultado: seller inserido com `total_items_tracked: 0`.
+### Fase 3 — Multi-conta e upgrade ✅
+8. ✅ Multi-conta: soma de vendas (get_tenant_total_sales + check_tenant_plan_limit)
+9. ✅ Estados de conta (account_state enum: active/pending_upgrade/disabled/error)
+10. ✅ Upgrade com pró-rata (calculate_prorata_upgrade + execute_plan_upgrade)
+11. ✅ Crescimento natural → bloqueio (PlanLimitBanner + useTenantLimits)
+12. ✅ Aviso pré-conexão de nova conta (AccountConnectionWarning)
+13. ✅ Audit log (tenant_limit_log)
 
-**Solução**: Usar endpoint alternativo `/users/{seller_id}/items/search` que é menos bloqueado pelo PolicyAgent. Se esse também falhar, tentar o endpoint multiget batch para buscar os IDs de items do seller via outros meios.
-
----
-
-### Arquivos a alterar
-
-**1. `src/components/competitor/TrackedCompetitorsTab.tsx`**
-- Adicionar `hasFetchedRef` para evitar re-fetch desnecessário
-- Guard no useEffect: só fetch se `sellerId` mudou ou primeira vez
-- Separar a lógica de `searchParams` para não causar re-renders desnecessários
-
-**2. `src/components/competitor/SellerTrackingList.tsx`**
-- Mesmo pattern: `hasFetchedRef` + guard para evitar re-fetch ao montar/desmontar por troca de view
-- Mover `fetchSellers` para só executar se dados estão vazios ou sellerId mudou
-
-**3. `src/hooks/useCompetitorSellers.ts`**
-- Adicionar cache: se já tem sellers carregados para o mesmo sellerId, retornar imediatamente
-- Expor `refresh` separado de `fetchSellers` (para botão manual)
-
-**4. `supabase/functions/competitor-seller-sync/index.ts`**
-- Em `fetchSellerListings`: adicionar fallback usando `/users/{seller_id}/items/search` endpoint
-- Se `/sites/MLB/search?seller_id=X` retorna 403, tentar `/users/{mlSellerId}/items/search?status=active&offset=X&limit=50` com token autenticado
-- Esse endpoint funciona melhor para sellers autenticados e geralmente não é bloqueado pelo PolicyAgent
-
-### Fluxo corrigido
-
-```text
-Troca de view (Anúncios → Sellers):
-  -> SellerTrackingList monta
-  -> useEffect verifica: hasFetchedRef.current === true && sellerId unchanged?
-  -> SIM → skip fetch, usa dados do hook (preservados no state do pai)
-  -> NÃO → fetch uma vez, marca hasFetchedRef
-
-Add Seller:
-  -> resolveSellerFromInput (OK, encontra seller)
-  -> fetchSellerListings:
-     1. Tenta /sites/MLB/search?seller_id=X (403 → catch → continua)
-     2. Fallback: /users/X/items/search?status=active (geralmente funciona com auth)
-  -> Items encontrados → insere no DB
-```
-
+### Fase 4 — Landing e onboarding ✅
+14. ✅ Landing com 3 CTAs (Login, Cadastro, Planos) no header e hero
+15. ✅ Welcome screen pós-confirmação de email (WelcomeScreen + aviso ML)
+16. ✅ Proteção contra abuso (system_audit_log + tenant_limit_log)
