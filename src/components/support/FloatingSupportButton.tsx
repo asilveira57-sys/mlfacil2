@@ -291,6 +291,25 @@ export function FloatingSupportButton({ visible = true, className }: FloatingSup
               <Button
                 variant="ghost"
                 className="w-full justify-start gap-3 h-12"
+                onClick={handleOpenMyTickets}
+              >
+                <div className="relative h-8 w-8 rounded-full bg-green-500/10 flex items-center justify-center">
+                  <ClipboardList className="h-4 w-4 text-green-600" />
+                  {unreadReplies > 0 && (
+                    <span className="absolute -top-1 -right-1 h-4 min-w-[16px] px-0.5 rounded-full bg-destructive text-destructive-foreground text-[10px] font-bold flex items-center justify-center">
+                      {unreadReplies}
+                    </span>
+                  )}
+                </div>
+                <div className="text-left">
+                  <p className="font-medium text-sm">Meus Chamados</p>
+                  <p className="text-xs text-muted-foreground">Acompanhe suas solicitações</p>
+                </div>
+              </Button>
+
+              <Button
+                variant="ghost"
+                className="w-full justify-start gap-3 h-12"
                 onClick={handleOpenKnowledgeBase}
               >
                 <div className="h-8 w-8 rounded-full bg-blue-500/10 flex items-center justify-center">
