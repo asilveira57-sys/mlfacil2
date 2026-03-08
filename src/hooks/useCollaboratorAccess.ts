@@ -9,9 +9,39 @@ interface CollaboratorAccess {
   refetch: () => Promise<void>;
 }
 
+// Dynamic route map cache
+let cachedRouteMap: Map<string, string> | null = null;
+let routeMapPromise: Promise<Map<string, string>> | null = null;
+
+async function loadRouteMap(): Promise<Map<string, string>> {
+  if (cachedRouteMap) return cachedRouteMap;
+  if (routeMapPromise) return routeMapPromise;
+
+  routeMapPromise = (async () => {
+    const { data, error } = await supabase
+      .from('system_modules')
+      .select('key, route')
+      .eq('is_active', true)
+      .not('route', 'is', null);
+
+    const map = new Map<string, string>();
+    if (!error && data) {
+      for (const m of data) {
+        if (m.route) map.set(m.route, m.key);
+      }
+    }
+    cachedRouteMap = map;
+    // Invalidate cache after 5 minutes
+    setTimeout(() => { cachedRouteMap = null; routeMapPromise = null; }, 5 * 60 * 1000);
+    return map;
+  })();
+
+  return routeMapPromise;
+}
+
 /**
  * Hook to check if the current user is a collaborator and what modules they have access to.
- * Now uses company_users + profile_permissions from the new RBAC system.
+ * Uses company_users + profile_permissions from the RBAC system.
  * Admins/owners have full access to all modules.
  */
 export function useCollaboratorAccess(): CollaboratorAccess {
@@ -59,7 +89,6 @@ export function useCollaboratorAccess(): CollaboratorAccess {
         .maybeSingle();
 
       if (!companyUser) {
-        // Not a company user, treat as owner/admin with full access
         setIsCollaborator(false);
         setEnabledModules(new Set(['__all__']));
         setIsLoading(false);
@@ -68,7 +97,6 @@ export function useCollaboratorAccess(): CollaboratorAccess {
       }
 
       if (companyUser.is_owner) {
-        // Owner has full access
         setIsCollaborator(false);
         setEnabledModules(new Set(['__all__']));
         setIsLoading(false);
@@ -80,7 +108,6 @@ export function useCollaboratorAccess(): CollaboratorAccess {
       setIsCollaborator(true);
 
       if (!companyUser.profile_id) {
-        // No profile assigned, minimal access
         setEnabledModules(new Set(['dashboard']));
         setIsLoading(false);
         initialLoadDoneRef.current = true;
@@ -115,17 +142,10 @@ export function useCollaboratorAccess(): CollaboratorAccess {
       setEnabledModules(modules);
     } catch (err) {
       console.error('[useCollaboratorAccess] Error:', err);
-      // CRITICAL: If we already resolved access once, keep previous state
-      // instead of wrongly restricting the owner/admin.
-      // Only default to restricted on the very first load AND only if we
-      // have absolutely no prior state to rely on.
       if (!initialLoadDoneRef.current) {
-        // First load failed – grant full access (fail-open for owners).
-        // This is safe because RLS still protects data server-side.
         setIsCollaborator(false);
         setEnabledModules(new Set(['__all__']));
       }
-      // If already resolved, keep previous isCollaborator / enabledModules values
     } finally {
       setIsLoading(false);
       initialLoadDoneRef.current = true;
@@ -157,35 +177,42 @@ export function useCollaboratorAccess(): CollaboratorAccess {
   };
 }
 
-// Module key to route path mapping for guards
-export const MODULE_ROUTE_MAP: Record<string, string[]> = {
-  dashboard: ['/dashboard'],
-  'marketplace.sales.shipping': ['/shipping-labels'],
-  'operational.labels': ['/shipping-labels', '/shipping-labels/header-settings'],
-  'marketplace.sales.orders': ['/vendas'],
-  'operational.tasks': ['/tarefas', '/tarefas/quadro', '/tarefas/inbox', '/tarefas/regras'],
-  'marketplace.campaigns': ['/promocoes'],
-  'marketplace.ads': ['/publicidade'],
-  'marketplace.listings.timeline': ['/anuncios/linha-do-tempo', '/anuncios/acoes'],
-  'marketplace.aftersales': ['/mensagens'],
-  'marketplace.questions': ['/perguntas'],
-  'marketplace.listings.diagnostics': ['/radiografia'],
-  'tools.market_explorer': ['/mercado'],
-  'tools.trends': ['/tendencias'],
-  'operational.products.abc': ['/abc-analysis'],
-  'operational.products.costs': ['/custos'],
-  'marketplace.pricing': ['/precificacao'],
-  'marketplace.shipping': ['/frete'],
-  'tools.competitors': ['/concorrencia'],
-  'wholesale': ['/atacado'],
-};
+/**
+ * Dynamic reverse lookup: route → module key.
+ * Uses the DB-backed route map instead of hardcoded values.
+ */
+export async function getModuleKeyFromRoute(route: string): Promise<string | null> {
+  const routeMap = await loadRouteMap();
+  
+  // Exact match first
+  const exact = routeMap.get(route);
+  if (exact) return exact;
 
-// Reverse lookup: route to module key
-export function getModuleKeyFromRoute(route: string): string | null {
-  for (const [moduleKey, routes] of Object.entries(MODULE_ROUTE_MAP)) {
-    if (routes.some(r => route === r || route.startsWith(r + '/'))) {
+  // Prefix match (e.g. /tarefas/quadro → /tarefas)
+  for (const [routePath, moduleKey] of routeMap) {
+    if (route.startsWith(routePath + '/')) {
       return moduleKey;
     }
   }
+
+  return null;
+}
+
+/**
+ * Synchronous version for components that already have the route map.
+ * Falls back to null if map isn't loaded yet.
+ */
+export function getModuleKeyFromRouteSync(route: string): string | null {
+  if (!cachedRouteMap) return null;
+  
+  const exact = cachedRouteMap.get(route);
+  if (exact) return exact;
+
+  for (const [routePath, moduleKey] of cachedRouteMap) {
+    if (route.startsWith(routePath + '/')) {
+      return moduleKey;
+    }
+  }
+
   return null;
 }
