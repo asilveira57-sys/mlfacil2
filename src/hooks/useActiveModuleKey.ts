@@ -33,6 +33,7 @@ export const ROUTE_MODULE_MAP: Record<string, string> = {
 
 /** Label map for human-readable module names in selectors */
 export const MODULE_LABELS: Record<string, string> = {
+  '__global__': 'Geral (todos)',
   'inicio': 'Início',
   'dashboard': 'Dashboard',
   'etiquetas': 'Etiquetas',

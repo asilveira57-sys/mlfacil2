@@ -47,10 +47,14 @@
   "postit": {
     "new_postit": "New Post-it",
     "title_placeholder": "Title...",
-    "content_placeholder": "Quick description...",
+    "content_placeholder": "Quick description... (paste images with Ctrl+V)",
     "pin_to_module": "Pin to: {{module}}",
     "creating": "Creating...",
-    "create_and_pin": "Create & Pin"
+    "create_and_pin": "Create & Pin",
+    "close": "Close",
+    "global": "Global (all modules)",
+    "general_task": "General Task",
+    "send_to_collaborator": "Send to collaborator"
   },
   "settings": {
     "title": "Notepad",
