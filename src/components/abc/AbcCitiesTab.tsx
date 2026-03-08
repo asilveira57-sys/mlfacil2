@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/supabaseHelpers";
 import { AbcFilters, AbcConfig } from "@/pages/AbcAnalysis";
 import { AbcTable, AbcItem } from "./AbcTable";
 import { AbcSummaryCards } from "./AbcSummaryCards";
@@ -123,15 +124,22 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Não autenticado");
 
-      // Get orders with shipment data
-      const { data: ordersData, error: ordersError } = await supabase
-        .from("meli_orders_cache")
-        .select("order_id, shipment_id, total_amount, items_count, created_at_meli, order_status")
-        .eq("seller_id", sellerId)
-        .gte("created_at_meli", filters.dateFrom || "1970-01-01")
-        .lte("created_at_meli", filters.dateTo ? `${filters.dateTo}T23:59:59` : "2099-12-31");
-
-      if (ordersError) throw ordersError;
+      // Get ALL orders with shipment data (paginated to avoid 1000-row limit)
+      const ordersData = await fetchAllRows<{
+        order_id: string;
+        shipment_id: string | null;
+        total_amount: number;
+        items_count: number;
+        created_at_meli: string;
+        order_status: string;
+      }>(
+        supabase
+          .from("meli_orders_cache")
+          .select("order_id, shipment_id, total_amount, items_count, created_at_meli, order_status")
+          .eq("seller_id", sellerId)
+          .gte("created_at_meli", filters.dateFrom || "1970-01-01")
+          .lte("created_at_meli", filters.dateTo ? `${filters.dateTo}T23:59:59` : "2099-12-31")
+      );
 
       // Filter by cancellation status
       const filteredOrders = ordersData?.filter(o => {
@@ -153,14 +161,20 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
         return;
       }
 
-      // Get shipments with geographic data
-      const { data: shipmentsData, error: shipmentsError } = await supabase
-        .from("meli_shipments_cache")
-        .select("shipment_id, shipping_state_uf, shipping_city, shipping_neighborhood, receiver_address")
-        .eq("seller_id", sellerId)
-        .in("shipment_id", shipmentIds);
+      // Get ALL shipments with geographic data — batch .in() to avoid limits
+      const shipmentsData: any[] = [];
+      const BATCH_SIZE = 500;
+      for (let i = 0; i < shipmentIds.length; i += BATCH_SIZE) {
+        const batch = shipmentIds.slice(i, i + BATCH_SIZE);
+        const { data: batchData, error: shipmentsError } = await supabase
+          .from("meli_shipments_cache")
+          .select("shipment_id, shipping_state_uf, shipping_city, shipping_neighborhood, receiver_address")
+          .eq("seller_id", sellerId)
+          .in("shipment_id", batch);
 
-      if (shipmentsError) throw shipmentsError;
+        if (shipmentsError) throw shipmentsError;
+        if (batchData) shipmentsData.push(...batchData);
+      }
 
       // Create shipment lookup
       const shipmentMap = new Map(
