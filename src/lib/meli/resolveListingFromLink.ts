@@ -117,6 +117,24 @@ async function fetchItemById(itemId: string): Promise<ResolvedListing> {
     }
   } catch { /* fall through */ }
 
+  // Search API fallback — works when /items returns 403 (PolicyAgent)
+  try {
+    console.log(`[resolveListingFromLink] Trying search fallback for ${itemId}...`);
+    const searchRes = await fetchJSON(`${ML_API}/sites/MLB/search?q=${encodeURIComponent(itemId)}&limit=5`);
+    // Look for exact match
+    for (const r of searchRes?.results || []) {
+      const rId = String(r.id).replace(/-/g, '');
+      if (rId === itemId.replace(/-/g, '') && r.id) {
+        return itemToResolved(r, false);
+      }
+    }
+    // If no exact match, use first result
+    if (searchRes?.results?.[0]?.id) {
+      console.log(`[resolveListingFromLink] No exact match for ${itemId}, using first search result`);
+      return itemToResolved(searchRes.results[0], false);
+    }
+  } catch { /* fall through */ }
+
   throw new Error(`Anúncio ${itemId} não encontrado ou indisponível.`);
 }
 
