@@ -1,0 +1,1 @@
+ALTER TABLE public.sandbox_company_snapshot ADD COLUMN IF NOT EXISTS vendas_despachar_amanha integer DEFAULT 0;

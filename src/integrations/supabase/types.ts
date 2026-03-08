@@ -13483,6 +13483,7 @@ export type Database = {
           total_vendas_semana: number | null
           updated_at: string
           user_id: string
+          vendas_despachar_amanha: number | null
         }
         Insert: {
           acos_medio?: number | null
@@ -13512,6 +13513,7 @@ export type Database = {
           total_vendas_semana?: number | null
           updated_at?: string
           user_id: string
+          vendas_despachar_amanha?: number | null
         }
         Update: {
           acos_medio?: number | null
@@ -13541,6 +13543,7 @@ export type Database = {
           total_vendas_semana?: number | null
           updated_at?: string
           user_id?: string
+          vendas_despachar_amanha?: number | null
         }
         Relationships: [
           {
