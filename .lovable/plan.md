@@ -1,66 +1,62 @@
 
-# Plano Mestre — Jornada Completa do Seller
 
-## Status de cada item
+## Plano: Fix Concorrencia - Performance, Tab Reset, e Seller Resolution
 
-### ✅ Já existe no sistema
-| # | Item | Status |
-|---|------|--------|
-| 2 | Cadastro (email/senha + confirmação) | ✅ Implementado |
-| 4 | Painel inicial (dashboard) | ✅ Existe (sem velocímetro) |
-| 5 | Conexão ML via OAuth | ✅ Implementado |
-| 6 | Elegibilidade para teste (>10 vendas) | ✅ Verificação existe na company |
-| 8 | Módulo Etiquetas (vendas abertas) | ✅ Implementado |
-| 9 | Módulo Custos (sem Passo 2) | ✅ Atualizado agora |
-| 13 | Seleção automática de plano | ✅ `useUserSalesVolume` + filtro de planos |
-| 15 | Cadastro fiscal (PF/PJ) | ✅ `company_billing` existe |
-| 12 | Bloqueio pós-trial | ✅ Parcial (trial_expired bloqueia) |
+### 3 Problemas Identificados
 
-### 🔶 Existe parcialmente / precisa ajuste
-| # | Item | O que falta |
-|---|------|-------------|
-| 1 | Landing com 3 botões | Landing existe mas precisa revisar CTAs |
-| 3 | Tela de boas-vindas (primeiro acesso) | Onboarding existe mas pode não ter welcome screen |
-| 7 | Sincronização inicial automática (30d) | Import manual existe, falta auto-trigger pós-OAuth |
-| 10 | Módulo ADS (sync pós-pagamento) | ADS existe, falta gate de trial |
-| 11 | Linha do Tempo (30d trial vs 1yr pago) | Módulo existe, falta limitar por trial |
-| 14 | Dados fiscais obrigatórios pós-pagamento | Tela existe, falta gate de bloqueio |
+**1. Seller resolution falha (403 em todas as APIs ML do browser)**
+- O `AddCompetitorSellerDialog` chama `resolveSellerFromLink` que faz fetch direto do browser para `api.mercadolibre.com`
+- O browser do usuario esta recebendo 403 (PolicyAgent) em TODOS os endpoints: `/items`, `/search`, batch
+- Mas a edge function `competitor-seller-sync` tem token autenticado e funciona (logs mostram "Token refreshed successfully")
+- **Solucao**: Parar de resolver client-side. Usar a action `preview` da edge function que ja existe e ja usa token autenticado
 
-### 🔴 Precisa ser desenvolvido
-| # | Item | Descrição |
-|---|------|-----------|
-| 4b | Velocímetro de ativação | Widget de progresso no dashboard |
-| 9b | Tabela `sync_jobs` + lock após sucesso | Controle de execução de syncs |
-| 9c | Lock do botão 1 ano após sucesso | Bloquear re-execução pós-sucesso |
-| 16 | Multi-conta (soma de vendas) | Lógica de soma cross-account |
-| 17-18 | Estados de conta + aviso pré-conexão | Workflow de nova conta |
-| 19 | Verificação de limite + pending_upgrade | Gate automático |
-| 20 | Upgrade com pró-rata | Cálculo proporcional |
-| 21 | Crescimento natural → bloqueio | Detecção automática de excesso |
-| 22 | Proteção contra abuso (logs) | Audit trail de conexões/upgrades |
+**2. Tab reseta ao navegar (Sellers -> sai -> volta -> mostra Anuncios)**
+- `activeTab` em `Concorrencia.tsx` (linha 39) usa `useState('tracked')` sem persistencia
+- Quando navega para outra pagina e volta, o componente remonta e `activeTab` volta para `'tracked'`
+- O `viewMode` dentro de `TrackedCompetitorsTab` tambem reseta para `'listings'` (linha 62)
+- **Solucao**: Persistir `activeTab` e `viewMode` na URL via query params (`?tab=tracked&view=sellers`)
 
-## Ordem sugerida de implementação
+**3. Lentidao ao trocar para aba Sellers (4-5s)**
+- `SellerTrackingList` chama `fetchSellers` no `useEffect` que invoca a edge function `competitor-seller-sync`
+- A edge function faz `getFreshAccessToken` que SEMPRE faz refresh do token ML (linha 57: "Always refresh to ensure fresh token")
+- Isso adiciona ~1-2s de latencia desnecessaria em cada chamada `list`
+- Alem disso, ao trocar viewMode de listings->sellers, o componente monta e dispara o fetch
+- **Solucao**: Na edge function, so refreshar token quando realmente necessario (verificar `token_expires_at`). No frontend, cachear resultado do fetch.
 
-### Fase 1 — Gates e bloqueios (impacto imediato)
-1. Velocímetro de ativação no dashboard
-2. Tabela `sync_jobs` + controle de locks
-3. Gate de dados fiscais pós-pagamento
-4. Auto-sync 30d após OAuth
+---
 
-### Fase 2 — Trial gates nos módulos ✅
-5. ✅ ADS: banner de trial + sync bloqueado via ML API gate no backend
-6. ✅ Linha do Tempo: banner de trial informando limitação a 30d
-7. ✅ Etiquetas: filtro "Todos" agora capped a 30 dias
+### Arquivos a alterar
 
-### Fase 3 — Multi-conta e upgrade ✅
-8. ✅ Multi-conta: soma de vendas (get_tenant_total_sales + check_tenant_plan_limit)
-9. ✅ Estados de conta (account_state enum: active/pending_upgrade/disabled/error)
-10. ✅ Upgrade com pró-rata (calculate_prorata_upgrade + execute_plan_upgrade)
-11. ✅ Crescimento natural → bloqueio (PlanLimitBanner + useTenantLimits)
-12. ✅ Aviso pré-conexão de nova conta (AccountConnectionWarning)
-13. ✅ Audit log (tenant_limit_log)
+**1. `src/components/competitor/AddCompetitorSellerDialog.tsx`**
+- Remover import de `resolveSellerFromLink` (client-side)
+- `handlePreview`: chamar a edge function `competitor-seller-sync` com `action: 'preview'` em vez de resolver client-side
+- Isso usa o token autenticado do seller, contornando os 403
 
-### Fase 4 — Landing e onboarding ✅
-14. ✅ Landing com 3 CTAs (Login, Cadastro, Planos) no header e hero
-15. ✅ Welcome screen pós-confirmação de email (WelcomeScreen + aviso ML)
-16. ✅ Proteção contra abuso (system_audit_log + tenant_limit_log)
+**2. `src/pages/Concorrencia.tsx`**
+- Ler `activeTab` da URL query param `?tab=` com fallback para `'tracked'`
+- No `setActiveTab`, atualizar query param na URL sem reload (`navigate` com `replace`)
+- Resultado: sair e voltar preserva a aba
+
+**3. `src/components/competitor/TrackedCompetitorsTab.tsx`**
+- Ler `viewMode` da URL query param `?view=` com fallback para `'listings'`
+- No `setViewMode`, atualizar query param
+
+**4. `supabase/functions/competitor-seller-sync/index.ts`**
+- Em `getFreshAccessToken`: verificar `token_expires_at` antes de refreshar
+- So refreshar se token expira em menos de 30 minutos
+- Isso elimina ~1-2s de latencia desnecessaria na maioria das chamadas
+
+### Fluxo corrigido de adicionar seller
+
+```text
+Usuario cola MLB3852634175
+  -> handlePreview()
+  -> POST competitor-seller-sync { action: 'preview', input: 'MLB3852634175', seller_id }
+  -> Edge function usa token autenticado
+  -> fetchMLResilient(/items/MLB3852634175) com auth header
+  -> Resolve seller_id -> /users/{id} -> retorna preview
+  -> UI mostra nickname, reputacao, total de anuncios
+  -> Usuario clica "Monitorar"
+  -> POST competitor-seller-sync { action: 'add', ... }
+```
+
