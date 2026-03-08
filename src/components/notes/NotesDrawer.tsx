@@ -155,6 +155,14 @@ export function NotesDrawer({ companyId }: NotesDrawerProps) {
     [uploadFile]
   );
 
+  // Handle non-image file attachment
+  const handleAttachFile = useCallback(
+    async (file: File): Promise<void> => {
+      await uploadFile({ file });
+    },
+    [uploadFile]
+  );
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <Tooltip>
