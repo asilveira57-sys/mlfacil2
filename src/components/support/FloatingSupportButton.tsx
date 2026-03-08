@@ -173,13 +173,13 @@ export function FloatingSupportButton({ visible = true, className }: FloatingSup
   const handleOpenKnowledgeBase = useCallback(() => {
     if (didDrag.current) return;
     setIsOpen(false);
-    navigate('/settings?tab=support&section=knowledge');
+    navigate('/settings?section=abrir-chamado');
   }, [navigate]);
 
   const handleOpenMyTickets = useCallback(() => {
     if (didDrag.current) return;
     setIsOpen(false);
-    navigate('/settings?tab=support');
+    navigate('/settings?section=abrir-chamado');
   }, [navigate]);
 
   const handleDismiss = useCallback((e: React.MouseEvent) => {

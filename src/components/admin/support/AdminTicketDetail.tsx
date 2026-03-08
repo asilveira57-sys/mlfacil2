@@ -203,12 +203,21 @@ export function AdminTicketDetail({ ticketId, onBack }: AdminTicketDetailProps) 
         category: 'system_alert',
         title: `Resposta no chamado: ${ticket.subject}`,
         body: newMessage.trim().slice(0, 200),
-        action_url: '/settings?tab=support',
+        action_url: `/settings?section=abrir-chamado&ticket=${ticket.id}`,
         reference_type: 'support_ticket',
         reference_id: ticket.id,
         origin_module: 'suporte',
         priority: 'normal',
       });
+
+      // Trigger email notification to seller
+      try {
+        await supabase.functions.invoke('support-notify', {
+          body: { type: 'reply', ticket_id: ticket.id },
+        });
+      } catch (emailErr) {
+        console.warn('[AdminTicketDetail] Email notify failed:', emailErr);
+      }
 
       toast({ title: 'Resposta enviada e seller notificado' });
     } catch (error) {
@@ -280,12 +289,35 @@ export function AdminTicketDetail({ ticketId, onBack }: AdminTicketDetailProps) 
             <div className="space-y-2">
               <p className="text-sm font-medium">Anexos</p>
               <div className="flex flex-wrap gap-2">
-                {attachments.map(att => (
-                  <Badge key={att.id} variant="outline" className="gap-1.5 py-1.5">
-                    {att.file_type.startsWith('image/') ? <Image className="h-3 w-3" /> : <FileText className="h-3 w-3" />}
-                    <span className="max-w-[100px] truncate">{att.file_name}</span>
-                  </Badge>
-                ))}
+                {attachments.map(att => {
+                  const { data: urlData } = supabase.storage
+                    .from('support-attachments')
+                    .getPublicUrl(att.storage_path);
+                  const url = urlData?.publicUrl;
+                  const isImage = att.file_type.startsWith('image/');
+                  return (
+                    <a
+                      key={att.id}
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex"
+                    >
+                      {isImage ? (
+                        <img
+                          src={url}
+                          alt={att.file_name}
+                          className="h-24 w-auto rounded-md border object-cover hover:opacity-80 transition-opacity cursor-pointer"
+                        />
+                      ) : (
+                        <Badge variant="outline" className="gap-1.5 py-1.5 cursor-pointer hover:bg-muted">
+                          <FileText className="h-3 w-3" />
+                          <span className="max-w-[100px] truncate">{att.file_name}</span>
+                        </Badge>
+                      )}
+                    </a>
+                  );
+                })}
               </div>
             </div>
           )}

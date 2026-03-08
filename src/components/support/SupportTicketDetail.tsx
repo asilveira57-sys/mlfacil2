@@ -303,17 +303,37 @@ export function SupportTicketDetail({ ticketId, onBack }: SupportTicketDetailPro
               <p className="text-sm font-medium">Anexos</p>
               <div className="flex flex-wrap gap-2">
                 {attachments.map(attachment => {
-                  const Icon = getAttachmentIcon(attachment.file_type);
+                  const { data: urlData } = supabase.storage
+                    .from('support-attachments')
+                    .getPublicUrl(attachment.storage_path);
+                  const url = urlData?.publicUrl;
+                  const isImage = attachment.file_type.startsWith('image/');
                   return (
-                    <Badge key={attachment.id} variant="outline" className="gap-1.5 py-1.5">
-                      <Icon className="h-3 w-3" />
-                      <span className="max-w-[100px] truncate">{attachment.file_name}</span>
-                      {attachment.file_size && (
-                        <span className="text-muted-foreground">
-                          ({formatFileSize(attachment.file_size)})
-                        </span>
+                    <a
+                      key={attachment.id}
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex"
+                    >
+                      {isImage ? (
+                        <img
+                          src={url}
+                          alt={attachment.file_name}
+                          className="h-24 w-auto rounded-md border object-cover hover:opacity-80 transition-opacity cursor-pointer"
+                        />
+                      ) : (
+                        <Badge variant="outline" className="gap-1.5 py-1.5 cursor-pointer hover:bg-muted">
+                          <FileText className="h-3 w-3" />
+                          <span className="max-w-[100px] truncate">{attachment.file_name}</span>
+                          {attachment.file_size && (
+                            <span className="text-muted-foreground">
+                              ({formatFileSize(attachment.file_size)})
+                            </span>
+                          )}
+                        </Badge>
                       )}
-                    </Badge>
+                    </a>
                   );
                 })}
               </div>
