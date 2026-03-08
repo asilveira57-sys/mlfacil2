@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useCurrentUserId } from './useCurrentUserId';
 import { toast } from 'sonner';
+import type { Json } from '@/integrations/supabase/types';
 
 export interface SecurityEvent {
   id: string;
@@ -9,11 +10,11 @@ export interface SecurityEvent {
   event_type: string;
   ip_address: string | null;
   user_agent: string | null;
-  device_info: Record<string, unknown>;
+  device_info: Json;
   location: string | null;
   is_new_device: boolean;
   success: boolean;
-  metadata: Record<string, unknown>;
+  metadata: Json;
   created_at: string;
 }
 
@@ -130,7 +131,7 @@ export function useLogSecurityEvent() {
   const userId = useCurrentUserId();
 
   return useMutation({
-    mutationFn: async (event: Pick<SecurityEvent, 'event_type' | 'success' | 'metadata'> & Partial<SecurityEvent>) => {
+    mutationFn: async (event: { event_type: string; success?: boolean; metadata?: Json }) => {
       if (!userId) return;
       const { error } = await supabase.from('security_events').insert([{
         user_id: userId,
