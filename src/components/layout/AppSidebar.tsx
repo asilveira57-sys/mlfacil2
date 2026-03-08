@@ -27,7 +27,7 @@ import {
   Calculator,
   Percent,
   Truck,
-  Copy,
+  
   Layers,
 } from "lucide-react";
 import {
