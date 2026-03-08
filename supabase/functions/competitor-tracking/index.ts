@@ -118,6 +118,23 @@ Deno.serve(async (req) => {
       const body = await req.json();
       const sellerId = body.seller_id;
 
+      // Get ML access token for authenticated API calls
+      let mlAccessToken: string | undefined;
+      if (sellerId) {
+        const adminClient = createClient(
+          Deno.env.get('SUPABASE_URL') ?? '',
+          Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+        );
+        const { data: mlAccount } = await adminClient
+          .from('ml_accounts')
+          .select('access_token')
+          .eq('user_id', user.id)
+          .eq('ml_user_id', sellerId)
+          .eq('is_active', true)
+          .single();
+        mlAccessToken = mlAccount?.access_token;
+      }
+
       if (!sellerId) {
         return new Response(JSON.stringify({ error: 'seller_id required' }), {
           status: 400,
