@@ -18,6 +18,7 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { isCollaborator, isLoading, hasModuleAccess } = useCollaboratorAccess();
+  const { data: routeMap } = useModuleRouteMap();
   const [timedOut, setTimedOut] = useState(false);
   // Prevent full-screen "blank" on background refetches.
   // Once access has been resolved at least once, keep rendering children
