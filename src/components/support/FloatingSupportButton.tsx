@@ -4,7 +4,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { MessageCircle, X, Headphones, HelpCircle, BookOpen, GripVertical } from 'lucide-react';
+import { MessageCircle, X, Headphones, HelpCircle, BookOpen, ClipboardList } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { Button } from '@/components/ui/button';
 import {
@@ -15,6 +15,7 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom';
 import { CreateTicketDialog } from './CreateTicketDialog';
 import { SupportChatDialog } from './SupportChatDialog';
+import { useUnreadTicketReplies } from '@/hooks/useUnreadTicketReplies';
 import { cn } from '@/lib/utils';
 
 const POSITION_KEY = 'support-btn-position';
@@ -73,6 +74,7 @@ export function FloatingSupportButton({ visible = true, className }: FloatingSup
 
   const location = useLocation();
   const navigate = useNavigate();
+  const unreadReplies = useUnreadTicketReplies();
 
   // Recalculate position on window resize
   useEffect(() => {
@@ -174,6 +176,12 @@ export function FloatingSupportButton({ visible = true, className }: FloatingSup
     navigate('/settings?tab=support&section=knowledge');
   }, [navigate]);
 
+  const handleOpenMyTickets = useCallback(() => {
+    if (didDrag.current) return;
+    setIsOpen(false);
+    navigate('/settings?tab=support');
+  }, [navigate]);
+
   const handleDismiss = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     setDismissed(true);
@@ -221,22 +229,29 @@ export function FloatingSupportButton({ visible = true, className }: FloatingSup
           setIsOpen(open);
         }}>
           <PopoverTrigger asChild>
-            <Button
-              size="icon"
-              className={cn(
-                'h-14 w-14 rounded-full shadow-lg',
-                'bg-primary hover:bg-primary/90 text-primary-foreground',
-                'transition-all duration-200',
-                !dragging && 'hover:scale-105',
-                className
+            <div className="relative">
+              <Button
+                size="icon"
+                className={cn(
+                  'h-14 w-14 rounded-full shadow-lg',
+                  'bg-primary hover:bg-primary/90 text-primary-foreground',
+                  'transition-all duration-200',
+                  !dragging && 'hover:scale-105',
+                  className
+                )}
+              >
+                {isOpen ? (
+                  <X className="h-6 w-6" />
+                ) : (
+                  <MessageCircle className="h-6 w-6" />
+                )}
+              </Button>
+              {unreadReplies > 0 && !isOpen && (
+                <span className="absolute -top-1 -right-1 h-5 min-w-[20px] px-1 rounded-full bg-destructive text-destructive-foreground text-xs font-bold flex items-center justify-center shadow-md">
+                  {unreadReplies}
+                </span>
               )}
-            >
-              {isOpen ? (
-                <X className="h-6 w-6" />
-              ) : (
-                <MessageCircle className="h-6 w-6" />
-              )}
-            </Button>
+            </div>
           </PopoverTrigger>
           <PopoverContent
             side="top"
@@ -273,6 +288,25 @@ export function FloatingSupportButton({ visible = true, className }: FloatingSup
                 </div>
               </Button>
               
+              <Button
+                variant="ghost"
+                className="w-full justify-start gap-3 h-12"
+                onClick={handleOpenMyTickets}
+              >
+                <div className="relative h-8 w-8 rounded-full bg-green-500/10 flex items-center justify-center">
+                  <ClipboardList className="h-4 w-4 text-green-600" />
+                  {unreadReplies > 0 && (
+                    <span className="absolute -top-1 -right-1 h-4 min-w-[16px] px-0.5 rounded-full bg-destructive text-destructive-foreground text-[10px] font-bold flex items-center justify-center">
+                      {unreadReplies}
+                    </span>
+                  )}
+                </div>
+                <div className="text-left">
+                  <p className="font-medium text-sm">Meus Chamados</p>
+                  <p className="text-xs text-muted-foreground">Acompanhe suas solicitações</p>
+                </div>
+              </Button>
+
               <Button
                 variant="ghost"
                 className="w-full justify-start gap-3 h-12"

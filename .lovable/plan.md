@@ -1,46 +1,66 @@
 
+# Plano Mestre — Jornada Completa do Seller
 
-## Diagnóstico
+## Status de cada item
 
-Atualmente **não existe** uma tela de administração para chamados de suporte. O admin não tem como ver, responder ou ser notificado de tickets abertos pelos sellers. Também falta a opção "Meus Chamados" no botão flutuante de suporte.
+### ✅ Já existe no sistema
+| # | Item | Status |
+|---|------|--------|
+| 2 | Cadastro (email/senha + confirmação) | ✅ Implementado |
+| 4 | Painel inicial (dashboard) | ✅ Existe (sem velocímetro) |
+| 5 | Conexão ML via OAuth | ✅ Implementado |
+| 6 | Elegibilidade para teste (>10 vendas) | ✅ Verificação existe na company |
+| 8 | Módulo Etiquetas (vendas abertas) | ✅ Implementado |
+| 9 | Módulo Custos (sem Passo 2) | ✅ Atualizado agora |
+| 13 | Seleção automática de plano | ✅ `useUserSalesVolume` + filtro de planos |
+| 15 | Cadastro fiscal (PF/PJ) | ✅ `company_billing` existe |
+| 12 | Bloqueio pós-trial | ✅ Parcial (trial_expired bloqueia) |
 
-A categoria de notificação `system_alert` será usada para notificar o seller quando o admin responder (o enum atual não tem categoria de suporte, mas `system_alert` serve bem para isso sem precisar migrar o enum).
+### 🔶 Existe parcialmente / precisa ajuste
+| # | Item | O que falta |
+|---|------|-------------|
+| 1 | Landing com 3 botões | Landing existe mas precisa revisar CTAs |
+| 3 | Tela de boas-vindas (primeiro acesso) | Onboarding existe mas pode não ter welcome screen |
+| 7 | Sincronização inicial automática (30d) | Import manual existe, falta auto-trigger pós-OAuth |
+| 10 | Módulo ADS (sync pós-pagamento) | ADS existe, falta gate de trial |
+| 11 | Linha do Tempo (30d trial vs 1yr pago) | Módulo existe, falta limitar por trial |
+| 14 | Dados fiscais obrigatórios pós-pagamento | Tela existe, falta gate de bloqueio |
 
-## Plano
+### 🔴 Precisa ser desenvolvido
+| # | Item | Descrição |
+|---|------|-----------|
+| 4b | Velocímetro de ativação | Widget de progresso no dashboard |
+| 9b | Tabela `sync_jobs` + lock após sucesso | Controle de execução de syncs |
+| 9c | Lock do botão 1 ano após sucesso | Bloquear re-execução pós-sucesso |
+| 16 | Multi-conta (soma de vendas) | Lógica de soma cross-account |
+| 17-18 | Estados de conta + aviso pré-conexão | Workflow de nova conta |
+| 19 | Verificação de limite + pending_upgrade | Gate automático |
+| 20 | Upgrade com pró-rata | Cálculo proporcional |
+| 21 | Crescimento natural → bloqueio | Detecção automática de excesso |
+| 22 | Proteção contra abuso (logs) | Audit trail de conexões/upgrades |
 
-### 1. Criar página Admin de Suporte (`src/pages/admin/AdminSuporte.tsx`)
+## Ordem sugerida de implementação
 
-- Lista todos os tickets de todos os workspaces com filtros (status, categoria, busca)
-- Mostra seller/workspace de cada ticket
-- Clique abre detalhe do ticket com timeline de mensagens
-- Admin responde com `sender_type: 'support'` e pode alterar status (em atendimento, aguardando resposta, resolvido, finalizado)
-- Ao enviar resposta, insere notificação individual na `app_notifications` para o `user_id` do ticket com `category: 'system_alert'`, `action_url: '/settings?tab=support'`, referenciando o ticket
+### Fase 1 — Gates e bloqueios (impacto imediato)
+1. Velocímetro de ativação no dashboard
+2. Tabela `sync_jobs` + controle de locks
+3. Gate de dados fiscais pós-pagamento
+4. Auto-sync 30d após OAuth
 
-### 2. Registrar tab no Admin (`src/pages/Admin.tsx`)
+### Fase 2 — Trial gates nos módulos ✅
+5. ✅ ADS: banner de trial + sync bloqueado via ML API gate no backend
+6. ✅ Linha do Tempo: banner de trial informando limitação a 30d
+7. ✅ Etiquetas: filtro "Todos" agora capped a 30 dias
 
-- Adicionar `{ id: 'suporte', label: 'Suporte', icon: Headphones }` no array `adminTabs`
-- Adicionar rota `<Route path="suporte/*" element={<AdminSuporte />} />`
+### Fase 3 — Multi-conta e upgrade ✅
+8. ✅ Multi-conta: soma de vendas (get_tenant_total_sales + check_tenant_plan_limit)
+9. ✅ Estados de conta (account_state enum: active/pending_upgrade/disabled/error)
+10. ✅ Upgrade com pró-rata (calculate_prorata_upgrade + execute_plan_upgrade)
+11. ✅ Crescimento natural → bloqueio (PlanLimitBanner + useTenantLimits)
+12. ✅ Aviso pré-conexão de nova conta (AccountConnectionWarning)
+13. ✅ Audit log (tenant_limit_log)
 
-### 3. Adicionar "Meus Chamados" no botão flutuante (`src/components/support/FloatingSupportButton.tsx`)
-
-- Nova opção no popover: "Meus Chamados" com ícone `ClipboardList`
-- Query para contar tickets com respostas não lidas (mensagens `sender_type = 'support'` com `created_at` posterior à última mensagem `sender_type = 'user'`)
-- Badge numérico no botão (igual sineta) mostrando quantidade de chamados com respostas pendentes
-- Click navega para `/settings?tab=support`
-
-### 4. Notificação individual ao seller
-
-- Quando admin envia mensagem no `AdminSuporte`, inserir em `app_notifications`:
-  - `user_id`: dono do ticket
-  - `category`: `system_alert`
-  - `title`: "Resposta no chamado: {subject}"
-  - `action_url`: `/settings?tab=support`
-  - `reference_type`: `support_ticket`
-  - `reference_id`: ticket id
-- Atualizar status do ticket para `waiting_response`
-
-### Resultado
-- Admin vê e responde chamados em `/admin/suporte`
-- Seller recebe notificação na sineta quando admin responde
-- Botão flutuante tem "Meus Chamados" com badge de respostas não lidas
-
+### Fase 4 — Landing e onboarding ✅
+14. ✅ Landing com 3 CTAs (Login, Cadastro, Planos) no header e hero
+15. ✅ Welcome screen pós-confirmação de email (WelcomeScreen + aviso ML)
+16. ✅ Proteção contra abuso (system_audit_log + tenant_limit_log)

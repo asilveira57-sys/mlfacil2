@@ -5,7 +5,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   LayoutDashboard, Rocket, Users, Shield, CreditCard, Receipt, FileText, 
   Search, Plug, Settings, Tags, Link2, FileStack, Globe, Menu, Star,
-  ClipboardList, History, Palette, Radio, CalendarDays, Sparkles, Eye, Activity, HelpCircle, Mail,
+  ClipboardList, History, Palette, Radio, CalendarDays, Sparkles, Eye, Activity, HelpCircle, Mail, Headphones,
 } from 'lucide-react';
 import { AdminDashboard } from './admin/AdminDashboard';
 import { AdminOnboarding } from './admin/AdminOnboarding';
@@ -35,6 +35,7 @@ import { AdminSystemStatus } from './admin/AdminSystemStatus';
 import AdminContatos from './admin/AdminContatos';
 import AdminCentralDeAjuda from './admin/AdminCentralDeAjuda';
 import { AdminEmails } from './admin/AdminEmails';
+import AdminSuporte from './admin/AdminSuporte';
 
 const adminTabs = [
   { id: '', label: 'Dashboard', icon: LayoutDashboard },
@@ -67,6 +68,7 @@ const adminTabs = [
   { id: 'contatos', label: 'Contatos', icon: Users },
   { id: 'central-de-ajuda', label: 'Central Ajuda', icon: HelpCircle },
   { id: 'emails', label: 'Comunicação', icon: Mail },
+  { id: 'suporte', label: 'Suporte', icon: Headphones },
 ];
 
 export default function Admin() {
@@ -139,6 +141,7 @@ export default function Admin() {
           <Route path="contatos" element={<AdminContatos />} />
           <Route path="central-de-ajuda" element={<AdminCentralDeAjuda />} />
           <Route path="emails" element={<AdminEmails />} />
+          <Route path="suporte" element={<AdminSuporte />} />
         </Routes>
       </div>
     </PageContainer>
