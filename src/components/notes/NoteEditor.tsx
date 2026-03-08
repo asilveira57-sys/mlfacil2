@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Paperclip, X as XIcon } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import type { Note } from '@/types/notes';
 import { NoteEditorToolbar } from './NoteEditorToolbar';
@@ -18,6 +19,7 @@ interface NoteEditorProps {
   onArchive?: () => void;
   onPasteImage?: (data: DataTransfer) => Promise<string | null>;
   onUploadImage?: (file: File) => Promise<string>;
+  onAttachFile?: (file: File) => Promise<void>;
 }
 
 export function NoteEditor({
@@ -33,11 +35,14 @@ export function NoteEditor({
   onArchive,
   onPasteImage,
   onUploadImage,
+  onAttachFile,
 }: NoteEditorProps) {
   const { t } = useTranslation('notes');
   const [title, setTitle] = useState(note.title);
+  const [attachedFiles, setAttachedFiles] = useState<{ name: string; type: string }[]>([]);
   const editorRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachInputRef = useRef<HTMLInputElement>(null);
   const lastSavedContent = useRef(note.content_plain);
 
   // Initialize content
@@ -51,7 +56,6 @@ export function NoteEditor({
     }
   }, [note.id]);
 
-  // Title change handler
   const handleTitleChange = useCallback(
     (value: string) => {
       setTitle(value);
@@ -60,7 +64,6 @@ export function NoteEditor({
     [onUpdate]
   );
 
-  // Content change handler
   const handleContentChange = useCallback(() => {
     if (!editorRef.current) return;
     const plain = editorRef.current.innerText || '';
@@ -74,17 +77,14 @@ export function NoteEditor({
     }
   }, [onUpdate]);
 
-  // Insert image into editor at cursor
   const insertImageInEditor = useCallback((imageUrl: string) => {
     if (!editorRef.current) return;
     editorRef.current.focus();
     const imgHtml = `<img src="${imageUrl}" class="max-w-full rounded my-2" style="max-width:100%;border-radius:4px;" />`;
     document.execCommand('insertHTML', false, imgHtml);
-    // Trigger content save
     handleContentChange();
   }, [handleContentChange]);
 
-  // Paste handler for images
   const handlePaste = useCallback(
     async (e: React.ClipboardEvent) => {
       const items = Array.from(e.clipboardData.items);
@@ -100,13 +100,11 @@ export function NoteEditor({
     [onPasteImage, insertImageInEditor]
   );
 
-  // Format commands
   const execCommand = useCallback((command: string) => {
     document.execCommand(command, false);
     editorRef.current?.focus();
   }, []);
 
-  // File upload
   const handleFileSelect = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -121,6 +119,22 @@ export function NoteEditor({
     [onUploadImage, insertImageInEditor]
   );
 
+  const handleAttachFile = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file && onAttachFile) {
+        try {
+          await onAttachFile(file);
+          setAttachedFiles((prev) => [...prev, { name: file.name, type: file.type }]);
+        } catch (err) {
+          console.error('[NoteEditor] Attach error:', err);
+        }
+      }
+      if (attachInputRef.current) attachInputRef.current.value = '';
+    },
+    [onAttachFile]
+  );
+
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
@@ -131,6 +145,7 @@ export function NoteEditor({
         onExecCommand={execCommand}
         onColorChange={(hex) => onUpdate({ color_hex: hex })}
         onUploadImage={() => fileInputRef.current?.click()}
+        onAttachFile={onAttachFile ? () => attachInputRef.current?.click() : undefined}
       />
 
       <input
@@ -139,6 +154,14 @@ export function NoteEditor({
         accept="image/*"
         className="hidden"
         onChange={handleFileSelect}
+      />
+
+      <input
+        ref={attachInputRef}
+        type="file"
+        accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.ppt,.pptx"
+        className="hidden"
+        onChange={handleAttachFile}
       />
 
       {/* Title */}
@@ -161,6 +184,18 @@ export function NoteEditor({
         onPaste={handlePaste}
         data-placeholder={t('no_notes_hint')}
       />
+
+      {/* Attached files indicator */}
+      {attachedFiles.length > 0 && (
+        <div className="px-4 py-2 border-t flex flex-wrap gap-1.5">
+          {attachedFiles.map((f, i) => (
+            <div key={i} className="flex items-center gap-1 rounded bg-muted px-2 py-1 text-xs text-muted-foreground">
+              <Paperclip className="h-3 w-3 shrink-0" />
+              <span className="truncate max-w-[140px]">{f.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Action bar */}
       <NoteEditorActions
