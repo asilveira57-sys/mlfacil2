@@ -196,13 +196,15 @@ export function useActiveSessions() {
         });
         
         // Also register the current session for future queries
-        await supabase.from('security_events').insert([{
-          user_id: userId!,
-          event_type: 'login',
-          user_agent: currentUserAgent,
-          success: true,
-          metadata: { login_at: new Date().toISOString(), source: 'session_backfill' },
-        }]).then(() => {/* silent */}).catch(() => {/* silent */});
+        try {
+          await supabase.from('security_events').insert([{
+            user_id: userId!,
+            event_type: 'login',
+            user_agent: currentUserAgent,
+            success: true,
+            metadata: { login_at: new Date().toISOString(), source: 'session_backfill' },
+          }]);
+        } catch { /* silent */ }
       }
       
       return sessions;
