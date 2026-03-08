@@ -127,7 +127,7 @@ async function backfillInBackground(
                 user_id: userId,
                 shipment_status: 'not_found',
                 label_available: false,
-              }, { onConflict: 'shipment_id' });
+              }, { onConflict: 'seller_id,shipment_id' });
             }
             errors++;
             return;
@@ -165,7 +165,7 @@ async function backfillInBackground(
             shipping_state_uf: stateUf,
             shipping_zipcode: rawZipcode,
             shipping_neighborhood: rawNeighborhood,
-          }, { onConflict: 'shipment_id' });
+          }, { onConflict: 'seller_id,shipment_id' });
 
           synced++;
         } catch (err) {
