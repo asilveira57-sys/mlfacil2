@@ -233,10 +233,15 @@ export default function ClonarAnuncio() {
           catalog_product_id: item.catalog_product_id || undefined,
           family_name: item.family_name || undefined,
         };
+        // ── Validate origin completeness ──
+        const calculatedStatus = getOriginStatusFromPayload(op);
+        op.origin_status = calculatedStatus;
+        const missing = getMissingRequiredFields(op);
+
         setOriginPayload(op);
-        setOriginStatus('complete');
+        setOriginStatus(calculatedStatus);
         await safeLog('origin_fetch_result', {
-          correlation_id: corrId, status: 'complete', source: 'ad-item-snapshot',
+          correlation_id: corrId, status: calculatedStatus, source: 'ad-item-snapshot',
           resolved_item_id: resolvedId,
           pictures_source: data.capture_log?.pictures_source || (pictures.length > 0 ? 'api' : 'none'),
           pictures_count: pictures.length,
@@ -244,6 +249,7 @@ export default function ClonarAnuncio() {
           category_name: data.category_name || null,
           capture_account_id: captureAccount?.id || null,
           capture_seller_id: captureSellerId,
+          missing_required_fields: missing,
         });
         updateDraftOrigin(op);
       } else {
