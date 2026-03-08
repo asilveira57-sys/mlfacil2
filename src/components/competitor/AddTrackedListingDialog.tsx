@@ -161,7 +161,7 @@ export function AddTrackedListingDialog({ sellerId, open, onOpenChange }: AddTra
           {/* Preview card */}
           {resolvedListing && (
             <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
-              <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+              <div className="flex items-center gap-2 text-sm text-primary">
                 <CheckCircle2 className="h-4 w-4" />
                 <span className="font-medium">Anúncio identificado</span>
                 {resolvedListing.is_catalog && (
