@@ -32,20 +32,20 @@ async function enrichNeighborhoodsInBackground(
   userId: string
 ) {
   const BATCH_SIZE = 10; // Small batches to respect ViaCEP rate limit
-  const MAX_RECORDS = 200; // Max records per execution to avoid timeout
+  const MAX_RECORDS = 300; // Max records per execution to avoid timeout
   const DELAY_BETWEEN_CALLS = 400; // 400ms delay between ViaCEP calls
 
   try {
-    console.log(`[Enrich] Starting neighborhood enrichment for seller ${sellerId}`);
+    console.log(`[Enrich] Starting geographic enrichment for seller ${sellerId}`);
 
-    // Get unique zipcodes that need enrichment
+    // Get unique zipcodes that need enrichment (missing city OR neighborhood)
     const { data: pendingShipments, error: fetchError } = await supabaseAdmin
       .from('meli_shipments_cache')
       .select('shipping_zipcode')
       .eq('seller_id', sellerId)
       .not('shipping_zipcode', 'is', null)
       .neq('shipping_zipcode', '')
-      .or('shipping_neighborhood.is.null,shipping_neighborhood.eq.')
+      .or('shipping_city.is.null,shipping_city.eq.,shipping_neighborhood.is.null,shipping_neighborhood.eq.')
       .limit(MAX_RECORDS);
 
     if (fetchError) {
@@ -54,7 +54,7 @@ async function enrichNeighborhoodsInBackground(
     }
 
     if (!pendingShipments || pendingShipments.length === 0) {
-      console.log('[Enrich] No shipments need neighborhood enrichment');
+      console.log('[Enrich] No shipments need geographic enrichment');
       return;
     }
 
