@@ -25,6 +25,7 @@ export interface SandboxSnapshot {
   cutoff_flex_time: string | null;
   cutoff_coleta_time: string | null;
   estoque_critico: number;
+  vendas_despachar_amanha: number;
   snapshot_status: string;
   snapshot_error: string | null;
   updated_at: string;

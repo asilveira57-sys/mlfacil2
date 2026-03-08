@@ -148,12 +148,13 @@ Deno.serve(async (req) => {
           .eq("shipment_substatus", "ready_to_print")
           .gte("updated_at", sevenDaysAgo);
 
-        // Também contar da print queue como backup
+        // Print queue backup: also filter by last 7 days to avoid stale "gerada" records
         const { count: etiquetasNaFila } = await supabase
           .from("meli_print_queue")
           .select("*", { count: "exact", head: true })
           .eq("seller_id", sellerId)
-          .eq("status", "gerada");
+          .eq("status", "gerada")
+          .gte("created_at", sevenDaysAgo);
 
         const etiquetasPend = Math.max(etiquetasReadyToPrint || 0, etiquetasNaFila || 0);
 
@@ -171,6 +172,21 @@ Deno.serve(async (req) => {
           .eq("seller_id", sellerId)
           .eq("shipment_status", "ready_to_ship")
           .in("shipment_substatus", ["ready_to_print", "invoice_pending", "ready_to_pack"]);
+
+        // === VENDAS PARA DESPACHAR AMANHÃ ===
+        // Count orders with estimated_handling_limit for tomorrow
+        const spNowForDespacho = new Date(now.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+        const tomorrow = new Date(spNowForDespacho);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const tomorrowStr = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
+        
+        const { count: vendasDespacharAmanha } = await supabase
+          .from("meli_shipments_cache")
+          .select("*", { count: "exact", head: true })
+          .eq("seller_id", sellerId)
+          .eq("shipment_status", "ready_to_ship")
+          .gte("estimated_handling_limit", `${tomorrowStr}T00:00:00`)
+          .lt("estimated_handling_limit", `${tomorrowStr}T23:59:59`);
 
         // === ADS ===
         const { data: adsData } = await supabase
@@ -270,6 +286,7 @@ Deno.serve(async (req) => {
           cutoff_flex_time: cutoffFlex,
           cutoff_coleta_time: cutoffColeta,
           estoque_critico: 0,
+          vendas_despachar_amanha: vendasDespacharAmanha || 0,
           snapshot_status: "ok",
           snapshot_error: null,
           updated_at: new Date().toISOString(),
