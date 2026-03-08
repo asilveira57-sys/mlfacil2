@@ -338,7 +338,7 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
         hasMorePeriods = false;
       } else {
         tempOffset += PERIODS_PER_PAGE;
-        if (scope === "recent" && tempOffset >= PERIODS_PER_PAGE) {
+        if ((scope === "recent" || scope === "30d") && tempOffset >= PERIODS_PER_PAGE) {
           hasMorePeriods = false;
         }
       }
