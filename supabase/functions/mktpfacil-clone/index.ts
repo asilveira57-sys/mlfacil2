@@ -395,7 +395,7 @@ async function getValidTokenForRead(
 // ACTION: Load source — ISOLATED public fetch (NO token, NO global client)
 // ============================================
 
-async function loadSource(itemId: string, supabase: any, userId: string, correlationId: string, sourceInputRaw?: string) {
+async function loadSource(itemId: string, supabase: any, userId: string, correlationId: string, sourceInputRaw?: string, preferredSellerId?: string | null) {
   const totalStart = Date.now();
 
   // === STEP 0: Validate/normalize item ID ===
@@ -468,10 +468,11 @@ async function loadSource(itemId: string, supabase: any, userId: string, correla
 
   // If still failing after recovery, try authenticated fallback for 403
   if (itemStatus === 403) {
-    await logEvent(supabase, userId, 'source', effectiveItemId, 'load_source_403_auth_fallback', 'info',
-      `Public fetch returned 403 (PolicyAgent), attempting authenticated fallback`, { correlation_id: correlationId });
+     await logEvent(supabase, userId, 'source', effectiveItemId, 'load_source_403_auth_fallback', 'info',
+      `Public fetch returned 403 (PolicyAgent), attempting authenticated fallback with preferred=${preferredSellerId || 'none'}`, {
+        correlation_id: correlationId, preferred_seller_id: preferredSellerId });
 
-    const authToken = await getValidTokenForRead(supabase, userId, correlationId);
+    const authToken = await getValidTokenForRead(supabase, userId, correlationId, preferredSellerId);
     if (authToken) {
       try {
         const authItemRes = await fetch(`https://api.mercadolibre.com/items/${effectiveItemId}`, {
