@@ -521,6 +521,49 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
         />
       )}
 
+      {/* Breadcrumb navigation - above table */}
+      {drillLevel !== "uf" && (
+        <div className="flex items-center gap-2 py-2">
+          <Button variant="ghost" size="sm" className="h-7 px-2" onClick={handleDrillUp}>
+            <ArrowLeft className="h-4 w-4 mr-1" />
+            Voltar
+          </Button>
+          <div className="flex items-center gap-1 text-sm">
+            {getBreadcrumb().map((part, idx) => {
+              const isLast = idx === getBreadcrumb().length - 1;
+              const isClickable = !isLast;
+              return (
+                <span key={idx} className="flex items-center">
+                  {idx > 0 && <ChevronRight className="h-4 w-4 mx-1 text-muted-foreground" />}
+                  <span
+                    className={
+                      isLast
+                        ? "font-semibold text-foreground"
+                        : isClickable
+                        ? "text-primary cursor-pointer hover:underline"
+                        : "text-muted-foreground"
+                    }
+                    onClick={() => {
+                      if (isLast) return;
+                      if (idx === 0) {
+                        setSelectedUf(null);
+                        setSelectedCity(null);
+                        setDrillLevel("uf");
+                      } else if (idx === 1 && drillLevel === "neighborhood") {
+                        setSelectedCity(null);
+                        setDrillLevel("city");
+                      }
+                    }}
+                  >
+                    {part}
+                  </span>
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ABC Table */}
       <AbcTable
         items={classifiedItems}
