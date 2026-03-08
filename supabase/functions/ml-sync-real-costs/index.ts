@@ -21,29 +21,48 @@ Deno.serve(async (req) => {
   const supabase = createClient(supabaseUrl, supabaseKey);
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return new Response(JSON.stringify({ error: "No authorization header" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    // Check for internal server-to-server call (from cost-engine)
+    const internalKey = req.headers.get("x-internal-key");
+    const isInternalCall = internalKey === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-    // Create client with user's auth context
-    const userSupabase = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
-      global: { headers: { Authorization: authHeader } }
-    });
-    
-    const { data: { user: authUser }, error: authError } = await userSupabase.auth.getUser();
-    if (authError || !authUser) {
-      console.error("[RealCosts] Auth error:", authError?.message || "No user");
-      return new Response(JSON.stringify({ error: "Invalid token" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    
-    const user = { id: authUser.id };
+    let user: { id: string };
+    let body: Record<string, unknown>;
 
-    const body = await req.json().catch(() => ({}));
+    if (isInternalCall) {
+      // Internal call: trust user_id from body, skip JWT auth
+      body = await req.json().catch(() => ({}));
+      const bodyUserId = body.user_id as string;
+      if (!bodyUserId) {
+        return new Response(JSON.stringify({ error: "user_id required for internal calls" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      user = { id: bodyUserId };
+      console.log("[RealCosts] Internal call for user:", bodyUserId);
+    } else {
+      // External call: validate JWT
+      const authHeader = req.headers.get("Authorization");
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return new Response(JSON.stringify({ error: "No authorization header" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const userSupabase = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
+        global: { headers: { Authorization: authHeader } }
+      });
+      
+      const { data: { user: authUser }, error: authError } = await userSupabase.auth.getUser();
+      if (authError || !authUser) {
+        console.error("[RealCosts] Auth error:", authError?.message || "No user");
+        return new Response(JSON.stringify({ error: "Invalid token" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      
+      user = { id: authUser.id };
+      body = await req.json().catch(() => ({}));
+    }
     const { seller_id, action, scope_days, force_resume, mode } = body;
 
     if (!seller_id) {
