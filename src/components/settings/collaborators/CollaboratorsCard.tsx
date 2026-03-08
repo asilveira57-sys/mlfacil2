@@ -229,6 +229,7 @@ export function CollaboratorsCard() {
         name: data.name,
         email: data.email,
         modules: {},
+        profileId: data.profileId,
       });
     }
   };
