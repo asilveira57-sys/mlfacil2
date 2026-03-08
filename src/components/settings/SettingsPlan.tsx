@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,6 @@ import {
 } from "@/components/ui/tooltip";
 import {
   CreditCard,
-  CheckCircle2,
   Clock,
   Lock,
   Sparkles,
@@ -24,11 +24,20 @@ import {
   Calendar,
   TrendingUp,
   MessageCircle,
+  RefreshCw,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useUserAccessState } from "@/hooks/useUserAccessState";
 import { useUserSalesVolume } from "@/hooks/useUserSalesVolume";
-import { useTierOffersCatalog, useOfferCheckout, formatPriceBRL, type PlanTier } from "@/hooks/useTierOffers";
+import {
+  useTierOffersCatalog,
+  useOfferCheckout,
+  formatPriceBRL,
+  getPeriodLabel,
+  getPeriodSuffix,
+  type PlanTier,
+  type TierOffer,
+} from "@/hooks/useTierOffers";
 
 const TIER_ICONS: Record<string, typeof Zap> = {
   volume_ate_50: Zap,
@@ -39,6 +48,34 @@ const TIER_ICONS: Record<string, typeof Zap> = {
   volume_acima_3000: Crown,
 };
 
+type BillingMode = "one_time" | "recurring";
+
+const MODE_LABELS: Record<BillingMode, string> = {
+  one_time: "Avulso (pré-pago)",
+  recurring: "Assinatura",
+};
+
+// Filter out 12-month offers (campaign-only, not active now)
+const MAX_VISIBLE_MONTHS = 6;
+
+function getVisibleOffers(offers: TierOffer[]): TierOffer[] {
+  return offers.filter((o) => o.period_months <= MAX_VISIBLE_MONTHS);
+}
+
+function getAvailableModes(offers: TierOffer[]): BillingMode[] {
+  const modes = new Set(offers.map((o) => o.billing_mode));
+  const result: BillingMode[] = [];
+  if (modes.has("recurring")) result.push("recurring");
+  if (modes.has("one_time")) result.push("one_time");
+  return result;
+}
+
+function getOffersForMode(offers: TierOffer[], mode: BillingMode): TierOffer[] {
+  return offers
+    .filter((o) => o.billing_mode === mode)
+    .sort((a, b) => a.period_months - b.period_months);
+}
+
 const SettingsPlan = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -47,13 +84,15 @@ const SettingsPlan = () => {
   const { data: catalog, isLoading: catalogLoading } = useTierOffersCatalog();
   const { checkout, loading: checkoutLoading } = useOfferCheckout();
 
+  // State: selected mode and offer per tier
+  const [selectedModes, setSelectedModes] = useState<Record<string, BillingMode>>({});
+  const [selectedOfferIds, setSelectedOfferIds] = useState<Record<string, string>>({});
+
   const tiers = catalog?.tiers ?? [];
-  const hasActiveSub = flags?.has_active_subscription ?? false;
   const trialDaysRemaining = flags?.trial_days_remaining ?? 0;
   const trialEndAt = flags?.trial_end_at;
 
   const formatDate = (date: string) => new Date(date).toLocaleDateString("pt-BR");
-
   const formatCurrency = (cents: number) =>
     (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -71,14 +110,41 @@ const SettingsPlan = () => {
       if (t.is_enterprise) continue;
       if (t.max_orders_30d === null || totalSales30d <= t.max_orders_30d) return t.id;
     }
-    return sorted.find(t => t.is_enterprise)?.id ?? null;
+    return sorted.find((t) => t.is_enterprise)?.id ?? null;
   };
 
   const recommendedTierId = getRecommendedTierId();
 
-  const getCheapestOffer = (tier: PlanTier) => {
-    if (!tier.offers || tier.offers.length === 0) return null;
-    return [...tier.offers].sort((a, b) => a.price_brl - b.price_brl)[0];
+  const getActiveMode = (tier: PlanTier): BillingMode => {
+    if (selectedModes[tier.id]) return selectedModes[tier.id];
+    const visible = getVisibleOffers(tier.offers);
+    const modes = getAvailableModes(visible);
+    return modes[0] || "recurring";
+  };
+
+  const getSelectedOffer = (tier: PlanTier): TierOffer | null => {
+    const visible = getVisibleOffers(tier.offers);
+    const mode = getActiveMode(tier);
+    const modeOffers = getOffersForMode(visible, mode);
+    if (selectedOfferIds[tier.id]) {
+      const found = modeOffers.find((o) => o.id === selectedOfferIds[tier.id]);
+      if (found) return found;
+    }
+    return modeOffers[0] || null;
+  };
+
+  const handleModeChange = (tierId: string, mode: BillingMode) => {
+    setSelectedModes((prev) => ({ ...prev, [tierId]: mode }));
+    // Reset selected offer when mode changes
+    setSelectedOfferIds((prev) => {
+      const next = { ...prev };
+      delete next[tierId];
+      return next;
+    });
+  };
+
+  const handleOfferSelect = (tierId: string, offerId: string) => {
+    setSelectedOfferIds((prev) => ({ ...prev, [tierId]: offerId }));
   };
 
   const handleChoosePlan = async (tier: PlanTier) => {
@@ -86,7 +152,7 @@ const SettingsPlan = () => {
       navigate("/contato");
       return;
     }
-    const offer = getCheapestOffer(tier);
+    const offer = getSelectedOffer(tier);
     if (offer) {
       await checkout(offer.id);
     }
@@ -247,8 +313,12 @@ const SettingsPlan = () => {
               .map((tier) => {
                 const tooSmall = isTooSmall(tier);
                 const isRecommended = tier.id === recommendedTierId;
-                const cheapest = getCheapestOffer(tier);
                 const TierIcon = getTierIcon(tier);
+                const visibleOffers = getVisibleOffers(tier.offers);
+                const availableModes = getAvailableModes(visibleOffers);
+                const activeMode = getActiveMode(tier);
+                const modeOffers = getOffersForMode(visibleOffers, activeMode);
+                const selectedOffer = getSelectedOffer(tier);
 
                 return (
                   <Card
@@ -268,25 +338,102 @@ const SettingsPlan = () => {
                       </div>
                       <CardTitle className="text-lg">{tier.name}</CardTitle>
                       <CardDescription className="text-xs">{formatOrderRange(tier)}</CardDescription>
-                      <div className="pt-2">
+
+                      {/* Price display */}
+                      <div className="pt-3">
                         {tier.is_enterprise ? (
                           <span className="text-lg font-semibold text-muted-foreground">Sob consulta</span>
-                        ) : cheapest ? (
-                          <>
-                            <span className="text-3xl font-bold">{formatPriceBRL(cheapest.price_brl)}</span>
-                            <span className="text-muted-foreground text-sm">
-                              {cheapest.period_months === 1 ? "/mês" : `/${cheapest.period_months}m`}
+                        ) : selectedOffer ? (
+                          <div>
+                            <span className="text-3xl font-bold text-foreground">
+                              {formatPriceBRL(selectedOffer.price_brl)}
                             </span>
-                          </>
+                            <span className="text-muted-foreground text-sm">
+                              {getPeriodSuffix(selectedOffer.period_months)}
+                            </span>
+                            {selectedOffer.billing_mode === "recurring" && (
+                              <div className="flex items-center justify-center gap-1 mt-1">
+                                <RefreshCw className="h-3 w-3 text-muted-foreground" />
+                                <span className="text-xs text-muted-foreground">Renovação automática</span>
+                              </div>
+                            )}
+                            {selectedOffer.badge_text && (
+                              <Badge variant="secondary" className="mt-2 text-xs bg-green-500/10 text-green-700 border-green-200">
+                                {selectedOffer.badge_text}
+                              </Badge>
+                            )}
+                          </div>
                         ) : (
                           <span className="text-muted-foreground">—</span>
                         )}
                       </div>
+
                       {tier.description && (
                         <p className="text-xs text-muted-foreground mt-1">{tier.description}</p>
                       )}
                     </CardHeader>
+
                     <CardContent className="space-y-4">
+                      {/* Billing mode toggle */}
+                      {!tier.is_enterprise && availableModes.length > 1 && (
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium text-muted-foreground text-left">Tipo de cobrança</p>
+                          <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
+                            {availableModes.map((mode) => (
+                              <button
+                                key={mode}
+                                onClick={() => handleModeChange(tier.id, mode)}
+                                className={`rounded-md px-2 py-1.5 text-xs font-medium transition-all ${
+                                  activeMode === mode
+                                    ? "bg-background text-foreground shadow-sm"
+                                    : "text-muted-foreground hover:text-foreground"
+                                }`}
+                              >
+                                {MODE_LABELS[mode]}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Period selector */}
+                      {!tier.is_enterprise && modeOffers.length > 1 && (
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium text-muted-foreground text-left">Período</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {modeOffers.map((offer) => {
+                              const isSelected = selectedOffer?.id === offer.id;
+                              return (
+                                <button
+                                  key={offer.id}
+                                  onClick={() => handleOfferSelect(tier.id, offer.id)}
+                                  className={`relative rounded-md border px-3 py-1.5 text-xs font-medium transition-all ${
+                                    isSelected
+                                      ? "border-primary bg-primary/10 text-primary"
+                                      : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"
+                                  }`}
+                                >
+                                  {getPeriodLabel(offer.period_months)}
+                                  {offer.badge_text && (
+                                    <span className="absolute -top-2 -right-1 text-[9px] bg-green-600 text-white px-1 rounded-full leading-tight">
+                                      {offer.badge_text}
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Single offer label when only one option */}
+                      {!tier.is_enterprise && modeOffers.length === 1 && availableModes.length <= 1 && selectedOffer && (
+                        <div className="text-xs text-muted-foreground text-center">
+                          {MODE_LABELS[selectedOffer.billing_mode]} · {getPeriodLabel(selectedOffer.period_months)}
+                        </div>
+                      )}
+
+                      {/* Volume warning */}
                       {tooSmall && (
                         <div className="p-2.5 rounded-lg bg-destructive/10 border border-destructive/20">
                           <div className="flex items-start gap-2">
@@ -298,6 +445,7 @@ const SettingsPlan = () => {
                         </div>
                       )}
 
+                      {/* Action button */}
                       <TooltipProvider>
                         {tooSmall ? (
                           <Tooltip>
@@ -324,7 +472,7 @@ const SettingsPlan = () => {
                           <Button
                             className="w-full"
                             variant={isRecommended ? "default" : "outline"}
-                            disabled={checkoutLoading}
+                            disabled={checkoutLoading || !selectedOffer}
                             onClick={() => handleChoosePlan(tier)}
                           >
                             {checkoutLoading ? "Processando..." : t('settings:plan.choose_plan')}
