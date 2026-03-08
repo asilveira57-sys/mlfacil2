@@ -45,6 +45,33 @@ function extractIdentifier(attributes: { id: string; value_name?: string }[], ..
   return undefined;
 }
 
+// ── Origin data validation helpers ──
+function hasCompleteOriginData(op: OriginPayload): boolean {
+  return !!(
+    op.title && op.title.trim().length > 0 &&
+    op.category_id && op.category_id.trim().length > 0 &&
+    (op.price ?? 0) > 0 &&
+    op.pictures && op.pictures.length > 0
+  );
+}
+
+function getOriginStatusFromPayload(op: OriginPayload): OriginStatus {
+  if (hasCompleteOriginData(op)) return 'complete';
+  const hasAny = !!(
+    op.title || op.description || op.category_id || (op.price ?? 0) > 0 || (op.pictures && op.pictures.length > 0)
+  );
+  return hasAny ? 'partial' : 'unavailable';
+}
+
+function getMissingRequiredFields(op: OriginPayload) {
+  return {
+    title: !op.title || op.title.trim().length === 0,
+    category_id: !op.category_id || op.category_id.trim().length === 0,
+    price: (op.price ?? 0) <= 0,
+    pictures: !op.pictures || op.pictures.length === 0,
+  };
+}
+
 export default function ClonarAnuncio() {
   const { data: accounts = [], isLoading: accountsLoading } = useMlAccounts({ onlyConnected: true });
 
