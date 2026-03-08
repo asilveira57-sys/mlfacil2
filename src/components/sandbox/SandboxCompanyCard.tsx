@@ -200,6 +200,7 @@ export function SandboxCompanyCard({ snapshot, isQuickSyncing = false }: Props) 
           <MetricRow icon={Package} label="Etiquetas" value={snapshot.etiquetas_pendentes} alert={snapshot.etiquetas_pendentes > 0} />
           <MetricRow icon={FileText} label="NF pendentes" value={snapshot.nf_pendentes} alert={snapshot.nf_pendentes > 0} />
           <MetricRow icon={Truck} label="Aguard. envio" value={snapshot.pedidos_envio} alert={snapshot.pedidos_envio > 5} />
+          <MetricRow icon={ShoppingCart} label="Despachar amanhã" value={snapshot.vendas_despachar_amanha || 0} alert={(snapshot.vendas_despachar_amanha || 0) > 0} />
         </div>
 
         {/* Service block */}
@@ -267,6 +268,7 @@ export function SandboxCompanyCard({ snapshot, isQuickSyncing = false }: Props) 
                 <MetricRow icon={Package} label="Etiquetas pendentes" value={snapshot.etiquetas_pendentes} alert={snapshot.etiquetas_pendentes > 0} onClick={() => handleNavigate('/shipping-labels', 'etiquetas')} />
                 <MetricRow icon={FileText} label="NF pendentes" value={snapshot.nf_pendentes} alert={snapshot.nf_pendentes > 0} />
                 <MetricRow icon={Truck} label="Aguardando envio" value={snapshot.pedidos_envio} alert={snapshot.pedidos_envio > 5} onClick={() => handleNavigate('/shipping-labels', 'envio')} />
+                <MetricRow icon={ShoppingCart} label="Despachar amanhã" value={snapshot.vendas_despachar_amanha || 0} alert={(snapshot.vendas_despachar_amanha || 0) > 0} />
                 <MetricRow icon={MessageCircle} label="Perguntas" value={snapshot.perguntas_pendentes} alert={snapshot.perguntas_pendentes > 0} onClick={() => handleNavigate('/perguntas', 'perguntas')} />
                 <MetricRow icon={AlertTriangle} label="Reclamações abertas" value={snapshot.reclamacoes_abertas} alert={snapshot.reclamacoes_abertas > 0} />
                 <MetricRow icon={MessageSquare} label="Reclamações aguardando" value={snapshot.reclamacoes_aguardando} alert={snapshot.reclamacoes_aguardando > 0} />
