@@ -291,7 +291,7 @@ function ActiveSessionsSection() {
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium">{browser} · {os}</span>
                       {session.is_current && (
-                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
                           Sessão atual
                         </Badge>
                       )}
