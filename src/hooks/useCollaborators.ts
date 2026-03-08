@@ -30,6 +30,7 @@ interface CreateCollaboratorData {
   name: string;
   email: string;
   modules: Record<string, boolean>;
+  profileId?: string | null;
 }
 
 interface UpdateCollaboratorData {
