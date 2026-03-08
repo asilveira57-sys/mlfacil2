@@ -70,6 +70,51 @@ async function fetchUserPublic(sellerId: string | number): Promise<{ id: number;
  * Get total active items for a seller.
  */
 async function fetchSellerItemCount(sellerId: string): Promise<number> {
+
+/**
+ * Try to resolve a seller from the URL slug (title portion of ML URLs).
+ * Works even when the item itself is inactive/removed because ML search
+ * can find related active listings from the same seller category.
+ */
+async function tryResolveFromUrlSlug(url: string): Promise<ResolvedSeller | null> {
+  // Extract slug from ML URL patterns like /titulo-do-produto-MLB12345 or /titulo-do-produto/up/MLBU...
+  const slugMatch = url.match(/mercadolivre\.com\.br\/([^\/\?#]+)/i) 
+    || url.match(/mercadolibre\.com[^\/]*\/([^\/\?#]+)/i);
+  if (!slugMatch) return null;
+
+  const slug = slugMatch[1]
+    .replace(/-MLB\d+.*$/i, '')  // remove MLB ID suffix
+    .replace(/-MLBU\d+.*$/i, '') // remove MLBU ID suffix
+    .replace(/-/g, ' ')
+    .substring(0, 60)
+    .trim();
+  
+  if (!slug || slug.length < 5) return null;
+  
+  console.log(`[resolveSellerFromLink] Trying slug search: "${slug}"`);
+  
+  try {
+    const searchRes = await fetchMLPublic(`/sites/MLB/search?q=${encodeURIComponent(slug)}&limit=3`);
+    for (const result of searchRes?.results || []) {
+      if (result?.seller?.id) {
+        const userData = await fetchUserPublic(String(result.seller.id));
+        const totalItems = await fetchSellerItemCount(String(userData.id));
+        return {
+          ml_seller_id: String(userData.id),
+          ml_nickname: userData.nickname || `Seller ${userData.id}`,
+          reputation: userData.seller_reputation || null,
+          total_items: totalItems,
+        };
+      }
+    }
+  } catch (e) {
+    console.log(`[resolveSellerFromLink] Slug search failed:`, e);
+  }
+  
+  return null;
+}
+
+/**
   try {
     const data = await fetchMLPublic(`/sites/MLB/search?seller_id=${sellerId}&limit=1`);
     return data?.paging?.total || 0;
