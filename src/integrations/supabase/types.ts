@@ -9309,6 +9309,7 @@ export type Database = {
       }
       notes: {
         Row: {
+          assigned_to: string | null
           color_hex: string | null
           company_id: string | null
           content_plain: string | null
@@ -9322,6 +9323,7 @@ export type Database = {
           workspace_id: string
         }
         Insert: {
+          assigned_to?: string | null
           color_hex?: string | null
           company_id?: string | null
           content_plain?: string | null
@@ -9335,6 +9337,7 @@ export type Database = {
           workspace_id: string
         }
         Update: {
+          assigned_to?: string | null
           color_hex?: string | null
           company_id?: string | null
           content_plain?: string | null

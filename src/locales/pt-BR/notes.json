@@ -44,9 +44,18 @@
     "sent_success": "Nota enviada para tarefas",
     "sent_error": "Erro ao enviar para tarefas"
   },
+  "postit": {
+    "new_postit": "Novo Post-it",
+    "title_placeholder": "Título...",
+    "content_placeholder": "Descrição rápida...",
+    "pin_to_module": "Fixar em: {{module}}",
+    "creating": "Criando...",
+    "create_and_pin": "Criar e Fixar"
+  },
   "settings": {
     "title": "Bloco de Notas",
     "description": "Ative ou desative o bloco de notas no cabeçalho.",
-    "show_in_header": "Exibir no cabeçalho"
+    "show_in_header": "Exibir no cabeçalho",
+    "show_postit_button": "Exibir botão flutuante de Post-it"
   }
 }

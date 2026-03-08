@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pin, X, Send, Edit2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Pin, X, Send, Edit2, ChevronDown, ChevronUp, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { Note } from '@/types/notes';
@@ -16,10 +16,6 @@ export function ModulePostIt({ note, onEdit, onUnpin, onSendToTasks }: ModulePos
   const { t } = useTranslation('notes');
   const [expanded, setExpanded] = useState(false);
 
-  const preview = note.content_plain
-    ? note.content_plain.slice(0, 60) + (note.content_plain.length > 60 ? '...' : '')
-    : '';
-
   return (
     <div
       className={cn(
@@ -31,6 +27,9 @@ export function ModulePostIt({ note, onEdit, onUnpin, onSendToTasks }: ModulePos
         borderColor: note.color_hex + '60',
       }}
     >
+      {/* Color accent bar */}
+      <div className="h-1 rounded-t-lg" style={{ backgroundColor: note.color_hex }} />
+
       {/* Compact view */}
       <div
         className="flex items-center gap-2 px-3 py-2"
@@ -40,6 +39,9 @@ export function ModulePostIt({ note, onEdit, onUnpin, onSendToTasks }: ModulePos
         <span className="text-xs font-medium truncate flex-1 text-foreground">
           {note.title || t('untitled')}
         </span>
+        {note.assigned_to && (
+          <User className="h-3 w-3 shrink-0 text-muted-foreground" />
+        )}
         {expanded ? (
           <ChevronUp className="h-3 w-3 shrink-0 text-muted-foreground" />
         ) : (
@@ -60,6 +62,7 @@ export function ModulePostIt({ note, onEdit, onUnpin, onSendToTasks }: ModulePos
               size="icon"
               className="h-6 w-6"
               onClick={(e) => { e.stopPropagation(); onEdit(); }}
+              title={t('actions.edit')}
             >
               <Edit2 className="h-3 w-3" />
             </Button>
@@ -68,6 +71,7 @@ export function ModulePostIt({ note, onEdit, onUnpin, onSendToTasks }: ModulePos
               size="icon"
               className="h-6 w-6"
               onClick={(e) => { e.stopPropagation(); onSendToTasks(); }}
+              title={t('actions.send_to_tasks')}
             >
               <Send className="h-3 w-3" />
             </Button>
@@ -77,6 +81,7 @@ export function ModulePostIt({ note, onEdit, onUnpin, onSendToTasks }: ModulePos
               size="icon"
               className="h-6 w-6"
               onClick={(e) => { e.stopPropagation(); onUnpin(); }}
+              title={t('actions.unpin_module')}
             >
               <X className="h-3 w-3" />
             </Button>

@@ -34,6 +34,7 @@ export interface Note {
   workspace_id: string;
   company_id: string | null;
   created_by_user_id: string;
+  assigned_to: string | null;
   title: string;
   content_rich: Record<string, unknown> | null;
   content_plain: string;

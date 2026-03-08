@@ -28,6 +28,7 @@ export const ROUTE_MODULE_MAP: Record<string, string> = {
   'settings': 'settings',
   'tools': 'tools',
   'produtos': 'produtos',
+  'postits': 'postits',
 };
 
 /** Label map for human-readable module names in selectors */
@@ -54,6 +55,7 @@ export const MODULE_LABELS: Record<string, string> = {
   'settings': 'Configurações',
   'tools': 'Ferramentas',
   'produtos': 'Produtos',
+  'postits': 'Post-its',
 };
 
 /** Returns list of available modules for selectors */

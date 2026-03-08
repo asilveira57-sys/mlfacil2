@@ -48,6 +48,7 @@ import AdTimelineRadar from "./pages/AdTimelineRadar";
 import AdTimelineDetail from "./pages/AdTimelineDetail";
 import AdActionsCenter from "./pages/AdActionsCenter";
 import Seed from "./pages/Seed";
+import PostIts from "./pages/PostIts";
 import Sandbox from "./pages/Sandbox";
 import FreightManagement from "./pages/FreightManagement";
 import Precificacao from "./pages/Precificacao";
@@ -197,6 +198,7 @@ const App = () => {
                   <Route path="/ajuste-preco" element={<AjustePreco />} />
                   <Route path="/atacado" element={<Atacado />} />
                   <Route path="/seed" element={<Seed />} />
+                  <Route path="/postits" element={<PostIts />} />
                   <Route path="/seed/:itemId" element={<Seed />} />
                   <Route path="/seed/sementes" element={<Seed />} />
                   <Route path="/sandbox" element={<Sandbox />} />

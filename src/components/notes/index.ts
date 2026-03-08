@@ -6,3 +6,5 @@ export { NoteCard } from './NoteCard';
 export { NotesList } from './NotesList';
 export { ModulePostIt } from './ModulePostIt';
 export { ModuleNotesOverlay } from './ModuleNotesOverlay';
+export { FloatingPostItButton } from './FloatingPostItButton';
+export { QuickPostItForm } from './QuickPostItForm';

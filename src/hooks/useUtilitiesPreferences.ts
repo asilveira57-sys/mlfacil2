@@ -27,6 +27,7 @@ export interface UtilitiesPreferences {
   showCalculatorInHeader: boolean;
   showNotesInHeader: boolean;
   showSupportButton: boolean;
+  showPostItButton: boolean;
   weatherCity: string;
   weatherCountry: string;
 }
@@ -51,6 +52,7 @@ const DEFAULT_PREFERENCES: UtilitiesPreferences = {
   showCalculatorInHeader: true,
   showNotesInHeader: true,
   showSupportButton: true,
+  showPostItButton: true,
   weatherCity: 'São Paulo',
   weatherCountry: 'BR',
 };
@@ -104,6 +106,7 @@ export function useUtilitiesPreferences() {
             showCalculatorInHeader: widgetsEnabled?.calculator ?? true,
             showNotesInHeader: widgetsEnabled?.notes ?? true,
             showSupportButton: widgetsLayout?.showSupportButton ?? true,
+            showPostItButton: widgetsLayout?.showPostItButton ?? true,
             weatherCity: widgetsLayout?.weatherCity || DEFAULT_PREFERENCES.weatherCity,
             weatherCountry: widgetsLayout?.weatherCountry || DEFAULT_PREFERENCES.weatherCountry,
           });
@@ -129,6 +132,7 @@ export function useUtilitiesPreferences() {
       weatherCity: updates.weatherCity ?? newPreferences.weatherCity,
       weatherCountry: updates.weatherCountry ?? newPreferences.weatherCountry,
       showSupportButton: updates.showSupportButton ?? newPreferences.showSupportButton,
+      showPostItButton: updates.showPostItButton ?? newPreferences.showPostItButton,
     };
     newPreferences.widgetsLayout = newLayout;
     newPreferences.weatherCity = newLayout.weatherCity || DEFAULT_PREFERENCES.weatherCity;
