@@ -176,6 +176,12 @@ export function FloatingSupportButton({ visible = true, className }: FloatingSup
     navigate('/settings?tab=support&section=knowledge');
   }, [navigate]);
 
+  const handleOpenMyTickets = useCallback(() => {
+    if (didDrag.current) return;
+    setIsOpen(false);
+    navigate('/settings?tab=support');
+  }, [navigate]);
+
   const handleDismiss = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     setDismissed(true);
