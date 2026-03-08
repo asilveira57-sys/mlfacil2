@@ -269,27 +269,25 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
       .eq("seller_id", sellerId)
       .eq("order_id", parseInt(orderId));
     
-    if (billingRows?.length) {
-      for (const detail of billingRows) {
-        const ct = (detail.charge_type || "").toLowerCase();
-        const amount = Math.abs(detail.gross_amount || 0);
-        if (ct.includes("custo por vender") || ct.includes("custo por cobrar") || ct.includes("sale_fee") || ct.includes("cargo por venta")) {
-          feeML += amount;
-        } else if (ct.includes("tarifa de envio") || ct.includes("envio extra") || ct.includes("envio intermunicipal") || ct.includes("shipping")) {
-          shippingCostSeller += amount;
-        } else if (ct.includes("taxa de parcelamento") || ct.includes("installment")) {
-          installmentsCost += amount;
+      if (billingRows?.length) {
+        for (const detail of billingRows) {
+          const amount = Math.abs(detail.gross_amount || 0);
+          const category = classifyBillingCharge(detail.charge_type || "");
+          switch (category) {
+            case "commission": feeML += amount; break;
+            case "shipping": shippingCostSeller += amount; break;
+            case "installments": installmentsCost += amount; break;
+            case "adjustments": adjustments += amount; break;
+          }
+        }
+        if (feeML > 0) {
+          feeMLSource = "billing";
+          sourceRefs.push("billing_details_cache");
+        } else {
+          sourceRefs.push("billing_details_cache:no_commission_found");
+          console.log(`[RealCosts] resync_single: order ${orderId} has billing cache but no commission — falling through to Strategy 3`);
         }
       }
-      if (feeML > 0) {
-        feeMLSource = "billing";
-        sourceRefs.push("billing_details_cache");
-      } else {
-        // Cache has records but no commission — DON'T close the door, let Strategy 3 try the API
-        sourceRefs.push("billing_details_cache:no_commission_found");
-        console.log(`[RealCosts] resync_single: order ${orderId} has billing cache but no commission — falling through to Strategy 3`);
-      }
-    }
   }
 
   // Strategy 3: Search billing period details for this specific order via API (search from END)
@@ -353,14 +351,12 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
               
               console.log(`[RealCosts] Strategy 3: FOUND order ${orderId} in period ${periodKey} offset ${startOffset}: type="${ct}" amount=${amount}`);
               
-              if (ct.includes('custo por vender') || ct.includes('custo por cobrar') || 
-                  ct.includes('sale_fee') || ct.includes('cargo por venta')) {
-                feeML += amount;
-              } else if ((ct.includes('tarifa de envio') || ct.includes('envio extra') || 
-                         ct.includes('envio intermunicipal') || ct.includes('shipping')) && shippingCostSeller === 0) {
-                shippingCostSeller = amount;
-              } else if (ct.includes('taxa de parcelamento') || ct.includes('installment')) {
-                installmentsCost += amount;
+              const category = classifyBillingCharge(ct);
+              switch (category) {
+                case "commission": feeML += amount; break;
+                case "shipping": if (shippingCostSeller === 0) shippingCostSeller = amount; break;
+                case "installments": installmentsCost += amount; break;
+                case "adjustments": adjustments += amount; break;
               }
             }
           }
@@ -531,18 +527,11 @@ async function aggregateBillingData(supabase: any, sellerId: string, orderIds: s
             billingByShipment.set(shipmentId, { shipping: 0, adjustments: 0 });
           }
           const entry = billingByShipment.get(shipmentId)!;
-          const chargeType = (detail.charge_type || "").toLowerCase();
-          // FIXED: Use signed amount directly
           const amount = detail.gross_amount || 0;
-
-          if (chargeType.includes("tarifa de envio") || 
-              chargeType.includes("envio extra") ||
-              chargeType.includes("envio intermunicipal") ||
-              chargeType.includes("mercado envíos") || 
-              chargeType.includes("shipping") || 
-              chargeType === "shipping_fee") {
+          const category = classifyBillingCharge(detail.charge_type || "");
+          if (category === "shipping") {
             entry.shipping += amount;
-          } else if (chargeType.includes("ajuste") || chargeType.includes("estorno")) {
+          } else if (category === "adjustments") {
             entry.adjustments += amount;
           }
         }
@@ -556,38 +545,78 @@ async function aggregateBillingData(supabase: any, sellerId: string, orderIds: s
   return { billingByOrder, billingByShipment };
 }
 
-function processChargeType(entry: { fee_ml: number; shipping: number; installments: number; adjustments: number }, detail: any) {
-  const chargeType = (detail.charge_type || "").toLowerCase();
-  // FIXED: Use signed amount directly instead of Math.abs
-  const amount = detail.gross_amount || 0;
+/**
+ * Unified billing charge classifier — SINGLE SOURCE OF TRUTH.
+ * Returns: 'commission' | 'shipping' | 'installments' | 'adjustments' | 'storage' | 'ads' | 'unknown'
+ */
+function classifyBillingCharge(chargeType: string): string {
+  const ct = (chargeType || "").toLowerCase();
 
-  if (chargeType.includes("custo por vender") || 
-      chargeType.includes("custo por cobrar") ||
-      chargeType.includes("cargo por venta") || 
-      chargeType.includes("sale_fee") || 
-      chargeType === "sale_fee_amount") {
-    entry.fee_ml += amount;
-  } else if (chargeType.includes("tarifa de envio") || 
-             chargeType.includes("envio extra") ||
-             chargeType.includes("envio intermunicipal") ||
-             chargeType.includes("mercado envíos") || 
-             chargeType.includes("shipping") || 
-             chargeType === "shipping_fee") {
-    entry.shipping += amount;
-  } else if (chargeType.includes("taxa de parcelamento") || 
-             chargeType.includes("cuota") || 
-             chargeType.includes("installment")) {
-    entry.installments += amount;
-  } else if (chargeType.includes("ajuste") || 
-             chargeType.includes("adjustment") ||
-             chargeType.includes("cancelamento") ||
-             chargeType.includes("reembolso") ||
-             chargeType.includes("bonificação") ||
-             chargeType.includes("estorno")) {
-    entry.adjustments += amount;
-  } else if (amount > 0) {
-    // Positive unknown charges go to fee_ml
-    entry.fee_ml += amount;
+  // Commission / Sale fees
+  if (ct.includes("custo por vender") || 
+      ct.includes("custo por cobrar") ||
+      ct.includes("tarifa de venda") ||
+      ct.includes("custo de gestão") ||
+      ct.includes("cargo por venta") || 
+      ct.includes("sale_fee") || 
+      ct === "sale_fee_amount") {
+    return "commission";
+  }
+
+  // Shipping
+  if (ct.includes("tarifa de envio") || 
+      ct.includes("envio extra") ||
+      ct.includes("envio intermunicipal") ||
+      ct.includes("envio interno") ||
+      ct.includes("mercado envíos") || 
+      ct.includes("shipping") || 
+      ct === "shipping_fee") {
+    return "shipping";
+  }
+
+  // Installments
+  if (ct.includes("taxa de parcelamento") || 
+      ct.includes("cuota") || 
+      ct.includes("installment")) {
+    return "installments";
+  }
+
+  // Adjustments / Refunds
+  if (ct.includes("ajuste") || 
+      ct.includes("adjustment") ||
+      ct.includes("cancelamento") ||
+      ct.includes("reembolso") ||
+      ct.includes("bonificação") ||
+      ct.includes("estorno")) {
+    return "adjustments";
+  }
+
+  // Storage (ignore in cost calc)
+  if (ct.includes("armazenamento") || ct.includes("full")) {
+    return "storage";
+  }
+
+  // Ads (ignore in cost calc)
+  if (ct.includes("publicidade") || ct.includes("ads")) {
+    return "ads";
+  }
+
+  return "unknown";
+}
+
+function processChargeType(entry: { fee_ml: number; shipping: number; installments: number; adjustments: number }, detail: any) {
+  const amount = detail.gross_amount || 0;
+  const category = classifyBillingCharge(detail.charge_type || "");
+
+  switch (category) {
+    case "commission": entry.fee_ml += amount; break;
+    case "shipping": entry.shipping += amount; break;
+    case "installments": entry.installments += amount; break;
+    case "adjustments": entry.adjustments += amount; break;
+    case "unknown":
+      if (amount > 0) entry.fee_ml += amount; // Positive unknown → fee
+      break;
+    // storage, ads → ignored
   }
 }
 
