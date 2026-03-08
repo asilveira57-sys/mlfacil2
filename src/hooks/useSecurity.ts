@@ -101,13 +101,13 @@ export function useChangePassword() {
       if (error) throw error;
 
       // Log the password change event
-      await supabase.from('security_events').insert({
+      await supabase.from('security_events').insert([{
         user_id: userId!,
         event_type: 'password_changed',
         user_agent: navigator.userAgent,
         success: true,
-        metadata: { changed_at: new Date().toISOString() },
-      });
+        metadata: { changed_at: new Date().toISOString() } as Json,
+      }]);
 
       // Update last password change timestamp
       await supabase.from('user_security_settings').upsert({
