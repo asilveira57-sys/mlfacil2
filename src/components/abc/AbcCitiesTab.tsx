@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Download, MapPin, ChevronRight, ArrowLeft, Loader2, DollarSign, Package, TrendingUp, Map as MapIcon } from "lucide-react";
+import { Download, MapPin, ChevronRight, ArrowLeft, Loader2, DollarSign, Package, TrendingUp, Map as MapIcon, RefreshCw, AlertTriangle } from "lucide-react";
+import { toast } from "@/hooks/use-toast";
 import { AbcMapDrawer, MapMarkerData } from "./AbcMapDrawer";
 import {
   Select,
@@ -108,6 +109,7 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
 
   // Map drawer state
   const [mapDrawerOpen, setMapDrawerOpen] = useState(false);
+  const [fixingAddresses, setFixingAddresses] = useState(false);
 
   // Drawer state for geographic details
   const [selectedGeoItem, setSelectedGeoItem] = useState<AbcItem | null>(null);
@@ -450,6 +452,35 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
     return parts;
   };
 
+  // Detect N/D items
+  const ndCount = currentItems
+    .filter(i => i.name === "N/D" || i.name === "" || !i.name)
+    .reduce((sum, i) => sum + i.orders, 0);
+  const hasNd = ndCount > 0;
+
+  const handleFixAddresses = async () => {
+    setFixingAddresses(true);
+    try {
+      const { error } = await supabase.functions.invoke('ml-backfill-shipments', {
+        body: { seller_id: sellerId },
+      });
+      if (error) throw error;
+      toast({
+        title: "Correção iniciada",
+        description: "Os endereços estão sendo corrigidos em segundo plano. Aguarde alguns minutos e recarregue a página.",
+      });
+    } catch (err) {
+      console.error("Fix addresses error:", err);
+      toast({
+        title: "Erro ao iniciar correção",
+        description: err instanceof Error ? err.message : "Tente novamente mais tarde.",
+        variant: "destructive",
+      });
+    } finally {
+      setTimeout(() => setFixingAddresses(false), 3000);
+    }
+  };
+
   const TABLE_COLUMNS = [
     { key: "orders" as const, label: "Pedidos", format: "number" as const, align: "right" as const, sortable: true },
     { key: "units" as const, label: "Unidades", format: "number" as const, align: "right" as const, sortable: true },
@@ -480,6 +511,14 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
         </div>
 
         <div className="flex items-center gap-2">
+          <Button
+            variant={hasNd ? "default" : "outline"}
+            onClick={handleFixAddresses}
+            disabled={fixingAddresses}
+          >
+            {fixingAddresses ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+            Corrigir endereços
+          </Button>
           <Button onClick={() => setMapDrawerOpen(true)} disabled={classifiedItems.length === 0}>
             <MapIcon className="h-4 w-4 mr-2" />
             Ver Mapa
@@ -519,6 +558,21 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
           thresholdA={config.percentA}
           thresholdB={config.percentB}
         />
+      )}
+
+      {/* N/D warning banner */}
+      {!loading && hasNd && (
+        <div className="flex items-center gap-3 rounded-lg border border-warning/50 bg-warning/10 p-4">
+          <AlertTriangle className="h-5 w-5 text-warning shrink-0" />
+          <div className="flex-1 text-sm">
+            <strong>{ndCount} pedidos</strong> sem localização identificada (N/D).
+            Clique em <strong>"Corrigir endereços"</strong> para resolver automaticamente.
+          </div>
+          <Button size="sm" onClick={handleFixAddresses} disabled={fixingAddresses}>
+            {fixingAddresses ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
+            Corrigir
+          </Button>
+        </div>
       )}
 
       {/* Breadcrumb navigation - above table */}
