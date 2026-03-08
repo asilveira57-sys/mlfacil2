@@ -41,28 +41,42 @@ async function backfillInBackground(
   try {
     console.log(`[Backfill] Starting shipment backfill for seller ${sellerId}`);
 
-    // Find orders with shipment_id but no matching meli_shipments_cache record
-    // Using a raw query approach: get shipment_ids from orders, then check which are missing
-    const { data: orderShipments, error: fetchErr } = await supabaseAdmin
-      .from('meli_orders_cache')
-      .select('shipment_id')
-      .eq('seller_id', sellerId)
-      .not('shipment_id', 'is', null)
-      .neq('shipment_id', '')
-      .limit(5000);
+    // Find orders with shipment_id — paginate to avoid 1000-row limit
+    const allOrderShipments: { shipment_id: string }[] = [];
+    const PAGE_SIZE = 1000;
+    let from = 0;
+    let hasMore = true;
 
-    if (fetchErr) {
-      console.error('[Backfill] Error fetching orders:', fetchErr);
-      return;
+    while (hasMore) {
+      const { data: page, error: fetchErr } = await supabaseAdmin
+        .from('meli_orders_cache')
+        .select('shipment_id')
+        .eq('seller_id', sellerId)
+        .not('shipment_id', 'is', null)
+        .neq('shipment_id', '')
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (fetchErr) {
+        console.error('[Backfill] Error fetching orders:', fetchErr);
+        return;
+      }
+
+      if (!page || page.length === 0) {
+        hasMore = false;
+      } else {
+        allOrderShipments.push(...page);
+        from += PAGE_SIZE;
+        hasMore = page.length === PAGE_SIZE;
+      }
     }
 
-    if (!orderShipments || orderShipments.length === 0) {
+    if (allOrderShipments.length === 0) {
       console.log('[Backfill] No orders found');
       return;
     }
 
     // Get unique shipment IDs
-    const allShipmentIds = [...new Set(orderShipments.map(o => o.shipment_id).filter(Boolean))];
+    const allShipmentIds = [...new Set(allOrderShipments.map(o => o.shipment_id).filter(Boolean))];
     console.log(`[Backfill] Found ${allShipmentIds.length} unique shipment IDs from orders`);
 
     // Check which ones already exist in cache - batch in groups of 500
@@ -91,17 +105,20 @@ async function backfillInBackground(
     let synced = 0;
     let errors = 0;
 
-    // Build order mapping
+    // Build order mapping — batch .in() to avoid limits
     const orderMap = new Map<string, string>();
-    const { data: mappingData } = await supabaseAdmin
-      .from('meli_orders_cache')
-      .select('order_id, shipment_id')
-      .eq('seller_id', sellerId)
-      .in('shipment_id', toProcess);
-    
-    (mappingData || []).forEach(o => {
-      if (o.shipment_id) orderMap.set(o.shipment_id, o.order_id);
-    });
+    for (let i = 0; i < toProcess.length; i += 500) {
+      const batch = toProcess.slice(i, i + 500);
+      const { data: mappingData } = await supabaseAdmin
+        .from('meli_orders_cache')
+        .select('order_id, shipment_id')
+        .eq('seller_id', sellerId)
+        .in('shipment_id', batch);
+      
+      (mappingData || []).forEach(o => {
+        if (o.shipment_id) orderMap.set(o.shipment_id, o.order_id);
+      });
+    }
 
     // Process in batches
     for (let i = 0; i < toProcess.length; i += BATCH_SIZE) {
