@@ -564,6 +564,43 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
         dateFrom={filters.dateFrom}
         dateTo={filters.dateTo}
       />
+
+      {/* Map Drawer */}
+      <AbcMapDrawer
+        open={mapDrawerOpen}
+        onOpenChange={setMapDrawerOpen}
+        title={
+          drillLevel === "uf"
+            ? "Mapa de Vendas por Estado"
+            : drillLevel === "city"
+            ? `Cidades de ${selectedUf}`
+            : `Bairros de ${selectedCity}`
+        }
+        subtitle={`${classifiedItems.length} ${drillLevel === "uf" ? "estados" : drillLevel === "city" ? "cidades" : "bairros"} • ${totals.totalOrders} pedidos`}
+        markers={classifiedItems.map((item) => ({
+          id: item.id,
+          name: item.id,
+          orders: item.orders,
+          units: item.units,
+          revenue: item.revenue,
+          classification: item.classification,
+        }))}
+        level={drillLevel}
+        selectedUf={selectedUf}
+        selectedCity={selectedCity}
+        onMarkerDrillDown={(marker) => {
+          setMapDrawerOpen(false);
+          if (drillLevel === "uf") {
+            setSelectedUf(marker.id);
+            setDrillLevel("city");
+          } else if (drillLevel === "city") {
+            setSelectedCity(marker.id);
+            setDrillLevel("neighborhood");
+          }
+          // Re-open map after drill
+          setTimeout(() => setMapDrawerOpen(true), 300);
+        }}
+      />
     </div>
   );
 }
