@@ -188,19 +188,19 @@ Deno.serve(async (req) => {
           .gte("estimated_handling_limit", `${tomorrowStr}T00:00:00`)
           .lt("estimated_handling_limit", `${tomorrowStr}T23:59:59`);
 
-        // === ADS ===
-        const { data: adsData } = await supabase
-          .from("ads_daily_metrics")
-          .select("spent, revenue, acos, roas")
+        // === ADS (from ads_period_cache which has actual synced data) ===
+        const { data: adsPeriodData } = await supabase
+          .from("ads_period_cache")
+          .select("total_spent, total_revenue, metric_date")
           .eq("seller_id", sellerId)
-          .gte("metric_date", weekAgo.toISOString().split("T")[0]);
+          .gte("metric_date", weekAgo.toISOString().split("T")[0])
+          .order("metric_date", { ascending: false })
+          .limit(7);
 
-        const gastoAds = (adsData || []).reduce((s, d) => s + Number(d.spent || 0), 0);
-        const fatAds = (adsData || []).reduce((s, d) => s + Number(d.revenue || 0), 0);
-        const acosValues = (adsData || []).filter((d) => d.acos != null).map((d) => Number(d.acos));
-        const roasValues = (adsData || []).filter((d) => d.roas != null).map((d) => Number(d.roas));
-        const acosMedio = acosValues.length > 0 ? acosValues.reduce((s, v) => s + v, 0) / acosValues.length : 0;
-        const roasMedio = roasValues.length > 0 ? roasValues.reduce((s, v) => s + v, 0) / roasValues.length : 0;
+        const gastoAds = (adsPeriodData || []).reduce((s, d) => s + Number(d.total_spent || 0), 0);
+        const fatAds = (adsPeriodData || []).reduce((s, d) => s + Number(d.total_revenue || 0), 0);
+        const acosMedio = fatAds > 0 ? (gastoAds / fatAds) * 100 : 0;
+        const roasMedio = gastoAds > 0 ? fatAds / gastoAds : 0;
 
         // === CUTOFF (uses ml_account UUID as seller_id) ===
         let cutoffFlex: string | null = null;
