@@ -480,7 +480,7 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setMapDrawerOpen(true)} disabled={classifiedItems.length === 0}>
+          <Button onClick={() => setMapDrawerOpen(true)} disabled={classifiedItems.length === 0}>
             <MapIcon className="h-4 w-4 mr-2" />
             Ver Mapa
           </Button>
