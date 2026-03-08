@@ -1229,6 +1229,68 @@ async function processQuestionEvent(
           .eq("status", "pending");
 
         await upsertNotification(supabase, accountInfo.userId, event.ml_user_id, accountInfo.companyName, "question", count || 1);
+
+        // SLA warning/breach notification
+        const hoursRemaining = (slaDeadline.getTime() - Date.now()) / (1000 * 60 * 60);
+        if (isSlaBreached) {
+          // SLA breached
+          const today = new Date().toISOString().split("T")[0];
+          const slaGroupKey = `qa_sla_breached_${event.ml_user_id}_${today}`;
+          const { data: existingSla } = await supabase
+            .from("app_notifications")
+            .select("id")
+            .eq("group_key", slaGroupKey)
+            .eq("is_dismissed", false)
+            .maybeSingle();
+
+          const slaTitle = `⚠️ SLA estourado na ${accountInfo.companyName}`;
+          const slaBody = `Pergunta sem resposta há mais de 15h`;
+
+          if (existingSla) {
+            await supabase.from("app_notifications").update({ title: slaTitle, body: slaBody }).eq("id", existingSla.id);
+          } else {
+            await supabase.from("app_notifications").insert({
+              user_id: accountInfo.userId,
+              seller_id: event.ml_user_id,
+              title: slaTitle,
+              body: slaBody,
+              category: "qa_sla_breached",
+              priority: "urgent",
+              action_url: "/perguntas",
+              group_key: slaGroupKey,
+              origin_module: "qa",
+            });
+          }
+        } else if (hoursRemaining > 0 && hoursRemaining <= 3) {
+          // SLA warning (< 3h remaining)
+          const today = new Date().toISOString().split("T")[0];
+          const warnGroupKey = `qa_sla_warning_${event.ml_user_id}_${today}`;
+          const { data: existingWarn } = await supabase
+            .from("app_notifications")
+            .select("id")
+            .eq("group_key", warnGroupKey)
+            .eq("is_dismissed", false)
+            .maybeSingle();
+
+          const warnTitle = `⏰ SLA próximo do limite na ${accountInfo.companyName}`;
+          const warnBody = `Faltam ${Math.round(hoursRemaining)}h para estourar o prazo`;
+
+          if (existingWarn) {
+            await supabase.from("app_notifications").update({ title: warnTitle, body: warnBody }).eq("id", existingWarn.id);
+          } else {
+            await supabase.from("app_notifications").insert({
+              user_id: accountInfo.userId,
+              seller_id: event.ml_user_id,
+              title: warnTitle,
+              body: warnBody,
+              category: "qa_sla_warning",
+              priority: "high",
+              action_url: "/perguntas",
+              group_key: warnGroupKey,
+              origin_module: "qa",
+            });
+          }
+        }
       }
     } catch (notifErr) {
       console.error(`[ml-worker] Notification error:`, notifErr);
