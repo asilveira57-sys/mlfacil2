@@ -295,12 +295,14 @@ async function mlRequest(
 
 // ============================================
 // Authenticated fallback: try user's ML tokens on 403
+// Prioritizes preferredSellerId if provided.
 // ============================================
 
 async function getValidTokenForRead(
   supabase: any,
   userId: string,
   correlationId: string,
+  preferredSellerId?: string | null,
 ): Promise<string | null> {
   // Fetch all active ML accounts for this user
   const { data: accounts, error } = await supabase
@@ -312,11 +314,33 @@ async function getValidTokenForRead(
 
   if (error || !accounts || accounts.length === 0) {
     await logEvent(supabase, userId, 'source', 'auth_fallback', 'no_ml_accounts', 'warn',
+      'No active ML accounts found for authenticated fallback', { correlation_id: correlationId, preferred_seller_id: preferredSellerId });
+    return null;
+  }
+
+  // Sort: preferred seller first
+  const sorted = preferredSellerId
+    ? [...accounts].sort((a: any, b: any) => {
+        const aMatch = String(a.ml_user_id) === String(preferredSellerId) ? 0 : 1;
+        const bMatch = String(b.ml_user_id) === String(preferredSellerId) ? 0 : 1;
+        return aMatch - bMatch;
+      })
+    : accounts;
+
+  await logEvent(supabase, userId, 'source', 'auth_fallback', 'token_selection_order', 'info',
+    `Will try ${sorted.length} accounts, preferred=${preferredSellerId || 'none'}`, {
+      correlation_id: correlationId,
+      preferred_seller_id: preferredSellerId,
+      account_order: sorted.map((a: any) => a.ml_user_id),
+    });
+
+  if (error || !accounts || accounts.length === 0) {
+    await logEvent(supabase, userId, 'source', 'auth_fallback', 'no_ml_accounts', 'warn',
       'No active ML accounts found for authenticated fallback', { correlation_id: correlationId });
     return null;
   }
 
-  for (const account of accounts) {
+  for (const account of sorted) {
     let token = account.access_token;
 
     // Check if token is expired and try refresh
