@@ -1,66 +1,59 @@
 
-# Plano Mestre — Jornada Completa do Seller
 
-## Status de cada item
+## Resumo
 
-### ✅ Já existe no sistema
-| # | Item | Status |
-|---|------|--------|
-| 2 | Cadastro (email/senha + confirmação) | ✅ Implementado |
-| 4 | Painel inicial (dashboard) | ✅ Existe (sem velocímetro) |
-| 5 | Conexão ML via OAuth | ✅ Implementado |
-| 6 | Elegibilidade para teste (>10 vendas) | ✅ Verificação existe na company |
-| 8 | Módulo Etiquetas (vendas abertas) | ✅ Implementado |
-| 9 | Módulo Custos (sem Passo 2) | ✅ Atualizado agora |
-| 13 | Seleção automática de plano | ✅ `useUserSalesVolume` + filtro de planos |
-| 15 | Cadastro fiscal (PF/PJ) | ✅ `company_billing` existe |
-| 12 | Bloqueio pós-trial | ✅ Parcial (trial_expired bloqueia) |
+Três melhorias no ecossistema de suporte:
 
-### 🔶 Existe parcialmente / precisa ajuste
-| # | Item | O que falta |
-|---|------|-------------|
-| 1 | Landing com 3 botões | Landing existe mas precisa revisar CTAs |
-| 3 | Tela de boas-vindas (primeiro acesso) | Onboarding existe mas pode não ter welcome screen |
-| 7 | Sincronização inicial automática (30d) | Import manual existe, falta auto-trigger pós-OAuth |
-| 10 | Módulo ADS (sync pós-pagamento) | ADS existe, falta gate de trial |
-| 11 | Linha do Tempo (30d trial vs 1yr pago) | Módulo existe, falta limitar por trial |
-| 14 | Dados fiscais obrigatórios pós-pagamento | Tela existe, falta gate de bloqueio |
+1. **Badge de chamados pendentes na tab Suporte do Admin** — mostrar contador de tickets abertos/em atendimento ao lado do label "Suporte"
+2. **E-mail automático para admin quando seller abre chamado** — via `email-trigger.ts` integrado ao fluxo de criação de ticket
+3. **E-mail de confirmação para o seller ao abrir chamado** — "Seu chamado foi recebido"
+4. **E-mail para o seller quando admin responde** — integrar no `handleSendReply` do `AdminTicketDetail`
+5. **Corrigir anexos não clicáveis** (pendente do plano anterior) — gerar URL pública via Storage
+6. **Corrigir navegação "Meus Chamados"** (pendente) — usar `?section=abrir-chamado&ticket=ID`
 
-### 🔴 Precisa ser desenvolvido
-| # | Item | Descrição |
-|---|------|-----------|
-| 4b | Velocímetro de ativação | Widget de progresso no dashboard |
-| 9b | Tabela `sync_jobs` + lock após sucesso | Controle de execução de syncs |
-| 9c | Lock do botão 1 ano após sucesso | Bloquear re-execução pós-sucesso |
-| 16 | Multi-conta (soma de vendas) | Lógica de soma cross-account |
-| 17-18 | Estados de conta + aviso pré-conexão | Workflow de nova conta |
-| 19 | Verificação de limite + pending_upgrade | Gate automático |
-| 20 | Upgrade com pró-rata | Cálculo proporcional |
-| 21 | Crescimento natural → bloqueio | Detecção automática de excesso |
-| 22 | Proteção contra abuso (logs) | Audit trail de conexões/upgrades |
+---
 
-## Ordem sugerida de implementação
+## Detalhes Técnicos
 
-### Fase 1 — Gates e bloqueios (impacto imediato)
-1. Velocímetro de ativação no dashboard
-2. Tabela `sync_jobs` + controle de locks
-3. Gate de dados fiscais pós-pagamento
-4. Auto-sync 30d após OAuth
+### 1. Badge no Admin — `src/pages/Admin.tsx`
 
-### Fase 2 — Trial gates nos módulos ✅
-5. ✅ ADS: banner de trial + sync bloqueado via ML API gate no backend
-6. ✅ Linha do Tempo: banner de trial informando limitação a 30d
-7. ✅ Etiquetas: filtro "Todos" agora capped a 30 dias
+Adicionar um hook `useOpenTicketsCount` que faz query em `support_tickets` com `status in ('open', 'in_progress')` e retorna a contagem. No array `adminTabs`, renderizar um badge numérico ao lado do item "Suporte" quando count > 0 (similar à sineta de notificações).
 
-### Fase 3 — Multi-conta e upgrade ✅
-8. ✅ Multi-conta: soma de vendas (get_tenant_total_sales + check_tenant_plan_limit)
-9. ✅ Estados de conta (account_state enum: active/pending_upgrade/disabled/error)
-10. ✅ Upgrade com pró-rata (calculate_prorata_upgrade + execute_plan_upgrade)
-11. ✅ Crescimento natural → bloqueio (PlanLimitBanner + useTenantLimits)
-12. ✅ Aviso pré-conexão de nova conta (AccountConnectionWarning)
-13. ✅ Audit log (tenant_limit_log)
+### 2. E-mails via módulo existente — Edge Function `email-enqueue-event`
 
-### Fase 4 — Landing e onboarding ✅
-14. ✅ Landing com 3 CTAs (Login, Cadastro, Planos) no header e hero
-15. ✅ Welcome screen pós-confirmação de email (WelcomeScreen + aviso ML)
-16. ✅ Proteção contra abuso (system_audit_log + tenant_limit_log)
+O sistema já tem infraestrutura de e-mail com `enqueueEmailEvent()`. Serão criados 3 event_keys:
+
+- `support_ticket_opened_admin` — notifica admin quando seller abre ticket
+- `support_ticket_opened_seller` — confirma ao seller que o chamado foi recebido
+- `support_ticket_reply_seller` — notifica seller quando admin responde
+
+Cada um precisa de um template na tabela `email_templates` (migração SQL) e o disparo será feito:
+- No `CreateTicketDialog.tsx` após criação bem-sucedida — chamar edge function para enfileirar os 2 eventos (admin + seller)
+- No `AdminTicketDetail.tsx` no `handleSendReply` — enfileirar evento de resposta
+
+Como o `enqueueEmailEvent` é para uso server-side, o disparo do frontend será via uma nova edge function leve `support-notify` que recebe `{ type, ticket_id }` e faz os inserts na fila de e-mail.
+
+### 3. Anexos clicáveis — `AdminTicketDetail.tsx` e `SupportTicketDetail.tsx`
+
+Para cada attachment, gerar URL via `supabase.storage.from('support-attachments').getPublicUrl(storage_path)`. Se imagem: renderizar thumbnail clicável (abre nova aba). Se arquivo: link de download.
+
+### 4. Navegação correta — `FloatingSupportButton.tsx` + `SettingsSupport.tsx`
+
+- Corrigir rotas: `navigate('/settings?section=abrir-chamado')` 
+- `AdminTicketDetail` notification `action_url`: `/settings?section=abrir-chamado&ticket=${ticket.id}`
+- `SettingsSupport.tsx`: ler `useSearchParams` para `ticket` param e auto-abrir o detalhe
+
+### Arquivos envolvidos
+
+| Arquivo | Alteração |
+|---------|-----------|
+| `src/pages/Admin.tsx` | Badge numérico na tab Suporte |
+| `src/hooks/useOpenTicketsCount.ts` | Novo hook — conta tickets open/in_progress |
+| `src/components/admin/support/AdminTicketDetail.tsx` | Anexos clicáveis + e-mail ao responder |
+| `src/components/support/SupportTicketDetail.tsx` | Anexos clicáveis |
+| `src/components/support/CreateTicketDialog.tsx` | Disparar e-mail após criar ticket |
+| `src/components/support/FloatingSupportButton.tsx` | Corrigir rotas de navegação |
+| `src/components/settings/SettingsSupport.tsx` | Auto-abrir ticket via URL param |
+| `supabase/functions/support-notify/index.ts` | Nova edge function — enfileira e-mails de suporte |
+| Migração SQL | Templates de e-mail para os 3 eventos |
+
