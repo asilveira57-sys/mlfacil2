@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -70,10 +70,23 @@ export function TrackedCompetitorsTab({ sellerId }: TrackedCompetitorsTabProps) 
     }, { replace: true });
   }, [setSearchParams]);
 
+  const prevSellerIdRef = useRef(sellerId);
+  const hasFetchedRef = useRef(false);
+  const prevStatusFilterRef = useRef(statusFilter);
+
   useEffect(() => {
+    const sellerChanged = prevSellerIdRef.current !== sellerId;
+    const statusChanged = prevStatusFilterRef.current !== statusFilter;
+    
+    if (hasFetchedRef.current && !sellerChanged && !statusChanged) return;
+    
+    prevSellerIdRef.current = sellerId;
+    prevStatusFilterRef.current = statusFilter;
+    hasFetchedRef.current = true;
+    
     fetchTrackers(statusFilter);
     fetchOverview();
-  }, [fetchTrackers, fetchOverview, statusFilter]);
+  }, [fetchTrackers, fetchOverview, statusFilter, sellerId]);
 
   const handleOpenDetail = (tracker: CompetitorTracker) => {
     setSelectedTracker(tracker);
