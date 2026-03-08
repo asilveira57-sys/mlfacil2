@@ -328,12 +328,35 @@ export function AbcCitiesTab({ sellerId, filters, config }: AbcCitiesTabProps) {
   };
 
   const handleOpenDetail = (item: AbcItem) => {
-    // Store the current drill context along with the item
-    setSelectedGeoItem({
-      ...item,
-      // Store current context for location building
-    });
+    setSelectedGeoItem(item);
     setDrawerOpen(true);
+  };
+
+  const handleOpenMapForItem = (item: AbcItem) => {
+    // Drill into the item first, then open map
+    if (drillLevel === "uf") {
+      setSelectedUf(item.id);
+      setDrillLevel("city");
+    } else if (drillLevel === "city") {
+      setSelectedCity(item.id);
+      setDrillLevel("neighborhood");
+    }
+    setTimeout(() => setMapDrawerOpen(true), 200);
+  };
+
+  // Handle navigating up from within the detail drawer
+  const handleDrawerNavigateUp = () => {
+    setDrawerOpen(false);
+    handleDrillUp();
+  };
+
+  // Build breadcrumb for the drawer
+  const getDrawerBreadcrumb = (): string[] => {
+    const parts = ["Brasil"];
+    if (selectedUf) parts.push(selectedUf);
+    if (selectedCity) parts.push(selectedCity);
+    if (selectedGeoItem) parts.push(selectedGeoItem.id);
+    return parts;
   };
 
   // Build location object based on current drill level and selected item
