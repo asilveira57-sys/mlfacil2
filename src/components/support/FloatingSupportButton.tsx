@@ -223,22 +223,29 @@ export function FloatingSupportButton({ visible = true, className }: FloatingSup
           setIsOpen(open);
         }}>
           <PopoverTrigger asChild>
-            <Button
-              size="icon"
-              className={cn(
-                'h-14 w-14 rounded-full shadow-lg',
-                'bg-primary hover:bg-primary/90 text-primary-foreground',
-                'transition-all duration-200',
-                !dragging && 'hover:scale-105',
-                className
+            <div className="relative">
+              <Button
+                size="icon"
+                className={cn(
+                  'h-14 w-14 rounded-full shadow-lg',
+                  'bg-primary hover:bg-primary/90 text-primary-foreground',
+                  'transition-all duration-200',
+                  !dragging && 'hover:scale-105',
+                  className
+                )}
+              >
+                {isOpen ? (
+                  <X className="h-6 w-6" />
+                ) : (
+                  <MessageCircle className="h-6 w-6" />
+                )}
+              </Button>
+              {unreadReplies > 0 && !isOpen && (
+                <span className="absolute -top-1 -right-1 h-5 min-w-[20px] px-1 rounded-full bg-destructive text-destructive-foreground text-xs font-bold flex items-center justify-center shadow-md">
+                  {unreadReplies}
+                </span>
               )}
-            >
-              {isOpen ? (
-                <X className="h-6 w-6" />
-              ) : (
-                <MessageCircle className="h-6 w-6" />
-              )}
-            </Button>
+            </div>
           </PopoverTrigger>
           <PopoverContent
             side="top"
