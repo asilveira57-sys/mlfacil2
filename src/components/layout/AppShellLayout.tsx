@@ -16,7 +16,7 @@ import { RefreshCw } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FloatingSupportButton } from "@/components/support/FloatingSupportButton";
 import { HeaderUtilities } from "@/components/utilities";
-import { ModuleNotesOverlay } from "@/components/notes";
+import { ModuleNotesOverlay, FloatingPostItButton } from "@/components/notes";
 import { useUtilitiesPreferences } from "@/hooks/useUtilitiesPreferences";
 import { GlobalExplanatoryCardGate } from "@/components/explanatory-cards/GlobalExplanatoryCardGate";
 

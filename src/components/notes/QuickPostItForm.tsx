@@ -18,7 +18,7 @@ export function QuickPostItForm({ onSubmit, isSubmitting }: QuickPostItFormProps
   const moduleKey = useActiveModuleKey();
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
-  const [colorHex, setColorHex] = useState(NOTE_COLORS[0].hex);
+  const [colorHex, setColorHex] = useState<string>(NOTE_COLORS[0].hex);
 
   const moduleLabel = MODULE_LABELS[moduleKey] || moduleKey;
 

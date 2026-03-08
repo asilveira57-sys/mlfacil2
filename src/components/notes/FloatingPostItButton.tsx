@@ -73,8 +73,8 @@ export function FloatingPostItButton({ visible = true, companyId }: FloatingPost
               size="icon"
               className={cn(
                 'fixed bottom-20 right-6 z-50 h-12 w-12 rounded-full shadow-lg',
-                'bg-amber-400 hover:bg-amber-500 border-amber-500',
-                'text-amber-950 hover:text-amber-950',
+                'bg-primary hover:bg-primary/90 border-primary',
+                'text-primary-foreground hover:text-primary-foreground',
                 'transition-all hover:scale-105'
               )}
             >
