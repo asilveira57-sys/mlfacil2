@@ -36,18 +36,25 @@ export async function resolveListingFromLink(input: string): Promise<ResolvedLis
 
   // Case 1: Direct MLB ID
   if (extracted && (extracted.type === 'MLB' || extracted.type === 'REGIONAL')) {
-    return fetchItemById(extracted.id);
+    try {
+      return await fetchItemById(extracted.id);
+    } catch {
+      // Item fetch failed (inactive/removed) — try slug search fallback
+      const slugResult = await trySearchByUrlSlug(trimmed);
+      if (slugResult) return slugResult;
+      throw new Error(`Anúncio ${extracted.id} não encontrado ou indisponível.`);
+    }
   }
 
   // Case 2: MLBU (catalog) - search for an actual listing
   if (extracted && extracted.type === 'MLBU') {
-    return resolveFromCatalog(extracted.id, trimmed);
-  }
-
-  // Case 3: Plain MLB ID in text
-  if (/^MLB-?\d{6,}$/i.test(trimmed)) {
-    const id = trimmed.replace(/-/g, '').toUpperCase();
-    return fetchItemById(id);
+    try {
+      return await resolveFromCatalog(extracted.id, trimmed);
+    } catch {
+      const slugResult = await trySearchByUrlSlug(trimmed);
+      if (slugResult) return slugResult;
+      throw new Error(`Produto de catálogo ${extracted.id} sem anúncios encontrados. Tente um link de anúncio específico.`);
+    }
   }
 
   // Case 4: Try to extract from URL slug
@@ -63,6 +70,33 @@ export async function resolveListingFromLink(input: string): Promise<ResolvedLis
   }
 
   throw new Error('Não foi possível identificar o anúncio. Cole o link de um anúncio ativo do Mercado Livre.');
+}
+
+/**
+ * Try to find a listing by searching the URL slug text.
+ */
+async function trySearchByUrlSlug(url: string): Promise<ResolvedListing | null> {
+  const slugMatch = url.match(/mercadolivre\.com\.br\/([^\/\?#]+)/i)
+    || url.match(/mercadolibre\.com[^\/]*\/([^\/\?#]+)/i);
+  if (!slugMatch) return null;
+
+  const slug = slugMatch[1]
+    .replace(/-MLB\d+.*$/i, '')
+    .replace(/-MLBU\d+.*$/i, '')
+    .replace(/-/g, ' ')
+    .substring(0, 60)
+    .trim();
+
+  if (!slug || slug.length < 5) return null;
+
+  try {
+    const searchRes = await fetchJSON(`${ML_API}/sites/MLB/search?q=${encodeURIComponent(slug)}&limit=1`);
+    if (searchRes?.results?.[0]?.id) {
+      return itemToResolved(searchRes.results[0], false);
+    }
+  } catch { /* fall through */ }
+
+  return null;
 }
 
 async function fetchItemById(itemId: string): Promise<ResolvedListing> {
