@@ -50,6 +50,15 @@ interface CreateTicketDialogProps {
 
 type TicketCategory = 'erro' | 'duvida' | 'sugestao' | 'financeiro' | 'integracao' | 'outro';
 
+const CATEGORY_TO_DB: Record<TicketCategory, string> = {
+  'erro': 'bug',
+  'duvida': 'question',
+  'sugestao': 'suggestion',
+  'financeiro': 'financial',
+  'integracao': 'integration',
+  'outro': 'other',
+};
+
 const CATEGORIES: { value: TicketCategory; label: string }[] = [
   { value: 'erro', label: 'Erro no sistema' },
   { value: 'duvida', label: 'Dúvida' },
@@ -122,7 +131,7 @@ export function CreateTicketDialog({
           user_id: user.id,
           workspace_id: currentWorkspace.id,
           subject: subject.trim(),
-          category: category as 'bug' | 'question' | 'suggestion' | 'financial' | 'integration' | 'other',
+          category: CATEGORY_TO_DB[category] as 'bug' | 'question' | 'suggestion' | 'financial' | 'integration' | 'other',
           description: description.trim(),
           current_route: context?.route || null,
           current_module: context?.module || null,

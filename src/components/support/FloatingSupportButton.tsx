@@ -5,6 +5,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { MessageCircle, X, Headphones, HelpCircle, BookOpen, GripVertical } from 'lucide-react';
+import html2canvas from 'html2canvas';
 import { Button } from '@/components/ui/button';
 import {
   Popover,
@@ -116,7 +117,6 @@ export function FloatingSupportButton({ visible = true, className }: FloatingSup
   // Capture screenshot using html2canvas
   const captureScreenshot = useCallback(async () => {
     try {
-      const html2canvas = (await import('html2canvas')).default;
       const canvas = await html2canvas(document.body, {
         logging: false,
         useCORS: true,
