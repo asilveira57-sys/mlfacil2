@@ -88,7 +88,7 @@ export function FloatingPostItButton({ visible = true, companyId }: FloatingPost
     if (!dragRef.current) return;
     const dx = e.clientX - dragRef.current.startX;
     const dy = e.clientY - dragRef.current.startY;
-    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) isDragging.current = true;
+    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) isDragging.current = true;
     const newPos = clamp(dragRef.current.originX + dx, dragRef.current.originY + dy);
     setPosition(newPos);
   }, [clamp]);
