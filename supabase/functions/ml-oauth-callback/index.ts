@@ -88,8 +88,8 @@ serve(async (req) => {
       const error = await tokenResponse.text();
       console.error('Token exchange failed:', error);
       
-      const errorUrl = new URL(`${frontendOrigin}/dashboard`);
-      errorUrl.searchParams.set('ml_error', 'token_exchange_failed');
+      const errorUrl = new URL(`${frontendOrigin}${errorRedirectPath}`);
+      errorUrl.searchParams.set(errorParamName, 'token_exchange_failed');
       return Response.redirect(errorUrl.toString(), 302);
     }
 
