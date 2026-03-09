@@ -74,8 +74,8 @@ Deno.serve(async (req) => {
     const { data: account, error: accError } = await supabase
       .from('ml_accounts')
       .select('access_token, refresh_token, token_expires_at, user_id')
-      .eq('ml_user_id', seller_id)
-      .eq('status', 'active')
+      .eq('ml_user_id', seller_id.toString())
+      .eq('is_active', true)
       .single();
 
     if (accError || !account) {
