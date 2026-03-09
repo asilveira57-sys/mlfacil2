@@ -3,6 +3,7 @@ import type { SandboxSnapshot } from '@/hooks/useSandboxSnapshots';
 
 interface Props {
   snapshots: SandboxSnapshot[];
+  disconnectedCount?: number;
 }
 
 function formatRelativeTime(dateStr: string): string {
@@ -14,7 +15,7 @@ function formatRelativeTime(dateStr: string): string {
   return `há ${Math.floor(h / 24)}d`;
 }
 
-export function SandboxGlobalSummary({ snapshots }: Props) {
+export function SandboxGlobalSummary({ snapshots, disconnectedCount = 0 }: Props) {
   const totalVendas = snapshots.reduce((s, c) => s + Number(c.total_vendas_semana || 0), 0);
   const totalAdsSpend = snapshots.reduce((s, c) => s + Number(c.gasto_ads_semana || 0), 0);
   const totalReclamacoes = snapshots.reduce((s, c) => s + (c.reclamacoes_abertas || 0), 0);
@@ -98,6 +99,13 @@ export function SandboxGlobalSummary({ snapshots }: Props) {
 
         {/* Spacer */}
         <div className="flex-1" />
+
+        {/* Disconnected companies note */}
+        {disconnectedCount > 0 && (
+          <span className="text-[10px] text-muted-foreground bg-muted/60 px-2 py-1 rounded-full flex-shrink-0">
+            {disconnectedCount} empresa{disconnectedCount > 1 ? 's' : ''} sem conta ML
+          </span>
+        )}
 
         {/* Last update status */}
         <div className={`flex items-center gap-1.5 text-xs flex-shrink-0 ${isStale ? 'text-yellow-500' : 'text-muted-foreground'}`}>
