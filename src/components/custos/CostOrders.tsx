@@ -169,32 +169,35 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     }
   };
 
-  // Poll a bulk job for progress
-  const pollJobProgress = async (jobId: string) => {
+  // Poll a bulk job for progress — queries DB directly (no Edge Function boot overhead)
+  const pollJobProgress = (jobId: string) => {
     setActiveJobId(jobId);
+    let lastProcessed = 0;
+    let staleStartedAt: number | null = null;
+    const STALE_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes without progress = stale
+
     const poll = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) return;
+        const { data: job, error } = await supabase
+          .from('cost_bulk_jobs')
+          .select('*')
+          .eq('id', jobId)
+          .maybeSingle();
 
-        const response = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders/bulk-reimport-status?job_id=${jobId}`,
-          {
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-            },
-          }
-        );
-        if (!response.ok) return;
-        const job = await response.json();
+        if (error || !job) {
+          setTimeout(poll, 5000);
+          return;
+        }
+
+        const processed = job.success_count + job.error_count;
 
         setBatchProgress({
-          current: job.processed_count || 0,
+          current: processed,
           total: job.total_orders || 0,
-          currentOrderId: `${job.processed_count}/${job.total_orders}`,
+          currentOrderId: `${processed}/${job.total_orders || '?'}`,
         });
 
-        if (job.status === 'done' || job.status === 'error') {
+        if (job.status === 'done' || job.status === 'error' || job.status === 'cancelled') {
           setBatchProcessing(false);
           setActiveJobId(null);
           setSelectedOrders(new Set());
@@ -204,20 +207,47 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
 
           if (job.status === 'done') {
             toast.success(`${job.success_count} pedidos processados com sucesso${job.error_count > 0 ? `, ${job.error_count} com erro` : ''}`);
+          } else if (job.status === 'cancelled') {
+            toast.info('Job cancelado.');
           } else {
             toast.error(`Job finalizado com erro: ${job.last_error || 'desconhecido'}`);
           }
           return;
         }
 
-        // Continue polling every 3s
+        // Staleness detection
+        if (processed === lastProcessed) {
+          if (!staleStartedAt) staleStartedAt = Date.now();
+          if (Date.now() - staleStartedAt > STALE_TIMEOUT_MS) {
+            toast.warning('O processamento parece travado. Você pode cancelar e tentar novamente.');
+          }
+        } else {
+          lastProcessed = processed;
+          staleStartedAt = null;
+        }
+
         setTimeout(poll, 3000);
       } catch {
-        // Retry polling even on network error
         setTimeout(poll, 5000);
       }
     };
     poll();
+  };
+
+  // Cancel a stuck bulk job
+  const handleCancelBulkJob = async () => {
+    if (!activeJobId) return;
+    try {
+      await supabase
+        .from('cost_bulk_jobs')
+        .update({ status: 'cancelled' })
+        .eq('id', activeJobId);
+      setBatchProcessing(false);
+      setActiveJobId(null);
+      toast.info('Job cancelado.');
+    } catch {
+      toast.error('Erro ao cancelar job');
+    }
   };
 
   const handleBatchResync = async () => {
