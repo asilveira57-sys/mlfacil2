@@ -436,7 +436,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
         .from('cost_bulk_jobs')
         .select('id, total_orders, processed_count, status')
         .eq('seller_id', sellerId)
-        .eq('status', 'running')
+        .in('status', ['running', 'queued'])
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
