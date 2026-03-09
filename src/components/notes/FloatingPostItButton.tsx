@@ -110,7 +110,10 @@ export function FloatingPostItButton({ visible = true, companyId }: FloatingPost
 
   const handleSubmit = useCallback(
     async (data: { title: string; content: string; colorHex: string; moduleKey: string; files?: File[] }) => {
-      if (!workspaceId) return;
+      if (!workspaceId) {
+        console.warn('[PostIt] workspaceId is null, cannot create note');
+        return;
+      }
       try {
         const note = await createNote({
           title: data.title,
