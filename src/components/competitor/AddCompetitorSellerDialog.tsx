@@ -38,37 +38,65 @@ export function AddCompetitorSellerDialog({ open, onOpenChange, onAdd, sellerId 
     setError(null);
     
     try {
-      const { data, error: fnError } = await supabase.functions.invoke('competitor-seller-sync', {
-        body: { action: 'preview', input: input.trim(), seller_id: sellerId },
-      });
+      let data: any = null;
+      let fnError: any = null;
       
-      if (fnError) {
-        // Extract error message from different possible locations
-        let errorMsg = 'Erro ao buscar seller';
-        
-        // Try to parse JSON from error message (format: "Edge function returned 400: Error, {JSON}")
-        try {
-          const msgMatch = fnError.message?.match(/\{.*\}/s);
-          if (msgMatch) {
-            const parsed = JSON.parse(msgMatch[0]);
-            if (parsed.error) errorMsg = parsed.error;
-          }
-        } catch (parseError) {
-          console.log('Failed to parse error JSON:', parseError);
-        }
-        
-        // Fallback to other possible locations
-        if (errorMsg === 'Erro ao buscar seller') {
-          errorMsg = (fnError as any)?.context?.body?.error || fnError.message || errorMsg;
-        }
-        
-        throw new Error(errorMsg);
+      try {
+        const result = await supabase.functions.invoke('competitor-seller-sync', {
+          body: { action: 'preview', input: input.trim(), seller_id: sellerId },
+        });
+        data = result.data;
+        fnError = result.error;
+      } catch (invokeErr: any) {
+        // supabase-js may throw instead of returning { error } for non-2xx
+        fnError = invokeErr;
       }
       
-      if (data?.error) throw new Error(data.error);
+      if (fnError) {
+        let errorMsg = 'Erro ao buscar seller';
+        
+        try {
+          // Try to extract JSON from error message
+          const rawMsg = typeof fnError === 'string' ? fnError : fnError?.message || '';
+          const jsonMatch = rawMsg.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (parsed.error) errorMsg = parsed.error;
+          }
+        } catch (_) { /* ignore parse errors */ }
+        
+        // Try context body as fallback
+        if (errorMsg === 'Erro ao buscar seller') {
+          try {
+            const ctxError = fnError?.context?.body?.error;
+            if (ctxError) errorMsg = ctxError;
+          } catch (_) { /* ignore */ }
+        }
+        
+        // Try data.error (sometimes returned in body even on error)
+        if (errorMsg === 'Erro ao buscar seller' && typeof data === 'object' && data?.error) {
+          errorMsg = data.error;
+        }
+        
+        if (errorMsg === 'Erro ao buscar seller') {
+          errorMsg = (typeof fnError === 'string' ? fnError : fnError?.message) || errorMsg;
+        }
+        
+        setError(errorMsg);
+        toast.error(errorMsg.split('\n')[0]);
+        return;
+      }
+      
+      if (data?.error) {
+        setError(data.error);
+        toast.error(String(data.error).split('\n')[0]);
+        return;
+      }
       
       if (!data || !data.ml_seller_id) {
-        throw new Error('Resposta inválida do servidor');
+        setError('Resposta inválida do servidor');
+        toast.error('Resposta inválida do servidor');
+        return;
       }
       
       setPreview(data);
@@ -76,7 +104,7 @@ export function AddCompetitorSellerDialog({ open, onOpenChange, onAdd, sellerId 
       console.error('Preview error:', e);
       const msg = e instanceof Error ? e.message : 'Erro ao buscar seller';
       setError(msg);
-      toast.error(msg.split('\n')[0]); // Show only first line in toast
+      toast.error(msg.split('\n')[0]);
     } finally {
       setLoading(false);
     }
