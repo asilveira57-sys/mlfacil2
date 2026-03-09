@@ -11,6 +11,7 @@ import { QuickPostItForm } from './QuickPostItForm';
 import { cn } from '@/lib/utils';
 
 const POSITION_KEY = 'postit-fab-position';
+const DISMISSED_KEY = 'postit-fab-dismissed';
 
 interface Position {
   x: number;
@@ -46,7 +47,7 @@ interface FloatingPostItButtonProps {
 export function FloatingPostItButton({ visible = true, companyId }: FloatingPostItButtonProps) {
   const { t } = useTranslation('notes');
   const [isOpen, setIsOpen] = useState(false);
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissed, setDismissed] = useState(() => localStorage.getItem(DISMISSED_KEY) === 'true');
   const [hovered, setHovered] = useState(false);
   const [position, setPosition] = useState<Position>(loadPosition);
   const [dragging, setDragging] = useState(false);
@@ -111,7 +112,18 @@ export function FloatingPostItButton({ visible = true, companyId }: FloatingPost
   const handleDismiss = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     setDismissed(true);
+    localStorage.setItem(DISMISSED_KEY, 'true');
     setIsOpen(false);
+  }, []);
+
+  // Listen for reactivation from other components
+  useEffect(() => {
+    const handler = () => {
+      setDismissed(false);
+      localStorage.removeItem(DISMISSED_KEY);
+    };
+    window.addEventListener('postit-fab-reactivate', handler);
+    return () => window.removeEventListener('postit-fab-reactivate', handler);
   }, []);
 
   const handleSubmit = useCallback(

@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { StickyNote, Filter, Pin } from 'lucide-react';
+import { StickyNote, Filter, Pin, ToggleRight, ToggleLeft } from 'lucide-react';
 import { useSetPageHeader } from '@/components/layout/AppShellLayout';
 import { PageContainer } from '@/components/layout/PageContainer';
 import { useCurrentWorkspaceId } from '@/hooks/useCurrentWorkspaceId';
@@ -14,7 +14,10 @@ import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
+import { Button } from '@/components/ui/button';
 import type { NotePin } from '@/types/notes';
+
+const FAB_DISMISSED_KEY = 'postit-fab-dismissed';
 
 export default function PostIts() {
   const { t } = useTranslation('notes');
@@ -22,6 +25,18 @@ export default function PostIts() {
   const { data: workspaceId } = useCurrentWorkspaceId();
   const [search, setSearch] = useState('');
   const [moduleFilter, setModuleFilter] = useState<string>('all');
+  const [fabActive, setFabActive] = useState(() => localStorage.getItem(FAB_DISMISSED_KEY) !== 'true');
+
+  const toggleFab = () => {
+    if (fabActive) {
+      localStorage.setItem(FAB_DISMISSED_KEY, 'true');
+      setFabActive(false);
+    } else {
+      localStorage.removeItem(FAB_DISMISSED_KEY);
+      setFabActive(true);
+      window.dispatchEvent(new Event('postit-fab-reactivate'));
+    }
+  };
 
   useSetPageHeader('Post-its', t('postit.page_description', { defaultValue: 'Notas fixadas nos módulos' }));
 
@@ -75,6 +90,15 @@ export default function PostIts() {
       <div className="space-y-4">
         {/* Filters */}
         <div className="flex items-center gap-3 flex-wrap">
+          <Button
+            variant={fabActive ? 'default' : 'outline'}
+            size="sm"
+            onClick={toggleFab}
+            className="gap-2"
+          >
+            {fabActive ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
+            {t('settings.show_postit_button')}
+          </Button>
           <div className="relative flex-1 min-w-[200px]">
             <Input
               placeholder={t('search_placeholder')}
