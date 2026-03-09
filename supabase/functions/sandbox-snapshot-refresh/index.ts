@@ -146,7 +146,7 @@ Deno.serve(async (req) => {
           .eq("seller_id", sellerId)
           .eq("shipment_status", "ready_to_ship")
           .eq("shipment_substatus", "ready_to_print")
-          .gte("updated_at", sevenDaysAgo);
+          .gte("last_sync_at", sevenDaysAgo);
 
         // Print queue backup: also filter by last 7 days to avoid stale "gerada" records
         const { count: etiquetasNaFila } = await supabase
