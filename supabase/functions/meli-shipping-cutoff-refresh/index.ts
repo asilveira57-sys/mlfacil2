@@ -151,7 +151,7 @@ Deno.serve(async (req) => {
             .select("shipment_id, estimated_handling_limit, logistic_type")
             .eq("seller_id", mlUserId)
             .in("shipment_status", ["ready_to_ship", "handling"])
-            .order("updated_at", { ascending: false })
+            .order("last_sync_at", { ascending: false })
             .limit(3);
           sampleShipments = fallback1;
         }
@@ -163,8 +163,8 @@ Deno.serve(async (req) => {
             .select("shipment_id, estimated_handling_limit, logistic_type")
             .eq("seller_id", mlUserId)
             .eq("shipment_status", "shipped")
-            .gte("updated_at", sevenDaysAgoUTC)
-            .order("updated_at", { ascending: false })
+            .gte("last_sync_at", sevenDaysAgoUTC)
+            .order("last_sync_at", { ascending: false })
             .limit(3);
           sampleShipments = fallback2;
         }
