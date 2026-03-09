@@ -40,7 +40,12 @@ export function AddCompetitorSellerDialog({ open, onOpenChange, onAdd, sellerId 
       const { data, error: fnError } = await supabase.functions.invoke('competitor-seller-sync', {
         body: { action: 'preview', input: input.trim(), seller_id: sellerId },
       });
-      if (fnError) throw fnError;
+      if (fnError) {
+        // Extract detailed error message from 400 responses
+        const errorBody = (fnError as any)?.context?.body;
+        const errorMsg = errorBody?.error || fnError.message || 'Erro ao buscar seller';
+        throw new Error(errorMsg);
+      }
       if (data?.error) throw new Error(data.error);
       setPreview(data);
     } catch (e) {
