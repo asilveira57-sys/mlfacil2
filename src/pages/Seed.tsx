@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
 
 export default function Seed() {
   const { t } = useTranslation('seed');
@@ -90,9 +91,26 @@ export default function Seed() {
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await refreshData();
-    setIsRefreshing(false);
-    toast.success(t('data_updated'));
+    try {
+      // First trigger the metrics collector edge function
+      if (sellerId) {
+        toast.info('Coletando métricas dos anúncios...');
+        const { error: fnError } = await supabase.functions.invoke('seed-metrics-collector', {
+          body: { seller_id: sellerId },
+        });
+        if (fnError) {
+          console.error('[Seed] Metrics collector error:', fnError);
+        }
+      }
+      // Then refresh local data
+      await refreshData();
+      toast.success(t('data_updated'));
+    } catch (err) {
+      console.error('[Seed] Refresh error:', err);
+      toast.error('Erro ao atualizar métricas');
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   const handlePlant = async (item: EligibleItem) => {
