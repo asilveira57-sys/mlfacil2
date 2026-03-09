@@ -142,7 +142,7 @@ export default function Sandbox() {
         </div>
       ) : (
         <>
-          <SandboxGlobalSummary snadisconnectedCount={allSnapshots.length - snapshots.length} pshots={snapshots} />
+          <SandboxGlobalSummary snapshots={snapshots} disconnectedCount={allSnapshots.length - snapshots.length} />
           <div className={`grid gap-3 ${gridClass}`}>
             {snapshots.map((snap, i) => (
               <div key={snap.id} className={getItemClass(i, count)}>
