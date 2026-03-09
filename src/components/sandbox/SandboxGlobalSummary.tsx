@@ -15,7 +15,7 @@ function formatRelativeTime(dateStr: string): string {
   return `há ${Math.floor(h / 24)}d`;
 }
 
-export function SandboxGlobalSummary({ snapshots }: Props) {
+export function SandboxGlobalSummary({ snapshots, disconnectedCount = 0 }: Props) {
   const totalVendas = snapshots.reduce((s, c) => s + Number(c.total_vendas_semana || 0), 0);
   const totalAdsSpend = snapshots.reduce((s, c) => s + Number(c.gasto_ads_semana || 0), 0);
   const totalReclamacoes = snapshots.reduce((s, c) => s + (c.reclamacoes_abertas || 0), 0);
