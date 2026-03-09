@@ -188,8 +188,19 @@ Deno.serve(async (req) => {
       });
     }
 
-    // FIX #2: Use mlAccountId (UUID) for events instead of accountId (text seller_id)
+    // Resolve workspace_accounts.id for system_events FK
     const mlAccountId = (mlAccount as { id: string }).id;
+    let wsAccountId: string | null = null;
+    {
+      const { data: wsAcc } = await supabase
+        .from('workspace_accounts')
+        .select('id')
+        .eq('workspace_id', workspaceId)
+        .eq('marketplace', 'ml')
+        .eq('is_active', true)
+        .maybeSingle();
+      wsAccountId = wsAcc?.id || null;
+    }
     let accessToken = (mlAccount as { access_token: string }).access_token;
 
     // Refresh token if expired
