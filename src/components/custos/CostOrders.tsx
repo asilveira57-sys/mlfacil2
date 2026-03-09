@@ -798,10 +798,13 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                   )}
                   {batchProcessing && (
                     <div className="flex-1 flex items-center gap-2">
-                      <Progress value={(batchProgress.current / batchProgress.total) * 100} className="flex-1 h-2" />
+                      <Progress value={batchProgress.total > 0 ? (batchProgress.current / batchProgress.total) * 100 : 0} className="flex-1 h-2" />
                       <span className="text-xs text-muted-foreground whitespace-nowrap">
                         Pedido {batchProgress.currentOrderId}
                       </span>
+                      <Button size="sm" variant="ghost" className="text-destructive h-6 px-2 text-xs" onClick={handleCancelBulkJob}>
+                        Cancelar
+                      </Button>
                     </div>
                   )}
                 </div>
