@@ -1,51 +1,66 @@
 
+# Plano Mestre — Jornada Completa do Seller
 
-## Problem Analysis
+## Status de cada item
 
-Looking at the console logs, **every single ML API call is returning 403** from the browser — `/items/`, `/search`, everything. The client-side approach that was implemented to "bypass IP blocks" is also being blocked by ML's PolicyAgent from the Lovable preview domain.
+### ✅ Já existe no sistema
+| # | Item | Status |
+|---|------|--------|
+| 2 | Cadastro (email/senha + confirmação) | ✅ Implementado |
+| 4 | Painel inicial (dashboard) | ✅ Existe (sem velocímetro) |
+| 5 | Conexão ML via OAuth | ✅ Implementado |
+| 6 | Elegibilidade para teste (>10 vendas) | ✅ Verificação existe na company |
+| 8 | Módulo Etiquetas (vendas abertas) | ✅ Implementado |
+| 9 | Módulo Custos (sem Passo 2) | ✅ Atualizado agora |
+| 13 | Seleção automática de plano | ✅ `useUserSalesVolume` + filtro de planos |
+| 15 | Cadastro fiscal (PF/PJ) | ✅ `company_billing` existe |
+| 12 | Bloqueio pós-trial | ✅ Parcial (trial_expired bloqueia) |
 
-The specific URL the user pasted is:
-```
-https://www.mercadolivre.com.br/par-trava-da-tampa-impressora-elgin-l42-dt/p/MLB2068148114#...&wid=MLB4083136109&sid=search
-```
+### 🔶 Existe parcialmente / precisa ajuste
+| # | Item | O que falta |
+|---|------|-------------|
+| 1 | Landing com 3 botões | Landing existe mas precisa revisar CTAs |
+| 3 | Tela de boas-vindas (primeiro acesso) | Onboarding existe mas pode não ter welcome screen |
+| 7 | Sincronização inicial automática (30d) | Import manual existe, falta auto-trigger pós-OAuth |
+| 10 | Módulo ADS (sync pós-pagamento) | ADS existe, falta gate de trial |
+| 11 | Linha do Tempo (30d trial vs 1yr pago) | Módulo existe, falta limitar por trial |
+| 14 | Dados fiscais obrigatórios pós-pagamento | Tela existe, falta gate de bloqueio |
 
-Two key problems:
-1. **`MLB2068148114` is a catalog page ID** (under `/p/`), not a regular listing — the API blocks access to it
-2. **`wid=MLB4083136109`** in the URL fragment is the **actual item listing ID** but is never extracted
-3. Even when fallbacks run (search by slug, etc.), the ML API blocks everything from this origin
+### 🔴 Precisa ser desenvolvido
+| # | Item | Descrição |
+|---|------|-----------|
+| 4b | Velocímetro de ativação | Widget de progresso no dashboard |
+| 9b | Tabela `sync_jobs` + lock após sucesso | Controle de execução de syncs |
+| 9c | Lock do botão 1 ano após sucesso | Bloquear re-execução pós-sucesso |
+| 16 | Multi-conta (soma de vendas) | Lógica de soma cross-account |
+| 17-18 | Estados de conta + aviso pré-conexão | Workflow de nova conta |
+| 19 | Verificação de limite + pending_upgrade | Gate automático |
+| 20 | Upgrade com pró-rata | Cálculo proporcional |
+| 21 | Crescimento natural → bloqueio | Detecção automática de excesso |
+| 22 | Proteção contra abuso (logs) | Audit trail de conexões/upgrades |
 
-## Plan
+## Ordem sugerida de implementação
 
-### 1. Extract `wid=` from URL fragments (client-side)
+### Fase 1 — Gates e bloqueios (impacto imediato)
+1. Velocímetro de ativação no dashboard
+2. Tabela `sync_jobs` + controle de locks
+3. Gate de dados fiscais pós-pagamento
+4. Auto-sync 30d após OAuth
 
-In `src/lib/meli/extractMeliId.ts`, add a new highest-priority pattern to extract `wid=MLBxxxxxx` from URL hash fragments. This gives us the real listing ID instead of the catalog page ID.
+### Fase 2 — Trial gates nos módulos ✅
+5. ✅ ADS: banner de trial + sync bloqueado via ML API gate no backend
+6. ✅ Linha do Tempo: banner de trial informando limitação a 30d
+7. ✅ Etiquetas: filtro "Todos" agora capped a 30 dias
 
-### 2. Hybrid resolution: client-side first, then edge function fallback
+### Fase 3 — Multi-conta e upgrade ✅
+8. ✅ Multi-conta: soma de vendas (get_tenant_total_sales + check_tenant_plan_limit)
+9. ✅ Estados de conta (account_state enum: active/pending_upgrade/disabled/error)
+10. ✅ Upgrade com pró-rata (calculate_prorata_upgrade + execute_plan_upgrade)
+11. ✅ Crescimento natural → bloqueio (PlanLimitBanner + useTenantLimits)
+12. ✅ Aviso pré-conexão de nova conta (AccountConnectionWarning)
+13. ✅ Audit log (tenant_limit_log)
 
-In `src/lib/meli/resolveSellerFromLink.ts` and `AddCompetitorSellerDialog.tsx`:
-- Try client-side resolution first (current approach)
-- If client-side gets 403, **fall back to the edge function** which has ML auth tokens that bypass PolicyAgent
-- The edge function's `fetchMLResilient` already tries authenticated requests first
-
-### 3. Add HTML page scraping as final fallback in edge function
-
-In `supabase/functions/competitor-seller-sync/index.ts`, add a new function that:
-- Fetches the actual ML product page HTML (not the API)
-- Parses it to extract seller ID from the page's embedded JSON data (`__PRELOADED_STATE__` or JSON-LD)
-- Uses that seller ID to fetch user data via API
-
-This works because the product page is a public website meant for browsers, unlike the API which has PolicyAgent restrictions.
-
-### 4. Better error messaging
-
-Update the error message to stop saying "inativo ou removido" when the real issue is API access restrictions. Show a more accurate message like "Não foi possível acessar a API do Mercado Livre. Tente informar o ID numérico do vendedor."
-
-### Technical Details
-
-**File changes:**
-
-- `src/lib/meli/extractMeliId.ts` — Add `wid=` extraction as Priority 0 in `MLB_PRIORITY_PATTERNS`
-- `src/lib/meli/resolveSellerFromLink.ts` — Add edge function fallback when all client-side attempts get 403
-- `src/components/competitor/AddCompetitorSellerDialog.tsx` — Wire up the hybrid flow (client → edge function)
-- `supabase/functions/competitor-seller-sync/index.ts` — Add `scrapeSellerFromPage()` function as final fallback in `resolveSellerFromInput`
-
+### Fase 4 — Landing e onboarding ✅
+14. ✅ Landing com 3 CTAs (Login, Cadastro, Planos) no header e hero
+15. ✅ Welcome screen pós-confirmação de email (WelcomeScreen + aviso ML)
+16. ✅ Proteção contra abuso (system_audit_log + tenant_limit_log)

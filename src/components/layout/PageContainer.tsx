@@ -24,17 +24,18 @@ export function PageContainer({
   const { setHeader } = usePageHeader();
   const { pathname } = useLocation();
 
-  // Avoid header update loops:
-  // Many pages pass inline JSX (new reference each render). If we depend on
-  // `headerContent`, the effect runs every render, causing AppShell re-renders
-  // that look like a "refresh".
+  // Keep header in sync. We store headerContent in a ref to avoid running
+  // the effect on every render (inline JSX = new reference each render).
+  // However we also need to re-run when the content *meaningfully* changes
+  // (e.g. workspace loads and the button appears). We use a simple boolean
+  // flag to detect presence changes without causing infinite loops.
   const headerContentRef = useRef<ReactNode>(headerContent);
   headerContentRef.current = headerContent;
-
+  const hasHeaderContent = !!headerContent;
 
   useEffect(() => {
     setHeader(title, subtitle, headerContentRef.current);
-  }, [title, subtitle, setHeader]);
+  }, [title, subtitle, setHeader, hasHeaderContent]);
 
   return (
     <div className={className}>
