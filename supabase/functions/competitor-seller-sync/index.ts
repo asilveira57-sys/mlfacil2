@@ -542,6 +542,8 @@ Deno.serve(async (req) => {
         return await handleDelete(supabaseAdmin, user.id, body);
       case 'preview':
         return await handlePreview(supabaseAdmin, body, accessToken);
+      case 'sales_report':
+        return await handleSalesReport(supabaseAdmin, user.id, body);
       default:
         return new Response(JSON.stringify({ error: 'Unknown action' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
@@ -870,6 +872,104 @@ async function handleDelete(admin: any, userId: string, body: any) {
 
   if (error) throw error;
   return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+}
+
+async function handleSalesReport(admin: any, userId: string, body: any) {
+  const { competitor_seller_id, days = 7 } = body;
+  
+  if (!competitor_seller_id) throw new Error('competitor_seller_id required');
+  if (days < 1 || days > 30) throw new Error('days must be between 1 and 30');
+
+  // Validate ownership
+  const { data: seller } = await admin
+    .from('competitor_sellers')
+    .select('id')
+    .eq('id', competitor_seller_id)
+    .eq('user_id', userId)
+    .single();
+
+  if (!seller) throw new Error('Not found');
+
+  // Fetch snapshots from last (days + safeDays) to ensure baseline
+  const safeDays = 1; // Need at least 1 day prior for baseline
+  const lookbackDays = days + safeDays;
+  const cutoffDate = new Date(Date.now() - lookbackDays * 24 * 3600000).toISOString();
+
+  const { data: snapshots } = await admin
+    .from('competitor_seller_item_snapshots')
+    .select('item_id, sold_quantity_ref, captured_at')
+    .eq('competitor_seller_id', competitor_seller_id)
+    .gte('captured_at', cutoffDate)
+    .order('item_id')
+    .order('captured_at', { ascending: true });
+
+  if (!snapshots || snapshots.length === 0) {
+    return new Response(JSON.stringify({ days: [] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
+
+  // Group snapshots by item_id
+  const byItem: Record<string, Array<{ sold_quantity_ref: number; captured_at: string }>> = {};
+  for (const s of snapshots) {
+    if (!byItem[s.item_id]) byItem[s.item_id] = [];
+    byItem[s.item_id].push({ sold_quantity_ref: s.sold_quantity_ref, captured_at: s.captured_at });
+  }
+
+  // Helper: Convert UTC timestamp to America/Sao_Paulo date string (YYYY-MM-DD)
+  const toSPDate = (isoTimestamp: string): string => {
+    const dt = new Date(isoTimestamp);
+    // America/Sao_Paulo is UTC-3 (no DST currently)
+    const spTimestamp = dt.getTime() - 3 * 3600000;
+    const spDate = new Date(spTimestamp);
+    return spDate.toISOString().split('T')[0];
+  };
+
+  // Calculate daily deltas per item
+  const dailyDeltasByDate: Record<string, number> = {};
+  const itemsWithDataByDate: Record<string, Set<string>> = {};
+
+  for (const [itemId, snaps] of Object.entries(byItem)) {
+    if (snaps.length < 2) continue; // Need at least 2 snapshots to calculate delta
+
+    // Sort by time (already sorted by query, but double-check)
+    snaps.sort((a, b) => new Date(a.captured_at).getTime() - new Date(b.captured_at).getTime());
+
+    // Calculate daily deltas: compare each snapshot to previous day's last snapshot
+    for (let i = 1; i < snaps.length; i++) {
+      const curr = snaps[i];
+      const prev = snaps[i - 1];
+      
+      const currDate = toSPDate(curr.captured_at);
+      const prevDate = toSPDate(prev.captured_at);
+      
+      // Only count delta if dates differ (end of day comparison)
+      if (currDate !== prevDate) {
+        const delta = Math.max(0, curr.sold_quantity_ref - prev.sold_quantity_ref);
+        
+        if (!dailyDeltasByDate[currDate]) dailyDeltasByDate[currDate] = 0;
+        if (!itemsWithDataByDate[currDate]) itemsWithDataByDate[currDate] = new Set();
+        
+        dailyDeltasByDate[currDate] += delta;
+        itemsWithDataByDate[currDate].add(itemId);
+      }
+    }
+  }
+
+  // Build result array (last N days only)
+  const today = new Date();
+  const resultDays: Array<{ date: string; estimated_sales: number; items_with_data: number }> = [];
+  
+  for (let i = days - 1; i >= 0; i--) {
+    const dt = new Date(today.getTime() - i * 24 * 3600000);
+    const spDate = toSPDate(dt.toISOString());
+    
+    resultDays.push({
+      date: spDate,
+      estimated_sales: dailyDeltasByDate[spDate] || 0,
+      items_with_data: itemsWithDataByDate[spDate]?.size || 0,
+    });
+  }
+
+  return new Response(JSON.stringify({ days: resultDays }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 }
 
 async function handleCronSync(admin: any) {
