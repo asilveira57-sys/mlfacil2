@@ -524,11 +524,11 @@ Deno.serve(async (req) => {
         }
       }
 
-      // FIX #2: Use mlAccountId (UUID) for all events instead of accountId (text)
+      // Use wsAccountId (workspace_accounts FK) for all events
       if (ineligibleItems.length > 0) {
         eventsToCreate.push({
           workspace_id: workspaceId,
-          account_id: mlAccountId, // UUID, not text seller_id
+          account_id: wsAccountId,
           event_type: 'promotion.items_ineligible',
           payload: {
             promotion_id: promo.id,
