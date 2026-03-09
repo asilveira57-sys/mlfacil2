@@ -562,7 +562,7 @@ Deno.serve(async (req) => {
         if (wasNotEndingSoon) {
           eventsToCreate.push({
             workspace_id: workspaceId,
-            account_id: mlAccountId,
+            account_id: wsAccountId,
             event_type: 'promotion.ends_soon',
             payload: {
               promotion_id: promo.id,
