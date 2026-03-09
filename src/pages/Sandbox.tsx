@@ -41,7 +41,7 @@ async function logSandboxEvent(action: string, meta: Record<string, unknown> = {
 }
 
 export default function Sandbox() {
-  const { data: snapshots = [], isLoading, refetch } = useSandboxSnapshots();
+  const { data: snapshots = [], allSnapshots = [], isLoading, refetch } = useSandboxSnapshots();
   const [refreshing, setRefreshing] = useState(false);
 
   // Usar o primeiro snapshot para o quick sync (multi-empresa: itera internamente)
