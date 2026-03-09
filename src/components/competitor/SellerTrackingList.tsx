@@ -80,8 +80,12 @@ export function SellerTrackingList({ sellerId }: SellerTrackingListProps) {
   };
 
   const getDisplayName = (seller: CompetitorSeller) => {
-    const base = seller.ml_nickname || `Seller ${seller.ml_seller_id}`;
-    return seller.user_alias ? `${base} (${seller.user_alias})` : base;
+    // LGPD masking: prefer user_alias, fallback to last 4 digits
+    if (seller.user_alias) {
+      return seller.user_alias;
+    }
+    const last4 = seller.ml_seller_id.slice(-4);
+    return `Concorrente ${last4}`;
   };
 
   if (loading && sellers.length === 0) {
@@ -136,12 +140,12 @@ export function SellerTrackingList({ sellerId }: SellerTrackingListProps) {
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       {editingAlias === seller.id ? (
                         <div className="flex items-center gap-1">
-                          <span className="font-medium">{seller.ml_nickname}</span>
+                          <span className="font-medium">{getDisplayName(seller)}</span>
                           <Input
                             value={aliasValue}
                             onChange={(e) => setAliasValue(e.target.value)}
                             className="h-7 w-40 text-sm"
-                            placeholder="Apelido"
+                            placeholder="Apelido personalizado"
                             autoFocus
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') handleSaveAlias(seller.id);
