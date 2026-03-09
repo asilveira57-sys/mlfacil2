@@ -29,6 +29,8 @@ serve(async (req) => {
     let userId = '';
     let companyId: string | null = null;
     let codeVerifier = '';
+    let flow = 'ml'; // default ML flow
+    let mlAccountIdFromState: string | null = null;
     
     try {
       if (state) {
@@ -37,10 +39,14 @@ serve(async (req) => {
         userId = stateData.userId || '';
         companyId = stateData.companyId || null;
         codeVerifier = stateData.cv || '';
+        flow = stateData.flow || 'ml';
+        mlAccountIdFromState = stateData.mlAccountId || null;
       }
     } catch (e) {
       console.log('Could not parse state, using default origin');
     }
+
+    const isFinanceFlow = flow === 'finance';
 
     console.log('Frontend origin:', frontendOrigin);
     console.log('User ID from state:', userId);
