@@ -53,9 +53,12 @@ serve(async (req) => {
     console.log('Company ID from state:', companyId || 'none');
     console.log('PKCE code_verifier present:', !!codeVerifier);
 
+    const errorRedirectPath = isFinanceFlow ? '/financeiro/integracoes' : '/dashboard';
+    const errorParamName = isFinanceFlow ? 'mp_error' : 'ml_error';
+
     if (!userId) {
-      const errorUrl = new URL(`${frontendOrigin}/dashboard`);
-      errorUrl.searchParams.set('ml_error', 'missing_user_id');
+      const errorUrl = new URL(`${frontendOrigin}${errorRedirectPath}`);
+      errorUrl.searchParams.set(errorParamName, 'missing_user_id');
       return Response.redirect(errorUrl.toString(), 302);
     }
 
