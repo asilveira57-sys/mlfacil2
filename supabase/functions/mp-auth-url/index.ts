@@ -66,7 +66,8 @@ serve(async (req) => {
     }
 
     const appId = Deno.env.get('ML_APP_ID');
-    const redirectUri = `${Deno.env.get('SUPABASE_URL')}/functions/v1/mp-oauth-callback`;
+    // Use ml-oauth-callback (already registered in ML app) — flow:'finance' in state differentiates
+    const redirectUri = `${Deno.env.get('SUPABASE_URL')}/functions/v1/ml-oauth-callback`;
 
     if (!appId) {
       throw new Error('ML_APP_ID not configured');
