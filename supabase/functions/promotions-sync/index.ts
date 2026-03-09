@@ -545,7 +545,7 @@ Deno.serve(async (req) => {
       if (pendingItems.length >= PENDING_THRESHOLD) {
         eventsToCreate.push({
           workspace_id: workspaceId,
-          account_id: mlAccountId,
+          account_id: wsAccountId,
           event_type: 'promotion.items_pending',
           payload: {
             promotion_id: promo.id,
