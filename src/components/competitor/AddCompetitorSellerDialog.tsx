@@ -47,61 +47,94 @@ export function AddCompetitorSellerDialog({ open, onOpenChange, onAdd, sellerId 
         });
         data = result.data;
         fnError = result.error;
+        
+        console.log('[AddCompetitorSellerDialog] Supabase response:', { 
+          hasData: !!data, 
+          hasError: !!fnError,
+          errorType: fnError?.constructor?.name,
+          errorKeys: fnError ? Object.keys(fnError) : [],
+          errorMessage: fnError?.message,
+          errorContext: fnError?.context,
+          dataKeys: data ? Object.keys(data) : [],
+          rawError: fnError,
+          rawData: data
+        });
       } catch (invokeErr: any) {
-        // supabase-js may throw instead of returning { error } for non-2xx
+        console.log('[AddCompetitorSellerDialog] Invoke threw exception:', invokeErr);
         fnError = invokeErr;
       }
       
       if (fnError) {
         let errorMsg = 'Erro ao buscar seller';
         
+        // Log all possible error locations
+        console.log('[AddCompetitorSellerDialog] Attempting to extract error from:', {
+          'fnError': fnError,
+          'fnError.message': fnError?.message,
+          'fnError.context': fnError?.context,
+          'fnError.context.body': fnError?.context?.body,
+          'data': data,
+          'data.error': data?.error
+        });
+        
+        // Try multiple extraction strategies
         try {
-          // Try to extract JSON from error message
+          // Strategy 1: JSON in message
           const rawMsg = typeof fnError === 'string' ? fnError : fnError?.message || '';
           const jsonMatch = rawMsg.match(/\{[\s\S]*\}/);
           if (jsonMatch) {
             const parsed = JSON.parse(jsonMatch[0]);
-            if (parsed.error) errorMsg = parsed.error;
+            if (parsed.error) {
+              errorMsg = parsed.error;
+              console.log('[AddCompetitorSellerDialog] Extracted from JSON match:', errorMsg);
+            }
           }
-        } catch (_) { /* ignore parse errors */ }
-        
-        // Try context body as fallback
-        if (errorMsg === 'Erro ao buscar seller') {
-          try {
-            const ctxError = fnError?.context?.body?.error;
-            if (ctxError) errorMsg = ctxError;
-          } catch (_) { /* ignore */ }
+        } catch (e) {
+          console.log('[AddCompetitorSellerDialog] JSON parse failed:', e);
         }
         
-        // Try data.error (sometimes returned in body even on error)
+        // Strategy 2: context.body.error
+        if (errorMsg === 'Erro ao buscar seller' && fnError?.context?.body?.error) {
+          errorMsg = fnError.context.body.error;
+          console.log('[AddCompetitorSellerDialog] Extracted from context.body.error:', errorMsg);
+        }
+        
+        // Strategy 3: data.error (sometimes in body)
         if (errorMsg === 'Erro ao buscar seller' && typeof data === 'object' && data?.error) {
           errorMsg = data.error;
+          console.log('[AddCompetitorSellerDialog] Extracted from data.error:', errorMsg);
         }
         
+        // Strategy 4: Raw message
         if (errorMsg === 'Erro ao buscar seller') {
           errorMsg = (typeof fnError === 'string' ? fnError : fnError?.message) || errorMsg;
+          console.log('[AddCompetitorSellerDialog] Using raw message:', errorMsg);
         }
         
+        console.log('[AddCompetitorSellerDialog] Final error message:', errorMsg);
         setError(errorMsg);
         toast.error(errorMsg.split('\n')[0]);
         return;
       }
       
       if (data?.error) {
+        console.log('[AddCompetitorSellerDialog] Error in data.error:', data.error);
         setError(data.error);
         toast.error(String(data.error).split('\n')[0]);
         return;
       }
       
       if (!data || !data.ml_seller_id) {
+        console.log('[AddCompetitorSellerDialog] Invalid response:', data);
         setError('Resposta inválida do servidor');
         toast.error('Resposta inválida do servidor');
         return;
       }
       
+      console.log('[AddCompetitorSellerDialog] Success:', data);
       setPreview(data);
     } catch (e) {
-      console.error('Preview error:', e);
+      console.error('[AddCompetitorSellerDialog] Outer catch:', e);
       const msg = e instanceof Error ? e.message : 'Erro ao buscar seller';
       setError(msg);
       toast.error(msg.split('\n')[0]);
