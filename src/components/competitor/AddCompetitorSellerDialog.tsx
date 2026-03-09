@@ -36,6 +36,7 @@ export function AddCompetitorSellerDialog({ open, onOpenChange, onAdd, sellerId 
     setLoading(true);
     setPreview(null);
     setError(null);
+    
     try {
       const { data, error: fnError } = await supabase.functions.invoke('competitor-seller-sync', {
         body: { action: 'preview', input: input.trim(), seller_id: sellerId },
@@ -46,12 +47,14 @@ export function AddCompetitorSellerDialog({ open, onOpenChange, onAdd, sellerId 
         let errorMsg = 'Erro ao buscar seller';
         
         // Try to parse JSON from error message (format: "Edge function returned 400: Error, {JSON}")
-        const msgMatch = fnError.message?.match(/\{.*\}/s);
-        if (msgMatch) {
-          try {
+        try {
+          const msgMatch = fnError.message?.match(/\{.*\}/s);
+          if (msgMatch) {
             const parsed = JSON.parse(msgMatch[0]);
             if (parsed.error) errorMsg = parsed.error;
-          } catch {}
+          }
+        } catch (parseError) {
+          console.log('Failed to parse error JSON:', parseError);
         }
         
         // Fallback to other possible locations
@@ -63,11 +66,17 @@ export function AddCompetitorSellerDialog({ open, onOpenChange, onAdd, sellerId 
       }
       
       if (data?.error) throw new Error(data.error);
+      
+      if (!data || !data.ml_seller_id) {
+        throw new Error('Resposta inválida do servidor');
+      }
+      
       setPreview(data);
     } catch (e) {
+      console.error('Preview error:', e);
       const msg = e instanceof Error ? e.message : 'Erro ao buscar seller';
       setError(msg);
-      toast.error(msg);
+      toast.error(msg.split('\n')[0]); // Show only first line in toast
     } finally {
       setLoading(false);
     }
@@ -128,9 +137,23 @@ export function AddCompetitorSellerDialog({ open, onOpenChange, onAdd, sellerId 
               </Button>
             </div>
             {error && (
-              <div className="text-sm text-destructive mt-2 p-3 bg-destructive/10 rounded-md border border-destructive/20">
-                <p className="font-medium mb-1">Erro ao identificar vendedor</p>
-                <p className="whitespace-pre-line">{error}</p>
+              <div className="text-sm mt-2 p-4 rounded-md border-2" style={{ 
+                backgroundColor: 'hsl(var(--destructive) / 0.1)', 
+                borderColor: 'hsl(var(--destructive) / 0.3)' 
+              }}>
+                <div className="flex items-start gap-2">
+                  <div className="mt-0.5">
+                    <svg className="h-5 w-5" style={{ color: 'hsl(var(--destructive))' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-semibold mb-2" style={{ color: 'hsl(var(--destructive))' }}>
+                      {error.includes('MLBU') || error.includes('catálogo') ? '⚠️ Link de Catálogo Não Suportado' : 'Erro ao Identificar Vendedor'}
+                    </p>
+                    <p className="whitespace-pre-line leading-relaxed">{error}</p>
+                  </div>
+                </div>
               </div>
             )}
           </div>
