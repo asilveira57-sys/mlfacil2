@@ -215,7 +215,7 @@ Deno.serve(async (req) => {
             .from("shipping_cutoff_cache")
             .select("flex_cutoff_time, colecta_cutoff_time, updated_at")
             .eq("seller_id", accountId)
-            .eq("status", "ok")
+            .in("status", ["ok", "partial"])
             .order("updated_at", { ascending: false })
             .limit(1)
             .maybeSingle();
@@ -245,7 +245,7 @@ Deno.serve(async (req) => {
                 .from("shipping_cutoff_cache")
                 .select("flex_cutoff_time, colecta_cutoff_time")
                 .eq("seller_id", accountId)
-                .eq("status", "ok")
+                .in("status", ["ok", "partial"])
                 .order("updated_at", { ascending: false })
                 .limit(1)
                 .maybeSingle();
