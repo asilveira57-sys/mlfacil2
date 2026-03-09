@@ -301,6 +301,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         toast.error('Sessão expirada');
+        setBatchProcessing(false);
         return;
       }
 
