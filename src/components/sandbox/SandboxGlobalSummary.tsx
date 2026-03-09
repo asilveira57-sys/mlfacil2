@@ -3,6 +3,7 @@ import type { SandboxSnapshot } from '@/hooks/useSandboxSnapshots';
 
 interface Props {
   snapshots: SandboxSnapshot[];
+  disconnectedCount?: number;
 }
 
 function formatRelativeTime(dateStr: string): string {
