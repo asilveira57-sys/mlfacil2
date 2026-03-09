@@ -629,7 +629,7 @@ Deno.serve(async (req) => {
             // Create event for this transition
             eventsToCreate.push({
               workspace_id: workspaceId,
-              account_id: mlAccountId,
+              account_id: wsAccountId,
               event_type: 'promotion.finished',
               payload: {
                 promotion_id: promoId,
