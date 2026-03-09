@@ -1,5 +1,4 @@
-import { useState, useMemo } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -7,8 +6,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
-import { Loader2, Send, AlertTriangle, Image as ImageIcon, Package, Tag, FileText, Ruler, ChevronDown, ChevronUp } from 'lucide-react';
+import {
+  Loader2, Send, AlertTriangle, Image as ImageIcon,
+  Package, Ruler, ChevronDown, ChevronUp, MapPin, Pause,
+} from 'lucide-react';
 import { OriginStatusBadge } from './OriginStatusBadge';
 import { CategoryPicker } from './CategoryPicker';
 import type { OriginPayload, UserPayload, FieldError, OriginStatus } from './types';
@@ -28,24 +31,20 @@ interface Props {
   accountId?: string | null;
 }
 
-function FieldWrapper({ id, label, errors, children, hint }: { id: string; label: string; errors: FieldError[]; children: React.ReactNode; hint?: string }) {
-  const fieldErrors = errors.filter(e => e.field === id);
-  const hasError = fieldErrors.length > 0;
-
+function FieldError({ errors, field }: { errors: FieldError[]; field: string }) {
+  const filtered = errors.filter(e => e.field === field);
+  if (filtered.length === 0) return null;
   return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id} className={cn('text-sm font-medium', hasError && 'text-destructive')}>
-        {label}
-      </Label>
-      <div className={cn(hasError && 'ring-1 ring-destructive rounded-md')}>
-        {children}
-      </div>
-      {hint && !hasError && <p className="text-xs text-muted-foreground">{hint}</p>}
-      {fieldErrors.map((e, i) => (
-        <p key={i} className="text-xs text-destructive">{e.message}</p>
+    <>
+      {filtered.map((e, i) => (
+        <p key={i} className="text-xs text-destructive mt-1">{e.message}</p>
       ))}
-    </div>
+    </>
   );
+}
+
+function hasFieldError(errors: FieldError[], field: string) {
+  return errors.some(e => e.field === field);
 }
 
 export function CloneDraftForm({
@@ -61,19 +60,21 @@ export function CloneDraftForm({
   createdItemId,
   accountId,
 }: Props) {
-  const [showAttributes, setShowAttributes] = useState(false);
   const [showDescription, setShowDescription] = useState(false);
+  const [showAttributes, setShowAttributes] = useState(false);
 
   const originPics = originPayload.pictures || [];
   const userPics = userPayload.pictures || [];
   const activePics = userPics.length > 0 ? userPics : originPics;
-
   const originAttrs = originPayload.attributes || [];
+  const thumbnail = originPayload.thumbnail || activePics[0]?.secure_url || activePics[0]?.url || '';
+
+  const isLoading = originStatus === 'loading';
 
   return (
-    <div className="space-y-4">
-      {/* Origin status indicator */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-0 border border-border rounded-xl overflow-hidden bg-card">
+      {/* Header bar */}
+      <div className="flex items-center justify-between px-4 py-3 bg-muted/40 border-b border-border">
         <OriginStatusBadge status={originStatus} />
         {published && createdItemId && (
           <Badge className="bg-emerald-600 hover:bg-emerald-700 gap-1">
@@ -84,298 +85,334 @@ export function CloneDraftForm({
 
       {/* General errors */}
       {generalErrors.length > 0 && (
-        <Alert variant="destructive">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertDescription className="space-y-1">
-            <p className="font-medium">Erro ao publicar. Corrija os campos destacados e reenvie.</p>
-            {generalErrors.map((e, i) => (
-              <p key={i} className="text-xs">{e.message}</p>
-            ))}
-          </AlertDescription>
-        </Alert>
+        <div className="px-4 pt-3">
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription className="space-y-1">
+              <p className="font-medium">Corrija os campos destacados e tente novamente.</p>
+              {generalErrors.map((e, i) => (
+                <p key={i} className="text-xs">{e.message}</p>
+              ))}
+            </AlertDescription>
+          </Alert>
+        </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Left column - Main fields */}
-        <Card className="border-border/50">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Tag className="h-4 w-4 text-primary" />
-              Dados do Anúncio
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <FieldWrapper id="title" label="Título" errors={fieldErrors} hint={originPayload.title ? `Origem: ${originPayload.title.substring(0, 60)}...` : undefined}>
-              <Input
-                id="title"
-                placeholder={originPayload.title || 'Título do anúncio'}
-                value={userPayload.title || ''}
-                onChange={e => onUserPayloadChange({ title: e.target.value })}
-              />
-            </FieldWrapper>
-
-            <FieldWrapper id="category_id" label="Categoria" errors={fieldErrors} hint={originPayload.category_id ? `Origem: ${originPayload.category_name || originPayload.category_id}` : undefined}>
-              <CategoryPicker
-                accountId={accountId || null}
-                value={userPayload.category_id || originPayload.category_id || ''}
-                originCategoryId={originPayload.category_id}
-                originCategoryName={originPayload.category_name}
-                onSelect={(id) => onUserPayloadChange({ category_id: id })}
-              />
-            </FieldWrapper>
-
-            <div className="grid grid-cols-2 gap-3">
-              <FieldWrapper id="price" label="Preço (R$)" errors={fieldErrors}>
-                <Input
-                  id="price"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  placeholder={originPayload.price ? String(originPayload.price) : '0.00'}
-                  value={userPayload.price ?? ''}
-                  onChange={e => onUserPayloadChange({ price: e.target.value })}
-                />
-              </FieldWrapper>
-
-              <FieldWrapper id="available_quantity" label="Quantidade" errors={fieldErrors}>
-                <Input
-                  id="available_quantity"
-                  type="number"
-                  min="1"
-                  placeholder={originPayload.available_quantity ? String(originPayload.available_quantity) : '1'}
-                  value={userPayload.available_quantity ?? ''}
-                  onChange={e => onUserPayloadChange({ available_quantity: e.target.value })}
-                />
-              </FieldWrapper>
+      {/* ─── Main content: Thumbnail + Fields ─── */}
+      <div className="flex gap-4 p-4">
+        {/* Thumbnail */}
+        <div className="shrink-0">
+          {thumbnail ? (
+            <img
+              src={thumbnail}
+              alt="Produto"
+              className="h-20 w-20 rounded-lg object-cover border border-border bg-muted"
+            />
+          ) : (
+            <div className="h-20 w-20 rounded-lg border border-dashed border-border bg-muted flex items-center justify-center">
+              <ImageIcon className="h-6 w-6 text-muted-foreground" />
             </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <FieldWrapper id="condition" label="Condição" errors={fieldErrors}>
-                <Select
-                  value={userPayload.condition || originPayload.condition || 'new'}
-                  onValueChange={v => onUserPayloadChange({ condition: v })}
-                >
-                  <SelectTrigger id="condition">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="new">Novo</SelectItem>
-                    <SelectItem value="used">Usado</SelectItem>
-                  </SelectContent>
-                </Select>
-              </FieldWrapper>
-
-              <FieldWrapper id="listing_type_id" label="Tipo de anúncio" errors={fieldErrors}>
-                <Select
-                  value={userPayload.listing_type_id || originPayload.listing_type_id || 'gold_special'}
-                  onValueChange={v => onUserPayloadChange({ listing_type_id: v })}
-                >
-                  <SelectTrigger id="listing_type_id">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="gold_special">Clássico</SelectItem>
-                    <SelectItem value="gold_pro">Premium</SelectItem>
-                  </SelectContent>
-                </Select>
-              </FieldWrapper>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <FieldWrapper id="sku" label="SKU" errors={fieldErrors}>
-                <Input
-                  id="sku"
-                  placeholder={originPayload.sku || 'Opcional'}
-                  value={userPayload.sku || ''}
-                  onChange={e => onUserPayloadChange({ sku: e.target.value })}
-                />
-              </FieldWrapper>
-
-              <FieldWrapper id="gtin" label="EAN / GTIN" errors={fieldErrors}>
-                <Input
-                  id="gtin"
-                  placeholder={originPayload.gtin || 'Opcional'}
-                  value={userPayload.gtin || ''}
-                  onChange={e => onUserPayloadChange({ gtin: e.target.value })}
-                />
-              </FieldWrapper>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Right column - Dimensions, photos, description */}
-        <div className="space-y-4">
-          {/* Dimensions */}
-          <Card className="border-border/50">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <Ruler className="h-4 w-4 text-primary" />
-                Dimensões da Embalagem
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className={cn('grid grid-cols-2 gap-3', fieldErrors.some(e => e.field === 'dimensions') && 'ring-1 ring-destructive rounded-md p-2')}>
-                <FieldWrapper id="package_height" label="Altura (cm)" errors={fieldErrors}>
-                  <Input
-                    id="package_height"
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    placeholder={originPayload.package_height ? String(originPayload.package_height) : ''}
-                    value={userPayload.package_height ?? ''}
-                    onChange={e => onUserPayloadChange({ package_height: e.target.value })}
-                  />
-                </FieldWrapper>
-                <FieldWrapper id="package_width" label="Largura (cm)" errors={fieldErrors}>
-                  <Input
-                    id="package_width"
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    placeholder={originPayload.package_width ? String(originPayload.package_width) : ''}
-                    value={userPayload.package_width ?? ''}
-                    onChange={e => onUserPayloadChange({ package_width: e.target.value })}
-                  />
-                </FieldWrapper>
-                <FieldWrapper id="package_length" label="Comprimento (cm)" errors={fieldErrors}>
-                  <Input
-                    id="package_length"
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    placeholder={originPayload.package_length ? String(originPayload.package_length) : ''}
-                    value={userPayload.package_length ?? ''}
-                    onChange={e => onUserPayloadChange({ package_length: e.target.value })}
-                  />
-                </FieldWrapper>
-                <FieldWrapper id="package_weight" label="Peso (g)" errors={fieldErrors}>
-                  <Input
-                    id="package_weight"
-                    type="number"
-                    step="1"
-                    min="0"
-                    placeholder={originPayload.package_weight ? String(originPayload.package_weight) : ''}
-                    value={userPayload.package_weight ?? ''}
-                    onChange={e => onUserPayloadChange({ package_weight: e.target.value })}
-                  />
-                </FieldWrapper>
-              </div>
-              {fieldErrors.filter(e => e.field === 'dimensions').map((e, i) => (
-                <p key={i} className="text-xs text-destructive mt-2">{e.message}</p>
-              ))}
-            </CardContent>
-          </Card>
-
-          {/* Photos */}
-          <Card className="border-border/50">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <ImageIcon className="h-4 w-4 text-primary" />
-                Fotos ({activePics.length})
-                {fieldErrors.some(e => e.field === 'pictures') && (
-                  <Badge variant="destructive" className="text-xs">Erro</Badge>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {activePics.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {activePics.slice(0, 8).map((pic, i) => (
-                    <img
-                      key={pic.id || i}
-                      src={pic.secure_url || pic.url}
-                      alt={`Foto ${i + 1}`}
-                      className="h-14 w-14 rounded-md object-cover border border-border/50"
-                    />
-                  ))}
-                  {activePics.length > 8 && (
-                    <div className="h-14 w-14 rounded-md border border-border/50 flex items-center justify-center text-xs text-muted-foreground">
-                      +{activePics.length - 8}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">Nenhuma foto carregada. Serão usadas as fotos da origem quando disponíveis.</p>
-              )}
-              {fieldErrors.filter(e => e.field === 'pictures').map((e, i) => (
-                <p key={i} className="text-xs text-destructive mt-1">{e.message}</p>
-              ))}
-            </CardContent>
-          </Card>
-
-          {/* Description toggle */}
-          <Card className="border-border/50">
-            <CardHeader className="pb-2 cursor-pointer" onClick={() => setShowDescription(!showDescription)}>
-              <CardTitle className="text-sm flex items-center justify-between">
-                <span className="flex items-center gap-2">
-                  <FileText className="h-4 w-4 text-primary" />
-                  Descrição
-                  {fieldErrors.some(e => e.field === 'description') && (
-                    <Badge variant="destructive" className="text-xs">Erro</Badge>
-                  )}
-                </span>
-                {showDescription ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              </CardTitle>
-            </CardHeader>
-            {showDescription && (
-              <CardContent>
-                <Textarea
-                  placeholder={originPayload.description ? originPayload.description.substring(0, 200) + '...' : 'Descrição do produto'}
-                  value={userPayload.description || ''}
-                  onChange={e => onUserPayloadChange({ description: e.target.value })}
-                  rows={6}
-                />
-                {originPayload.description && !userPayload.description && (
-                  <p className="text-xs text-muted-foreground mt-1">Vazio = usa descrição da origem ({originPayload.description.length} chars)</p>
-                )}
-              </CardContent>
-            )}
-          </Card>
-
-          {/* Attributes toggle */}
-          {originAttrs.length > 0 && (
-            <Card className="border-border/50">
-              <CardHeader className="pb-2 cursor-pointer" onClick={() => setShowAttributes(!showAttributes)}>
-                <CardTitle className="text-sm flex items-center justify-between">
-                  <span className="flex items-center gap-2">
-                    <Package className="h-4 w-4 text-primary" />
-                    Ficha Técnica ({originAttrs.length} atributos)
-                    {fieldErrors.some(e => e.field === 'attributes') && (
-                      <Badge variant="destructive" className="text-xs">Erro</Badge>
-                    )}
-                  </span>
-                  {showAttributes ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                </CardTitle>
-              </CardHeader>
-              {showAttributes && (
-                <CardContent>
-                  <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto">
-                    {originAttrs.map((attr, i) => (
-                      <Badge key={i} variant="secondary" className="text-xs">
-                        {attr.name || attr.id}: {attr.value_name || '-'}
-                      </Badge>
-                    ))}
-                  </div>
-                  {fieldErrors.filter(e => e.field === 'attributes').map((e, i) => (
-                    <p key={i} className="text-xs text-destructive mt-2">{e.message}</p>
-                  ))}
-                </CardContent>
-              )}
-            </Card>
           )}
+          {activePics.length > 1 && (
+            <p className="text-[10px] text-muted-foreground text-center mt-1">
+              {activePics.length} fotos
+            </p>
+          )}
+        </div>
+
+        {/* Primary fields */}
+        <div className="flex-1 space-y-3 min-w-0">
+          {/* Title */}
+          <div>
+            <Label htmlFor="title" className={cn('text-xs font-medium text-muted-foreground', hasFieldError(fieldErrors, 'title') && 'text-destructive')}>
+              Título *
+            </Label>
+            <Input
+              id="title"
+              placeholder={isLoading ? 'Carregando...' : (originPayload.title || 'Título do anúncio')}
+              value={userPayload.title || ''}
+              onChange={e => onUserPayloadChange({ title: e.target.value })}
+              disabled={isLoading}
+              className={cn('h-9', hasFieldError(fieldErrors, 'title') && 'border-destructive')}
+            />
+            {!userPayload.title && originPayload.title && (
+              <p className="text-[10px] text-muted-foreground mt-0.5 truncate">Origem: {originPayload.title}</p>
+            )}
+            <FieldError errors={fieldErrors} field="title" />
+          </div>
+
+          {/* Price + Quantity + SKU + EAN row */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div>
+              <Label htmlFor="price" className={cn('text-xs font-medium text-muted-foreground', hasFieldError(fieldErrors, 'price') && 'text-destructive')}>
+                Valor (R$) *
+              </Label>
+              <Input
+                id="price"
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder={originPayload.price ? String(originPayload.price) : '0.00'}
+                value={userPayload.price ?? ''}
+                onChange={e => onUserPayloadChange({ price: e.target.value })}
+                disabled={isLoading}
+                className={cn('h-9', hasFieldError(fieldErrors, 'price') && 'border-destructive')}
+              />
+              <FieldError errors={fieldErrors} field="price" />
+            </div>
+            <div>
+              <Label htmlFor="available_quantity" className="text-xs font-medium text-muted-foreground">
+                Quantidade
+              </Label>
+              <Input
+                id="available_quantity"
+                type="number"
+                min="1"
+                placeholder={originPayload.available_quantity ? String(originPayload.available_quantity) : '1'}
+                value={userPayload.available_quantity ?? ''}
+                onChange={e => onUserPayloadChange({ available_quantity: e.target.value })}
+                disabled={isLoading}
+                className="h-9"
+              />
+            </div>
+            <div>
+              <Label htmlFor="sku" className="text-xs font-medium text-muted-foreground">SKU</Label>
+              <Input
+                id="sku"
+                placeholder={originPayload.sku || '—'}
+                value={userPayload.sku || ''}
+                onChange={e => onUserPayloadChange({ sku: e.target.value })}
+                disabled={isLoading}
+                className="h-9"
+              />
+              <FieldError errors={fieldErrors} field="sku" />
+            </div>
+            <div>
+              <Label htmlFor="gtin" className="text-xs font-medium text-muted-foreground">Cód. barras</Label>
+              <Input
+                id="gtin"
+                placeholder={originPayload.gtin || '—'}
+                value={userPayload.gtin || ''}
+                onChange={e => onUserPayloadChange({ gtin: e.target.value })}
+                disabled={isLoading}
+                className="h-9"
+              />
+              <FieldError errors={fieldErrors} field="gtin" />
+            </div>
+          </div>
+
+          {/* Category */}
+          <div>
+            <Label className={cn('text-xs font-medium text-muted-foreground', hasFieldError(fieldErrors, 'category_id') && 'text-destructive')}>
+              Categoria *
+            </Label>
+            <CategoryPicker
+              accountId={accountId || null}
+              value={userPayload.category_id || originPayload.category_id || ''}
+              originCategoryId={originPayload.category_id}
+              originCategoryName={originPayload.category_name}
+              onSelect={(id) => onUserPayloadChange({ category_id: id })}
+            />
+            <FieldError errors={fieldErrors} field="category_id" />
+          </div>
         </div>
       </div>
 
-      {/* Publish button */}
       <Separator />
-      <div className="flex items-center justify-between">
+
+      {/* ─── Retirada em mãos ─── */}
+      <div className="flex items-center justify-between px-4 py-3">
+        <div className="flex items-center gap-2">
+          <MapPin className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm">Retirada em mãos</span>
+        </div>
+        <Switch
+          checked={userPayload.local_pick_up ?? false}
+          onCheckedChange={v => onUserPayloadChange({ local_pick_up: v })}
+          disabled={isLoading}
+        />
+      </div>
+
+      <Separator />
+
+      {/* ─── Dimensões ─── */}
+      <div className="px-4 py-3 space-y-2">
+        <div className="flex items-center gap-2 mb-1">
+          <Ruler className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-medium">Dimensões da embalagem</span>
+          {hasFieldError(fieldErrors, 'dimensions') && (
+            <Badge variant="destructive" className="text-[10px] h-4">Erro</Badge>
+          )}
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {([
+            { id: 'package_height', label: 'Altura (cm)', key: 'package_height' as const },
+            { id: 'package_width', label: 'Largura (cm)', key: 'package_width' as const },
+            { id: 'package_length', label: 'Comprimento (cm)', key: 'package_length' as const },
+            { id: 'package_weight', label: 'Peso (g)', key: 'package_weight' as const },
+          ] as const).map(dim => (
+            <div key={dim.id}>
+              <Label htmlFor={dim.id} className="text-xs text-muted-foreground">{dim.label}</Label>
+              <Input
+                id={dim.id}
+                type="number"
+                step={dim.key === 'package_weight' ? '1' : '0.1'}
+                min="0"
+                placeholder={originPayload[dim.key] ? String(originPayload[dim.key]) : ''}
+                value={userPayload[dim.key] ?? ''}
+                onChange={e => onUserPayloadChange({ [dim.key]: e.target.value })}
+                disabled={isLoading}
+                className="h-9"
+              />
+            </div>
+          ))}
+        </div>
+        <FieldError errors={fieldErrors} field="dimensions" />
+      </div>
+
+      <Separator />
+
+      {/* ─── Modalidade ─── */}
+      <div className="flex items-center justify-between px-4 py-3">
+        <span className="text-sm font-medium">Modalidade</span>
+        <Select
+          value={userPayload.listing_type_id || originPayload.listing_type_id || 'gold_special'}
+          onValueChange={v => onUserPayloadChange({ listing_type_id: v })}
+          disabled={isLoading}
+        >
+          <SelectTrigger className="w-40 h-9">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="gold_special">Clássico</SelectItem>
+            <SelectItem value="gold_pro">Premium</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <Separator />
+
+      {/* ─── Criar pausado ─── */}
+      <div className="flex items-center justify-between px-4 py-3">
+        <div className="flex items-center gap-2">
+          <Pause className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm">Criar anúncio pausado</span>
+        </div>
+        <Switch
+          checked={userPayload.start_paused ?? false}
+          onCheckedChange={v => onUserPayloadChange({ start_paused: v })}
+          disabled={isLoading}
+        />
+      </div>
+
+      <Separator />
+
+      {/* ─── Descrição (collapsible) ─── */}
+      <div
+        className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors"
+        onClick={() => setShowDescription(!showDescription)}
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">Descrição</span>
+          {originPayload.description && !userPayload.description && (
+            <Badge variant="secondary" className="text-[10px] h-4">Origem</Badge>
+          )}
+          {hasFieldError(fieldErrors, 'description') && (
+            <Badge variant="destructive" className="text-[10px] h-4">Erro</Badge>
+          )}
+        </div>
+        {showDescription ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+      </div>
+      {showDescription && (
+        <div className="px-4 pb-3">
+          <Textarea
+            placeholder={originPayload.description ? originPayload.description.substring(0, 200) + '...' : 'Descrição do produto'}
+            value={userPayload.description || ''}
+            onChange={e => onUserPayloadChange({ description: e.target.value })}
+            rows={5}
+            disabled={isLoading}
+          />
+          {originPayload.description && !userPayload.description && (
+            <p className="text-[10px] text-muted-foreground mt-1">Vazio = usa descrição da origem ({originPayload.description.length} chars)</p>
+          )}
+          <FieldError errors={fieldErrors} field="description" />
+        </div>
+      )}
+
+      {/* ─── Ficha Técnica (collapsible) ─── */}
+      {originAttrs.length > 0 && (
+        <>
+          <Separator />
+          <div
+            className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors"
+            onClick={() => setShowAttributes(!showAttributes)}
+          >
+            <div className="flex items-center gap-2">
+              <Package className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">Ficha Técnica ({originAttrs.length})</span>
+              {hasFieldError(fieldErrors, 'attributes') && (
+                <Badge variant="destructive" className="text-[10px] h-4">Erro</Badge>
+              )}
+            </div>
+            {showAttributes ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+          </div>
+          {showAttributes && (
+            <div className="px-4 pb-3">
+              <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto">
+                {originAttrs.map((attr, i) => (
+                  <Badge key={i} variant="secondary" className="text-xs">
+                    {attr.name || attr.id}: {attr.value_name || '-'}
+                  </Badge>
+                ))}
+              </div>
+              <FieldError errors={fieldErrors} field="attributes" />
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ─── Photos strip ─── */}
+      {activePics.length > 0 && (
+        <>
+          <Separator />
+          <div className="px-4 py-3">
+            <div className="flex items-center gap-2 mb-2">
+              <ImageIcon className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">Fotos ({activePics.length})</span>
+              {hasFieldError(fieldErrors, 'pictures') && (
+                <Badge variant="destructive" className="text-[10px] h-4">Erro</Badge>
+              )}
+            </div>
+            <div className="flex gap-1.5 overflow-x-auto pb-1">
+              {activePics.slice(0, 10).map((pic, i) => (
+                <img
+                  key={pic.id || i}
+                  src={pic.secure_url || pic.url}
+                  alt={`Foto ${i + 1}`}
+                  className="h-12 w-12 rounded-md object-cover border border-border shrink-0"
+                />
+              ))}
+              {activePics.length > 10 && (
+                <div className="h-12 w-12 rounded-md border border-border flex items-center justify-center text-xs text-muted-foreground shrink-0">
+                  +{activePics.length - 10}
+                </div>
+              )}
+            </div>
+            <FieldError errors={fieldErrors} field="pictures" />
+          </div>
+        </>
+      )}
+
+      {/* ─── Footer: Publish ─── */}
+      <Separator />
+      <div className="flex items-center justify-between px-4 py-3 bg-muted/30">
         <p className="text-xs text-muted-foreground">
-          Campos em branco usarão os dados da origem automaticamente.
+          Campos vazios usam dados da origem.
         </p>
         <Button
           size="lg"
           onClick={onPublish}
-          disabled={publishing || published}
+          disabled={publishing || published || isLoading}
           className="gap-2"
         >
           {publishing ? (
@@ -388,7 +425,7 @@ export function CloneDraftForm({
           ) : (
             <>
               <Send className="h-4 w-4" />
-              Publicar Anúncio
+              Criar anúncio
             </>
           )}
         </Button>

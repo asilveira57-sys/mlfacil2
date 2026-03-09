@@ -15,7 +15,7 @@ import { PageContainer } from '@/components/layout/PageContainer';
 import { CloneHistory } from '@/components/clone-module/CloneHistory';
 import { CloneDraftForm } from '@/components/clone-turbo/CloneDraftForm';
 import { mapErrorToFields, buildMergedPayload } from '@/components/clone-turbo/types';
-import type { OriginPayload, UserPayload, FieldError, OriginStatus, DraftStatus } from '@/components/clone-turbo/types';
+import type { OriginPayload, UserPayload, FieldError, OriginStatus } from '@/components/clone-turbo/types';
 
 // Attributes to strip for anti-catalog
 const FORBIDDEN_ATTRIBUTES = new Set([
@@ -45,7 +45,6 @@ function extractIdentifier(attributes: { id: string; value_name?: string }[], ..
   return undefined;
 }
 
-// ── Origin data validation helpers ──
 function hasCompleteOriginData(op: OriginPayload): boolean {
   return !!(
     op.title && op.title.trim().length > 0 &&
@@ -121,15 +120,18 @@ export default function ClonarAnuncio() {
     const itemId = extractMeliId(sourceUrl);
     if (!itemId) {
       setError('Não foi possível detectar um item_id válido. Cole o link completo do anúncio.');
+      setLoading(false);
       return;
     }
+
+    setLoading(true);
 
     const corrId = crypto.randomUUID().substring(0, 8);
     setCorrelationId(corrId);
     setSourceItemId(itemId);
     setUserPayload({});
 
-    // Open form IMMEDIATELY with empty fields
+    // Open form IMMEDIATELY with loading state
     setOriginPayload({ origin_status: 'loading' });
     setOriginStatus('loading');
     setFormOpen(true);
@@ -137,11 +139,11 @@ export default function ClonarAnuncio() {
     await safeLog('clone_draft_created', { correlation_id: corrId, item_id: itemId, source_url: sourceUrl });
 
     // Create draft in DB
+    let newDraftId: string | null = null;
     try {
       const { data: authData } = await supabase.auth.getUser();
       const userId = authData?.user?.id;
       if (userId) {
-        // Find workspace
         const { data: prefs } = await supabase
           .from('user_preferences')
           .select('active_workspace_id')
@@ -164,7 +166,10 @@ export default function ClonarAnuncio() {
             })
             .select('id')
             .single();
-          if (draft) setDraftId(draft.id);
+          if (draft) {
+            newDraftId = draft.id;
+            setDraftId(draft.id);
+          }
         }
       }
     } catch (_) { /* fail-safe, form still works */ }
@@ -200,7 +205,6 @@ export default function ClonarAnuncio() {
         const dims = extractDimensions(attrs);
         const safeAttrs = attrs.filter((a: any) => !FORBIDDEN_ATTRIBUTES.has(a.id?.toUpperCase()));
 
-        // Pictures with thumbnail fallback
         let pictures = (item.pictures || []).map((p: any) => ({
           id: p.id, url: p.url || p.secure_url, secure_url: p.secure_url || p.url,
         })).filter((p: any) => p.secure_url);
@@ -233,7 +237,6 @@ export default function ClonarAnuncio() {
           catalog_product_id: item.catalog_product_id || undefined,
           family_name: item.family_name || undefined,
         };
-        // ── Validate origin completeness ──
         const calculatedStatus = getOriginStatusFromPayload(op);
         op.origin_status = calculatedStatus;
         const missing = getMissingRequiredFields(op);
@@ -243,23 +246,17 @@ export default function ClonarAnuncio() {
         await safeLog('origin_fetch_result', {
           correlation_id: corrId, status: calculatedStatus, source: 'ad-item-snapshot',
           resolved_item_id: resolvedId,
-          pictures_source: data.capture_log?.pictures_source || (pictures.length > 0 ? 'api' : 'none'),
           pictures_count: pictures.length,
           has_description: !!(data.description || item.description),
-          category_name: data.category_name || null,
-          capture_account_id: captureAccount?.id || null,
-          capture_seller_id: captureSellerId,
           missing_required_fields: missing,
         });
-        updateDraftOrigin(op);
+        updateDraftOriginDirect(newDraftId, op);
       } else {
-        // Edge returned but no item
         setOriginPayload({ origin_status: 'unavailable' });
         setOriginStatus('unavailable');
         await safeLog('origin_fetch_result', {
           correlation_id: corrId, status: 'unavailable', source: 'ad-item-snapshot',
           error: data?.error || 'no_item_returned',
-          http_status: data?.http_status || null,
         });
       }
     } catch (err: unknown) {
@@ -270,28 +267,40 @@ export default function ClonarAnuncio() {
         correlation_id: corrId, status: 'unavailable', source: 'ad-item-snapshot',
         error: msg,
       });
+    } finally {
+      setLoading(false);
     }
   }, [sourceUrl, accounts, selectedAccountId, safeLog]);
 
-  const updateDraftOrigin = useCallback(async (op: OriginPayload) => {
-    if (!draftId) return;
+  const updateDraftOriginDirect = useCallback(async (id: string | null, op: OriginPayload) => {
+    if (!id) return;
     try {
       await supabase
         .from('clone_drafts')
         .update({ raw_snapshot: JSON.parse(JSON.stringify(op)), updated_at: new Date().toISOString() })
-        .eq('id', draftId);
+        .eq('id', id);
     } catch (_) { /* fail-safe */ }
-  }, [draftId]);
+  }, []);
 
   // ============================================
   // STEP 2: User edits fields
   // ============================================
   const handleUserPayloadChange = useCallback((updates: Partial<UserPayload>) => {
-    setUserPayload(prev => ({ ...prev, ...updates }));
-    // Clear field errors for changed fields
+    setUserPayload(prev => {
+      const next = { ...prev, ...updates };
+      // Persist draft payload to DB
+      if (draftId) {
+        supabase
+          .from('clone_drafts')
+          .update({ draft_payload: JSON.parse(JSON.stringify(next)) as any, updated_at: new Date().toISOString() })
+          .eq('id', draftId)
+          .then(() => {});
+      }
+      return next;
+    });
     const changedFields = Object.keys(updates);
     setFieldErrors(prev => prev.filter(e => !changedFields.includes(e.field)));
-  }, []);
+  }, [draftId]);
 
   // ============================================
   // STEP 3: Publish with MERGE
@@ -308,7 +317,7 @@ export default function ClonarAnuncio() {
     const merged = buildMergedPayload(originPayload, userPayload);
     const corrId = correlationId || 'unknown';
 
-    // ── Client-side validation gate ──
+    // ── Client-side validation ──
     const validationErrors: FieldError[] = [];
     if (!merged.title || !merged.title.trim()) {
       validationErrors.push({ field: 'title', message: 'Título é obrigatório.' });
@@ -319,10 +328,9 @@ export default function ClonarAnuncio() {
     if (!merged.price || merged.price <= 0) {
       validationErrors.push({ field: 'price', message: 'Preço deve ser maior que zero.' });
     }
-    // family_name fallback: use title
     const resolvedFamilyName = merged.family_name?.trim() || merged.title?.trim() || '';
     if (!resolvedFamilyName) {
-      validationErrors.push({ field: 'family_name', message: 'Nome da família (family_name) é obrigatório. Preencha o título.' });
+      validationErrors.push({ field: 'title', message: 'Título ou family_name é obrigatório.' });
     }
 
     if (validationErrors.length > 0) {
@@ -339,7 +347,6 @@ export default function ClonarAnuncio() {
     await safeLog('publish_attempt', { correlation_id: corrId, item_id: sourceItemId, account_id: selectedAccountId });
 
     try {
-      // Build ML payload
       const mlPayload: Record<string, unknown> = {
         title: merged.title,
         category_id: merged.category_id,
@@ -358,12 +365,23 @@ export default function ClonarAnuncio() {
         mlPayload.description = { plain_text: merged.description };
       }
 
-      // Dimensions (only if > 0)
-      if (merged.package_height) {
-        mlPayload.shipping = {
-          mode: 'me2',
-          dimensions: `${merged.package_height}x${merged.package_width || 1}x${merged.package_length || 1},${merged.package_weight || 1}`,
-        };
+      // Shipping — only send when semantically valid
+      const hasDims = merged.package_height && merged.package_width && merged.package_length && merged.package_weight;
+      const shipping: Record<string, unknown> = {};
+      if (hasDims) {
+        shipping.mode = 'me2';
+        shipping.dimensions = `${merged.package_height}x${merged.package_width}x${merged.package_length},${merged.package_weight}`;
+      }
+      if (merged.local_pick_up) {
+        shipping.local_pick_up = true;
+      }
+      if (Object.keys(shipping).length > 0) {
+        mlPayload.shipping = shipping;
+      }
+
+      // Start paused
+      if (merged.start_paused) {
+        mlPayload.status = 'paused';
       }
 
       // Safe attributes
@@ -371,7 +389,6 @@ export default function ClonarAnuncio() {
         mlPayload.attributes = merged.attributes;
       }
 
-      // POST via edge function (needs token)
       const { data, error: fnError } = await supabase.functions.invoke('mktpfacil-clone', {
         body: {
           action: 'publish_item',
@@ -386,12 +403,10 @@ export default function ClonarAnuncio() {
       if (fnError) throw new Error(fnError.message || 'Erro ao publicar');
 
       if (data?.error || data?.status === 'error') {
-        // Map errors to fields — include final_attempt/used_title_fallback from backend
         const errorBody = { ...(data.error_body || data), final_attempt: data.final_attempt, used_title_fallback: data.used_title_fallback };
         const mapped = mapErrorToFields(errorBody);
         setFieldErrors(mapped);
 
-        // Update draft
         if (draftId) {
           await supabase.from('clone_drafts').update({
             status: 'ERROR' as string,
@@ -402,7 +417,7 @@ export default function ClonarAnuncio() {
         }
 
         const attemptInfo = data.final_attempt ? ` (tentativa final: ${data.final_attempt})` : '';
-        await safeLog('publish_error', { correlation_id: corrId, error: errorBody, field_errors: mapped.map(e => e.field), final_attempt: data.final_attempt, used_title_fallback: data.used_title_fallback });
+        await safeLog('publish_error', { correlation_id: corrId, error: errorBody, field_errors: mapped.map(e => e.field) });
         toast.error('Erro ao publicar', { description: `Corrija os campos destacados e tente novamente.${attemptInfo}` });
         return;
       }
@@ -456,7 +471,7 @@ export default function ClonarAnuncio() {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="clone" className="space-y-6">
+          <TabsContent value="clone" className="space-y-4">
             {/* Anti-catalog warning */}
             <Alert className="border-amber-500/50 bg-amber-950/20">
               <Info className="h-4 w-4 text-amber-500" />
@@ -465,23 +480,24 @@ export default function ClonarAnuncio() {
               </AlertDescription>
             </Alert>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Source + Destination — stacked on mobile, side by side on desktop */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Input card */}
               <Card className="border-border/50">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base flex items-center gap-2">
+                  <CardTitle className="text-sm flex items-center gap-2">
                     <Search className="h-4 w-4 text-primary" />
                     Anúncio de Origem
                   </CardTitle>
-                  <CardDescription>Cole o link ou MLB do anúncio que deseja clonar</CardDescription>
+                  <CardDescription className="text-xs">Cole o link ou MLB do anúncio</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-3">
                   <div className="flex gap-2">
                     <Input
-                      placeholder="https://www.mercadolivre.com.br/... ou MLB123456789"
+                      placeholder="https://mercadolivre.com.br/... ou MLB123456789"
                       value={sourceUrl}
                       onChange={e => setSourceUrl(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && handleLoadItem()}
+                      onKeyDown={e => e.key === 'Enter' && !loading && handleLoadItem()}
                       className="flex-1"
                     />
                     <Button onClick={handleLoadItem} disabled={loading || !sourceUrl.trim()}>
@@ -491,7 +507,7 @@ export default function ClonarAnuncio() {
                   {correlationId && (
                     <div className="flex items-center justify-between gap-2 p-2 rounded-md bg-muted/50 text-xs">
                       <span className="text-muted-foreground">
-                        Execução: <code className="font-mono font-medium text-foreground">{correlationId}</code>
+                        ID: <code className="font-mono font-medium text-foreground">{correlationId}</code>
                       </span>
                       <Button
                         variant="ghost"
@@ -500,7 +516,7 @@ export default function ClonarAnuncio() {
                         onClick={() => window.open(`/admin/logs?area=clone_anuncio&search=${correlationId}`, '_blank')}
                       >
                         <ExternalLink className="h-3 w-3" />
-                        Ver logs
+                        Logs
                       </Button>
                     </div>
                   )}
@@ -515,13 +531,13 @@ export default function ClonarAnuncio() {
               {/* Destination account */}
               <Card className="border-border/50">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base flex items-center gap-2">
+                  <CardTitle className="text-sm flex items-center gap-2">
                     <Copy className="h-4 w-4 text-primary" />
                     Conta Destino
                   </CardTitle>
-                  <CardDescription>Selecione a conta para publicar o anúncio</CardDescription>
+                  <CardDescription className="text-xs">Selecione a conta para publicar</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-3">
                   {accountsLoading ? (
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -548,16 +564,16 @@ export default function ClonarAnuncio() {
                     </Select>
                   )}
                   {selectedAccount && (
-                    <div className="p-3 rounded-lg bg-muted/30 space-y-1">
+                    <div className="p-2.5 rounded-lg bg-muted/30 space-y-0.5">
                       <p className="text-sm font-medium">{selectedAccount.nickname || 'Sem nome'}</p>
-                      <p className="text-xs text-muted-foreground">Seller ID: {selectedAccount.ml_user_id}</p>
+                      <p className="text-xs text-muted-foreground">ID: {selectedAccount.ml_user_id}</p>
                     </div>
                   )}
                 </CardContent>
               </Card>
             </div>
 
-            {/* Draft form — opens immediately */}
+            {/* Draft form — opens immediately on load */}
             {formOpen && (
               <CloneDraftForm
                 originPayload={originPayload}
