@@ -325,15 +325,35 @@ async function resolveSellerFromInput(input: string, accessToken?: string): Prom
     
     // Regular MLB item — try individual endpoint, then batch fallback for 403
     let itemData: any = null;
+    let mlbFetchError: any = null;
     try {
       itemData = await fetchMLResilient(`/items/${itemId}`, accessToken);
     } catch (mlbError) {
+      mlbFetchError = mlbError;
       console.log(`MLB item ${itemId} individual fetch failed (${mlbError}), trying batch fallback...`);
       // Batch endpoint bypasses PolicyAgent 403
       itemData = await fetchItemViaBatch(itemId, accessToken);
       
       if (!itemData) {
-        // If batch also fails, try MLBU from original input
+        // If MLB item was found in URL but is inaccessible (403), give specific error
+        // Don't fall back to MLBU in this case
+        const errorMsg = String(mlbFetchError?.message || mlbError);
+        if (errorMsg.includes('403')) {
+          const error = new Error(
+            `O anúncio ${itemId} não está acessível no momento. Isso pode ocorrer quando:\n\n` +
+            `• O anúncio foi pausado ou finalizado pelo vendedor\n` +
+            `• O produto está temporariamente indisponível\n` +
+            `• O vendedor restringiu o acesso ao anúncio\n\n` +
+            `Para monitorar este vendedor:\n` +
+            `1. Acesse o perfil do vendedor no Mercado Livre\n` +
+            `2. Escolha outro anúncio ativo deste mesmo vendedor\n` +
+            `3. Cole o link do anúncio ativo aqui`
+          );
+          (error as any).statusCode = 400;
+          throw error;
+        }
+        
+        // Only try MLBU fallback if error is NOT a 403
         const mlbuMatch = trimmed.match(/(MLBU\d+)/i);
         if (mlbuMatch) {
           const mlbuId = mlbuMatch[1].toUpperCase();
