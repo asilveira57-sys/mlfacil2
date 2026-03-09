@@ -48,7 +48,7 @@ serve(async (req) => {
 
     const isFinanceFlow = flow === 'finance';
 
-    console.log('Frontend origin:', frontendOrigin);
+    console.log('Flow:', flow, '| Frontend origin:', frontendOrigin);
     console.log('User ID from state:', userId);
     console.log('Company ID from state:', companyId || 'none');
     console.log('PKCE code_verifier present:', !!codeVerifier);
