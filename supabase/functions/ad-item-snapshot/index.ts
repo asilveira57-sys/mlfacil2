@@ -664,7 +664,7 @@ serve(async (req) => {
           item_id: resolvedItemId,
           final_reason: finalReason,
           final_http_status: bestAttemptStatus,
-          final_endpoint: itemEndpoint,
+          final_endpoint: bestAttemptName,
           best_error_body_snippet: bestAttemptBody?.slice(0, 2000),
           used_token: bestAttemptName.includes('B_token'),
           elapsed_ms: Date.now() - t0Global,
