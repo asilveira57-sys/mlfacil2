@@ -125,8 +125,101 @@ serve(async (req) => {
     const now = new Date().toISOString();
 
     // ================================================================
-    // MULTI-ACCOUNT FIX: Do NOT deactivate other accounts!
-    // Each account maintains its own independent connection status.
+    // FINANCE FLOW: Save to finance_accounts and redirect to /financeiro
+    // ================================================================
+    if (isFinanceFlow) {
+      console.log('[finance-flow] Processing MP OAuth for user:', mpUserIdStr);
+      const mpUserIdStr = mlUserIdStr;
+
+      const { data: existing } = await supabaseAdmin
+        .from('finance_accounts')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('mp_user_id', mpUserIdStr)
+        .maybeSingle();
+
+      if (existing) {
+        const { error: updateError } = await supabaseAdmin
+          .from('finance_accounts')
+          .update({
+            access_token: tokenData.access_token,
+            refresh_token: tokenData.refresh_token,
+            token_expires_at: expiresAt.toISOString(),
+            nickname: userData.nickname || null,
+            email: userData.email || null,
+            connection_status: 'connected',
+            is_active: true,
+            last_token_refresh_at: now,
+            last_api_ok_at: now,
+            last_api_error_code: null,
+            last_api_error_at: null,
+            consecutive_failures: 0,
+            company_id: companyId || undefined,
+            updated_at: now,
+          })
+          .eq('id', existing.id);
+
+        if (updateError) {
+          console.error('[finance-flow] Update error:', updateError);
+          const errorUrl = new URL(`${frontendOrigin}/financeiro/integracoes`);
+          errorUrl.searchParams.set('mp_error', 'save_failed');
+          return Response.redirect(errorUrl.toString(), 302);
+        }
+        console.log('[finance-flow] Updated existing finance account:', existing.id);
+      } else {
+        const insertData: Record<string, unknown> = {
+          user_id: userId,
+          mp_user_id: mpUserIdStr,
+          access_token: tokenData.access_token,
+          refresh_token: tokenData.refresh_token,
+          token_expires_at: expiresAt.toISOString(),
+          nickname: userData.nickname || null,
+          email: userData.email || null,
+          connection_status: 'connected',
+          is_active: true,
+          last_token_refresh_at: now,
+          last_api_ok_at: now,
+          consecutive_failures: 0,
+        };
+        if (mlAccountIdFromState) insertData.ml_account_id = mlAccountIdFromState;
+        if (companyId) insertData.company_id = companyId;
+
+        // Auto-link to ml_account if not explicit
+        if (!mlAccountIdFromState) {
+          const { data: mlAcc } = await supabaseAdmin
+            .from('ml_accounts')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('ml_user_id', mpUserIdStr)
+            .eq('is_active', true)
+            .maybeSingle();
+          if (mlAcc) {
+            insertData.ml_account_id = mlAcc.id;
+            console.log('[finance-flow] Auto-linked to ml_account:', mlAcc.id);
+          }
+        }
+
+        const { error: insertError } = await supabaseAdmin
+          .from('finance_accounts')
+          .insert(insertData);
+
+        if (insertError) {
+          console.error('[finance-flow] Insert error:', insertError);
+          const errorUrl = new URL(`${frontendOrigin}/financeiro/integracoes`);
+          errorUrl.searchParams.set('mp_error', 'save_failed');
+          return Response.redirect(errorUrl.toString(), 302);
+        }
+        console.log('[finance-flow] Created new finance account for MP user:', mpUserIdStr);
+      }
+
+      const redirectUrl = new URL(`${frontendOrigin}/financeiro/integracoes`);
+      redirectUrl.searchParams.set('mp_connected', 'true');
+      redirectUrl.searchParams.set('nickname', userData.nickname || '');
+      return Response.redirect(redirectUrl.toString(), 302);
+    }
+
+    // ================================================================
+    // ML FLOW: Save to ml_accounts (original logic)
     // ================================================================
     
     // Check if this specific ML account already exists for this user
