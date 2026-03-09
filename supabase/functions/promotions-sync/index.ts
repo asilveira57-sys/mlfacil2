@@ -188,8 +188,19 @@ Deno.serve(async (req) => {
       });
     }
 
-    // FIX #2: Use mlAccountId (UUID) for events instead of accountId (text seller_id)
+    // Resolve workspace_accounts.id for system_events FK
     const mlAccountId = (mlAccount as { id: string }).id;
+    let wsAccountId: string | null = null;
+    {
+      const { data: wsAcc } = await supabase
+        .from('workspace_accounts')
+        .select('id')
+        .eq('workspace_id', workspaceId)
+        .eq('marketplace', 'ml')
+        .eq('is_active', true)
+        .maybeSingle();
+      wsAccountId = wsAcc?.id || null;
+    }
     let accessToken = (mlAccount as { access_token: string }).access_token;
 
     // Refresh token if expired
@@ -513,11 +524,11 @@ Deno.serve(async (req) => {
         }
       }
 
-      // FIX #2: Use mlAccountId (UUID) for all events instead of accountId (text)
+      // Use wsAccountId (workspace_accounts FK) for all events
       if (ineligibleItems.length > 0) {
         eventsToCreate.push({
           workspace_id: workspaceId,
-          account_id: mlAccountId, // UUID, not text seller_id
+          account_id: wsAccountId,
           event_type: 'promotion.items_ineligible',
           payload: {
             promotion_id: promo.id,
@@ -534,7 +545,7 @@ Deno.serve(async (req) => {
       if (pendingItems.length >= PENDING_THRESHOLD) {
         eventsToCreate.push({
           workspace_id: workspaceId,
-          account_id: mlAccountId,
+          account_id: wsAccountId,
           event_type: 'promotion.items_pending',
           payload: {
             promotion_id: promo.id,
@@ -551,7 +562,7 @@ Deno.serve(async (req) => {
         if (wasNotEndingSoon) {
           eventsToCreate.push({
             workspace_id: workspaceId,
-            account_id: mlAccountId,
+            account_id: wsAccountId,
             event_type: 'promotion.ends_soon',
             payload: {
               promotion_id: promo.id,
@@ -567,7 +578,7 @@ Deno.serve(async (req) => {
       if (promo.status === 'finished' && existing?.status !== 'finished') {
         eventsToCreate.push({
           workspace_id: workspaceId,
-          account_id: mlAccountId,
+          account_id: wsAccountId,
           event_type: 'promotion.finished',
           payload: {
             promotion_id: promo.id,
@@ -581,7 +592,7 @@ Deno.serve(async (req) => {
       if (startedItems.length > 0) {
         eventsToCreate.push({
           workspace_id: workspaceId,
-          account_id: mlAccountId,
+          account_id: wsAccountId,
           event_type: 'promotion.items_started',
           payload: {
             promotion_id: promo.id,
@@ -618,7 +629,7 @@ Deno.serve(async (req) => {
             // Create event for this transition
             eventsToCreate.push({
               workspace_id: workspaceId,
-              account_id: mlAccountId,
+              account_id: wsAccountId,
               event_type: 'promotion.finished',
               payload: {
                 promotion_id: promoId,
