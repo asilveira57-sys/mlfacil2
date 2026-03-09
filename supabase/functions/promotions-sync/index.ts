@@ -592,7 +592,7 @@ Deno.serve(async (req) => {
       if (startedItems.length > 0) {
         eventsToCreate.push({
           workspace_id: workspaceId,
-          account_id: mlAccountId,
+          account_id: wsAccountId,
           event_type: 'promotion.items_started',
           payload: {
             promotion_id: promo.id,
