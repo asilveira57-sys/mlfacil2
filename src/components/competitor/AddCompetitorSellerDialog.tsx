@@ -40,12 +40,28 @@ export function AddCompetitorSellerDialog({ open, onOpenChange, onAdd, sellerId 
       const { data, error: fnError } = await supabase.functions.invoke('competitor-seller-sync', {
         body: { action: 'preview', input: input.trim(), seller_id: sellerId },
       });
+      
       if (fnError) {
-        // Extract detailed error message from 400 responses
-        const errorBody = (fnError as any)?.context?.body;
-        const errorMsg = errorBody?.error || fnError.message || 'Erro ao buscar seller';
+        // Extract error message from different possible locations
+        let errorMsg = 'Erro ao buscar seller';
+        
+        // Try to parse JSON from error message (format: "Edge function returned 400: Error, {JSON}")
+        const msgMatch = fnError.message?.match(/\{.*\}/s);
+        if (msgMatch) {
+          try {
+            const parsed = JSON.parse(msgMatch[0]);
+            if (parsed.error) errorMsg = parsed.error;
+          } catch {}
+        }
+        
+        // Fallback to other possible locations
+        if (errorMsg === 'Erro ao buscar seller') {
+          errorMsg = (fnError as any)?.context?.body?.error || fnError.message || errorMsg;
+        }
+        
         throw new Error(errorMsg);
       }
+      
       if (data?.error) throw new Error(data.error);
       setPreview(data);
     } catch (e) {
