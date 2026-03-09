@@ -100,6 +100,13 @@ export function SandboxGlobalSummary({ snapshots, disconnectedCount = 0 }: Props
         {/* Spacer */}
         <div className="flex-1" />
 
+        {/* Disconnected companies note */}
+        {disconnectedCount > 0 && (
+          <span className="text-[10px] text-muted-foreground bg-muted/60 px-2 py-1 rounded-full flex-shrink-0">
+            {disconnectedCount} empresa{disconnectedCount > 1 ? 's' : ''} sem conta ML
+          </span>
+        )}
+
         {/* Last update status */}
         <div className={`flex items-center gap-1.5 text-xs flex-shrink-0 ${isStale ? 'text-yellow-500' : 'text-muted-foreground'}`}>
         {isStale
