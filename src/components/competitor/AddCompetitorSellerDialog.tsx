@@ -88,7 +88,7 @@ export function AddCompetitorSellerDialog({ open, onOpenChange, onAdd, sellerId 
             Monitorar Vendedor Concorrente
           </DialogTitle>
           <p className="text-sm text-muted-foreground mt-1">
-            Cole o link de um anúncio do vendedor que deseja monitorar. O sistema identificará o vendedor automaticamente.
+            Cole o link de um anúncio do vendedor que deseja monitorar. Por conformidade com LGPD, o vendedor será identificado com um apelido anônimo.
           </p>
         </DialogHeader>
 
@@ -107,7 +107,10 @@ export function AddCompetitorSellerDialog({ open, onOpenChange, onAdd, sellerId 
               </Button>
             </div>
             {error && (
-              <p className="text-sm text-destructive mt-1">{error}</p>
+              <div className="text-sm text-destructive mt-2 p-3 bg-destructive/10 rounded-md border border-destructive/20">
+                <p className="font-medium mb-1">Erro ao identificar vendedor</p>
+                <p className="whitespace-pre-line">{error}</p>
+              </div>
             )}
           </div>
 
@@ -155,7 +158,10 @@ export function AddCompetitorSellerDialog({ open, onOpenChange, onAdd, sellerId 
               className="mt-1"
             />
             <p className="text-xs text-muted-foreground mt-1">
-              Será exibido como: {preview?.ml_nickname || 'NICKNAME'}{alias ? ` (${alias})` : ''}
+              Será exibido como: <span className="font-medium">{preview?.ml_nickname || 'palavra1.palavra2.palavra3'}</span>{alias ? ` (${alias})` : ''}
+            </p>
+            <p className="text-xs text-muted-foreground/80 mt-1">
+              💡 O apelido anônimo protege a identidade do vendedor (LGPD). Use o campo acima para adicionar sua própria identificação interna.
             </p>
           </div>
         </div>

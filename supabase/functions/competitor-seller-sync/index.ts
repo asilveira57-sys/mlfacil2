@@ -11,6 +11,28 @@ const ML_SECRET_KEY = Deno.env.get('ML_SECRET_KEY')!;
 const DELAY_MS = 200;
 const MULTIGET_BATCH = 20;
 
+// Word list for masked nickname generation (LGPD compliance)
+const MASKED_WORDS = [
+  'caneta', 'mesa', 'lago', 'sapato', 'nuvem', 'prato', 'cadeira', 'sol', 'livro',
+  'porta', 'janela', 'pedra', 'rio', 'flor', 'gato', 'cachorro', 'peixe', 'arvore',
+  'chuva', 'vento', 'montanha', 'cafe', 'casa', 'rua', 'carro', 'bola', 'mapa',
+  'ponte', 'mar', 'estrela', 'lua', 'papel', 'tinta', 'lapis', 'quadro', 'tecla',
+  'mouse', 'tela', 'copo', 'garfo', 'faca', 'prato', 'tigela', 'panela', 'fogao',
+  'geladeira', 'sofa', 'cama', 'travesseiro', 'cobertor', 'tapete', 'cortina',
+  'lampada', 'ventilador', 'relogio', 'calendario', 'agenda', 'mochila', 'bolsa',
+  'carteira', 'chave', 'cadeado', 'anel', 'colar', 'bracelete', 'oculos', 'chapeu',
+  'luva', 'cachecol', 'casaco', 'camisa', 'calca', 'bermuda', 'saia', 'vestido',
+  'tenis', 'sandalia', 'bota', 'meia', 'cinto', 'gravata', 'bone', 'viseira',
+  'bandeira', 'poster', 'moldura', 'vaso', 'planta', 'semente', 'folha', 'galho',
+  'raiz', 'fruto', 'pinha', 'coco', 'banana', 'laranja', 'limao', 'uva', 'maca'
+];
+
+// Generate masked nickname for LGPD compliance (formato: palavra1.palavra2.palavra3)
+function generateMaskedNickname(): string {
+  const shuffle = () => MASKED_WORDS[Math.floor(Math.random() * MASKED_WORDS.length)];
+  return `${shuffle()}.${shuffle()}.${shuffle()}`;
+}
+
 function delay(ms: number) {
   return new Promise(r => setTimeout(r, ms));
 }
@@ -206,6 +228,7 @@ function extractItemIdFromInput(input: string): string | null {
 // Resolve seller from MLBU catalog product ID
 async function resolveFromMLBU(mlbuId: string, accessToken?: string, originalInput?: string): Promise<{ ml_seller_id: string; ml_nickname: string; reputation: any }> {
   console.log(`MLBU detected: ${mlbuId}, searching catalog...`);
+  
   // Try catalog search first
   try {
     const searchRes = await fetchMLResilient(`/sites/MLB/search?catalog_product_id=${mlbuId}&limit=1`, accessToken);
@@ -214,13 +237,14 @@ async function resolveFromMLBU(mlbuId: string, accessToken?: string, originalInp
       const userData = await fetchMLResilient(`/users/${sellerId}`, accessToken);
       return {
         ml_seller_id: String(userData.id),
-        ml_nickname: userData.nickname || `Seller ${userData.id}`,
+        ml_nickname: generateMaskedNickname(),
         reputation: userData.seller_reputation || null,
       };
     }
   } catch (e) {
     console.log(`Catalog search failed for ${mlbuId}: ${e}`);
   }
+  
   // Try products endpoint to get item IDs
   try {
     const productData = await fetchMLResilient(`/products/${mlbuId}`, accessToken);
@@ -231,7 +255,7 @@ async function resolveFromMLBU(mlbuId: string, accessToken?: string, originalInp
         const userData = await fetchMLResilient(`/users/${itemData.seller_id}`, accessToken);
         return {
           ml_seller_id: String(userData.id),
-          ml_nickname: userData.nickname || `Seller ${userData.id}`,
+          ml_nickname: generateMaskedNickname(),
           reputation: userData.seller_reputation || null,
         };
       }
@@ -239,6 +263,7 @@ async function resolveFromMLBU(mlbuId: string, accessToken?: string, originalInp
   } catch (e) {
     console.log(`Products endpoint failed for ${mlbuId}: ${e}`);
   }
+  
   // Last resort: extract product title from URL slug and search
   const urlToSearch = originalInput || '';
   const slugMatch = urlToSearch.match(/mercadolivre\.com\.br\/([^\/]+)\/(?:up|p)\//i);
@@ -252,7 +277,7 @@ async function resolveFromMLBU(mlbuId: string, accessToken?: string, originalInp
         const userData = await fetchMLResilient(`/users/${sellerId}`, accessToken);
         return {
           ml_seller_id: String(userData.id),
-          ml_nickname: userData.nickname || `Seller ${userData.id}`,
+          ml_nickname: generateMaskedNickname(),
           reputation: userData.seller_reputation || null,
         };
       }
@@ -260,7 +285,18 @@ async function resolveFromMLBU(mlbuId: string, accessToken?: string, originalInp
       console.log(`Title search fallback failed: ${e}`);
     }
   }
-  throw new Error(`Não foi possível encontrar vendedores para o produto catálogo ${mlbuId}. Tente colar o link de um anúncio específico.`);
+  
+  // Return 400 Bad Request with clear instructions for catalog products
+  const error = new Error(
+    `Este é um link de produto catálogo (${mlbuId}). Para monitorar vendedores concorrentes:\n\n` +
+    `1. Acesse a página do produto no Mercado Livre\n` +
+    `2. Escolha um vendedor específico que vende este produto\n` +
+    `3. Abra o anúncio deste vendedor\n` +
+    `4. Cole o link do anúncio específico aqui\n\n` +
+    `Links de produtos catálogo (com MLBU) não funcionam porque não identificam um vendedor único.`
+  );
+  (error as any).statusCode = 400;
+  throw error;
 }
 
 // Resolve seller: accepts seller_id number, listing URL (MLB), or profile URL
@@ -272,7 +308,7 @@ async function resolveSellerFromInput(input: string, accessToken?: string): Prom
     const data = await fetchMLResilient(`/users/${trimmed}`, accessToken);
     return {
       ml_seller_id: String(data.id),
-      ml_nickname: data.nickname || `Seller ${data.id}`,
+      ml_nickname: generateMaskedNickname(),
       reputation: data.seller_reputation || null,
     };
   }
@@ -312,7 +348,7 @@ async function resolveSellerFromInput(input: string, accessToken?: string): Prom
       const userData = await fetchMLResilient(`/users/${itemData.seller_id}`, accessToken);
       return {
         ml_seller_id: String(userData.id),
-        ml_nickname: userData.nickname || `Seller ${userData.id}`,
+        ml_nickname: generateMaskedNickname(),
         reputation: userData.seller_reputation || null,
       };
     }
@@ -331,7 +367,7 @@ async function resolveSellerFromInput(input: string, accessToken?: string): Prom
       if (userData.nickname?.toLowerCase() === nickname.toLowerCase()) {
         return {
           ml_seller_id: String(userData.id),
-          ml_nickname: userData.nickname,
+          ml_nickname: generateMaskedNickname(),
           reputation: userData.seller_reputation || null,
         };
       }
@@ -350,7 +386,7 @@ async function resolveSellerFromInput(input: string, accessToken?: string): Prom
           if (userData.nickname?.toLowerCase() === trimmed.toLowerCase()) {
             return {
               ml_seller_id: String(userData.id),
-              ml_nickname: userData.nickname,
+              ml_nickname: generateMaskedNickname(),
               reputation: userData.seller_reputation || null,
             };
           }
@@ -511,7 +547,11 @@ Deno.serve(async (req) => {
     }
   } catch (e) {
     console.error('competitor-seller-sync error:', e);
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : 'Internal error' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    const statusCode = (e as any)?.statusCode || 500;
+    return new Response(
+      JSON.stringify({ error: e instanceof Error ? e.message : 'Internal error' }), 
+      { status: statusCode, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
   }
 });
 
