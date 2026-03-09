@@ -104,8 +104,8 @@ serve(async (req) => {
     });
 
     if (!userResponse.ok) {
-      const errorUrl = new URL(`${frontendOrigin}/dashboard`);
-      errorUrl.searchParams.set('ml_error', 'user_fetch_failed');
+      const errorUrl = new URL(`${frontendOrigin}${errorRedirectPath}`);
+      errorUrl.searchParams.set(errorParamName, 'user_fetch_failed');
       return Response.redirect(errorUrl.toString(), 302);
     }
 
