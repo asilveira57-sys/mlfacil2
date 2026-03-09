@@ -896,7 +896,15 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       });
 
       if (response.error) throw new Error(response.error.message);
-      if (!response.data.success) throw new Error(response.data.message || 'Erro ao gerar etiquetas');
+      if (!response.data.success) {
+        // Show specific validation errors if available
+        const validationErrors = response.data.validationErrors as Array<{ shipment_id: string; reason: string }> | undefined;
+        if (validationErrors && validationErrors.length > 0) {
+          const reasons = [...new Set(validationErrors.map((e: { reason: string }) => e.reason))];
+          throw new Error(`${validationErrors.length} envio(s) inválido(s): ${reasons.join('; ')}`);
+        }
+        throw new Error(response.data.message || 'Erro ao gerar etiquetas');
+      }
 
       return response.data;
     },
