@@ -554,13 +554,17 @@ serve(async (req) => {
         error_log: JSON.stringify(validationErrors),
       });
 
+      // Return 200 with success:false so the SDK can read validation details
+      // (non-2xx causes SDK to set error and discard the body)
       return new Response(
         JSON.stringify({ 
           success: false, 
           validationErrors,
-          message: 'Nenhum envio válido para gerar etiqueta',
+          message: validationErrors.length > 0
+            ? `Nenhum envio válido: ${validationErrors.map(e => e.reason).filter((v, i, a) => a.indexOf(v) === i).join('; ')}`
+            : 'Nenhum envio válido para gerar etiqueta',
         }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
