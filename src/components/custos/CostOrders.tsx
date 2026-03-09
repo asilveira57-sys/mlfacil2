@@ -259,7 +259,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { toast.error('Sessão expirada'); return; }
+      if (!session) { toast.error('Sessão expirada'); setBatchProcessing(false); return; }
 
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders/bulk-reimport`,
