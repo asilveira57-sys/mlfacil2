@@ -47,6 +47,12 @@ export interface SellerDetail {
   deltas: Record<string, { sales_delta: number; price_change: number; first_seen: string }>;
 }
 
+export interface CompetitorSalesReportDay {
+  date: string; // YYYY-MM-DD
+  estimated_sales: number;
+  items_with_data: number;
+}
+
 export interface SellerPreview {
   ml_seller_id: string;
   ml_nickname: string;
@@ -177,6 +183,17 @@ export function useCompetitorSellers(sellerId: string) {
     }
   }, [sellerId, invoke, fetchSellers]);
 
+  const getSalesReport = useCallback(async (competitorSellerId: string, days: number = 7): Promise<CompetitorSalesReportDay[]> => {
+    try {
+      const data = await invoke({ action: 'sales_report', seller_id: sellerId, competitor_seller_id: competitorSellerId, days });
+      return data.days || [];
+    } catch (e) {
+      console.error('getSalesReport error:', e);
+      toast.error('Erro ao carregar relatório de vendas');
+      return [];
+    }
+  }, [sellerId, invoke]);
+
   return {
     sellers,
     loading,
@@ -187,6 +204,7 @@ export function useCompetitorSellers(sellerId: string) {
     addSellerResolved,
     syncSeller,
     getDetail,
+    getSalesReport,
     updateAlias,
     deleteSeller,
   };

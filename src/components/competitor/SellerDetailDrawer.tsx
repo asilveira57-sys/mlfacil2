@@ -8,9 +8,9 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   RefreshCw, ExternalLink, Package, TrendingUp, TrendingDown,
-  Star, Search, ArrowUpDown, Users
+  Star, Search, ArrowUpDown, Users, TrendingUp as TrendingUpIcon
 } from 'lucide-react';
-import { CompetitorSeller, CompetitorSellerItem, useCompetitorSellers } from '@/hooks/useCompetitorSellers';
+import { CompetitorSeller, CompetitorSellerItem, useCompetitorSellers, CompetitorSalesReportDay } from '@/hooks/useCompetitorSellers';
 
 interface SellerDetailDrawerProps {
   open: boolean;
@@ -24,9 +24,10 @@ interface SellerDetailDrawerProps {
 type SortKey = 'sales' | 'price' | 'title';
 
 export function SellerDetailDrawer({ open, onOpenChange, sellerId, competitorSeller, onSync, syncing }: SellerDetailDrawerProps) {
-  const { getDetail } = useCompetitorSellers(sellerId);
+  const { getDetail, getSalesReport } = useCompetitorSellers(sellerId);
   const [items, setItems] = useState<CompetitorSellerItem[]>([]);
   const [deltas, setDeltas] = useState<Record<string, { sales_delta: number; price_change: number; first_seen: string }>>({});
+  const [salesReport, setSalesReport] = useState<CompetitorSalesReportDay[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<SortKey>('sales');
@@ -40,12 +41,23 @@ export function SellerDetailDrawer({ open, onOpenChange, sellerId, competitorSel
 
   const loadDetail = async () => {
     setLoading(true);
-    const data = await getDetail(competitorSeller.id);
-    if (data) {
-      setItems(data.items);
-      setDeltas(data.deltas);
+    try {
+      // Load detail and sales report in parallel
+      const [detailData, reportData] = await Promise.all([
+        getDetail(competitorSeller.id),
+        getSalesReport(competitorSeller.id, 7),
+      ]);
+      
+      if (detailData) {
+        setItems(detailData.items);
+        setDeltas(detailData.deltas);
+      }
+      setSalesReport(reportData);
+    } catch (error) {
+      console.error('loadDetail error:', error);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const formatCurrency = (value: number | null) => {
@@ -54,8 +66,12 @@ export function SellerDetailDrawer({ open, onOpenChange, sellerId, competitorSel
   };
 
   const getDisplayName = () => {
-    const base = competitorSeller.ml_nickname || `Seller ${competitorSeller.ml_seller_id}`;
-    return competitorSeller.user_alias ? `${base} (${competitorSeller.user_alias})` : base;
+    // LGPD masking: prefer user_alias, fallback to last 4 digits
+    if (competitorSeller.user_alias) {
+      return competitorSeller.user_alias;
+    }
+    const last4 = competitorSeller.ml_seller_id.slice(-4);
+    return `Concorrente ${last4}`;
   };
 
   // Filter & sort
@@ -116,6 +132,35 @@ export function SellerDetailDrawer({ open, onOpenChange, sellerId, competitorSel
               </CardContent>
             </Card>
           </div>
+
+          {/* Daily Sales Report */}
+          {salesReport.length >= 2 && (
+            <Card>
+              <CardContent className="p-4">
+                <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                  <TrendingUpIcon className="h-4 w-4" />
+                  Relatório Diário Estimado
+                </h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Ontem</p>
+                    <p className="text-lg font-bold">
+                      {salesReport[salesReport.length - 2]?.estimated_sales || 0} vendas
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Anteontem</p>
+                    <p className="text-lg font-bold">
+                      {salesReport[salesReport.length - 3]?.estimated_sales || 0} vendas
+                    </p>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Estimado por variação de sold_quantity
+                </p>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Reputation */}
           {competitorSeller.seller_reputation && (
