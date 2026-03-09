@@ -46,6 +46,8 @@ export interface UserPayload {
   package_length?: number | string;
   package_weight?: number | string;
   family_name?: string;
+  local_pick_up?: boolean;
+  start_paused?: boolean;
 }
 
 export interface CloneDraft {
@@ -165,5 +167,7 @@ export function buildMergedPayload(origin: OriginPayload, user: UserPayload) {
     sku: str(user.sku) || str(origin.sku),
     gtin: str(user.gtin) || str(origin.gtin),
     family_name: str(user.family_name) || str(origin.family_name),
+    local_pick_up: user.local_pick_up ?? false,
+    start_paused: user.start_paused ?? false,
   };
 }
