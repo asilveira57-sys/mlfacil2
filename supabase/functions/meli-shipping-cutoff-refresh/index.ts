@@ -121,150 +121,39 @@ Deno.serve(async (req) => {
         }
       }
 
-      // 5. Get real agency cutoff from ML shipment lead_time
+      // 5. Get real agency cutoff from estimated_handling_limit in shipments cache
+      // This is the actual seller dispatch deadline that ML assigns per shipment.
+      // NO external API calls needed — data already in our DB from sync.
       let agencyCutoff: string | null = null;
 
-      // 5a. Get one ready_to_ship shipment ID from cache
-      // Strategy: try multiple queries from most to least specific
       try {
-        const spDate = getDateRefSP();
-        const todayStartUTC = spDate + "T03:00:00.000Z";
-        const tomorrowEndUTC = new Date(new Date(spDate + "T03:00:00.000Z").getTime() + 2 * 24 * 60 * 60 * 1000 - 1).toISOString();
-        // Fallback: last 7 days
-        const sevenDaysAgoUTC = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        const nowISO = new Date().toISOString();
 
-        // Query 1: ready_to_ship/handling with handling limit in today-tomorrow window
-        let { data: sampleShipments } = await supabase
+        // Query active shipments with future handling limits, ordered by earliest first
+        const { data: activeShipments } = await supabase
           .from("meli_shipments_cache")
           .select("shipment_id, estimated_handling_limit, logistic_type")
           .eq("seller_id", mlUserId)
           .in("shipment_status", ["ready_to_ship", "handling"])
-          .gte("estimated_handling_limit", todayStartUTC)
-          .lte("estimated_handling_limit", tomorrowEndUTC)
-          .order("estimated_handling_limit", { ascending: false })
-          .limit(3);
+          .gt("estimated_handling_limit", nowISO)
+          .order("estimated_handling_limit", { ascending: true })
+          .limit(20);
 
-        // Query 2: any ready_to_ship (even with null/past handling limit)
-        if (!sampleShipments || sampleShipments.length === 0) {
-          const { data: fallback1 } = await supabase
-            .from("meli_shipments_cache")
-            .select("shipment_id, estimated_handling_limit, logistic_type")
-            .eq("seller_id", mlUserId)
-            .in("shipment_status", ["ready_to_ship", "handling"])
-            .order("last_sync_at", { ascending: false })
-            .limit(3);
-          sampleShipments = fallback1;
-        }
-
-        // Query 3: recently shipped (last 7 days) as last resort
-        if (!sampleShipments || sampleShipments.length === 0) {
-          const { data: fallback2 } = await supabase
-            .from("meli_shipments_cache")
-            .select("shipment_id, estimated_handling_limit, logistic_type")
-            .eq("seller_id", mlUserId)
-            .eq("shipment_status", "shipped")
-            .gte("last_sync_at", sevenDaysAgoUTC)
-            .order("last_sync_at", { ascending: false })
-            .limit(3);
-          sampleShipments = fallback2;
-        }
-
-        if (sampleShipments && sampleShipments.length > 0) {
-          // 5b. Call ML API to get shipment lead_time (separate endpoint!)
-          for (const shipment of sampleShipments) {
-            try {
-              // Try lead_time endpoint first (has estimated_schedule_limit)
-              const leadTimeResult = await fetchWithRetry(
-                `https://api.mercadolibre.com/shipments/${shipment.shipment_id}/lead_time`,
-                token, "shipment_lead_time", supabase, traceId, companyId, sellerId
-              );
-
-              if (leadTimeResult.ok && leadTimeResult.data) {
-                const lt = leadTimeResult.data;
-                let extractedCutoff: string | null = null;
-
-                // Strategy 1: estimated_schedule_limit.date (agency schedule cutoff)
-                if (lt.estimated_schedule_limit?.date) {
-                  const d = new Date(lt.estimated_schedule_limit.date);
-                  extractedCutoff = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
-                }
-
-                // Strategy 2: estimated_handling_limit.date (seller dispatch deadline)
-                if (!extractedCutoff && lt.estimated_handling_limit?.date) {
-                  const d = new Date(lt.estimated_handling_limit.date);
-                  const timeStr = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
-                  // Only use if time is not midnight (ML docs say only date matters)
-                  if (timeStr !== '00:00') {
-                    extractedCutoff = timeStr;
-                  }
-                }
-
-                // Strategy 3: pickup_promise.from/to
-                if (!extractedCutoff && lt.pickup_promise?.to) {
-                  const d = new Date(lt.pickup_promise.to);
-                  extractedCutoff = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
-                }
-
-                await log(supabase, {
-                  trace_id: traceId, company_id: companyId, seller_id: sellerId,
-                  action: "shipment_lead_time", status: extractedCutoff ? "success" : "empty",
-                  step: "lead_time_parse", execution_time_ms: Date.now() - startTime,
-                  payload_summary: {
-                    shipment_id: shipment.shipment_id,
-                    lead_time_keys: Object.keys(lt).sort(),
-                    estimated_schedule_limit: lt.estimated_schedule_limit || null,
-                    estimated_handling_limit: lt.estimated_handling_limit || null,
-                    pickup_promise: lt.pickup_promise || null,
-                    estimated_delivery_time: lt.estimated_delivery_time ? {
-                      handling: lt.estimated_delivery_time.handling,
-                      shipping: lt.estimated_delivery_time.shipping,
-                      type: lt.estimated_delivery_time.type,
-                    } : null,
-                    extracted_cutoff: extractedCutoff,
-                  },
-                });
-
-                if (extractedCutoff) {
-                  if (!agencyCutoff || extractedCutoff > agencyCutoff) {
-                    agencyCutoff = extractedCutoff;
-                  }
-                  break; // Found cutoff, stop checking
-                }
-              }
-
-              // Fallback: try SLA endpoint (newer API replacing estimated_handling_limit)
-              if (!agencyCutoff) {
-                const slaResult = await fetchWithRetry(
-                  `https://api.mercadolibre.com/shipments/${shipment.shipment_id}/sla`,
-                  token, "shipment_sla", supabase, traceId, companyId, sellerId
-                );
-                if (slaResult.ok && slaResult.data) {
-                  const sla = slaResult.data;
-                  // SLA returns expected_date which is the actual agency cutoff
-                  const deadline = sla.expected_date || sla.handling_deadline?.date || sla.handling_limit?.date || sla.cutoff?.date;
-                  if (deadline) {
-                    const d = new Date(deadline);
-                    const timeStr = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false });
-                    if (timeStr !== '00:00') {
-                      agencyCutoff = timeStr;
-                    }
-                  }
-                  await log(supabase, {
-                    trace_id: traceId, company_id: companyId, seller_id: sellerId,
-                    action: "shipment_sla", status: agencyCutoff ? "success" : "empty",
-                    step: "sla_parse", execution_time_ms: Date.now() - startTime,
-                    payload_summary: {
-                      shipment_id: shipment.shipment_id,
-                      sla_keys: Object.keys(sla).sort(),
-                      raw_preview: JSON.stringify(sla).substring(0, 500),
-                      extracted_cutoff: agencyCutoff,
-                    },
-                  });
-                  if (agencyCutoff) break;
-                }
-              }
-            } catch (e: any) {
-              console.error("Shipment lead_time error:", e.message);
+        if (activeShipments && activeShipments.length > 0) {
+          // Find the earliest handling limit with a non-midnight time in SP timezone
+          for (const shipment of activeShipments) {
+            if (!shipment.estimated_handling_limit) continue;
+            const d = new Date(shipment.estimated_handling_limit);
+            const timeStr = d.toLocaleTimeString('pt-BR', {
+              timeZone: 'America/Sao_Paulo',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false,
+            });
+            // Skip midnight — ML sometimes sets date-only limits as 00:00
+            if (timeStr !== '00:00') {
+              agencyCutoff = timeStr;
+              break;
             }
           }
         }
@@ -272,11 +161,15 @@ Deno.serve(async (req) => {
         await log(supabase, {
           trace_id: traceId, company_id: companyId, seller_id: sellerId,
           action: "agency_cutoff", status: agencyCutoff ? "success" : "empty",
-          step: "cutoff_extraction_complete", execution_time_ms: Date.now() - startTime,
+          step: "cutoff_from_handling_limit", execution_time_ms: Date.now() - startTime,
           payload_summary: {
             agency_cutoff: agencyCutoff,
-            shipments_checked: sampleShipments?.length || 0,
-            query_range: `${todayStartUTC} .. ${tomorrowEndUTC}`,
+            shipments_checked: activeShipments?.length || 0,
+            sample: (activeShipments || []).slice(0, 3).map(s => ({
+              id: s.shipment_id,
+              limit: s.estimated_handling_limit,
+              type: s.logistic_type,
+            })),
           },
         });
       } catch (e: any) {

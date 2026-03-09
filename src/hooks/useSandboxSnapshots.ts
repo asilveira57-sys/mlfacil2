@@ -35,9 +35,9 @@ export interface SandboxSnapshot {
 }
 
 export function useSandboxSnapshots() {
-  return useQuery({
+  const query = useQuery({
     queryKey: ['sandbox-snapshots'],
-    queryFn: async (): Promise<SandboxSnapshot[]> => {
+    queryFn: async (): Promise<{ filtered: SandboxSnapshot[]; all: SandboxSnapshot[] }> => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) return [];
       const user = session.user;

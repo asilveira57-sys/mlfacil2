@@ -41,7 +41,7 @@ async function logSandboxEvent(action: string, meta: Record<string, unknown> = {
 }
 
 export default function Sandbox() {
-  const { data: snapshots = [], allSnapshots = [], isLoading, refetch } = useSandboxSnapshots();
+  const { data: snapshots = [], allSnapshots = [], allSnapshots = [], isLoading, refetch } = useSandboxSnapshots();
   const [refreshing, setRefreshing] = useState(false);
 
   // Usar o primeiro snapshot para o quick sync (multi-empresa: itera internamente)
@@ -142,7 +142,7 @@ export default function Sandbox() {
         </div>
       ) : (
         <>
-          <SandboxGlobalSummary snapshots={snapshots} />
+          <SandboxGlobalSummary snadisconnectedCount={allSnapshots.length - snapshots.length} pshots={snapshots} />
           <div className={`grid gap-3 ${gridClass}`}>
             {snapshots.map((snap, i) => (
               <div key={snap.id} className={getItemClass(i, count)}>
