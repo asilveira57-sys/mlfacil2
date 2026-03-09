@@ -103,10 +103,11 @@ export function SeedItemDetailDrawer({
           return match ? match[1] : null;
         };
 
-        const mlbId = extractMlbId(itemId) || itemId;
+        const mlbId = extractMlbId(itemId);
+        const isSkuBased = !mlbId;
 
-        // Parallel fetches
-        const [plantedRes, historyRes, listingRes] = await Promise.all([
+        // Parallel fetches (planted + history always by itemId)
+        const [plantedRes, historyRes] = await Promise.all([
           supabase
             .from('send_planted_items')
             .select('*')
@@ -123,15 +124,72 @@ export function SeedItemDetailDrawer({
             .eq('item_id', itemId)
             .order('occurred_at', { ascending: false })
             .limit(50),
+        ]);
 
-          supabase
+        // Try multiple strategies to find listing data
+        let listingData: {
+          title: string; thumbnail: string; sku: string;
+          permalink: string; price: number; status: string;
+          available_quantity: number;
+        } | null = null;
+
+        // Strategy 1: lookup by item_id (MLB ID)
+        if (mlbId) {
+          const { data } = await supabase
             .from('meli_listings_cache')
             .select('title, thumbnail, sku, permalink, price, status, available_quantity')
             .eq('seller_id', sellerId)
             .eq('item_id', mlbId)
             .limit(1)
-            .single()
-        ]);
+            .maybeSingle();
+          if (data?.title) listingData = data;
+        }
+
+        // Strategy 2: lookup by SKU in meli_listings_cache
+        if (!listingData && isSkuBased) {
+          const { data } = await supabase
+            .from('meli_listings_cache')
+            .select('title, thumbnail, sku, permalink, price, status, available_quantity')
+            .eq('seller_id', sellerId)
+            .eq('sku', itemId)
+            .limit(1)
+            .maybeSingle();
+          if (data?.title) listingData = data;
+        }
+
+        // Strategy 3: lookup by product_key in meli_order_items_cache
+        if (!listingData) {
+          const { data } = await supabase
+            .from('meli_order_items_cache')
+            .select('item_id, title, thumbnail, sku')
+            .eq('seller_id', sellerId)
+            .eq('product_key', itemId)
+            .order('created_at_meli', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (data?.title) {
+            listingData = {
+              title: data.title || '',
+              thumbnail: data.thumbnail || '',
+              sku: data.sku || itemId,
+              permalink: '',
+              price: 0,
+              status: '',
+              available_quantity: 0,
+            };
+            // If we found the MLB item_id, try to get full listing data
+            if (data.item_id) {
+              const { data: fullListing } = await supabase
+                .from('meli_listings_cache')
+                .select('title, thumbnail, sku, permalink, price, status, available_quantity')
+                .eq('seller_id', sellerId)
+                .eq('item_id', data.item_id)
+                .limit(1)
+                .maybeSingle();
+              if (fullListing?.title) listingData = fullListing;
+            }
+          }
+        }
 
         let metricsData = null;
         if (plantedRes.data) {
@@ -149,7 +207,7 @@ export function SeedItemDetailDrawer({
           planted: plantedRes.data as SeedPlantedItem | null,
           metrics: metricsData as SeedMetricsSnapshot | null,
           history: (historyRes.data || []) as SeedItemHistory[],
-          listing: listingRes.data || null
+          listing: listingData
         });
       } catch (err) {
         console.error('[SendItemDetailDrawer] Error:', err);
