@@ -221,31 +221,44 @@ export function useSeed(): UseSeedResult {
           }
         }
 
-        // Second try: meli_order_items_cache by product_key for any still missing
+        // Second try: meli_order_items_cache for any still missing (both SKUs and MLB IDs)
         const stillMissingSkus = missingSkuCodes.filter(sku => !listingsCache.has(sku));
+        const stillMissingMlbIds = missingMlbIds.filter(id => !listingsCache.has(id));
         
-        if (stillMissingSkus.length > 0) {
-          const { data: orderItemsData } = await supabase
-            .from('meli_order_items_cache')
-            .select('product_key, item_id, title, thumbnail, sku')
-            .eq('seller_id', sellerId)
-            .in('product_key', stillMissingSkus);
+        // Fetch by product_key for SKUs
+        const skuOrderFetch = stillMissingSkus.length > 0
+          ? supabase
+              .from('meli_order_items_cache')
+              .select('product_key, item_id, title, thumbnail, sku')
+              .eq('seller_id', sellerId)
+              .in('product_key', stillMissingSkus)
+          : null;
 
-          for (const oi of (orderItemsData || [])) {
-            if (oi.product_key && !listingsCache.has(oi.product_key)) {
-              listingsCache.set(oi.product_key, {
-                title: oi.title || '',
-                thumbnail: oi.thumbnail || '',
-                sku: oi.sku || oi.product_key
-              });
-            }
-            if (oi.item_id && !listingsCache.has(oi.item_id)) {
-              listingsCache.set(oi.item_id, {
-                title: oi.title || '',
-                thumbnail: oi.thumbnail || '',
-                sku: oi.sku || ''
-              });
-            }
+        // Also fetch by item_id for MLB IDs that weren't in listings_cache
+        const mlbOrderFetch = stillMissingMlbIds.length > 0
+          ? supabase
+              .from('meli_order_items_cache')
+              .select('product_key, item_id, title, thumbnail, sku')
+              .eq('seller_id', sellerId)
+              .in('item_id', stillMissingMlbIds)
+          : null;
+
+        const [skuOrderRes, mlbOrderRes] = await Promise.all([skuOrderFetch, mlbOrderFetch]);
+
+        for (const oi of [...(skuOrderRes?.data || []), ...(mlbOrderRes?.data || [])]) {
+          if (oi.product_key && !listingsCache.has(oi.product_key)) {
+            listingsCache.set(oi.product_key, {
+              title: oi.title || '',
+              thumbnail: oi.thumbnail || '',
+              sku: oi.sku || oi.product_key
+            });
+          }
+          if (oi.item_id && !listingsCache.has(oi.item_id)) {
+            listingsCache.set(oi.item_id, {
+              title: oi.title || '',
+              thumbnail: oi.thumbnail || '',
+              sku: oi.sku || ''
+            });
           }
         }
       }
