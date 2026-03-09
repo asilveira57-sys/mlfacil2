@@ -125,12 +125,16 @@ Deno.serve(async (req) => {
       let agencyCutoff: string | null = null;
 
       // 5a. Get one ready_to_ship shipment ID from cache
+      // Strategy: try multiple queries from most to least specific
       try {
         const spDate = getDateRefSP();
         const todayStartUTC = spDate + "T03:00:00.000Z";
         const tomorrowEndUTC = new Date(new Date(spDate + "T03:00:00.000Z").getTime() + 2 * 24 * 60 * 60 * 1000 - 1).toISOString();
+        // Fallback: last 7 days
+        const sevenDaysAgoUTC = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-        const { data: sampleShipments, error: shipErr } = await supabase
+        // Query 1: ready_to_ship/handling with handling limit in today-tomorrow window
+        let { data: sampleShipments } = await supabase
           .from("meli_shipments_cache")
           .select("shipment_id, estimated_handling_limit, logistic_type")
           .eq("seller_id", mlUserId)
@@ -139,6 +143,31 @@ Deno.serve(async (req) => {
           .lte("estimated_handling_limit", tomorrowEndUTC)
           .order("estimated_handling_limit", { ascending: false })
           .limit(3);
+
+        // Query 2: any ready_to_ship (even with null/past handling limit)
+        if (!sampleShipments || sampleShipments.length === 0) {
+          const { data: fallback1 } = await supabase
+            .from("meli_shipments_cache")
+            .select("shipment_id, estimated_handling_limit, logistic_type")
+            .eq("seller_id", mlUserId)
+            .in("shipment_status", ["ready_to_ship", "handling"])
+            .order("last_sync_at", { ascending: false })
+            .limit(3);
+          sampleShipments = fallback1;
+        }
+
+        // Query 3: recently shipped (last 7 days) as last resort
+        if (!sampleShipments || sampleShipments.length === 0) {
+          const { data: fallback2 } = await supabase
+            .from("meli_shipments_cache")
+            .select("shipment_id, estimated_handling_limit, logistic_type")
+            .eq("seller_id", mlUserId)
+            .eq("shipment_status", "shipped")
+            .gte("last_sync_at", sevenDaysAgoUTC)
+            .order("last_sync_at", { ascending: false })
+            .limit(3);
+          sampleShipments = fallback2;
+        }
 
         if (sampleShipments && sampleShipments.length > 0) {
           // 5b. Call ML API to get shipment lead_time (separate endpoint!)
