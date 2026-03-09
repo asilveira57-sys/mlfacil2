@@ -196,15 +196,32 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
+    // Use user-scoped client for auth validation (handles token refresh)
+    const supabaseAuth = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      { global: { headers: { Authorization: authHeader } } }
+    );
+
+    const { data: claimsData, error: claimsError } = await supabaseAuth.auth.getClaims(token);
     
-    if (userError || !user) {
-      console.error('Auth error:', userError?.message);
-      return new Response(
-        JSON.stringify({ error: 'User not authenticated', details: userError?.message }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    let userId: string;
+    if (claimsError || !claimsData?.claims?.sub) {
+      // Fallback to getUser if getClaims fails
+      const { data: { user: fallbackUser }, error: userError } = await supabaseAuth.auth.getUser();
+      if (userError || !fallbackUser) {
+        console.error('Auth error:', claimsError?.message || userError?.message);
+        return new Response(
+          JSON.stringify({ error: 'User not authenticated', details: claimsError?.message || userError?.message }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      userId = fallbackUser.id;
+    } else {
+      userId = claimsData.claims.sub as string;
     }
+
+    const user = { id: userId };
 
     console.log('Authenticated user:', user.id);
 
