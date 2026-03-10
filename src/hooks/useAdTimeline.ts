@@ -215,14 +215,54 @@ export function useAdTimelineItemDetail(workspaceId: string | null, itemId: stri
         .from('meli_listings_cache')
         .select('*')
         .eq('item_id', itemId)
-        .single();
+        .maybeSingle();
 
+      if (listing) {
+        return { ...data, ...listing } as AdTimelineStats & Record<string, any>;
+      }
+
+      // Fallback: use RPC for thumb/title from order items
+      const { data: orderItems } = await supabase
+        .rpc('get_order_items_enrichment', { p_item_ids: [itemId] });
+
+      const orderItem = orderItems?.[0];
       return {
         ...data,
-        ...(listing || {}),
+        title: orderItem?.title || data.item_id,
+        thumbnail: orderItem?.thumbnail || null,
+        price: orderItem?.unit_price || null,
+        sku: orderItem?.sku || null,
+        variation_id: orderItem?.variation_id || null,
+        status: null,
+        available_quantity: null,
       } as AdTimelineStats & Record<string, any>;
     },
     enabled: !!workspaceId && !!itemId,
+  });
+}
+
+// Background enrichment: fetch status/stock from ML API for items missing listing cache
+export function useEnrichTimelineItems() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ itemIds, mlAccountId }: { itemIds: string[]; mlAccountId?: string }) => {
+      if (!itemIds.length) return { enriched: 0 };
+
+      // Resolve ml_user_id to UUID if needed
+      const mlAccountUuid = mlAccountId ? await resolveMlAccountUuid(mlAccountId) : undefined;
+
+      const response = await supabase.functions.invoke('ad-timeline-enrich-items', {
+        body: { item_ids: itemIds, ml_account_id: mlAccountUuid || undefined },
+      });
+
+      if (response.error) throw response.error;
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ad-timeline-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['ad-timeline-item-detail'] });
+    },
   });
 }
 
