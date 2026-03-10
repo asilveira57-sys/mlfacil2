@@ -142,8 +142,8 @@ export function useTierPlans() {
   return useQuery({
     queryKey: ['tier-plans'],
     queryFn: fetchTierPlans,
-    staleTime: 10 * 60 * 1000, // 10 minutes
-    gcTime: 30 * 60 * 1000, // 30 minutes
+    staleTime: 30 * 60 * 1000, // 30 minutes
+    gcTime: 60 * 60 * 1000, // 60 minutes
     refetchOnWindowFocus: false,
   });
 }

@@ -99,7 +99,8 @@ export function useAnnouncements() {
       }));
     },
     enabled: !!userId,
-    staleTime: 60_000,
+    staleTime: 15 * 60 * 1000, // 15 minutes
+    gcTime: 30 * 60 * 1000, // 30 minutes
   });
 }
 

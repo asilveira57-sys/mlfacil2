@@ -63,7 +63,7 @@ export function useSeoMeta() {
       seoCache.set(pathname, result as SeoMetaData);
       return result as SeoMetaData;
     },
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 15 * 60 * 1000, // 15 minutes
     gcTime: 30 * 60 * 1000, // 30 minutes
   });
 

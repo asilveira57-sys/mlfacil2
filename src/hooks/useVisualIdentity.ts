@@ -58,7 +58,8 @@ export function useVisualIdentity() {
       return data as VisualIdentitySettings | null;
     },
     enabled: !!sellerId,
-    staleTime: 2 * 60 * 1000,
+    staleTime: 30 * 60 * 1000, // 30 minutes
+    gcTime: 60 * 60 * 1000, // 60 minutes
   });
 
   const { data: groups = [], isLoading: groupsLoading } = useQuery({
@@ -72,7 +73,8 @@ export function useVisualIdentity() {
       if (error) throw error;
       return data as VisualCategoryGroup[];
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30 * 60 * 1000, // 30 minutes
+    gcTime: 60 * 60 * 1000, // 60 minutes
   });
 
   // Resolve which group to use

@@ -44,8 +44,8 @@ export function usePostSaleConversations(sellerId: string | null, filters?: Conv
       return (data || []) as PostSaleConversation[];
     },
     enabled: !!sellerId,
-    staleTime: 30 * 1000, // 30 seconds
-    refetchInterval: 60 * 1000, // 1 minute
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes
   });
 }
 
@@ -101,7 +101,8 @@ export function usePostSaleConversation(conversationId: string | null) {
       };
     },
     enabled: !!conversationId,
-    staleTime: 10 * 1000, // 10 seconds
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes
   });
 }
 
@@ -263,7 +264,7 @@ export function useUnreadConversationsCount(sellerId: string | null) {
       return count || 0;
     },
     enabled: !!sellerId,
-    staleTime: 30 * 1000,
-    refetchInterval: 60 * 1000,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes
   });
 }

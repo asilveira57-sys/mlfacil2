@@ -21,7 +21,8 @@ export function useUserContext(): UserContext {
 
       return ctx;
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30 * 60 * 1000, // 30 minutes
+    gcTime: 60 * 60 * 1000, // 60 minutes
   });
 
   return {

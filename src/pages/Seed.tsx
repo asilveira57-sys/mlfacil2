@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -89,18 +89,29 @@ export default function Seed() {
     i.health_status === 'stagnant' || i.health_status === 'weakening'
   ).length;
 
+  // Cooldown: prevent calling edge function more than once every 5 minutes
+  const lastMetricsCallRef = useRef<number>(0);
+  const METRICS_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      // First trigger the metrics collector edge function
-      if (sellerId) {
+      const now = Date.now();
+      const timeSinceLastCall = now - lastMetricsCallRef.current;
+
+      // Only call edge function if cooldown has passed
+      if (sellerId && timeSinceLastCall >= METRICS_COOLDOWN_MS) {
         toast.info('Coletando métricas dos anúncios...');
+        lastMetricsCallRef.current = now;
         const { error: fnError } = await supabase.functions.invoke('seed-metrics-collector', {
           body: { seller_id: sellerId },
         });
         if (fnError) {
           console.error('[Seed] Metrics collector error:', fnError);
         }
+      } else if (sellerId && timeSinceLastCall < METRICS_COOLDOWN_MS) {
+        const remainingMin = Math.ceil((METRICS_COOLDOWN_MS - timeSinceLastCall) / 60000);
+        toast.info(`Usando dados recentes. Próxima coleta disponível em ${remainingMin} min.`);
       }
       // Then refresh local data
       await refreshData();

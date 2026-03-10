@@ -13,28 +13,12 @@ export function useAccountChangeInvalidation() {
 
   useEffect(() => {
     const handleAccountChange = (event: CustomEvent<{ accountId: string; sellerId: string }>) => {
-      const { sellerId } = event.detail;
-      
       if (import.meta.env.DEV) {
-        console.info('[Cache] Account changed, invalidating queries for seller:', sellerId);
+        console.info('[Cache] Account changed, invalidating ALL queries');
       }
 
-      // Invalidate all account-specific query caches
-      // This forces a refetch with the new account's data
-      queryClient.invalidateQueries({ queryKey: ['post-sale-conversations'] });
-      queryClient.invalidateQueries({ queryKey: ['post-sale-conversation'] });
-      queryClient.invalidateQueries({ queryKey: ['post-sale-unread-count'] });
-      queryClient.invalidateQueries({ queryKey: ['ads'] });
-      queryClient.invalidateQueries({ queryKey: ['orders'] });
-      queryClient.invalidateQueries({ queryKey: ['costs'] });
-      queryClient.invalidateQueries({ queryKey: ['questions'] });
-      queryClient.invalidateQueries({ queryKey: ['billing'] });
-      queryClient.invalidateQueries({ queryKey: ['sales-data'] });
-      queryClient.invalidateQueries({ queryKey: ['shipping-labels'] });
-      
-      // Clear specific cached data to prevent showing stale results
-      queryClient.removeQueries({ queryKey: ['post-sale-conversations'] });
-      queryClient.removeQueries({ queryKey: ['orders'] });
+      // Invalidate everything — account change means all data is stale
+      queryClient.invalidateQueries();
       
       // Dispatch event to clear local sales cache (useSalesDataCache)
       window.dispatchEvent(new CustomEvent('clear_sales_cache'));

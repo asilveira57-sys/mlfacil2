@@ -318,12 +318,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       };
     },
     enabled: !!sellerId,
-    staleTime: 30000,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes
     refetchOnWindowFocus: false,
     placeholderData: (prev: any) => prev,
-    // Silent polling: refetch from DB every 60s to pick up cron-synced data
-    refetchInterval: 60000,
-    refetchIntervalInBackground: false,
   });
 
   const orders = ordersData?.orders ?? [];
