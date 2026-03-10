@@ -206,9 +206,9 @@ async function processOrdersInBackground(
       
       if (!mlResponse || !mlResponse.ok) {
         await supabaseAdmin.from('sync_jobs').update({
-          status: 'error',
-          error_message: 'Failed to fetch orders after retries',
-          completed_at: new Date().toISOString(),
+          status: 'failed',
+          finished_at: new Date().toISOString(),
+          metadata: { seller_id: sellerId, error_message: 'Failed to fetch orders after retries' },
         }).eq('id', jobId);
         return;
       }
