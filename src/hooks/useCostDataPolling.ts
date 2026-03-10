@@ -50,7 +50,7 @@ export function useCostDataPolling({
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState<CostSummaryData | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isVisibleRef = useRef(true);
 
   const fetchSummary = useCallback(async () => {

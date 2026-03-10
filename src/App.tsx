@@ -2,8 +2,9 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { ActiveAccountProvider } from "@/contexts/ActiveAccountContext";
 import { UserAccessProvider } from "@/contexts/UserAccessContext";
 import { RefreshPolicyProvider } from "@/contexts/RefreshPolicyContext";
@@ -11,12 +12,16 @@ import { CookieConsentGate } from "@/components/cookies/CookieConsentGate";
 import { RouteChangeCleanup } from "@/components/layout/RouteChangeCleanup";
 import { AccountChangeInvalidator } from "@/components/layout/AccountChangeInvalidator";
 import { AppShellLayout } from "@/components/layout/AppShellLayout";
+import { queryPersister, PERSIST_MAX_AGE, PERSIST_BUSTER_KEY, shouldPersistQuery } from "@/lib/queryPersister";
+import { usePostLoginPrefetch } from "@/hooks/usePostLoginPrefetch";
 
 import { WelcomeOnboardingGate } from "@/components/welcome";
 import { TrialExpiredPaywall, BillingDataGate, ModuleAccessGuard } from "@/components/access";
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { SeoHead } from "@/components/seo/SeoHead";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+
+// === Eager-loaded routes (critical path) ===
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import CriarAcesso from "./pages/CriarAcesso";
@@ -24,63 +29,85 @@ import PrimeiroAcesso from "./pages/PrimeiroAcesso";
 import Reconnecting from "./pages/Reconnecting";
 import Dashboard from "./pages/Dashboard";
 import Home from "./pages/Home";
-import ShippingLabels from "./pages/ShippingLabels";
-import LabelHeaderSettings from "./pages/LabelHeaderSettings";
-import ZPLConverter from "./pages/ZPLConverter";
-import AbcAnalysis from "./pages/AbcAnalysis";
-import TendenciasV2 from "./pages/TendenciasV2";
-import Mercado from "./pages/Mercado";
-import Custos from "./pages/Custos";
-import Concorrencia from "./pages/Concorrencia";
-import Radiografia from "./pages/Radiografia";
-import Tarefas from "./pages/Tarefas";
-import TarefaDetalhe from "./pages/TarefaDetalhe";
-import Settings from "./pages/Settings";
-import Blog from "./pages/Blog";
-import Planos from "./pages/Planos";
-import AdminPlanos from "./pages/AdminPlanos";
-import Publicidade from "./pages/Publicidade";
-import Promocoes from "./pages/Promocoes";
-import MensagensPosVenda from "./pages/MensagensPosVenda";
-import Perguntas from "./pages/Perguntas";
-import Admin from "./pages/Admin";
-import AdTimelineRadar from "./pages/AdTimelineRadar";
-import AdTimelineDetail from "./pages/AdTimelineDetail";
-import AdActionsCenter from "./pages/AdActionsCenter";
-import Seed from "./pages/Seed";
-import PostIts from "./pages/PostIts";
-import Sandbox from "./pages/Sandbox";
-import FreightManagement from "./pages/FreightManagement";
-import Precificacao from "./pages/Precificacao";
-import Comissoes from "./pages/Comissoes";
-import Financeiro from "./pages/financeiro/Financeiro";
-import Retrospectiva from "./pages/Retrospectiva";
-import Consultoria from "./pages/Consultoria";
-import ModuloDetalhe from "./pages/ModuloDetalhe";
-import ProductsPage from "./pages/ProductsPage";
-import ProductDetailPage from "./pages/ProductDetailPage";
-import TermosDeUso from "./pages/TermosDeUso";
-import PoliticaPrivacidade from "./pages/PoliticaPrivacidade";
-import PoliticaCookies from "./pages/PoliticaCookies";
-import Lgpd from "./pages/Lgpd";
 import NotFound from "./pages/NotFound";
-import SocialCalendar from "./pages/SocialCalendar";
-import ConsultantLibrary from "./pages/ConsultantLibrary";
-import PublicTipPage from "./pages/PublicTipPage";
-import { ZplViewerTool, TrendsLiteTool, PricingSimulatorTool, CommissionsTool } from "./pages/tools";
-import ClonarAnuncio from "./pages/ClonarAnuncio";
-import AjustePreco from "./pages/AjustePreco";
-import Atacado from "./pages/Atacado";
-import SystemStatus from "./pages/SystemStatus";
-import Contato from "./pages/Contato";
-import Suporte from "./pages/Suporte";
-import CentralDeAjuda from "./pages/CentralDeAjuda";
-import CentralDeAjudaArtigo from "./pages/CentralDeAjudaArtigo";
 import PublicLayout from "./components/PublicLayout";
 import { AdminRoute } from "./components/auth/AdminRoute";
 
+// === Lazy-loaded routes (heavy modules) ===
+const lazyRetry = (factory: () => Promise<any>) =>
+  lazy(() => factory().catch(() => new Promise<any>((resolve) => setTimeout(() => resolve(factory()), 1500))));
+
+const ShippingLabels = lazyRetry(() => import("./pages/ShippingLabels"));
+const LabelHeaderSettings = lazyRetry(() => import("./pages/LabelHeaderSettings"));
+const ZPLConverter = lazyRetry(() => import("./pages/ZPLConverter"));
+const AbcAnalysis = lazyRetry(() => import("./pages/AbcAnalysis"));
+const TendenciasV2 = lazyRetry(() => import("./pages/TendenciasV2"));
+const Mercado = lazyRetry(() => import("./pages/Mercado"));
+const Custos = lazyRetry(() => import("./pages/Custos"));
+const Concorrencia = lazyRetry(() => import("./pages/Concorrencia"));
+const Radiografia = lazyRetry(() => import("./pages/Radiografia"));
+const Tarefas = lazyRetry(() => import("./pages/Tarefas"));
+const TarefaDetalhe = lazyRetry(() => import("./pages/TarefaDetalhe"));
+const Settings = lazyRetry(() => import("./pages/Settings"));
+const Blog = lazyRetry(() => import("./pages/Blog"));
+const Planos = lazyRetry(() => import("./pages/Planos"));
+const AdminPlanos = lazyRetry(() => import("./pages/AdminPlanos"));
+const Publicidade = lazyRetry(() => import("./pages/Publicidade"));
+const Promocoes = lazyRetry(() => import("./pages/Promocoes"));
+const MensagensPosVenda = lazyRetry(() => import("./pages/MensagensPosVenda"));
+const Perguntas = lazyRetry(() => import("./pages/Perguntas"));
+const Admin = lazyRetry(() => import("./pages/Admin"));
+const AdTimelineRadar = lazyRetry(() => import("./pages/AdTimelineRadar"));
+const AdTimelineDetail = lazyRetry(() => import("./pages/AdTimelineDetail"));
+const AdActionsCenter = lazyRetry(() => import("./pages/AdActionsCenter"));
+const Seed = lazyRetry(() => import("./pages/Seed"));
+const PostIts = lazyRetry(() => import("./pages/PostIts"));
+const Sandbox = lazyRetry(() => import("./pages/Sandbox"));
+const FreightManagement = lazyRetry(() => import("./pages/FreightManagement"));
+const Precificacao = lazyRetry(() => import("./pages/Precificacao"));
+const Comissoes = lazyRetry(() => import("./pages/Comissoes"));
+const Financeiro = lazyRetry(() => import("./pages/financeiro/Financeiro"));
+const Retrospectiva = lazyRetry(() => import("./pages/Retrospectiva"));
+const Consultoria = lazyRetry(() => import("./pages/Consultoria"));
+const ModuloDetalhe = lazyRetry(() => import("./pages/ModuloDetalhe"));
+const ProductsPage = lazyRetry(() => import("./pages/ProductsPage"));
+const ProductDetailPage = lazyRetry(() => import("./pages/ProductDetailPage"));
+const TermosDeUso = lazyRetry(() => import("./pages/TermosDeUso"));
+const PoliticaPrivacidade = lazyRetry(() => import("./pages/PoliticaPrivacidade"));
+const PoliticaCookies = lazyRetry(() => import("./pages/PoliticaCookies"));
+const Lgpd = lazyRetry(() => import("./pages/Lgpd"));
+const SocialCalendar = lazyRetry(() => import("./pages/SocialCalendar"));
+const ConsultantLibrary = lazyRetry(() => import("./pages/ConsultantLibrary"));
+const PublicTipPage = lazyRetry(() => import("./pages/PublicTipPage"));
+const ClonarAnuncio = lazyRetry(() => import("./pages/ClonarAnuncio"));
+const AjustePreco = lazyRetry(() => import("./pages/AjustePreco"));
+const Atacado = lazyRetry(() => import("./pages/Atacado"));
+const SystemStatus = lazyRetry(() => import("./pages/SystemStatus"));
+const Contato = lazyRetry(() => import("./pages/Contato"));
+const Suporte = lazyRetry(() => import("./pages/Suporte"));
+const CentralDeAjuda = lazyRetry(() => import("./pages/CentralDeAjuda"));
+const CentralDeAjudaArtigo = lazyRetry(() => import("./pages/CentralDeAjudaArtigo"));
+
+// Tools - lazy loaded
+const ZplViewerTool = lazyRetry(() => import("./pages/tools/ZplViewerTool"));
+const TrendsLiteTool = lazyRetry(() => import("./pages/tools/TrendsLiteTool"));
+const PricingSimulatorTool = lazyRetry(() => import("./pages/tools/PricingSimulatorTool"));
+const CommissionsTool = lazyRetry(() => import("./pages/tools/CommissionsTool"));
+
 // NOTE: GlobalWatchdogs removed to prevent background activity storms on tab focus.
 // Cost/orders sync is now triggered only by explicit user actions or module-specific buttons.
+
+const LazyFallback = () => (
+  <div className="min-h-screen bg-background flex items-center justify-center">
+    <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
+  </div>
+);
+
+/** Inner component that uses hooks requiring QueryClient context */
+function AppInner() {
+  usePostLoginPrefetch();
+  return null;
+}
 
 const App = () => {
   const [queryClient] = useState(() => new QueryClient({
@@ -95,6 +122,19 @@ const App = () => {
       },
     },
   }));
+
+  const persistOptions = {
+    persister: queryPersister,
+    maxAge: PERSIST_MAX_AGE,
+    buster: PERSIST_BUSTER_KEY,
+    dehydrateOptions: {
+      shouldDehydrateQuery: (query: any) => {
+        // Only persist successful queries that match our whitelist
+        return query.state.status === 'success' && shouldPersistQuery(query.queryKey);
+      },
+    },
+  };
+
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     console.info("[MOUNT] App");
@@ -118,13 +158,14 @@ const App = () => {
   }, [queryClient]);
 
   return (
-    <QueryClientProvider client={queryClient}>
+    <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}>
       <RefreshPolicyProvider>
         <TooltipProvider>
           <ActiveAccountProvider>
             <UserAccessProvider>
               <Toaster />
               <Sonner />
+              <AppInner />
               <BrowserRouter>
               <ScrollToTop />
               <CookieConsentGate>
@@ -136,6 +177,7 @@ const App = () => {
               <TrialExpiredPaywall />
               <BillingDataGate />
               <ModuleAccessGuard>
+              <Suspense fallback={<LazyFallback />}>
               <Routes>
                 {/* ===== Public routes (no shell, no auth) ===== */}
                 <Route path="/" element={<Index />} />
@@ -224,6 +266,7 @@ const App = () => {
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />
               </Routes>
+              </Suspense>
               </ModuleAccessGuard>
               </CookieConsentGate>
               </BrowserRouter>
@@ -231,7 +274,7 @@ const App = () => {
           </ActiveAccountProvider>
         </TooltipProvider>
       </RefreshPolicyProvider>
-    </QueryClientProvider>
+    </PersistQueryClientProvider>
   );
 };
 

@@ -35,7 +35,7 @@ export function useCostSyncWatchdog(sellerId: string | null, enabled: boolean) {
   
 const lastActionRef = useRef<number>(0);
 const isResumingRef = useRef(false);
-const intervalRef = useRef<NodeJS.Timeout | null>(null);
+const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 const lastResumeAttemptRef = useRef<{ [key: string]: number }>({});
 
   const fetchState = useCallback(async () => {

@@ -20,7 +20,7 @@ interface UseCalcJobOptions {
 export function useCostCalcJob({ sellerId, onComplete }: UseCalcJobOptions) {
   const [job, setJob] = useState<CalcJob | null>(null);
   const [starting, setStarting] = useState(false);
-  const pollRef = useRef<NodeJS.Timeout | null>(null);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isActive = job?.status === 'queued' || job?.status === 'running';
 

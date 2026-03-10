@@ -310,7 +310,7 @@ export function SalesDashboard() {
   }, [dateFilter, isFirstLoad, toast, activeSellerId, t, getCached, setCached, shouldRefreshRecent]);
 
   // Auto-refresh reference
-  const autoRefreshRef = useRef<NodeJS.Timeout | null>(null);
+  const autoRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Reset states when account changes
   useEffect(() => {

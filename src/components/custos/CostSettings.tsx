@@ -51,7 +51,7 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
   const [taxLoading, setTaxLoading] = useState(false);
   const [savingTax, setSavingTax] = useState(false);
 
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastBillingScope = useRef<string>("history");
 
   // Access control
