@@ -43,8 +43,18 @@ export default function AdTimelineDetail() {
   const { data: events, isLoading: eventsLoading } = useAdTimelineEvents(workspaceId, itemId || null);
   const { data: actions, isLoading: actionsLoading } = useAdLifecycleActions(workspaceId);
   const createActionMutation = useCreateAction();
+  const enrichMutation = useEnrichTimelineItems();
+  const enrichTriggeredRef = useRef(false);
 
   const itemActions = actions?.filter(a => a.item_id === itemId) || [];
+
+  // Trigger background enrichment if status is missing
+  useEffect(() => {
+    if (item && !item.status && itemId && !enrichTriggeredRef.current && !enrichMutation.isPending) {
+      enrichTriggeredRef.current = true;
+      enrichMutation.mutate({ itemIds: [itemId], mlAccountId: sellerId || undefined });
+    }
+  }, [item, itemId, sellerId]);
 
   const handleCreateAction = (type: ActionType) => {
     setActionType(type);
