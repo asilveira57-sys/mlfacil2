@@ -50,7 +50,7 @@ let isProcessingQueue = false;
 
 export function useCatalogEnrichment() {
   const globalCache = useTrendsGlobalCache();
-  const batchTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const batchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [enrichmentProgress, setEnrichmentProgress] = useState({ total: 0, completed: 0 });
 
   // ============================================================

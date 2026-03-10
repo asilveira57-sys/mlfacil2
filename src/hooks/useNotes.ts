@@ -17,7 +17,7 @@ interface UseNotesOptions {
 export function useNotes({ workspaceId, companyId, search, status = 'active' }: UseNotesOptions) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [autoSaveTimers] = useState(() => new Map<string, NodeJS.Timeout>());
+  const [autoSaveTimers] = useState(() => new Map<string, ReturnType<typeof setTimeout>>());
   const lastSaveRef = useRef<Record<string, number>>({});
 
   // Only use companyId if it's a valid UUID — otherwise ignore it

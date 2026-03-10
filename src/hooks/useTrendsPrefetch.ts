@@ -10,7 +10,7 @@ export function useTrendsPrefetch(
 ) {
   const cache = useTrendsCache();
   const telemetry = useTrendsTelemetry();
-  const hoverTimers = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const hoverTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const prefetchedCategories = useRef<Set<string>>(new Set());
 
   // Start prefetch timer on mouse enter

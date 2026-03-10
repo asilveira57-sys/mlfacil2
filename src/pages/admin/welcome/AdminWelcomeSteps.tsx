@@ -473,7 +473,7 @@ export function AdminWelcomeSteps({ flow, onBack }: Props) {
         onClose={() => setFormDialog({ open: false, step: null })}
         initial={formDialog.step}
         flowId={flow.id}
-        nextOrdem={(sorted.at(-1)?.ordem ?? 0) + 1}
+        nextOrdem={(sorted.length > 0 ? sorted[sorted.length - 1]?.ordem ?? 0 : 0) + 1}
       />
 
       {/* Delete confirm */}

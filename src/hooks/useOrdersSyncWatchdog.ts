@@ -23,7 +23,7 @@ export function useOrdersSyncWatchdog(sellerId: string | null, enabled: boolean)
 
   const lastActionRef = useRef<number>(0);
   const isSyncingRef = useRef(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchState = useCallback(async () => {
     if (!sellerId) return;

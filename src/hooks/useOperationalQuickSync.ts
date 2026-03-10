@@ -48,8 +48,8 @@ export function useOperationalQuickSync({
     secondsUntilCooldownEnd: 0,
   });
 
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isRunningRef = useRef(false);
   const lastManualRunRef = useRef<number>(0);
 
