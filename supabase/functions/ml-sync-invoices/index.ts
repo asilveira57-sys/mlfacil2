@@ -145,7 +145,11 @@ async function processInvoicesInBackground(
 
       // Update progress
       await supabaseAdmin.from('sync_jobs').update({
-        processed_records: synced + errors,
+        metadata: {
+          seller_id: sellerId,
+          total_records: orderIds.length,
+          processed_records: synced + errors,
+        },
       }).eq('id', jobId);
 
       // Small yield between batches
