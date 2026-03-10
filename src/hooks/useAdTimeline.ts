@@ -83,6 +83,38 @@ export function useAdTimelineStats(workspaceId: string | null, filters: Timeline
           listings?.forEach(l => listingMap.set(l.item_id, l));
         }
 
+        // Fallback: for items not found in listings cache, try order items cache
+        const missingIds = itemIds.filter(id => !listingMap.has(id));
+        if (missingIds.length > 0) {
+          for (let i = 0; i < missingIds.length; i += batchSize) {
+            const batchIds = missingIds.slice(i, i + batchSize);
+            const { data: orderItems } = await supabase
+              .from('meli_order_items_cache')
+              .select('item_id, title, thumbnail, unit_price, variation_id, sku')
+              .in('item_id', batchIds)
+              .order('created_at_meli', { ascending: false });
+
+            // Deduplicate: keep only the first (most recent) per item_id
+            const seen = new Set<string>();
+            orderItems?.forEach(oi => {
+              if (!seen.has(oi.item_id)) {
+                seen.add(oi.item_id);
+                listingMap.set(oi.item_id, {
+                  item_id: oi.item_id,
+                  title: oi.title,
+                  thumbnail: oi.thumbnail,
+                  price: oi.unit_price,
+                  sku: oi.sku,
+                  variation_id: oi.variation_id,
+                  // These fields don't exist in order_items_cache
+                  status: null,
+                  available_quantity: null,
+                });
+              }
+            });
+          }
+        }
+
         return allStatsData.map(stat => ({
           ...stat,
           ...listingMap.get(stat.item_id),

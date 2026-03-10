@@ -514,7 +514,7 @@ export default function AdTimelineRadar() {
                           {item.title || item.item_id}
                         </div>
                         <div className="text-xs text-muted-foreground truncate max-w-[250px]">
-                          {[item.sku && `SKU: ${item.sku}`, item.variation_id && `Var: ${item.variation_id}`].filter(Boolean).join(' • ') || item.item_id}
+                          {item.item_id}{item.sku ? ` • SKU: ${item.sku}` : ''}
                         </div>
                       </TableCell>
                       <TableCell>
