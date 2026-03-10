@@ -608,90 +608,52 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         }
       }
 
-      // === PHASE 4.5: Re-sync shipments with ACTIVE statuses (may have changed) ===
-      if (!silent) {
-        setSyncProgress('Atualizando status de envios ativos...');
-      }
+      // Phase 4.5 REMOVED: Active shipment re-sync is handled by the
+      // shipping-status-sync cron job every 30 minutes. No need to re-fetch
+      // all active shipments during manual sync — it was the main bottleneck.
 
-      try {
-        // Fetch shipments that have active/pending statuses - these may have changed in ML
-        const ACTIVE_STATUSES = ['ready_to_ship', 'handling', 'pending'];
-        type ActiveShipment = { shipment_id: string };
-        
-        const activeShipments = await fetchAllRowsPaginated<ActiveShipment>(
-          async (offset, limit) => {
-            const { data, error } = await supabase
-              .from('meli_shipments_cache')
-              .select('shipment_id')
-              .eq('seller_id', sellerId)
-              .in('shipment_status', ACTIVE_STATUSES)
-              .order('last_sync_at', { ascending: true })
-              .range(offset, offset + limit - 1);
-            return { data: data as ActiveShipment[] | null, error };
-          }
-        );
-
-        const activeShipmentIds = activeShipments.map(s => s.shipment_id);
-        console.log(`Re-syncing ${activeShipmentIds.length} shipments with active statuses`);
-
-        if (activeShipmentIds.length > 0) {
-          const totalActiveBatches = Math.ceil(activeShipmentIds.length / SHIPMENT_SYNC_BATCH);
-          
-          for (let i = 0; i < activeShipmentIds.length; i += SHIPMENT_SYNC_BATCH) {
-            const batchNum = Math.floor(i / SHIPMENT_SYNC_BATCH) + 1;
-            const batch = activeShipmentIds.slice(i, i + SHIPMENT_SYNC_BATCH);
-            
-            if (!silent) {
-              setSyncProgress(`Atualizando status ${batchNum}/${totalActiveBatches} (${batch.length})`);
-            }
-            
-            const resyncResponse = await supabase.functions.invoke('ml-sync-shipments', {
-              headers,
-              body: { seller_id: sellerId, shipment_ids: batch },
-            });
-            
-            if (resyncResponse.data?.job_id) {
-              await waitForJob(resyncResponse.data.job_id, silent);
-            }
-            
-            if (i + SHIPMENT_SYNC_BATCH < activeShipmentIds.length) {
-              await sleep(500);
-            }
-          }
-        }
-      } catch (err) {
-        console.error('Error re-syncing active shipments:', err);
-      }
-
-      // === PHASE 5: Sync invoices in batches ===
+      // === PHASE 5: Sync invoices ONLY for orders missing invoice data ===
       if (!silent) {
         setSyncPhase('invoices');
         setSyncProgress('Sincronizando notas fiscais...');
       }
 
       if (orderIds.length > 0) {
-        const totalInvoiceBatches = Math.ceil(orderIds.length / INVOICE_SYNC_BATCH);
-        
-        for (let i = 0; i < orderIds.length; i += INVOICE_SYNC_BATCH) {
-          const batchNum = Math.floor(i / INVOICE_SYNC_BATCH) + 1;
-          const batch = orderIds.slice(i, i + INVOICE_SYNC_BATCH);
+        // Only fetch invoices for orders that don't have invoice data yet
+        const { data: ordersWithoutInvoice } = await supabase
+          .from('meli_orders_cache')
+          .select('order_id')
+          .eq('seller_id', sellerId)
+          .in('order_id', orderIds)
+          .is('invoice_key', null)
+          .not('order_status', 'in', '(cancelled)');
+
+        const pendingInvoiceIds = (ordersWithoutInvoice || []).map(o => o.order_id);
+        console.log(`Invoices: ${orderIds.length} total orders, ${pendingInvoiceIds.length} missing invoice`);
+
+        if (pendingInvoiceIds.length > 0) {
+          const totalInvoiceBatches = Math.ceil(pendingInvoiceIds.length / INVOICE_SYNC_BATCH);
           
-          if (!silent && totalInvoiceBatches > 1) {
-            setSyncProgress(`NFs ${batchNum}/${totalInvoiceBatches}`);
-          }
-          
-          const invoicesResponse = await supabase.functions.invoke('ml-sync-invoices', {
-            headers,
-            body: { seller_id: sellerId, order_ids: batch },
-          });
-          
-          if (invoicesResponse.data?.job_id) {
-            await waitForJob(invoicesResponse.data.job_id, silent);
-          }
-          
-          // Small delay between batches
-          if (i + INVOICE_SYNC_BATCH < orderIds.length) {
-            await sleep(300);
+          for (let i = 0; i < pendingInvoiceIds.length; i += INVOICE_SYNC_BATCH) {
+            const batchNum = Math.floor(i / INVOICE_SYNC_BATCH) + 1;
+            const batch = pendingInvoiceIds.slice(i, i + INVOICE_SYNC_BATCH);
+            
+            if (!silent && totalInvoiceBatches > 1) {
+              setSyncProgress(`NFs ${batchNum}/${totalInvoiceBatches}`);
+            }
+            
+            const invoicesResponse = await supabase.functions.invoke('ml-sync-invoices', {
+              headers,
+              body: { seller_id: sellerId, order_ids: batch },
+            });
+            
+            if (invoicesResponse.data?.job_id) {
+              await waitForJob(invoicesResponse.data.job_id, silent);
+            }
+            
+            if (i + INVOICE_SYNC_BATCH < pendingInvoiceIds.length) {
+              await sleep(300);
+            }
           }
         }
       }
