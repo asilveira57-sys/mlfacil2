@@ -19284,6 +19284,17 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      get_order_items_enrichment: {
+        Args: { p_item_ids: string[] }
+        Returns: {
+          item_id: string
+          sku: string
+          thumbnail: string
+          title: string
+          unit_price: number
+          variation_id: string
+        }[]
+      }
       get_orders_needing_cost_sync: {
         Args: { p_limit?: number; p_offset?: number; p_seller_id: string }
         Returns: {
