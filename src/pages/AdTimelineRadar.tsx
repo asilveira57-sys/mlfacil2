@@ -177,6 +177,20 @@ export default function AdTimelineRadar() {
 
   const recalculateMutation = useRecalculateTimeline();
   const createActionMutation = useCreateAction();
+  const enrichMutation = useEnrichTimelineItems();
+  const enrichTriggeredRef = useRef(false);
+
+  // Background enrichment: fetch status/stock for items missing listing cache data
+  useEffect(() => {
+    if (!stats?.length || enrichTriggeredRef.current || enrichMutation.isPending) return;
+    const missingIds = stats.filter(s => !s.status).map(s => s.item_id);
+    if (missingIds.length > 0) {
+      enrichTriggeredRef.current = true;
+      // Enrich max 200 items at a time to stay within edge function timeout
+      const batch = missingIds.slice(0, 200);
+      enrichMutation.mutate({ itemIds: batch, mlAccountId });
+    }
+  }, [stats, mlAccountId]);
 
   const handleRecalculate = () => {
     if (workspaceId) {
