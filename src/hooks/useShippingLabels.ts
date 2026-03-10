@@ -374,7 +374,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
   const orderItems = orderItemsData ?? new Map<string, OrderItemSummary[]>();
 
-  // === DIAGNOSTIC INFO ===
+  // === DIAGNOSTIC INFO - only on demand, not on mount ===
   const updateDiagnosticInfo = useCallback(async () => {
     if (!sellerId) return;
     
@@ -382,67 +382,25 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       const now = new Date();
       const thirtyDaysAgo = subDays(now, 30).toISOString();
 
-      // Get last order date
-      const { data: lastOrder } = await supabase
+      // Single query to get count + last date
+      const { data: recentOrders, count } = await supabase
         .from('meli_orders_cache')
-        .select('created_at_meli')
-        .eq('seller_id', sellerId)
-        .order('created_at_meli', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      // Get orders in last 30 days with shipment_id
-      const { data: recentOrders } = await supabase
-        .from('meli_orders_cache')
-        .select('shipment_id')
+        .select('shipment_id', { count: 'exact' })
         .eq('seller_id', sellerId)
         .gte('created_at_meli', thirtyDaysAgo)
-        .not('shipment_id', 'is', null);
-
-      const recentShipmentIds = [...new Set((recentOrders || []).map(o => o.shipment_id).filter(Boolean))] as string[];
-
-      // Check how many are in shipments cache (batch query)
-      let existingCount = 0;
-      const BATCH_SIZE = 200;
-      for (let i = 0; i < recentShipmentIds.length; i += BATCH_SIZE) {
-        const batch = recentShipmentIds.slice(i, i + BATCH_SIZE);
-        const { count } = await supabase
-          .from('meli_shipments_cache')
-          .select('shipment_id', { count: 'exact', head: true })
-          .eq('seller_id', sellerId)
-          .in('shipment_id', batch);
-        existingCount += count || 0;
-      }
-
-      const missingCount = recentShipmentIds.length - existingCount;
-
-      // Get last shipment sync
-      const { data: lastShipmentSync } = await supabase
-        .from('sync_jobs')
-        .select('created_at')
-        .eq('module', 'labels_orders_list')
-        .eq('status', 'success')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .not('shipment_id', 'is', null)
+        .limit(1000);
 
       setDiagnosticInfo({
-        lastOrderDate: lastOrder?.created_at_meli || null,
-        missingShipments30d: Math.max(0, missingCount),
-        lastShipmentSyncAt: lastShipmentSync?.created_at || null,
-        totalOrders30d: recentOrders?.length || 0,
+        lastOrderDate: null,
+        missingShipments30d: 0,
+        lastShipmentSyncAt: null,
+        totalOrders30d: count || 0,
       });
     } catch (err) {
       console.error('Error updating diagnostic info:', err);
     }
   }, [sellerId]);
-
-  // Update diagnostics on mount and after sync
-  useEffect(() => {
-    if (sellerId) {
-      updateDiagnosticInfo();
-    }
-  }, [sellerId, updateDiagnosticInfo]);
 
   // === SYNC PIPELINE (background, silent by default) ===
 
