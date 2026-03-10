@@ -403,9 +403,10 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
   // === SYNC PIPELINE (background, silent by default) ===
 
-// Wait for a specific job to complete (max 45s instead of 120s)
+// Wait for a specific job to complete - tolerant to both old and new schema
   const waitForJob = useCallback(async (jobId: string, silent: boolean, maxAttempts = 22): Promise<boolean> => {
     let attempts = 0;
+    let notFoundCount = 0;
     
     while (attempts < maxAttempts) {
       await sleep(2000);
@@ -417,18 +418,30 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         .eq('id', jobId)
         .maybeSingle();
       
-      if (!job) continue;
+      if (!job) {
+        notFoundCount++;
+        // Fail-fast: if job not found after 3 attempts, stop waiting
+        if (notFoundCount >= 3) {
+          console.warn(`Job ${jobId} not found after ${notFoundCount} attempts, skipping wait`);
+          return true; // Continue pipeline instead of blocking
+        }
+        continue;
+      }
+      
       const meta = (job.metadata as Record<string, unknown>) || {};
       const procRec = (meta.processed_records as number) || 0;
       const totRec = (meta.total_records as number) || 0;
+      const status = job.status;
       
-      if (job.status === 'success') {
+      // Accept both old (done) and new (success) completion statuses
+      if (status === 'success' || status === 'done') {
         console.log(`Job ${jobId} completed: ${procRec}/${totRec}`);
         return true;
       }
       
-      if (job.status === 'failed') {
-        console.error(`Job ${jobId} failed`);
+      // Accept both old (error) and new (failed/canceled) failure statuses
+      if (status === 'failed' || status === 'error' || status === 'canceled') {
+        console.error(`Job ${jobId} failed with status: ${status}`);
         return false;
       }
       
