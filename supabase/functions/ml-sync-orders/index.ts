@@ -689,16 +689,33 @@ serve(async (req) => {
       console.log('[ml-sync-orders] Token refreshed successfully before sync');
     }
 
-    // Create job record
+    // Resolve tenant_id for sync_jobs
+    let tenantId: string | null = null;
+    if (mlAccount.company_id) {
+      const { data: company } = await supabaseAdmin
+        .from('companies')
+        .select('tenant_id')
+        .eq('id', mlAccount.company_id)
+        .maybeSingle();
+      tenantId = company?.tenant_id || mlAccount.company_id;
+    }
+    if (!tenantId) tenantId = mlAccount.company_id || user.id;
+
+    // Create job record (new schema)
     const jobId = crypto.randomUUID();
     const { error: jobError } = await supabaseAdmin.from('sync_jobs').insert({
       id: jobId,
-      user_id: user.id,
-      seller_id: seller_id,
-      job_type: 'orders',
-      status: 'processing',
-      total_records: 0,
-      processed_records: 0,
+      tenant_id: tenantId,
+      module: 'shipping_labels_orders',
+      scope: 'manual',
+      status: 'running',
+      started_at: new Date().toISOString(),
+      created_by_user_id: user.id,
+      metadata: {
+        seller_id: seller_id,
+        total_records: 0,
+        processed_records: 0,
+      },
     });
 
     if (jobError) {
