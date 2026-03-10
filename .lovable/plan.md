@@ -1,66 +1,50 @@
 
-# Plano Mestre — Jornada Completa do Seller
+Diagnóstico confirmado (o que quebrou)
+- A lentidão de ~4 minutos e o resultado inconsistente vêm de uma quebra estrutural no pipeline de sync de etiquetas.
+- Evidência de produção: logs da função de pedidos mostram erro recorrente ao criar job:
+  - "Could not find the 'job_type' column of 'sync_jobs'".
+- Causa raiz:
+  1) O schema atual de `sync_jobs` foi migrado para (`tenant_id`, `module`, `scope`, status `queued/running/success/failed/canceled`, `metadata`).
+  2) As funções `ml-sync-orders`, `ml-sync-shipments` e `ml-sync-invoices` ainda usam schema antigo (`job_type`, `user_id`, `seller_id`, `processed_records`, `completed_at`, status `processing/done/error`).
+  3) O hook `useShippingLabels` espera status `success/failed` e depende de polling do job; como o job não é criado, ele fica aguardando timeout por fase (multiplica o tempo total) e segue com dados parcialmente desatualizados.
 
-## Status de cada item
+Plano de correção (hotfix prioritário)
+1) Corrigir criação/atualização de job nas 3 funções de sync
+- Arquivos:  
+  - `supabase/functions/ml-sync-orders/index.ts`  
+  - `supabase/functions/ml-sync-shipments/index.ts`  
+  - `supabase/functions/ml-sync-invoices/index.ts`
+- Ajustes:
+  - Inserir em `sync_jobs` no formato novo (`tenant_id`, `module`, `scope`, `status`, `metadata`).
+  - Atualizar progresso dentro de `metadata` (ex.: `processed_records`, `total_records`).
+  - Finalizar com `success`/`failed` (não `done`/`error`).
 
-### ✅ Já existe no sistema
-| # | Item | Status |
-|---|------|--------|
-| 2 | Cadastro (email/senha + confirmação) | ✅ Implementado |
-| 4 | Painel inicial (dashboard) | ✅ Existe (sem velocímetro) |
-| 5 | Conexão ML via OAuth | ✅ Implementado |
-| 6 | Elegibilidade para teste (>10 vendas) | ✅ Verificação existe na company |
-| 8 | Módulo Etiquetas (vendas abertas) | ✅ Implementado |
-| 9 | Módulo Custos (sem Passo 2) | ✅ Atualizado agora |
-| 13 | Seleção automática de plano | ✅ `useUserSalesVolume` + filtro de planos |
-| 15 | Cadastro fiscal (PF/PJ) | ✅ `company_billing` existe |
-| 12 | Bloqueio pós-trial | ✅ Parcial (trial_expired bloqueia) |
+2) Tornar o frontend tolerante a ambos formatos durante transição
+- Arquivo: `src/hooks/useShippingLabels.ts`
+- Ajustes:
+  - `waitForJob` aceitar estados:  
+    - sucesso: `success` ou `done`  
+    - falha: `failed`, `error`, `canceled`
+  - Se `job_id` não existir na tabela após poucas tentativas, abortar espera longa (fail-fast) e continuar com fallback de refetch controlado.
 
-### 🔶 Existe parcialmente / precisa ajuste
-| # | Item | O que falta |
-|---|------|-------------|
-| 1 | Landing com 3 botões | Landing existe mas precisa revisar CTAs |
-| 3 | Tela de boas-vindas (primeiro acesso) | Onboarding existe mas pode não ter welcome screen |
-| 7 | Sincronização inicial automática (30d) | Import manual existe, falta auto-trigger pós-OAuth |
-| 10 | Módulo ADS (sync pós-pagamento) | ADS existe, falta gate de trial |
-| 11 | Linha do Tempo (30d trial vs 1yr pago) | Módulo existe, falta limitar por trial |
-| 14 | Dados fiscais obrigatórios pós-pagamento | Tela existe, falta gate de bloqueio |
+3) Corrigir consistência do fluxo de sync manual
+- Arquivo: `src/hooks/useShippingLabels.ts`
+- Ajustes:
+  - Só avançar de fase quando a anterior realmente concluir.
+  - Refetch + invalidate após cada fase crítica (orders/shipments/invoices) com checkpoints.
 
-### 🔴 Precisa ser desenvolvido
-| # | Item | Descrição |
-|---|------|-----------|
-| 4b | Velocímetro de ativação | Widget de progresso no dashboard |
-| 9b | Tabela `sync_jobs` + lock após sucesso | Controle de execução de syncs |
-| 9c | Lock do botão 1 ano após sucesso | Bloquear re-execução pós-sucesso |
-| 16 | Multi-conta (soma de vendas) | Lógica de soma cross-account |
-| 17-18 | Estados de conta + aviso pré-conexão | Workflow de nova conta |
-| 19 | Verificação de limite + pending_upgrade | Gate automático |
-| 20 | Upgrade com pró-rata | Cálculo proporcional |
-| 21 | Crescimento natural → bloqueio | Detecção automática de excesso |
-| 22 | Proteção contra abuso (logs) | Audit trail de conexões/upgrades |
+4) Ajuste de rastreabilidade (para não regredir)
+- Padronizar `module/scope` dos jobs de etiquetas (ex.: `shipping_labels_orders`, `shipping_labels_shipments`, `shipping_labels_invoices`).
+- Garantir metadados mínimos para debug: contadores, `seller_id`, duração, erro.
 
-## Ordem sugerida de implementação
+Validação pós-correção (critério de pronto)
+- Executar sync manual em `/shipping-labels` e confirmar:
+  - tempo total cai de ~4 min para janela compatível com volume real;
+  - jobs aparecem em `sync_jobs` com status válido;
+  - progressão visual não trava por timeout artificial;
+  - contagens e status finais batem com `get_shipping_orders`.
+- Conferir logs recentes das 3 funções sem erro de coluna inexistente.
 
-### Fase 1 — Gates e bloqueios (impacto imediato)
-1. Velocímetro de ativação no dashboard
-2. Tabela `sync_jobs` + controle de locks
-3. Gate de dados fiscais pós-pagamento
-4. Auto-sync 30d após OAuth
-
-### Fase 2 — Trial gates nos módulos ✅
-5. ✅ ADS: banner de trial + sync bloqueado via ML API gate no backend
-6. ✅ Linha do Tempo: banner de trial informando limitação a 30d
-7. ✅ Etiquetas: filtro "Todos" agora capped a 30 dias
-
-### Fase 3 — Multi-conta e upgrade ✅
-8. ✅ Multi-conta: soma de vendas (get_tenant_total_sales + check_tenant_plan_limit)
-9. ✅ Estados de conta (account_state enum: active/pending_upgrade/disabled/error)
-10. ✅ Upgrade com pró-rata (calculate_prorata_upgrade + execute_plan_upgrade)
-11. ✅ Crescimento natural → bloqueio (PlanLimitBanner + useTenantLimits)
-12. ✅ Aviso pré-conexão de nova conta (AccountConnectionWarning)
-13. ✅ Audit log (tenant_limit_log)
-
-### Fase 4 — Landing e onboarding ✅
-14. ✅ Landing com 3 CTAs (Login, Cadastro, Planos) no header e hero
-15. ✅ Welcome screen pós-confirmação de email (WelcomeScreen + aviso ML)
-16. ✅ Proteção contra abuso (system_audit_log + tenant_limit_log)
+Detalhes técnicos (resumo)
+- Problema principal não é apenas performance: é incompatibilidade entre contrato de job (frontend + edge) e schema real da tabela.
+- Corrigir primeiro o contrato de job resolve simultaneamente: tempo, previsibilidade e confiabilidade do resultado.
