@@ -135,21 +135,31 @@ export function useAdTimelineBucketCounts(workspaceId: string | null, mlAccountI
       // Resolve ml_user_id to UUID
       const mlAccountUuid = await resolveMlAccountUuid(mlAccountId);
 
-      let query = supabase
-        .from('ad_timeline_stats')
-        .select('status_bucket')
-        .eq('workspace_id', workspaceId);
+      // Fetch ALL rows with pagination (no 1000-row limit)
+      let allData: any[] = [];
+      let offset = 0;
+      let hasMore = true;
 
-      if (mlAccountUuid) {
-        query = query.eq('ml_account_id', mlAccountUuid);
+      while (hasMore) {
+        let query = supabase
+          .from('ad_timeline_stats')
+          .select('status_bucket')
+          .eq('workspace_id', workspaceId);
+
+        if (mlAccountUuid) {
+          query = query.eq('ml_account_id', mlAccountUuid);
+        }
+
+        const { data, error } = await query.range(offset, offset + PAGE_SIZE - 1);
+        if (error) throw error;
+
+        allData = allData.concat(data || []);
+        hasMore = (data?.length || 0) === PAGE_SIZE;
+        offset += PAGE_SIZE;
       }
 
-      const { data, error } = await query;
-
-      if (error) throw error;
-
       const counts: BucketCounts = { OK: 0, '30D': 0, '60D': 0, '90D': 0, '120D': 0, NO_SALES: 0, total: 0 };
-      data?.forEach(row => {
+      allData.forEach(row => {
         const bucket = row.status_bucket as StatusBucket;
         if (counts[bucket] !== undefined) {
           counts[bucket]++;
