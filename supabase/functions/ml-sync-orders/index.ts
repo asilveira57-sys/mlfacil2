@@ -642,7 +642,7 @@ serve(async (req) => {
     // Get ML account with access token AND refresh token
     const { data: mlAccount, error: mlError } = await supabaseAdmin
       .from('ml_accounts')
-      .select('id, access_token, refresh_token, token_expires_at, ml_user_id')
+      .select('id, access_token, refresh_token, token_expires_at, ml_user_id, company_id')
       .eq('user_id', user.id)
       .eq('ml_user_id', seller_id)
       .eq('is_active', true)
