@@ -446,11 +446,11 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
   // === SYNC PIPELINE (background, silent by default) ===
 
-  // Wait for a specific job to complete
-  const waitForJob = useCallback(async (jobId: string, silent: boolean): Promise<boolean> => {
+// Wait for a specific job to complete (max 45s instead of 120s)
+  const waitForJob = useCallback(async (jobId: string, silent: boolean, maxAttempts = 22): Promise<boolean> => {
     let attempts = 0;
     
-    while (attempts < MAX_POLL_ATTEMPTS) {
+    while (attempts < maxAttempts) {
       await sleep(2000);
       attempts++;
       
@@ -481,7 +481,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       }
     }
     
-    console.warn(`Job ${jobId} timed out after ${MAX_POLL_ATTEMPTS * 2} seconds`);
+    console.warn(`Job ${jobId} timed out after ${maxAttempts * 2} seconds`);
     return false;
   }, []);
 
