@@ -330,16 +330,33 @@ serve(async (req) => {
       (ordersMapping || []).map(o => [o.shipment_id, o.order_id])
     );
 
-    // Create job record
+    // Resolve tenant_id for sync_jobs
+    let tenantId: string | null = null;
+    if (mlAccount.company_id) {
+      const { data: company } = await supabaseAdmin
+        .from('companies')
+        .select('tenant_id')
+        .eq('id', mlAccount.company_id)
+        .maybeSingle();
+      tenantId = company?.tenant_id || mlAccount.company_id;
+    }
+    if (!tenantId) tenantId = mlAccount.company_id || user.id;
+
+    // Create job record (new schema)
     const jobId = crypto.randomUUID();
     await supabaseAdmin.from('sync_jobs').insert({
       id: jobId,
-      user_id: user.id,
-      seller_id: seller_id,
-      job_type: 'shipments',
-      status: 'processing',
-      total_records: shipment_ids.length,
-      processed_records: 0,
+      tenant_id: tenantId,
+      module: 'shipping_labels_shipments',
+      scope: 'manual',
+      status: 'running',
+      started_at: new Date().toISOString(),
+      created_by_user_id: user.id,
+      metadata: {
+        seller_id: seller_id,
+        total_records: shipment_ids.length,
+        processed_records: 0,
+      },
     });
 
     // Start background processing
