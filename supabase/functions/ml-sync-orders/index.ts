@@ -578,9 +578,14 @@ async function processOrdersInBackground(
 
     // Mark job as done
     await supabaseAdmin.from('sync_jobs').update({
-      status: 'done',
-      processed_records: processed,
-      completed_at: new Date().toISOString(),
+      status: 'success',
+      finished_at: new Date().toISOString(),
+      metadata: {
+        seller_id: sellerId,
+        total_records: allOrders.length,
+        processed_records: processed,
+        items_synced: allOrderItems.length,
+      },
     }).eq('id', jobId);
 
   } catch (error) {
