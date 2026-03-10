@@ -162,10 +162,15 @@ async function processInvoicesInBackground(
 
     // Mark job as done
     await supabaseAdmin.from('sync_jobs').update({
-      status: errors > 0 && synced === 0 ? 'error' : 'done',
-      processed_records: synced,
-      error_message: errors > 0 ? `${errors} invoices failed` : null,
-      completed_at: new Date().toISOString(),
+      status: errors > 0 && synced === 0 ? 'failed' : 'success',
+      finished_at: new Date().toISOString(),
+      metadata: {
+        seller_id: sellerId,
+        total_records: orderIds.length,
+        processed_records: synced,
+        errors: errors > 0 ? errors : undefined,
+        error_message: errors > 0 ? `${errors} invoices failed` : undefined,
+      },
     }).eq('id', jobId);
 
   } catch (error) {
