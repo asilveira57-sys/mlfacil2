@@ -5,6 +5,8 @@ project_id = "rfckrbqwdsejicjlxqdv"
     verify_jwt = false
   [functions.ad-item-snapshot]
     verify_jwt = false
+  [functions.ad-timeline-enrich-items]
+    verify_jwt = false
   [functions.ad-timeline-recalculate]
     verify_jwt = false
   [functions.ads-ai-consultant]
