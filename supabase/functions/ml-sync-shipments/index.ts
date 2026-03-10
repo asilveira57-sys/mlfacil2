@@ -244,9 +244,9 @@ async function processShipmentsInBackground(
   } catch (error) {
     console.error(`[Job ${jobId}] Background processing error:`, error);
     await supabaseAdmin.from('sync_jobs').update({
-      status: 'error',
-      error_message: error instanceof Error ? error.message : 'Unknown error',
-      completed_at: new Date().toISOString(),
+      status: 'failed',
+      finished_at: new Date().toISOString(),
+      metadata: { seller_id: sellerId, error_message: error instanceof Error ? error.message : 'Unknown error' },
     }).eq('id', jobId);
   }
 }
