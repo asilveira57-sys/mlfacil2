@@ -196,9 +196,9 @@ async function processOrdersInBackground(
         console.error(`[Job ${jobId}] ML API error:`, errorText);
         
         await supabaseAdmin.from('sync_jobs').update({
-          status: 'error',
-          error_message: `ML API error: ${mlResponse.status} - Token refresh failed. Por favor, reconecte sua conta ML.`,
-          completed_at: new Date().toISOString(),
+          status: 'failed',
+          finished_at: new Date().toISOString(),
+          metadata: { seller_id: sellerId, error_message: `ML API error: ${mlResponse!.status} - Token refresh failed` },
         }).eq('id', jobId);
         
         return;
