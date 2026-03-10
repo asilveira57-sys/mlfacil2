@@ -196,9 +196,9 @@ async function processOrdersInBackground(
         console.error(`[Job ${jobId}] ML API error:`, errorText);
         
         await supabaseAdmin.from('sync_jobs').update({
-          status: 'error',
-          error_message: `ML API error: ${mlResponse.status} - Token refresh failed. Por favor, reconecte sua conta ML.`,
-          completed_at: new Date().toISOString(),
+          status: 'failed',
+          finished_at: new Date().toISOString(),
+          metadata: { seller_id: sellerId, error_message: `ML API error: ${mlResponse!.status} - Token refresh failed` },
         }).eq('id', jobId);
         
         return;
@@ -206,9 +206,9 @@ async function processOrdersInBackground(
       
       if (!mlResponse || !mlResponse.ok) {
         await supabaseAdmin.from('sync_jobs').update({
-          status: 'error',
-          error_message: 'Failed to fetch orders after retries',
-          completed_at: new Date().toISOString(),
+          status: 'failed',
+          finished_at: new Date().toISOString(),
+          metadata: { seller_id: sellerId, error_message: 'Failed to fetch orders after retries' },
         }).eq('id', jobId);
         return;
       }
@@ -222,8 +222,11 @@ async function processOrdersInBackground(
 
       // Update progress
       await supabaseAdmin.from('sync_jobs').update({
-        total_records: totalFromApi,
-        processed_records: allOrders.length,
+        metadata: {
+          seller_id: sellerId,
+          total_records: totalFromApi,
+          processed_records: allOrders.length,
+        },
       }).eq('id', jobId);
 
       if (orders.length < limit || allOrders.length >= totalFromApi) {
@@ -422,7 +425,11 @@ async function processOrdersInBackground(
 
       // Update progress
       await supabaseAdmin.from('sync_jobs').update({
-        processed_records: processed,
+        metadata: {
+          seller_id: sellerId,
+          total_records: allOrders.length,
+          processed_records: processed,
+        },
       }).eq('id', jobId);
 
       // Yield between batches
@@ -571,17 +578,22 @@ async function processOrdersInBackground(
 
     // Mark job as done
     await supabaseAdmin.from('sync_jobs').update({
-      status: 'done',
-      processed_records: processed,
-      completed_at: new Date().toISOString(),
+      status: 'success',
+      finished_at: new Date().toISOString(),
+      metadata: {
+        seller_id: sellerId,
+        total_records: allOrders.length,
+        processed_records: processed,
+        items_synced: allOrderItems.length,
+      },
     }).eq('id', jobId);
 
   } catch (error) {
     console.error(`[Job ${jobId}] Background processing error:`, error);
     await supabaseAdmin.from('sync_jobs').update({
-      status: 'error',
-      error_message: error instanceof Error ? error.message : 'Unknown error',
-      completed_at: new Date().toISOString(),
+      status: 'failed',
+      finished_at: new Date().toISOString(),
+      metadata: { seller_id: sellerId, error_message: error instanceof Error ? error.message : 'Unknown error' },
     }).eq('id', jobId);
   }
 }
@@ -642,7 +654,7 @@ serve(async (req) => {
     // Get ML account with access token AND refresh token
     const { data: mlAccount, error: mlError } = await supabaseAdmin
       .from('ml_accounts')
-      .select('id, access_token, refresh_token, token_expires_at, ml_user_id')
+      .select('id, access_token, refresh_token, token_expires_at, ml_user_id, company_id')
       .eq('user_id', user.id)
       .eq('ml_user_id', seller_id)
       .eq('is_active', true)
@@ -689,16 +701,33 @@ serve(async (req) => {
       console.log('[ml-sync-orders] Token refreshed successfully before sync');
     }
 
-    // Create job record
+    // Resolve tenant_id for sync_jobs
+    let tenantId: string | null = null;
+    if (mlAccount.company_id) {
+      const { data: company } = await supabaseAdmin
+        .from('companies')
+        .select('tenant_id')
+        .eq('id', mlAccount.company_id)
+        .maybeSingle();
+      tenantId = company?.tenant_id || mlAccount.company_id;
+    }
+    if (!tenantId) tenantId = mlAccount.company_id || user.id;
+
+    // Create job record (new schema)
     const jobId = crypto.randomUUID();
     const { error: jobError } = await supabaseAdmin.from('sync_jobs').insert({
       id: jobId,
-      user_id: user.id,
-      seller_id: seller_id,
-      job_type: 'orders',
-      status: 'processing',
-      total_records: 0,
-      processed_records: 0,
+      tenant_id: tenantId,
+      module: 'shipping_labels_orders',
+      scope: 'manual',
+      status: 'running',
+      started_at: new Date().toISOString(),
+      created_by_user_id: user.id,
+      metadata: {
+        seller_id: seller_id,
+        total_records: 0,
+        processed_records: 0,
+      },
     });
 
     if (jobError) {

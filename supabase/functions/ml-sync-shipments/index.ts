@@ -195,7 +195,11 @@ async function processShipmentsInBackground(
 
       // Update progress
       await supabaseAdmin.from('sync_jobs').update({
-        processed_records: synced + errors,
+        metadata: {
+          seller_id: sellerId,
+          total_records: shipmentIds.length,
+          processed_records: synced + errors,
+        },
       }).eq('id', jobId);
 
       // Small yield between batches
@@ -208,10 +212,15 @@ async function processShipmentsInBackground(
 
     // Mark job as done
     await supabaseAdmin.from('sync_jobs').update({
-      status: errors > 0 && synced === 0 ? 'error' : 'done',
-      processed_records: synced,
-      error_message: errors > 0 ? `${errors} shipments failed` : null,
-      completed_at: new Date().toISOString(),
+      status: errors > 0 && synced === 0 ? 'failed' : 'success',
+      finished_at: new Date().toISOString(),
+      metadata: {
+        seller_id: sellerId,
+        total_records: shipmentIds.length,
+        processed_records: synced,
+        errors: errors > 0 ? errors : undefined,
+        error_message: errors > 0 ? `${errors} shipments failed` : undefined,
+      },
     }).eq('id', jobId);
 
     // Trigger neighborhood enrichment in background (fire and forget)
@@ -235,9 +244,9 @@ async function processShipmentsInBackground(
   } catch (error) {
     console.error(`[Job ${jobId}] Background processing error:`, error);
     await supabaseAdmin.from('sync_jobs').update({
-      status: 'error',
-      error_message: error instanceof Error ? error.message : 'Unknown error',
-      completed_at: new Date().toISOString(),
+      status: 'failed',
+      finished_at: new Date().toISOString(),
+      metadata: { seller_id: sellerId, error_message: error instanceof Error ? error.message : 'Unknown error' },
     }).eq('id', jobId);
   }
 }
@@ -305,7 +314,7 @@ serve(async (req) => {
     // Get ML account with access token
     const { data: mlAccount, error: mlError } = await supabaseAdmin
       .from('ml_accounts')
-      .select('access_token, ml_user_id')
+      .select('access_token, ml_user_id, company_id')
       .eq('user_id', user.id)
       .eq('ml_user_id', seller_id)
       .eq('is_active', true)
@@ -330,16 +339,33 @@ serve(async (req) => {
       (ordersMapping || []).map(o => [o.shipment_id, o.order_id])
     );
 
-    // Create job record
+    // Resolve tenant_id for sync_jobs
+    let tenantId: string | null = null;
+    if (mlAccount.company_id) {
+      const { data: company } = await supabaseAdmin
+        .from('companies')
+        .select('tenant_id')
+        .eq('id', mlAccount.company_id)
+        .maybeSingle();
+      tenantId = company?.tenant_id || mlAccount.company_id;
+    }
+    if (!tenantId) tenantId = mlAccount.company_id || user.id;
+
+    // Create job record (new schema)
     const jobId = crypto.randomUUID();
     await supabaseAdmin.from('sync_jobs').insert({
       id: jobId,
-      user_id: user.id,
-      seller_id: seller_id,
-      job_type: 'shipments',
-      status: 'processing',
-      total_records: shipment_ids.length,
-      processed_records: 0,
+      tenant_id: tenantId,
+      module: 'shipping_labels_shipments',
+      scope: 'manual',
+      status: 'running',
+      started_at: new Date().toISOString(),
+      created_by_user_id: user.id,
+      metadata: {
+        seller_id: seller_id,
+        total_records: shipment_ids.length,
+        processed_records: 0,
+      },
     });
 
     // Start background processing
