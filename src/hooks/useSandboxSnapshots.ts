@@ -94,8 +94,8 @@ export function useSandboxSnapshots() {
 
       return { filtered, all };
     },
-    staleTime: 2 * 60 * 1000,
-    refetchOnMount: true,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes
   });
 
   return {

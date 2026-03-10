@@ -97,7 +97,8 @@ export function useActiveOnboardingFlow(userId: string | null, companyId: string
   return useQuery({
     queryKey: ['onboarding-active-flow', userId, companyId],
     enabled: !!userId && !!companyId,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30 * 60 * 1000, // 30 minutes
+    gcTime: 60 * 60 * 1000, // 60 minutes
     queryFn: async () => {
       if (!userId || !companyId) return null;
 

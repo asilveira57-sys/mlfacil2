@@ -39,6 +39,7 @@ export function useCurrentWorkspaceId() {
 
       return (member as any)?.workspace_id as string | null;
     },
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 30 * 60 * 1000, // 30 minutes
+    gcTime: 60 * 60 * 1000, // 60 minutes
   });
 }

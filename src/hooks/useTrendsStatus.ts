@@ -31,7 +31,8 @@ export function useTrendsStatus() {
 
       return data as TrendsStatus | null;
     },
-    staleTime: 60 * 1000, // 1 minute
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes
     // DISABLED: Static mode - no polling. Use manual refresh button instead.
     // refetchInterval: 5 * 60 * 1000,
   });

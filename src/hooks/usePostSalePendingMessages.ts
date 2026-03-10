@@ -27,8 +27,8 @@ export function usePostSalePendingMessages() {
       return data as PostSaleMessage[];
     },
     enabled: !!sellerId,
-    staleTime: 15_000,
-    refetchInterval: 30_000,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes
   });
 }
 
@@ -52,8 +52,8 @@ export function usePostSalePendingCount() {
       return count || 0;
     },
     enabled: !!sellerId,
-    staleTime: 15_000,
-    refetchInterval: 30_000,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes
   });
 }
 

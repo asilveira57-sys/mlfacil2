@@ -264,7 +264,7 @@ export function useUnreadConversationsCount(sellerId: string | null) {
       return count || 0;
     },
     enabled: !!sellerId,
-    staleTime: 30 * 1000,
-    refetchInterval: 60 * 1000,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes
   });
 }

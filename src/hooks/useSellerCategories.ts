@@ -124,7 +124,8 @@ export function useCategorySyncState(accountId: string | null) {
       };
     },
     enabled: !!accountId,
-    staleTime: 30 * 1000, // 30 seconds
+    staleTime: 15 * 60 * 1000, // 15 minutes
+    gcTime: 30 * 60 * 1000, // 30 minutes
     // DISABLED: Static mode - no polling. User must click refresh or wait for sync to complete.
     // refetchInterval: (query) => {
     //   const data = query.state.data;

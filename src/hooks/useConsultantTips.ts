@@ -103,7 +103,8 @@ export function useConsultantTips(filtros?: {
       if (error) throw error;
       return (data || []) as ConsultantTip[];
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 15 * 60 * 1000, // 15 minutes
+    gcTime: 30 * 60 * 1000, // 30 minutes
   });
 }
 
@@ -124,7 +125,8 @@ export function useConsultantTipBySlug(slug: string) {
       return data as ConsultantTip | null;
     },
     enabled: !!slug,
-    staleTime: 10 * 60 * 1000,
+    staleTime: 15 * 60 * 1000, // 15 minutes
+    gcTime: 30 * 60 * 1000, // 30 minutes
   });
 }
 

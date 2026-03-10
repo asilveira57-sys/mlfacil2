@@ -490,7 +490,7 @@ export function useSellerCategoriesEligibility(sellerId: string | null, periodDa
       }));
     },
     enabled: !!sellerId,
-    staleTime: 2 * 60 * 1000,
+    staleTime: 10 * 60 * 1000, // 10 minutes
   });
 }
 
