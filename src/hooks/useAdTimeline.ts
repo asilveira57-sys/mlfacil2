@@ -83,41 +83,22 @@ export function useAdTimelineStats(workspaceId: string | null, filters: Timeline
           listings?.forEach(l => listingMap.set(l.item_id, l));
         }
 
-        // Fallback: for items not found in listings cache, try order items cache
+        // Fallback: for items not found in listings cache, use RPC with DISTINCT ON
+        // This avoids the 1000-row limit by deduplicating server-side
         const missingIds = itemIds.filter(id => !listingMap.has(id));
         if (missingIds.length > 0) {
           for (let i = 0; i < missingIds.length; i += batchSize) {
             const batchIds = missingIds.slice(i, i + batchSize);
-            const { data: orderItems } = await supabase
-              .from('meli_order_items_cache')
-              .select('item_id, title, thumbnail, unit_price, variation_id, sku')
-              .in('item_id', batchIds)
-              .order('created_at_meli', { ascending: false });
+            const { data: orderItems, error: rpcError } = await supabase
+              .rpc('get_order_items_enrichment', { p_item_ids: batchIds });
 
-            // Deduplicate per item_id, preferring rows with thumbnail and title
-            const itemMap = new Map<string, any>();
-            orderItems?.forEach(oi => {
-              const existing = itemMap.get(oi.item_id);
-              if (!existing) {
-                itemMap.set(oi.item_id, oi);
-              } else {
-                // Prefer row with thumbnail over one without
-                if (!existing.thumbnail && oi.thumbnail) {
-                  itemMap.set(oi.item_id, { ...existing, thumbnail: oi.thumbnail });
-                }
-                // Prefer row with title over one without
-                if (!existing.title && oi.title) {
-                  itemMap.set(oi.item_id, { ...itemMap.get(oi.item_id)!, title: oi.title });
-                }
-                // Prefer row with sku over one without
-                if (!existing.sku && oi.sku) {
-                  itemMap.set(oi.item_id, { ...itemMap.get(oi.item_id)!, sku: oi.sku });
-                }
-              }
-            });
-            itemMap.forEach((oi, itemId) => {
-              listingMap.set(itemId, {
-                item_id: itemId,
+            if (rpcError) {
+              console.error('[useAdTimelineStats] RPC enrichment error:', rpcError);
+            }
+
+            orderItems?.forEach((oi: any) => {
+              listingMap.set(oi.item_id, {
+                item_id: oi.item_id,
                 title: oi.title,
                 thumbnail: oi.thumbnail,
                 price: oi.unit_price,
@@ -154,21 +135,31 @@ export function useAdTimelineBucketCounts(workspaceId: string | null, mlAccountI
       // Resolve ml_user_id to UUID
       const mlAccountUuid = await resolveMlAccountUuid(mlAccountId);
 
-      let query = supabase
-        .from('ad_timeline_stats')
-        .select('status_bucket')
-        .eq('workspace_id', workspaceId);
+      // Fetch ALL rows with pagination (no 1000-row limit)
+      let allData: any[] = [];
+      let offset = 0;
+      let hasMore = true;
 
-      if (mlAccountUuid) {
-        query = query.eq('ml_account_id', mlAccountUuid);
+      while (hasMore) {
+        let query = supabase
+          .from('ad_timeline_stats')
+          .select('status_bucket')
+          .eq('workspace_id', workspaceId);
+
+        if (mlAccountUuid) {
+          query = query.eq('ml_account_id', mlAccountUuid);
+        }
+
+        const { data, error } = await query.range(offset, offset + PAGE_SIZE - 1);
+        if (error) throw error;
+
+        allData = allData.concat(data || []);
+        hasMore = (data?.length || 0) === PAGE_SIZE;
+        offset += PAGE_SIZE;
       }
 
-      const { data, error } = await query;
-
-      if (error) throw error;
-
       const counts: BucketCounts = { OK: 0, '30D': 0, '60D': 0, '90D': 0, '120D': 0, NO_SALES: 0, total: 0 };
-      data?.forEach(row => {
+      allData.forEach(row => {
         const bucket = row.status_bucket as StatusBucket;
         if (counts[bucket] !== undefined) {
           counts[bucket]++;
