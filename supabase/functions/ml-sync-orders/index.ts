@@ -222,8 +222,11 @@ async function processOrdersInBackground(
 
       // Update progress
       await supabaseAdmin.from('sync_jobs').update({
-        total_records: totalFromApi,
-        processed_records: allOrders.length,
+        metadata: {
+          seller_id: sellerId,
+          total_records: totalFromApi,
+          processed_records: allOrders.length,
+        },
       }).eq('id', jobId);
 
       if (orders.length < limit || allOrders.length >= totalFromApi) {
