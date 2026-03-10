@@ -305,7 +305,7 @@ serve(async (req) => {
     // Get ML account with access token
     const { data: mlAccount, error: mlError } = await supabaseAdmin
       .from('ml_accounts')
-      .select('access_token, ml_user_id')
+      .select('access_token, ml_user_id, company_id')
       .eq('user_id', user.id)
       .eq('ml_user_id', seller_id)
       .eq('is_active', true)
