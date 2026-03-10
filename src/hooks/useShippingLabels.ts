@@ -127,8 +127,7 @@ const SYNC_QUERY_BATCH = 1000;
 const SHIPMENT_SYNC_BATCH = 200;
 // Batch size for invoice sync requests
 const INVOICE_SYNC_BATCH = 300;
-// Max poll attempts (2 min timeout)
-const MAX_POLL_ATTEMPTS = 60;
+// Max poll attempts removed - now passed as parameter to waitForJob
 
 // Helper to get auth headers
 async function getAuthHeaders(): Promise<{ Authorization: string } | null> {
