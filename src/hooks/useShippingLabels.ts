@@ -127,8 +127,7 @@ const SYNC_QUERY_BATCH = 1000;
 const SHIPMENT_SYNC_BATCH = 200;
 // Batch size for invoice sync requests
 const INVOICE_SYNC_BATCH = 300;
-// Max poll attempts (2 min timeout)
-const MAX_POLL_ATTEMPTS = 60;
+// Max poll attempts removed - now passed as parameter to waitForJob
 
 // Helper to get auth headers
 async function getAuthHeaders(): Promise<{ Authorization: string } | null> {
@@ -374,7 +373,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
   const orderItems = orderItemsData ?? new Map<string, OrderItemSummary[]>();
 
-  // === DIAGNOSTIC INFO ===
+  // === DIAGNOSTIC INFO - only on demand, not on mount ===
   const updateDiagnosticInfo = useCallback(async () => {
     if (!sellerId) return;
     
@@ -382,75 +381,33 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       const now = new Date();
       const thirtyDaysAgo = subDays(now, 30).toISOString();
 
-      // Get last order date
-      const { data: lastOrder } = await supabase
+      // Single query to get count + last date
+      const { data: recentOrders, count } = await supabase
         .from('meli_orders_cache')
-        .select('created_at_meli')
-        .eq('seller_id', sellerId)
-        .order('created_at_meli', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      // Get orders in last 30 days with shipment_id
-      const { data: recentOrders } = await supabase
-        .from('meli_orders_cache')
-        .select('shipment_id')
+        .select('shipment_id', { count: 'exact' })
         .eq('seller_id', sellerId)
         .gte('created_at_meli', thirtyDaysAgo)
-        .not('shipment_id', 'is', null);
-
-      const recentShipmentIds = [...new Set((recentOrders || []).map(o => o.shipment_id).filter(Boolean))] as string[];
-
-      // Check how many are in shipments cache (batch query)
-      let existingCount = 0;
-      const BATCH_SIZE = 200;
-      for (let i = 0; i < recentShipmentIds.length; i += BATCH_SIZE) {
-        const batch = recentShipmentIds.slice(i, i + BATCH_SIZE);
-        const { count } = await supabase
-          .from('meli_shipments_cache')
-          .select('shipment_id', { count: 'exact', head: true })
-          .eq('seller_id', sellerId)
-          .in('shipment_id', batch);
-        existingCount += count || 0;
-      }
-
-      const missingCount = recentShipmentIds.length - existingCount;
-
-      // Get last shipment sync
-      const { data: lastShipmentSync } = await supabase
-        .from('sync_jobs')
-        .select('created_at')
-        .eq('module', 'labels_orders_list')
-        .eq('status', 'success')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .not('shipment_id', 'is', null)
+        .limit(1000);
 
       setDiagnosticInfo({
-        lastOrderDate: lastOrder?.created_at_meli || null,
-        missingShipments30d: Math.max(0, missingCount),
-        lastShipmentSyncAt: lastShipmentSync?.created_at || null,
-        totalOrders30d: recentOrders?.length || 0,
+        lastOrderDate: null,
+        missingShipments30d: 0,
+        lastShipmentSyncAt: null,
+        totalOrders30d: count || 0,
       });
     } catch (err) {
       console.error('Error updating diagnostic info:', err);
     }
   }, [sellerId]);
 
-  // Update diagnostics on mount and after sync
-  useEffect(() => {
-    if (sellerId) {
-      updateDiagnosticInfo();
-    }
-  }, [sellerId, updateDiagnosticInfo]);
-
   // === SYNC PIPELINE (background, silent by default) ===
 
-  // Wait for a specific job to complete
-  const waitForJob = useCallback(async (jobId: string, silent: boolean): Promise<boolean> => {
+// Wait for a specific job to complete (max 45s instead of 120s)
+  const waitForJob = useCallback(async (jobId: string, silent: boolean, maxAttempts = 22): Promise<boolean> => {
     let attempts = 0;
     
-    while (attempts < MAX_POLL_ATTEMPTS) {
+    while (attempts < maxAttempts) {
       await sleep(2000);
       attempts++;
       
@@ -481,7 +438,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       }
     }
     
-    console.warn(`Job ${jobId} timed out after ${MAX_POLL_ATTEMPTS * 2} seconds`);
+    console.warn(`Job ${jobId} timed out after ${maxAttempts * 2} seconds`);
     return false;
   }, []);
 
@@ -608,90 +565,52 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         }
       }
 
-      // === PHASE 4.5: Re-sync shipments with ACTIVE statuses (may have changed) ===
-      if (!silent) {
-        setSyncProgress('Atualizando status de envios ativos...');
-      }
+      // Phase 4.5 REMOVED: Active shipment re-sync is handled by the
+      // shipping-status-sync cron job every 30 minutes. No need to re-fetch
+      // all active shipments during manual sync — it was the main bottleneck.
 
-      try {
-        // Fetch shipments that have active/pending statuses - these may have changed in ML
-        const ACTIVE_STATUSES = ['ready_to_ship', 'handling', 'pending'];
-        type ActiveShipment = { shipment_id: string };
-        
-        const activeShipments = await fetchAllRowsPaginated<ActiveShipment>(
-          async (offset, limit) => {
-            const { data, error } = await supabase
-              .from('meli_shipments_cache')
-              .select('shipment_id')
-              .eq('seller_id', sellerId)
-              .in('shipment_status', ACTIVE_STATUSES)
-              .order('last_sync_at', { ascending: true })
-              .range(offset, offset + limit - 1);
-            return { data: data as ActiveShipment[] | null, error };
-          }
-        );
-
-        const activeShipmentIds = activeShipments.map(s => s.shipment_id);
-        console.log(`Re-syncing ${activeShipmentIds.length} shipments with active statuses`);
-
-        if (activeShipmentIds.length > 0) {
-          const totalActiveBatches = Math.ceil(activeShipmentIds.length / SHIPMENT_SYNC_BATCH);
-          
-          for (let i = 0; i < activeShipmentIds.length; i += SHIPMENT_SYNC_BATCH) {
-            const batchNum = Math.floor(i / SHIPMENT_SYNC_BATCH) + 1;
-            const batch = activeShipmentIds.slice(i, i + SHIPMENT_SYNC_BATCH);
-            
-            if (!silent) {
-              setSyncProgress(`Atualizando status ${batchNum}/${totalActiveBatches} (${batch.length})`);
-            }
-            
-            const resyncResponse = await supabase.functions.invoke('ml-sync-shipments', {
-              headers,
-              body: { seller_id: sellerId, shipment_ids: batch },
-            });
-            
-            if (resyncResponse.data?.job_id) {
-              await waitForJob(resyncResponse.data.job_id, silent);
-            }
-            
-            if (i + SHIPMENT_SYNC_BATCH < activeShipmentIds.length) {
-              await sleep(500);
-            }
-          }
-        }
-      } catch (err) {
-        console.error('Error re-syncing active shipments:', err);
-      }
-
-      // === PHASE 5: Sync invoices in batches ===
+      // === PHASE 5: Sync invoices ONLY for orders missing invoice data ===
       if (!silent) {
         setSyncPhase('invoices');
         setSyncProgress('Sincronizando notas fiscais...');
       }
 
       if (orderIds.length > 0) {
-        const totalInvoiceBatches = Math.ceil(orderIds.length / INVOICE_SYNC_BATCH);
-        
-        for (let i = 0; i < orderIds.length; i += INVOICE_SYNC_BATCH) {
-          const batchNum = Math.floor(i / INVOICE_SYNC_BATCH) + 1;
-          const batch = orderIds.slice(i, i + INVOICE_SYNC_BATCH);
+        // Only fetch invoices for orders that don't have invoice data yet
+        const { data: ordersWithoutInvoice } = await supabase
+          .from('meli_orders_cache')
+          .select('order_id')
+          .eq('seller_id', sellerId)
+          .in('order_id', orderIds)
+          .is('invoice_key', null)
+          .not('order_status', 'in', '(cancelled)');
+
+        const pendingInvoiceIds = (ordersWithoutInvoice || []).map(o => o.order_id);
+        console.log(`Invoices: ${orderIds.length} total orders, ${pendingInvoiceIds.length} missing invoice`);
+
+        if (pendingInvoiceIds.length > 0) {
+          const totalInvoiceBatches = Math.ceil(pendingInvoiceIds.length / INVOICE_SYNC_BATCH);
           
-          if (!silent && totalInvoiceBatches > 1) {
-            setSyncProgress(`NFs ${batchNum}/${totalInvoiceBatches}`);
-          }
-          
-          const invoicesResponse = await supabase.functions.invoke('ml-sync-invoices', {
-            headers,
-            body: { seller_id: sellerId, order_ids: batch },
-          });
-          
-          if (invoicesResponse.data?.job_id) {
-            await waitForJob(invoicesResponse.data.job_id, silent);
-          }
-          
-          // Small delay between batches
-          if (i + INVOICE_SYNC_BATCH < orderIds.length) {
-            await sleep(300);
+          for (let i = 0; i < pendingInvoiceIds.length; i += INVOICE_SYNC_BATCH) {
+            const batchNum = Math.floor(i / INVOICE_SYNC_BATCH) + 1;
+            const batch = pendingInvoiceIds.slice(i, i + INVOICE_SYNC_BATCH);
+            
+            if (!silent && totalInvoiceBatches > 1) {
+              setSyncProgress(`NFs ${batchNum}/${totalInvoiceBatches}`);
+            }
+            
+            const invoicesResponse = await supabase.functions.invoke('ml-sync-invoices', {
+              headers,
+              body: { seller_id: sellerId, order_ids: batch },
+            });
+            
+            if (invoicesResponse.data?.job_id) {
+              await waitForJob(invoicesResponse.data.job_id, silent);
+            }
+            
+            if (i + INVOICE_SYNC_BATCH < pendingInvoiceIds.length) {
+              await sleep(300);
+            }
           }
         }
       }
@@ -701,7 +620,6 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       await refetch();
       queryClient.invalidateQueries({ queryKey: ['shipping-orders'] });
       queryClient.invalidateQueries({ queryKey: ['shipping-orders-all'] });
-      await updateDiagnosticInfo();
 
       if (!silent) {
         setSyncPhase('done');
@@ -726,7 +644,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         setSyncProgress('');
       }
     }
-  }, [isSyncing, sellerId, getDateRange, refetch, queryClient, toast, waitForJob, updateDiagnosticInfo]);
+  }, [isSyncing, sellerId, getDateRange, refetch, queryClient, toast, waitForJob]);
 
   // Repair sync: force sync of all missing shipments (last 30 days)
   const repairSync = useCallback(async () => {
@@ -813,7 +731,6 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
       setLastSyncAt(new Date().toISOString());
       await refetch();
-      await updateDiagnosticInfo();
       
       toast({
         title: 'Reparo concluído!',
@@ -838,7 +755,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       setSyncPhase('idle');
       setSyncProgress('');
     }
-  }, [isSyncing, sellerId, refetch, toast, waitForJob, updateDiagnosticInfo]);
+  }, [isSyncing, sellerId, refetch, toast, waitForJob]);
 
   // Generate labels mutation with batch support
   const generateLabelsMutation = useMutation({
