@@ -94,23 +94,38 @@ export function useAdTimelineStats(workspaceId: string | null, filters: Timeline
               .in('item_id', batchIds)
               .order('created_at_meli', { ascending: false });
 
-            // Deduplicate: keep only the first (most recent) per item_id
-            const seen = new Set<string>();
+            // Deduplicate per item_id, preferring rows with thumbnail and title
+            const itemMap = new Map<string, any>();
             orderItems?.forEach(oi => {
-              if (!seen.has(oi.item_id)) {
-                seen.add(oi.item_id);
-                listingMap.set(oi.item_id, {
-                  item_id: oi.item_id,
-                  title: oi.title,
-                  thumbnail: oi.thumbnail,
-                  price: oi.unit_price,
-                  sku: oi.sku,
-                  variation_id: oi.variation_id,
-                  // These fields don't exist in order_items_cache
-                  status: null,
-                  available_quantity: null,
-                });
+              const existing = itemMap.get(oi.item_id);
+              if (!existing) {
+                itemMap.set(oi.item_id, oi);
+              } else {
+                // Prefer row with thumbnail over one without
+                if (!existing.thumbnail && oi.thumbnail) {
+                  itemMap.set(oi.item_id, { ...existing, thumbnail: oi.thumbnail });
+                }
+                // Prefer row with title over one without
+                if (!existing.title && oi.title) {
+                  itemMap.set(oi.item_id, { ...itemMap.get(oi.item_id)!, title: oi.title });
+                }
+                // Prefer row with sku over one without
+                if (!existing.sku && oi.sku) {
+                  itemMap.set(oi.item_id, { ...itemMap.get(oi.item_id)!, sku: oi.sku });
+                }
               }
+            });
+            itemMap.forEach((oi, itemId) => {
+              listingMap.set(itemId, {
+                item_id: itemId,
+                title: oi.title,
+                thumbnail: oi.thumbnail,
+                price: oi.unit_price,
+                sku: oi.sku,
+                variation_id: oi.variation_id,
+                status: null,
+                available_quantity: null,
+              });
             });
           }
         }
