@@ -43,7 +43,7 @@ export function usePostLoginPrefetch() {
           queryClient.prefetchQuery({
             queryKey: ['workspace-companies'],
             queryFn: async () => {
-              const { data } = await supabase.from('company_members').select('company_id, role, companies(id, name, slug)');
+              const { data } = await (supabase as any).from('company_members').select('company_id, role, companies(id, name, slug)');
               return data;
             },
             staleTime: 30 * 60 * 1000,
@@ -53,7 +53,7 @@ export function usePostLoginPrefetch() {
           queryClient.prefetchQuery({
             queryKey: ['visual-identity'],
             queryFn: async () => {
-              const { data } = await supabase.from('visual_identity').select('*').limit(1).maybeSingle();
+              const { data } = await (supabase as any).from('visual_identity').select('*').limit(1).maybeSingle();
               return data;
             },
             staleTime: 30 * 60 * 1000,
