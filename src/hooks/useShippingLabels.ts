@@ -731,7 +731,6 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
 
       setLastSyncAt(new Date().toISOString());
       await refetch();
-      await updateDiagnosticInfo();
       
       toast({
         title: 'Reparo concluído!',
@@ -756,7 +755,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       setSyncPhase('idle');
       setSyncProgress('');
     }
-  }, [isSyncing, sellerId, refetch, toast, waitForJob, updateDiagnosticInfo]);
+  }, [isSyncing, sellerId, refetch, toast, waitForJob]);
 
   // Generate labels mutation with batch support
   const generateLabelsMutation = useMutation({
