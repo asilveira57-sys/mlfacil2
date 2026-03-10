@@ -620,7 +620,6 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       await refetch();
       queryClient.invalidateQueries({ queryKey: ['shipping-orders'] });
       queryClient.invalidateQueries({ queryKey: ['shipping-orders-all'] });
-      await updateDiagnosticInfo();
 
       if (!silent) {
         setSyncPhase('done');
@@ -645,7 +644,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         setSyncProgress('');
       }
     }
-  }, [isSyncing, sellerId, getDateRange, refetch, queryClient, toast, waitForJob, updateDiagnosticInfo]);
+  }, [isSyncing, sellerId, getDateRange, refetch, queryClient, toast, waitForJob]);
 
   // Repair sync: force sync of all missing shipments (last 30 days)
   const repairSync = useCallback(async () => {
