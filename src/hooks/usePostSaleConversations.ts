@@ -44,8 +44,8 @@ export function usePostSaleConversations(sellerId: string | null, filters?: Conv
       return (data || []) as PostSaleConversation[];
     },
     enabled: !!sellerId,
-    staleTime: 30 * 1000, // 30 seconds
-    refetchInterval: 60 * 1000, // 1 minute
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes
   });
 }
 
