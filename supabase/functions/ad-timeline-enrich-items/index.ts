@@ -139,6 +139,7 @@ serve(async (req) => {
           thumbnail: item.thumbnail,
           status: item.status,
           available_quantity: item.available_quantity,
+          sold_quantity: item.sold_quantity || 0,
           price: item.price || 0,
           sku,
           variation_id: variationId,
