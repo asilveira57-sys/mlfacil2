@@ -33,6 +33,11 @@ const actionLabels: Record<ActionType, { title: string; description: string; ico
     description: "O anúncio será encerrado e não poderá mais receber vendas.",
     icon: <XCircle className="h-5 w-5 text-destructive" />,
   },
+  RELIST: { 
+    title: "Republicar Anúncio", 
+    description: "",
+    icon: <RefreshCcw className="h-5 w-5" />,
+  },
   CLONE: { 
     title: "Clonar Anúncio", 
     description: "Um novo anúncio será criado com os dados selecionados.",
