@@ -103,7 +103,7 @@ serve(async (req) => {
     for (let i = 0; i < item_ids.length; i += ML_BATCH) {
       const batch = item_ids.slice(i, i + ML_BATCH);
       const idsParam = batch.join(',');
-      const url = `https://api.mercadolibre.com/items?ids=${idsParam}&attributes=id,title,thumbnail,status,available_quantity,price,variations`;
+      const url = `https://api.mercadolibre.com/items?ids=${idsParam}&attributes=id,title,thumbnail,status,available_quantity,sold_quantity,price,variations`;
 
       const res = await fetch(url, {
         headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' },
