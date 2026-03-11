@@ -13,7 +13,6 @@ import {
   ShoppingCart,
   XCircle,
   Copy,
-  RefreshCcw,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -27,6 +26,8 @@ import {
 } from "@/hooks/useAdTimeline";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { useCurrentWorkspaceId } from "@/hooks/useCurrentWorkspaceId";
+import { useTasks } from "@/hooks/useTasks";
+import { useToast } from "@/hooks/use-toast";
 import type { StatusBucket, ActionType, CloneChecklist } from "@/types/ad-timeline";
 
 export default function AdTimelineDetail() {
@@ -34,6 +35,7 @@ export default function AdTimelineDetail() {
   const navigate = useNavigate();
   const { sellerId } = useActiveAccount();
   const { data: workspaceId } = useCurrentWorkspaceId();
+  const { toast } = useToast();
   const mlAccountId = sellerId || undefined;
 
   const [actionDrawerOpen, setActionDrawerOpen] = useState(false);
@@ -45,6 +47,7 @@ export default function AdTimelineDetail() {
   const createActionMutation = useCreateAction();
   const enrichMutation = useEnrichTimelineItems();
   const enrichTriggeredRef = useRef(false);
+  const { createTask } = useTasks(workspaceId ?? null);
 
   const itemActions = actions?.filter(a => a.item_id === itemId) || [];
 
@@ -72,6 +75,22 @@ export default function AdTimelineDetail() {
       reason,
       checklist,
     });
+
+    // Create a task automatically
+    const actionLabel = actionType === 'END' ? 'Encerrar' : 'Clonar';
+    const itemTitle = item?.title || itemId;
+    try {
+      await createTask({
+        title: `[${actionLabel}] ${itemTitle}`.substring(0, 200),
+        description: `${reason || 'Sem motivo informado'}\n\nItem: ${itemId}`,
+        status: 'todo',
+        priority: 'medium',
+        tags: ['linha-do-tempo'],
+      });
+      toast({ title: 'Tarefa criada automaticamente' });
+    } catch (e) {
+      console.error('[AdTimelineDetail] Task creation failed:', e);
+    }
     
     setActionDrawerOpen(false);
   };
@@ -138,14 +157,14 @@ export default function AdTimelineDetail() {
 
                 <div className="flex flex-wrap gap-4 text-sm">
                   {item.price && <div><span className="text-muted-foreground">Preço:</span> <span className="font-medium">R$ {item.price.toFixed(2)}</span></div>}
-                  {item.status && <div><span className="text-muted-foreground">Status:</span> <Badge variant="outline">{item.status}</Badge></div>}
+                  {item.status && <div><span className="text-muted-foreground">Status ML:</span> <Badge variant="outline">{item.status}</Badge></div>}
+                  {item.available_quantity != null && <div><span className="text-muted-foreground">Estoque:</span> <span className="font-medium">{item.available_quantity}</span></div>}
                 </div>
 
                 <Separator />
 
                 <div className="flex flex-wrap gap-2">
                   <Button size="sm" variant="outline" onClick={() => handleCreateAction('END')}><XCircle className="h-4 w-4 mr-1" />Encerrar</Button>
-                  <Button size="sm" variant="outline" onClick={() => handleCreateAction('RELIST')}><RefreshCcw className="h-4 w-4 mr-1" />Republicar</Button>
                   <Button size="sm" variant="outline" onClick={() => handleCreateAction('CLONE')}><Copy className="h-4 w-4 mr-1" />Clonar</Button>
                 </div>
               </div>
@@ -162,11 +181,15 @@ export default function AdTimelineDetail() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-4 gap-4 text-center">
+                <div className="grid grid-cols-5 gap-4 text-center">
                   <div><div className="text-2xl font-bold">{item.sales_count_30d}</div><div className="text-xs text-muted-foreground">30 dias</div></div>
                   <div><div className="text-2xl font-bold">{item.sales_count_60d}</div><div className="text-xs text-muted-foreground">60 dias</div></div>
                   <div><div className="text-2xl font-bold">{item.sales_count_90d}</div><div className="text-xs text-muted-foreground">90 dias</div></div>
                   <div><div className="text-2xl font-bold">{item.sales_count_120d}</div><div className="text-xs text-muted-foreground">120 dias</div></div>
+                  <div>
+                    <div className="text-2xl font-bold text-primary">{item.sold_quantity ?? '—'}</div>
+                    <div className="text-xs text-muted-foreground">Total histórico</div>
+                  </div>
                 </div>
                 <Separator className="my-4" />
                 <div className="grid grid-cols-2 gap-4">

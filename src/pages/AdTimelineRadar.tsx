@@ -36,7 +36,6 @@ import {
   Eye,
   XCircle,
   Copy,
-  RefreshCcw,
   AlertTriangle,
   Search,
   Filter,
@@ -45,6 +44,8 @@ import {
   ArrowUpDown,
   ChevronLeft,
   ChevronRight,
+  FileSpreadsheet,
+  FileText,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -58,19 +59,25 @@ import {
 } from "@/hooks/useAdTimeline";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { useCurrentWorkspaceId } from "@/hooks/useCurrentWorkspaceId";
+import { useTasks } from "@/hooks/useTasks";
+import { useWorkspaceCompanies } from "@/hooks/useWorkspaceCompanies";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
+import { exportTimelineExcel, exportTimelinePdf } from "@/utils/exportTimeline";
 import type { StatusBucket, ActionType, CloneChecklist, AdTimelineStats } from "@/types/ad-timeline";
 
-const bucketLabels: Record<StatusBucket | 'ALL', string> = {
+const bucketLabels: Record<StatusBucket | 'ALL' | 'HAS_SALES', string> = {
   ALL: 'Todos',
   OK: 'OK',
   '30D': '30 dias',
   '60D': '60 dias',
   '90D': '90 dias',
   '120D': '120 dias',
-  NO_SALES: 'Sem vendas',
+  NO_SALES: 'Nunca vendeu',
+  HAS_SALES: 'Já vendeu',
 };
 
-type SortColumn = 'last_sale_at' | 'days_since_last_sale' | 'avg_gap_hours' | 'sales_count_30d' | 'sales_count_60d' | 'sales_count_90d' | 'status' | 'available_quantity';
+type SortColumn = 'last_sale_at' | 'days_since_last_sale' | 'avg_gap_hours' | 'sales_count_30d' | 'sales_count_60d' | 'sales_count_90d' | 'status' | 'available_quantity' | 'sold_quantity';
 type SortDirection = 'asc' | 'desc';
 
 const ITEMS_PER_PAGE = 30;
@@ -150,9 +157,12 @@ export default function AdTimelineRadar() {
   const navigate = useNavigate();
   const { sellerId } = useActiveAccount();
   const { data: workspaceId } = useCurrentWorkspaceId();
+  const { toast } = useToast();
   const mlAccountId = sellerId || undefined;
 
-  const [statusFilter, setStatusFilter] = useState<StatusBucket | 'ALL'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<StatusBucket | 'ALL' | 'HAS_SALES'>('ALL');
+  const [mlStatusFilter, setMlStatusFilter] = useState<string>('all');
+  const [stockFilter, setStockFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState("");
   const [actionDrawerOpen, setActionDrawerOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<AdTimelineStats | null>(null);
@@ -179,6 +189,7 @@ export default function AdTimelineRadar() {
   const createActionMutation = useCreateAction();
   const enrichMutation = useEnrichTimelineItems();
   const enrichTriggeredRef = useRef(false);
+  const { createTask } = useTasks(workspaceId ?? null);
 
   // Background enrichment: fetch status/stock for items missing listing cache data
   useEffect(() => {
@@ -186,7 +197,6 @@ export default function AdTimelineRadar() {
     const missingIds = stats.filter(s => !s.status).map(s => s.item_id);
     if (missingIds.length > 0) {
       enrichTriggeredRef.current = true;
-      // Enrich max 200 items at a time to stay within edge function timeout
       const batch = missingIds.slice(0, 200);
       enrichMutation.mutate({ itemIds: batch, mlAccountId });
     }
@@ -215,6 +225,21 @@ export default function AdTimelineRadar() {
       reason,
       checklist,
     });
+
+    // Create a task automatically
+    const actionLabel = actionType === 'END' ? 'Encerrar' : 'Clonar';
+    const itemTitle = selectedItem.title || selectedItem.item_id;
+    try {
+      await createTask({
+        title: `[${actionLabel}] ${itemTitle}`.substring(0, 200),
+        description: `${reason || 'Sem motivo informado'}\n\nItem: ${selectedItem.item_id}`,
+        status: 'todo',
+        priority: 'medium',
+        tags: ['linha-do-tempo'],
+      });
+    } catch (e) {
+      console.error('[AdTimelineRadar] Task creation failed:', e);
+    }
     
     setActionDrawerOpen(false);
     setSelectedItem(null);
@@ -227,32 +252,79 @@ export default function AdTimelineRadar() {
       setSortColumn(column);
       setSortDirection('desc');
     }
-    setCurrentPage(1); // Reset to first page when sorting
+    setCurrentPage(1);
+  };
+
+  // Get company logo for PDF export
+  const getCompanyLogo = async (): Promise<string | null> => {
+    try {
+      const { data } = await supabase
+        .from('companies')
+        .select('logo_url')
+        .eq('is_active', true)
+        .limit(1)
+        .maybeSingle();
+      return (data as any)?.logo_url || null;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleExportExcel = () => {
+    const dataToExport = filteredData || [];
+    if (!dataToExport.length) {
+      toast({ title: 'Nenhum dado para exportar', variant: 'destructive' });
+      return;
+    }
+    exportTimelineExcel({ data: dataToExport });
+    toast({ title: 'Excel exportado com sucesso' });
+  };
+
+  const handleExportPdf = async () => {
+    const dataToExport = filteredData || [];
+    if (!dataToExport.length) {
+      toast({ title: 'Nenhum dado para exportar', variant: 'destructive' });
+      return;
+    }
+    const logoUrl = await getCompanyLogo();
+    await exportTimelinePdf({ data: dataToExport, logoUrl });
+    toast({ title: 'PDF exportado com sucesso' });
   };
 
   // Filter, sort and paginate data
-  const { paginatedStats, totalPages, totalItems } = useMemo(() => {
+  const { paginatedStats, totalPages, totalItems, filteredData } = useMemo(() => {
     let filtered = stats?.filter(s => {
-      if (!searchTerm) return true;
-      const term = searchTerm.toLowerCase();
-      return (
-        s.item_id.toLowerCase().includes(term) ||
-        s.title?.toLowerCase().includes(term) ||
-        s.sku?.toLowerCase().includes(term)
-      );
+      // Search filter
+      if (searchTerm) {
+        const term = searchTerm.toLowerCase();
+        const matches = s.item_id.toLowerCase().includes(term) ||
+          s.title?.toLowerCase().includes(term) ||
+          s.sku?.toLowerCase().includes(term);
+        if (!matches) return false;
+      }
+      
+      // ML status filter
+      if (mlStatusFilter !== 'all' && s.status !== mlStatusFilter) return false;
+      
+      // Stock filter
+      if (stockFilter === 'out_of_stock' && (s.available_quantity === undefined || s.available_quantity === null || s.available_quantity > 0)) return false;
+      if (stockFilter === 'in_stock' && (s.available_quantity === undefined || s.available_quantity === null || s.available_quantity === 0)) return false;
+
+      // HAS_SALES bucket filter (client-side)
+      if (statusFilter === 'HAS_SALES' && s.status_bucket === 'NO_SALES') return false;
+      
+      return true;
     }) || [];
     
     // Sort
     if (sortColumn) {
       filtered = [...filtered].sort((a, b) => {
-        let aVal: any = a[sortColumn];
-        let bVal: any = b[sortColumn];
+        let aVal: any = (a as any)[sortColumn];
+        let bVal: any = (b as any)[sortColumn];
         
-        // Handle nulls
         if (aVal === null || aVal === undefined) aVal = sortDirection === 'asc' ? Infinity : -Infinity;
         if (bVal === null || bVal === undefined) bVal = sortDirection === 'asc' ? Infinity : -Infinity;
         
-        // Handle dates
         if (sortColumn === 'last_sale_at') {
           aVal = aVal === Infinity || aVal === -Infinity ? aVal : new Date(aVal).getTime();
           bVal = bVal === Infinity || bVal === -Infinity ? bVal : new Date(bVal).getTime();
@@ -271,11 +343,11 @@ export default function AdTimelineRadar() {
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
     const paginatedStats = filtered.slice(startIndex, startIndex + ITEMS_PER_PAGE);
     
-    return { paginatedStats, totalPages, totalItems };
-  }, [stats, searchTerm, sortColumn, sortDirection, currentPage]);
+    return { paginatedStats, totalPages, totalItems, filteredData: filtered };
+  }, [stats, searchTerm, mlStatusFilter, stockFilter, statusFilter, sortColumn, sortDirection, currentPage]);
 
   // Reset page when filter changes
-  const handleStatusFilterChange = (value: StatusBucket | 'ALL') => {
+  const handleStatusFilterChange = (value: StatusBucket | 'ALL' | 'HAS_SALES') => {
     setStatusFilter(value);
     setCurrentPage(1);
   };
@@ -360,7 +432,7 @@ export default function AdTimelineRadar() {
               >
                 <CardContent className="p-4">
                   <div className="text-2xl font-bold text-muted-foreground">{bucketCounts?.NO_SALES || 0}</div>
-                  <div className="text-xs text-muted-foreground">Sem vendas</div>
+                  <div className="text-xs text-muted-foreground">Nunca vendeu</div>
                 </CardContent>
               </Card>
               <Card 
@@ -388,7 +460,7 @@ export default function AdTimelineRadar() {
                 className="pl-9 w-64"
               />
             </div>
-            <Select value={statusFilter} onValueChange={(v) => handleStatusFilterChange(v as StatusBucket | 'ALL')}>
+            <Select value={statusFilter} onValueChange={(v) => handleStatusFilterChange(v as StatusBucket | 'ALL' | 'HAS_SALES')}>
               <SelectTrigger className="w-40">
                 <Filter className="h-4 w-4 mr-2" />
                 <SelectValue />
@@ -397,6 +469,28 @@ export default function AdTimelineRadar() {
                 {Object.entries(bucketLabels).map(([key, label]) => (
                   <SelectItem key={key} value={key}>{label}</SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+            <Select value={mlStatusFilter} onValueChange={(v) => { setMlStatusFilter(v); setCurrentPage(1); }}>
+              <SelectTrigger className="w-36">
+                <SelectValue placeholder="Status ML" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Status ML: Todos</SelectItem>
+                <SelectItem value="active">Ativo</SelectItem>
+                <SelectItem value="paused">Pausado</SelectItem>
+                <SelectItem value="closed">Fechado</SelectItem>
+                <SelectItem value="inactive">Inativo</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={stockFilter} onValueChange={(v) => { setStockFilter(v); setCurrentPage(1); }}>
+              <SelectTrigger className="w-36">
+                <SelectValue placeholder="Estoque" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Estoque: Todos</SelectItem>
+                <SelectItem value="in_stock">Com estoque</SelectItem>
+                <SelectItem value="out_of_stock">Sem estoque</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -409,10 +503,24 @@ export default function AdTimelineRadar() {
               <RefreshCw className={`h-4 w-4 mr-2 ${recalculateMutation.isPending ? 'animate-spin' : ''}`} />
               Recalcular
             </Button>
-            <Button variant="outline">
-              <Download className="h-4 w-4 mr-2" />
-              Exportar CSV
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline">
+                  <Download className="h-4 w-4 mr-2" />
+                  Exportar
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={handleExportExcel}>
+                  <FileSpreadsheet className="h-4 w-4 mr-2" />
+                  Excel (.xlsx)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleExportPdf}>
+                  <FileText className="h-4 w-4 mr-2" />
+                  PDF
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 
@@ -481,6 +589,13 @@ export default function AdTimelineRadar() {
                     currentDirection={sortDirection} 
                     onSort={handleSort}
                   />
+                  <SortableHeader 
+                    column="sold_quantity" 
+                    label="Total" 
+                    currentSort={sortColumn} 
+                    currentDirection={sortDirection} 
+                    onSort={handleSort}
+                  />
                   <TableHead className="w-[50px]"></TableHead>
                 </TableRow>
               </TableHeader>
@@ -499,12 +614,13 @@ export default function AdTimelineRadar() {
                       <TableCell><Skeleton className="h-4 w-8 mx-auto" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-8 mx-auto" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-8 mx-auto" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-8 mx-auto" /></TableCell>
                       <TableCell><Skeleton className="h-8 w-8" /></TableCell>
                     </TableRow>
                   ))
                 ) : paginatedStats?.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={12} className="text-center py-12">
+                    <TableCell colSpan={13} className="text-center py-12">
                       <div className="flex flex-col items-center gap-2 text-muted-foreground">
                         <AlertTriangle className="h-8 w-8" />
                         <p>Nenhum anúncio encontrado</p>
@@ -553,6 +669,7 @@ export default function AdTimelineRadar() {
                       <TableCell className="text-center text-sm">{item.sales_count_30d}</TableCell>
                       <TableCell className="text-center text-sm">{item.sales_count_60d}</TableCell>
                       <TableCell className="text-center text-sm">{item.sales_count_90d}</TableCell>
+                      <TableCell className="text-center text-sm font-medium">{item.sold_quantity ?? '—'}</TableCell>
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -564,9 +681,6 @@ export default function AdTimelineRadar() {
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleCreateAction(item, 'END')}>
                               <XCircle className="h-4 w-4 mr-2" />Encerrar
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleCreateAction(item, 'RELIST')}>
-                              <RefreshCcw className="h-4 w-4 mr-2" />Republicar
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleCreateAction(item, 'CLONE')}>
                               <Copy className="h-4 w-4 mr-2" />Clonar

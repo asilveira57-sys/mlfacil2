@@ -35,8 +35,8 @@ const actionLabels: Record<ActionType, { title: string; description: string; ico
   },
   RELIST: { 
     title: "Republicar Anúncio", 
-    description: "O anúncio será republicado com os mesmos dados. Disponível apenas para itens encerrados.",
-    icon: <RefreshCcw className="h-5 w-5 text-blue-500" />,
+    description: "",
+    icon: <RefreshCcw className="h-5 w-5" />,
   },
   CLONE: { 
     title: "Clonar Anúncio", 

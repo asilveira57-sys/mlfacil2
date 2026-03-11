@@ -30,6 +30,7 @@ export interface AdTimelineStats {
   available_quantity?: number;
   sku?: string;
   variation_id?: string;
+  sold_quantity?: number;
 }
 
 export interface AdTimelineEvent {
@@ -102,9 +103,11 @@ export interface AdTimelineSettings {
 
 export interface TimelineFilters {
   ml_account_id?: string;
-  status_bucket?: StatusBucket | 'ALL';
+  status_bucket?: StatusBucket | 'ALL' | 'HAS_SALES';
   category_id?: string;
   search?: string;
+  ml_status?: string;
+  stock_filter?: 'all' | 'in_stock' | 'out_of_stock';
 }
 
 export interface BucketCounts {
