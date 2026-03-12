@@ -44,17 +44,17 @@ Deno.serve(async (req) => {
     const systemPrompt = buildSystemPrompt();
     const userPrompt = buildUserPrompt(analysisData, analysis_type, focus_area);
 
-    console.log('[ads-ai-consultant] Calling Lovable AI for strategic analysis...');
+    console.log('[ads-ai-consultant] Calling OpenAI for strategic analysis...');
 
-    // Call Lovable AI for analysis
-    const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    // Call OpenAI API for analysis
+    const aiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${lovableApiKey}`,
+        'Authorization': `Bearer ${openaiApiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-3-flash-preview',
+        model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
