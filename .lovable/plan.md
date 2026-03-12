@@ -1,66 +1,122 @@
 
-# Plano Mestre — Jornada Completa do Seller
 
-## Status de cada item
+## Mapa Completo de Custos — Lovable Cloud, IA e APIs Externas
 
-### ✅ Já existe no sistema
-| # | Item | Status |
-|---|------|--------|
-| 2 | Cadastro (email/senha + confirmação) | ✅ Implementado |
-| 4 | Painel inicial (dashboard) | ✅ Existe (sem velocímetro) |
-| 5 | Conexão ML via OAuth | ✅ Implementado |
-| 6 | Elegibilidade para teste (>10 vendas) | ✅ Verificação existe na company |
-| 8 | Módulo Etiquetas (vendas abertas) | ✅ Implementado |
-| 9 | Módulo Custos (sem Passo 2) | ✅ Atualizado agora |
-| 13 | Seleção automática de plano | ✅ `useUserSalesVolume` + filtro de planos |
-| 15 | Cadastro fiscal (PF/PJ) | ✅ `company_billing` existe |
-| 12 | Bloqueio pós-trial | ✅ Parcial (trial_expired bloqueia) |
+Aqui está o levantamento completo de tudo que gera custo no sistema, organizado por categoria.
 
-### 🔶 Existe parcialmente / precisa ajuste
-| # | Item | O que falta |
-|---|------|-------------|
-| 1 | Landing com 3 botões | Landing existe mas precisa revisar CTAs |
-| 3 | Tela de boas-vindas (primeiro acesso) | Onboarding existe mas pode não ter welcome screen |
-| 7 | Sincronização inicial automática (30d) | Import manual existe, falta auto-trigger pós-OAuth |
-| 10 | Módulo ADS (sync pós-pagamento) | ADS existe, falta gate de trial |
-| 11 | Linha do Tempo (30d trial vs 1yr pago) | Módulo existe, falta limitar por trial |
-| 14 | Dados fiscais obrigatórios pós-pagamento | Tela existe, falta gate de bloqueio |
+---
 
-### 🔴 Precisa ser desenvolvido
-| # | Item | Descrição |
-|---|------|-----------|
-| 4b | Velocímetro de ativação | Widget de progresso no dashboard |
-| 9b | Tabela `sync_jobs` + lock após sucesso | Controle de execução de syncs |
-| 9c | Lock do botão 1 ano após sucesso | Bloquear re-execução pós-sucesso |
-| 16 | Multi-conta (soma de vendas) | Lógica de soma cross-account |
-| 17-18 | Estados de conta + aviso pré-conexão | Workflow de nova conta |
-| 19 | Verificação de limite + pending_upgrade | Gate automático |
-| 20 | Upgrade com pró-rata | Cálculo proporcional |
-| 21 | Crescimento natural → bloqueio | Detecção automática de excesso |
-| 22 | Proteção contra abuso (logs) | Audit trail de conexões/upgrades |
+### 1. OpenAI API (custo direto — sua chave `OPENAI_API_KEY`)
 
-## Ordem sugerida de implementação
+Estas 4 edge functions fazem chamadas à `api.openai.com/v1/chat/completions` usando modelo `gpt-4o-mini`:
 
-### Fase 1 — Gates e bloqueios (impacto imediato)
-1. Velocímetro de ativação no dashboard
-2. Tabela `sync_jobs` + controle de locks
-3. Gate de dados fiscais pós-pagamento
-4. Auto-sync 30d após OAuth
+| Função | Uso | Frequência estimada |
+|---|---|---|
+| `ads-ai-consultant` | Análise estratégica de anúncios patrocinados | Sob demanda (botão do admin) |
+| `blog-generate-article` | Geração de artigos para blog | Sob demanda |
+| `generate-message-suggestions` | Geração de frases motivacionais ("Mensagem do Dia") | Sob demanda (com quota diária) |
+| `post-sale-messages` | Melhoria de texto de mensagens pós-venda (action `suggest`) | Sob demanda |
 
-### Fase 2 — Trial gates nos módulos ✅
-5. ✅ ADS: banner de trial + sync bloqueado via ML API gate no backend
-6. ✅ Linha do Tempo: banner de trial informando limitação a 30d
-7. ✅ Etiquetas: filtro "Todos" agora capped a 30 dias
+**Custo**: ~$0.15/1M tokens input, ~$0.60/1M tokens output (gpt-4o-mini). Custo muito baixo por chamada.
 
-### Fase 3 — Multi-conta e upgrade ✅
-8. ✅ Multi-conta: soma de vendas (get_tenant_total_sales + check_tenant_plan_limit)
-9. ✅ Estados de conta (account_state enum: active/pending_upgrade/disabled/error)
-10. ✅ Upgrade com pró-rata (calculate_prorata_upgrade + execute_plan_upgrade)
-11. ✅ Crescimento natural → bloqueio (PlanLimitBanner + useTenantLimits)
-12. ✅ Aviso pré-conexão de nova conta (AccountConnectionWarning)
-13. ✅ Audit log (tenant_limit_log)
+---
 
-### Fase 4 — Landing e onboarding ✅
-14. ✅ Landing com 3 CTAs (Login, Cadastro, Planos) no header e hero
-15. ✅ Welcome screen pós-confirmação de email (WelcomeScreen + aviso ML)
-16. ✅ Proteção contra abuso (system_audit_log + tenant_limit_log)
+### 2. Resend (e-mails transacionais e campanhas)
+
+| Função | Uso |
+|---|---|
+| `email-worker-send` | Envio real de e-mails (onboarding, notificações, campanhas) |
+| `email-test-provider` | Teste de configuração do provedor |
+
+**Secret**: `RESEND_API_KEY`
+**Custo**: Plano gratuito Resend = 100 emails/dia, 3.000/mês. Depois disso, pago.
+
+---
+
+### 3. Facebook Conversions API
+
+| Função | Uso |
+|---|---|
+| `facebook-conversions` | Envia eventos server-side para o Pixel do Facebook |
+| `facebook-get-pixel-id` | Retorna o Pixel ID configurado |
+
+**Secrets**: `FACEBOOK_ACCESS_TOKEN`, `FACEBOOK_PIXEL_ID`
+**Custo**: Gratuito (API do Facebook não cobra por envio de eventos).
+
+---
+
+### 4. OpenWeatherMap
+
+| Função | Uso |
+|---|---|
+| `weather-api` | Busca clima atual para exibição no dashboard |
+
+**Secret**: `OPENWEATHERMAP_API_KEY`
+**Custo**: Plano gratuito = 1.000 chamadas/dia. Acima disso, pago.
+
+---
+
+### 5. Mercado Livre API (gratuito, mas consome Edge Function executions)
+
+**64 edge functions** fazem chamadas à `api.mercadolibre.com`. Não há custo de API do ML, mas cada invocação consome:
+- **Lovable Cloud edge function execution time** (ver item 7)
+
+Funções mais pesadas (maior volume de chamadas ML):
+- `ml-sync-orders`, `ml-sync-shipments`, `ml-sync-invoices`, `ml-sync-messages`
+- `ml-sync-billing`, `ml-sync-real-costs`, `ml-sync-financial`
+- `ads-sync`, `ads-connector-sync`, `ads-nightly-cache`
+- `radiography-engine`, `wholesale-engine`, `competitor-engine`
+- `qa-messages-polling-sync`, `orders-hourly-sync`, `orders-nightly-sync`
+
+---
+
+### 6. Mercado Pago API (gratuito, mas consome executions)
+
+Funções que chamam `api.mercadopago.com`:
+- `mp-sync-movements`, `mp-sync-payments`, `mp-sync-price`
+- `mp-sync-tenant-plans`, `mp-token-refresh`
+- `mercadopago-checkout`, `mercadopago-webhook`
+- `billing-checkout`, `billing-periodic-sync`
+
+---
+
+### 7. Lovable Cloud — Consumo Base
+
+Itens que geram custo no Lovable Cloud independente de IA:
+
+| Recurso | O que consome |
+|---|---|
+| **Database (Postgres)** | Armazenamento de dados, todas as tabelas, RLS, RPCs |
+| **Edge Functions** | Cada invocação = tempo de execução (110+ functions no projeto) |
+| **Storage** | Bucket `template-assets` (usado por templates) |
+| **Auth** | Cada signup/login/token refresh conta como auth request |
+| **Realtime** | Tabelas com realtime habilitado (se houver) |
+| **pg_cron jobs** | `billing-periodic-sync` roda a cada 30min, mais qualquer outro cron configurado |
+
+---
+
+### 8. Lovable AI Gateway (LOVABLE_API_KEY)
+
+Após a migração, **apenas 1 uso restante**:
+
+| Função | Uso | Consome créditos IA? |
+|---|---|---|
+| `auth-email-hook` | Autenticação de webhook de e-mail | **NÃO** — usa a key apenas para verificação de assinatura, não faz chamada de IA |
+
+**Resultado: Zero consumo de créditos Lovable AI no momento.**
+
+---
+
+### Resumo de Custos Variáveis
+
+| Provedor | Secret | Custo |
+|---|---|---|
+| **OpenAI** | `OPENAI_API_KEY` | Por token (muito baixo com gpt-4o-mini) |
+| **Resend** | `RESEND_API_KEY` | Gratuito até 3k emails/mês |
+| **Facebook** | `FACEBOOK_ACCESS_TOKEN` | Gratuito |
+| **OpenWeatherMap** | `OPENWEATHERMAP_API_KEY` | Gratuito até 1k/dia |
+| **Mercado Livre** | Token OAuth | Gratuito |
+| **Mercado Pago** | Token OAuth | Gratuito |
+| **Lovable Cloud** | — | Database + Auth + Edge executions + Storage |
+| **Lovable AI** | `LOVABLE_API_KEY` | **Zero** (não usado para IA) |
+
