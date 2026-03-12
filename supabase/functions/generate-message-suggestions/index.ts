@@ -30,10 +30,10 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const lovableKey = Deno.env.get("LOVABLE_API_KEY");
+    const openaiKey = Deno.env.get("OPENAI_API_KEY");
 
-    if (!lovableKey) {
-      throw new Error("LOVABLE_API_KEY not configured");
+    if (!openaiKey) {
+      throw new Error("OPENAI_API_KEY not configured");
     }
 
     // Auth check
