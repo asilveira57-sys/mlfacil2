@@ -147,9 +147,9 @@ function escapeRegex(string: string): string {
 // AI suggestion for improving message text
 async function suggestImprovement(content: string, messageType: string): Promise<string> {
   // Use Lovable AI for text improvement
-  const apiKey = Deno.env.get("LOVABLE_API_KEY");
+  const apiKey = Deno.env.get("OPENAI_API_KEY");
   if (!apiKey) {
-    console.warn("LOVABLE_API_KEY not configured, returning original content");
+    console.warn("OPENAI_API_KEY not configured, returning original content");
     return content;
   }
 
