@@ -89,7 +89,7 @@ export function useAdsAiConsultant(sellerId: string | undefined) {
       if (data?.error) {
         if (data.error.includes('Rate limit')) {
           toast.error('Limite de requisições atingido. Tente novamente em alguns minutos.');
-        } else if (data.error.includes('credits')) {
+        } else if (data.error.includes('credits') || data.error.includes('insufficient_quota')) {
           toast.error('Créditos de IA esgotados. Adicione créditos para continuar.');
         } else {
           toast.error(data.error);

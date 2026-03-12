@@ -147,9 +147,9 @@ function escapeRegex(string: string): string {
 // AI suggestion for improving message text
 async function suggestImprovement(content: string, messageType: string): Promise<string> {
   // Use Lovable AI for text improvement
-  const apiKey = Deno.env.get("LOVABLE_API_KEY");
+  const apiKey = Deno.env.get("OPENAI_API_KEY");
   if (!apiKey) {
-    console.warn("LOVABLE_API_KEY not configured, returning original content");
+    console.warn("OPENAI_API_KEY not configured, returning original content");
     return content;
   }
 
@@ -173,14 +173,14 @@ Tipo de mensagem: ${messageType}
 Retorne APENAS o texto melhorado, sem explicações.`;
 
   try {
-    const response = await fetch("https://api.lovable.dev/v1/chat/completions", {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "gpt-4o-mini",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: `Melhore esta mensagem:\n\n${content}` },
