@@ -96,7 +96,7 @@ export function LandingHeader() {
             </Button>
             <Button 
               variant="outline"
-              onClick={() => navigate("/auth?tab=signup")}
+              onClick={() => navigate("/criar-acesso")}
             >
               {t('header.btn_criar_conta')}
             </Button>
@@ -144,7 +144,7 @@ export function LandingHeader() {
                   </Button>
                   <Button 
                     variant="outline" 
-                    onClick={() => { navigate("/auth?tab=signup"); setMobileMenuOpen(false); }}
+                    onClick={() => { navigate("/criar-acesso"); setMobileMenuOpen(false); }}
                   >
                     {t('header.btn_criar_conta')}
                   </Button>
