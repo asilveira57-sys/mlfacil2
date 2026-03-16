@@ -1,4 +1,5 @@
 import { Card } from "@/components/ui/card";
+import { BarChart3 } from "lucide-react";
 import {
   BarChart,
   Bar,
