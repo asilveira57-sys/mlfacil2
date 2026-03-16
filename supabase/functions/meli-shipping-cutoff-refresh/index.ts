@@ -121,10 +121,10 @@ Deno.serve(async (req) => {
         }
       }
 
-      // 5. Get real agency cutoff from estimated_handling_limit in shipments cache
-      // This is the actual seller dispatch deadline that ML assigns per shipment.
-      // NO external API calls needed — data already in our DB from sync.
+      // 5. Get real cutoffs from estimated_handling_limit in shipments cache,
+      // SEPARATED BY LOGISTIC TYPE to avoid mixing agency/flex/coleta cutoffs.
       let agencyCutoff: string | null = null;
+      let colectaCutoffFromShipments: string | null = null;
 
       try {
         const nowISO = new Date().toISOString();
@@ -137,10 +137,14 @@ Deno.serve(async (req) => {
           .in("shipment_status", ["ready_to_ship", "handling"])
           .gt("estimated_handling_limit", nowISO)
           .order("estimated_handling_limit", { ascending: true })
-          .limit(20);
+          .limit(50);
 
         if (activeShipments && activeShipments.length > 0) {
-          // Find the earliest handling limit with a non-midnight time in SP timezone
+          // Separate shipments by logistic type category
+          const agencyTypes = ["xd_drop_off", "drop_off"]; // Agency drop-off
+          const flexTypes = ["self_service"]; // Flex
+          const fullTypes = ["fulfillment", "cross_docking"]; // Full
+
           for (const shipment of activeShipments) {
             if (!shipment.estimated_handling_limit) continue;
             const d = new Date(shipment.estimated_handling_limit);
@@ -151,21 +155,39 @@ Deno.serve(async (req) => {
               hour12: false,
             });
             // Skip midnight — ML sometimes sets date-only limits as 00:00
-            if (timeStr !== '00:00') {
+            if (timeStr === '00:00') continue;
+
+            const lt = shipment.logistic_type || '';
+
+            // Agency cutoff (earliest agency deadline)
+            if (!agencyCutoff && agencyTypes.includes(lt)) {
               agencyCutoff = timeStr;
-              break;
             }
+
+            // Coleta cutoff (non-agency, non-flex, non-full)
+            if (!colectaCutoffFromShipments && !agencyTypes.includes(lt) && !flexTypes.includes(lt) && !fullTypes.includes(lt) && lt) {
+              colectaCutoffFromShipments = timeStr;
+            }
+
+            // If we found both, stop searching
+            if (agencyCutoff && colectaCutoffFromShipments) break;
           }
         }
 
         await log(supabase, {
           trace_id: traceId, company_id: companyId, seller_id: sellerId,
-          action: "agency_cutoff", status: agencyCutoff ? "success" : "empty",
+          action: "cutoff_extraction", status: (agencyCutoff || colectaCutoffFromShipments) ? "success" : "empty",
           step: "cutoff_from_handling_limit", execution_time_ms: Date.now() - startTime,
           payload_summary: {
             agency_cutoff: agencyCutoff,
+            colecta_cutoff: colectaCutoffFromShipments,
             shipments_checked: activeShipments?.length || 0,
-            sample: (activeShipments || []).slice(0, 3).map(s => ({
+            by_type: (activeShipments || []).reduce((acc: any, s: any) => {
+              const t = s.logistic_type || 'unknown';
+              acc[t] = (acc[t] || 0) + 1;
+              return acc;
+            }, {}),
+            sample: (activeShipments || []).slice(0, 5).map(s => ({
               id: s.shipment_id,
               limit: s.estimated_handling_limit,
               type: s.logistic_type,
@@ -174,10 +196,11 @@ Deno.serve(async (req) => {
         });
       } catch (e: any) {
         console.error("Cutoff extraction error:", e.message);
-        await log(supabase, { trace_id: traceId, company_id: companyId, seller_id: sellerId, action: "agency_cutoff", status: "error", step: "cutoff_extraction", execution_time_ms: Date.now() - startTime, error_message: e.message });
+        await log(supabase, { trace_id: traceId, company_id: companyId, seller_id: sellerId, action: "cutoff_extraction", status: "error", step: "cutoff_extraction", execution_time_ms: Date.now() - startTime, error_message: e.message });
       }
 
-      const finalCutoff = agencyCutoff;
+      // Use colecta cutoff from shipments if API doesn't provide one
+      const finalColectaCutoff = colectaCutoffFromShipments;
 
       // 6. Normalize
       await log(supabase, { trace_id: traceId, company_id: companyId, seller_id: sellerId, action: "normalize", status: "success", step: "normalize_start", execution_time_ms: Date.now() - startTime });
