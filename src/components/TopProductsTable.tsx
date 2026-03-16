@@ -52,8 +52,9 @@ export function TopProductsTable({ products, isLoading }: TopProductsTableProps)
       <Card className="p-6">
         <h3 className="text-lg font-semibold mb-4">{t('top_products.title')}</h3>
         <div className="h-[200px] flex flex-col items-center justify-center text-muted-foreground">
-          <Package className="w-12 h-12 mb-4 opacity-50" />
-          <p>{t('charts.no_data')}</p>
+          <Package className="w-12 h-12 mb-4 opacity-30" />
+          <p className="text-sm">Nenhum dado encontrado ainda.</p>
+          <p className="text-xs mt-1 text-muted-foreground/70">Será preenchido automaticamente com a atividade da conta.</p>
         </div>
       </Card>
     );
