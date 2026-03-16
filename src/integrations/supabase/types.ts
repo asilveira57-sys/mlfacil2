@@ -7874,6 +7874,7 @@ export type Database = {
       meli_shipments_cache: {
         Row: {
           estimated_handling_limit: string | null
+          estimated_schedule_limit: string | null
           id: string
           label_available: boolean
           last_sync_at: string
@@ -7894,6 +7895,7 @@ export type Database = {
         }
         Insert: {
           estimated_handling_limit?: string | null
+          estimated_schedule_limit?: string | null
           id?: string
           label_available?: boolean
           last_sync_at?: string
@@ -7914,6 +7916,7 @@ export type Database = {
         }
         Update: {
           estimated_handling_limit?: string | null
+          estimated_schedule_limit?: string | null
           id?: string
           label_available?: boolean
           last_sync_at?: string
