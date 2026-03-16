@@ -513,8 +513,80 @@ serve(async (req) => {
 
     const invoiceMap = new Map((invoices || []).map(i => [i.order_id, i]));
 
-    // Map shipment_id -> order_id for header building
-    const shipmentToOrderId = new Map<string, string>();
+    // Identify orders with missing/stale invoice status and re-check via ML API
+    const staleOrderIds = orderIds.filter(oid => {
+      const inv = invoiceMap.get(oid);
+      return !inv || inv.invoice_status !== 'emitida';
+    });
+
+    if (staleOrderIds.length > 0 && mlAccount.access_token) {
+      console.log(`Re-checking ${staleOrderIds.length} orders with stale invoice status via ML API`);
+      for (const orderId of staleOrderIds) {
+        try {
+          // Try billing_info endpoint first
+          const billingRes = await fetch(
+            `https://api.mercadolibre.com/orders/${orderId}/billing_info`,
+            { headers: { 'Authorization': `Bearer ${mlAccount.access_token}` } }
+          );
+          
+          let freshStatus = 'pendente';
+          let invoiceNumber: string | null = null;
+          let invoiceKey: string | null = null;
+          let issuedAt: string | null = null;
+          
+          if (billingRes.ok) {
+            const billingInfo = await billingRes.json();
+            const docNumber = billingInfo.billing_info?.doc_number;
+            const additionalInvoice = billingInfo.additional_info?.find((info: { type: string }) => info.type === 'invoice');
+            
+            if (docNumber || additionalInvoice || billingInfo.status === 'invoiced') {
+              freshStatus = 'emitida';
+              invoiceNumber = docNumber || additionalInvoice?.doc_number || null;
+              invoiceKey = billingInfo.billing_info?.access_key || additionalInvoice?.access_key || null;
+              issuedAt = additionalInvoice?.issue_date || billingInfo.date_created || null;
+            }
+          }
+          
+          // Fallback: fiscal_documents endpoint
+          if (freshStatus !== 'emitida') {
+            try {
+              const fiscalRes = await fetch(
+                `https://api.mercadolibre.com/packs/${orderId}/fiscal_documents`,
+                { headers: { 'Authorization': `Bearer ${mlAccount.access_token}` } }
+              );
+              if (fiscalRes.ok) {
+                const fiscalDocs = await fiscalRes.json();
+                if (Array.isArray(fiscalDocs) && fiscalDocs.length > 0) {
+                  freshStatus = 'emitida';
+                  invoiceNumber = fiscalDocs[0].fiscal_document_number || null;
+                  invoiceKey = fiscalDocs[0].access_key || null;
+                  issuedAt = fiscalDocs[0].issue_date || null;
+                }
+              }
+            } catch { /* ignore */ }
+          }
+          
+          // Update cache and map if found
+          if (freshStatus === 'emitida') {
+            console.log(`Invoice found for order ${orderId} via live API check`);
+            invoiceMap.set(orderId, { order_id: orderId, invoice_status: 'emitida' });
+            // Update cache in background (don't await)
+            supabaseAdmin.from('meli_invoices_cache').upsert({
+              user_id: user.id,
+              seller_id,
+              order_id: orderId,
+              invoice_status: 'emitida',
+              invoice_number: invoiceNumber,
+              invoice_key: invoiceKey,
+              issued_at: issuedAt,
+              last_sync_at: new Date().toISOString(),
+            }, { onConflict: 'seller_id,order_id' });
+          }
+        } catch (err) {
+          console.error(`Error re-checking invoice for order ${orderId}:`, err);
+        }
+      }
+    }
 
     for (const shipment_id of shipment_ids) {
       const shipment = shipmentMap.get(shipment_id);
