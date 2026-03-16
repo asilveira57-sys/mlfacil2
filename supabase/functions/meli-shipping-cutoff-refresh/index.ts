@@ -121,47 +121,103 @@ Deno.serve(async (req) => {
         }
       }
 
-      // 5. Get real cutoffs from estimated_handling_limit in shipments cache,
-      // SEPARATED BY LOGISTIC TYPE to avoid mixing agency/flex/coleta cutoffs.
+      // 5. Get REAL agency cutoff from estimated_schedule_limit (the actual ML cutoff time)
+      // and fallback handling_limit for coleta/other types
       let agencyCutoff: string | null = null;
+      let agencyCutoffSource: string = "none";
+      let handlingLimitTime: string | null = null; // for comparison/fallback display
       let colectaCutoffFromShipments: string | null = null;
 
       try {
         const nowISO = new Date().toISOString();
 
-        // Query active shipments with future handling limits, ordered by earliest first
+        // Query active shipments, include both schedule_limit and handling_limit
         const { data: activeShipments } = await supabase
           .from("meli_shipments_cache")
-          .select("shipment_id, estimated_handling_limit, logistic_type")
+          .select("shipment_id, estimated_handling_limit, estimated_schedule_limit, logistic_type")
           .eq("seller_id", mlUserId)
           .in("shipment_status", ["ready_to_ship", "handling"])
           .gt("estimated_handling_limit", nowISO)
           .order("estimated_handling_limit", { ascending: true })
           .limit(50);
 
-        if (activeShipments && activeShipments.length > 0) {
-          // Separate shipments by logistic type category
-          const agencyTypes = ["xd_drop_off", "drop_off"]; // Agency drop-off
-          const flexTypes = ["self_service"]; // Flex
-          const fullTypes = ["fulfillment", "cross_docking"]; // Full
+        const agencyTypes = ["xd_drop_off", "drop_off"];
+        const flexTypes = ["self_service"];
+        const fullTypes = ["fulfillment", "cross_docking"];
 
+        if (activeShipments && activeShipments.length > 0) {
+          // First pass: try to get agency cutoff from estimated_schedule_limit (correct field)
+          for (const shipment of activeShipments) {
+            const lt = shipment.logistic_type || '';
+            if (!agencyTypes.includes(lt)) continue;
+
+            // Priority 1: estimated_schedule_limit = real ML agency cutoff
+            if (shipment.estimated_schedule_limit) {
+              const d = new Date(shipment.estimated_schedule_limit);
+              const timeStr = d.toLocaleTimeString('pt-BR', {
+                timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false,
+              });
+              if (timeStr !== '00:00') {
+                agencyCutoff = timeStr;
+                agencyCutoffSource = "estimated_schedule_limit";
+                break;
+              }
+            }
+          }
+
+          // If no schedule_limit found in cache, try fetching from ML API directly
+          if (!agencyCutoff) {
+            const agencyShipment = activeShipments.find((s: any) => agencyTypes.includes(s.logistic_type || ''));
+            if (agencyShipment) {
+              try {
+                const shipmentApiRes = await fetchWithRetry(
+                  `https://api.mercadolibre.com/shipments/${agencyShipment.shipment_id}`,
+                  token, "shipment_schedule_limit", supabase, traceId, companyId, sellerId
+                );
+                if (shipmentApiRes.ok) {
+                  const shipData = shipmentApiRes.data;
+                  // Extract estimated_schedule_limit from API response
+                  const scheduleLimit = shipData?.shipping_option?.estimated_schedule_limit?.date
+                    || shipData?.lead_time?.estimated_schedule_limit?.date
+                    || shipData?.estimated_schedule_limit?.date;
+
+                  if (scheduleLimit) {
+                    const d = new Date(scheduleLimit);
+                    const timeStr = d.toLocaleTimeString('pt-BR', {
+                      timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false,
+                    });
+                    if (timeStr !== '00:00') {
+                      agencyCutoff = timeStr;
+                      agencyCutoffSource = "api_schedule_limit";
+                    }
+
+                    // Persist the schedule_limit in cache for future use
+                    await supabase.from("meli_shipments_cache")
+                      .update({ estimated_schedule_limit: scheduleLimit })
+                      .eq("seller_id", mlUserId)
+                      .eq("shipment_id", agencyShipment.shipment_id);
+                  }
+                }
+              } catch (apiErr: any) {
+                console.error("Schedule limit API fetch error:", apiErr.message);
+              }
+            }
+          }
+
+          // Second pass: get handling_limit time (for comparison) and coleta cutoff
           for (const shipment of activeShipments) {
             if (!shipment.estimated_handling_limit) continue;
             const d = new Date(shipment.estimated_handling_limit);
             const timeStr = d.toLocaleTimeString('pt-BR', {
-              timeZone: 'America/Sao_Paulo',
-              hour: '2-digit',
-              minute: '2-digit',
-              hour12: false,
+              timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false,
             });
-            // Skip midnight — ML sometimes sets date-only limits as 00:00
             if (timeStr === '00:00') continue;
 
             const lt = shipment.logistic_type || '';
 
-            // Agency cutoff (earliest agency deadline)
-            if (!agencyCutoff && agencyTypes.includes(lt)) {
-              agencyCutoff = timeStr;
+            // Capture handling_limit for agency (for divergence display)
+            if (!handlingLimitTime && agencyTypes.includes(lt)) {
+              handlingLimitTime = timeStr;
             }
 
             // Coleta cutoff (non-agency, non-flex, non-full)
@@ -169,27 +225,31 @@ Deno.serve(async (req) => {
               colectaCutoffFromShipments = timeStr;
             }
 
-            // If we found both, stop searching
-            if (agencyCutoff && colectaCutoffFromShipments) break;
+            if (handlingLimitTime && colectaCutoffFromShipments) break;
           }
         }
 
         await log(supabase, {
           trace_id: traceId, company_id: companyId, seller_id: sellerId,
-          action: "cutoff_extraction", status: (agencyCutoff || colectaCutoffFromShipments) ? "success" : "empty",
-          step: "cutoff_from_handling_limit", execution_time_ms: Date.now() - startTime,
+          action: "cutoff_extraction", status: agencyCutoff ? "success" : "empty",
+          step: "cutoff_real_schedule_limit", execution_time_ms: Date.now() - startTime,
           payload_summary: {
             agency_cutoff: agencyCutoff,
+            agency_cutoff_source: agencyCutoffSource,
+            handling_limit_time: handlingLimitTime,
             colecta_cutoff: colectaCutoffFromShipments,
             shipments_checked: activeShipments?.length || 0,
+            divergence: agencyCutoff && handlingLimitTime && agencyCutoff !== handlingLimitTime
+              ? `ML=${agencyCutoff} vs handling=${handlingLimitTime}` : null,
             by_type: (activeShipments || []).reduce((acc: any, s: any) => {
               const t = s.logistic_type || 'unknown';
               acc[t] = (acc[t] || 0) + 1;
               return acc;
             }, {}),
-            sample: (activeShipments || []).slice(0, 5).map(s => ({
+            sample: (activeShipments || []).slice(0, 5).map((s: any) => ({
               id: s.shipment_id,
-              limit: s.estimated_handling_limit,
+              handling: s.estimated_handling_limit,
+              schedule: s.estimated_schedule_limit,
               type: s.logistic_type,
             })),
           },
@@ -199,7 +259,6 @@ Deno.serve(async (req) => {
         await log(supabase, { trace_id: traceId, company_id: companyId, seller_id: sellerId, action: "cutoff_extraction", status: "error", step: "cutoff_extraction", execution_time_ms: Date.now() - startTime, error_message: e.message });
       }
 
-      // Use colecta cutoff from shipments if API doesn't provide one
       const finalColectaCutoff = colectaCutoffFromShipments;
 
       // 6. Normalize
