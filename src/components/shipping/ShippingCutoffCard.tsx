@@ -221,6 +221,26 @@ function CutoffItem({
   );
 }
 
+function AgencyItem({
+  enabled, cutoffTime,
+}: {
+  enabled: boolean; cutoffTime: string | null | undefined;
+}) {
+  if (!enabled) {
+    return (
+      <span className="text-xs text-muted-foreground">
+        Agência: <span className="italic">não disponível</span>
+      </span>
+    );
+  }
+
+  return (
+    <span className="text-xs text-foreground">
+      Agência: <span className="font-mono font-semibold text-primary">{cutoffTime || '—'}</span>
+    </span>
+  );
+}
+
 function ColectaItem({
   enabled, cutoffTime, windowFrom, windowTo, calculated,
 }: {
