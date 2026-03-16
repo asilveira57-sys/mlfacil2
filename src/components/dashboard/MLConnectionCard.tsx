@@ -54,6 +54,7 @@ function FirstConnectionCard() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [connecting, setConnecting] = useState(false);
+  const [showWarning, setShowWarning] = useState(false);
 
   const handleConnect = async () => {
     setConnecting(true);
