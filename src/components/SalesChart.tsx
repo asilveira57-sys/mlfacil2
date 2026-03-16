@@ -1,5 +1,6 @@
 import { Card } from "@/components/ui/card";
 import { useTranslation } from "react-i18next";
+import { TrendingUp } from "lucide-react";
 import {
   AreaChart,
   Area,
