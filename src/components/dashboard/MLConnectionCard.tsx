@@ -297,6 +297,7 @@ function ReconnectRequiredCard() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [reconnecting, setReconnecting] = useState(false);
+  const [showWarning, setShowWarning] = useState(false);
 
   const handleReconnect = async () => {
     setReconnecting(true);
