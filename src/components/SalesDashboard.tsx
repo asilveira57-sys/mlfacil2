@@ -560,13 +560,11 @@ export function SalesDashboard() {
 
   if (error === "connect") {
     return (
-      <Card className="p-8 text-center">
-        <AlertCircle className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-        <h3 className="text-xl font-semibold mb-2">{t('no_account')}</h3>
-        <p className="text-muted-foreground mb-4">
-          {t('no_account_desc')}
-        </p>
-      </Card>
+      <DashboardEmptyState
+        title="Conta não conectada"
+        message="Conecte sua conta do Mercado Livre para visualizar suas vendas e métricas."
+        icon={<AlertCircle className="w-12 h-12 text-muted-foreground/40" />}
+      />
     );
   }
 
@@ -584,7 +582,22 @@ export function SalesDashboard() {
     );
   }
 
+  // Empty state: data loaded but no sales activity
   const metrics = salesData?.metrics;
+  const isEmpty = salesData && !isLoading && 
+    (metrics?.totalOrders || 0) === 0 && 
+    (metrics?.ordersPeriod || 0) === 0 &&
+    (salesData?.dailySales?.length || 0) === 0;
+
+  if (isEmpty) {
+    return (
+      <DashboardEmptyState
+        title="Nenhum dado de vendas encontrado ainda."
+        message="Esse módulo será preenchido automaticamente quando houver atividade na conta. A sincronização de vendas pode levar alguns minutos após a primeira conexão."
+        icon={<ShoppingCart className="w-12 h-12 text-muted-foreground/40" />}
+      />
+    );
+  }
   const hasDateFilter = dateFilter.dateFrom !== null;
 
   return (
