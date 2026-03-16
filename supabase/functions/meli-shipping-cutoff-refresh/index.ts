@@ -205,7 +205,9 @@ Deno.serve(async (req) => {
       // 6. Normalize
       await log(supabase, { trace_id: traceId, company_id: companyId, seller_id: sellerId, action: "normalize", status: "success", step: "normalize_start", execution_time_ms: Date.now() - startTime });
 
-      const normalized = normalizeShippingCutoff(flexData, colectaData, finalCutoff);
+      const normalized = normalizeShippingCutoff(flexData, colectaData, finalColectaCutoff);
+      // Store agency cutoff separately
+      (normalized as any).agency_cutoff_time = agencyCutoff;
 
       // 6. Build safe source_payload (no tokens!)
       const safePayload: any = {};
