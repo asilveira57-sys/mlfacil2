@@ -86,6 +86,8 @@ export function ShippingCutoffCard({
                     <AgencyItem
                       enabled={agency?.enabled ?? false}
                       cutoffTime={agency?.cutoff_time}
+                      cutoffSource={agency?.cutoff_source}
+                      handlingLimitTime={agency?.handling_limit_time}
                     />
 
                     <span className="text-muted-foreground/30">|</span>

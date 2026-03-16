@@ -124,7 +124,7 @@ export function useShippingCutoff({ sellerId, mlUserId, companyId }: UseShipping
         const parsed: CutoffData = {
           flex: result.flex,
           colecta: result.colecta,
-          agency: result.agency || { enabled: false, cutoff_time: null },
+          agency: result.agency || { enabled: false, cutoff_time: null, cutoff_source: null, handling_limit_time: null },
           meta: result.meta,
           _raw: result._raw,
         };
