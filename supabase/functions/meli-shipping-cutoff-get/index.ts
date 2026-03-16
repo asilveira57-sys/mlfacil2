@@ -161,6 +161,13 @@ function formatColectaResponse(c: any) {
   };
 }
 
+function formatAgencyResponse(c: any) {
+  return {
+    enabled: !!c.agency_cutoff_time,
+    cutoff_time: c.agency_cutoff_time || null,
+  };
+}
+
 function jsonResponse(body: any, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
