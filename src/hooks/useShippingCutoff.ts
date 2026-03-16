@@ -21,6 +21,8 @@ export interface CutoffColectaData {
 export interface CutoffAgencyData {
   enabled: boolean;
   cutoff_time: string | null;
+  cutoff_source: string | null;
+  handling_limit_time: string | null;
 }
 
 export interface CutoffMeta {
