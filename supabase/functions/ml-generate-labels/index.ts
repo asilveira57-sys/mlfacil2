@@ -512,6 +512,7 @@ serve(async (req) => {
       .in('order_id', orderIds);
 
     const invoiceMap = new Map((invoices || []).map(i => [i.order_id, i]));
+    const shipmentToOrderId = new Map<string, string>();
 
     // Identify orders with missing/stale invoice status and re-check via ML API
     const staleOrderIds = orderIds.filter(oid => {
