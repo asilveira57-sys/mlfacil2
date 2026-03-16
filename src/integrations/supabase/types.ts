@@ -14592,6 +14592,7 @@ export type Database = {
       }
       shipping_cutoff_cache: {
         Row: {
+          agency_cutoff_time: string | null
           colecta_cutoff_calculated: boolean
           colecta_cutoff_time: string | null
           colecta_enabled: boolean
@@ -14618,6 +14619,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          agency_cutoff_time?: string | null
           colecta_cutoff_calculated?: boolean
           colecta_cutoff_time?: string | null
           colecta_enabled?: boolean
@@ -14644,6 +14646,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          agency_cutoff_time?: string | null
           colecta_cutoff_calculated?: boolean
           colecta_cutoff_time?: string | null
           colecta_enabled?: boolean

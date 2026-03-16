@@ -18,6 +18,11 @@ export interface CutoffColectaData {
   cutoff_calculated: boolean;
 }
 
+export interface CutoffAgencyData {
+  enabled: boolean;
+  cutoff_time: string | null;
+}
+
 export interface CutoffMeta {
   status: 'ok' | 'partial' | 'error';
   fetched_at: string | null;
@@ -29,6 +34,7 @@ export interface CutoffMeta {
 export interface CutoffData {
   flex: CutoffFlexData;
   colecta: CutoffColectaData;
+  agency: CutoffAgencyData;
   meta: CutoffMeta;
   // Raw cache data for zone details modal
   _raw?: any;
@@ -112,10 +118,11 @@ export function useShippingCutoff({ sellerId, mlUserId, companyId }: UseShipping
       }
 
       // Result is already normalized { flex, colecta, meta }
-      if (result?.flex || result?.colecta || result?.meta) {
+      if (result?.flex || result?.colecta || result?.agency || result?.meta) {
         const parsed: CutoffData = {
           flex: result.flex,
           colecta: result.colecta,
+          agency: result.agency || { enabled: false, cutoff_time: null },
           meta: result.meta,
           _raw: result._raw,
         };

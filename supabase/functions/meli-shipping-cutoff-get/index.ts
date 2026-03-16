@@ -42,6 +42,7 @@ Deno.serve(async (req) => {
         return jsonResponse({
           flex: formatFlexResponse(cached),
           colecta: formatColectaResponse(cached),
+          agency: formatAgencyResponse(cached),
           meta: { status: cached.status, fetched_at: cached.fetched_at, expires_at: cached.expires_at, timezone: cached.timezone, message: null },
         });
       }
@@ -106,6 +107,7 @@ Deno.serve(async (req) => {
         return jsonResponse({
           flex: formatFlexResponse(fallback),
           colecta: formatColectaResponse(fallback),
+          agency: formatAgencyResponse(fallback),
           meta: { status: "partial", fetched_at: fallback.fetched_at, expires_at: fallback.expires_at, timezone: fallback.timezone, message: "Alguns dados não vieram agora." },
         });
       }
@@ -113,6 +115,7 @@ Deno.serve(async (req) => {
       return jsonResponse({
         flex: { enabled: false, cutoff_type: null, cutoff_time: null, zone_summary_first: null, zone_summary_last: null, zone_details_count: 0 },
         colecta: { enabled: false, cutoff_time: null, window_from: null, window_to: null, cutoff_calculated: false },
+        agency: { enabled: false, cutoff_time: null },
         meta: { status: "error", fetched_at: null, expires_at: null, timezone: "America/Sao_Paulo", message: "Não foi possível buscar a hora de corte agora." },
       });
     }
@@ -122,6 +125,7 @@ Deno.serve(async (req) => {
     return jsonResponse({
       flex: formatFlexResponse(cached),
       colecta: formatColectaResponse(cached),
+      agency: formatAgencyResponse(cached),
       meta: { status: cached.status, fetched_at: cached.fetched_at, expires_at: cached.expires_at, timezone: cached.timezone, message: cached.status === "partial" ? "Alguns dados não vieram agora." : null },
     });
   } catch (error: any) {
@@ -154,6 +158,13 @@ function formatColectaResponse(c: any) {
     window_from: c.colecta_window_from,
     window_to: c.colecta_window_to,
     cutoff_calculated: c.colecta_cutoff_calculated ?? false,
+  };
+}
+
+function formatAgencyResponse(c: any) {
+  return {
+    enabled: !!c.agency_cutoff_time,
+    cutoff_time: c.agency_cutoff_time || null,
   };
 }
 

@@ -578,9 +578,40 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
         }
       }
 
-      // Phase 4.5 REMOVED: Active shipment re-sync is handled by the
-      // shipping-status-sync cron job every 30 minutes. No need to re-fetch
-      // all active shipments during manual sync — it was the main bottleneck.
+      // === PHASE 4.5: Re-check active shipments for status changes ===
+      // This catches cases where labels were printed in ML but cache is stale
+      if (!silent) {
+        setSyncProgress('Atualizando status...');
+      }
+
+      // Get active shipment IDs that might have changed status
+      const { data: activeShipments } = await supabase
+        .from('meli_shipments_cache')
+        .select('shipment_id')
+        .eq('seller_id', sellerId)
+        .in('shipment_status', ['ready_to_ship', 'handling'])
+        .order('last_sync_at', { ascending: true })
+        .limit(100); // Only check the 100 oldest-synced active shipments
+
+      const activeIds = (activeShipments || []).map(s => s.shipment_id);
+      console.log(`Phase 4.5: Re-checking ${activeIds.length} active shipments for status changes`);
+
+      if (activeIds.length > 0) {
+        // Send in batches
+        for (let i = 0; i < activeIds.length; i += SHIPMENT_SYNC_BATCH) {
+          const batch = activeIds.slice(i, i + SHIPMENT_SYNC_BATCH);
+          const resp = await supabase.functions.invoke('ml-sync-shipments', {
+            headers,
+            body: { seller_id: sellerId, shipment_ids: batch },
+          });
+          if (resp.data?.job_id) {
+            await waitForJob(resp.data.job_id, silent);
+          }
+          if (i + SHIPMENT_SYNC_BATCH < activeIds.length) {
+            await sleep(500);
+          }
+        }
+      }
 
       // === PHASE 5: Sync invoices ONLY for orders missing invoice data ===
       if (!silent) {

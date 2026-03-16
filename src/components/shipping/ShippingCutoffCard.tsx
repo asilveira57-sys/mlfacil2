@@ -53,8 +53,9 @@ export function ShippingCutoffCard({
   const meta = data?.meta;
   const flex = data?.flex;
   const colecta = data?.colecta;
+  const agency = data?.agency;
   // Only show error state if there's a client-side error OR status is error AND no data at all
-  const hasAnyData = flex?.enabled || colecta?.enabled;
+  const hasAnyData = flex?.enabled || colecta?.enabled || agency?.enabled;
   const isError = (!data && !!error) || (meta?.status === 'error' && !hasAnyData && !!error);
   const isPartial = meta?.status === 'partial';
 
@@ -81,6 +82,14 @@ export function ShippingCutoffCard({
                   </p>
                 ) : (
                   <div className="flex items-center gap-4 mt-1 flex-wrap">
+                    {/* Agência */}
+                    <AgencyItem
+                      enabled={agency?.enabled ?? false}
+                      cutoffTime={agency?.cutoff_time}
+                    />
+
+                    <span className="text-muted-foreground/30">|</span>
+
                     {/* Flex */}
                     <CutoffItem
                       label="Flex"
@@ -208,6 +217,26 @@ function CutoffItem({
   return (
     <span className="text-xs text-foreground">
       {label}: <span className="font-mono font-semibold text-primary">{cutoffTime || '—'}</span>
+    </span>
+  );
+}
+
+function AgencyItem({
+  enabled, cutoffTime,
+}: {
+  enabled: boolean; cutoffTime: string | null | undefined;
+}) {
+  if (!enabled) {
+    return (
+      <span className="text-xs text-muted-foreground">
+        Agência: <span className="italic">não disponível</span>
+      </span>
+    );
+  }
+
+  return (
+    <span className="text-xs text-foreground">
+      Agência: <span className="font-mono font-semibold text-primary">{cutoffTime || '—'}</span>
     </span>
   );
 }
