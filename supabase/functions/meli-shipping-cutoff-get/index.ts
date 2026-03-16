@@ -107,6 +107,7 @@ Deno.serve(async (req) => {
         return jsonResponse({
           flex: formatFlexResponse(fallback),
           colecta: formatColectaResponse(fallback),
+          agency: formatAgencyResponse(fallback),
           meta: { status: "partial", fetched_at: fallback.fetched_at, expires_at: fallback.expires_at, timezone: fallback.timezone, message: "Alguns dados não vieram agora." },
         });
       }
