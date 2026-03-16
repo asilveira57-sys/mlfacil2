@@ -436,8 +436,8 @@ serve(async (req) => {
       }
     );
 
-    // Redirect back to frontend dashboard with success flag
-    const redirectUrl = new URL(`${frontendOrigin}/dashboard`);
+    // Redirect to sync screen instead of dashboard
+    const redirectUrl = new URL(`${frontendOrigin}/sincronizando`);
     redirectUrl.searchParams.set('ml_connected', 'true');
     redirectUrl.searchParams.set('nickname', userData.nickname || '');
     
