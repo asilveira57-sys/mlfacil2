@@ -115,6 +115,7 @@ Deno.serve(async (req) => {
       return jsonResponse({
         flex: { enabled: false, cutoff_type: null, cutoff_time: null, zone_summary_first: null, zone_summary_last: null, zone_details_count: 0 },
         colecta: { enabled: false, cutoff_time: null, window_from: null, window_to: null, cutoff_calculated: false },
+        agency: { enabled: false, cutoff_time: null },
         meta: { status: "error", fetched_at: null, expires_at: null, timezone: "America/Sao_Paulo", message: "Não foi possível buscar a hora de corte agora." },
       });
     }
