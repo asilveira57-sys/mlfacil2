@@ -210,6 +210,7 @@ const App = () => {
 
                 {/* ===== First access (auth required, onboarding page) ===== */}
                 <Route path="/primeiro-acesso" element={<PrimeiroAcesso />} />
+                <Route path="/sincronizando" element={<ProtectedRoute><Sincronizando /></ProtectedRoute>} />
 
                 {/* ===== Protected dashboard routes (with persistent shell) ===== */}
                 <Route element={<AppShellLayout />}>
