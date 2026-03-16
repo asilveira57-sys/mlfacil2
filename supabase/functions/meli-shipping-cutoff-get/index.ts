@@ -165,6 +165,8 @@ function formatAgencyResponse(c: any) {
   return {
     enabled: !!c.agency_cutoff_time,
     cutoff_time: c.agency_cutoff_time || null,
+    cutoff_source: c.agency_cutoff_source || null,
+    handling_limit_time: c.agency_handling_limit_time || null,
   };
 }
 
