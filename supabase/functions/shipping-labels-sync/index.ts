@@ -344,6 +344,13 @@ async function processAccount(
             updateData.estimated_handling_limit = data.shipping_option.estimated_handling_limit.date;
           }
 
+          // Extract schedule limit (real ML cutoff)
+          if (data.shipping_option?.estimated_schedule_limit?.date) {
+            updateData.estimated_schedule_limit = data.shipping_option.estimated_schedule_limit.date;
+          } else if (data.lead_time?.estimated_schedule_limit?.date) {
+            updateData.estimated_schedule_limit = data.lead_time.estimated_schedule_limit.date;
+          }
+
           await supabase
             .from("meli_shipments_cache")
             .update(updateData)
