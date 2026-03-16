@@ -27,6 +27,7 @@ import Auth from "./pages/Auth";
 import CriarAcesso from "./pages/CriarAcesso";
 import PrimeiroAcesso from "./pages/PrimeiroAcesso";
 import Reconnecting from "./pages/Reconnecting";
+import Sincronizando from "./pages/Sincronizando";
 import Dashboard from "./pages/Dashboard";
 import Home from "./pages/Home";
 import NotFound from "./pages/NotFound";
@@ -209,6 +210,7 @@ const App = () => {
 
                 {/* ===== First access (auth required, onboarding page) ===== */}
                 <Route path="/primeiro-acesso" element={<PrimeiroAcesso />} />
+                <Route path="/sincronizando" element={<ProtectedRoute><Sincronizando /></ProtectedRoute>} />
 
                 {/* ===== Protected dashboard routes (with persistent shell) ===== */}
                 <Route element={<AppShellLayout />}>
