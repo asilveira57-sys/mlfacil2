@@ -113,6 +113,16 @@ async function syncShipmentBatch(
           estimatedHandlingLimit = new Date(created.getTime() + hours * 3600000).toISOString();
         }
 
+        // Extract estimated_schedule_limit (real ML agency/drop-off cutoff time)
+        let estimatedScheduleLimit: string | null = null;
+        if (shipment.shipping_option?.estimated_schedule_limit?.date) {
+          estimatedScheduleLimit = shipment.shipping_option.estimated_schedule_limit.date;
+        } else if (shipment.lead_time?.estimated_schedule_limit?.date) {
+          estimatedScheduleLimit = shipment.lead_time.estimated_schedule_limit.date;
+        } else if (shipment.estimated_schedule_limit?.date) {
+          estimatedScheduleLimit = shipment.estimated_schedule_limit.date;
+        }
+
         const data: Record<string, any> = {
           user_id: userId,
           seller_id: sellerId,
@@ -132,6 +142,7 @@ async function syncShipmentBatch(
           last_sync_at: new Date().toISOString(),
         };
         if (estimatedHandlingLimit) data.estimated_handling_limit = estimatedHandlingLimit;
+        if (estimatedScheduleLimit) data.estimated_schedule_limit = estimatedScheduleLimit;
 
         await supabase.from("meli_shipments_cache").upsert(data, {
           onConflict: "seller_id,shipment_id",
