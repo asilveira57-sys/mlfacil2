@@ -125,6 +125,7 @@ Deno.serve(async (req) => {
     return jsonResponse({
       flex: formatFlexResponse(cached),
       colecta: formatColectaResponse(cached),
+      agency: formatAgencyResponse(cached),
       meta: { status: cached.status, fetched_at: cached.fetched_at, expires_at: cached.expires_at, timezone: cached.timezone, message: cached.status === "partial" ? "Alguns dados não vieram agora." : null },
     });
   } catch (error: any) {
