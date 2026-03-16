@@ -27,6 +27,7 @@ import Auth from "./pages/Auth";
 import CriarAcesso from "./pages/CriarAcesso";
 import PrimeiroAcesso from "./pages/PrimeiroAcesso";
 import Reconnecting from "./pages/Reconnecting";
+import Sincronizando from "./pages/Sincronizando";
 import Dashboard from "./pages/Dashboard";
 import Home from "./pages/Home";
 import NotFound from "./pages/NotFound";
