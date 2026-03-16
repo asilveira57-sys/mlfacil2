@@ -157,11 +157,21 @@ Deno.serve(async (req) => {
               estimatedHandlingLimit = deadline.toISOString();
             }
 
+            // Extract estimated_schedule_limit (real ML agency/drop-off cutoff)
+            let estimatedScheduleLimit: string | null = null;
+            if (data.shipping_option?.estimated_schedule_limit?.date) {
+              estimatedScheduleLimit = data.shipping_option.estimated_schedule_limit.date;
+            } else if (data.lead_time?.estimated_schedule_limit?.date) {
+              estimatedScheduleLimit = data.lead_time.estimated_schedule_limit.date;
+            } else if (data.estimated_schedule_limit?.date) {
+              estimatedScheduleLimit = data.estimated_schedule_limit.date;
+            }
+
             // Only update if status changed or we have new handling limit data
             const statusChanged = data.status !== shipment.shipment_status ||
               data.substatus !== shipment.shipment_substatus;
 
-            if (statusChanged || estimatedHandlingLimit) {
+            if (statusChanged || estimatedHandlingLimit || estimatedScheduleLimit) {
               const receiverAddress = data.receiver_address || {};
               const labelAvailable = data.substatus === "ready_to_print" || data.substatus === "printed";
 
@@ -177,6 +187,9 @@ Deno.serve(async (req) => {
 
               if (estimatedHandlingLimit) {
                 updateData.estimated_handling_limit = estimatedHandlingLimit;
+              }
+              if (estimatedScheduleLimit) {
+                updateData.estimated_schedule_limit = estimatedScheduleLimit;
               }
 
               await supabase

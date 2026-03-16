@@ -127,24 +127,27 @@ async function processShipmentsInBackground(
           let estimatedHandlingLimit: string | null = null;
           const shipmentAny = shipment as any;
           
-          // Path 1: shipping_option.estimated_handling_limit.date (most common)
           if (shipmentAny.shipping_option?.estimated_handling_limit?.date) {
             estimatedHandlingLimit = shipmentAny.shipping_option.estimated_handling_limit.date;
-          }
-          // Path 2: lead_time.estimated_handling_limit.date
-          else if (shipmentAny.lead_time?.estimated_handling_limit?.date) {
+          } else if (shipmentAny.lead_time?.estimated_handling_limit?.date) {
             estimatedHandlingLimit = shipmentAny.lead_time.estimated_handling_limit.date;
-          }
-          // Path 3: estimated_handling_limit directly on shipment
-          else if (shipmentAny.estimated_handling_limit?.date) {
+          } else if (shipmentAny.estimated_handling_limit?.date) {
             estimatedHandlingLimit = shipmentAny.estimated_handling_limit.date;
-          }
-          // Path 4: Calculate from estimated_delivery_time.handling (hours from date_created)
-          else if (shipmentAny.shipping_option?.estimated_delivery_time?.handling && shipmentAny.date_created) {
+          } else if (shipmentAny.shipping_option?.estimated_delivery_time?.handling && shipmentAny.date_created) {
             const created = new Date(shipmentAny.date_created);
             const handlingHours = shipmentAny.shipping_option.estimated_delivery_time.handling;
             const deadline = new Date(created.getTime() + handlingHours * 3600000);
             estimatedHandlingLimit = deadline.toISOString();
+          }
+
+          // Extract estimated_schedule_limit (real ML agency/drop-off cutoff time)
+          let estimatedScheduleLimit: string | null = null;
+          if (shipmentAny.shipping_option?.estimated_schedule_limit?.date) {
+            estimatedScheduleLimit = shipmentAny.shipping_option.estimated_schedule_limit.date;
+          } else if (shipmentAny.lead_time?.estimated_schedule_limit?.date) {
+            estimatedScheduleLimit = shipmentAny.lead_time.estimated_schedule_limit.date;
+          } else if (shipmentAny.estimated_schedule_limit?.date) {
+            estimatedScheduleLimit = shipmentAny.estimated_schedule_limit.date;
           }
           
           if (!estimatedHandlingLimit && !isFullLogistic) {
@@ -172,6 +175,9 @@ async function processShipmentsInBackground(
 
           if (estimatedHandlingLimit) {
             shipmentData.estimated_handling_limit = estimatedHandlingLimit;
+          }
+          if (estimatedScheduleLimit) {
+            shipmentData.estimated_schedule_limit = estimatedScheduleLimit;
           }
 
           const { error: upsertError } = await supabaseAdmin

@@ -86,6 +86,8 @@ export function ShippingCutoffCard({
                     <AgencyItem
                       enabled={agency?.enabled ?? false}
                       cutoffTime={agency?.cutoff_time}
+                      cutoffSource={agency?.cutoff_source}
+                      handlingLimitTime={agency?.handling_limit_time}
                     />
 
                     <span className="text-muted-foreground/30">|</span>
@@ -222,9 +224,10 @@ function CutoffItem({
 }
 
 function AgencyItem({
-  enabled, cutoffTime,
+  enabled, cutoffTime, cutoffSource, handlingLimitTime,
 }: {
   enabled: boolean; cutoffTime: string | null | undefined;
+  cutoffSource: string | null | undefined; handlingLimitTime: string | null | undefined;
 }) {
   if (!enabled) {
     return (
@@ -234,9 +237,19 @@ function AgencyItem({
     );
   }
 
+  const hasDivergence = cutoffTime && handlingLimitTime && cutoffTime !== handlingLimitTime;
+
   return (
     <span className="text-xs text-foreground">
       Agência: <span className="font-mono font-semibold text-primary">{cutoffTime || '—'}</span>
+      {cutoffSource === 'estimated_schedule_limit' || cutoffSource === 'api_schedule_limit' ? (
+        <span className="text-muted-foreground ml-0.5 text-[10px]">(ML)</span>
+      ) : null}
+      {hasDivergence && (
+        <span className="text-muted-foreground ml-1 text-[10px]">
+          despacho: {handlingLimitTime}
+        </span>
+      )}
     </span>
   );
 }

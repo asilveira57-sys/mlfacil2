@@ -1,0 +1,1 @@
+ALTER TABLE meli_shipments_cache ADD COLUMN IF NOT EXISTS estimated_schedule_limit TIMESTAMPTZ;
