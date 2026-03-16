@@ -82,6 +82,14 @@ export function ShippingCutoffCard({
                   </p>
                 ) : (
                   <div className="flex items-center gap-4 mt-1 flex-wrap">
+                    {/* Agência */}
+                    <AgencyItem
+                      enabled={agency?.enabled ?? false}
+                      cutoffTime={agency?.cutoff_time}
+                    />
+
+                    <span className="text-muted-foreground/30">|</span>
+
                     {/* Flex */}
                     <CutoffItem
                       label="Flex"
