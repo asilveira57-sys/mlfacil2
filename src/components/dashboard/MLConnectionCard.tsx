@@ -6,6 +6,7 @@
  */
 
 import { useState } from "react";
+import { MLOAuthWarningModal } from "@/components/ml/MLOAuthWarningModal";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -53,6 +54,7 @@ function FirstConnectionCard() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [connecting, setConnecting] = useState(false);
+  const [showWarning, setShowWarning] = useState(false);
 
   const handleConnect = async () => {
     setConnecting(true);
@@ -105,12 +107,9 @@ function FirstConnectionCard() {
     <div className="min-h-[50vh] flex items-center justify-center">
       <Card className="max-w-md w-full border-2 border-dashed border-primary/25 bg-gradient-to-br from-primary/5 via-background to-background shadow-lg">
         <CardContent className="p-8 text-center space-y-6">
-          {/* Icon */}
           <div className="mx-auto w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
             <ShoppingBag className="w-8 h-8 text-primary" />
           </div>
-
-          {/* Text */}
           <div className="space-y-2">
             <h2 className="text-xl font-semibold text-foreground">
               Conecte sua conta do Mercado Livre
@@ -120,12 +119,10 @@ function FirstConnectionCard() {
               acompanhar anúncios e visualizar métricas automaticamente.
             </p>
           </div>
-
-          {/* CTA */}
           <Button
             className="w-full gap-2"
             size="lg"
-            onClick={handleConnect}
+            onClick={() => setShowWarning(true)}
             disabled={connecting}
           >
             {connecting ? (
@@ -135,14 +132,19 @@ function FirstConnectionCard() {
             )}
             {connecting ? "Conectando..." : "Conectar Mercado Livre"}
           </Button>
-
-          {/* Trust text */}
           <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground/70">
             <Shield className="w-3 h-3" />
             <span>Conexão OAuth oficial — pode ser revogada a qualquer momento.</span>
           </div>
         </CardContent>
       </Card>
+
+      <MLOAuthWarningModal
+        open={showWarning}
+        onClose={() => setShowWarning(false)}
+        onConfirm={() => { setShowWarning(false); handleConnect(); }}
+        loading={connecting}
+      />
     </div>
   );
 }
@@ -295,6 +297,7 @@ function ReconnectRequiredCard() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [reconnecting, setReconnecting] = useState(false);
+  const [showWarning, setShowWarning] = useState(false);
 
   const handleReconnect = async () => {
     setReconnecting(true);
@@ -369,7 +372,7 @@ function ReconnectRequiredCard() {
           <Button
             className="w-full gap-2"
             size="lg"
-            onClick={handleReconnect}
+            onClick={() => setShowWarning(true)}
             disabled={reconnecting}
           >
             {reconnecting ? (
@@ -380,12 +383,18 @@ function ReconnectRequiredCard() {
             {reconnecting ? "Reconectando..." : "Reconectar conta"}
           </Button>
 
-          {/* Trust text */}
           <p className="text-xs text-muted-foreground/50">
             A reconexão leva poucos segundos e não altera seus dados já importados.
           </p>
         </CardContent>
       </Card>
+
+      <MLOAuthWarningModal
+        open={showWarning}
+        onClose={() => setShowWarning(false)}
+        onConfirm={() => { setShowWarning(false); handleReconnect(); }}
+        loading={reconnecting}
+      />
     </div>
   );
 }
