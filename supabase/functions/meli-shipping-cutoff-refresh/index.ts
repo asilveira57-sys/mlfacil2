@@ -265,8 +265,10 @@ Deno.serve(async (req) => {
       await log(supabase, { trace_id: traceId, company_id: companyId, seller_id: sellerId, action: "normalize", status: "success", step: "normalize_start", execution_time_ms: Date.now() - startTime });
 
       const normalized = normalizeShippingCutoff(flexData, colectaData, finalColectaCutoff);
-      // Store agency cutoff separately
+      // Store agency cutoff from real ML schedule_limit
       (normalized as any).agency_cutoff_time = agencyCutoff;
+      (normalized as any).agency_cutoff_source = agencyCutoffSource;
+      (normalized as any).agency_handling_limit_time = handlingLimitTime;
 
       // 6. Build safe source_payload (no tokens!)
       const safePayload: any = {};
