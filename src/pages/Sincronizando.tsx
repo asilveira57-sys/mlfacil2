@@ -148,7 +148,7 @@ export default function Sincronizando() {
           {steps.map((step) => (
             <div key={step.id} className="flex items-center gap-3 p-3 rounded-lg bg-card border border-border/50">
               {step.status === 'done' && (
-                <CheckCircle className="w-5 h-5 text-green-500 shrink-0" />
+                <CheckCircle className="w-5 h-5 text-primary shrink-0" />
               )}
               {step.status === 'running' && (
                 <Loader2 className="w-5 h-5 text-primary animate-spin shrink-0" />
