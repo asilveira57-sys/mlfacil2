@@ -118,10 +118,11 @@ export function useShippingCutoff({ sellerId, mlUserId, companyId }: UseShipping
       }
 
       // Result is already normalized { flex, colecta, meta }
-      if (result?.flex || result?.colecta || result?.meta) {
+      if (result?.flex || result?.colecta || result?.agency || result?.meta) {
         const parsed: CutoffData = {
           flex: result.flex,
           colecta: result.colecta,
+          agency: result.agency || { enabled: false, cutoff_time: null },
           meta: result.meta,
           _raw: result._raw,
         };
