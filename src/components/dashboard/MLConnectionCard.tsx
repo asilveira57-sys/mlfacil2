@@ -371,7 +371,7 @@ function ReconnectRequiredCard() {
           <Button
             className="w-full gap-2"
             size="lg"
-            onClick={handleReconnect}
+            onClick={() => setShowWarning(true)}
             disabled={reconnecting}
           >
             {reconnecting ? (
@@ -382,12 +382,18 @@ function ReconnectRequiredCard() {
             {reconnecting ? "Reconectando..." : "Reconectar conta"}
           </Button>
 
-          {/* Trust text */}
           <p className="text-xs text-muted-foreground/50">
             A reconexão leva poucos segundos e não altera seus dados já importados.
           </p>
         </CardContent>
       </Card>
+
+      <MLOAuthWarningModal
+        open={showWarning}
+        onClose={() => setShowWarning(false)}
+        onConfirm={() => { setShowWarning(false); handleReconnect(); }}
+        loading={reconnecting}
+      />
     </div>
   );
 }
