@@ -1,66 +1,71 @@
 
-# Plano Mestre — Jornada Completa do Seller
 
-## Status de cada item
+## Diagnóstico da Causa Raiz - Hora de Corte Errada
 
-### ✅ Já existe no sistema
-| # | Item | Status |
-|---|------|--------|
-| 2 | Cadastro (email/senha + confirmação) | ✅ Implementado |
-| 4 | Painel inicial (dashboard) | ✅ Existe (sem velocímetro) |
-| 5 | Conexão ML via OAuth | ✅ Implementado |
-| 6 | Elegibilidade para teste (>10 vendas) | ✅ Verificação existe na company |
-| 8 | Módulo Etiquetas (vendas abertas) | ✅ Implementado |
-| 9 | Módulo Custos (sem Passo 2) | ✅ Atualizado agora |
-| 13 | Seleção automática de plano | ✅ `useUserSalesVolume` + filtro de planos |
-| 15 | Cadastro fiscal (PF/PJ) | ✅ `company_billing` existe |
-| 12 | Bloqueio pós-trial | ✅ Parcial (trial_expired bloqueia) |
+### O que está acontecendo
 
-### 🔶 Existe parcialmente / precisa ajuste
-| # | Item | O que falta |
-|---|------|-------------|
-| 1 | Landing com 3 botões | Landing existe mas precisa revisar CTAs |
-| 3 | Tela de boas-vindas (primeiro acesso) | Onboarding existe mas pode não ter welcome screen |
-| 7 | Sincronização inicial automática (30d) | Import manual existe, falta auto-trigger pós-OAuth |
-| 10 | Módulo ADS (sync pós-pagamento) | ADS existe, falta gate de trial |
-| 11 | Linha do Tempo (30d trial vs 1yr pago) | Módulo existe, falta limitar por trial |
-| 14 | Dados fiscais obrigatórios pós-pagamento | Tela existe, falta gate de bloqueio |
+O sistema mostra **"Agência: 11:22"** quando o Mercado Livre mostra **"Agência até as 16:17h"**. A causa é que o sistema está usando o campo **errado** da API.
 
-### 🔴 Precisa ser desenvolvido
-| # | Item | Descrição |
-|---|------|-----------|
-| 4b | Velocímetro de ativação | Widget de progresso no dashboard |
-| 9b | Tabela `sync_jobs` + lock após sucesso | Controle de execução de syncs |
-| 9c | Lock do botão 1 ano após sucesso | Bloquear re-execução pós-sucesso |
-| 16 | Multi-conta (soma de vendas) | Lógica de soma cross-account |
-| 17-18 | Estados de conta + aviso pré-conexão | Workflow de nova conta |
-| 19 | Verificação de limite + pending_upgrade | Gate automático |
-| 20 | Upgrade com pró-rata | Cálculo proporcional |
-| 21 | Crescimento natural → bloqueio | Detecção automática de excesso |
-| 22 | Proteção contra abuso (logs) | Audit trail de conexões/upgrades |
+**Campo usado hoje:** `estimated_handling_limit` = prazo para o vendedor PREPARAR o pedido (varia por pedido, baseado na hora da compra)
 
-## Ordem sugerida de implementação
+**Campo correto:** `estimated_schedule_limit` = prazo para ENTREGAR na agência (horário fixo do dia, que é o que o ML exibe)
 
-### Fase 1 — Gates e bloqueios (impacto imediato)
-1. Velocímetro de ativação no dashboard
-2. Tabela `sync_jobs` + controle de locks
-3. Gate de dados fiscais pós-pagamento
-4. Auto-sync 30d após OAuth
+Dados reais do banco confirmam o problema:
 
-### Fase 2 — Trial gates nos módulos ✅
-5. ✅ ADS: banner de trial + sync bloqueado via ML API gate no backend
-6. ✅ Linha do Tempo: banner de trial informando limitação a 30d
-7. ✅ Etiquetas: filtro "Todos" agora capped a 30 dias
+```text
+Shipment 46663628578 | xd_drop_off | handling_limit: 2026-03-17T14:22:36 UTC
+  → Convertido para BRT: 11:22 (é isso que aparece no card)
+  → Mas isso é o prazo de AMANHÃ para este pedido específico, não o cutoff da agência HOJE
+```
 
-### Fase 3 — Multi-conta e upgrade ✅
-8. ✅ Multi-conta: soma de vendas (get_tenant_total_sales + check_tenant_plan_limit)
-9. ✅ Estados de conta (account_state enum: active/pending_upgrade/disabled/error)
-10. ✅ Upgrade com pró-rata (calculate_prorata_upgrade + execute_plan_upgrade)
-11. ✅ Crescimento natural → bloqueio (PlanLimitBanner + useTenantLimits)
-12. ✅ Aviso pré-conexão de nova conta (AccountConnectionWarning)
-13. ✅ Audit log (tenant_limit_log)
+O `estimated_handling_limit` é um prazo POR PEDIDO (quando o pedido foi criado + tempo de preparo). Já o `estimated_schedule_limit` é o horário real de corte da agência (ex: 16:17h), que é o mesmo para todos os pedidos do dia.
 
-### Fase 4 — Landing e onboarding ✅
-14. ✅ Landing com 3 CTAs (Login, Cadastro, Planos) no header e hero
-15. ✅ Welcome screen pós-confirmação de email (WelcomeScreen + aviso ML)
-16. ✅ Proteção contra abuso (system_audit_log + tenant_limit_log)
+### Plano de Correção
+
+#### 1. Adicionar coluna `estimated_schedule_limit` na tabela `meli_shipments_cache`
+- Migration para adicionar a coluna que armazena o prazo real de entrega na agência
+
+#### 2. Corrigir `meli-shipping-cutoff-refresh` - buscar cutoff real
+- Ao invés de extrair hora do `estimated_handling_limit` (errado), buscar diretamente da API do ML o campo `shipping_option.estimated_schedule_limit.date` de UM envio ativo `xd_drop_off`
+- Já temos o token ML disponível na função, então é apenas 1 chamada adicional à API
+- Extrair a hora desse campo como cutoff real da agência
+- Manter o `estimated_handling_limit` como informação secundária ("prazo de despacho")
+
+#### 3. Atualizar funções de sincronização para capturar `estimated_schedule_limit`
+- `shipping-labels-sync` (cron)
+- `shipping-status-sync` (cron)
+- `ml-sync-shipments` (manual)
+- Em cada um, extrair `shipping_option.estimated_schedule_limit.date` e persistir na coluna nova
+
+#### 4. Atualizar o card para mostrar ambos quando houver divergência
+- "Agência: 16:17 (ML)" = horário real de cutoff
+- Se houver prazo de despacho diferente, mostrar como informação adicional
+- Quando não houver dado confiável, mostrar "não disponível" ao invés de número errado
+
+### Detalhes Técnicos
+
+**Nova coluna:**
+```sql
+ALTER TABLE meli_shipments_cache 
+  ADD COLUMN IF NOT EXISTS estimated_schedule_limit TIMESTAMPTZ;
+```
+
+**Lógica de extração do cutoff real (no refresh):**
+```text
+1. Pegar 1 shipment ativo xd_drop_off do cache
+2. Chamar GET /shipments/{id} com token ML
+3. Extrair shipping_option.estimated_schedule_limit.date
+4. Converter para horário BRT → esse é o cutoff real
+5. Se não disponível, marcar como "não disponível"
+```
+
+**Impacto:**
+- 1 chamada extra à API ML por refresh (já fazemos 2-3 chamadas, +1 é aceitável)
+- Cache de 6h continua funcionando (não aumenta consumo significativamente)
+- Os cron jobs de sync passam a capturar o campo automaticamente para uso futuro
+
+### Resultado Esperado
+- Card mostra o mesmo horário que o Mercado Livre
+- Quando não houver dado confiável, mostra "não disponível" ao invés de número incorreto
+- Separação clara entre "cutoff da agência" e "prazo de despacho do pedido"
+
