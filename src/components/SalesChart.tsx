@@ -1,5 +1,6 @@
 import { Card } from "@/components/ui/card";
 import { useTranslation } from "react-i18next";
+import { TrendingUp } from "lucide-react";
 import {
   AreaChart,
   Area,
@@ -53,6 +54,19 @@ export function SalesChart({ data, isLoading }: SalesChartProps) {
       <Card className="p-6">
         <div className="h-[350px] flex items-center justify-center">
           <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
+        </div>
+      </Card>
+    );
+  }
+
+  if (!data.length) {
+    return (
+      <Card className="p-6">
+        <h3 className="text-lg font-semibold mb-4">{t('charts.daily_title')}</h3>
+        <div className="h-[300px] flex flex-col items-center justify-center text-muted-foreground">
+          <TrendingUp className="w-12 h-12 mb-3 opacity-30" />
+          <p className="text-sm">Nenhum dado encontrado ainda.</p>
+          <p className="text-xs mt-1 text-muted-foreground/70">Será preenchido automaticamente com a atividade da conta.</p>
         </div>
       </Card>
     );
