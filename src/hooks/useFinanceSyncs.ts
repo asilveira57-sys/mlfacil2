@@ -25,12 +25,17 @@ export function useSyncPayments() {
       return result.data!;
     },
     onSuccess: (data) => {
-      toast.success(`${data.processedRecords} pagamentos sincronizados`);
+      if (data.processedRecords === 0 && data.totalFetched === 0) {
+        toast.info('Nenhum pagamento encontrado nos últimos 30 dias.');
+      } else {
+        toast.success(`${data.processedRecords} pagamentos sincronizados`);
+      }
       queryClient.invalidateQueries({ queryKey: ['mp-payments'] });
       queryClient.invalidateQueries({ queryKey: ['finance-job-runs'] });
     },
     onError: (err: Error) => {
-      toast.error(err.message);
+      toast.error('Não foi possível sincronizar os pagamentos. Tente novamente mais tarde.');
+      console.error('[useSyncPayments] Error:', err.message);
     },
   });
 }
