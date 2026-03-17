@@ -300,11 +300,9 @@ export function SalesDashboard() {
       }
       const errorMsg = err?.message || t('error_default');
       setError(errorMsg);
-      toast({
-        title: t('error_loading'),
-        description: t('error_default'),
-        variant: "destructive",
-      });
+      // Only show destructive toast for real technical errors, not empty data
+      // Log the error classification
+      console.warn('[SalesDashboard] Technical error after retries:', errorMsg);
     } finally {
       setIsLoading(false);
     }
