@@ -57,8 +57,55 @@ serve(async (req) => {
     // ML API Access Gate - check trial/subscription
     const { assertMlApiAccess } = await import("../_shared/ml-api-gate.ts");
     const gate = await assertMlApiAccess(supabaseAdmin, user.id);
+    
+    // Business-rule denials (no_company, no_trial, trial_expired) → return 200 with zeroed data + meta
+    // Only gate_error / unexpected_error are real failures
     if (!gate.allowed) {
-      console.log(`[ml-sales-data] Access denied: ${gate.reason}`);
+      const isBusinessRule = !['gate_error', 'unexpected_error'].includes(gate.reason);
+      
+      if (isBusinessRule) {
+        console.log(`[ml-sales-data] Business rule denial (HTTP 200): ${gate.reason}`);
+        
+        const metaState = gate.reason === 'trial_expired' ? 'BLOCKED' : 'EMPTY';
+        const metaReason = gate.reason === 'no_company' ? 'NO_COMPANY'
+          : gate.reason === 'no_trial' ? 'NO_TRIAL'
+          : gate.reason === 'trial_expired' ? 'TRIAL_EXPIRED'
+          : gate.reason === 'no_subscription' ? 'NO_SUBSCRIPTION'
+          : gate.reason.toUpperCase();
+        
+        return new Response(
+          JSON.stringify({
+            success: true,
+            metrics: {
+              totalRevenue: 0, totalOrders: 0,
+              revenueToday: 0, ordersToday: 0,
+              revenueYesterday: 0, ordersYesterday: 0,
+              revenue7d: 0, orders7d: 0,
+              revenuePrev7d: 0, ordersPrev7d: 0,
+              revenue30d: 0, orders30d: 0,
+              revenuePrev30d: 0, ordersPrev30d: 0,
+              revenuePeriod: 0, ordersPeriod: 0,
+              revenuePrevPeriod: 0, ordersPrevPeriod: 0,
+              averageTicket: 0, averageTicket30d: 0,
+              averageTicketPeriod: 0, averageTicketPrevPeriod: 0,
+              cancelledOrders: 0, cancelledRevenue: 0,
+              cancelledOrdersPeriod: 0, cancelledRevenuePeriod: 0,
+            },
+            dailySales: [],
+            monthlySales: [],
+            monthlyCancelled: [],
+            topProducts: [],
+            availableMonths: [],
+            seller: { nickname: null, email: null },
+            meta: { state: metaState, reason: metaReason },
+            _debug: { source: 'gate_business_rule', gateReason: gate.reason },
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      // Real technical gate error → keep original error response
+      console.error(`[ml-sales-data] Gate technical error: ${gate.reason}`);
       return gate.response!;
     }
 

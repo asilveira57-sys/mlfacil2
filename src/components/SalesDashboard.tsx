@@ -259,23 +259,27 @@ export function SalesDashboard() {
         });
       }
 
-      // Classify errors: gate errors (402/403) are NOT technical failures
-      const isGateError = response.error && (
+      // Handle new contract: edge function returns 200 with meta.state for business rules
+      const metaState = response.data?.meta?.state;
+      const metaReason = response.data?.meta?.reason;
+
+      if (metaState === 'EMPTY' || metaState === 'BLOCKED') {
+        console.info(`[SalesDashboard] Business rule response — state: ${metaState}, reason: ${metaReason}, HTTP: 200`);
+        setSalesData(response.data);
+        setIsLoading(false);
+        return;
+      }
+
+      // Legacy fallback: catch any remaining 402/403 from older deploys
+      const isLegacyGateError = response.error && (
         response.error.status === 402 || 
         response.error.status === 403 ||
         response.error?.message?.includes('402') ||
         response.error?.message?.includes('403')
       );
-      const isGateErrorCode = response.data?.error_code && [
-        'TRIAL_EXPIRED', 'NO_TRIAL', 'NO_COMPANY', 'NO_SUBSCRIPTION',
-        'PAYMENT_REQUIRED', 'API_ACCESS_DENIED'
-      ].includes(response.data.error_code);
-
-      if (isGateError || isGateErrorCode) {
-        // Gate error = seller connected but no active plan/trial
-        // Show dashboard with R$0,00 instead of error
-        console.info('[SalesDashboard] Gate error treated as empty data:', response.error?.status || response.data?.error_code);
-        setSalesData(null); // Will render with zeroed fallback
+      if (isLegacyGateError) {
+        console.info('[SalesDashboard] Legacy gate error treated as empty data:', response.error?.status);
+        setSalesData(null);
         setIsLoading(false);
         return;
       }
@@ -588,6 +592,7 @@ export function SalesDashboard() {
   }
 
   if (error) {
+    console.warn('[SalesDashboard] Rendering SystemError — origin: technical_error, message:', error);
     return (
       <SystemError
         message={error}
@@ -599,9 +604,29 @@ export function SalesDashboard() {
   // Use real data or zeroed fallback — never block the dashboard for empty sellers
   const metrics = salesData?.metrics;
   const hasDateFilter = dateFilter.dateFrom !== null;
+  const metaState = (salesData as any)?.meta?.state as string | undefined;
+  const metaReason = (salesData as any)?.meta?.reason as string | undefined;
 
   return (
     <div className="space-y-6">
+      {/* Subtle info banner for empty/blocked accounts */}
+      {metaState === 'EMPTY' && (
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>Ainda não há vendas registradas para exibir neste painel.</span>
+        </div>
+      )}
+      {metaState === 'BLOCKED' && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/50 dark:border-amber-800/50 dark:bg-amber-950/20 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>
+            {metaReason === 'TRIAL_EXPIRED'
+              ? 'Seu período de teste expirou. Ative um plano para continuar acessando os dados.'
+              : 'Sua conta está conectada, mas ainda não possui acesso completo ao painel.'}
+          </span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center gap-3">
