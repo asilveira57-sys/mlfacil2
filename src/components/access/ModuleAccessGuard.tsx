@@ -51,7 +51,11 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
       return;
     }
     setTimedOut(false);
-    const t = window.setTimeout(() => setTimedOut(true), 15_000);
+    // Fail-open after 5s — RLS still protects data server-side
+    const t = window.setTimeout(() => {
+      console.warn('[ModuleAccessGuard] Permission check timed out after 5s, failing open');
+      setTimedOut(true);
+    }, 5_000);
     return () => window.clearTimeout(t);
   }, [isLoading, location.pathname]);
 
