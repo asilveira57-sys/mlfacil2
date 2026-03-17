@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { classifyBillingCharge, processChargeIntoAccumulator, isNewMlBillingFormat } from "../_shared/ml-billing-classifier.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -236,12 +237,13 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
     return false;
   }
 
-  // Strategy 1: /orders/{orderId} → payments[].marketplace_fee (most reliable)
+  // Strategy 1: /orders/{orderId} → payments[].marketplace_fee (legacy) + billing_info (new format)
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const orderResp = await fetch(`https://api.mercadolibre.com/orders/${orderId}`, { headers: { Authorization: `Bearer ${currentToken}` } });
       if (orderResp.ok) {
         const orderData = await orderResp.json();
+        // Legacy: payments[].marketplace_fee
         if (orderData.payments && Array.isArray(orderData.payments)) {
           for (const payment of orderData.payments) {
             if (payment.marketplace_fee != null && payment.marketplace_fee > 0) {
@@ -259,6 +261,41 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
       if (orderResp.status === 429) { await orderResp.text(); await new Promise(r => setTimeout(r, 1500 * (attempt + 1))); continue; }
       await orderResp.text(); break;
     } catch (e) { console.error(`[RealCosts] orders API error:`, e); break; }
+  }
+
+  // Strategy 1b: If no fee from payments (new ML format post-2026-03-04), try /orders/{id}/billing_info
+  if (feeML === 0 && isNewMlBillingFormat(order.created_at_meli)) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const biResp = await fetch(`https://api.mercadolibre.com/orders/${orderId}/billing_info`, { headers: { Authorization: `Bearer ${currentToken}` } });
+        if (biResp.ok) {
+          const biData = await biResp.json();
+          const charges = biData.charges || biData.billing_info || [];
+          if (Array.isArray(charges)) {
+            for (const charge of charges) {
+              const label = (charge.name || charge.label || charge.description || charge.type || charge.detail || '').toLowerCase();
+              const amount = Math.abs(charge.amount || charge.value || 0);
+              if (amount === 0) continue;
+              const category = classifyBillingCharge(label);
+              switch (category) {
+                case "commission": feeML += amount; break;
+                case "shipping": shippingCostSeller += amount; break;
+                case "installments": installmentsCost += amount; break;
+                case "adjustments": adjustments += amount; break;
+              }
+            }
+          }
+          if (feeML > 0) {
+            feeMLSource = "billing";
+            sourceRefs.push("billing_info:v2");
+          }
+          break;
+        }
+        if (biResp.status === 401) { await biResp.text(); if (await tryRefreshToken()) continue; break; }
+        if (biResp.status === 429) { await biResp.text(); await new Promise(r => setTimeout(r, 1500 * (attempt + 1))); continue; }
+        await biResp.text(); break;
+      } catch (e) { console.error(`[RealCosts] billing_info API error:`, e); break; }
+    }
   }
 
   // Strategy 2: If still no fee, check meli_billing_details_cache (from billing periods sync)
@@ -378,11 +415,12 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
     } catch (e) { console.error(`[RealCosts] Strategy 3 billing period search error:`, e); }
   }
 
-  // Final: if all 3 strategies exhausted and still no fee but have shipping, mark as billing
+  // Final: if all strategies exhausted and still no commission but have shipping,
+  // DON'T mark as "billing" — keep as "pending" with explicit note about commission missing
   if (feeMLSource === "pending" && shippingCostSeller > 0) {
-    feeMLSource = "billing";
-    sourceRefs.push("all_strategies_exhausted:shipping_only");
-    console.log(`[RealCosts] resync_single: order ${orderId}: all 3 strategies checked, no commission found but has shipping — marking as billing`);
+    // Keep feeMLSource as "pending" — commission is still missing
+    sourceRefs.push("all_strategies_exhausted:shipping_only:commission_pending");
+    console.log(`[RealCosts] resync_single: order ${orderId}: all strategies checked, has shipping but NO commission — keeping as pending`);
   }
 
   // Cache in meli_order_financials_cache
@@ -545,79 +583,11 @@ async function aggregateBillingData(supabase: any, sellerId: string, orderIds: s
   return { billingByOrder, billingByShipment };
 }
 
-/**
- * Unified billing charge classifier — SINGLE SOURCE OF TRUTH.
- * Returns: 'commission' | 'shipping' | 'installments' | 'adjustments' | 'storage' | 'ads' | 'unknown'
- */
-function classifyBillingCharge(chargeType: string): string {
-  const ct = (chargeType || "").toLowerCase();
-
-  // Commission / Sale fees
-  if (ct.includes("custo por vender") || 
-      ct.includes("custo por cobrar") ||
-      ct.includes("tarifa de venda") ||
-      ct.includes("custo de gestão") ||
-      ct.includes("cargo por venta") || 
-      ct.includes("sale_fee") || 
-      ct === "sale_fee_amount") {
-    return "commission";
-  }
-
-  // Shipping
-  if (ct.includes("tarifa de envio") || 
-      ct.includes("envio extra") ||
-      ct.includes("envio intermunicipal") ||
-      ct.includes("envio interno") ||
-      ct.includes("mercado envíos") || 
-      ct.includes("shipping") || 
-      ct === "shipping_fee") {
-    return "shipping";
-  }
-
-  // Installments
-  if (ct.includes("taxa de parcelamento") || 
-      ct.includes("cuota") || 
-      ct.includes("installment")) {
-    return "installments";
-  }
-
-  // Adjustments / Refunds
-  if (ct.includes("ajuste") || 
-      ct.includes("adjustment") ||
-      ct.includes("cancelamento") ||
-      ct.includes("reembolso") ||
-      ct.includes("bonificação") ||
-      ct.includes("estorno")) {
-    return "adjustments";
-  }
-
-  // Storage (ignore in cost calc)
-  if (ct.includes("armazenamento") || ct.includes("full")) {
-    return "storage";
-  }
-
-  // Ads (ignore in cost calc)
-  if (ct.includes("publicidade") || ct.includes("ads")) {
-    return "ads";
-  }
-
-  return "unknown";
-}
+// classifyBillingCharge and processChargeIntoAccumulator are now imported from _shared/ml-billing-classifier.ts
 
 function processChargeType(entry: { fee_ml: number; shipping: number; installments: number; adjustments: number }, detail: any) {
   const amount = detail.gross_amount || 0;
-  const category = classifyBillingCharge(detail.charge_type || "");
-
-  switch (category) {
-    case "commission": entry.fee_ml += amount; break;
-    case "shipping": entry.shipping += amount; break;
-    case "installments": entry.installments += amount; break;
-    case "adjustments": entry.adjustments += amount; break;
-    case "unknown":
-      if (amount > 0) entry.fee_ml += amount; // Positive unknown → fee
-      break;
-    // storage, ads → ignored
-  }
+  processChargeIntoAccumulator(entry, detail.charge_type || "", amount);
 }
 
 async function handleReprocessPending(supabase: any, userId: string, sellerId: string, scopeDays: number | null, corsHeaders: any) {
@@ -719,6 +689,32 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
       } catch (e) { console.error(`[ReprocessPending] orders API error for ${order.order_id}:`, e); break; }
     }
 
+    // Strategy 1b: If no fee (new ML format), try /orders/{id}/billing_info
+    if (feeML === 0 && isNewMlBillingFormat(order.created_at_meli)) {
+      try {
+        const biResp = await fetch(`https://api.mercadolibre.com/orders/${order.order_id}/billing_info`, { headers: { Authorization: `Bearer ${currentToken}` } });
+        if (biResp.ok) {
+          const biData = await biResp.json();
+          const charges = biData.charges || biData.billing_info || [];
+          if (Array.isArray(charges)) {
+            for (const charge of charges) {
+              const label = (charge.name || charge.label || charge.description || charge.type || charge.detail || '').toLowerCase();
+              const amount = Math.abs(charge.amount || charge.value || 0);
+              if (amount === 0) continue;
+              const category = classifyBillingCharge(label);
+              switch (category) {
+                case "commission": feeML += amount; break;
+                case "shipping": shippingCostSeller += amount; break;
+                case "installments": installmentsCost += amount; break;
+                case "adjustments": adjustments += amount; break;
+              }
+            }
+          }
+          if (feeML > 0) { feeMLSource = "billing"; sourceRefs.push("billing_info:v2"); updatedCount++; }
+        } else { await biResp.text(); }
+      } catch (e) { console.error(`[ReprocessPending] billing_info API error for ${order.order_id}:`, e); }
+    }
+
     // Strategy 2: If no fee, check billing_details_cache
     if (feeML === 0) {
       const { data: billingRows } = await supabase
@@ -815,11 +811,10 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
       } catch (e) { console.error(`[ReprocessPending] billing period search error for ${order.order_id}:`, e); }
     }
 
-    // Final: if all 3 strategies exhausted and still no fee but have shipping, mark as billing (all sources checked)
+    // Final: if all strategies exhausted and still no commission but have shipping — keep pending
     if (feeMLSource === "pending" && shippingCostSeller > 0) {
-      feeMLSource = "billing";
-      sourceRefs.push("all_strategies_exhausted:shipping_only");
-      console.log(`[ReprocessPending] order ${order.order_id}: all 3 strategies checked, no commission found but has shipping — marking as billing`);
+      sourceRefs.push("all_strategies_exhausted:shipping_only:commission_pending");
+      console.log(`[ReprocessPending] order ${order.order_id}: all strategies checked, has shipping but NO commission — keeping as pending`);
     }
 
     // Cache financials
