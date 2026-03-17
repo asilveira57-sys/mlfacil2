@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { classifyBillingCharge, processChargeIntoAccumulator, isNewMlBillingFormat } from "../_shared/ml-billing-classifier.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
