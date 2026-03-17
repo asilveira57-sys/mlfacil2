@@ -10,7 +10,7 @@ import { TopProductsTable } from "./TopProductsTable";
 import { DashboardFilters } from "./DashboardFilters";
 import { OnboardingSync } from "./OnboardingSync";
 import { SyncStatusIndicator } from "./sales/SyncStatusIndicator";
-import { DashboardEmptyState } from "./dashboard/DashboardEmptyState";
+import { SystemEmpty, SystemError } from "@/components/ui/system-states";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -300,11 +300,9 @@ export function SalesDashboard() {
       }
       const errorMsg = err?.message || t('error_default');
       setError(errorMsg);
-      toast({
-        title: t('error_loading'),
-        description: t('error_default'),
-        variant: "destructive",
-      });
+      // Only show destructive toast for real technical errors, not empty data
+      // Log the error classification
+      console.warn('[SalesDashboard] Technical error after retries:', errorMsg);
     } finally {
       setIsLoading(false);
     }
@@ -560,7 +558,7 @@ export function SalesDashboard() {
 
   if (error === "connect") {
     return (
-      <DashboardEmptyState
+      <SystemEmpty
         title="Conta não conectada"
         message="Conecte sua conta do Mercado Livre para visualizar suas vendas e métricas."
         icon={<AlertCircle className="w-12 h-12 text-muted-foreground/40" />}
@@ -570,15 +568,10 @@ export function SalesDashboard() {
 
   if (error) {
     return (
-      <Card className="p-8 text-center">
-        <AlertCircle className="w-12 h-12 mx-auto mb-4 text-destructive" />
-        <h3 className="text-xl font-semibold mb-2">{t('error_loading')}</h3>
-        <p className="text-muted-foreground mb-4">{error}</p>
-        <Button onClick={() => fetchSalesData(undefined, true)} variant="outline">
-          <RefreshCw className="w-4 h-4 mr-2" />
-          {t('retry')}
-        </Button>
-      </Card>
+      <SystemError
+        message={error}
+        onRetry={() => fetchSalesData(undefined, true)}
+      />
     );
   }
 
@@ -591,10 +584,10 @@ export function SalesDashboard() {
 
   if (isEmpty) {
     return (
-      <DashboardEmptyState
-        title="Nenhum dado de vendas encontrado ainda."
-        message="Esse módulo será preenchido automaticamente quando houver atividade na conta. A sincronização de vendas pode levar alguns minutos após a primeira conexão."
-        icon={<ShoppingCart className="w-12 h-12 text-muted-foreground/40" />}
+      <SystemEmpty
+        title="Ainda não há dados de vendas para exibir"
+        message="Assim que novas vendas forem registradas no Mercado Livre, o sistema será atualizado automaticamente. A sincronização pode levar alguns minutos após a primeira conexão."
+        icon={<ShoppingCart className="w-12 h-12 text-muted-foreground/30" />}
       />
     );
   }
