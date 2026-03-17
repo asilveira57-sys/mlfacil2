@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { useUserAccess } from '@/contexts/UserAccessContext';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
+import { useMLConnectionState } from '@/hooks/useMLConnectionState';
 
 interface ActivationStep {
   key: string;
@@ -12,37 +13,37 @@ interface ActivationStep {
 }
 
 export function ActivationSpeedometer() {
-  const { flags, mlConnected } = useUserAccess();
+  const { flags } = useUserAccess();
   const { accounts } = useActiveAccount();
+  const connectionInfo = useMLConnectionState();
 
-  const hasOrders = true; // If they're on dashboard with account, orders exist via auto-sync
-  const hasListings = mlConnected; // Listings sync happens with connection
-  const hasBilling = (flags as any)?.billing_complete ?? false;
+  // Use real connection state — not the backend mlConnected flag
+  const isReallyConnected = connectionInfo.state === 'CONNECTED' || accounts.length > 0;
 
   const steps: ActivationStep[] = [
     {
       key: 'ml_connect',
       label: 'Conectar Mercado Livre',
       icon: <Link2 className="h-4 w-4" />,
-      completed: mlConnected,
+      completed: isReallyConnected,
     },
     {
       key: 'import_orders',
       label: 'Importar vendas',
       icon: <Download className="h-4 w-4" />,
-      completed: mlConnected && accounts.length > 0,
+      completed: isReallyConnected, // Import happens automatically on connection
     },
     {
       key: 'import_listings',
       label: 'Importar anúncios',
       icon: <BarChart3 className="h-4 w-4" />,
-      completed: hasListings,
+      completed: isReallyConnected, // Listings sync happens with connection
     },
     {
       key: 'sync_costs',
       label: 'Sincronizar custos',
       icon: <Receipt className="h-4 w-4" />,
-      completed: mlConnected, // Basic costs sync happens with orders
+      completed: isReallyConnected, // Basic costs sync happens with orders
     },
     {
       key: 'activate_modules',
