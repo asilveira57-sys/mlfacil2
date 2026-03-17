@@ -1,66 +1,79 @@
 
-# Plano Mestre — Jornada Completa do Seller
+Diagnóstico profundo (com causa raiz confirmada)
 
-## Status de cada item
+1) Divergência dos filtros (9 vs 15) está no SQL do `get_shipping_orders` (modo `today_dispatch`)
+- Hoje a regra está restritiva demais:
+  - exige `estimated_handling_limit <= fim de hoje`
+  - e, quando `estimated_handling_limit` é nulo, só aceita pedido criado hoje
+- Resultado real no banco para o seller afetado:
+  - `ready_to_print` ativos = 15
+  - incluídos pela regra atual = 9
+  - excluídos = 6, sendo:
+    - 4 com `handling_limit` nulo e pedidos antigos (mas ainda ativos)
+    - 2 com prazo em “amanhã” (que o ML ainda considera no operacional de hoje)
 
-### ✅ Já existe no sistema
-| # | Item | Status |
-|---|------|--------|
-| 2 | Cadastro (email/senha + confirmação) | ✅ Implementado |
-| 4 | Painel inicial (dashboard) | ✅ Existe (sem velocímetro) |
-| 5 | Conexão ML via OAuth | ✅ Implementado |
-| 6 | Elegibilidade para teste (>10 vendas) | ✅ Verificação existe na company |
-| 8 | Módulo Etiquetas (vendas abertas) | ✅ Implementado |
-| 9 | Módulo Custos (sem Passo 2) | ✅ Atualizado agora |
-| 13 | Seleção automática de plano | ✅ `useUserSalesVolume` + filtro de planos |
-| 15 | Cadastro fiscal (PF/PJ) | ✅ `company_billing` existe |
-| 12 | Bloqueio pós-trial | ✅ Parcial (trial_expired bloqueia) |
+2) Divergência do filtro 7 dias (14 vs 15)
+- O 1 faltante está fora da janela de criação de 7 dias, mas ainda está ativo para impressão.
+- Ou seja: filtro por data de venda está escondendo envio operacional ativo.
 
-### 🔶 Existe parcialmente / precisa ajuste
-| # | Item | O que falta |
-|---|------|-------------|
-| 1 | Landing com 3 botões | Landing existe mas precisa revisar CTAs |
-| 3 | Tela de boas-vindas (primeiro acesso) | Onboarding existe mas pode não ter welcome screen |
-| 7 | Sincronização inicial automática (30d) | Import manual existe, falta auto-trigger pós-OAuth |
-| 10 | Módulo ADS (sync pós-pagamento) | ADS existe, falta gate de trial |
-| 11 | Linha do Tempo (30d trial vs 1yr pago) | Módulo existe, falta limitar por trial |
-| 14 | Dados fiscais obrigatórios pós-pagamento | Tela existe, falta gate de bloqueio |
+3) “Hora de Corte não disponível” tem dois problemas independentes
+- Problema estrutural: `meli-shipping-cutoff-refresh` tenta salvar colunas que não existem em `shipping_cutoff_cache`:
+  - `agency_cutoff_source`
+  - `agency_handling_limit_time`
+- Isso gera erro de upsert e impede persistência correta do cache do dia.
+- Problema de fonte: `estimated_schedule_limit` está vindo nulo nos envios atuais (cache/API), então a função cai em “none” e a UI mostra indisponível.
 
-### 🔴 Precisa ser desenvolvido
-| # | Item | Descrição |
-|---|------|-----------|
-| 4b | Velocímetro de ativação | Widget de progresso no dashboard |
-| 9b | Tabela `sync_jobs` + lock após sucesso | Controle de execução de syncs |
-| 9c | Lock do botão 1 ano após sucesso | Bloquear re-execução pós-sucesso |
-| 16 | Multi-conta (soma de vendas) | Lógica de soma cross-account |
-| 17-18 | Estados de conta + aviso pré-conexão | Workflow de nova conta |
-| 19 | Verificação de limite + pending_upgrade | Gate automático |
-| 20 | Upgrade com pró-rata | Cálculo proporcional |
-| 21 | Crescimento natural → bloqueio | Detecção automática de excesso |
-| 22 | Proteção contra abuso (logs) | Audit trail de conexões/upgrades |
+Plano definitivo de correção
 
-## Ordem sugerida de implementação
+Fase A — Ajustar regra de filtros para paridade operacional com ML
+1. Criar migration para substituir a função `public.get_shipping_orders` com regra “ML-like”:
+- `today_dispatch`:
+  - incluir envios ativos (`ready_to_ship`, `handling`, `pending`)
+  - aceitar:
+    - `estimated_handling_limit` nulo (sem restringir “criado hoje”)
+    - ou `estimated_handling_limit < fim_de_hoje + 1 dia` (janela operacional)
+- Corrigir fronteira de timezone (São Paulo) dentro da função para evitar corte UTC incorreto.
+2. Para filtros por período (`7d/15d/30d/custom`), manter histórico por data, mas incluir “envios ativos operacionais” para não esconder pendências reais.
 
-### Fase 1 — Gates e bloqueios (impacto imediato)
-1. Velocímetro de ativação no dashboard
-2. Tabela `sync_jobs` + controle de locks
-3. Gate de dados fiscais pós-pagamento
-4. Auto-sync 30d após OAuth
+Fase B — Eliminar erro silencioso que afeta sincronização
+3. Corrigir `useShippingLabels`:
+- remover query inválida em `meli_orders_cache.invoice_key` (coluna não existe)
+- usar `meli_invoices_cache` para detectar pedidos sem NF
+- isso remove erro 400 recorrente e evita sync parcial mascarado.
 
-### Fase 2 — Trial gates nos módulos ✅
-5. ✅ ADS: banner de trial + sync bloqueado via ML API gate no backend
-6. ✅ Linha do Tempo: banner de trial informando limitação a 30d
-7. ✅ Etiquetas: filtro "Todos" agora capped a 30 dias
+Fase C — Correção definitiva do card de Hora de Corte
+4. Migration em `shipping_cutoff_cache`:
+- adicionar:
+  - `agency_cutoff_source text`
+  - `agency_handling_limit_time text`
+5. Endpoints de cutoff:
+- `meli-shipping-cutoff-refresh`:
+  - parar de tratar upsert falho como sucesso
+  - tentar extração de cutoff oficial em múltiplas fontes/caminhos do payload de shipment (não só 1 shipment)
+  - persistir fonte usada (`schedule_limit`, `api_schedule_limit`, `fallback_handling`)
+- `meli-shipping-cutoff-get`:
+  - retornar meta coerente (`partial/error`) quando cutoff oficial não vier
+  - manter fallback transparente (mostrar ambos quando houver divergência, conforme regra aprovada)
 
-### Fase 3 — Multi-conta e upgrade ✅
-8. ✅ Multi-conta: soma de vendas (get_tenant_total_sales + check_tenant_plan_limit)
-9. ✅ Estados de conta (account_state enum: active/pending_upgrade/disabled/error)
-10. ✅ Upgrade com pró-rata (calculate_prorata_upgrade + execute_plan_upgrade)
-11. ✅ Crescimento natural → bloqueio (PlanLimitBanner + useTenantLimits)
-12. ✅ Aviso pré-conexão de nova conta (AccountConnectionWarning)
-13. ✅ Audit log (tenant_limit_log)
+Fase D — UI e transparência operacional
+6. `ShippingCutoffCard`:
+- quando cutoff oficial não existir, não “sumir” com contexto:
+  - exibir “Agência: não disponível (ML)”
+  - exibir “Despacho: HH:mm” quando houver `handling_limit_time`
+- manter badge de origem para evitar nova interpretação errada.
 
-### Fase 4 — Landing e onboarding ✅
-14. ✅ Landing com 3 CTAs (Login, Cadastro, Planos) no header e hero
-15. ✅ Welcome screen pós-confirmação de email (WelcomeScreen + aviso ML)
-16. ✅ Proteção contra abuso (system_audit_log + tenant_limit_log)
+Validação de aceite (obrigatória)
+- `today_dispatch` deve retornar “Para imprimir = 15” no seller de referência.
+- Filtro `7d` não pode ficar menor que o conjunto operacional ativo.
+- `shipping_cutoff_cache` deve ter linha do dia corrente após refresh.
+- logs não podem mais conter:
+  - erro de coluna inexistente no save_cache
+  - falso “status ok” com persistência falha
+- conferência lado a lado com painel ML (mesmo usuário, mesmo momento) para garantir equivalência real.
+
+Arquivos/áreas que serão alterados na implementação
+- DB migration: `get_shipping_orders` + novas colunas de cutoff
+- `src/hooks/useShippingLabels.ts`
+- `supabase/functions/meli-shipping-cutoff-refresh/index.ts`
+- `supabase/functions/meli-shipping-cutoff-get/index.ts`
+- `src/components/shipping/ShippingCutoffCard.tsx`
