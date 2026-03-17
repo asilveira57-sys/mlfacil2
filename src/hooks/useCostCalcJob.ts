@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
+const POLL_INTERVAL_MS = 3000;
+const STALE_JOB_TIMEOUT_MS = 20 * 60 * 1000; // 20 minutes without heartbeat/progress
+
 export interface CalcJob {
   id: string;
   seller_id: string;
@@ -12,21 +15,57 @@ export interface CalcJob {
   finished_at: string | null;
 }
 
+type CalcJobRow = CalcJob & {
+  created_at?: string | null;
+  updated_at?: string | null;
+  last_heartbeat?: string | null;
+};
+
 interface UseCalcJobOptions {
   sellerId: string | null;
   onComplete?: () => void;
 }
 
+function getReferenceTimestamp(job: Partial<CalcJobRow>): number | null {
+  const ref = job.last_heartbeat || job.started_at || job.updated_at || job.created_at;
+  if (!ref) return null;
+  const ts = new Date(ref).getTime();
+  return Number.isFinite(ts) ? ts : null;
+}
+
+function isStaleJob(job: Partial<CalcJobRow>): boolean {
+  const referenceTs = getReferenceTimestamp(job);
+  if (!referenceTs) return false;
+  return Date.now() - referenceTs > STALE_JOB_TIMEOUT_MS;
+}
+
 export function useCostCalcJob({ sellerId, onComplete }: UseCalcJobOptions) {
   const [job, setJob] = useState<CalcJob | null>(null);
   const [starting, setStarting] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const isActive = job?.status === 'queued' || job?.status === 'running';
 
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  const cancelStaleJob = useCallback(async (jobId: string) => {
+    await supabase
+      .from('cost_calc_jobs')
+      .update({
+        status: 'cancelled',
+        last_error: 'Job cancelado automaticamente por inatividade prolongada.',
+      } as never)
+      .eq('id', jobId)
+      .in('status', ['queued', 'running']);
+  }, []);
+
   const pollJob = useCallback(async (jobId: string) => {
     try {
-      // Query the cost_calc_jobs table directly instead of calling edge function
       const { data, error } = await supabase
         .from('cost_calc_jobs')
         .select('*')
@@ -34,27 +73,41 @@ export function useCostCalcJob({ sellerId, onComplete }: UseCalcJobOptions) {
         .maybeSingle();
 
       if (error || !data) return;
-      setJob(data as unknown as CalcJob);
 
-      if (data.status === 'done' || data.status === 'error' || data.status === 'cancelled') {
-        if (pollRef.current) clearInterval(pollRef.current);
-        pollRef.current = null;
-        if (data.status === 'done') onComplete?.();
+      const jobData = data as unknown as CalcJobRow;
+
+      if ((jobData.status === 'queued' || jobData.status === 'running') && isStaleJob(jobData)) {
+        await cancelStaleJob(jobData.id);
+        setJob({
+          ...jobData,
+          status: 'cancelled',
+          last_error: jobData.last_error || 'Job cancelado automaticamente por inatividade prolongada.',
+        } as CalcJob);
+        stopPolling();
+        return;
+      }
+
+      setJob(jobData as CalcJob);
+
+      if (jobData.status === 'done' || jobData.status === 'error' || jobData.status === 'cancelled') {
+        stopPolling();
+        if (jobData.status === 'done') onComplete?.();
       }
     } catch {
       // silently retry
     }
-  }, [onComplete]);
+  }, [cancelStaleJob, onComplete, stopPolling]);
 
   const startPolling = useCallback((jobId: string) => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(() => pollJob(jobId), 3000);
+    stopPolling();
+    pollRef.current = setInterval(() => pollJob(jobId), POLL_INTERVAL_MS);
     pollJob(jobId);
-  }, [pollJob]);
+  }, [pollJob, stopPolling]);
 
   // Check for active job on mount
   useEffect(() => {
     if (!sellerId) return;
+
     const checkActive = async () => {
       try {
         const { data, error } = await supabase
@@ -67,15 +120,34 @@ export function useCostCalcJob({ sellerId, onComplete }: UseCalcJobOptions) {
           .maybeSingle();
 
         if (error || !data) return;
-        if (data.status === 'queued' || data.status === 'running') {
-          setJob(data as unknown as CalcJob);
-          startPolling(data.id);
+
+        const jobData = data as unknown as CalcJobRow;
+
+        if (isStaleJob(jobData)) {
+          await cancelStaleJob(jobData.id);
+          setJob({
+            ...jobData,
+            status: 'cancelled',
+            last_error: jobData.last_error || 'Job cancelado automaticamente por inatividade prolongada.',
+          } as CalcJob);
+          return;
         }
-      } catch { /* ignore */ }
+
+        if (jobData.status === 'queued' || jobData.status === 'running') {
+          setJob(jobData as CalcJob);
+          startPolling(jobData.id);
+        }
+      } catch {
+        // ignore
+      }
     };
+
     checkActive();
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [sellerId, startPolling]);
+
+    return () => {
+      stopPolling();
+    };
+  }, [sellerId, startPolling, stopPolling, cancelStaleJob]);
 
   const startCalc = useCallback(async (periodDays: number, dateFrom?: string, dateTo?: string) => {
     if (!sellerId) return;
