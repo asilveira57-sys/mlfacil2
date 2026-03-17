@@ -87,7 +87,7 @@ export function SettingsLayout() {
           <div className="flex items-center gap-2">
             <Tabs value={activeSlug} onValueChange={setActiveSlug} className="flex-1">
               <TabsList className="h-auto p-1 flex flex-wrap gap-1 bg-muted/50">
-                {menuGroups.map(group => (
+                {groups.map(group => (
                   group.items.map(item => {
                     const Icon = getIcon(item.icon);
                     return (
