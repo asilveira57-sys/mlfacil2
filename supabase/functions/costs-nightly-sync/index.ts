@@ -557,19 +557,17 @@ async function processRealCosts(supabase: any, userId: string, sellerId: string,
       }
       
       const entry = billingByOrder.get(orderId)!;
-      const chargeType = (detail.charge_type || '').toLowerCase();
+      const category = classifyBillingCharge(detail.charge_type || '');
       const amount = detail.gross_amount || 0;
 
-      if (chargeType.includes('custo por vender') || chargeType.includes('sale_fee')) {
-        entry.fee_ml += amount;
-      } else if (chargeType.includes('tarifa de envio') || chargeType.includes('shipping')) {
-        entry.shipping += amount;
-      } else if (chargeType.includes('parcelamento') || chargeType.includes('installment')) {
-        entry.installments += amount;
-      } else if (chargeType.includes('ajuste') || chargeType.includes('estorno')) {
-        entry.adjustments += amount;
-      } else if (amount > 0) {
-        entry.fee_ml += amount;
+      switch (category) {
+        case 'commission': entry.fee_ml += amount; break;
+        case 'shipping': entry.shipping += amount; break;
+        case 'installments': entry.installments += amount; break;
+        case 'adjustments': entry.adjustments += amount; break;
+        case 'unknown':
+          if (amount > 0) entry.fee_ml += amount;
+          break;
       }
     }
 
