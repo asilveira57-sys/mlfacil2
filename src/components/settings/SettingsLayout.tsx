@@ -66,7 +66,8 @@ export function SettingsLayout() {
   const { isAdmin } = useUserRole();
 
   // Flatten all items from all groups for tab navigation
-  const allItems = menuGroups.flatMap(g => g.items.flatMap(item => [item, ...item.children]));
+  const groups = Array.isArray(menuGroups) ? menuGroups : [];
+  const allItems = groups.flatMap(g => g.items.flatMap(item => [item, ...item.children]));
   
   const activeSlug = searchParams.get("section") || allItems[0]?.slug || "perfil";
 
@@ -86,7 +87,7 @@ export function SettingsLayout() {
           <div className="flex items-center gap-2">
             <Tabs value={activeSlug} onValueChange={setActiveSlug} className="flex-1">
               <TabsList className="h-auto p-1 flex flex-wrap gap-1 bg-muted/50">
-                {menuGroups.map(group => (
+                {groups.map(group => (
                   group.items.map(item => {
                     const Icon = getIcon(item.icon);
                     return (
