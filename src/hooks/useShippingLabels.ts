@@ -620,14 +620,17 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       }
 
       if (orderIds.length > 0) {
-        // Only fetch invoices for orders that don't have invoice data yet
-        const { data: ordersWithoutInvoice } = await supabase
-          .from('meli_orders_cache')
+        // Only fetch invoices for orders that don't have invoice data in invoices cache
+        const { data: existingInvoices } = await supabase
+          .from('meli_invoices_cache')
           .select('order_id')
           .eq('seller_id', sellerId)
-          .in('order_id', orderIds)
-          .is('invoice_key', null)
-          .not('order_status', 'in', '(cancelled)');
+          .in('order_id', orderIds);
+
+        const invoicedOrderIds = new Set((existingInvoices || []).map(i => i.order_id));
+        const ordersWithoutInvoice = orderIds
+          .filter(id => !invoicedOrderIds.has(id))
+          .map(order_id => ({ order_id }));
 
         const pendingInvoiceIds = (ordersWithoutInvoice || []).map(o => o.order_id);
         console.log(`Invoices: ${orderIds.length} total orders, ${pendingInvoiceIds.length} missing invoice`);

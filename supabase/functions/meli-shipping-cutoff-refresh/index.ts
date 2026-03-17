@@ -301,14 +301,27 @@ Deno.serve(async (req) => {
         ? (normalized.flex_enabled || normalized.colecta_enabled ? "partial" : "error")
         : "ok";
 
-      // 8. Save cache
+      // 8. Save cache (explicitly list columns to avoid unknown column errors)
       const record = {
         company_id: companyId,
         seller_id: sellerId,
         provider: "meli",
         date_ref: dateRef,
         timezone: "America/Sao_Paulo",
-        ...normalized,
+        flex_enabled: normalized.flex_enabled,
+        flex_cutoff_type: normalized.flex_cutoff_type,
+        flex_cutoff_time: normalized.flex_cutoff_time,
+        flex_zone_summary_first: normalized.flex_zone_summary_first,
+        flex_zone_summary_last: normalized.flex_zone_summary_last,
+        flex_zone_details: normalized.flex_zone_details,
+        colecta_enabled: normalized.colecta_enabled,
+        colecta_cutoff_time: normalized.colecta_cutoff_time,
+        colecta_window_from: normalized.colecta_window_from,
+        colecta_window_to: normalized.colecta_window_to,
+        colecta_cutoff_calculated: normalized.colecta_cutoff_calculated,
+        agency_cutoff_time: agencyCutoff,
+        agency_cutoff_source: agencyCutoffSource,
+        agency_handling_limit_time: handlingLimitTime,
         source_payload: safePayload,
         fetched_at: now.toISOString(),
         expires_at: expiresAt.toISOString(),
@@ -321,6 +334,10 @@ Deno.serve(async (req) => {
         .upsert(record, { onConflict: "company_id,seller_id,date_ref" })
         .select()
         .single();
+
+      if (upsertErr) {
+        console.error("[cutoff-refresh] Cache upsert FAILED:", upsertErr.message);
+      }
 
       await log(supabase, { trace_id: traceId, company_id: companyId, seller_id: sellerId, action: "save_cache", status: upsertErr ? "error" : "success", step: "save_cache", execution_time_ms: Date.now() - startTime, error_message: upsertErr?.message });
 
