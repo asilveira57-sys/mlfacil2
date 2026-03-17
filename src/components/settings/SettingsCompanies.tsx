@@ -561,14 +561,28 @@ const SettingsCompanies = () => {
             {showLinkOption && companies.length > 0 && (
               <Button
                 size="sm"
-                variant="ghost"
+                variant="outline"
                 title="Vincular a empresa"
                 onClick={() => {
                   setAccountToLink(account);
                   setShowLinkDialog(true);
                 }}
               >
-                <Link2 className="h-4 w-4" />
+                <Link2 className="h-4 w-4 mr-1" />
+                Vincular empresa
+              </Button>
+            )}
+            {showLinkOption && companies.length === 0 && (
+              <Button
+                size="sm"
+                variant="default"
+                title="Criar empresa e vincular"
+                onClick={() => {
+                  setShowNewCompanyDialog(true);
+                }}
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Criar empresa
               </Button>
             )}
             
