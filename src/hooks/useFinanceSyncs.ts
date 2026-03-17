@@ -51,12 +51,17 @@ export function useSyncMovements() {
       return result.data!;
     },
     onSuccess: (data) => {
-      toast.success(`${data.processedRecords} movimentos sincronizados`);
+      if (data.processedRecords === 0 && data.totalFetched === 0) {
+        toast.info('Nenhuma movimentação encontrada nos últimos 30 dias.');
+      } else {
+        toast.success(`${data.processedRecords} movimentos sincronizados`);
+      }
       queryClient.invalidateQueries({ queryKey: ['mp-movements'] });
       queryClient.invalidateQueries({ queryKey: ['finance-job-runs'] });
     },
     onError: (err: Error) => {
-      toast.error(err.message);
+      toast.error('Não foi possível sincronizar as movimentações. Tente novamente mais tarde.');
+      console.error('[useSyncMovements] Error:', err.message);
     },
   });
 }

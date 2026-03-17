@@ -52,6 +52,12 @@ async function fetchAllMovements(
 
     if (!res.ok) {
       const errText = await res.text();
+      console.warn(`[mp-sync-movements] MP API returned ${res.status}: ${errText}`);
+      // Treat 404 or empty-data errors as "no movements" instead of throwing
+      if (res.status === 404 || res.status === 400) {
+        console.info('[mp-sync-movements] No movements available from MP API, returning empty');
+        return { movements: [], totalFetched: 0 };
+      }
       throw new Error(`MP API error ${res.status}: ${errText}`);
     }
 
