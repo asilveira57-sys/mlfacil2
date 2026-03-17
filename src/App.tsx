@@ -217,9 +217,9 @@ const App = () => {
                 <Route element={<AppShellLayout />}>
                   <Route path="/inicio" element={<Home />} />
                   <Route path="/dashboard" element={<Dashboard />} />
-                  <Route path="/shipping-labels" element={<ShippingLabels />} />
-                  <Route path="/shipping-labels/header-settings" element={<LabelHeaderSettings />} />
-                  <Route path="/zpl-converter" element={<ZPLConverter />} />
+                  <Route path="/shipping-labels" element={<ShippingEligibilityGuard><ShippingLabels /></ShippingEligibilityGuard>} />
+                  <Route path="/shipping-labels/header-settings" element={<ShippingEligibilityGuard><LabelHeaderSettings /></ShippingEligibilityGuard>} />
+                  <Route path="/zpl-converter" element={<ShippingEligibilityGuard><ZPLConverter /></ShippingEligibilityGuard>} />
                   <Route path="/abc-analysis" element={<AbcAnalysis />} />
                   <Route path="/tendencias" element={<TendenciasV2 />} />
                   <Route path="/mercado" element={<Mercado />} />
