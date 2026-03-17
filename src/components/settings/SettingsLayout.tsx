@@ -1,12 +1,12 @@
 import { useSearchParams } from "react-router-dom";
-import {
-  User, Shield, Activity, Globe, Bell,
-  Users, Palette, LayoutTemplate, ShieldCheck,
-  Wrench, CreditCard, Receipt, Building2,
-  Headphones, MessageSquare, Settings, LucideIcon,
-} from "lucide-react";
+import { Settings, LucideIcon } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageContainer } from "@/components/layout/PageContainer";
+import { useConfigMenu } from "@/hooks/useConfigMenu";
+import { useUserRole } from "@/hooks/useUserRole";
+import { Skeleton } from "@/components/ui/skeleton";
+import { SettingsMenuEditor } from "@/components/settings/SettingsMenuEditor";
+import * as LucideIcons from "lucide-react";
 
 import SettingsProfile from "@/components/settings/SettingsProfile";
 import SettingsSecurity from "@/components/settings/SettingsSecurity";
@@ -24,30 +24,29 @@ import { SettingsAccessProfiles } from "@/components/settings/SettingsAccessProf
 import { SettingsDailyMessage } from "@/components/settings/SettingsDailyMessage";
 import { SettingsNotifications } from "@/components/settings/SettingsNotifications";
 
-interface SettingsTab {
-  id: string;
-  label: string;
-  icon: LucideIcon;
-  component: React.ComponentType | null;
-}
+// Static map: slug from DB → React component
+const COMPONENT_MAP: Record<string, React.ComponentType> = {
+  "perfil": SettingsProfile,
+  "seguranca": SettingsSecurity,
+  "idioma": SettingsLanguage,
+  "notificacoes": SettingsNotifications,
+  "colaboradores": CollaboratorsCard,
+  "perfis-acesso": SettingsAccessProfiles,
+  "personalizacao": SettingsCustomization,
+  "aparencia": SettingsTemplates,
+  "privacidade-lgpd": SettingsPrivacy,
+  "utilidades": SettingsUtilities,
+  "plano": SettingsPlan,
+  "faturamento": SettingsBilling,
+  "empresas-contas": SettingsCompanies,
+  "abrir-chamado": SettingsSupport,
+  "mensagem-do-dia": SettingsDailyMessage,
+};
 
-const settingsTabs: SettingsTab[] = [
-  { id: "perfil", label: "Perfil", icon: User, component: SettingsProfile },
-  { id: "seguranca", label: "Segurança", icon: Shield, component: SettingsSecurity },
-  { id: "idioma", label: "Idioma", icon: Globe, component: SettingsLanguage },
-  { id: "notificacoes", label: "Notificações", icon: Bell, component: SettingsNotifications },
-  { id: "colaboradores", label: "Colaboradores", icon: Users, component: CollaboratorsCard },
-  { id: "perfis-acesso", label: "Perfis de Acesso", icon: ShieldCheck, component: SettingsAccessProfiles },
-  { id: "personalizacao", label: "Personalização", icon: Palette, component: SettingsCustomization },
-  { id: "aparencia", label: "Aparência", icon: LayoutTemplate, component: SettingsTemplates },
-  { id: "privacidade-lgpd", label: "Privacidade", icon: ShieldCheck, component: SettingsPrivacy },
-  { id: "utilidades", label: "Utilidades", icon: Wrench, component: SettingsUtilities },
-  { id: "plano", label: "Plano", icon: CreditCard, component: SettingsPlan },
-  { id: "faturamento", label: "Faturamento", icon: Receipt, component: SettingsBilling },
-  { id: "empresas-contas", label: "Empresas", icon: Building2, component: SettingsCompanies },
-  { id: "abrir-chamado", label: "Suporte", icon: Headphones, component: SettingsSupport },
-  { id: "mensagem-do-dia", label: "Msg do Dia", icon: MessageSquare, component: SettingsDailyMessage },
-];
+function getIcon(iconName: string): LucideIcon {
+  const icon = (LucideIcons as Record<string, unknown>)[iconName];
+  return (icon as LucideIcon) || Settings;
+}
 
 function PlaceholderContent({ name }: { name: string }) {
   return (
@@ -63,37 +62,55 @@ function PlaceholderContent({ name }: { name: string }) {
 
 export function SettingsLayout() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeSlug = searchParams.get("section") || "perfil";
+  const { menuGroups, isLoading } = useConfigMenu();
+  const { isAdmin } = useUserRole();
+
+  // Flatten all items from all groups for tab navigation
+  const allItems = menuGroups.flatMap(g => g.items.flatMap(item => [item, ...item.children]));
+  
+  const activeSlug = searchParams.get("section") || allItems[0]?.slug || "perfil";
 
   const setActiveSlug = (slug: string) => {
     setSearchParams({ section: slug }, { replace: true });
   };
 
-  const activeTab = settingsTabs.find((t) => t.id === activeSlug) || settingsTabs[0];
-  const ActiveComponent = activeTab.component;
+  const activeItem = allItems.find(i => i.slug === activeSlug);
+  const ActiveComponent = activeItem ? COMPONENT_MAP[activeItem.slug] : null;
 
   return (
     <PageContainer title="Configurações" subtitle="Gerencie sua conta e preferências">
       <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-        <Tabs value={activeSlug} onValueChange={setActiveSlug}>
-          <TabsList className="h-auto p-1 flex flex-wrap gap-1 bg-muted/50">
-            {settingsTabs.map((tab) => (
-              <TabsTrigger
-                key={tab.id}
-                value={tab.id}
-                className="flex items-center gap-1.5 text-xs px-3 py-1.5 data-[state=active]:bg-background data-[state=active]:shadow-sm"
-              >
-                <tab.icon className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">{tab.label}</span>
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+        {isLoading ? (
+          <Skeleton className="h-10 w-full" />
+        ) : (
+          <div className="flex items-center gap-2">
+            <Tabs value={activeSlug} onValueChange={setActiveSlug} className="flex-1">
+              <TabsList className="h-auto p-1 flex flex-wrap gap-1 bg-muted/50">
+                {menuGroups.map(group => (
+                  group.items.map(item => {
+                    const Icon = getIcon(item.icon);
+                    return (
+                      <TabsTrigger
+                        key={item.id}
+                        value={item.slug}
+                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">{item.name}</span>
+                      </TabsTrigger>
+                    );
+                  })
+                ))}
+              </TabsList>
+            </Tabs>
+            {isAdmin && <SettingsMenuEditor />}
+          </div>
+        )}
 
         {ActiveComponent ? (
           <ActiveComponent />
         ) : (
-          <PlaceholderContent name={activeTab.label} />
+          <PlaceholderContent name={activeItem?.name || "Configuração"} />
         )}
       </div>
     </PageContainer>
