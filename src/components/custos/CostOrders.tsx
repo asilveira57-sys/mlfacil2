@@ -813,6 +813,23 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                 </div>
               )}
 
+              {/* Active job banner (when resumed from previous session and no explicit selection) */}
+              {batchProcessing && selectedOrders.size === 0 && (
+                <div className="flex items-center gap-3 p-3 mb-2 rounded-lg bg-muted border">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-sm font-medium">Processamento em background em andamento</span>
+                  <div className="flex-1 flex items-center gap-2">
+                    <Progress value={batchProgress.total > 0 ? (batchProgress.current / batchProgress.total) * 100 : 0} className="flex-1 h-2" />
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                      Pedido {batchProgress.currentOrderId}
+                    </span>
+                  </div>
+                  <Button size="sm" variant="ghost" className="text-destructive h-6 px-2 text-xs" onClick={handleCancelBulkJob}>
+                    Cancelar
+                  </Button>
+                </div>
+              )}
+
               {/* Batch action bar */}
               {selectedOrders.size > 0 && (
                 <div className="flex items-center gap-3 p-3 mb-2 rounded-lg bg-muted border flex-wrap">
