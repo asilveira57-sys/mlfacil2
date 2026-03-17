@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -103,6 +103,16 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, currentOrderId: '' });
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isPollingActiveRef = useRef(false);
+
+  const stopJobPolling = useCallback(() => {
+    isPollingActiveRef.current = false;
+    if (pollTimeoutRef.current) {
+      clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = null;
+    }
+  }, []);
 
   const allOnPageSelected = orders.length > 0 && orders.every(o => selectedOrders.has(o.order_id));
   const someOnPageSelected = orders.some(o => selectedOrders.has(o.order_id));
@@ -171,12 +181,23 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
 
   // Poll a bulk job for progress — queries DB directly (no Edge Function boot overhead)
   const pollJobProgress = (jobId: string) => {
+    stopJobPolling();
+    isPollingActiveRef.current = true;
     setActiveJobId(jobId);
-    let lastProcessed = 0;
+
+    let lastProcessed = -1;
     let staleStartedAt: number | null = null;
+    let staleWarningShown = false;
     const STALE_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes without progress = stale
 
+    const scheduleNextPoll = (ms: number) => {
+      if (!isPollingActiveRef.current) return;
+      pollTimeoutRef.current = setTimeout(poll, ms);
+    };
+
     const poll = async () => {
+      if (!isPollingActiveRef.current) return;
+
       try {
         const { data: job, error } = await supabase
           .from('cost_bulk_jobs')
@@ -185,11 +206,11 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
           .maybeSingle();
 
         if (error || !job) {
-          setTimeout(poll, 5000);
+          scheduleNextPoll(5000);
           return;
         }
 
-        const processed = job.success_count + job.error_count;
+        const processed = (job.success_count || 0) + (job.error_count || 0);
 
         setBatchProgress({
           current: processed,
@@ -198,6 +219,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
         });
 
         if (job.status === 'done' || job.status === 'error' || job.status === 'cancelled') {
+          stopJobPolling();
           setBatchProcessing(false);
           setActiveJobId(null);
           setSelectedOrders(new Set());
@@ -215,22 +237,25 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
           return;
         }
 
-        // Staleness detection
+        // Staleness detection (show warning only once until progress changes)
         if (processed === lastProcessed) {
           if (!staleStartedAt) staleStartedAt = Date.now();
-          if (Date.now() - staleStartedAt > STALE_TIMEOUT_MS) {
+          if (!staleWarningShown && Date.now() - staleStartedAt > STALE_TIMEOUT_MS) {
+            staleWarningShown = true;
             toast.warning('O processamento parece travado. Você pode cancelar e tentar novamente.');
           }
         } else {
           lastProcessed = processed;
           staleStartedAt = null;
+          staleWarningShown = false;
         }
 
-        setTimeout(poll, 3000);
+        scheduleNextPoll(3000);
       } catch {
-        setTimeout(poll, 5000);
+        scheduleNextPoll(5000);
       }
     };
+
     poll();
   };
 
@@ -242,6 +267,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
         .from('cost_bulk_jobs')
         .update({ status: 'cancelled' })
         .eq('id', activeJobId);
+      stopJobPolling();
       setBatchProcessing(false);
       setActiveJobId(null);
       toast.info('Job cancelado.');
@@ -431,22 +457,48 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   // Check for active bulk jobs on mount
   useEffect(() => {
     if (!sellerId) return;
+
     const checkActiveJob = async () => {
       const { data } = await supabase
         .from('cost_bulk_jobs')
-        .select('id, total_orders, processed_count, status')
+        .select('id, total_orders, processed_count, status, created_at, updated_at')
         .eq('seller_id', sellerId)
         .in('status', ['running', 'queued'])
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (data) {
-        setBatchProcessing(true);
-        setBatchProgress({ current: data.processed_count, total: data.total_orders, currentOrderId: `${data.processed_count}/${data.total_orders}` });
-        pollJobProgress(data.id);
+
+      if (!data) return;
+
+      const reference = new Date(data.updated_at || data.created_at || Date.now()).getTime();
+      const isStaleQueued =
+        data.status === 'queued' &&
+        Number.isFinite(reference) &&
+        Date.now() - reference > 20 * 60 * 1000;
+
+      if (isStaleQueued) {
+        await supabase
+          .from('cost_bulk_jobs')
+          .update({ status: 'cancelled' })
+          .eq('id', data.id)
+          .eq('status', 'queued');
+        return;
       }
+
+      setBatchProcessing(true);
+      setBatchProgress({
+        current: data.processed_count,
+        total: data.total_orders,
+        currentOrderId: `${data.processed_count}/${data.total_orders}`,
+      });
+      pollJobProgress(data.id);
     };
+
     checkActiveJob();
+
+    return () => {
+      stopJobPolling();
+    };
   }, [sellerId]);
 
   useEffect(() => {
@@ -757,6 +809,23 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                     onClick={() => { setSelectAllPages(false); setSelectedOrders(new Set()); }}
                   >
                     Limpar seleção
+                  </Button>
+                </div>
+              )}
+
+              {/* Active job banner (when resumed from previous session and no explicit selection) */}
+              {batchProcessing && selectedOrders.size === 0 && (
+                <div className="flex items-center gap-3 p-3 mb-2 rounded-lg bg-muted border">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-sm font-medium">Processamento em background em andamento</span>
+                  <div className="flex-1 flex items-center gap-2">
+                    <Progress value={batchProgress.total > 0 ? (batchProgress.current / batchProgress.total) * 100 : 0} className="flex-1 h-2" />
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                      Pedido {batchProgress.currentOrderId}
+                    </span>
+                  </div>
+                  <Button size="sm" variant="ghost" className="text-destructive h-6 px-2 text-xs" onClick={handleCancelBulkJob}>
+                    Cancelar
                   </Button>
                 </div>
               )}
