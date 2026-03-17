@@ -106,13 +106,13 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isPollingActiveRef = useRef(false);
 
-  const stopJobPolling = () => {
+  const stopJobPolling = useCallback(() => {
     isPollingActiveRef.current = false;
     if (pollTimeoutRef.current) {
       clearTimeout(pollTimeoutRef.current);
       pollTimeoutRef.current = null;
     }
-  };
+  }, []);
 
   const allOnPageSelected = orders.length > 0 && orders.every(o => selectedOrders.has(o.order_id));
   const someOnPageSelected = orders.some(o => selectedOrders.has(o.order_id));
