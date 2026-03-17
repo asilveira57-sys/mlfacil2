@@ -81,37 +81,42 @@ export function SettingsLayout() {
   return (
     <PageContainer title="Configurações" subtitle="Gerencie sua conta e preferências">
       <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-        {isLoading ? (
-          <Skeleton className="h-10 w-full" />
-        ) : (
-          <div className="flex items-center gap-2">
-            <Tabs value={activeSlug} onValueChange={setActiveSlug} className="flex-1">
-              <TabsList className="h-auto p-1 flex flex-wrap gap-1 bg-muted/50">
-                {groups.map(group => (
-                  group.items.map(item => {
-                    const Icon = getIcon(item.icon);
-                    return (
-                      <TabsTrigger
-                        key={item.id}
-                        value={item.slug}
-                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 data-[state=active]:bg-background data-[state=active]:shadow-sm"
-                      >
-                        <Icon className="h-3.5 w-3.5" />
-                        <span className="hidden sm:inline">{item.name}</span>
-                      </TabsTrigger>
-                    );
-                  })
-                ))}
-              </TabsList>
-            </Tabs>
-            {isAdmin && <SettingsMenuEditor />}
+        {isLoading && groups.length === 0 ? (
+          <div className="space-y-4">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-64 w-full" />
           </div>
-        )}
-
-        {ActiveComponent ? (
-          <ActiveComponent />
         ) : (
-          <PlaceholderContent name={activeItem?.name || "Configuração"} />
+          <>
+            <div className="flex items-center gap-2">
+              <Tabs value={activeSlug} onValueChange={setActiveSlug} className="flex-1">
+                <TabsList className="h-auto p-1 flex flex-wrap gap-1 bg-muted/50">
+                  {groups.map(group => (
+                    group.items.map(item => {
+                      const Icon = getIcon(item.icon);
+                      return (
+                        <TabsTrigger
+                          key={item.id}
+                          value={item.slug}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                        >
+                          <Icon className="h-3.5 w-3.5" />
+                          <span className="hidden sm:inline">{item.name}</span>
+                        </TabsTrigger>
+                      );
+                    })
+                  ))}
+                </TabsList>
+              </Tabs>
+              {isAdmin && <SettingsMenuEditor />}
+            </div>
+
+            {ActiveComponent ? (
+              <ActiveComponent />
+            ) : (
+              <PlaceholderContent name={activeItem?.name || "Configuração"} />
+            )}
+          </>
         )}
       </div>
     </PageContainer>
