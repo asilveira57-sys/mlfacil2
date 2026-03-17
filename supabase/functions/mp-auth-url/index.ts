@@ -7,6 +7,28 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
+/**
+ * Generate a random code_verifier (43-128 chars, URL-safe)
+ * and derive the S256 code_challenge from it.
+ */
+async function generatePKCE() {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  const codeVerifier = base64UrlEncode(array);
+
+  const encoder = new TextEncoder();
+  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(codeVerifier));
+  const codeChallenge = base64UrlEncode(new Uint8Array(digest));
+
+  return { codeVerifier, codeChallenge };
+}
+
+function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -73,6 +95,10 @@ serve(async (req) => {
       throw new Error('ML_APP_ID not configured');
     }
 
+    // Generate PKCE pair (required by Mercado Livre)
+    const { codeVerifier, codeChallenge } = await generatePKCE();
+    console.log('[mp-auth-url] PKCE generated, challenge method: S256');
+
     // State includes context for secure server-side processing
     const stateData = {
       nonce: crypto.randomUUID(),
@@ -81,19 +107,22 @@ serve(async (req) => {
       companyId: companyId || null,
       mlAccountId: mlAccountId || null,
       flow: 'finance', // Distinguishes from ML OAuth
+      cv: codeVerifier, // code_verifier for PKCE
     };
     const state = btoa(JSON.stringify(stateData));
 
     console.log('[mp-auth-url] State:', { origin: frontendOrigin, userId: user.id, flow: 'finance' });
 
-    // Same OAuth endpoint as ML but redirects to mp-oauth-callback
+    // OAuth endpoint with PKCE
     const authUrl = new URL('https://auth.mercadolivre.com.br/authorization');
     authUrl.searchParams.append('response_type', 'code');
     authUrl.searchParams.append('client_id', appId);
     authUrl.searchParams.append('redirect_uri', redirectUri);
     authUrl.searchParams.append('state', state);
+    authUrl.searchParams.append('code_challenge', codeChallenge);
+    authUrl.searchParams.append('code_challenge_method', 'S256');
 
-    console.log('[mp-auth-url] Generated auth URL:', authUrl.toString());
+    console.log('[mp-auth-url] Generated auth URL with PKCE');
 
     return new Response(
       JSON.stringify({ authUrl: authUrl.toString(), state }),
