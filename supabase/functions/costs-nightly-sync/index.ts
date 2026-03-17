@@ -1,6 +1,7 @@
 // @ts-nocheck - Deno types not available in build context
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { fetchWithBatchedIn } from "../_shared/fetch-all-rows.ts";
+import { classifyBillingCharge } from "../_shared/ml-billing-classifier.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
