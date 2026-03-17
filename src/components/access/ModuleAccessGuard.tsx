@@ -99,22 +99,9 @@ export function ModuleAccessGuard({ children }: ModuleAccessGuardProps) {
       return <>{children}</>;
     }
 
+    // Fail-open on timeout: render children, RLS protects data server-side
     if (timedOut) {
-      return (
-        <div className="min-h-screen bg-background flex items-center justify-center p-6">
-          <div className="flex flex-col items-center gap-3 text-center max-w-md">
-            <p className="text-sm text-muted-foreground">
-              O carregamento de permissões demorou mais que o esperado.
-            </p>
-            <div className="flex gap-2">
-              <Button onClick={() => window.location.reload()}>Tentar novamente</Button>
-              <Button variant="outline" onClick={() => navigate('/dashboard', { replace: true })}>
-                Voltar
-              </Button>
-            </div>
-          </div>
-        </div>
-      );
+      return <>{children}</>;
     }
 
     return (
