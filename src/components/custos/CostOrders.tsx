@@ -457,22 +457,48 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   // Check for active bulk jobs on mount
   useEffect(() => {
     if (!sellerId) return;
+
     const checkActiveJob = async () => {
       const { data } = await supabase
         .from('cost_bulk_jobs')
-        .select('id, total_orders, processed_count, status')
+        .select('id, total_orders, processed_count, status, created_at, updated_at')
         .eq('seller_id', sellerId)
         .in('status', ['running', 'queued'])
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (data) {
-        setBatchProcessing(true);
-        setBatchProgress({ current: data.processed_count, total: data.total_orders, currentOrderId: `${data.processed_count}/${data.total_orders}` });
-        pollJobProgress(data.id);
+
+      if (!data) return;
+
+      const reference = new Date(data.updated_at || data.created_at || Date.now()).getTime();
+      const isStaleQueued =
+        data.status === 'queued' &&
+        Number.isFinite(reference) &&
+        Date.now() - reference > 20 * 60 * 1000;
+
+      if (isStaleQueued) {
+        await supabase
+          .from('cost_bulk_jobs')
+          .update({ status: 'cancelled' })
+          .eq('id', data.id)
+          .eq('status', 'queued');
+        return;
       }
+
+      setBatchProcessing(true);
+      setBatchProgress({
+        current: data.processed_count,
+        total: data.total_orders,
+        currentOrderId: `${data.processed_count}/${data.total_orders}`,
+      });
+      pollJobProgress(data.id);
     };
+
     checkActiveJob();
+
+    return () => {
+      stopJobPolling();
+    };
   }, [sellerId]);
 
   useEffect(() => {
