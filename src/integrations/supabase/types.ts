@@ -14595,7 +14595,9 @@ export type Database = {
       }
       shipping_cutoff_cache: {
         Row: {
+          agency_cutoff_source: string | null
           agency_cutoff_time: string | null
+          agency_handling_limit_time: string | null
           colecta_cutoff_calculated: boolean
           colecta_cutoff_time: string | null
           colecta_enabled: boolean
@@ -14622,7 +14624,9 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          agency_cutoff_source?: string | null
           agency_cutoff_time?: string | null
+          agency_handling_limit_time?: string | null
           colecta_cutoff_calculated?: boolean
           colecta_cutoff_time?: string | null
           colecta_enabled?: boolean
@@ -14649,7 +14653,9 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          agency_cutoff_source?: string | null
           agency_cutoff_time?: string | null
+          agency_handling_limit_time?: string | null
           colecta_cutoff_calculated?: boolean
           colecta_cutoff_time?: string | null
           colecta_enabled?: boolean
@@ -19335,21 +19341,37 @@ export type Database = {
         Args: { p_seller_id: string; p_user_id: string }
         Returns: number
       }
-      get_shipping_orders: {
-        Args: {
-          p_date_from?: string
-          p_date_to?: string
-          p_page?: number
-          p_page_size?: number
-          p_period_type?: string
-          p_search_query?: string
-          p_seller_id: string
-          p_sort_dir?: string
-          p_sort_field?: string
-          p_status_filter?: string
-        }
-        Returns: Json
-      }
+      get_shipping_orders:
+        | {
+            Args: {
+              p_date_from?: string
+              p_date_to?: string
+              p_page?: number
+              p_page_size?: number
+              p_period_type?: string
+              p_search_query?: string
+              p_seller_id: string
+              p_sort_direction?: string
+              p_sort_field?: string
+              p_status_filter?: string
+            }
+            Returns: Json
+          }
+        | {
+            Args: {
+              p_date_from?: string
+              p_date_to?: string
+              p_page?: number
+              p_page_size?: number
+              p_period_type?: string
+              p_search_query?: string
+              p_seller_id: string
+              p_sort_dir?: string
+              p_sort_field?: string
+              p_status_filter?: string
+            }
+            Returns: Json
+          }
       get_tenant_total_sales: {
         Args: { p_company_id: string }
         Returns: {

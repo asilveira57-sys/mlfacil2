@@ -229,10 +229,13 @@ function AgencyItem({
   enabled: boolean; cutoffTime: string | null | undefined;
   cutoffSource: string | null | undefined; handlingLimitTime: string | null | undefined;
 }) {
-  if (!enabled) {
+  // Show handling limit as fallback even if agency cutoff is not available
+  const hasHandlingFallback = !cutoffTime && handlingLimitTime;
+
+  if (!enabled && !hasHandlingFallback) {
     return (
       <span className="text-xs text-muted-foreground">
-        Agência: <span className="italic">não disponível</span>
+        Agência: <span className="italic">não disponível (ML)</span>
       </span>
     );
   }
@@ -241,14 +244,27 @@ function AgencyItem({
 
   return (
     <span className="text-xs text-foreground">
-      Agência: <span className="font-mono font-semibold text-primary">{cutoffTime || '—'}</span>
-      {cutoffSource === 'estimated_schedule_limit' || cutoffSource === 'api_schedule_limit' ? (
-        <span className="text-muted-foreground ml-0.5 text-[10px]">(ML)</span>
-      ) : null}
-      {hasDivergence && (
-        <span className="text-muted-foreground ml-1 text-[10px]">
-          despacho: {handlingLimitTime}
-        </span>
+      {cutoffTime ? (
+        <>
+          Agência: <span className="font-mono font-semibold text-primary">{cutoffTime}</span>
+          {(cutoffSource === 'estimated_schedule_limit' || cutoffSource === 'api_schedule_limit') && (
+            <span className="text-muted-foreground ml-0.5 text-[10px]">(ML)</span>
+          )}
+          {hasDivergence && (
+            <span className="text-muted-foreground ml-1 text-[10px]">
+              despacho: {handlingLimitTime}
+            </span>
+          )}
+        </>
+      ) : (
+        <>
+          <span className="text-muted-foreground">Agência: <span className="italic">não disponível (ML)</span></span>
+          {handlingLimitTime && (
+            <span className="ml-1.5">
+              Despacho: <span className="font-mono font-semibold text-primary">{handlingLimitTime}</span>
+            </span>
+          )}
+        </>
       )}
     </span>
   );
