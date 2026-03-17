@@ -632,7 +632,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
           .filter(id => !invoicedOrderIds.has(id))
           .map(order_id => ({ order_id }));
 
-        const pendingInvoiceIds = (ordersWithoutInvoice || []).map(o => o.order_id);
+        const pendingInvoiceIds = ordersWithoutInvoice.map(o => o.order_id);
         console.log(`Invoices: ${orderIds.length} total orders, ${pendingInvoiceIds.length} missing invoice`);
 
         if (pendingInvoiceIds.length > 0) {
