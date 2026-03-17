@@ -181,12 +181,23 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
 
   // Poll a bulk job for progress — queries DB directly (no Edge Function boot overhead)
   const pollJobProgress = (jobId: string) => {
+    stopJobPolling();
+    isPollingActiveRef.current = true;
     setActiveJobId(jobId);
-    let lastProcessed = 0;
+
+    let lastProcessed = -1;
     let staleStartedAt: number | null = null;
+    let staleWarningShown = false;
     const STALE_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes without progress = stale
 
+    const scheduleNextPoll = (ms: number) => {
+      if (!isPollingActiveRef.current) return;
+      pollTimeoutRef.current = setTimeout(poll, ms);
+    };
+
     const poll = async () => {
+      if (!isPollingActiveRef.current) return;
+
       try {
         const { data: job, error } = await supabase
           .from('cost_bulk_jobs')
@@ -195,11 +206,11 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
           .maybeSingle();
 
         if (error || !job) {
-          setTimeout(poll, 5000);
+          scheduleNextPoll(5000);
           return;
         }
 
-        const processed = job.success_count + job.error_count;
+        const processed = (job.success_count || 0) + (job.error_count || 0);
 
         setBatchProgress({
           current: processed,
@@ -208,6 +219,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
         });
 
         if (job.status === 'done' || job.status === 'error' || job.status === 'cancelled') {
+          stopJobPolling();
           setBatchProcessing(false);
           setActiveJobId(null);
           setSelectedOrders(new Set());
@@ -225,22 +237,25 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
           return;
         }
 
-        // Staleness detection
+        // Staleness detection (show warning only once until progress changes)
         if (processed === lastProcessed) {
           if (!staleStartedAt) staleStartedAt = Date.now();
-          if (Date.now() - staleStartedAt > STALE_TIMEOUT_MS) {
+          if (!staleWarningShown && Date.now() - staleStartedAt > STALE_TIMEOUT_MS) {
+            staleWarningShown = true;
             toast.warning('O processamento parece travado. Você pode cancelar e tentar novamente.');
           }
         } else {
           lastProcessed = processed;
           staleStartedAt = null;
+          staleWarningShown = false;
         }
 
-        setTimeout(poll, 3000);
+        scheduleNextPoll(3000);
       } catch {
-        setTimeout(poll, 5000);
+        scheduleNextPoll(5000);
       }
     };
+
     poll();
   };
 
