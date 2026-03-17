@@ -259,23 +259,27 @@ export function SalesDashboard() {
         });
       }
 
-      // Classify errors: gate errors (402/403) are NOT technical failures
-      const isGateError = response.error && (
+      // Handle new contract: edge function returns 200 with meta.state for business rules
+      const metaState = response.data?.meta?.state;
+      const metaReason = response.data?.meta?.reason;
+
+      if (metaState === 'EMPTY' || metaState === 'BLOCKED') {
+        console.info(`[SalesDashboard] Business rule response — state: ${metaState}, reason: ${metaReason}, HTTP: 200`);
+        setSalesData(response.data);
+        setIsLoading(false);
+        return;
+      }
+
+      // Legacy fallback: catch any remaining 402/403 from older deploys
+      const isLegacyGateError = response.error && (
         response.error.status === 402 || 
         response.error.status === 403 ||
         response.error?.message?.includes('402') ||
         response.error?.message?.includes('403')
       );
-      const isGateErrorCode = response.data?.error_code && [
-        'TRIAL_EXPIRED', 'NO_TRIAL', 'NO_COMPANY', 'NO_SUBSCRIPTION',
-        'PAYMENT_REQUIRED', 'API_ACCESS_DENIED'
-      ].includes(response.data.error_code);
-
-      if (isGateError || isGateErrorCode) {
-        // Gate error = seller connected but no active plan/trial
-        // Show dashboard with R$0,00 instead of error
-        console.info('[SalesDashboard] Gate error treated as empty data:', response.error?.status || response.data?.error_code);
-        setSalesData(null); // Will render with zeroed fallback
+      if (isLegacyGateError) {
+        console.info('[SalesDashboard] Legacy gate error treated as empty data:', response.error?.status);
+        setSalesData(null);
         setIsLoading(false);
         return;
       }
