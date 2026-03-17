@@ -811,11 +811,10 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
       } catch (e) { console.error(`[ReprocessPending] billing period search error for ${order.order_id}:`, e); }
     }
 
-    // Final: if all 3 strategies exhausted and still no fee but have shipping, mark as billing (all sources checked)
+    // Final: if all strategies exhausted and still no commission but have shipping — keep pending
     if (feeMLSource === "pending" && shippingCostSeller > 0) {
-      feeMLSource = "billing";
-      sourceRefs.push("all_strategies_exhausted:shipping_only");
-      console.log(`[ReprocessPending] order ${order.order_id}: all 3 strategies checked, no commission found but has shipping — marking as billing`);
+      sourceRefs.push("all_strategies_exhausted:shipping_only:commission_pending");
+      console.log(`[ReprocessPending] order ${order.order_id}: all strategies checked, has shipping but NO commission — keeping as pending`);
     }
 
     // Cache financials
