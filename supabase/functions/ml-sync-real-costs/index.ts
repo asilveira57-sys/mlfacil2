@@ -237,12 +237,13 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
     return false;
   }
 
-  // Strategy 1: /orders/{orderId} → payments[].marketplace_fee (most reliable)
+  // Strategy 1: /orders/{orderId} → payments[].marketplace_fee (legacy) + billing_info (new format)
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const orderResp = await fetch(`https://api.mercadolibre.com/orders/${orderId}`, { headers: { Authorization: `Bearer ${currentToken}` } });
       if (orderResp.ok) {
         const orderData = await orderResp.json();
+        // Legacy: payments[].marketplace_fee
         if (orderData.payments && Array.isArray(orderData.payments)) {
           for (const payment of orderData.payments) {
             if (payment.marketplace_fee != null && payment.marketplace_fee > 0) {
@@ -260,6 +261,41 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
       if (orderResp.status === 429) { await orderResp.text(); await new Promise(r => setTimeout(r, 1500 * (attempt + 1))); continue; }
       await orderResp.text(); break;
     } catch (e) { console.error(`[RealCosts] orders API error:`, e); break; }
+  }
+
+  // Strategy 1b: If no fee from payments (new ML format post-2026-03-04), try /orders/{id}/billing_info
+  if (feeML === 0 && isNewMlBillingFormat(order.created_at_meli)) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const biResp = await fetch(`https://api.mercadolibre.com/orders/${orderId}/billing_info`, { headers: { Authorization: `Bearer ${currentToken}` } });
+        if (biResp.ok) {
+          const biData = await biResp.json();
+          const charges = biData.charges || biData.billing_info || [];
+          if (Array.isArray(charges)) {
+            for (const charge of charges) {
+              const label = (charge.name || charge.label || charge.description || charge.type || charge.detail || '').toLowerCase();
+              const amount = Math.abs(charge.amount || charge.value || 0);
+              if (amount === 0) continue;
+              const category = classifyBillingCharge(label);
+              switch (category) {
+                case "commission": feeML += amount; break;
+                case "shipping": shippingCostSeller += amount; break;
+                case "installments": installmentsCost += amount; break;
+                case "adjustments": adjustments += amount; break;
+              }
+            }
+          }
+          if (feeML > 0) {
+            feeMLSource = "billing";
+            sourceRefs.push("billing_info:v2");
+          }
+          break;
+        }
+        if (biResp.status === 401) { await biResp.text(); if (await tryRefreshToken()) continue; break; }
+        if (biResp.status === 429) { await biResp.text(); await new Promise(r => setTimeout(r, 1500 * (attempt + 1))); continue; }
+        await biResp.text(); break;
+      } catch (e) { console.error(`[RealCosts] billing_info API error:`, e); break; }
+    }
   }
 
   // Strategy 2: If still no fee, check meli_billing_details_cache (from billing periods sync)
