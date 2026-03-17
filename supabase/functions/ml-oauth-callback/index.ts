@@ -128,8 +128,8 @@ serve(async (req) => {
     // FINANCE FLOW: Save to finance_accounts and redirect to /financeiro
     // ================================================================
     if (isFinanceFlow) {
-      console.log('[finance-flow] Processing MP OAuth for user:', mpUserIdStr);
       const mpUserIdStr = mlUserIdStr;
+      console.log('[finance-flow] Processing MP OAuth for user:', mpUserIdStr);
 
       const { data: existing } = await supabaseAdmin
         .from('finance_accounts')
