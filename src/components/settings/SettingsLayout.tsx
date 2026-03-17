@@ -66,7 +66,8 @@ export function SettingsLayout() {
   const { isAdmin } = useUserRole();
 
   // Flatten all items from all groups for tab navigation
-  const allItems = menuGroups.flatMap(g => g.items.flatMap(item => [item, ...item.children]));
+  const groups = Array.isArray(menuGroups) ? menuGroups : [];
+  const allItems = groups.flatMap(g => g.items.flatMap(item => [item, ...item.children]));
   
   const activeSlug = searchParams.get("section") || allItems[0]?.slug || "perfil";
 
