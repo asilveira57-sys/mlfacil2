@@ -10,7 +10,7 @@ import { TopProductsTable } from "./TopProductsTable";
 import { DashboardFilters } from "./DashboardFilters";
 import { OnboardingSync } from "./OnboardingSync";
 import { SyncStatusIndicator } from "./sales/SyncStatusIndicator";
-import { DashboardEmptyState } from "./dashboard/DashboardEmptyState";
+import { SystemEmpty, SystemError } from "@/components/ui/system-states";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
