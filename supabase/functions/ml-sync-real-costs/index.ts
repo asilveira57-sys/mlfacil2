@@ -415,11 +415,12 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
     } catch (e) { console.error(`[RealCosts] Strategy 3 billing period search error:`, e); }
   }
 
-  // Final: if all 3 strategies exhausted and still no fee but have shipping, mark as billing
+  // Final: if all strategies exhausted and still no commission but have shipping,
+  // DON'T mark as "billing" — keep as "pending" with explicit note about commission missing
   if (feeMLSource === "pending" && shippingCostSeller > 0) {
-    feeMLSource = "billing";
-    sourceRefs.push("all_strategies_exhausted:shipping_only");
-    console.log(`[RealCosts] resync_single: order ${orderId}: all 3 strategies checked, no commission found but has shipping — marking as billing`);
+    // Keep feeMLSource as "pending" — commission is still missing
+    sourceRefs.push("all_strategies_exhausted:shipping_only:commission_pending");
+    console.log(`[RealCosts] resync_single: order ${orderId}: all strategies checked, has shipping but NO commission — keeping as pending`);
   }
 
   // Cache in meli_order_financials_cache
