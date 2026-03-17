@@ -267,6 +267,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
         .from('cost_bulk_jobs')
         .update({ status: 'cancelled' })
         .eq('id', activeJobId);
+      stopJobPolling();
       setBatchProcessing(false);
       setActiveJobId(null);
       toast.info('Job cancelado.');
