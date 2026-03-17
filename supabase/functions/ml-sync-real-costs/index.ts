@@ -689,6 +689,32 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
       } catch (e) { console.error(`[ReprocessPending] orders API error for ${order.order_id}:`, e); break; }
     }
 
+    // Strategy 1b: If no fee (new ML format), try /orders/{id}/billing_info
+    if (feeML === 0 && isNewMlBillingFormat(order.created_at_meli)) {
+      try {
+        const biResp = await fetch(`https://api.mercadolibre.com/orders/${order.order_id}/billing_info`, { headers: { Authorization: `Bearer ${currentToken}` } });
+        if (biResp.ok) {
+          const biData = await biResp.json();
+          const charges = biData.charges || biData.billing_info || [];
+          if (Array.isArray(charges)) {
+            for (const charge of charges) {
+              const label = (charge.name || charge.label || charge.description || charge.type || charge.detail || '').toLowerCase();
+              const amount = Math.abs(charge.amount || charge.value || 0);
+              if (amount === 0) continue;
+              const category = classifyBillingCharge(label);
+              switch (category) {
+                case "commission": feeML += amount; break;
+                case "shipping": shippingCostSeller += amount; break;
+                case "installments": installmentsCost += amount; break;
+                case "adjustments": adjustments += amount; break;
+              }
+            }
+          }
+          if (feeML > 0) { feeMLSource = "billing"; sourceRefs.push("billing_info:v2"); updatedCount++; }
+        } else { await biResp.text(); }
+      } catch (e) { console.error(`[ReprocessPending] billing_info API error for ${order.order_id}:`, e); }
+    }
+
     // Strategy 2: If no fee, check billing_details_cache
     if (feeML === 0) {
       const { data: billingRows } = await supabase
