@@ -694,7 +694,8 @@ Deno.serve(async (req) => {
               );
 
               // Get baseline snapshot (onboarding_initial)
-              const { data: baseline } = await supabase
+              let baseline = null;
+              const { data: baselineSnap } = await supabase
                 .from("retrospective_snapshots")
                 .select("*")
                 .eq("tenant_id", tenant.id)
@@ -703,6 +704,96 @@ Deno.serve(async (req) => {
                 .order("created_at", { ascending: true })
                 .limit(1)
                 .maybeSingle();
+
+              // If we have a baseline snapshot but it lacks 30-day lookback data,
+              // enrich it by querying orders from 30 days before the anchor date
+              if (baselineSnap) {
+                baseline = baselineSnap;
+                // Check if the baseline already has 30-day lookback metrics
+                if (!baselineSnap.orders_count || baselineSnap.orders_count === 0) {
+                  try {
+                    const anchorDateStr = toDateStr(anchorDate);
+                    const lookback30Start = toDateStr(addDays(anchorDate, -30));
+
+                    const { data: lookbackOrders } = await supabase
+                      .from("meli_orders_cache")
+                      .select("order_id, total_amount")
+                      .eq("seller_id", sellerId)
+                      .eq("order_status", "paid")
+                      .gte("created_at_meli", lookback30Start)
+                      .lt("created_at_meli", anchorDateStr);
+
+                    const lbCount = lookbackOrders?.length || 0;
+                    const lbRevenue = (lookbackOrders || []).reduce(
+                      (s: number, o: any) => s + Number(o.total_amount || 0), 0
+                    );
+                    const lbTicket = lbCount > 0 ? lbRevenue / lbCount : 0;
+
+                    // Enrich baseline with lookback data
+                    baseline = {
+                      ...baselineSnap,
+                      orders_count: lbCount,
+                      revenue_total: lbRevenue,
+                      average_ticket: lbTicket,
+                    };
+
+                    // Also update the stored snapshot with lookback data
+                    await supabase
+                      .from("retrospective_snapshots")
+                      .update({
+                        orders_count: lbCount,
+                        revenue_total: lbRevenue,
+                        average_ticket: lbTicket,
+                      })
+                      .eq("id", baselineSnap.id);
+
+                    console.log(`[retro-engine] Enriched baseline for company=${company.id}: ${lbCount} orders, R$${lbRevenue.toFixed(2)}`);
+                  } catch (lbErr: any) {
+                    console.error(`[retro-engine] Lookback error: ${lbErr.message}`);
+                  }
+                }
+              } else {
+                // No baseline exists — create one with 30-day lookback
+                try {
+                  const anchorDateStr = toDateStr(anchorDate);
+                  const lookback30Start = toDateStr(addDays(anchorDate, -30));
+
+                  const { data: lookbackOrders } = await supabase
+                    .from("meli_orders_cache")
+                    .select("order_id, total_amount")
+                    .eq("seller_id", sellerId)
+                    .eq("order_status", "paid")
+                    .gte("created_at_meli", lookback30Start)
+                    .lt("created_at_meli", anchorDateStr);
+
+                  const lbCount = lookbackOrders?.length || 0;
+                  const lbRevenue = (lookbackOrders || []).reduce(
+                    (s: number, o: any) => s + Number(o.total_amount || 0), 0
+                  );
+                  const lbTicket = lbCount > 0 ? lbRevenue / lbCount : 0;
+
+                  const { data: newBaseline } = await supabase
+                    .from("retrospective_snapshots")
+                    .insert({
+                      tenant_id: tenant.id,
+                      company_id: company.id,
+                      snapshot_type: "onboarding_initial",
+                      snapshot_date: anchorDateStr,
+                      period_start: lookback30Start,
+                      period_end: anchorDateStr,
+                      orders_count: lbCount,
+                      revenue_total: lbRevenue,
+                      average_ticket: lbTicket,
+                    })
+                    .select("*")
+                    .single();
+
+                  baseline = newBaseline;
+                  console.log(`[retro-engine] Created baseline for company=${company.id}: ${lbCount} orders, R$${lbRevenue.toFixed(2)}`);
+                } catch (blErr: any) {
+                  console.error(`[retro-engine] Baseline creation error: ${blErr.message}`);
+                }
+              }
 
               // Build summary
               const summaryJson = await buildSummaryJson(
