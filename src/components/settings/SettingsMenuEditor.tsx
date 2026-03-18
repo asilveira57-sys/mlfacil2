@@ -253,6 +253,11 @@ export function SettingsMenuEditor() {
         </SheetHeader>
 
         <div className="flex-1 overflow-y-auto mt-4 space-y-2">
+          {loadingItems ? (
+            <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">Carregando itens...</div>
+          ) : items.length === 0 ? (
+            <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">Nenhum item encontrado</div>
+          ) : (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={items.map(i => i.id)} strategy={verticalListSortingStrategy}>
               {items.map(item => (
