@@ -18,7 +18,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { supabase } from "@/integrations/supabase/client";
-import { useConfigMenu, ConfigMenuItem } from "@/hooks/useConfigMenu";
+// ConfigMenuItem type not needed - editor fetches directly
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -137,34 +137,51 @@ function SortableItem({
 }
 
 export function SettingsMenuEditor() {
-  const { menuGroups } = useConfigMenu();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<EditableItem[]>([]);
   const [hasChanges, setHasChanges] = useState(false);
+  const [loadingItems, setLoadingItems] = useState(false);
 
-  // Initialize items when sheet opens
-  const handleOpen = useCallback((isOpen: boolean) => {
+  // Fetch items directly from DB when sheet opens (includes inactive)
+  const handleOpen = useCallback(async (isOpen: boolean) => {
     setOpen(isOpen);
     if (isOpen) {
-      const flat: EditableItem[] = [];
-      menuGroups.forEach(g => {
-        g.items.forEach(item => {
-          flat.push({
-            id: item.id,
-            slug: item.slug,
-            name: item.name,
-            active: item.active,
-            display_order: item.display_order,
-            group_name: g.name,
-          });
+      setLoadingItems(true);
+      try {
+        const [groupsRes, itemsRes] = await Promise.all([
+          supabase.from('config_menu_groups').select('*').order('display_order', { ascending: true }),
+          supabase.from('config_menu_items').select('*').order('display_order', { ascending: true }),
+        ]);
+
+        const groups = groupsRes.data || [];
+        const allItems = itemsRes.data || [];
+
+        const flat: EditableItem[] = [];
+        groups.forEach(g => {
+          allItems
+            .filter(i => i.group_id === g.id && !i.parent_id)
+            .forEach(item => {
+              flat.push({
+                id: item.id,
+                slug: item.slug,
+                name: item.name,
+                active: item.active,
+                display_order: item.display_order,
+                group_name: g.name,
+              });
+            });
         });
-      });
-      setItems(flat);
+        setItems(flat);
+      } catch (err) {
+        console.error('[SettingsMenuEditor] Failed to load items:', err);
+      } finally {
+        setLoadingItems(false);
+      }
       setHasChanges(false);
     }
-  }, [menuGroups]);
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -236,6 +253,11 @@ export function SettingsMenuEditor() {
         </SheetHeader>
 
         <div className="flex-1 overflow-y-auto mt-4 space-y-2">
+          {loadingItems ? (
+            <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">Carregando itens...</div>
+          ) : items.length === 0 ? (
+            <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">Nenhum item encontrado</div>
+          ) : (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={items.map(i => i.id)} strategy={verticalListSortingStrategy}>
               {items.map(item => (
@@ -248,6 +270,7 @@ export function SettingsMenuEditor() {
               ))}
             </SortableContext>
           </DndContext>
+          )}
         </div>
 
         <div className="pt-4 border-t border-border mt-auto">
