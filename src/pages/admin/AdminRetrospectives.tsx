@@ -15,24 +15,21 @@ import {
 import {
   History, RefreshCw, Trash2, Loader2, Search, FileText,
   Presentation, ExternalLink, Eye, Play, BarChart3, Zap,
-  AlertCircle, CheckCircle2, Clock, Filter,
+  AlertCircle, CheckCircle2, Clock, Filter, Download, Building2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  useRetrospectives,
   useRetrospectiveRules,
-  useRetrospectiveTargets,
-  useRetrospectiveSnapshots,
   useTriggerRetrospectiveEngine,
   useDeleteRetrospectiveNew,
   useGenerateRetrospectiveReports,
   type Retrospective,
-  type RetrospectiveRule,
   type RetrospectiveTarget,
   type RetrospectiveSnapshot,
 } from '@/hooks/useRetrospectiveEngine';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { generateRetrospectivePdfFromEngine } from '@/components/retrospective/RetrospectiveEnginePdfExporter';
 
 // ─── Helpers ───
 
@@ -61,19 +58,49 @@ const TYPE_LABELS: Record<string, string> = {
   semester: 'Semestral',
 };
 
-// ─── Admin hook: list ALL retrospectives (cross-tenant) ───
+// ─── Extended type with company_name ───
+
+interface RetrospectiveWithCompany extends Retrospective {
+  company_name?: string | null;
+}
+
+// ─── Admin hook: list ALL retrospectives with company name ───
 
 function useAllRetrospectives() {
   return useQuery({
-    queryKey: ['admin-retrospectives'],
+    queryKey: ['admin-retrospectives-with-companies'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      // Fetch retrospectives
+      const { data: retros, error } = await supabase
         .from('retrospectives')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(500);
       if (error) throw error;
-      return (data ?? []) as Retrospective[];
+
+      // Get unique company_ids
+      const companyIds = [...new Set(
+        (retros ?? []).map(r => r.company_id).filter(Boolean)
+      )] as string[];
+
+      // Fetch company names
+      let companyMap: Record<string, string> = {};
+      if (companyIds.length > 0) {
+        const { data: companies } = await supabase
+          .from('companies')
+          .select('id, display_name')
+          .in('id', companyIds);
+        
+        for (const c of companies || []) {
+          if (c.display_name) companyMap[c.id] = c.display_name;
+        }
+      }
+
+      // Merge
+      return (retros ?? []).map(r => ({
+        ...r,
+        company_name: r.company_id ? companyMap[r.company_id] || null : null,
+      })) as RetrospectiveWithCompany[];
     },
   });
 }
@@ -123,7 +150,7 @@ export function AdminRetrospectives() {
   const [filterType, setFilterType] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [activeTab, setActiveTab] = useState<'retrospectives' | 'rules' | 'targets' | 'snapshots'>('retrospectives');
-  const [selectedRetro, setSelectedRetro] = useState<Retrospective | null>(null);
+  const [selectedRetro, setSelectedRetro] = useState<RetrospectiveWithCompany | null>(null);
 
   // Stats
   const stats = useMemo(() => {
@@ -135,7 +162,7 @@ export function AdminRetrospectives() {
     return { total, generated, sent, errors, pendingTargets };
   }, [retrospectives, targets]);
 
-  // Filtered retrospectives
+  // Filtered retrospectives — includes company_name in search
   const filtered = useMemo(() => {
     return retrospectives.filter(r => {
       if (filterType !== 'all' && r.retrospective_type !== filterType) return false;
@@ -144,6 +171,7 @@ export function AdminRetrospectives() {
         const q = search.toLowerCase();
         return (
           r.title?.toLowerCase().includes(q) ||
+          r.company_name?.toLowerCase().includes(q) ||
           r.tenant_id?.toLowerCase().includes(q) ||
           r.company_id?.toLowerCase().includes(q) ||
           r.retrospective_type?.toLowerCase().includes(q)
@@ -178,6 +206,15 @@ export function AdminRetrospectives() {
       toast.success('Relatórios regenerados com sucesso');
     } catch (err: any) {
       toast.error(err.message || 'Erro ao regenerar');
+    }
+  };
+
+  const handleDownloadPdf = (r: RetrospectiveWithCompany) => {
+    try {
+      generateRetrospectivePdfFromEngine(r, r.company_name || undefined);
+      toast.success('PDF gerado com sucesso');
+    } catch (err: any) {
+      toast.error('Erro ao gerar PDF');
     }
   };
 
@@ -256,7 +293,7 @@ export function AdminRetrospectives() {
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Buscar por título, tenant, empresa..."
+                placeholder="Buscar por título, cliente, empresa..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-9"
@@ -308,6 +345,7 @@ export function AdminRetrospectives() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead>Cliente</TableHead>
                       <TableHead>Título</TableHead>
                       <TableHead>Tipo</TableHead>
                       <TableHead>Período</TableHead>
@@ -322,7 +360,15 @@ export function AdminRetrospectives() {
                       const st = STATUS_MAP[r.status] || { label: r.status, variant: 'outline' as const };
                       return (
                         <TableRow key={r.id}>
-                          <TableCell className="font-medium max-w-[200px] truncate">
+                          <TableCell>
+                            <div className="flex items-center gap-1.5">
+                              <Building2 className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                              <span className="font-medium text-sm max-w-[140px] truncate">
+                                {r.company_name || '—'}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-medium max-w-[180px] truncate">
                             {r.title}
                           </TableCell>
                           <TableCell>
@@ -365,6 +411,10 @@ export function AdminRetrospectives() {
                               <Button variant="ghost" size="icon" className="h-7 w-7"
                                 onClick={() => setSelectedRetro(r)} title="Visualizar">
                                 <Eye className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-7 w-7"
+                                onClick={() => handleDownloadPdf(r)} title="Download PDF">
+                                <Download className="h-3.5 w-3.5" />
                               </Button>
                               <Button variant="ghost" size="icon" className="h-7 w-7"
                                 onClick={() => handleRegenerateReports(r.id)}
@@ -555,6 +605,7 @@ export function AdminRetrospectives() {
           retro={selectedRetro}
           open={!!selectedRetro}
           onOpenChange={(open) => !open && setSelectedRetro(null)}
+          onDownloadPdf={() => handleDownloadPdf(selectedRetro)}
         />
       )}
     </div>
@@ -579,9 +630,15 @@ function StatCard({ label, value, icon: Icon, color }: { label: string; value: n
 
 // ─── Detail Dialog ───
 
-function RetroDetailDialog({ retro, open, onOpenChange }: { retro: Retrospective; open: boolean; onOpenChange: (open: boolean) => void }) {
+function RetroDetailDialog({ retro, open, onOpenChange, onDownloadPdf }: {
+  retro: RetrospectiveWithCompany;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onDownloadPdf: () => void;
+}) {
   const summary = retro.summary_json as any;
   const current = summary?.current || {};
+  const baseline = summary?.baseline;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -589,6 +646,7 @@ function RetroDetailDialog({ retro, open, onOpenChange }: { retro: Retrospective
         <DialogHeader>
           <DialogTitle className="text-lg">{retro.title}</DialogTitle>
           <DialogDescription>
+            {retro.company_name && <span className="font-medium text-foreground">{retro.company_name} • </span>}
             {retro.period_start} — {retro.period_end} • {TYPE_LABELS[retro.retrospective_type] || retro.retrospective_type}
           </DialogDescription>
         </DialogHeader>
@@ -607,15 +665,42 @@ function RetroDetailDialog({ retro, open, onOpenChange }: { retro: Retrospective
                 <p className="text-muted-foreground">Gerado em</p>
                 <p>{retro.generated_at ? format(new Date(retro.generated_at), 'dd/MM/yyyy HH:mm') : '—'}</p>
               </div>
+              {retro.company_name && (
+                <div>
+                  <p className="text-muted-foreground">Cliente</p>
+                  <p className="font-medium flex items-center gap-1.5">
+                    <Building2 className="h-3.5 w-3.5" /> {retro.company_name}
+                  </p>
+                </div>
+              )}
               <div>
-                <p className="text-muted-foreground">Tenant ID</p>
-                <p className="font-mono text-xs">{retro.tenant_id}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Company ID</p>
-                <p className="font-mono text-xs">{retro.company_id || '—'}</p>
+                <p className="text-muted-foreground">Data de Entrada</p>
+                <p>{format(new Date(retro.created_at), 'dd/MM/yyyy HH:mm')}</p>
               </div>
             </div>
+
+            {/* Baseline */}
+            {baseline && (
+              <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+                <h4 className="font-medium mb-2 text-amber-800 dark:text-amber-200 flex items-center gap-1.5">
+                  📌 Cenário de Entrada (30d anteriores)
+                </h4>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Faturamento</p>
+                    <p className="font-bold">R$ {fmt(baseline.revenue)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Pedidos</p>
+                    <p className="font-bold">{baseline.orders ?? 0}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Ticket Médio</p>
+                    <p className="font-bold">R$ {fmt(baseline.ticket)}</p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* KPIs */}
             {current && Object.keys(current).length > 0 && (
@@ -651,34 +736,28 @@ function RetroDetailDialog({ retro, open, onOpenChange }: { retro: Retrospective
             )}
 
             {/* Report Links */}
-            {(retro.html_url || retro.presentation_url || retro.pdf_url) && (
-              <div>
-                <h4 className="font-medium mb-2">Relatórios Gerados</h4>
-                <div className="flex gap-2 flex-wrap">
-                  {retro.html_url && (
-                    <Button variant="outline" size="sm" className="gap-1.5" asChild>
-                      <a href={retro.html_url} target="_blank" rel="noopener noreferrer">
-                        <FileText className="h-3.5 w-3.5" /> HTML <ExternalLink className="h-3 w-3" />
-                      </a>
-                    </Button>
-                  )}
-                  {retro.presentation_url && (
-                    <Button variant="outline" size="sm" className="gap-1.5" asChild>
-                      <a href={retro.presentation_url} target="_blank" rel="noopener noreferrer">
-                        <Presentation className="h-3.5 w-3.5" /> Slides <ExternalLink className="h-3 w-3" />
-                      </a>
-                    </Button>
-                  )}
-                  {retro.pdf_url && (
-                    <Button variant="outline" size="sm" className="gap-1.5" asChild>
-                      <a href={retro.pdf_url} target="_blank" rel="noopener noreferrer">
-                        <FileText className="h-3.5 w-3.5" /> PDF <ExternalLink className="h-3 w-3" />
-                      </a>
-                    </Button>
-                  )}
-                </div>
+            <div>
+              <h4 className="font-medium mb-2">Relatórios</h4>
+              <div className="flex gap-2 flex-wrap">
+                {retro.html_url && (
+                  <Button variant="outline" size="sm" className="gap-1.5" asChild>
+                    <a href={retro.html_url} target="_blank" rel="noopener noreferrer">
+                      <FileText className="h-3.5 w-3.5" /> HTML <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </Button>
+                )}
+                {retro.presentation_url && (
+                  <Button variant="outline" size="sm" className="gap-1.5" asChild>
+                    <a href={retro.presentation_url} target="_blank" rel="noopener noreferrer">
+                      <Presentation className="h-3.5 w-3.5" /> Slides <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" className="gap-1.5" onClick={onDownloadPdf}>
+                  <Download className="h-3.5 w-3.5" /> PDF
+                </Button>
               </div>
-            )}
+            </div>
 
             {/* Raw JSON */}
             <details className="text-xs">
