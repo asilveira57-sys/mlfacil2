@@ -89,6 +89,10 @@ export function useConfigMenu() {
     gcTime: 60 * 60 * 1000, // 60 minutes
   });
 
+  if (error) {
+    console.error('[useConfigMenu] Query failed:', (error as Error).message);
+  }
+
   return {
     menuGroups: data || [],
     isLoading,
