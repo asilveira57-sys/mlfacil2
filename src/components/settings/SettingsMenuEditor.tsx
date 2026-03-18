@@ -270,6 +270,7 @@ export function SettingsMenuEditor() {
               ))}
             </SortableContext>
           </DndContext>
+          )}
         </div>
 
         <div className="pt-4 border-t border-border mt-auto">
