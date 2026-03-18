@@ -43,6 +43,25 @@ const COMPONENT_MAP: Record<string, React.ComponentType> = {
   "mensagem-do-dia": SettingsDailyMessage,
 };
 
+// Static fallback tabs when DB returns empty
+const FALLBACK_ITEMS: { slug: string; name: string; icon: string }[] = [
+  { slug: "perfil", name: "Perfil", icon: "User" },
+  { slug: "seguranca", name: "Segurança", icon: "Shield" },
+  { slug: "notificacoes", name: "Notificações", icon: "Bell" },
+  { slug: "idioma", name: "Idioma", icon: "Globe" },
+  { slug: "colaboradores", name: "Colaboradores", icon: "Users" },
+  { slug: "perfis-acesso", name: "Perfis de Acesso", icon: "Key" },
+  { slug: "personalizacao", name: "Personalização", icon: "Palette" },
+  { slug: "aparencia", name: "Aparência", icon: "Paintbrush" },
+  { slug: "privacidade-lgpd", name: "Privacidade / LGPD", icon: "Lock" },
+  { slug: "utilidades", name: "Utilidades", icon: "Wrench" },
+  { slug: "plano", name: "Plano", icon: "CreditCard" },
+  { slug: "faturamento", name: "Faturamento", icon: "Receipt" },
+  { slug: "empresas-contas", name: "Empresas / Contas", icon: "Building2" },
+  { slug: "abrir-chamado", name: "Suporte", icon: "HelpCircle" },
+  { slug: "mensagem-do-dia", name: "Mensagem do Dia", icon: "MessageSquare" },
+];
+
 function getIcon(iconName: string): LucideIcon {
   const icon = (LucideIcons as Record<string, unknown>)[iconName];
   return (icon as LucideIcon) || Settings;
