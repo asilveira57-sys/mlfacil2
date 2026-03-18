@@ -18,7 +18,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { supabase } from "@/integrations/supabase/client";
-import { useConfigMenu, ConfigMenuItem } from "@/hooks/useConfigMenu";
+// ConfigMenuItem type not needed - editor fetches directly
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
