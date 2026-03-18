@@ -137,34 +137,51 @@ function SortableItem({
 }
 
 export function SettingsMenuEditor() {
-  const { menuGroups } = useConfigMenu();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<EditableItem[]>([]);
   const [hasChanges, setHasChanges] = useState(false);
+  const [loadingItems, setLoadingItems] = useState(false);
 
-  // Initialize items when sheet opens
-  const handleOpen = useCallback((isOpen: boolean) => {
+  // Fetch items directly from DB when sheet opens (includes inactive)
+  const handleOpen = useCallback(async (isOpen: boolean) => {
     setOpen(isOpen);
     if (isOpen) {
-      const flat: EditableItem[] = [];
-      menuGroups.forEach(g => {
-        g.items.forEach(item => {
-          flat.push({
-            id: item.id,
-            slug: item.slug,
-            name: item.name,
-            active: item.active,
-            display_order: item.display_order,
-            group_name: g.name,
-          });
+      setLoadingItems(true);
+      try {
+        const [groupsRes, itemsRes] = await Promise.all([
+          supabase.from('config_menu_groups').select('*').order('display_order', { ascending: true }),
+          supabase.from('config_menu_items').select('*').order('display_order', { ascending: true }),
+        ]);
+
+        const groups = groupsRes.data || [];
+        const allItems = itemsRes.data || [];
+
+        const flat: EditableItem[] = [];
+        groups.forEach(g => {
+          allItems
+            .filter(i => i.group_id === g.id && !i.parent_id)
+            .forEach(item => {
+              flat.push({
+                id: item.id,
+                slug: item.slug,
+                name: item.name,
+                active: item.active,
+                display_order: item.display_order,
+                group_name: g.name,
+              });
+            });
         });
-      });
-      setItems(flat);
+        setItems(flat);
+      } catch (err) {
+        console.error('[SettingsMenuEditor] Failed to load items:', err);
+      } finally {
+        setLoadingItems(false);
+      }
       setHasChanges(false);
     }
-  }, [menuGroups]);
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
