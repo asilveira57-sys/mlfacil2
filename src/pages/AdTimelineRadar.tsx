@@ -73,7 +73,7 @@ const bucketLabels: Record<StatusBucket | 'ALL' | 'HAS_SALES', string> = {
   '30D': '30 dias',
   '60D': '60 dias',
   '90D': '90 dias',
-  '120D': '120 dias',
+  '120D': '+120 dias',
   NO_SALES: 'Nunca vendeu',
   HAS_SALES: 'Já vendeu',
 };
