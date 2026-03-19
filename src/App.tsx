@@ -15,7 +15,7 @@ import { AppShellLayout } from "@/components/layout/AppShellLayout";
 import { queryPersister, PERSIST_MAX_AGE, PERSIST_BUSTER_KEY, shouldPersistQuery } from "@/lib/queryPersister";
 import { usePostLoginPrefetch } from "@/hooks/usePostLoginPrefetch";
 
-import { WelcomeOnboardingGate } from "@/components/welcome";
+
 import { TrialExpiredPaywall, BillingDataGate, ModuleAccessGuard } from "@/components/access";
 import { ShippingEligibilityGuard } from "@/components/access/ShippingEligibilityGuard";
 import { ScrollToTop } from "@/components/ScrollToTop";
@@ -175,7 +175,7 @@ const App = () => {
               <AccountChangeInvalidator />
               <SeoHead />
               
-              <WelcomeOnboardingGate />
+              
               <TrialExpiredPaywall />
               <BillingDataGate />
               <ModuleAccessGuard>

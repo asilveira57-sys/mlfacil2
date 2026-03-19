@@ -10,7 +10,7 @@ import { PlanLimitBanner } from "@/components/access/PlanLimitBanner";
 import { useTenantLimits } from "@/hooks/useTenantLimits";
 import { DashboardModulesGrid } from "@/components/dashboard/DashboardModulesGrid";
 import { WidgetHubGrid } from "@/components/dashboard/widget-hub";
-import { WelcomeScreen } from "@/components/onboarding/WelcomeScreen";
+
 import { MLConnectionCard } from "@/components/dashboard/MLConnectionCard";
 import { useMLConnectionState } from "@/hooks/useMLConnectionState";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
@@ -29,8 +29,6 @@ const Dashboard = () => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchParams] = useSearchParams();
-  const isFirstAccess = searchParams.get('welcome') === '1';
-  const [showWelcome, setShowWelcome] = useState(isFirstAccess);
 
   const { activeAccount, loading: accountLoading, initialized } = useActiveAccount();
   const connectionInfo = useMLConnectionState();
@@ -74,12 +72,7 @@ const Dashboard = () => {
       subtitle={t('dashboard:subtitle')}
     >
       <div className="p-4 lg:p-6 space-y-6">
-        {showWelcome ? (
-          <WelcomeScreen
-            userName={user?.user_metadata?.full_name || user?.email?.split('@')[0]}
-            onContinue={() => setShowWelcome(false)}
-          />
-        ) : isConnected ? (
+        {isConnected ? (
           <>
             {/* Connected status bar */}
             <MLConnectionCard connectionInfo={connectionInfo} />
