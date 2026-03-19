@@ -329,6 +329,7 @@ async function processOrdersInBackground(
                 permalink: result.body.permalink || null,
                 catalog_product_id: result.body.catalog_product_id || null,
                 thumbnail: result.body.thumbnail || null,
+                variations: result.body.variations || [],
               });
             }
           }
