@@ -68,7 +68,6 @@ export default function Custos() {
   // Refresh when switching tabs
   useEffect(() => {
     if (activeTab === 'resumo' && sellerId) refreshSummary();
-    if (activeTab === 'pedidos') invalidateCostCache('orders');
   }, [activeTab, sellerId, refreshSummary]);
 
   const handleCalculate = async () => {
