@@ -47,12 +47,37 @@ Deno.serve(async (req) => {
     }
 
     const token = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
-    if (userError || !user) {
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    
+    let user: { id: string };
+    
+    // Accept internal calls with service role key
+    if (token === serviceRoleKey) {
+      const body = await req.json().catch(() => ({}));
+      const bodyUserId = body.user_id as string;
+      // For internal calls, user_id is optional (cron jobs don't have one)
+      user = { id: bodyUserId || 'system' };
+      
+      const { seller_id, action, scope } = body;
+      if (!seller_id) {
+        return new Response(JSON.stringify({ error: "seller_id is required" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (action === "status") return await handleGetStatus(supabase, user.id, seller_id, corsHeaders);
+      if (action === "sync") return await handleSync(supabase, user.id, seller_id, scope || "recent", corsHeaders);
+      if (action === "reset") return await handleReset(supabase, user.id, seller_id, corsHeaders);
+      return await handleGetStatus(supabase, user.id, seller_id, corsHeaders);
+    }
+    
+    // External call: validate JWT
+    const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
+    if (userError || !authUser) {
       return new Response(JSON.stringify({ error: "Invalid token" }), {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    user = { id: authUser.id };
 
     // ML API Access Gate
     const gate = await assertMlApiAccess(supabase, user.id);
