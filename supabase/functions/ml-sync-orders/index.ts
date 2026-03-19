@@ -372,6 +372,20 @@ async function processOrdersInBackground(
             // Get cached item details
             const itemDetails = itemDetailsCache.get(itemId);
 
+            // Extract variation attributes from item details
+            let variationAttrs: { name: string; value: string }[] | null = null;
+            if (variationId && itemDetails?.variations) {
+              const variation = itemDetails.variations.find(
+                (v) => v.id?.toString() === variationId
+              );
+              if (variation?.attribute_combinations?.length) {
+                variationAttrs = variation.attribute_combinations
+                  .filter((a) => a.name && a.value_name)
+                  .map((a) => ({ name: a.name, value: a.value_name! }));
+                if (variationAttrs.length === 0) variationAttrs = null;
+              }
+            }
+
             allOrderItems.push({
               user_id: userId,
               seller_id: sellerId,
@@ -390,6 +404,7 @@ async function processOrdersInBackground(
               permalink: itemDetails?.permalink || null,
               catalog_product_id: itemDetails?.catalog_product_id || null,
               thumbnail: itemDetails?.thumbnail || null,
+              variation_attributes: variationAttrs,
             });
 
             itemCount += quantity;
