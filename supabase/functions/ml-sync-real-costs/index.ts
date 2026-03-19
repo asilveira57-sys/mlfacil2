@@ -727,7 +727,8 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
     }
 
     // Strategy 1b: If no fee (new ML format), try /orders/{id}/billing_info
-    if (feeML === 0 && isNewMlBillingFormat(order.created_at_meli)) {
+    // Always try billing_info when no commission found
+    if (feeML === 0) {
       try {
         const biResp = await fetch(`https://api.mercadolibre.com/orders/${order.order_id}/billing_info`, { headers: { Authorization: `Bearer ${currentToken}` } });
         if (biResp.ok) {
