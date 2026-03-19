@@ -63,6 +63,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { CompanyLogoSection } from "./CompanyLogoSection";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 
 interface MarketplaceAccount {
@@ -87,6 +88,7 @@ interface Company {
   billing_type: "PF" | "PJ";
   is_active: boolean;
   created_at: string;
+  logo_url: string | null;
 }
 
 interface ErpConfig {
@@ -834,6 +836,15 @@ const SettingsCompanies = () => {
                 </AccordionTrigger>
                 <AccordionContent className="pb-4">
                   <div className="space-y-3 pl-2 border-l-2 border-muted ml-5">
+                    {/* Logo Section */}
+                    <div className="pl-4">
+                      <CompanyLogoSection
+                        companyId={company.id}
+                        logoUrl={company.logo_url}
+                        onLogoChange={fetchData}
+                      />
+                    </div>
+
                     {/* ML Accounts under this company */}
                     {hasAccount ? (
                       <div className="space-y-2 pl-4">

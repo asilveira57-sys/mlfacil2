@@ -87,7 +87,56 @@ export function useCompanyLogoUpload() {
     }
   }, []);
 
-  return { uploadLogo, uploading, error };
+  const removeLogo = useCallback(async (companyId: string): Promise<boolean> => {
+    setUploading(true);
+    setError(null);
+    try {
+      const { error: updateError } = await supabase
+        .from('companies')
+        .update({
+          logo_url: null,
+          logo_original_url: null,
+        } as any)
+        .eq('id', companyId);
+
+      if (updateError) throw updateError;
+      return true;
+    } catch (err: any) {
+      console.error('[LogoUpload] Remove error:', err);
+      setError(err.message || 'Erro ao remover logomarca.');
+      return false;
+    } finally {
+      setUploading(false);
+    }
+  }, []);
+
+  const applyLogoToAll = useCallback(async (
+    userId: string,
+    logoUrl: string,
+  ): Promise<boolean> => {
+    setUploading(true);
+    setError(null);
+    try {
+      const { error: updateError } = await supabase
+        .from('companies')
+        .update({
+          logo_url: logoUrl,
+          logo_original_url: logoUrl,
+        } as any)
+        .eq('user_id', userId);
+
+      if (updateError) throw updateError;
+      return true;
+    } catch (err: any) {
+      console.error('[LogoUpload] ApplyAll error:', err);
+      setError(err.message || 'Erro ao aplicar logo.');
+      return false;
+    } finally {
+      setUploading(false);
+    }
+  }, []);
+
+  return { uploadLogo, removeLogo, applyLogoToAll, uploading, error };
 }
 
 function getImageDimensions(file: File): Promise<{ width: number; height: number }> {
