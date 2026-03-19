@@ -115,6 +115,33 @@ export function BulkActionsBar({
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+
+            {/* Separation Report */}
+            {onSeparationReport && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="secondary" size="sm" disabled={isGenerating}>
+                    <ClipboardList className="h-4 w-4 mr-2" />
+                    Separação
+                    <ChevronDown className="h-4 w-4 ml-1" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="bg-popover">
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">
+                    Relatório de Separação
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => onSeparationReport('per_order')}>
+                    <span className="font-medium">Por pedido</span>
+                    <span className="ml-2 text-xs text-muted-foreground">lista por venda</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onSeparationReport('accumulated')}>
+                    <span className="font-medium">Acumulado</span>
+                    <span className="ml-2 text-xs text-muted-foreground">soma quantidades</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
             
             <Button
               variant="ghost"
