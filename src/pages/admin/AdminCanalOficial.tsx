@@ -78,6 +78,7 @@ function AnnouncementForm({
     priority: initial?.priority ?? 0,
     is_active: initial?.is_active ?? true,
     target_seller_id: (initial as any)?.target_seller_id ?? '',
+    expires_at: (initial as any)?.expires_at ?? '',
   });
 
   const set = (k: keyof FormData, v: string | number | boolean) =>
