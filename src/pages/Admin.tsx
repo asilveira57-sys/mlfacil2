@@ -7,6 +7,7 @@ import {
   LayoutDashboard, Rocket, Users, Shield, CreditCard, Receipt, FileText, 
   Search, Plug, Settings, Tags, Link2, FileStack, Globe, Menu, Star,
   ClipboardList, History, Palette, Radio, CalendarDays, Sparkles, Eye, Activity, HelpCircle, Mail, Headphones,
+  UserCheck,
 } from 'lucide-react';
 import { AdminDashboard } from './admin/AdminDashboard';
 import { AdminOnboarding } from './admin/AdminOnboarding';
@@ -37,6 +38,7 @@ import AdminContatos from './admin/AdminContatos';
 import AdminCentralDeAjuda from './admin/AdminCentralDeAjuda';
 import { AdminEmails } from './admin/AdminEmails';
 import AdminSuporte from './admin/AdminSuporte';
+import { AdminClientes } from './admin/AdminClientes';
 
 const adminTabs = [
   { id: '', label: 'Dashboard', icon: LayoutDashboard },
@@ -44,6 +46,7 @@ const adminTabs = [
   { id: 'canal-oficial', label: 'Canal Oficial', icon: Radio },
   { id: 'calendario-social', label: 'Calendário Social', icon: CalendarDays },
   { id: 'dica-consultor', label: 'Dica Consultor', icon: Sparkles },
+  { id: 'clientes', label: 'Clientes', icon: UserCheck },
   { id: 'usuarios', label: 'Usuários', icon: Users },
   { id: 'perfis', label: 'Perfis', icon: Shield },
   { id: 'colaboradores', label: 'Colaboradores', icon: Users },
@@ -123,6 +126,7 @@ export default function Admin() {
           <Route path="onboarding" element={<AdminOnboarding />} />
           <Route path="canal-oficial" element={<AdminCanalOficial />} />
           <Route path="usuarios" element={<AdminUsers />} />
+          <Route path="clientes" element={<AdminClientes />} />
           <Route path="perfis" element={<AdminAccessProfiles />} />
           <Route path="colaboradores" element={<AdminCollaboratorsPlaceholder />} />
           <Route path="planos/*" element={<PlanosRedirect />} />

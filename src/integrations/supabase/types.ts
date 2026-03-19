@@ -19137,6 +19137,32 @@ export type Database = {
         }
         Returns: Json
       }
+      admin_get_clients_overview: {
+        Args: never
+        Returns: {
+          company_city: string
+          company_document: string
+          company_id: string
+          company_name: string
+          company_state: string
+          cpf: string
+          email: string
+          full_name: string
+          ml_account_connected: boolean
+          ml_accounts: Json
+          onboarding_status: string
+          payment_status: string
+          photo_url: string
+          profile_created_at: string
+          roles: string[]
+          selected_plan_id: string
+          trial_end_at: string
+          trial_start_at: string
+          trial_status: string
+          user_id: string
+          whatsapp: string
+        }[]
+      }
       admin_reset_trial: {
         Args: {
           p_reason?: string
