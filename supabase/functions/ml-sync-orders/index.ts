@@ -66,11 +66,24 @@ interface MLOrderItem {
   currency_id?: string;
 }
 
+interface MLVariationAttribute {
+  id: string;
+  name: string;
+  value_id: string | null;
+  value_name: string | null;
+}
+
+interface MLVariation {
+  id: number;
+  attribute_combinations?: MLVariationAttribute[];
+}
+
 interface MLItemDetails {
   id: string;
   permalink?: string;
   catalog_product_id?: string;
   thumbnail?: string;
+  variations?: MLVariation[];
 }
 
 interface MLOrder {
