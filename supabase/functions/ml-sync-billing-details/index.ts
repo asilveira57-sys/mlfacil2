@@ -363,13 +363,14 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
         hasMorePeriods = false;
       } else {
         tempOffset += PERIODS_PER_PAGE;
-        if ((scope === "recent" || scope === "30d") && tempOffset >= PERIODS_PER_PAGE) {
+        if ((scope === "recent" || scope === "30d") && tempOffset >= PERIODS_PER_PAGE * 2) {
+          // For recent: sync current + previous period (2 pages of periods)
           hasMorePeriods = false;
         }
       }
       
-      // Wait 12s between period fetches to stay under 5 req/min limit
-      await delay(12000);
+      // Wait 2s between period fetches (reduced from 12s — use backoff only on 429)
+      await delay(2000);
     }
 
     // For scope "30d", filter periods to only those within last 30 days
