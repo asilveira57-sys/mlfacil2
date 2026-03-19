@@ -310,8 +310,9 @@ export default function AdTimelineRadar() {
       if (stockFilter === 'out_of_stock' && (s.available_quantity === undefined || s.available_quantity === null || s.available_quantity > 0)) return false;
       if (stockFilter === 'in_stock' && (s.available_quantity === undefined || s.available_quantity === null || s.available_quantity === 0)) return false;
 
-      // HAS_SALES bucket filter (client-side)
+      // Status bucket filter (client-side)
       if (statusFilter === 'HAS_SALES' && s.status_bucket === 'NO_SALES') return false;
+      if (statusFilter !== 'ALL' && statusFilter !== 'HAS_SALES' && s.status_bucket !== statusFilter) return false;
       
       return true;
     }) || [];
