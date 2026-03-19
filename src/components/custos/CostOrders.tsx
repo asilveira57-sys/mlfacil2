@@ -96,7 +96,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const [resyncingOrder, setResyncingOrder] = useState<string | null>(null);
   const [reimportingOrder, setReimportingOrder] = useState<string | null>(null);
 
-  // Batch selection state
+  // Batch selection state (left side)
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
   const [selectAllPages, setSelectAllPages] = useState(false);
   const [loadingAllIds, setLoadingAllIds] = useState(false);
@@ -105,6 +105,14 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isPollingActiveRef = useRef(false);
+
+  // Safe 1-by-1 resync state (right side)
+  const [safeSelectedOrders, setSafeSelectedOrders] = useState<Set<string>>(new Set());
+  const [safeSelectAllPages, setSafeSelectAllPages] = useState(false);
+  const [safeLoadingAllIds, setSafeLoadingAllIds] = useState(false);
+  const [safeProcessing, setSafeProcessing] = useState(false);
+  const [safeProgress, setSafeProgress] = useState({ current: 0, total: 0, currentOrderId: '', errors: [] as string[] });
+  const safeCancelRef = useRef(false);
 
   const stopJobPolling = useCallback(() => {
     isPollingActiveRef.current = false;
