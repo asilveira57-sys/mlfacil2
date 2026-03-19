@@ -163,6 +163,16 @@ function AnnouncementForm({
         <p className="text-[11px] text-muted-foreground">Se preenchido, só esse seller verá o comunicado.</p>
       </div>
 
+      <div className="space-y-1.5">
+        <Label>Expira em (opcional)</Label>
+        <Input
+          type="datetime-local"
+          value={form.expires_at ? form.expires_at.slice(0, 16) : ''}
+          onChange={(e) => set('expires_at', e.target.value ? new Date(e.target.value).toISOString() : '')}
+        />
+        <p className="text-[11px] text-muted-foreground">Após essa data, o comunicado não será mais exibido.</p>
+      </div>
+
       <div className="flex items-center gap-2">
         <Switch
           id="is_active"
