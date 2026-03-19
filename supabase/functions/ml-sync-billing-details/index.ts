@@ -528,8 +528,8 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
         offset += results.length;
         hasMore = results.length >= DETAILS_PAGE_SIZE;
 
-        // Wait 12s between details fetches to stay under 5 req/min limit
-        await delay(12000);
+        // Wait 2s between details fetches (reduced from 12s — use backoff only on 429)
+        await delay(2000);
       }
 
       periodsProcessed = i + 1;
