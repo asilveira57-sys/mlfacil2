@@ -86,7 +86,7 @@ export function SettingsLayout() {
 
   // Flatten all items from all groups for tab navigation
   const groups = Array.isArray(menuGroups) ? menuGroups : [];
-  const dbItems = groups.flatMap(g => g.items.flatMap(item => [item, ...item.children]));
+  const dbItems = groups.flatMap(g => g.items.flatMap(item => [item, ...item.children])).filter(i => i.active !== false);
 
   // Use DB items if available, otherwise use static fallback
   const useFallback = !isLoading && dbItems.length === 0;
