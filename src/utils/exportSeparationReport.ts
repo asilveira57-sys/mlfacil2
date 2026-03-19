@@ -57,27 +57,37 @@ function drawHeader(
   sellerName: string | undefined,
   mode: SeparationMode,
   pageWidth: number,
+  totalOrders: number,
 ) {
-  const headerH = 22;
+  const headerH = 28;
   doc.setFillColor(30, 30, 30);
   doc.rect(0, 0, pageWidth, headerH, 'F');
 
   if (logoData) {
     try {
-      doc.addImage(logoData, 'PNG', 8, 2, 0, 17);
+      doc.addImage(logoData, 'PNG', 8, 3, 0, 20);
     } catch { /* skip */ }
   }
 
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(13);
-  doc.text('Relatório de Separação', pageWidth / 2, 9, { align: 'center' });
-  doc.setFontSize(8);
-  const subtitle = [
-    sellerName || '',
-    mode === 'accumulated' ? 'Acumulado por produto' : 'Por pedido',
-    format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR }),
-  ].filter(Boolean).join(' • ');
-  doc.text(subtitle, pageWidth / 2, 16, { align: 'center' });
+  doc.setFont('helvetica', 'bold');
+  doc.text('Relatório de Separação', pageWidth / 2, 10, { align: 'center' });
+
+  // Account name - prominent
+  if (sellerName) {
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(sellerName, pageWidth / 2, 16, { align: 'center' });
+  }
+
+  // Mode + date/time + count
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'normal');
+  const modeLabel = mode === 'accumulated' ? 'Acumulado por produto' : 'Por pedido';
+  const dateStr = format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR });
+  const subtitle = `${modeLabel} • ${totalOrders} pedidos • ${dateStr}`;
+  doc.text(subtitle, pageWidth / 2, 22, { align: 'center' });
 
   return headerH;
 }
