@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button';
-import { FileText, Printer, X, Loader2, ChevronDown } from 'lucide-react';
+import { FileText, Printer, X, Loader2, ChevronDown, ClipboardList } from 'lucide-react';
 import { LabelGenerationProgress, GenerationProgress } from './LabelGenerationProgress';
 import { LabelLayout } from '@/hooks/useShippingLabels';
 import {
@@ -15,6 +15,7 @@ interface BulkActionsBarProps {
   selectedCount: number;
   onClear: () => void;
   onGenerateLabels: (format: 'pdf' | 'zpl', layout: LabelLayout) => void;
+  onSeparationReport?: (mode: 'per_order' | 'accumulated') => void;
   isGenerating: boolean;
   generationProgress: GenerationProgress;
 }
