@@ -29,8 +29,6 @@ const Dashboard = () => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchParams] = useSearchParams();
-  const isFirstAccess = searchParams.get('welcome') === '1';
-  const [showWelcome, setShowWelcome] = useState(isFirstAccess);
 
   const { activeAccount, loading: accountLoading, initialized } = useActiveAccount();
   const connectionInfo = useMLConnectionState();
