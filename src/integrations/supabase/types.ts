@@ -8180,12 +8180,14 @@ export type Database = {
           content: string
           created_at: string
           created_by: string | null
+          expires_at: string | null
           id: string
           image_url: string | null
           is_active: boolean
           link_url: string | null
           plan_target: string
           priority: number
+          published_at: string
           target_seller_id: string | null
           title: string
           updated_at: string
@@ -8194,12 +8196,14 @@ export type Database = {
           content: string
           created_at?: string
           created_by?: string | null
+          expires_at?: string | null
           id?: string
           image_url?: string | null
           is_active?: boolean
           link_url?: string | null
           plan_target?: string
           priority?: number
+          published_at?: string
           target_seller_id?: string | null
           title: string
           updated_at?: string
@@ -8208,12 +8212,14 @@ export type Database = {
           content?: string
           created_at?: string
           created_by?: string | null
+          expires_at?: string | null
           id?: string
           image_url?: string | null
           is_active?: boolean
           link_url?: string | null
           plan_target?: string
           priority?: number
+          published_at?: string
           target_seller_id?: string | null
           title?: string
           updated_at?: string
