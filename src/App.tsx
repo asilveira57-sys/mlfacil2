@@ -175,7 +175,7 @@ const App = () => {
               <AccountChangeInvalidator />
               <SeoHead />
               
-              <WelcomeOnboardingGate />
+              
               <TrialExpiredPaywall />
               <BillingDataGate />
               <ModuleAccessGuard>
