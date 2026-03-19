@@ -1005,7 +1005,8 @@ async function handleResyncBatchOrders(supabase: any, userId: string, sellerId: 
     }
 
     // Strategy 1b: billing_info (new ML format)
-    if (feeML === 0 && isNewMlBillingFormat(order.created_at_meli)) {
+    // Always try billing_info when no commission found
+    if (feeML === 0) {
       try {
         const biResp = await fetch(`https://api.mercadolibre.com/orders/${orderId}/billing_info`, { headers: { Authorization: `Bearer ${currentToken}` } });
         if (biResp.ok) {
