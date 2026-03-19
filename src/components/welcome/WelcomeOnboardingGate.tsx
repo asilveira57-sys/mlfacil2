@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { useCurrentUserId } from '@/hooks/useCurrentUserId';
 import { useActiveOnboardingFlow } from '@/hooks/useWelcomeOnboarding';
+import { useUserAccess } from '@/contexts/UserAccessContext';
 import { WelcomeOnboardingModal } from './WelcomeOnboardingModal';
 import { supabase } from '@/integrations/supabase/client';
 
