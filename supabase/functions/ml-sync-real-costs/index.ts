@@ -464,10 +464,37 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
     } catch {}
   }
 
-  // 4. Get existing breakdown for cost_items_total and cost_packaging
-  const { data: existing } = await supabase.from("order_cost_breakdown_cache").select("cost_items_total, cost_packaging").eq("seller_id", sellerId).eq("order_id", orderId).maybeSingle();
+  // 4. Get existing breakdown for cost_items_total, cost_packaging and anti-overwrite
+  const { data: existing } = await supabase.from("order_cost_breakdown_cache").select("cost_items_total, cost_packaging, fee_ml, shipping_cost_seller, commission_cost, installments_cost, adjustments").eq("seller_id", sellerId).eq("order_id", orderId).maybeSingle();
   const costItemsTotal = existing?.cost_items_total || 0;
   const costPackaging = existing?.cost_packaging || 0;
+
+  // Anti-overwrite: preserve existing non-zero values when new values are zero
+  if (feeML === 0 && existing) {
+    const existingFee = Number(existing.fee_ml) || Number(existing.commission_cost) || 0;
+    if (existingFee > 0) {
+      feeML = existingFee;
+      feeMLSource = "billing";
+      sourceRefs.push("anti_overwrite:preserved_commission");
+      console.log(`[RealCosts] resync_single: preserved existing commission ${existingFee} for order ${orderId}`);
+    }
+  }
+  if (shippingCostSeller === 0 && existing) {
+    const existingShipping = Number(existing.shipping_cost_seller) || 0;
+    if (existingShipping > 0) {
+      shippingCostSeller = existingShipping;
+      sourceRefs.push("anti_overwrite:preserved_shipping");
+      console.log(`[RealCosts] resync_single: preserved existing shipping ${existingShipping} for order ${orderId}`);
+    }
+  }
+  if (installmentsCost === 0 && existing) {
+    const existingInst = Number(existing.installments_cost) || 0;
+    if (existingInst > 0) installmentsCost = existingInst;
+  }
+  if (adjustments === 0 && existing) {
+    const existingAdj = Number(existing.adjustments) || 0;
+    if (existingAdj > 0) adjustments = existingAdj;
+  }
 
   const revenueTotal = order.total_amount || 0;
   const commissionCost = feeML;
