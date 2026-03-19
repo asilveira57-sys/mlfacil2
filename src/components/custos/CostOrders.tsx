@@ -366,6 +366,180 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     }
   };
 
+  // Safe selection toggles (right side)
+  const safeAllOnPageSelected = orders.length > 0 && orders.every(o => safeSelectedOrders.has(o.order_id));
+
+  const toggleSafeSelectAll = () => {
+    setSafeSelectAllPages(false);
+    setSafeSelectedOrders(prev => {
+      const next = new Set(prev);
+      if (safeAllOnPageSelected) {
+        orders.forEach(o => next.delete(o.order_id));
+      } else {
+        orders.forEach(o => next.add(o.order_id));
+      }
+      return next;
+    });
+  };
+
+  const toggleSafeSelectOrder = (orderId: string) => {
+    setSafeSelectAllPages(false);
+    setSafeSelectedOrders(prev => {
+      const next = new Set(prev);
+      if (next.has(orderId)) next.delete(orderId);
+      else next.add(orderId);
+      return next;
+    });
+  };
+
+  const handleSafeSelectAllPages = async () => {
+    setSafeLoadingAllIds(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const params = new URLSearchParams({
+        seller_id: sellerId,
+        period_days: periodDays,
+        search,
+        ids_only: 'true',
+      });
+
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+      if (profitFilter !== 'all') params.set('profit_type', profitFilter);
+      if (ecommerceFilter !== 'all') params.set('ecommerce_cost', ecommerceFilter);
+      if (shippingFilter !== 'all') params.set('shipping_filter', shippingFilter);
+      if (orderStatusFilter !== 'paid') params.set('order_status', orderStatusFilter);
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders?${params}`,
+        { headers: { Authorization: `Bearer ${session.access_token}` } }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        const allIds = data.order_ids || [];
+        setSafeSelectedOrders(new Set(allIds));
+        setSafeSelectAllPages(true);
+        toast.success(`${allIds.length} pedidos selecionados para modo seguro`);
+      }
+    } catch (error) {
+      console.error('Error fetching all IDs:', error);
+      toast.error('Erro ao selecionar todos os pedidos');
+    } finally {
+      setSafeLoadingAllIds(false);
+    }
+  };
+
+  // Safe 1-by-1 sequential resync handler
+  const handleSafeResync = async () => {
+    const ids = Array.from(safeSelectedOrders);
+    if (ids.length === 0) return;
+
+    safeCancelRef.current = false;
+    setSafeProcessing(true);
+    setSafeProgress({ current: 0, total: ids.length, currentOrderId: '', errors: [] });
+
+    const errors: string[] = [];
+    let sinceLastCalc = 0;
+    const pendingCalcIds: string[] = [];
+
+    for (let i = 0; i < ids.length; i++) {
+      if (safeCancelRef.current) {
+        toast.info(`Cancelado após ${i} de ${ids.length} pedidos`);
+        break;
+      }
+
+      const orderId = ids[i];
+      setSafeProgress(p => ({ ...p, current: i, currentOrderId: orderId }));
+
+      // Resync single with retry up to 2x
+      let success = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const { error } = await supabase.functions.invoke('ml-sync-real-costs', {
+            body: { seller_id: sellerId, action: 'resync_single', order_id: orderId }
+          });
+          if (error) throw error;
+          success = true;
+          break;
+        } catch (err) {
+          if (attempt < 2) {
+            await new Promise(r => setTimeout(r, 2000));
+          }
+        }
+      }
+
+      if (!success) {
+        errors.push(orderId);
+      }
+
+      pendingCalcIds.push(orderId);
+      sinceLastCalc++;
+
+      // Recalculate every 10 orders
+      if (sinceLastCalc >= 10) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            for (const calcId of pendingCalcIds) {
+              await fetch(
+                `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders/calculate`,
+                {
+                  method: 'POST',
+                  headers: {
+                    Authorization: `Bearer ${session.access_token}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({ seller_id: sellerId, order_id: calcId }),
+                }
+              );
+            }
+          }
+        } catch {}
+        pendingCalcIds.length = 0;
+        sinceLastCalc = 0;
+      }
+
+      setSafeProgress(p => ({ ...p, current: i + 1, errors: [...errors] }));
+    }
+
+    // Recalculate remaining
+    if (pendingCalcIds.length > 0) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          for (const calcId of pendingCalcIds) {
+            await fetch(
+              `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders/calculate`,
+              {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${session.access_token}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ seller_id: sellerId, order_id: calcId }),
+              }
+            );
+          }
+        }
+      } catch {}
+    }
+
+    setSafeProcessing(false);
+    setSafeSelectedOrders(new Set());
+    setSafeSelectAllPages(false);
+    invalidateCostCache('orders');
+    loadOrders();
+
+    const processed = safeCancelRef.current ? safeProgress.current : ids.length;
+    if (errors.length > 0) {
+      toast.warning(`${processed - errors.length} atualizados, ${errors.length} com erro`);
+    } else {
+      toast.success(`${processed} pedidos atualizados com sucesso!`);
+    }
+  };
+
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
       if (sortDirection === 'desc') {
