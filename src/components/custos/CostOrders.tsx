@@ -1313,6 +1313,12 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                              <Checkbox
+                                checked={safeSelectedOrders.has(order.order_id)}
+                                onCheckedChange={() => toggleSafeSelectOrder(order.order_id)}
+                                disabled={safeProcessing}
+                                className="mr-0.5"
+                              />
                               <Button
                                 size="sm"
                                 variant="ghost"
