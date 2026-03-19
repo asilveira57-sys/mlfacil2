@@ -271,8 +271,13 @@ function drawItemRow(
   const titleLines = lines.slice(0, 2) as string[];
   doc.text(titleLines, textX, y + 4);
 
-  // Variation ID below title if present
-  if (item.variation_id) {
+  // Variation attributes below title (human-readable names)
+  if (item.variation_attributes && item.variation_attributes.length > 0) {
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 100, 100);
+    const attrText = item.variation_attributes.map(a => `${a.name}: ${a.value}`).join(' | ');
+    doc.text(attrText, textX, y + 4 + titleLines.length * 3.2);
+  } else if (item.variation_id) {
     doc.setFontSize(6.5);
     doc.setTextColor(120, 120, 120);
     doc.text(`Var: ${item.variation_id}`, textX, y + 4 + titleLines.length * 3.2);
