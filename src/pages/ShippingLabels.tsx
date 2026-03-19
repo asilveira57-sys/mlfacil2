@@ -128,6 +128,29 @@ export default function ShippingLabels() {
     generateLabels({ format, layout: 'meli_100x150', shipmentId });
   };
 
+  const handleSeparationReport = useCallback(async (mode: SeparationMode) => {
+    const selected = orders.filter(o => selectedIds.has(o.id));
+    if (selected.length === 0) return;
+    let logoUrl: string | null = null;
+    try {
+      if (companyId) {
+        const { data } = await supabase
+          .from('companies')
+          .select('logo_url')
+          .eq('id', companyId)
+          .maybeSingle();
+        logoUrl = (data as any)?.logo_url || null;
+      }
+    } catch { /* use default */ }
+    await exportSeparationReport({
+      orders: selected,
+      orderItems,
+      mode,
+      logoUrl,
+      sellerName: activeAccount?.nickname || undefined,
+    });
+  }, [orders, selectedIds, orderItems, companyId, activeAccount]);
+
   const headerContent = (
     <Button
       variant="ghost"
