@@ -10,7 +10,7 @@ import { PlanLimitBanner } from "@/components/access/PlanLimitBanner";
 import { useTenantLimits } from "@/hooks/useTenantLimits";
 import { DashboardModulesGrid } from "@/components/dashboard/DashboardModulesGrid";
 import { WidgetHubGrid } from "@/components/dashboard/widget-hub";
-import { WelcomeScreen } from "@/components/onboarding/WelcomeScreen";
+
 import { MLConnectionCard } from "@/components/dashboard/MLConnectionCard";
 import { useMLConnectionState } from "@/hooks/useMLConnectionState";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
