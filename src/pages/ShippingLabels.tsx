@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
@@ -17,6 +17,7 @@ import { supabase } from '@/integrations/supabase/client';
 
 import { useToast } from '@/hooks/use-toast';
 import { PageContainer } from '@/components/layout/PageContainer';
+import { exportSeparationReport, SeparationMode } from '@/utils/exportSeparationReport';
 
 export default function ShippingLabels() {
   const { t } = useTranslation('shipping');
@@ -127,6 +128,29 @@ export default function ShippingLabels() {
     generateLabels({ format, layout: 'meli_100x150', shipmentId });
   };
 
+  const handleSeparationReport = useCallback(async (mode: SeparationMode) => {
+    const selected = orders.filter(o => selectedIds.has(o.id));
+    if (selected.length === 0) return;
+    let logoUrl: string | null = null;
+    try {
+      if (companyId) {
+        const { data } = await supabase
+          .from('companies')
+          .select('logo_url')
+          .eq('id', companyId)
+          .maybeSingle();
+        logoUrl = (data as any)?.logo_url || null;
+      }
+    } catch { /* use default */ }
+    await exportSeparationReport({
+      orders: selected,
+      orderItems,
+      mode,
+      logoUrl,
+      sellerName: activeAccount?.nickname || undefined,
+    });
+  }, [orders, selectedIds, orderItems, companyId, activeAccount]);
+
   const headerContent = (
     <Button
       variant="ghost"
@@ -222,6 +246,7 @@ export default function ShippingLabels() {
         selectedCount={selectedIds.size}
         onClear={clearSelection}
         onGenerateLabels={handleGenerateLabels}
+        onSeparationReport={handleSeparationReport}
         isGenerating={isGenerating}
         generationProgress={generationProgress}
       />
