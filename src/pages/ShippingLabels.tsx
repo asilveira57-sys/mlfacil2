@@ -131,7 +131,9 @@ export default function ShippingLabels() {
   const handleSeparationReport = useCallback(async (mode: SeparationMode) => {
     const selected = orders.filter(o => selectedIds.has(o.id));
     if (selected.length === 0) return;
-    let logoUrl: string | null = null;
+    
+    // Load logo as base64 via storage SDK to bypass CORS
+    let logoBase64: string | null = null;
     try {
       if (companyId) {
         const { data } = await supabase
@@ -139,14 +141,44 @@ export default function ShippingLabels() {
           .select('logo_url')
           .eq('id', companyId)
           .maybeSingle();
-        logoUrl = (data as any)?.logo_url || null;
+        const logoUrl = (data as any)?.logo_url || null;
+        if (logoUrl) {
+          // Extract storage path from full URL
+          const storageMatch = logoUrl.match(/\/storage\/v1\/object\/public\/(.+)/);
+          if (storageMatch) {
+            const [bucket, ...pathParts] = storageMatch[1].split('/');
+            const filePath = pathParts.join('/');
+            const { data: blob } = await supabase.storage.from(bucket).download(filePath);
+            if (blob) {
+              logoBase64 = await new Promise<string | null>((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = () => resolve(null);
+                reader.readAsDataURL(blob);
+              });
+            }
+          } else {
+            // External URL - try direct fetch
+            const resp = await fetch(logoUrl);
+            if (resp.ok) {
+              const blob = await resp.blob();
+              logoBase64 = await new Promise<string | null>((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = () => resolve(null);
+                reader.readAsDataURL(blob);
+              });
+            }
+          }
+        }
       }
     } catch { /* use default */ }
+    
     await exportSeparationReport({
       orders: selected,
       orderItems,
       mode,
-      logoUrl,
+      logoBase64,
       sellerName: activeAccount?.nickname || undefined,
     });
   }, [orders, selectedIds, orderItems, companyId, activeAccount]);

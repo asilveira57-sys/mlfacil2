@@ -132,7 +132,7 @@ export async function exportSeparationReport({
     thumbCache.set(url, await loadThumbnail(url));
   }));
 
-  const headerH = drawHeader(doc, logoData, sellerName, mode, pageWidth);
+  const headerH = drawHeader(doc, logoData, sellerName, mode, pageWidth, orders.length);
   let y = headerH + 6;
 
   const rowH = 14;
