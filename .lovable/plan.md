@@ -1,74 +1,47 @@
 
 
-## Plano: Painel de Gerenciamento de Clientes (Admin)
+## Diagnóstico: Por que sellers travam em 80%
 
-### Problema atual
+### Causa raiz
 
-A tela `AdminUsers` atual é limitada: mostra apenas IDs truncados de `user_access_state`, sem email real, sem empresa vinculada, sem contas ML, e sem opção de excluir. Não serve para gestão de clientes.
+O fluxo `/primeiro-acesso` tem 7 steps. O último é "Ativar ambiente" — que chama `updateOnboarding({ status: 'completed' })`. Porém, quando o seller conecta o ML no step 5, o OAuth redireciona para `/sincronizando` → depois vai para `/dashboard`. O seller **nunca volta** ao `/primeiro-acesso` para completar os steps 6 e 7.
 
----
+Resultado: `onboarding_status` fica `'pending'` no banco, e o flag `onboarding_completed` fica `false`. O Speedometer mostra 80% eternamente.
 
-### Solução: Nova aba "Clientes" no Admin
+Confirmação no banco:
+- `delatripshop@gmail.com` → `onboarding_status: NULL` (nem row existe)
+- `adeconex4@gmail.com` → `onboarding_status: NULL`
+- Sellers com 100% → `onboarding_status: completed`
 
-Criar uma nova página `AdminClientes` com visão completa de cada seller, substituindo/complementando a atual `AdminUsers`.
+### Solução
 
----
+Mover a conclusão do onboarding para o momento certo: **quando o seller volta do OAuth e os dados são sincronizados** (na página `/sincronizando`).
 
-### O que será exibido por cliente
-
-| Dado | Origem |
+| Arquivo | Mudança |
 |---|---|
-| Nome completo, email, whatsapp, CPF | `profiles` |
-| Empresa (nome, CNPJ, cidade, UF) | `companies` (via `user_id`) |
-| Contas ML vinculadas (nickname, status, company_id) | `ml_accounts` (via `user_id`) |
-| Status de acesso (trial/ativo/expirado/bloqueado) | `user_access_state` |
-| Início e fim do trial | `user_access_state.trial_start_at`, `trial_end_at` |
-| Plano selecionado | `user_access_state.selected_plan_id` |
-| Data de cadastro | `profiles.created_at` |
-| Roles | `user_roles` |
+| `src/pages/Sincronizando.tsx` | Após completar todos os sync steps, chamar `updateOnboarding({ status: 'completed' })` antes de redirecionar para o dashboard |
+| `src/components/dashboard/ActivationSpeedometer.tsx` | Nenhuma mudança necessária — já lê o flag corretamente |
 
-### Ações disponíveis por cliente
+### Detalhe da mudança
 
-1. **Ver detalhes** — modal/drawer com todos os dados acima
-2. **Ajustar período de trial** — adicionar/remover dias (já existe RPC `admin_adjust_trial`)
-3. **Resetar trial** — (já existe RPC)
-4. **Bloquear/Desbloquear** — (já existe RPC)
-5. **Excluir seller** — nova funcionalidade via Edge Function `admin-delete-user` que:
-   - Remove `ml_accounts`, `companies`, `user_access_state`, `profiles`, `user_roles`
-   - Deleta o user de `auth.users` (requer service_role)
-   - Registra log de auditoria
+No `Sincronizando.tsx`, após marcar `setAllDone(true)`:
 
-### Mudanças necessárias
+1. Obter a sessão do usuário (já existe no código)
+2. Chamar `supabase.rpc('update_onboarding_state', { p_status: 'completed', ... })`
+3. Isso garante que ao chegar no dashboard, o flag já é `true` e o Speedometer mostra 100%
 
-**1. Nova Edge Function `admin-delete-user`**
-- Recebe `user_id`, valida que o chamador é admin
-- Deleta dados relacionados em cascata
-- Deleta o auth user via `supabase.auth.admin.deleteUser()`
-- Retorna sucesso/erro
+### Para os sellers existentes (DeLaTrip e ACS)
 
-**2. Nova RPC `admin_get_clients_overview`**
-- Função SQL SECURITY DEFINER que retorna join de `profiles` + `user_access_state` + `companies` + `ml_accounts` + `user_roles`
-- Acesso restrito a admins via `has_role(auth.uid(), 'admin')`
-- Retorna dados completos para a listagem
+Na mesma implementação, vou adicionar uma migration SQL que corrige retroativamente: se o user tem `ml_accounts` vinculadas mas `onboarding_status` é NULL ou `pending`, atualizar para `completed`.
 
-**3. Novo componente `src/pages/admin/AdminClientes.tsx`**
-- Tabela com colunas: Nome, Email, Empresa, Contas ML, Status, Trial, Cadastro, Ações
-- Filtros: busca por nome/email, status (trial/ativo/expirado/bloqueado)
-- Modal de detalhes com todas as informações do seller
-- Dialog de confirmação para exclusão (com digitação do email para confirmar)
-- Ações inline: ajustar trial, bloquear, excluir
-
-**4. Hook `src/hooks/useAdminClients.ts`**
-- `useAdminClients()` — query da RPC
-- `useDeleteClient()` — mutation chamando a Edge Function
-- Reutiliza `useAdminTrialManagement` existente
-
-**5. Registrar no Admin.tsx**
-- Nova tab "Clientes" com ícone `UserCheck`
-- Nova rota `/admin/clientes`
-- Posicionar após "Usuários" na lista de tabs
+| Tipo | Ação |
+|---|---|
+| Migration SQL | `UPDATE/INSERT user_access_state` para users com ml_accounts mas sem onboarding completed |
+| `Sincronizando.tsx` | Auto-completar onboarding quando sync finaliza |
 
 ### Resultado
 
-O admin terá uma visão completa de todos os sellers: dados pessoais, empresa, contas ML vinculadas, status de trial/plano, com capacidade de ajustar prazos, bloquear e excluir completamente um seller de teste.
+- Sellers existentes: corrigidos via migration (100% imediato)
+- Novos sellers: ao sair da tela de sync, onboarding já fica `completed` automaticamente
+- Nenhum seller fica mais preso em 80%
 
