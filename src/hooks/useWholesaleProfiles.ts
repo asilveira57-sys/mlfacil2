@@ -94,13 +94,12 @@ export function useWholesaleProfiles() {
 
   const createProfile = useMutation({
     mutationFn: async (formData: ProfileFormData) => {
-      if (!companyId) throw new Error("Sem empresa ativa");
-      const { data: { session } } = await supabase.auth.getSession();
+      const { userId, tenantId } = await getEffectiveTenant();
       
       const { data: profile, error } = await (supabase as any)
         .from("wholesale_profiles")
         .insert({
-          company_id: companyId,
+          company_id: tenantId,
           name: formData.name,
           rounding_mode: formData.rounding_mode,
           margin_min_pct: formData.margin_min_pct,
