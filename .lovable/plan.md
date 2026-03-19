@@ -1,66 +1,64 @@
 
-# Plano Mestre — Jornada Completa do Seller
 
-## Status de cada item
+## Plano: Novo botão "Atualizar 1 a 1 (seguro)" com seleção à direita
 
-### ✅ Já existe no sistema
-| # | Item | Status |
-|---|------|--------|
-| 2 | Cadastro (email/senha + confirmação) | ✅ Implementado |
-| 4 | Painel inicial (dashboard) | ✅ Existe (sem velocímetro) |
-| 5 | Conexão ML via OAuth | ✅ Implementado |
-| 6 | Elegibilidade para teste (>10 vendas) | ✅ Verificação existe na company |
-| 8 | Módulo Etiquetas (vendas abertas) | ✅ Implementado |
-| 9 | Módulo Custos (sem Passo 2) | ✅ Atualizado agora |
-| 13 | Seleção automática de plano | ✅ `useUserSalesVolume` + filtro de planos |
-| 15 | Cadastro fiscal (PF/PJ) | ✅ `company_billing` existe |
-| 12 | Bloqueio pós-trial | ✅ Parcial (trial_expired bloqueia) |
+### Problema
+Os 3 fluxos existentes (batch à esquerda, reimport, e "Atualizar selecionados") continuam zerando dados. O usuário precisa de um modo alternativo que processe pedido a pedido via `resync_single` (que funciona, embora lento) -- controlado por seleção à direita.
 
-### 🔶 Existe parcialmente / precisa ajuste
-| # | Item | O que falta |
-|---|------|-------------|
-| 1 | Landing com 3 botões | Landing existe mas precisa revisar CTAs |
-| 3 | Tela de boas-vindas (primeiro acesso) | Onboarding existe mas pode não ter welcome screen |
-| 7 | Sincronização inicial automática (30d) | Import manual existe, falta auto-trigger pós-OAuth |
-| 10 | Módulo ADS (sync pós-pagamento) | ADS existe, falta gate de trial |
-| 11 | Linha do Tempo (30d trial vs 1yr pago) | Módulo existe, falta limitar por trial |
-| 14 | Dados fiscais obrigatórios pós-pagamento | Tela existe, falta gate de bloqueio |
+### Solução
+Criar um segundo sistema de seleção (checkboxes à direita, na coluna de ações) com um botão "Atualizar 1 a 1" que processa sequencialmente usando `resync_single` + `calculateSingleOrder` no frontend, sem passar pelo sistema de bulk jobs do backend.
 
-### 🔴 Precisa ser desenvolvido
-| # | Item | Descrição |
-|---|------|-----------|
-| 4b | Velocímetro de ativação | Widget de progresso no dashboard |
-| 9b | Tabela `sync_jobs` + lock após sucesso | Controle de execução de syncs |
-| 9c | Lock do botão 1 ano após sucesso | Bloquear re-execução pós-sucesso |
-| 16 | Multi-conta (soma de vendas) | Lógica de soma cross-account |
-| 17-18 | Estados de conta + aviso pré-conexão | Workflow de nova conta |
-| 19 | Verificação de limite + pending_upgrade | Gate automático |
-| 20 | Upgrade com pró-rata | Cálculo proporcional |
-| 21 | Crescimento natural → bloqueio | Detecção automática de excesso |
-| 22 | Proteção contra abuso (logs) | Audit trail de conexões/upgrades |
+### Implementação
 
-## Ordem sugerida de implementação
+**Arquivo: `src/components/custos/CostOrders.tsx`**
 
-### Fase 1 — Gates e bloqueios (impacto imediato)
-1. Velocímetro de ativação no dashboard
-2. Tabela `sync_jobs` + controle de locks
-3. Gate de dados fiscais pós-pagamento
-4. Auto-sync 30d após OAuth
+1. **Novo estado de seleção à direita** (separado do `selectedOrders` existente à esquerda):
+   - `safeSelectedOrders: Set<string>` -- checkboxes na coluna de ações (direita)
+   - `safeProcessing: boolean`, `safeProgress: { current, total, currentOrderId, errors }` -- progresso
+   - Checkbox em cada linha na coluna de ações + checkbox "selecionar todos da página" no header da coluna de ações
 
-### Fase 2 — Trial gates nos módulos ✅
-5. ✅ ADS: banner de trial + sync bloqueado via ML API gate no backend
-6. ✅ Linha do Tempo: banner de trial informando limitação a 30d
-7. ✅ Etiquetas: filtro "Todos" agora capped a 30 dias
+2. **"Selecionar todos" com suporte a todas as páginas**:
+   - Checkbox na página seleciona os 50 da página
+   - Banner "Selecionar todos os X pedidos" aparece quando toda a página está marcada (reutiliza API `ids_only`)
+   - Ambos os modos disponíveis conforme solicitado
 
-### Fase 3 — Multi-conta e upgrade ✅
-8. ✅ Multi-conta: soma de vendas (get_tenant_total_sales + check_tenant_plan_limit)
-9. ✅ Estados de conta (account_state enum: active/pending_upgrade/disabled/error)
-10. ✅ Upgrade com pró-rata (calculate_prorata_upgrade + execute_plan_upgrade)
-11. ✅ Crescimento natural → bloqueio (PlanLimitBanner + useTenantLimits)
-12. ✅ Aviso pré-conexão de nova conta (AccountConnectionWarning)
-13. ✅ Audit log (tenant_limit_log)
+3. **Barra de ação fixa** (aparece quando `safeSelectedOrders.size > 0`):
+   - Botão: "Atualizar 1 a 1 (seguro)" -- processa sequencialmente
+   - Progress bar com contador `3/50` e nome do pedido atual
+   - Botão "Cancelar" para parar a qualquer momento
+   - Botão "Limpar seleção"
 
-### Fase 4 — Landing e onboarding ✅
-14. ✅ Landing com 3 CTAs (Login, Cadastro, Planos) no header e hero
-15. ✅ Welcome screen pós-confirmação de email (WelcomeScreen + aviso ML)
-16. ✅ Proteção contra abuso (system_audit_log + tenant_limit_log)
+4. **Lógica de processamento sequencial** (roda no frontend, `handleSafeResync`):
+   - Para cada pedido:
+     a. Chama `supabase.functions.invoke('ml-sync-real-costs', { body: { action: 'resync_single', seller_id, order_id } })`
+     b. A cada 10 pedidos processados, chama `cost-engine/calculate-order` para consolidar custos
+     c. Atualiza progresso na UI
+   - **Em caso de erro**: retry até 2x com delay de 2s; se continuar falhando, registra erro e continua para o próximo
+   - **Cancelamento**: flag `cancelledRef` que é verificada antes de processar o próximo pedido
+   - **No final**: recalcula os pedidos restantes (que não foram recalculados no lote de 10), invalida cache, recarrega lista
+
+5. **UI da coluna de ações** (direita):
+   - Adicionar checkbox antes dos botões existentes (RotateCw e Trash2)
+   - Header da coluna: checkbox de "selecionar todos da página"
+   - Os botões individuais (RotateCw, Trash2) permanecem inalterados
+
+### Detalhes Técnicos
+
+```text
+Fluxo por pedido:
+  1. resync_single (ML API → financials_cache + shipment_cache)
+  2. A cada 10: calculateSingleOrder (consolida breakdown com impostos/embalagem/custo)
+  3. No final: recalcula pedidos restantes do último bloco incompleto
+
+Retry:
+  Erro → espera 2s → retry 1 → espera 2s → retry 2 → pula e registra
+
+Cancelamento:
+  cancelRef.current = true → loop para no próximo pedido
+```
+
+### Arquivos modificados
+- `src/components/custos/CostOrders.tsx` -- novo sistema de seleção à direita, barra de ação, lógica sequencial
+
+Nenhuma alteração no backend. Usa endpoints existentes (`resync_single` + `calculate-order`).
+
