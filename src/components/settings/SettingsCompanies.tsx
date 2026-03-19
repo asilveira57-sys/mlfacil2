@@ -87,6 +87,7 @@ interface Company {
   billing_type: "PF" | "PJ";
   is_active: boolean;
   created_at: string;
+  logo_url: string | null;
 }
 
 interface ErpConfig {
