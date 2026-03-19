@@ -169,6 +169,9 @@ export default function AdTimelineRadar() {
   const [selectedItem, setSelectedItem] = useState<AdTimelineStats | null>(null);
   const [actionType, setActionType] = useState<ActionType>('END');
   
+  // Selection state for batch actions
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   
