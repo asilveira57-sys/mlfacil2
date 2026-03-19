@@ -246,6 +246,7 @@ export default function ShippingLabels() {
         selectedCount={selectedIds.size}
         onClear={clearSelection}
         onGenerateLabels={handleGenerateLabels}
+        onSeparationReport={handleSeparationReport}
         isGenerating={isGenerating}
         generationProgress={generationProgress}
       />
