@@ -182,6 +182,7 @@ export async function exportSeparationReport({
           accMap.set(key, {
             item_id: item.item_id,
             variation_id: item.variation_id,
+            variation_attributes: item.variation_attributes || null,
             sku: item.sku,
             title: item.title,
             thumbnail: item.thumbnail,
