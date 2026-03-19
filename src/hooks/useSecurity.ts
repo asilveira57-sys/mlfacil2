@@ -244,23 +244,47 @@ export function useSignOutOtherSessions() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async () => {
+    mutationFn: async (sessionId?: string) => {
+      // If sessionId provided, we're disconnecting a specific "session" (security_event record)
+      // signOut({ scope: 'others' }) revokes all other real auth sessions
       const { error } = await supabase.auth.signOut({ scope: 'others' });
       if (error) throw error;
+
+      const currentUserAgent = navigator.userAgent;
+
+      if (sessionId) {
+        // Remove the specific login event
+        await supabase
+          .from('security_events')
+          .delete()
+          .eq('id', sessionId)
+          .eq('user_id', userId!);
+      } else {
+        // Remove all non-current login events
+        await supabase
+          .from('security_events')
+          .delete()
+          .eq('user_id', userId!)
+          .eq('event_type', 'login')
+          .neq('user_agent', currentUserAgent);
+      }
 
       // Log the event
       await supabase.from('security_events').insert([{
         user_id: userId!,
         event_type: 'all_sessions_revoked',
-        user_agent: navigator.userAgent,
+        user_agent: currentUserAgent,
         success: true,
-        metadata: { revoked_at: new Date().toISOString() } as Json,
+        metadata: { revoked_at: new Date().toISOString(), session_id: sessionId || 'all' } as Json,
       }]);
     },
-    onSuccess: () => {
+    onSuccess: (_data, sessionId) => {
       queryClient.invalidateQueries({ queryKey: ['active-sessions', userId] });
       queryClient.invalidateQueries({ queryKey: ['security-events', userId] });
-      toast.success('Todos os outros dispositivos foram desconectados');
+      toast.success(sessionId 
+        ? 'Dispositivo desconectado com sucesso' 
+        : 'Todos os outros dispositivos foram desconectados'
+      );
     },
     onError: () => {
       toast.error('Erro ao desconectar dispositivos');

@@ -329,7 +329,7 @@ function ActiveSessionsSection() {
                         <AlertDialogFooter>
                           <AlertDialogCancel>Cancelar</AlertDialogCancel>
                           <AlertDialogAction
-                            onClick={() => signOutOthers.mutate()}
+                            onClick={() => signOutOthers.mutate(session.id)}
                             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                           >
                             Desconectar
