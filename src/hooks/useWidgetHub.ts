@@ -109,15 +109,21 @@ async function emitWidgetEvent(tenantId: string, userId: string, slug: string, e
 export function useWidgetActions() {
   const qc = useQueryClient();
   const { activeAccount } = useActiveAccount();
-  const tenantId = activeAccount?.companyId ?? '';
+  const companyId = activeAccount?.companyId ?? '';
   const { toast } = useToast();
+
+  const getEffectiveTenant = async () => {
+    const userId = await getCurrentUserId();
+    if (!userId) throw new Error('Sessão expirada. Faça login novamente.');
+    const tenantId = companyId || userId;
+    return { userId, tenantId };
+  };
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['user-dashboard-widgets'] });
 
   const addWidget = useMutation({
     mutationFn: async (catalog: CatalogWidget) => {
-      const userId = await getCurrentUserId();
-      if (!userId || !tenantId) throw new Error('Auth required');
+      const { userId, tenantId } = await getEffectiveTenant();
       const size = SIZE_MAP[catalog.tamanho_padrao] ?? SIZE_MAP.medium;
 
       const { error } = await supabase.from('user_dashboard_widgets').insert({
