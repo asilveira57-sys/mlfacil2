@@ -849,6 +849,260 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
   }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
+/**
+ * BATCH resync: processes multiple orders at once using bulk DB lookups + parallel API calls.
+ * Much faster than calling resync_single N times (1 HTTP call per order).
+ */
+async function handleResyncBatchOrders(supabase: any, userId: string, sellerId: string, orderIds: string[], corsHeaders: any) {
+  const startTime = Date.now();
+  console.log(`[RealCosts] resync_batch_orders: ${orderIds.length} orders for seller ${sellerId}`);
+
+  // 1. Get ML account token
+  const { data: mlAccount } = await supabase.from("ml_accounts").select("id, access_token, refresh_token, token_expires_at").eq("ml_user_id", sellerId).eq("is_active", true).maybeSingle();
+  if (!mlAccount) {
+    return new Response(JSON.stringify({ error: "ML account not found" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+  let currentToken = mlAccount.access_token;
+
+  // Helper: refresh token
+  async function tryRefreshToken(): Promise<boolean> {
+    const ML_APP_ID = Deno.env.get('ML_APP_ID') || '';
+    const ML_SECRET_KEY = Deno.env.get('ML_SECRET_KEY') || '';
+    const { data: acct } = await supabase.from("ml_accounts").select("id, refresh_token").eq("ml_user_id", sellerId).eq("is_active", true).maybeSingle();
+    if (!acct?.refresh_token) return false;
+    const tokenResp = await fetch('https://api.mercadolibre.com/oauth/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'refresh_token', client_id: ML_APP_ID, client_secret: ML_SECRET_KEY, refresh_token: acct.refresh_token }),
+    });
+    if (tokenResp.ok) {
+      const td = await tokenResp.json();
+      currentToken = td.access_token;
+      await supabase.from("ml_accounts").update({ access_token: td.access_token, refresh_token: td.refresh_token, token_expires_at: new Date(Date.now() + td.expires_in * 1000).toISOString(), updated_at: new Date().toISOString() }).eq("id", acct.id);
+      return true;
+    }
+    await tokenResp.text();
+    return false;
+  }
+
+  // 2. Fetch all target orders from cache in one query
+  const { data: orders } = await supabase
+    .from("meli_orders_cache")
+    .select("order_id, shipment_id, total_amount, created_at_meli, order_status")
+    .eq("seller_id", sellerId)
+    .in("order_id", orderIds);
+
+  if (!orders?.length) {
+    return new Response(JSON.stringify({ error: "No orders found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
+  const orderMap = new Map(orders.map((o: any) => [o.order_id, o]));
+
+  // 3. Bulk fetch existing breakdowns for cost_items_total / cost_packaging preservation
+  const { data: existingBreakdowns } = await supabase
+    .from("order_cost_breakdown_cache")
+    .select("order_id, cost_items_total, cost_packaging")
+    .eq("seller_id", sellerId)
+    .in("order_id", orderIds);
+  const existingMap = new Map((existingBreakdowns || []).map((b: any) => [b.order_id, b]));
+
+  // 4. Bulk fetch from billing_details_cache (Strategy 2 - batch)
+  const numericOrderIds = orderIds.filter(id => /^\d+$/.test(id));
+  let billingCacheByOrder = new Map<string, { fee_ml: number; shipping: number; installments: number; adjustments: number }>();
+  if (numericOrderIds.length > 0) {
+    for (let i = 0; i < numericOrderIds.length; i += 100) {
+      const chunk = numericOrderIds.slice(i, i + 100);
+      const { data: billingRows } = await supabase
+        .from("meli_billing_details_cache")
+        .select("order_id, charge_type, gross_amount")
+        .eq("seller_id", sellerId)
+        .in("order_id", chunk);
+      
+      for (const detail of billingRows || []) {
+        const oid = String(detail.order_id);
+        if (!billingCacheByOrder.has(oid)) {
+          billingCacheByOrder.set(oid, { fee_ml: 0, shipping: 0, installments: 0, adjustments: 0 });
+        }
+        processChargeIntoAccumulator(billingCacheByOrder.get(oid)!, detail.charge_type || "", Math.abs(detail.gross_amount || 0));
+      }
+    }
+  }
+
+  // 5. Process each order: Strategy 1 (orders API) → Strategy 1b (billing_info) → Strategy 2 (cache)
+  const results: any[] = [];
+  const financialsToUpsert: any[] = [];
+  const breakdownsToUpsert: any[] = [];
+  let updatedCount = 0;
+
+  for (const orderId of orderIds) {
+    if (Date.now() - startTime >= MAX_RUNTIME_MS) {
+      console.log(`[RealCosts] resync_batch: runtime limit reached at order ${orderId}`);
+      break;
+    }
+
+    const order = orderMap.get(orderId);
+    if (!order) continue;
+
+    // Skip delivered orders >30 days old
+    if (order.order_status === 'delivered' && order.created_at_meli) {
+      const orderAge = Date.now() - new Date(order.created_at_meli).getTime();
+      if (orderAge > 30 * 24 * 60 * 60 * 1000) continue;
+    }
+
+    let feeML = 0, shippingCostSeller = 0, installmentsCost = 0, adjustments = 0;
+    let feeMLSource = "pending";
+    const sourceRefs: string[] = [];
+
+    // Strategy 1: /orders/{orderId} → payments[].marketplace_fee
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const orderResp = await fetch(`https://api.mercadolibre.com/orders/${orderId}`, { headers: { Authorization: `Bearer ${currentToken}` } });
+        if (orderResp.ok) {
+          const orderData = await orderResp.json();
+          if (orderData.payments && Array.isArray(orderData.payments)) {
+            for (const payment of orderData.payments) {
+              if (payment.marketplace_fee != null && payment.marketplace_fee > 0) {
+                feeML += payment.marketplace_fee;
+              }
+            }
+          }
+          if (feeML > 0) { feeMLSource = "billing"; sourceRefs.push("orders:api:marketplace_fee"); }
+          break;
+        }
+        if (orderResp.status === 401) { await orderResp.text(); if (await tryRefreshToken()) continue; break; }
+        if (orderResp.status === 429) { await orderResp.text(); await new Promise(r => setTimeout(r, 1500)); continue; }
+        await orderResp.text(); break;
+      } catch (e) { break; }
+    }
+
+    // Strategy 1b: billing_info (new ML format)
+    if (feeML === 0 && isNewMlBillingFormat(order.created_at_meli)) {
+      try {
+        const biResp = await fetch(`https://api.mercadolibre.com/orders/${orderId}/billing_info`, { headers: { Authorization: `Bearer ${currentToken}` } });
+        if (biResp.ok) {
+          const biData = await biResp.json();
+          const charges = biData.charges || biData.billing_info || [];
+          if (Array.isArray(charges)) {
+            for (const charge of charges) {
+              const label = (charge.name || charge.label || charge.description || charge.type || charge.detail || '').toLowerCase();
+              const amount = Math.abs(charge.amount || charge.value || 0);
+              if (amount === 0) continue;
+              const category = classifyBillingCharge(label);
+              switch (category) {
+                case "commission": feeML += amount; break;
+                case "shipping": shippingCostSeller += amount; break;
+                case "installments": installmentsCost += amount; break;
+                case "adjustments": adjustments += amount; break;
+              }
+            }
+          }
+          if (feeML > 0) { feeMLSource = "billing"; sourceRefs.push("billing_info:v2"); }
+        } else { await biResp.text(); }
+      } catch (e) { /* skip */ }
+    }
+
+    // Strategy 2: billing_details_cache (bulk pre-fetched)
+    if (feeML === 0) {
+      const cached = billingCacheByOrder.get(orderId);
+      if (cached && cached.fee_ml > 0) {
+        feeML = cached.fee_ml;
+        shippingCostSeller = cached.shipping || shippingCostSeller;
+        installmentsCost = cached.installments || installmentsCost;
+        adjustments = cached.adjustments || adjustments;
+        feeMLSource = "billing";
+        sourceRefs.push("billing_details_cache");
+      }
+    }
+
+    // NO Strategy 3 in batch — too slow
+
+    // Shipping fallback from cache
+    if (shippingCostSeller === 0 && order.shipment_id) {
+      const { data: sc } = await supabase.from("meli_shipment_costs_cache").select("sender_cost").eq("shipment_id", order.shipment_id).maybeSingle();
+      if (sc) { shippingCostSeller = sc.sender_cost || 0; sourceRefs.push("shipment:cache"); }
+    }
+
+    if (feeMLSource === "pending" && shippingCostSeller > 0) {
+      sourceRefs.push("batch:shipping_only:commission_pending");
+    }
+    if (feeMLSource === "pending") sourceRefs.push("batch:all_strategies_exhausted");
+
+    // Cache financials
+    if (feeMLSource === "billing") {
+      financialsToUpsert.push({
+        seller_id: sellerId, order_id: orderId, shipment_id: order.shipment_id,
+        cost_sale_fee: feeML, cost_shipping_fee: shippingCostSeller,
+        cost_installment_fee: installmentsCost, cost_cancellations: adjustments,
+        revenue_products: order.total_amount || 0, synced_at: new Date().toISOString(),
+      });
+      updatedCount++;
+    }
+
+    // Build breakdown
+    const existing = existingMap.get(orderId);
+    const costItemsTotal = existing?.cost_items_total || 0;
+    const costPackaging = existing?.cost_packaging || 0;
+    const revenueTotal = order.total_amount || 0;
+    const commissionCost = feeML;
+    const totalMarketplaceCost = feeML + shippingCostSeller + adjustments;
+    const costFees = feeML + adjustments;
+    const costShipping = shippingCostSeller;
+    const costTotal = costItemsTotal + costPackaging + costFees + costShipping;
+    const profitTotal = revenueTotal - costTotal;
+    const marginPercent = revenueTotal > 0 ? Math.round((profitTotal / revenueTotal) * 100) : 0;
+    const missingFields: string[] = [];
+    if (feeMLSource === "pending") missingFields.push("sem_comissao");
+    if (shippingCostSeller === 0 && order.shipment_id) missingFields.push("sem_frete_cobrado");
+
+    breakdownsToUpsert.push({
+      user_id: userId, seller_id: sellerId, order_id: orderId,
+      shipment_id: order.shipment_id, revenue_total: revenueTotal,
+      created_at_meli: order.created_at_meli,
+      fee_ml: feeML, fee_ml_source: feeMLSource,
+      shipping_cost_seller: shippingCostSeller, installments_cost: installmentsCost,
+      adjustments, total_marketplace_cost: totalMarketplaceCost,
+      has_real_financial: feeMLSource === "billing",
+      has_real_cost: false, source_refs: { refs: sourceRefs },
+      real_cost_synced_at: new Date().toISOString(),
+      calculated_at: new Date().toISOString(),
+      last_checked_at: new Date().toISOString(),
+      status: feeMLSource === "billing" ? "calculated" : "pending",
+      commission_cost: commissionCost, missing_fields: missingFields,
+      cost_fees: costFees, cost_shipping: costShipping,
+      cost_total: costTotal, profit_total: profitTotal, margin_percent: marginPercent,
+      last_writer: 'ml-sync-real-costs:resync_batch',
+    });
+
+    results.push({ order_id: orderId, fee_ml: feeML, fee_ml_source: feeMLSource, shipping: shippingCostSeller });
+
+    // Minimal delay between API calls (50ms)
+    await new Promise(r => setTimeout(r, 50));
+  }
+
+  // 6. Bulk upsert financials + breakdowns
+  if (financialsToUpsert.length > 0) {
+    for (let i = 0; i < financialsToUpsert.length; i += 50) {
+      await supabase.from("meli_order_financials_cache").upsert(financialsToUpsert.slice(i, i + 50), { onConflict: "seller_id,order_id", ignoreDuplicates: false });
+    }
+  }
+  if (breakdownsToUpsert.length > 0) {
+    for (let i = 0; i < breakdownsToUpsert.length; i += 50) {
+      await supabase.from("order_cost_breakdown_cache").upsert(breakdownsToUpsert.slice(i, i + 50), { onConflict: "seller_id,order_id" });
+    }
+  }
+
+  const duration = Date.now() - startTime;
+  console.log(`[RealCosts] resync_batch_orders: completed ${results.length}/${orderIds.length} orders in ${duration}ms (${updatedCount} with billing)`);
+
+  return new Response(JSON.stringify({
+    ok: true,
+    processed: results.length,
+    updated: updatedCount,
+    still_pending: results.length - updatedCount,
+    duration_ms: duration,
+    results,
+  }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+
 // PAGINATED backfill for ALL missing orders - with state persistence
 async function handleBackfillMissing(supabase: any, userId: string, sellerId: string, scopeDays: number | null, corsHeaders: any) {
   const startTime = Date.now();
