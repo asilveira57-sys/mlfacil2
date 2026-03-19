@@ -634,6 +634,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   // Reset selectAllPages when filters/page change
   useEffect(() => {
     setSelectAllPages(false);
+    setSafeSelectAllPages(false);
   }, [periodDays, statusFilter, profitFilter, ecommerceFilter, shippingFilter, orderStatusFilter, page, search]);
 
   // Check for active bulk jobs on mount
