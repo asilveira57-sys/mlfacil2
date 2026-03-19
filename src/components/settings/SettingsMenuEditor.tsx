@@ -43,13 +43,14 @@ import {
 import { GripVertical, Pencil, Check, X, Settings2, Save, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+const PROTECTED_SLUGS = ["mensagem-do-dia"];
+
 interface EditableItem {
   id: string;
   slug: string;
   name: string;
   active: boolean;
   display_order: number;
-  group_name?: string;
   markedForDeletion?: boolean;
 }
 
@@ -66,6 +67,7 @@ function SortableItem({
 }) {
   const [editing, setEditing] = useState(false);
   const [tempName, setTempName] = useState(item.name);
+  const isProtected = PROTECTED_SLUGS.includes(item.slug);
 
   const {
     attributes,
@@ -150,18 +152,20 @@ function SortableItem({
         />
       )}
 
-      <button
-        onClick={() => onMarkDelete(item.id)}
-        className={cn(
-          "shrink-0 p-1 rounded-md transition-colors",
-          item.markedForDeletion
-            ? "text-muted-foreground hover:text-foreground"
-            : "text-muted-foreground hover:text-destructive"
-        )}
-        title={item.markedForDeletion ? "Desfazer exclusão" : "Excluir item"}
-      >
-        {item.markedForDeletion ? <X className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
-      </button>
+      {!isProtected && (
+        <button
+          onClick={() => onMarkDelete(item.id)}
+          className={cn(
+            "shrink-0 p-1 rounded-md transition-colors",
+            item.markedForDeletion
+              ? "text-muted-foreground hover:text-foreground"
+              : "text-muted-foreground hover:text-destructive"
+          )}
+          title={item.markedForDeletion ? "Desfazer exclusão" : "Excluir item"}
+        >
+          {item.markedForDeletion ? <X className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
+        </button>
+      )}
     </div>
   );
 }
@@ -180,30 +184,31 @@ export function SettingsMenuEditor() {
     if (isOpen) {
       setLoadingItems(true);
       try {
-        const [groupsRes, itemsRes] = await Promise.all([
-          supabase.from('config_menu_groups').select('*').order('display_order', { ascending: true }),
-          supabase.from('config_menu_items').select('*').order('display_order', { ascending: true }),
-        ]);
+        // Load only top-level items, sorted by display_order (same as UI)
+        const { data, error } = await supabase
+          .from('config_menu_items')
+          .select('*')
+          .is('parent_id', null)
+          .order('display_order', { ascending: true });
 
-        const groups = groupsRes.data || [];
-        const allItems = itemsRes.data || [];
+        if (error) throw error;
 
-        const flat: EditableItem[] = [];
-        groups.forEach(g => {
-          allItems
-            .filter(i => i.group_id === g.id && !i.parent_id)
-            .forEach(item => {
-              flat.push({
-                id: item.id,
-                slug: item.slug,
-                name: item.name,
-                active: item.active,
-                display_order: item.display_order,
-                group_name: g.name,
-                markedForDeletion: false,
-              });
-            });
-        });
+        const flat: EditableItem[] = (data || []).map(item => ({
+          id: item.id,
+          slug: item.slug,
+          name: item.name,
+          active: item.active,
+          display_order: item.display_order,
+          markedForDeletion: false,
+        }));
+
+        // Force mensagem-do-dia to the end
+        const msgIdx = flat.findIndex(i => i.slug === 'mensagem-do-dia');
+        if (msgIdx > -1) {
+          const [msg] = flat.splice(msgIdx, 1);
+          flat.push(msg);
+        }
+
         setItems(flat);
       } catch (err) {
         console.error('[SettingsMenuEditor] Failed to load items:', err);
@@ -226,7 +231,16 @@ export function SettingsMenuEditor() {
     setItems(prev => {
       const oldIndex = prev.findIndex(i => i.id === active.id);
       const newIndex = prev.findIndex(i => i.id === over.id);
-      return arrayMove(prev, oldIndex, newIndex);
+      const reordered = arrayMove(prev, oldIndex, newIndex);
+
+      // Always keep mensagem-do-dia at the end
+      const msgIdx = reordered.findIndex(i => i.slug === 'mensagem-do-dia');
+      if (msgIdx > -1 && msgIdx !== reordered.length - 1) {
+        const [msg] = reordered.splice(msgIdx, 1);
+        reordered.push(msg);
+      }
+
+      return reordered;
     });
     setHasChanges(true);
   };
@@ -242,6 +256,8 @@ export function SettingsMenuEditor() {
   };
 
   const handleMarkDelete = (id: string) => {
+    const item = items.find(i => i.id === id);
+    if (item && PROTECTED_SLUGS.includes(item.slug)) return;
     setItems(prev => prev.map(i => i.id === id ? { ...i, markedForDeletion: !i.markedForDeletion } : i));
     setHasChanges(true);
   };
@@ -269,11 +285,12 @@ export function SettingsMenuEditor() {
         if (delError) throw delError;
       }
 
-      // Update remaining items
+      // Update remaining items with sequential display_order
       for (const [index, item] of itemsToSave.entries()) {
+        const order = item.slug === 'mensagem-do-dia' ? 99 : index + 1;
         const { error } = await supabase
           .from("config_menu_items")
-          .update({ display_order: index + 1, name: item.name, active: item.active })
+          .update({ display_order: order, name: item.name, active: item.active })
           .eq("id", item.id);
         if (error) throw error;
       }

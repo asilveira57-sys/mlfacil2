@@ -18,7 +18,7 @@ import { createSyncStoragePersister } from '@tanstack/query-sync-storage-persist
  * Max age: 12 hours for config, handled by buster version.
  */
 
-const PERSIST_BUSTER = 'v1'; // bump to invalidate all persisted cache
+const PERSIST_BUSTER = 'v2'; // bump to invalidate all persisted cache
 
 export const queryPersister = createSyncStoragePersister({
   storage: window.localStorage,
