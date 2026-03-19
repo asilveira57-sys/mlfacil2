@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { classifyBillingCharge } from '../_shared/ml-billing-classifier.ts';
 
 declare const EdgeRuntime: {
   waitUntil(promise: Promise<unknown>): void;
