@@ -104,7 +104,7 @@ export function useWholesaleProfiles() {
           rounding_mode: formData.rounding_mode,
           margin_min_pct: formData.margin_min_pct,
           allow_without_cost: formData.allow_without_cost,
-          created_by: session?.user?.id || null,
+          created_by: userId,
         })
         .select()
         .single();
