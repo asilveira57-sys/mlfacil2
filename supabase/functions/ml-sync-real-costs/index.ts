@@ -926,16 +926,7 @@ async function handleResyncBatchOrders(supabase: any, userId: string, sellerId: 
 
   const orderMap = new Map(orders.map((o: any) => [o.order_id, o]));
 
-  // 3. Bulk fetch existing breakdowns for cost_items_total / cost_packaging preservation
-  // Fetch existing breakdowns with ALL financial fields for anti-overwrite protection
-  const { data: existingBreakdowns } = await supabase
-    .from("order_cost_breakdown_cache")
-    .select("order_id, cost_items_total, cost_packaging, fee_ml, shipping_cost_seller, commission_cost, installments_cost, adjustments, fee_ml_source")
-    .eq("seller_id", sellerId)
-    .in("order_id", orderIds);
-  const existingMap = new Map((existingBreakdowns || []).map((b: any) => [b.order_id, b]));
-
-  // 4. Bulk fetch from billing_details_cache (Strategy 2 - batch)
+  // 3. Bulk fetch from billing_details_cache (Strategy 2 - batch)
   const numericOrderIds = orderIds.filter(id => /^\d+$/.test(id));
   let billingCacheByOrder = new Map<string, { fee_ml: number; shipping: number; installments: number; adjustments: number }>();
   if (numericOrderIds.length > 0) {
@@ -957,10 +948,9 @@ async function handleResyncBatchOrders(supabase: any, userId: string, sellerId: 
     }
   }
 
-  // 5. Process each order: Strategy 1 (orders API) → Strategy 1b (billing_info) → Strategy 2 (cache)
+  // 4. Process each order: Strategy 1 (orders API) → Strategy 1b (billing_info) → Strategy 2 (cache)
   const results: any[] = [];
   const financialsToUpsert: any[] = [];
-  const breakdownsToUpsert: any[] = [];
   let updatedCount = 0;
 
   for (const orderId of orderIds) {
