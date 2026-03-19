@@ -43,7 +43,7 @@ export function useAdminClients() {
     queryFn: async () => {
       const { data, error } = await supabase.rpc('admin_get_clients_overview');
       if (error) throw error;
-      return (data || []) as AdminClient[];
+      return (data || []) as unknown as AdminClient[];
     },
   });
 }

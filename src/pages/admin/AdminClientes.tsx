@@ -24,7 +24,7 @@ import {
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 
-function statusBadge(trialStatus: string | null, paymentStatus: string | null) {
+function statusBadge(trialStatus: string | null, paymentStatus: string | null): React.ReactNode {
   if (paymentStatus === 'active') return <Badge className="bg-green-600 text-white">Ativo</Badge>;
   if (trialStatus === 'active') return <Badge variant="secondary">Trial</Badge>;
   if (trialStatus === 'expired') return <Badge variant="destructive">Expirado</Badge>;
