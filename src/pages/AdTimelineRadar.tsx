@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { TrialModuleGate } from "@/components/access/TrialModuleGate";
 import { PageContainer } from "@/components/layout/PageContainer";
@@ -27,6 +27,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Clock,
@@ -168,6 +169,9 @@ export default function AdTimelineRadar() {
   const [selectedItem, setSelectedItem] = useState<AdTimelineStats | null>(null);
   const [actionType, setActionType] = useState<ActionType>('END');
   
+  // Selection state for batch actions
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   
@@ -255,7 +259,14 @@ export default function AdTimelineRadar() {
     setCurrentPage(1);
   };
 
-  // Get company logo for PDF export
+  const toggleSelectItem = useCallback((id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
   const getCompanyLogo = async (): Promise<string | null> => {
     try {
       const { data } = await supabase
@@ -346,6 +357,44 @@ export default function AdTimelineRadar() {
     
     return { paginatedStats, totalPages, totalItems, filteredData: filtered };
   }, [stats, searchTerm, mlStatusFilter, stockFilter, statusFilter, sortColumn, sortDirection, currentPage]);
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedIds(prev => {
+      const allPageIds = paginatedStats?.map(s => s.id) || [];
+      const allSelected = allPageIds.length > 0 && allPageIds.every(id => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) {
+        allPageIds.forEach(id => next.delete(id));
+      } else {
+        allPageIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
+  }, [paginatedStats]);
+
+  const handleBatchAction = (type: ActionType) => {
+    if (selectedIds.size === 0) return;
+    const items = (filteredData || []).filter(s => selectedIds.has(s.id));
+    if (items.length === 0) return;
+    
+    const actionLabel = type === 'END' ? 'Encerrar' : 'Clonar';
+    Promise.all(
+      items.map(item =>
+        createTask({
+          title: `[${actionLabel}] ${(item.title || item.item_id).substring(0, 180)}`,
+          description: `Ação em lote via Linha do Tempo\n\nItem: ${item.item_id}`,
+          status: 'todo',
+          priority: 'medium',
+          tags: ['linha-do-tempo'],
+        }).catch(e => console.error('[Batch] Task creation failed:', e))
+      )
+    ).then(() => {
+      toast({ title: `${items.length} tarefas de "${actionLabel}" criadas com sucesso` });
+      setSelectedIds(new Set());
+    });
+  };
+
+  const allPageSelected = (paginatedStats?.length || 0) > 0 && paginatedStats?.every(s => selectedIds.has(s.id));
 
   // Reset page when filter changes
   const handleStatusFilterChange = (value: StatusBucket | 'ALL' | 'HAS_SALES') => {
@@ -525,49 +574,79 @@ export default function AdTimelineRadar() {
           </div>
         </div>
 
+        {/* Batch Action Bar */}
+        {selectedIds.size > 0 && (
+          <div className="flex items-center gap-3 p-3 bg-primary/5 border border-primary/20 rounded-lg">
+            <span className="text-sm font-medium">{selectedIds.size} selecionado(s)</span>
+            <Button size="sm" variant="outline" onClick={() => handleBatchAction('END')}>
+              <XCircle className="h-3.5 w-3.5 mr-1" />
+              Encerrar em lote
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => handleBatchAction('CLONE')}>
+              <Copy className="h-3.5 w-3.5 mr-1" />
+              Clonar em lote
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())} className="ml-auto text-xs">
+              Limpar seleção
+            </Button>
+          </div>
+        )}
+
         {/* Table */}
         <Card>
           <CardContent className="p-0">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[80px]">Imagem</TableHead>
-                  <TableHead>Anúncio</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead className="w-[36px] px-2">
+                    <Checkbox
+                      checked={allPageSelected}
+                      onCheckedChange={toggleSelectAll}
+                      aria-label="Selecionar todos"
+                    />
+                  </TableHead>
+                  <TableHead className="w-[56px] px-1">Img</TableHead>
+                  <TableHead className="min-w-[160px]">Anúncio</TableHead>
+                  <TableHead className="w-[70px] px-1">Status</TableHead>
                   <SortableHeader 
                     column="status" 
-                    label="Status ML" 
+                    label="ML" 
                     currentSort={sortColumn} 
                     currentDirection={sortDirection} 
                     onSort={handleSort}
+                    className="w-[65px] px-1"
                   />
                   <SortableHeader 
                     column="available_quantity" 
-                    label="Estoque" 
+                    label="Est." 
                     currentSort={sortColumn} 
                     currentDirection={sortDirection} 
                     onSort={handleSort}
+                    className="w-[60px] px-1"
                   />
                   <SortableHeader 
                     column="last_sale_at" 
-                    label="Última Venda" 
+                    label="Últ. Venda" 
                     currentSort={sortColumn} 
                     currentDirection={sortDirection} 
                     onSort={handleSort}
+                    className="w-[80px] px-1"
                   />
                   <SortableHeader 
                     column="days_since_last_sale" 
-                    label="Dias s/ Venda" 
+                    label="Dias" 
                     currentSort={sortColumn} 
                     currentDirection={sortDirection} 
                     onSort={handleSort}
+                    className="w-[50px] px-1"
                   />
                   <SortableHeader 
                     column="avg_gap_hours" 
-                    label="Média Gap" 
+                    label="Gap" 
                     currentSort={sortColumn} 
                     currentDirection={sortDirection} 
                     onSort={handleSort}
+                    className="w-[50px] px-1"
                   />
                   <SortableHeader 
                     column="sales_count_30d" 
@@ -575,6 +654,7 @@ export default function AdTimelineRadar() {
                     currentSort={sortColumn} 
                     currentDirection={sortDirection} 
                     onSort={handleSort}
+                    className="w-[40px] px-1"
                   />
                   <SortableHeader 
                     column="sales_count_60d" 
@@ -582,6 +662,7 @@ export default function AdTimelineRadar() {
                     currentSort={sortColumn} 
                     currentDirection={sortDirection} 
                     onSort={handleSort}
+                    className="w-[40px] px-1"
                   />
                   <SortableHeader 
                     column="sales_count_90d" 
@@ -589,6 +670,7 @@ export default function AdTimelineRadar() {
                     currentSort={sortColumn} 
                     currentDirection={sortDirection} 
                     onSort={handleSort}
+                    className="w-[40px] px-1"
                   />
                   <SortableHeader 
                     column="sold_quantity" 
@@ -596,32 +678,34 @@ export default function AdTimelineRadar() {
                     currentSort={sortColumn} 
                     currentDirection={sortDirection} 
                     onSort={handleSort}
+                    className="w-[45px] px-1"
                   />
-                  <TableHead className="w-[50px]"></TableHead>
+                  <TableHead className="w-[40px] px-1"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {statsLoading ? (
                   Array.from({ length: 5 }).map((_, i) => (
                     <TableRow key={i}>
-                      <TableCell><Skeleton className="h-12 w-12 rounded" /></TableCell>
-                      <TableCell><Skeleton className="h-4 w-40" /></TableCell>
-                      <TableCell><Skeleton className="h-6 w-16" /></TableCell>
-                      <TableCell><Skeleton className="h-6 w-16" /></TableCell>
-                      <TableCell><Skeleton className="h-4 w-12 mx-auto" /></TableCell>
-                      <TableCell><Skeleton className="h-4 w-20 mx-auto" /></TableCell>
-                      <TableCell><Skeleton className="h-4 w-12 mx-auto" /></TableCell>
-                      <TableCell><Skeleton className="h-4 w-12 mx-auto" /></TableCell>
-                      <TableCell><Skeleton className="h-4 w-8 mx-auto" /></TableCell>
-                      <TableCell><Skeleton className="h-4 w-8 mx-auto" /></TableCell>
-                      <TableCell><Skeleton className="h-4 w-8 mx-auto" /></TableCell>
-                      <TableCell><Skeleton className="h-4 w-8 mx-auto" /></TableCell>
-                      <TableCell><Skeleton className="h-8 w-8" /></TableCell>
+                      <TableCell className="px-2"><Skeleton className="h-4 w-4" /></TableCell>
+                      <TableCell className="px-1"><Skeleton className="h-10 w-10 rounded" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-36" /></TableCell>
+                      <TableCell className="px-1"><Skeleton className="h-5 w-14" /></TableCell>
+                      <TableCell className="px-1"><Skeleton className="h-5 w-12" /></TableCell>
+                      <TableCell className="px-1"><Skeleton className="h-4 w-10 mx-auto" /></TableCell>
+                      <TableCell className="px-1"><Skeleton className="h-4 w-16 mx-auto" /></TableCell>
+                      <TableCell className="px-1"><Skeleton className="h-4 w-8 mx-auto" /></TableCell>
+                      <TableCell className="px-1"><Skeleton className="h-4 w-8 mx-auto" /></TableCell>
+                      <TableCell className="px-1"><Skeleton className="h-4 w-6 mx-auto" /></TableCell>
+                      <TableCell className="px-1"><Skeleton className="h-4 w-6 mx-auto" /></TableCell>
+                      <TableCell className="px-1"><Skeleton className="h-4 w-6 mx-auto" /></TableCell>
+                      <TableCell className="px-1"><Skeleton className="h-4 w-6 mx-auto" /></TableCell>
+                      <TableCell className="px-1"><Skeleton className="h-6 w-6" /></TableCell>
                     </TableRow>
                   ))
                 ) : paginatedStats?.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={13} className="text-center py-12">
+                    <TableCell colSpan={14} className="text-center py-12">
                       <div className="flex flex-col items-center gap-2 text-muted-foreground">
                         <AlertTriangle className="h-8 w-8" />
                         <p>Nenhum anúncio encontrado</p>
@@ -630,51 +714,57 @@ export default function AdTimelineRadar() {
                   </TableRow>
                 ) : (
                   paginatedStats?.map((item) => (
-                    <TableRow key={item.id} className="cursor-pointer hover:bg-muted/50">
-                      <TableCell>
+                    <TableRow key={item.id} className={`cursor-pointer hover:bg-muted/50 ${selectedIds.has(item.id) ? 'bg-primary/5' : ''}`}>
+                      <TableCell className="px-2" onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={selectedIds.has(item.id)}
+                          onCheckedChange={() => toggleSelectItem(item.id)}
+                        />
+                      </TableCell>
+                      <TableCell className="px-1">
                         {item.thumbnail ? (
-                          <img src={item.thumbnail} alt="" className="h-12 w-12 object-cover rounded" />
+                          <img src={item.thumbnail} alt="" className="h-10 w-10 object-cover rounded" />
                         ) : (
-                          <div className="h-12 w-12 bg-muted rounded flex items-center justify-center">
-                            <Clock className="h-4 w-4 text-muted-foreground" />
+                          <div className="h-10 w-10 bg-muted rounded flex items-center justify-center">
+                            <Clock className="h-3.5 w-3.5 text-muted-foreground" />
                           </div>
                         )}
                       </TableCell>
                       <TableCell>
-                        <div className="font-medium text-sm truncate max-w-[250px] hover:underline"
+                        <div className="font-medium text-sm truncate max-w-[200px] hover:underline"
                           onClick={() => navigate(`/anuncios/linha-do-tempo/${item.item_id}`)}>
                           {item.title || item.item_id}
                         </div>
-                        <div className="text-xs text-muted-foreground truncate max-w-[250px]">
-                          {item.item_id}{item.sku ? ` • SKU: ${item.sku}` : ''}
+                        <div className="text-xs text-muted-foreground truncate max-w-[200px]">
+                          {item.item_id}{item.sku ? ` • ${item.sku}` : ''}
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="px-1">
                         <StatusBucketBadge bucket={item.status_bucket as StatusBucket} />
                       </TableCell>
-                      <TableCell className="text-center">
+                      <TableCell className="text-center px-1">
                         <MlStatusBadge status={item.status} />
                       </TableCell>
-                      <TableCell className="text-center">
+                      <TableCell className="text-center px-1">
                         <StockBadge quantity={item.available_quantity} />
                       </TableCell>
-                      <TableCell className="text-center text-sm">
+                      <TableCell className="text-center text-xs px-1">
                         {item.last_sale_at ? format(new Date(item.last_sale_at), "dd/MM/yy", { locale: ptBR }) : "—"}
                       </TableCell>
-                      <TableCell className="text-center">
-                        <span className={`font-medium ${(item.days_since_last_sale || 0) > 60 ? 'text-destructive' : (item.days_since_last_sale || 0) > 30 ? 'text-warning' : 'text-foreground'}`}>
+                      <TableCell className="text-center px-1">
+                        <span className={`text-sm font-medium ${(item.days_since_last_sale || 0) > 60 ? 'text-destructive' : (item.days_since_last_sale || 0) > 30 ? 'text-warning' : 'text-foreground'}`}>
                           {item.days_since_last_sale ?? "—"}
                         </span>
                       </TableCell>
-                      <TableCell className="text-center text-sm">{formatGap(item.avg_gap_hours)}</TableCell>
-                      <TableCell className="text-center text-sm">{item.sales_count_30d}</TableCell>
-                      <TableCell className="text-center text-sm">{item.sales_count_60d}</TableCell>
-                      <TableCell className="text-center text-sm">{item.sales_count_90d}</TableCell>
-                      <TableCell className="text-center text-sm font-medium">{item.sold_quantity ?? '—'}</TableCell>
-                      <TableCell>
+                      <TableCell className="text-center text-xs px-1">{formatGap(item.avg_gap_hours)}</TableCell>
+                      <TableCell className="text-center text-xs px-1">{item.sales_count_30d}</TableCell>
+                      <TableCell className="text-center text-xs px-1">{item.sales_count_60d}</TableCell>
+                      <TableCell className="text-center text-xs px-1">{item.sales_count_90d}</TableCell>
+                      <TableCell className="text-center text-xs font-medium px-1">{item.sold_quantity ?? '—'}</TableCell>
+                      <TableCell className="px-1">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon"><MoreHorizontal className="h-4 w-4" /></Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7"><MoreHorizontal className="h-3.5 w-3.5" /></Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => navigate(`/anuncios/linha-do-tempo/${item.item_id}`)}>
