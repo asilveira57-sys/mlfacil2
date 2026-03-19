@@ -86,6 +86,15 @@ Deno.serve(async (req) => {
     if (action === "reprocess_pending") {
       return await handleReprocessPending(supabase, user.id, seller_id, scope_days, corsHeaders);
     }
+    if (action === "resync_batch_orders") {
+      const { order_ids } = body;
+      if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0) {
+        return new Response(JSON.stringify({ error: "order_ids[] is required" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      return await handleResyncBatchOrders(supabase, user.id, seller_id, order_ids, corsHeaders);
+    }
     if (action === "backfill_missing") {
       return await handleBackfillMissing(supabase, user.id, seller_id, scope_days, corsHeaders);
     }
