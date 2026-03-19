@@ -1070,38 +1070,10 @@ async function handleResyncBatchOrders(supabase: any, userId: string, sellerId: 
       }
     }
 
-    // Anti-overwrite: preserve existing non-zero values when new values are zero
-    const existingBd = existingMap.get(orderId);
-    if (feeML === 0 && existingBd) {
-      const existingFee = Number(existingBd.fee_ml) || Number(existingBd.commission_cost) || 0;
-      if (existingFee > 0) {
-        feeML = existingFee;
-        feeMLSource = existingBd.fee_ml_source || "billing";
-        sourceRefs.push("anti_overwrite:preserved_commission");
-      }
-    }
-    if (shippingCostSeller === 0 && existingBd) {
-      const existingShipping = Number(existingBd.shipping_cost_seller) || 0;
-      if (existingShipping > 0) {
-        shippingCostSeller = existingShipping;
-        sourceRefs.push("anti_overwrite:preserved_shipping");
-      }
-    }
-    if (installmentsCost === 0 && existingBd) {
-      const existingInst = Number(existingBd.installments_cost) || 0;
-      if (existingInst > 0) installmentsCost = existingInst;
-    }
-    if (adjustments === 0 && existingBd) {
-      const existingAdj = Number(existingBd.adjustments) || 0;
-      if (existingAdj > 0) adjustments = existingAdj;
-    }
+    // Cache shipping in meli_shipment_costs_cache if we got a value from API
+    // (already done inline above for API fallback)
 
-    if (feeMLSource === "pending" && shippingCostSeller > 0) {
-      sourceRefs.push("batch:shipping_only:commission_pending");
-    }
-    if (feeMLSource === "pending") sourceRefs.push("batch:all_strategies_exhausted");
-
-    // Cache financials
+    // Cache financials ONLY when we have real billing data
     if (feeMLSource === "billing") {
       financialsToUpsert.push({
         seller_id: sellerId, order_id: orderId, shipment_id: order.shipment_id,
@@ -1112,40 +1084,19 @@ async function handleResyncBatchOrders(supabase: any, userId: string, sellerId: 
       updatedCount++;
     }
 
-    // Build breakdown
-    const existing = existingMap.get(orderId);
-    const costItemsTotal = existing?.cost_items_total || 0;
-    const costPackaging = existing?.cost_packaging || 0;
-    const revenueTotal = order.total_amount || 0;
-    const commissionCost = feeML;
-    const totalMarketplaceCost = feeML + shippingCostSeller + adjustments;
-    const costFees = feeML + adjustments;
-    const costShipping = shippingCostSeller;
-    const costTotal = costItemsTotal + costPackaging + costFees + costShipping;
-    const profitTotal = revenueTotal - costTotal;
-    const marginPercent = revenueTotal > 0 ? Math.round((profitTotal / revenueTotal) * 100) : 0;
-    const missingFields: string[] = [];
-    if (feeMLSource === "pending") missingFields.push("sem_comissao");
-    if (shippingCostSeller === 0 && order.shipment_id) missingFields.push("sem_frete_cobrado");
+    // Also update financials cache with shipping-only data (even without commission)
+    if (feeMLSource !== "billing" && shippingCostSeller > 0) {
+      financialsToUpsert.push({
+        seller_id: sellerId, order_id: orderId, shipment_id: order.shipment_id,
+        cost_sale_fee: 0, cost_shipping_fee: shippingCostSeller,
+        cost_installment_fee: 0, cost_cancellations: 0,
+        revenue_products: order.total_amount || 0, synced_at: new Date().toISOString(),
+      });
+    }
 
-    breakdownsToUpsert.push({
-      user_id: userId, seller_id: sellerId, order_id: orderId,
-      shipment_id: order.shipment_id, revenue_total: revenueTotal,
-      created_at_meli: order.created_at_meli,
-      fee_ml: feeML, fee_ml_source: feeMLSource,
-      shipping_cost_seller: shippingCostSeller, installments_cost: installmentsCost,
-      adjustments, total_marketplace_cost: totalMarketplaceCost,
-      has_real_financial: feeMLSource === "billing",
-      has_real_cost: false, source_refs: { refs: sourceRefs },
-      real_cost_synced_at: new Date().toISOString(),
-      calculated_at: new Date().toISOString(),
-      last_checked_at: new Date().toISOString(),
-      status: feeMLSource === "billing" ? "calculated" : "pending",
-      commission_cost: commissionCost, missing_fields: missingFields,
-      cost_fees: costFees, cost_shipping: costShipping,
-      cost_total: costTotal, profit_total: profitTotal, margin_percent: marginPercent,
-      last_writer: 'ml-sync-real-costs:resync_batch',
-    });
+    // DO NOT write to order_cost_breakdown_cache here.
+    // calculateSingleOrder is the SOLE writer for breakdowns.
+    // Writing here causes race conditions that overwrite valid shipping/commission values.
 
     results.push({ order_id: orderId, fee_ml: feeML, fee_ml_source: feeMLSource, shipping: shippingCostSeller });
 
@@ -1153,15 +1104,10 @@ async function handleResyncBatchOrders(supabase: any, userId: string, sellerId: 
     await new Promise(r => setTimeout(r, 50));
   }
 
-  // 6. Bulk upsert financials + breakdowns
+  // 6. Bulk upsert financials only (NO breakdown writes)
   if (financialsToUpsert.length > 0) {
     for (let i = 0; i < financialsToUpsert.length; i += 50) {
       await supabase.from("meli_order_financials_cache").upsert(financialsToUpsert.slice(i, i + 50), { onConflict: "seller_id,order_id", ignoreDuplicates: false });
-    }
-  }
-  if (breakdownsToUpsert.length > 0) {
-    for (let i = 0; i < breakdownsToUpsert.length; i += 50) {
-      await supabase.from("order_cost_breakdown_cache").upsert(breakdownsToUpsert.slice(i, i + 50), { onConflict: "seller_id,order_id" });
     }
   }
 
