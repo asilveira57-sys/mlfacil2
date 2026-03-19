@@ -259,6 +259,52 @@ export default function AdTimelineRadar() {
     setCurrentPage(1);
   };
 
+  const toggleSelectItem = useCallback((id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    if (!filteredData) return;
+    setSelectedIds(prev => {
+      const allPageIds = paginatedStats?.map(s => s.id) || [];
+      const allSelected = allPageIds.every(id => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) {
+        allPageIds.forEach(id => next.delete(id));
+      } else {
+        allPageIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
+  }, [paginatedStats, filteredData]);
+
+  const handleBatchAction = (type: ActionType) => {
+    if (selectedIds.size === 0) return;
+    const items = (filteredData || []).filter(s => selectedIds.has(s.id));
+    if (items.length === 0) return;
+    
+    // Create tasks for all selected items
+    const actionLabel = type === 'END' ? 'Encerrar' : 'Clonar';
+    Promise.all(
+      items.map(item =>
+        createTask({
+          title: `[${actionLabel}] ${(item.title || item.item_id).substring(0, 180)}`,
+          description: `Ação em lote via Linha do Tempo\n\nItem: ${item.item_id}`,
+          status: 'todo',
+          priority: 'medium',
+          tags: ['linha-do-tempo'],
+        }).catch(e => console.error('[Batch] Task creation failed:', e))
+      )
+    ).then(() => {
+      toast({ title: `${items.length} tarefas de "${actionLabel}" criadas com sucesso` });
+      setSelectedIds(new Set());
+    });
+  };
+
   // Get company logo for PDF export
   const getCompanyLogo = async (): Promise<string | null> => {
     try {
