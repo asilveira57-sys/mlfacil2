@@ -1142,7 +1142,17 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                         </div>
                       </TableHead>
                       <TableHead className="w-[72px]">Status</TableHead>
-                      <TableHead className="w-[52px]"></TableHead>
+                      <TableHead className="w-[80px]">
+                        <div className="flex items-center gap-1">
+                          <Checkbox
+                            checked={safeAllOnPageSelected}
+                            onCheckedChange={toggleSafeSelectAll}
+                            disabled={safeProcessing}
+                            aria-label="Selecionar todos (modo seguro)"
+                          />
+                          <span className="text-[10px]">Ações</span>
+                        </div>
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
