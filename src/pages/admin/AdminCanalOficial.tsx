@@ -287,6 +287,7 @@ export function AdminCanalOficial() {
         is_active: form.is_active,
         target_seller_id: form.target_seller_id || null,
         expires_at: form.expires_at || null,
+      } as any);
       toast({ title: 'Comunicado salvo com sucesso' });
       setEditingId(null);
     } catch {
