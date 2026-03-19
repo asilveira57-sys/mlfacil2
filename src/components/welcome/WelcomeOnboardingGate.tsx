@@ -42,7 +42,11 @@ export function WelcomeOnboardingGate() {
   const location = useLocation();
   const userId = useCurrentUserId();
   const { activeAccount } = useActiveAccount();
+  const { requiresOnboarding, loading: accessLoading } = useUserAccess();
   const [dismissed, setDismissed] = useState(false);
+
+  // Block Welcome Cards for users who completed /primeiro-acesso onboarding
+  const onboardingCompleted = !accessLoading && !requiresOnboarding;
 
   const accountCompanyId = activeAccount?.companyId ?? null;
   const sellerId = activeAccount?.sellerId ?? null;
