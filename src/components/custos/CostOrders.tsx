@@ -511,7 +511,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
         if (session) {
           for (const calcId of pendingCalcIds) {
             await fetch(
-              `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders/calculate`,
+              `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/calculate-order`,
               {
                 method: 'POST',
                 headers: {
