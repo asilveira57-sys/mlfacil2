@@ -836,6 +836,15 @@ const SettingsCompanies = () => {
                 </AccordionTrigger>
                 <AccordionContent className="pb-4">
                   <div className="space-y-3 pl-2 border-l-2 border-muted ml-5">
+                    {/* Logo Section */}
+                    <div className="pl-4">
+                      <CompanyLogoSection
+                        companyId={company.id}
+                        logoUrl={company.logo_url}
+                        onLogoChange={fetchData}
+                      />
+                    </div>
+
                     {/* ML Accounts under this company */}
                     {hasAccount ? (
                       <div className="space-y-2 pl-4">
