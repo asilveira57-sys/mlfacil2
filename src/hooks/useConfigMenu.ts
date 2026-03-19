@@ -85,8 +85,8 @@ export function useConfigMenu() {
       // Only return groups that have at least one item
       return menuGroups.filter(g => g.items.length > 0);
     },
-    staleTime: 30 * 60 * 1000, // 30 minutes
-    gcTime: 60 * 60 * 1000, // 60 minutes
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 30 * 60 * 1000, // 30 minutes
   });
 
   if (error) {

@@ -18,7 +18,6 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { supabase } from "@/integrations/supabase/client";
-// ConfigMenuItem type not needed - editor fetches directly
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -31,7 +30,17 @@ import {
   SheetDescription,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { GripVertical, Pencil, Check, X, Settings2, Save } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { GripVertical, Pencil, Check, X, Settings2, Save, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface EditableItem {
@@ -41,16 +50,19 @@ interface EditableItem {
   active: boolean;
   display_order: number;
   group_name?: string;
+  markedForDeletion?: boolean;
 }
 
 function SortableItem({
   item,
   onToggle,
   onRename,
+  onMarkDelete,
 }: {
   item: EditableItem;
   onToggle: (id: string) => void;
   onRename: (id: string, name: string) => void;
+  onMarkDelete: (id: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [tempName, setTempName] = useState(item.name);
@@ -83,7 +95,8 @@ function SortableItem({
       className={cn(
         "flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border bg-background",
         isDragging && "opacity-50 shadow-lg z-50",
-        !item.active && "opacity-50"
+        !item.active && "opacity-50",
+        item.markedForDeletion && "opacity-30 bg-destructive/5 border-destructive/30"
       )}
     >
       <button
@@ -116,22 +129,39 @@ function SortableItem({
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <span className="text-sm truncate">{item.name}</span>
-            <button
-              onClick={() => { setTempName(item.name); setEditing(true); }}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <Pencil className="h-3 w-3" />
-            </button>
+            <span className={cn("text-sm truncate", item.markedForDeletion && "line-through")}>{item.name}</span>
+            {!item.markedForDeletion && (
+              <button
+                onClick={() => { setTempName(item.name); setEditing(true); }}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+            )}
           </div>
         )}
       </div>
 
-      <Switch
-        checked={item.active}
-        onCheckedChange={() => onToggle(item.id)}
-        className="shrink-0"
-      />
+      {!item.markedForDeletion && (
+        <Switch
+          checked={item.active}
+          onCheckedChange={() => onToggle(item.id)}
+          className="shrink-0"
+        />
+      )}
+
+      <button
+        onClick={() => onMarkDelete(item.id)}
+        className={cn(
+          "shrink-0 p-1 rounded-md transition-colors",
+          item.markedForDeletion
+            ? "text-muted-foreground hover:text-foreground"
+            : "text-muted-foreground hover:text-destructive"
+        )}
+        title={item.markedForDeletion ? "Desfazer exclusão" : "Excluir item"}
+      >
+        {item.markedForDeletion ? <X className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
+      </button>
     </div>
   );
 }
@@ -143,8 +173,8 @@ export function SettingsMenuEditor() {
   const [items, setItems] = useState<EditableItem[]>([]);
   const [hasChanges, setHasChanges] = useState(false);
   const [loadingItems, setLoadingItems] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
-  // Fetch items directly from DB when sheet opens (includes inactive)
   const handleOpen = useCallback(async (isOpen: boolean) => {
     setOpen(isOpen);
     if (isOpen) {
@@ -170,6 +200,7 @@ export function SettingsMenuEditor() {
                 active: item.active,
                 display_order: item.display_order,
                 group_name: g.name,
+                markedForDeletion: false,
               });
             });
         });
@@ -210,26 +241,46 @@ export function SettingsMenuEditor() {
     setHasChanges(true);
   };
 
+  const handleMarkDelete = (id: string) => {
+    setItems(prev => prev.map(i => i.id === id ? { ...i, markedForDeletion: !i.markedForDeletion } : i));
+    setHasChanges(true);
+  };
+
+  const itemsToDelete = items.filter(i => i.markedForDeletion);
+  const itemsToSave = items.filter(i => !i.markedForDeletion);
+
+  const handleSaveClick = () => {
+    if (itemsToDelete.length > 0) {
+      setConfirmDeleteOpen(true);
+    } else {
+      saveMutation.mutate();
+    }
+  };
+
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const updates = items.map((item, index) => ({
-        id: item.id,
-        display_order: index + 1,
-        name: item.name,
-        active: item.active,
-      }));
+      // Delete marked items
+      if (itemsToDelete.length > 0) {
+        const deleteIds = itemsToDelete.map(i => i.id);
+        const { error: delError } = await supabase
+          .from("config_menu_items")
+          .delete()
+          .in("id", deleteIds);
+        if (delError) throw delError;
+      }
 
-      // Update each item
-      for (const u of updates) {
+      // Update remaining items
+      for (const [index, item] of itemsToSave.entries()) {
         const { error } = await supabase
           .from("config_menu_items")
-          .update({ display_order: u.display_order, name: u.name, active: u.active })
-          .eq("id", u.id);
+          .update({ display_order: index + 1, name: item.name, active: item.active })
+          .eq("id", item.id);
         if (error) throw error;
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["config-menu"] });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["config-menu"] });
+      await queryClient.refetchQueries({ queryKey: ["config-menu"] });
       toast({ title: "Menu atualizado com sucesso" });
       setHasChanges(false);
       setOpen(false);
@@ -240,50 +291,81 @@ export function SettingsMenuEditor() {
   });
 
   return (
-    <Sheet open={open} onOpenChange={handleOpen}>
-      <SheetTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
-          <Settings2 className="h-4 w-4" />
-        </Button>
-      </SheetTrigger>
-      <SheetContent className="w-[400px] sm:max-w-[400px] flex flex-col">
-        <SheetHeader>
-          <SheetTitle>Editar Menu</SheetTitle>
-          <SheetDescription>Arraste para reordenar, clique no lápis para renomear.</SheetDescription>
-        </SheetHeader>
-
-        <div className="flex-1 overflow-y-auto mt-4 space-y-2">
-          {loadingItems ? (
-            <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">Carregando itens...</div>
-          ) : items.length === 0 ? (
-            <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">Nenhum item encontrado</div>
-          ) : (
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={items.map(i => i.id)} strategy={verticalListSortingStrategy}>
-              {items.map(item => (
-                <SortableItem
-                  key={item.id}
-                  item={item}
-                  onToggle={handleToggle}
-                  onRename={handleRename}
-                />
-              ))}
-            </SortableContext>
-          </DndContext>
-          )}
-        </div>
-
-        <div className="pt-4 border-t border-border mt-auto">
-          <Button
-            onClick={() => saveMutation.mutate()}
-            disabled={!hasChanges || saveMutation.isPending}
-            className="w-full"
-          >
-            <Save className="h-4 w-4 mr-2" />
-            Salvar Alterações
+    <>
+      <Sheet open={open} onOpenChange={handleOpen}>
+        <SheetTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
+            <Settings2 className="h-4 w-4" />
           </Button>
-        </div>
-      </SheetContent>
-    </Sheet>
+        </SheetTrigger>
+        <SheetContent className="w-[400px] sm:max-w-[400px] flex flex-col">
+          <SheetHeader>
+            <SheetTitle>Editar Menu</SheetTitle>
+            <SheetDescription>Arraste para reordenar, clique no lápis para renomear.</SheetDescription>
+          </SheetHeader>
+
+          <div className="flex-1 overflow-y-auto mt-4 space-y-2">
+            {loadingItems ? (
+              <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">Carregando itens...</div>
+            ) : items.length === 0 ? (
+              <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">Nenhum item encontrado</div>
+            ) : (
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                <SortableContext items={items.map(i => i.id)} strategy={verticalListSortingStrategy}>
+                  {items.map(item => (
+                    <SortableItem
+                      key={item.id}
+                      item={item}
+                      onToggle={handleToggle}
+                      onRename={handleRename}
+                      onMarkDelete={handleMarkDelete}
+                    />
+                  ))}
+                </SortableContext>
+              </DndContext>
+            )}
+          </div>
+
+          <div className="pt-4 border-t border-border mt-auto space-y-2">
+            {itemsToDelete.length > 0 && (
+              <p className="text-xs text-destructive text-center">
+                {itemsToDelete.length} item(ns) será(ão) excluído(s) permanentemente
+              </p>
+            )}
+            <Button
+              onClick={handleSaveClick}
+              disabled={!hasChanges || saveMutation.isPending}
+              className="w-full"
+            >
+              <Save className="h-4 w-4 mr-2" />
+              Salvar Alterações
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar exclusão</AlertDialogTitle>
+            <AlertDialogDescription>
+              Você está prestes a excluir permanentemente {itemsToDelete.length} item(ns):
+              <span className="block mt-2 font-medium text-foreground">
+                {itemsToDelete.map(i => i.name).join(", ")}
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => saveMutation.mutate()}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Excluir e Salvar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
