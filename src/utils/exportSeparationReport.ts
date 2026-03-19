@@ -107,7 +107,7 @@ export async function exportSeparationReport({
   orders,
   orderItems,
   mode,
-  logoUrl,
+  logoBase64,
   sellerName,
 }: SeparationReportOptions) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -116,8 +116,8 @@ export async function exportSeparationReport({
   const margin = 8;
   const contentWidth = pageWidth - margin * 2;
 
-  // Load logo
-  let logoData = logoUrl ? await loadImageAsBase64(logoUrl) : null;
+  // Load logo - use pre-loaded base64 or fallback to default
+  let logoData = logoBase64 || null;
   if (!logoData) logoData = await loadImageAsBase64(DEFAULT_LOGO_URL);
 
   // Pre-load unique thumbnails
