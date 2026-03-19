@@ -368,13 +368,16 @@ const PrimeiroAcesso = () => {
               </p>
             </div>
             <div className="rounded-xl border border-border p-6 bg-muted/20 text-center space-y-3">
-              <Link2 className="w-12 h-12 text-muted-foreground/40 mx-auto" />
+              <Link2 className="w-12 h-12 text-primary/40 mx-auto" />
               <p className="text-sm text-muted-foreground">
-                A conexão com o Mercado Livre será disponibilizada em breve. Você poderá conectar depois dentro do sistema.
+                Após concluir a ativação, você poderá conectar sua conta do Mercado Livre diretamente no painel principal.
+              </p>
+              <p className="text-xs text-muted-foreground/60">
+                A conexão é rápida, segura e usa OAuth oficial do Mercado Livre.
               </p>
             </div>
-            <Button onClick={handleSkipConnect} variant="outline" className="gap-2 w-full">
-              Continuar sem conectar <ArrowRight className="w-4 h-4" />
+            <Button onClick={handleSkipConnect} className="gap-2 w-full">
+              Continuar <ArrowRight className="w-4 h-4" />
             </Button>
           </div>
         );

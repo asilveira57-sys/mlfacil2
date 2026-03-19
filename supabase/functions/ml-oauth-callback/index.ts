@@ -315,7 +315,7 @@ serve(async (req) => {
     // TRIAL + BOOTSTRAP: Start trial on first OAuth and trigger 30d import
     // ================================================================
     
-    // Resolve company_id if not provided in state
+    // Resolve company_id — NEVER allow ml_account without a company
     let resolvedCompanyId = companyId;
     if (!resolvedCompanyId) {
       // Try to get company from ml_account
@@ -335,17 +335,47 @@ serve(async (req) => {
           .eq('user_id', userId)
           .eq('is_active', true)
           .limit(1)
-          .single();
+          .maybeSingle();
         
         resolvedCompanyId = userCompany?.id || null;
+      }
+
+      // FALLBACK: Auto-create company if none exists
+      if (!resolvedCompanyId) {
+        console.warn('[ml-oauth-callback] No company found — auto-creating for user:', userId);
         
-        // Link ml_account to company if found
-        if (resolvedCompanyId) {
-          await supabaseAdmin
-            .from('ml_accounts')
-            .update({ company_id: resolvedCompanyId })
-            .eq('id', mlAccountId);
+        // Get user email for default company name
+        const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+        const userEmail = authUser?.user?.email || '';
+        const defaultName = userEmail
+          ? `Empresa de ${userEmail.split('@')[0]}`
+          : `Empresa ${mlUserIdStr}`;
+        
+        const { data: newCompany, error: companyErr } = await supabaseAdmin
+          .from('companies')
+          .insert({
+            user_id: userId,
+            display_name: defaultName,
+            is_active: true,
+            is_primary: true,
+          })
+          .select('id')
+          .single();
+
+        if (companyErr || !newCompany) {
+          console.error('[ml-oauth-callback] Failed to auto-create company:', companyErr);
+        } else {
+          resolvedCompanyId = newCompany.id;
+          console.log('[ml-oauth-callback] Auto-created company:', resolvedCompanyId);
         }
+      }
+      
+      // Link ml_account to company if resolved
+      if (resolvedCompanyId) {
+        await supabaseAdmin
+          .from('ml_accounts')
+          .update({ company_id: resolvedCompanyId })
+          .eq('id', mlAccountId);
       }
     }
 
@@ -415,7 +445,7 @@ serve(async (req) => {
         console.error('Error setting up bootstrap (non-fatal):', bootstrapErr);
       }
     } else {
-      console.warn('No company found for user, trial/bootstrap skipped');
+      console.error('[ml-oauth-callback] CRITICAL: Could not resolve or create company for user:', userId);
     }
 
     console.log('ML OAuth completed successfully');

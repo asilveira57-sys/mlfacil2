@@ -26,6 +26,17 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  // Clean up stale onboarding localStorage when onboarding is done
+  useEffect(() => {
+    if (!requiresOnboarding && hasSession) {
+      const staleKey = "mktp_onboarding_progress";
+      if (localStorage.getItem(staleKey)) {
+        localStorage.removeItem(staleKey);
+        console.info("[ProtectedRoute] Cleared stale onboarding localStorage");
+      }
+    }
+  }, [requiresOnboarding, hasSession]);
+
   // Still checking session
   if (!sessionChecked || accessLoading) {
     return (

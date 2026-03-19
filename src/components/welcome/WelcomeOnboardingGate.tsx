@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useActiveAccount } from '@/contexts/ActiveAccountContext';
 import { useCurrentUserId } from '@/hooks/useCurrentUserId';
 import { useActiveOnboardingFlow } from '@/hooks/useWelcomeOnboarding';
+import { useUserAccess } from '@/contexts/UserAccessContext';
 import { WelcomeOnboardingModal } from './WelcomeOnboardingModal';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -41,7 +42,11 @@ export function WelcomeOnboardingGate() {
   const location = useLocation();
   const userId = useCurrentUserId();
   const { activeAccount } = useActiveAccount();
+  const { requiresOnboarding, loading: accessLoading } = useUserAccess();
   const [dismissed, setDismissed] = useState(false);
+
+  // Block Welcome Cards for users who completed /primeiro-acesso onboarding
+  const onboardingCompleted = !accessLoading && !requiresOnboarding;
 
   const accountCompanyId = activeAccount?.companyId ?? null;
   const sellerId = activeAccount?.sellerId ?? null;
@@ -65,7 +70,7 @@ export function WelcomeOnboardingGate() {
     isExcluded ? null : companyId
   );
 
-  if (isExcluded || isLoading || !flowData || dismissed || !userId || !companyId) {
+  if (isExcluded || onboardingCompleted || isLoading || !flowData || dismissed || !userId || !companyId) {
     return null;
   }
 
