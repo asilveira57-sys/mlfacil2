@@ -49,10 +49,20 @@ export function useWholesaleProfiles() {
   const companyId = activeAccount?.companyId;
   const queryClient = useQueryClient();
 
+  const getEffectiveTenant = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user?.id;
+    if (!userId) throw new Error("Sessão expirada. Faça login novamente.");
+    const tenantId = companyId || userId;
+    return { userId, tenantId };
+  };
+
+  const effectiveTenantId = companyId || null;
+
   const profilesQuery = useQuery({
     queryKey: ["wholesale-profiles", companyId],
     queryFn: async () => {
-      if (!companyId) return [] as WholesaleProfile[];
+      const { tenantId } = await getEffectiveTenant();
       
       // Fetch profiles
       const { data: profiles, error } = await (supabase as any)
