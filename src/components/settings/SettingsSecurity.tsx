@@ -311,6 +311,33 @@ function ActiveSessionsSection() {
                       )}
                     </div>
                   </div>
+                  {!session.is_current && (
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="ghost" size="sm" className="shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10 h-8 px-2 text-xs">
+                          <LogOut className="h-3.5 w-3.5 mr-1" />
+                          Desconectar
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Desconectar dispositivo?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            A sessão em <strong>{browser} · {os}</strong> será encerrada.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => signOutOthers.mutate()}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          >
+                            Desconectar
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  )}
                 </div>
               );
             })}
