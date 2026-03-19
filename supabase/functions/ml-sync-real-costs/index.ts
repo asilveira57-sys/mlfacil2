@@ -739,96 +739,15 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
       }
     }
 
-    // Strategy 3: Search billing period details via API for this specific order
+    // Strategy 3 REMOVED from batch — too slow (linear search through billing periods).
+    // Kept only in resync_single for manual single-order resyncs.
+    // If still pending after S1+S1b+S2, mark as pending and move on.
     if (feeMLSource === "pending") {
-      try {
-        const orderDate = order.created_at_meli ? new Date(order.created_at_meli) : new Date();
-        const y = orderDate.getFullYear();
-        const m = orderDate.getMonth();
-        const periodKeys = [
-          `${y}-${String(m + 1).padStart(2, '0')}-01`,
-          `${new Date(y, m + 1, 1).getFullYear()}-${String(new Date(y, m + 1, 1).getMonth() + 1).padStart(2, '0')}-01`,
-        ];
-        
-        for (const periodKey of periodKeys) {
-          if (feeML > 0) break;
-          let offset = 0;
-          let hasMore = true;
-          let pages = 0;
-          
-          while (hasMore && pages < 50) {
-            const url = `https://api.mercadolibre.com/billing/integration/periods/key/${periodKey}/group/ML/details?document_type=BILL&limit=200&offset=${offset}`;
-            let resp: Response;
-            let retries = 0;
-            while (true) {
-              resp = await fetch(url, { headers: { Authorization: `Bearer ${currentToken}` } });
-              if (resp.status === 401) {
-                await resp.text();
-                const ML_APP_ID2 = Deno.env.get('ML_APP_ID') || '';
-                const ML_SECRET_KEY2 = Deno.env.get('ML_SECRET_KEY') || '';
-                const { data: acct2 } = await supabase.from("ml_accounts").select("id, refresh_token").eq("ml_user_id", sellerId).eq("is_active", true).maybeSingle();
-                if (acct2?.refresh_token) {
-                  const tr2 = await fetch('https://api.mercadolibre.com/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'refresh_token', client_id: ML_APP_ID2, client_secret: ML_SECRET_KEY2, refresh_token: acct2.refresh_token }) });
-                  if (tr2.ok) { const td2 = await tr2.json(); currentToken = td2.access_token; await supabase.from("ml_accounts").update({ access_token: td2.access_token, refresh_token: td2.refresh_token, token_expires_at: new Date(Date.now() + td2.expires_in * 1000).toISOString(), updated_at: new Date().toISOString() }).eq("id", acct2.id); continue; }
-                  await tr2.text();
-                }
-                break;
-              }
-              if (resp.status === 429) { await resp.text(); retries++; if (retries > 3) break; await new Promise(r => setTimeout(r, 2000 * retries)); continue; }
-              break;
-            }
-            if (!resp!.ok) { await resp!.text(); break; }
-            
-            const data = await resp!.json();
-            const results = data.results || [];
-            if (results.length === 0) { hasMore = false; break; }
-            
-            for (const item of results) {
-              const salesInfo = (item.sales_info || [])[0] || {};
-              if (String(salesInfo.order_id) === String(order.order_id)) {
-                const chargeInfo = item.charge_info || {};
-                const ct = (chargeInfo.transaction_detail || chargeInfo.concept_type || '').toLowerCase();
-                const amount = Math.abs(chargeInfo.detail_amount || 0);
-                const category = classifyBillingCharge(ct);
-                switch (category) {
-                  case "commission": feeML += amount; break;
-                  case "shipping": if (shippingCostSeller === 0) shippingCostSeller = amount; break;
-                  case "installments": installmentsCost += amount; break;
-                  case "adjustments": adjustments += amount; break;
-                }
-              }
-            }
-            
-            offset += results.length;
-            hasMore = results.length >= 200;
-            pages++;
-            if (feeML > 0) break;
-            await new Promise(r => setTimeout(r, 300));
-          }
-        }
-        
-        if (feeML > 0) { feeMLSource = "billing"; sourceRefs.push("billing_period_details:api_search"); updatedCount++; }
-      } catch (e) { console.error(`[ReprocessPending] billing period search error for ${order.order_id}:`, e); }
+      sourceRefs.push("batch:s1_s1b_s2_exhausted:pending");
     }
 
-    // Final: if all strategies exhausted and still no commission but have shipping — keep pending
-    if (feeMLSource === "pending" && shippingCostSeller > 0) {
-      sourceRefs.push("all_strategies_exhausted:shipping_only:commission_pending");
-      console.log(`[ReprocessPending] order ${order.order_id}: all strategies checked, has shipping but NO commission — keeping as pending`);
-    }
-
-    // Cache financials
-    if (feeMLSource === "billing") {
-      await supabase.from("meli_order_financials_cache").upsert({
-        seller_id: sellerId, order_id: order.order_id, shipment_id: order.shipment_id,
-        cost_sale_fee: feeML, cost_shipping_fee: shippingCostSeller,
-        cost_installment_fee: installmentsCost, cost_cancellations: adjustments,
-        revenue_products: order.revenue_total || 0, synced_at: new Date().toISOString(),
-      }, { onConflict: "seller_id,order_id", ignoreDuplicates: false });
-    }
-
-    // Rate limit: 200ms between orders
-    await new Promise(r => setTimeout(r, 200));
+    // Rate limit: 100ms between orders (reduced from 200ms)
+    await new Promise(r => setTimeout(r, 100));
 
     // Fallback: shipment costs API if no shipping
     if (shippingCostSeller === 0 && order.shipment_id) {
