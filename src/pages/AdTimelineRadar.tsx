@@ -73,7 +73,7 @@ const bucketLabels: Record<StatusBucket | 'ALL' | 'HAS_SALES', string> = {
   '30D': '30 dias',
   '60D': '60 dias',
   '90D': '90 dias',
-  '120D': '120 dias',
+  '120D': '+120 dias',
   NO_SALES: 'Nunca vendeu',
   HAS_SALES: 'Já vendeu',
 };
@@ -473,7 +473,7 @@ export default function AdTimelineRadar() {
               >
                 <CardContent className="p-4">
                   <div className="text-2xl font-bold text-destructive">{bucketCounts?.['120D'] || 0}</div>
-                  <div className="text-xs text-muted-foreground">120 dias sem venda</div>
+                  <div className="text-xs text-muted-foreground">+120 dias sem venda</div>
                 </CardContent>
               </Card>
               <Card 
