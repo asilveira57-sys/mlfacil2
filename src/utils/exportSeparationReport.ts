@@ -11,7 +11,7 @@ interface SeparationReportOptions {
   orders: ShippingOrder[];
   orderItems: Map<string, OrderItemSummary[]>;
   mode: SeparationMode;
-  logoUrl?: string | null;
+  logoBase64?: string | null;
   sellerName?: string;
 }
 
