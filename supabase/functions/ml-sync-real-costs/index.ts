@@ -1046,10 +1046,54 @@ async function handleResyncBatchOrders(supabase: any, userId: string, sellerId: 
 
     // NO Strategy 3 in batch — too slow
 
-    // Shipping fallback from cache
+    // Shipping fallback: cache first, then API
     if (shippingCostSeller === 0 && order.shipment_id) {
-      const { data: sc } = await supabase.from("meli_shipment_costs_cache").select("sender_cost").eq("shipment_id", order.shipment_id).maybeSingle();
+      const { data: sc } = await supabase.from("meli_shipment_costs_cache").select("sender_cost").eq("seller_id", sellerId).eq("shipment_id", order.shipment_id).maybeSingle();
       if (sc) { shippingCostSeller = sc.sender_cost || 0; sourceRefs.push("shipment:cache"); }
+      else {
+        // API fallback for shipping
+        try {
+          const shipResp = await fetch(`https://api.mercadolibre.com/shipments/${order.shipment_id}/costs`, { headers: { Authorization: `Bearer ${currentToken}` } });
+          if (shipResp.ok) {
+            const shipData = await shipResp.json();
+            shippingCostSeller = shipData.sender?.cost || shipData.senders?.[0]?.cost || shipData.receiver?.cost || 0;
+            sourceRefs.push("shipment:api:batch");
+            if (shippingCostSeller > 0) {
+              await supabase.from("meli_shipment_costs_cache").upsert({
+                user_id: userId, seller_id: sellerId, shipment_id: order.shipment_id, order_id: orderId,
+                sender_cost: shippingCostSeller, gross_amount: shipData.gross_amount || 0, raw_json: shipData,
+                synced_at: new Date().toISOString()
+              }, { onConflict: "seller_id,shipment_id" });
+            }
+          } else { await shipResp.text(); }
+        } catch {}
+      }
+    }
+
+    // Anti-overwrite: preserve existing non-zero values when new values are zero
+    const existingBd = existingMap.get(orderId);
+    if (feeML === 0 && existingBd) {
+      const existingFee = Number(existingBd.fee_ml) || Number(existingBd.commission_cost) || 0;
+      if (existingFee > 0) {
+        feeML = existingFee;
+        feeMLSource = existingBd.fee_ml_source || "billing";
+        sourceRefs.push("anti_overwrite:preserved_commission");
+      }
+    }
+    if (shippingCostSeller === 0 && existingBd) {
+      const existingShipping = Number(existingBd.shipping_cost_seller) || 0;
+      if (existingShipping > 0) {
+        shippingCostSeller = existingShipping;
+        sourceRefs.push("anti_overwrite:preserved_shipping");
+      }
+    }
+    if (installmentsCost === 0 && existingBd) {
+      const existingInst = Number(existingBd.installments_cost) || 0;
+      if (existingInst > 0) installmentsCost = existingInst;
+    }
+    if (adjustments === 0 && existingBd) {
+      const existingAdj = Number(existingBd.adjustments) || 0;
+      if (existingAdj > 0) adjustments = existingAdj;
     }
 
     if (feeMLSource === "pending" && shippingCostSeller > 0) {
