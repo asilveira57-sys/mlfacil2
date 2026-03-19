@@ -1062,6 +1062,85 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                 </div>
               )}
 
+              {/* Safe 1-by-1 banners */}
+              {safeAllOnPageSelected && !safeSelectAllPages && totalOrders > orders.length && !safeProcessing && (
+                <div className="flex items-center gap-2 p-3 mb-2 rounded-lg bg-green-500/10 border border-green-500/20 text-sm">
+                  <span>
+                    Todos os <strong>{orders.length}</strong> desta página selecionados (modo seguro).
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="link"
+                    className="p-0 h-auto font-semibold"
+                    onClick={handleSafeSelectAllPages}
+                    disabled={safeLoadingAllIds}
+                  >
+                    {safeLoadingAllIds ? (
+                      <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />Carregando...</>
+                    ) : (
+                      <>Selecionar todos os {totalOrders.toLocaleString()} pedidos</>
+                    )}
+                  </Button>
+                </div>
+              )}
+
+              {safeSelectAllPages && (
+                <div className="flex items-center gap-2 p-3 mb-2 rounded-lg bg-green-500/10 border border-green-500/20 text-sm">
+                  <CheckSquare className="h-4 w-4 text-green-600" />
+                  <span>
+                    Todos os <strong>{safeSelectedOrders.size.toLocaleString()}</strong> pedidos selecionados (modo seguro 1 a 1).
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="link"
+                    className="p-0 h-auto"
+                    onClick={() => { setSafeSelectAllPages(false); setSafeSelectedOrders(new Set()); }}
+                  >
+                    Limpar seleção
+                  </Button>
+                </div>
+              )}
+
+              {/* Safe action bar */}
+              {(safeSelectedOrders.size > 0 || safeProcessing) && (
+                <div className="flex items-center gap-3 p-3 mb-2 rounded-lg bg-green-500/10 border border-green-500/20 flex-wrap">
+                  <span className="text-sm font-medium">🛡️ Modo Seguro: {safeSelectedOrders.size.toLocaleString()} selecionado(s)</span>
+                  {!safeProcessing ? (
+                    <>
+                      <Button
+                        size="sm"
+                        className="bg-green-600 hover:bg-green-700 text-white"
+                        onClick={handleSafeResync}
+                      >
+                        <RotateCw className="h-3.5 w-3.5 mr-1" />
+                        Atualizar 1 a 1 (seguro)
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => { setSafeSelectedOrders(new Set()); setSafeSelectAllPages(false); }}>
+                        Limpar seleção
+                      </Button>
+                    </>
+                  ) : (
+                    <div className="flex-1 flex items-center gap-2">
+                      <Progress value={safeProgress.total > 0 ? (safeProgress.current / safeProgress.total) * 100 : 0} className="flex-1 h-2" />
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">
+                        {safeProgress.current}/{safeProgress.total} — {safeProgress.currentOrderId}
+                      </span>
+                      {safeProgress.errors.length > 0 && (
+                        <Badge variant="destructive" className="text-xs">{safeProgress.errors.length} erro(s)</Badge>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive h-6 px-2 text-xs"
+                        onClick={() => { safeCancelRef.current = true; }}
+                      >
+                        Cancelar
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="border rounded-lg overflow-hidden">
                 <Table className="table-fixed w-full [&_td]:px-1.5 [&_td]:py-1.5 [&_th]:px-1.5 [&_th]:py-2 text-xs">
                   <TableHeader>
