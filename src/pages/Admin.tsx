@@ -7,6 +7,7 @@ import {
   LayoutDashboard, Rocket, Users, Shield, CreditCard, Receipt, FileText, 
   Search, Plug, Settings, Tags, Link2, FileStack, Globe, Menu, Star,
   ClipboardList, History, Palette, Radio, CalendarDays, Sparkles, Eye, Activity, HelpCircle, Mail, Headphones,
+  UserCheck,
 } from 'lucide-react';
 import { AdminDashboard } from './admin/AdminDashboard';
 import { AdminOnboarding } from './admin/AdminOnboarding';
