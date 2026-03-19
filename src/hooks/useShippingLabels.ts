@@ -44,6 +44,7 @@ export interface ShippingOrder {
 export interface OrderItemSummary {
   item_id: string;
   variation_id: string | null;
+  variation_attributes: { name: string; value: string }[] | null;
   sku: string | null;
   title_short: string | null;
   title: string | null;
