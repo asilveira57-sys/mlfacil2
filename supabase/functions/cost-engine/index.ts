@@ -1124,6 +1124,18 @@ async function calculateSingleOrder(supabase: any, userId: string, sellerId: str
     .eq('order_id', orderId)
     .maybeSingle();
 
+  // Get shipment cost cache as additional fallback
+  let shipmentCacheCost = 0;
+  if (order.shipment_id) {
+    const { data: sc } = await supabase
+      .from('meli_shipment_costs_cache')
+      .select('sender_cost')
+      .eq('seller_id', sellerId)
+      .eq('shipment_id', order.shipment_id)
+      .maybeSingle();
+    if (sc) shipmentCacheCost = Number(sc.sender_cost) || 0;
+  }
+
   let commissionCost = 0, costShipping = 0, revenueShipping = 0, installmentsCost = 0;
   if (billing) {
     commissionCost = billing.cost_sale_fee || 0;
@@ -1137,6 +1149,12 @@ async function calculateSingleOrder(supabase: any, userId: string, sellerId: str
     costShipping = Number(existingBreakdown.shipping_cost_seller) || Number(existingBreakdown.cost_shipping) || 0;
     revenueShipping = Number(existingBreakdown.receita_envio) || 0;
     console.log(`[cost-engine] Single order fallback for ${orderId}: commission=${commissionCost}, shipping=${costShipping}`);
+  }
+
+  // Shipment cache fallback: if still no shipping, use direct shipment cache
+  if (costShipping === 0 && shipmentCacheCost > 0) {
+    costShipping = shipmentCacheCost;
+    console.log(`[cost-engine] Shipment cache fallback for ${orderId}: shipping=${costShipping}`);
   }
 
   // Safety guard: never overwrite non-zero commission with zero
@@ -1154,6 +1172,11 @@ async function calculateSingleOrder(supabase: any, userId: string, sellerId: str
       costShipping = existingShipping;
       console.log(`[cost-engine] Preserved existing shipping ${existingShipping} for order ${orderId}`);
     }
+  }
+  // Ultimate fallback: shipment cache
+  if (costShipping === 0 && shipmentCacheCost > 0) {
+    costShipping = shipmentCacheCost;
+    console.log(`[cost-engine] Ultimate shipment cache fallback for ${orderId}: shipping=${costShipping}`);
   }
 
   // Tax V2
