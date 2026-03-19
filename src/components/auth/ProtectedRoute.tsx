@@ -19,6 +19,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const [hasSession, setHasSession] = useState<boolean | null>(null);
   const { requiresOnboarding, loading: accessLoading } = useUserAccess();
 
+  // Check session on mount
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setHasSession(!!session);
