@@ -1,0 +1,1 @@
+ALTER TABLE public.meli_order_items_cache ADD COLUMN IF NOT EXISTS variation_attributes JSONB DEFAULT NULL;

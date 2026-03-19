@@ -53,7 +53,7 @@ export function useOrderDetails(sellerId: string | null) {
       // Fetch items
       const { data: itemsData, error: itemsError } = await supabase
         .from('meli_order_items_cache')
-        .select('item_id, variation_id, sku, title_short, title, quantity, unit_price, permalink, catalog_product_id, thumbnail')
+        .select('item_id, variation_id, variation_attributes, sku, title_short, title, quantity, unit_price, permalink, catalog_product_id, thumbnail')
         .eq('seller_id', sellerId)
         .eq('order_id', orderId);
 
@@ -117,6 +117,7 @@ export function useOrderDetails(sellerId: string | null) {
       const items: OrderItemSummary[] = (itemsData || []).map(item => ({
         item_id: item.item_id,
         variation_id: item.variation_id,
+        variation_attributes: (item as any).variation_attributes || null,
         sku: item.sku,
         title_short: item.title_short,
         title: item.title,

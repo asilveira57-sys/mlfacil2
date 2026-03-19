@@ -11,13 +11,14 @@ interface SeparationReportOptions {
   orders: ShippingOrder[];
   orderItems: Map<string, OrderItemSummary[]>;
   mode: SeparationMode;
-  logoUrl?: string | null;
+  logoBase64?: string | null;
   sellerName?: string;
 }
 
 interface AccumulatedItem {
   item_id: string;
   variation_id: string | null;
+  variation_attributes: { name: string; value: string }[] | null;
   sku: string | null;
   title: string | null;
   thumbnail: string | null;
@@ -56,27 +57,37 @@ function drawHeader(
   sellerName: string | undefined,
   mode: SeparationMode,
   pageWidth: number,
+  totalOrders: number,
 ) {
-  const headerH = 22;
+  const headerH = 28;
   doc.setFillColor(30, 30, 30);
   doc.rect(0, 0, pageWidth, headerH, 'F');
 
   if (logoData) {
     try {
-      doc.addImage(logoData, 'PNG', 8, 2, 0, 17);
+      doc.addImage(logoData, 'PNG', 8, 3, 0, 20);
     } catch { /* skip */ }
   }
 
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(13);
-  doc.text('Relatório de Separação', pageWidth / 2, 9, { align: 'center' });
-  doc.setFontSize(8);
-  const subtitle = [
-    sellerName || '',
-    mode === 'accumulated' ? 'Acumulado por produto' : 'Por pedido',
-    format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR }),
-  ].filter(Boolean).join(' • ');
-  doc.text(subtitle, pageWidth / 2, 16, { align: 'center' });
+  doc.setFont('helvetica', 'bold');
+  doc.text('Relatório de Separação', pageWidth / 2, 10, { align: 'center' });
+
+  // Account name - prominent
+  if (sellerName) {
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(sellerName, pageWidth / 2, 16, { align: 'center' });
+  }
+
+  // Mode + date/time + count
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'normal');
+  const modeLabel = mode === 'accumulated' ? 'Acumulado por produto' : 'Por pedido';
+  const dateStr = format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR });
+  const subtitle = `${modeLabel} • ${totalOrders} pedidos • ${dateStr}`;
+  doc.text(subtitle, pageWidth / 2, 22, { align: 'center' });
 
   return headerH;
 }
@@ -96,7 +107,7 @@ export async function exportSeparationReport({
   orders,
   orderItems,
   mode,
-  logoUrl,
+  logoBase64,
   sellerName,
 }: SeparationReportOptions) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -105,8 +116,8 @@ export async function exportSeparationReport({
   const margin = 8;
   const contentWidth = pageWidth - margin * 2;
 
-  // Load logo
-  let logoData = logoUrl ? await loadImageAsBase64(logoUrl) : null;
+  // Load logo - use pre-loaded base64 or fallback to default
+  let logoData = logoBase64 || null;
   if (!logoData) logoData = await loadImageAsBase64(DEFAULT_LOGO_URL);
 
   // Pre-load unique thumbnails
@@ -121,7 +132,7 @@ export async function exportSeparationReport({
     thumbCache.set(url, await loadThumbnail(url));
   }));
 
-  const headerH = drawHeader(doc, logoData, sellerName, mode, pageWidth);
+  const headerH = drawHeader(doc, logoData, sellerName, mode, pageWidth, orders.length);
   let y = headerH + 6;
 
   const rowH = 14;
@@ -181,6 +192,7 @@ export async function exportSeparationReport({
           accMap.set(key, {
             item_id: item.item_id,
             variation_id: item.variation_id,
+            variation_attributes: item.variation_attributes || null,
             sku: item.sku,
             title: item.title,
             thumbnail: item.thumbnail,
@@ -218,6 +230,7 @@ export async function exportSeparationReport({
       drawItemRow(doc, {
         item_id: item.item_id,
         variation_id: item.variation_id,
+        variation_attributes: item.variation_attributes || null,
         sku: item.sku,
         title_short: null,
         title: item.title,
@@ -268,8 +281,13 @@ function drawItemRow(
   const titleLines = lines.slice(0, 2) as string[];
   doc.text(titleLines, textX, y + 4);
 
-  // Variation ID below title if present
-  if (item.variation_id) {
+  // Variation attributes below title (human-readable names)
+  if (item.variation_attributes && item.variation_attributes.length > 0) {
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 100, 100);
+    const attrText = item.variation_attributes.map(a => `${a.name}: ${a.value}`).join(' | ');
+    doc.text(attrText, textX, y + 4 + titleLines.length * 3.2);
+  } else if (item.variation_id) {
     doc.setFontSize(6.5);
     doc.setTextColor(120, 120, 120);
     doc.text(`Var: ${item.variation_id}`, textX, y + 4 + titleLines.length * 3.2);
