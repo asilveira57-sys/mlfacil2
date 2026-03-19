@@ -1,17 +1,23 @@
 import { useEffect, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { useUserAccess } from "@/contexts/UserAccessContext";
 import { Loader2 } from "lucide-react";
+
+// Routes that should NOT trigger the onboarding redirect
+const ONBOARDING_BYPASS = ["/primeiro-acesso", "/sincronizando", "/reconnecting"];
 
 /**
  * ProtectedRoute wraps dashboard/private routes:
  * - No session → redirect to /auth
- * - Session → render children (Welcome Cards handle onboarding via modal)
+ * - Session + onboarding pending → redirect to /primeiro-acesso
+ * - Session + onboarding done → render children
  */
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const [sessionChecked, setSessionChecked] = useState(false);
   const [hasSession, setHasSession] = useState<boolean | null>(null);
+  const { requiresOnboarding, loading: accessLoading } = useUserAccess();
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -21,7 +27,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Still checking session
-  if (!sessionChecked) {
+  if (!sessionChecked || accessLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -35,7 +41,12 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return <Navigate to="/auth" state={{ from: location }} replace />;
   }
 
-  // Onboarding is now handled by Welcome Cards modal on the Dashboard.
-  // No forced redirect to /primeiro-acesso anymore.
+  // Onboarding still pending — redirect to /primeiro-acesso unless already there
+  const isBypassRoute = ONBOARDING_BYPASS.some((p) => location.pathname.startsWith(p));
+  if (requiresOnboarding && !isBypassRoute) {
+    console.info("[ProtectedRoute] Onboarding pending, redirecting to /primeiro-acesso from:", location.pathname);
+    return <Navigate to="/primeiro-acesso" replace />;
+  }
+
   return <>{children}</>;
 }
