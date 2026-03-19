@@ -54,16 +54,26 @@ export function useAnnouncements() {
     queryFn: async () => {
       if (!userId) return [];
 
-      // Busca seller_id do marketplace account ativo (para filtro de target_seller_id)
-      let activeSellerId: string | null = null;
-      if (activeMarketplaceAccountId) {
-        const { data: maData } = await supabase
-          .from('marketplace_accounts')
-          .select('external_user_id')
-          .eq('id', activeMarketplaceAccountId)
-          .single();
-        activeSellerId = maData?.external_user_id ?? null;
-      }
+      // Busca seller_id e data de criação do usuário em paralelo
+      const [sellerResult, profileResult] = await Promise.all([
+        activeMarketplaceAccountId
+          ? supabase
+              .from('marketplace_accounts')
+              .select('external_user_id')
+              .eq('id', activeMarketplaceAccountId)
+              .single()
+          : Promise.resolve({ data: null }),
+        supabase
+          .from('profiles')
+          .select('created_at')
+          .eq('id', userId)
+          .single(),
+      ]);
+
+      const activeSellerId = sellerResult.data?.external_user_id ?? null;
+      const userCreatedAt = profileResult.data?.created_at
+        ? new Date(profileResult.data.created_at)
+        : null;
 
       // Busca todos os comunicados ativos
       const { data: announcements, error: annErr } = await supabase
@@ -76,11 +86,24 @@ export function useAnnouncements() {
       if (annErr) throw annErr;
       if (!announcements || announcements.length === 0) return [];
 
-      // Filtra: target_seller_id IS NULL (para todos) OU = sellerId ativo
+      const now = new Date();
+
+      // Filtra comunicados
       const filtered = announcements.filter((a: any) => {
+        // Respeitar expiração
+        if (a.expires_at && new Date(a.expires_at) < now) return false;
+
         const target = a.target_seller_id;
-        if (!target) return true; // comunicado global
-        return activeSellerId && target === activeSellerId;
+        if (target) {
+          // Comunicado segmentado → só para o seller alvo
+          return activeSellerId && target === activeSellerId;
+        }
+
+        // Comunicado global → só para sellers criados ANTES do published_at
+        if (userCreatedAt && a.published_at) {
+          return userCreatedAt <= new Date(a.published_at);
+        }
+        return true;
       });
 
       // Busca leituras do usuário
@@ -99,8 +122,8 @@ export function useAnnouncements() {
       }));
     },
     enabled: !!userId,
-    staleTime: 15 * 60 * 1000, // 15 minutes
-    gcTime: 30 * 60 * 1000, // 30 minutes
+    staleTime: 15 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
   });
 }
 

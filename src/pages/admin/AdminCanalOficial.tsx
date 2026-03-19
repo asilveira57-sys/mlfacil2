@@ -45,6 +45,7 @@ interface FormData {
   priority: number;
   is_active: boolean;
   target_seller_id: string;
+  expires_at: string;
 }
 
 const EMPTY_FORM: FormData = {
@@ -56,6 +57,7 @@ const EMPTY_FORM: FormData = {
   priority: 0,
   is_active: true,
   target_seller_id: '',
+  expires_at: '',
 };
 
 function AnnouncementForm({
@@ -76,6 +78,7 @@ function AnnouncementForm({
     priority: initial?.priority ?? 0,
     is_active: initial?.is_active ?? true,
     target_seller_id: (initial as any)?.target_seller_id ?? '',
+    expires_at: (initial as any)?.expires_at ?? '',
   });
 
   const set = (k: keyof FormData, v: string | number | boolean) =>
@@ -158,6 +161,16 @@ function AnnouncementForm({
           placeholder="ID do seller (deixe vazio para todos)"
         />
         <p className="text-[11px] text-muted-foreground">Se preenchido, só esse seller verá o comunicado.</p>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label>Expira em (opcional)</Label>
+        <Input
+          type="datetime-local"
+          value={form.expires_at ? form.expires_at.slice(0, 16) : ''}
+          onChange={(e) => set('expires_at', e.target.value ? new Date(e.target.value).toISOString() : '')}
+        />
+        <p className="text-[11px] text-muted-foreground">Após essa data, o comunicado não será mais exibido.</p>
       </div>
 
       <div className="flex items-center gap-2">
@@ -273,6 +286,7 @@ export function AdminCanalOficial() {
         priority: form.priority,
         is_active: form.is_active,
         target_seller_id: form.target_seller_id || null,
+        expires_at: form.expires_at || null,
       } as any);
       toast({ title: 'Comunicado salvo com sucesso' });
       setEditingId(null);
