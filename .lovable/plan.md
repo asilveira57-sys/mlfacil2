@@ -1,47 +1,58 @@
 
 
-## Diagnóstico: Por que sellers travam em 80%
+## Plano: Corrigir Canal Oficial — Comunicados retroativos e segmentação
 
-### Causa raiz
+### Dois problemas identificados
 
-O fluxo `/primeiro-acesso` tem 7 steps. O último é "Ativar ambiente" — que chama `updateOnboarding({ status: 'completed' })`. Porém, quando o seller conecta o ML no step 5, o OAuth redireciona para `/sincronizando` → depois vai para `/dashboard`. O seller **nunca volta** ao `/primeiro-acesso` para completar os steps 6 e 7.
+**Problema 1**: Comunicados globais (`target_seller_id = NULL`) aparecem para **todos os sellers**, inclusive novos que entram meses depois. Acumulação infinita — em 1 ano poderiam ser 100+ mensagens retroativas na caixa de um seller novo.
 
-Resultado: `onboarding_status` fica `'pending'` no banco, e o flag `onboarding_completed` fica `false`. O Speedometer mostra 80% eternamente.
+**Problema 2**: O comunicado do agente de promoções ("Agente aderiu a 5 produtos") usa `target_seller_id = sellerId` (ML user ID numérico), mas o filtro no frontend compara com `external_user_id` da `marketplace_accounts`. Se o match funcionar, ok, mas precisa garantir que **só o seller dono** vê.
 
-Confirmação no banco:
-- `delatripshop@gmail.com` → `onboarding_status: NULL` (nem row existe)
-- `adeconex4@gmail.com` → `onboarding_status: NULL`
-- Sellers com 100% → `onboarding_status: completed`
+---
 
 ### Solução
 
-Mover a conclusão do onboarding para o momento certo: **quando o seller volta do OAuth e os dados são sincronizados** (na página `/sincronizando`).
+#### 1. Comunicados globais viram "snapshot no tempo"
+
+Adicionar coluna `published_at` na tabela `mktpfacil_announcements`. No filtro do frontend, comunicados globais só aparecem para sellers cujo `profiles.created_at` é **anterior** ao `published_at` do comunicado.
+
+Regra: se o seller entrou depois que o comunicado foi publicado, ele **não vê**.
+
+| Mudança | Detalhe |
+|---|---|
+| Migration SQL | Adicionar coluna `published_at timestamptz DEFAULT now()` |
+| Migration SQL | Preencher `published_at = created_at` nos comunicados existentes |
+| `useOfficialChannel.ts` | No filtro de globais, buscar `profiles.created_at` do user e comparar com `published_at` |
+
+#### 2. Segmentação por seller continua funcionando
+
+O `target_seller_id` já funciona — o agente de promoções grava o ML seller ID e o frontend compara com `external_user_id`. Apenas confirmar que o match está correto (ambos usam o mesmo ID numérico do ML).
+
+#### 3. Auto-desativar comunicados antigos (opcional mas recomendado)
+
+Adicionar coluna `expires_at timestamptz NULL`. Comunicados com `expires_at < now()` são automaticamente filtrados no frontend. Isso evita acúmulo mesmo para sellers antigos.
+
+| Mudança | Detalhe |
+|---|---|
+| Migration SQL | Adicionar coluna `expires_at timestamptz NULL` |
+| `useOfficialChannel.ts` | Filtrar `expires_at IS NULL OR expires_at > now()` |
+| Admin Canal Oficial | Campo opcional "Expira em" no formulário de criação |
+
+---
+
+### Arquivos afetados
 
 | Arquivo | Mudança |
 |---|---|
-| `src/pages/Sincronizando.tsx` | Após completar todos os sync steps, chamar `updateOnboarding({ status: 'completed' })` antes de redirecionar para o dashboard |
-| `src/components/dashboard/ActivationSpeedometer.tsx` | Nenhuma mudança necessária — já lê o flag corretamente |
-
-### Detalhe da mudança
-
-No `Sincronizando.tsx`, após marcar `setAllDone(true)`:
-
-1. Obter a sessão do usuário (já existe no código)
-2. Chamar `supabase.rpc('update_onboarding_state', { p_status: 'completed', ... })`
-3. Isso garante que ao chegar no dashboard, o flag já é `true` e o Speedometer mostra 100%
-
-### Para os sellers existentes (DeLaTrip e ACS)
-
-Na mesma implementação, vou adicionar uma migration SQL que corrige retroativamente: se o user tem `ml_accounts` vinculadas mas `onboarding_status` é NULL ou `pending`, atualizar para `completed`.
-
-| Tipo | Ação |
-|---|---|
-| Migration SQL | `UPDATE/INSERT user_access_state` para users com ml_accounts mas sem onboarding completed |
-| `Sincronizando.tsx` | Auto-completar onboarding quando sync finaliza |
+| Migration SQL | `published_at`, `expires_at` colunas novas + backfill |
+| `src/hooks/useOfficialChannel.ts` | Filtro: globais só para sellers criados antes do `published_at`; respeitar `expires_at` |
+| `src/pages/admin/AdminCanalOficial.tsx` | Campo "Expira em" no formulário |
+| `supabase/functions/promotion-agent-run/index.ts` | Nenhuma mudança necessária — já segmenta corretamente |
 
 ### Resultado
 
-- Sellers existentes: corrigidos via migration (100% imediato)
-- Novos sellers: ao sair da tela de sync, onboarding já fica `completed` automaticamente
-- Nenhum seller fica mais preso em 80%
+- Seller novo entra → caixa vazia (zero mensagens retroativas)
+- Comunicado global → entregue apenas a quem estava no sistema no momento
+- Comunicado do agente → continua indo só pro seller alvo
+- Comunicados antigos → expiram automaticamente se configurado
 
