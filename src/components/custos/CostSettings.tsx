@@ -485,65 +485,29 @@ export function CostSettings({ sellerId }: CostSettingsProps) {
             </CardContent>
           </Card>
 
-          {/* Step 1: Billing */}
-          <Card className="border-2 border-primary/20">
+          {/* Step 1: Billing (TEMPORARILY DISABLED) */}
+          <Card className="border border-muted opacity-60 pointer-events-none select-none">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="flex items-center gap-2"><Database className="h-5 w-5" />Passo 1: Sincronizar Taxas (Billing)</CardTitle>
-                  <CardDescription>Busca as taxas exatas de cada pedido da API do Mercado Livre</CardDescription>
+                  <CardTitle className="flex items-center gap-2 text-muted-foreground"><Database className="h-5 w-5" />Passo 1: Sincronizar Taxas (Billing)</CardTitle>
+                  <CardDescription>Temporariamente desativado — em manutenção</CardDescription>
                 </div>
-                {getBillingSyncBadge()}
+                <span className="text-xs bg-muted text-muted-foreground px-2 py-1 rounded">Desativado</span>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
-                <div className="p-3 bg-muted rounded-lg"><p className="text-2xl font-bold">{billingStatus?.total_details?.toLocaleString() || 0}</p><p className="text-xs text-muted-foreground">Movimentos</p></div>
-                <div className="p-3 bg-muted rounded-lg"><p className="text-2xl font-bold">{billingStatus?.unique_orders_with_billing?.toLocaleString() || 0}</p><p className="text-xs text-muted-foreground">Pedidos com Billing</p></div>
-                <div className="p-3 bg-muted rounded-lg"><p className="text-2xl font-bold">{billingStatus?.periods_count || 0}</p><p className="text-xs text-muted-foreground">Períodos</p></div>
-                <div className="p-3 bg-muted rounded-lg"><p className="text-sm font-medium">{billingStatus?.oldest_period || "—"}</p><p className="text-xs text-muted-foreground">Mais Antigo</p></div>
-                <div className="p-3 bg-muted rounded-lg"><p className="text-sm font-medium">{billingStatus?.last_sync_at ? new Date(billingStatus.last_sync_at).toLocaleDateString('pt-BR') : "—"}</p><p className="text-xs text-muted-foreground">Última Sync</p></div>
-              </div>
-              {isBillingSyncing && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm"><span>Progresso</span><span className="font-medium">{billingProgress}%</span></div>
-                  <Progress value={billingProgress} className="h-2" />
-                </div>
-              )}
-              <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-sm">
-                <AlertCircle className="h-4 w-4 text-amber-600" />
-                <span className="text-amber-700 dark:text-amber-300">O Mercado Livre disponibiliza billing 24 a 48h após a venda.</span>
+                <div className="p-3 bg-muted/50 rounded-lg"><p className="text-2xl font-bold text-muted-foreground">—</p><p className="text-xs text-muted-foreground">Movimentos</p></div>
+                <div className="p-3 bg-muted/50 rounded-lg"><p className="text-2xl font-bold text-muted-foreground">—</p><p className="text-xs text-muted-foreground">Pedidos com Billing</p></div>
+                <div className="p-3 bg-muted/50 rounded-lg"><p className="text-2xl font-bold text-muted-foreground">—</p><p className="text-xs text-muted-foreground">Períodos</p></div>
+                <div className="p-3 bg-muted/50 rounded-lg"><p className="text-sm font-medium text-muted-foreground">—</p><p className="text-xs text-muted-foreground">Mais Antigo</p></div>
+                <div className="p-3 bg-muted/50 rounded-lg"><p className="text-sm font-medium text-muted-foreground">—</p><p className="text-xs text-muted-foreground">Última Sync</p></div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <Button onClick={() => handleSyncBilling("30d")} disabled={syncingBilling || isBillingSyncing} className="gap-2">
-                  {syncingBilling && lastBillingScope.current === "30d" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}Últimos 30 Dias
-                </Button>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span>
-                        <Button onClick={() => handleSyncBilling("recent")} disabled={syncingBilling || isBillingSyncing || !hasActiveSubscription} variant="outline" className="gap-2">
-                          {syncingBilling && lastBillingScope.current === "recent" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}Últimos 12 Meses
-                          {!hasActiveSubscription && <Lock className="h-3.5 w-3.5 ml-1 text-muted-foreground" />}
-                        </Button>
-                      </span>
-                    </TooltipTrigger>
-                    {!hasActiveSubscription && <TooltipContent>Disponível após ativar um plano</TooltipContent>}
-                  </Tooltip>
-                </TooltipProvider>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span>
-                        <Button onClick={() => handleSyncBilling("history")} disabled={syncingBilling || isBillingSyncing || !hasActiveSubscription} variant="outline" className="gap-2">
-                          {syncingBilling && lastBillingScope.current === "history" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}Histórico Completo
-                          {!hasActiveSubscription && <Lock className="h-3.5 w-3.5 ml-1 text-muted-foreground" />}
-                        </Button>
-                      </span>
-                    </TooltipTrigger>
-                    {!hasActiveSubscription && <TooltipContent>Disponível após ativar um plano</TooltipContent>}
-                  </Tooltip>
-                </TooltipProvider>
+                <Button disabled className="gap-2 opacity-50"><FileText className="h-4 w-4" />Últimos 30 Dias</Button>
+                <Button disabled variant="outline" className="gap-2 opacity-50"><FileText className="h-4 w-4" />Últimos 12 Meses</Button>
+                <Button disabled variant="outline" className="gap-2 opacity-50"><Database className="h-4 w-4" />Histórico Completo</Button>
               </div>
             </CardContent>
           </Card>
