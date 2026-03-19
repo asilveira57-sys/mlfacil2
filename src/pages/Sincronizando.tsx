@@ -97,6 +97,17 @@ export default function Sincronizando() {
 
       setSteps(prev => prev.map(s => ({ ...s, status: 'done' })));
       logStepComplete('dashboard');
+
+      // Auto-complete onboarding so ActivationSpeedometer reaches 100%
+      try {
+        await supabase.rpc('update_onboarding_state', {
+          p_status: 'completed',
+        });
+        logStepComplete('onboarding_auto_completed');
+      } catch (onbErr) {
+        console.warn('[Sincronizando] Failed to auto-complete onboarding:', onbErr);
+      }
+
       setAllDone(true);
 
     } catch (err) {
