@@ -2026,22 +2026,93 @@ async function processChunkAndContinue(supabase: any, jobId: string) {
   const orderIds = job.order_ids as string[];
   const offset = job.current_offset as number;
   const isResync = job.job_type === 'resync';
-  // For resync: use larger chunks (batch API), for reimport: keep original chunk size
-  const chunkSize = isResync ? Math.min(orderIds.length - offset, 50) : (job.chunk_size as number);
-  const delayMs = isResync ? 100 : CHUNK_DELAY_MS;
+  const isSafeResync = job.job_type === 'safe_resync';
 
   if (offset >= orderIds.length) {
     await supabase.from('cost_bulk_jobs').update({ status: 'done' }).eq('id', jobId);
     return;
   }
 
-  const chunk = orderIds.slice(offset, offset + chunkSize);
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+
   let successCount = job.success_count;
   let errorCount = job.error_count;
   let lastError = job.last_error;
 
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  if (isSafeResync) {
+    // Safe resync: process 1 order at a time with resync_single + retry
+    const chunkSize = Math.min(10, orderIds.length - offset); // process up to 10 per invocation
+    const chunk = orderIds.slice(offset, offset + chunkSize);
+
+    for (const orderId of chunk) {
+      // Check if job was cancelled
+      const { data: freshJob } = await supabase.from('cost_bulk_jobs').select('status').eq('id', jobId).single();
+      if (freshJob?.status === 'cancelled') return;
+
+      let success = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const syncRes = await fetch(`${supabaseUrl}/functions/v1/ml-sync-real-costs`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${serviceKey}` },
+            body: JSON.stringify({ action: 'resync_single', order_id: orderId, seller_id: job.seller_id }),
+          });
+          if (syncRes.ok) {
+            success = true;
+            break;
+          } else {
+            await syncRes.text();
+            if (attempt < 2) await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+          }
+        } catch {
+          if (attempt < 2) await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+        }
+      }
+
+      if (success) {
+        // Recalculate this order
+        try {
+          await calculateSingleOrder(supabase, job.user_id, job.seller_id, orderId);
+          successCount++;
+        } catch (e) {
+          errorCount++;
+          lastError = `${orderId}: ${e instanceof Error ? e.message : 'calc error'}`;
+        }
+      } else {
+        errorCount++;
+        lastError = `${orderId}: resync failed after 3 attempts`;
+      }
+
+      // Update progress after each order
+      await supabase.from('cost_bulk_jobs').update({
+        success_count: successCount, error_count: errorCount, last_error: lastError,
+      }).eq('id', jobId);
+    }
+
+    const newOffset = offset + chunk.length;
+    await supabase.from('cost_bulk_jobs').update({
+      current_offset: newOffset, processed_count: newOffset,
+      success_count: successCount, error_count: errorCount, last_error: lastError,
+      status: newOffset >= orderIds.length ? 'done' : 'running',
+    }).eq('id', jobId);
+
+    if (newOffset < orderIds.length) {
+      EdgeRuntime.waitUntil(
+        fetch(`${supabaseUrl}/functions/v1/cost-engine/orders/bulk-reimport-continue`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-internal-key': serviceKey },
+          body: JSON.stringify({ job_id: jobId }),
+        }).catch(err => console.error(`[cost-engine] Safe resync chain failed:`, err))
+      );
+    }
+    return;
+  }
+
+  // Original logic for resync and reimport
+  const chunkSize = isResync ? Math.min(orderIds.length - offset, 50) : (job.chunk_size as number);
+  const delayMs = isResync ? 100 : CHUNK_DELAY_MS;
+  const chunk = orderIds.slice(offset, offset + chunkSize);
 
   if (isResync) {
     // BATCH resync: single call to ml-sync-real-costs with all orders in chunk
