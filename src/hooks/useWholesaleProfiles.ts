@@ -89,7 +89,7 @@ export function useWholesaleProfiles() {
         tiers: (tiers || []).filter((t: any) => t.profile_id === p.id),
       })) as WholesaleProfile[];
     },
-    enabled: !!companyId,
+    enabled: true,
   });
 
   const createProfile = useMutation({
