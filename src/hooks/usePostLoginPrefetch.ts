@@ -1,17 +1,11 @@
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { fetchConfigMenuItems } from '@/hooks/useConfigMenu';
 
 /**
  * Prefetches critical data right after login so pages load instantly.
  * Runs once per session (tracked via ref).
- * 
- * Prefetched data:
- * - config menu groups & items
- * - user context (profile, workspace membership)
- * - workspace companies
- * - access profiles matrix
- * - visual identity / theme
  */
 export function usePostLoginPrefetch() {
   const queryClient = useQueryClient();
@@ -24,18 +18,11 @@ export function usePostLoginPrefetch() {
       if (event === 'SIGNED_IN' && !hasPrefetched.current) {
         hasPrefetched.current = true;
         
-        // Small delay to let auth settle
         setTimeout(() => {
-          // Prefetch config menu
+          // Prefetch config menu — uses the SAME queryFn as useConfigMenu
           queryClient.prefetchQuery({
             queryKey: ['config-menu'],
-            queryFn: async () => {
-              const [groupsRes, itemsRes] = await Promise.all([
-                supabase.from('config_menu_groups').select('*').eq('active', true).order('display_order'),
-                supabase.from('config_menu_items').select('*').eq('active', true).order('display_order'),
-              ]);
-              return { groups: groupsRes.data, items: itemsRes.data };
-            },
+            queryFn: fetchConfigMenuItems,
             staleTime: 30 * 60 * 1000,
           });
 

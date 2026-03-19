@@ -43,21 +43,18 @@ const COMPONENT_MAP: Record<string, React.ComponentType> = {
   "mensagem-do-dia": SettingsDailyMessage,
 };
 
-// Static fallback tabs when DB returns empty
+// Static fallback tabs when DB returns empty (error case only)
 const FALLBACK_ITEMS: { slug: string; name: string; icon: string }[] = [
   { slug: "perfil", name: "Perfil", icon: "User" },
+  { slug: "empresas-contas", name: "Empresas / Contas", icon: "Building2" },
   { slug: "seguranca", name: "Segurança", icon: "Shield" },
   { slug: "notificacoes", name: "Notificações", icon: "Bell" },
   { slug: "idioma", name: "Idioma", icon: "Globe" },
   { slug: "colaboradores", name: "Colaboradores", icon: "Users" },
   { slug: "perfis-acesso", name: "Perfis de Acesso", icon: "Key" },
-  { slug: "personalizacao", name: "Personalização", icon: "Palette" },
   { slug: "aparencia", name: "Aparência", icon: "Paintbrush" },
-  { slug: "privacidade-lgpd", name: "Privacidade / LGPD", icon: "Lock" },
-  { slug: "utilidades", name: "Utilidades", icon: "Wrench" },
   { slug: "plano", name: "Plano", icon: "CreditCard" },
   { slug: "faturamento", name: "Faturamento", icon: "Receipt" },
-  { slug: "empresas-contas", name: "Empresas / Contas", icon: "Building2" },
   { slug: "abrir-chamado", name: "Suporte", icon: "HelpCircle" },
   { slug: "mensagem-do-dia", name: "Mensagem do Dia", icon: "MessageSquare" },
 ];
@@ -81,18 +78,15 @@ function PlaceholderContent({ name }: { name: string }) {
 
 export function SettingsLayout() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { menuGroups, isLoading } = useConfigMenu();
+  const { menuItems, isLoading, error } = useConfigMenu();
   const { isAdmin } = useUserRole();
 
-  // Flatten all items from all groups for tab navigation
-  const groups = Array.isArray(menuGroups) ? menuGroups : [];
-  const dbItems = groups.flatMap(g => g.items.flatMap(item => [item, ...item.children])).filter(i => i.active !== false);
-
-  // Use DB items if available, otherwise use static fallback
-  const useFallback = !isLoading && dbItems.length === 0;
+  // Use DB items (flat, already sorted with mensagem-do-dia last)
+  // Fallback only on actual error
+  const useFallback = !isLoading && menuItems.length === 0;
   const tabItems = useFallback
     ? FALLBACK_ITEMS.map(f => ({ id: f.slug, slug: f.slug, name: f.name, icon: f.icon }))
-    : dbItems.map(i => ({ id: i.id, slug: i.slug, name: i.name, icon: i.icon }));
+    : menuItems.map(i => ({ id: i.id, slug: i.slug, name: i.name, icon: i.icon }));
 
   const activeSlug = searchParams.get("section") || tabItems[0]?.slug || "perfil";
 

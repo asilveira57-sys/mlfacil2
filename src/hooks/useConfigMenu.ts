@@ -24,69 +24,43 @@ export interface ConfigMenuGroup {
   items: ConfigMenuItem[];
 }
 
+/**
+ * Shared query function for config-menu.
+ * Returns flat top-level items sorted by display_order.
+ * "mensagem-do-dia" is always forced to the end.
+ */
+export async function fetchConfigMenuItems(): Promise<ConfigMenuItem[]> {
+  const { data, error } = await supabase
+    .from('config_menu_items')
+    .select('*')
+    .eq('active', true)
+    .is('parent_id', null)
+    .order('display_order', { ascending: true });
+
+  if (error) throw error;
+
+  const items: ConfigMenuItem[] = (data || []).map(item => ({
+    ...item,
+    icon: item.icon || 'Settings',
+    children: [],
+  }));
+
+  // Force mensagem-do-dia to always be last
+  const msgIdx = items.findIndex(i => i.slug === 'mensagem-do-dia');
+  if (msgIdx > -1) {
+    const [msg] = items.splice(msgIdx, 1);
+    items.push(msg);
+  }
+
+  return items;
+}
+
 export function useConfigMenu() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['config-menu'],
-    queryFn: async () => {
-      const [groupsRes, itemsRes] = await Promise.all([
-        supabase
-          .from('config_menu_groups')
-          .select('*')
-          .eq('active', true)
-          .order('display_order', { ascending: true }),
-        supabase
-          .from('config_menu_items')
-          .select('*')
-          .eq('active', true)
-          .order('display_order', { ascending: true }),
-      ]);
-
-      if (groupsRes.error) throw groupsRes.error;
-      if (itemsRes.error) throw itemsRes.error;
-
-      const items = itemsRes.data || [];
-      const groups = groupsRes.data || [];
-
-      // Build item tree
-      const itemMap = new Map<string, ConfigMenuItem>();
-      items.forEach(item => {
-        itemMap.set(item.id, {
-          ...item,
-          icon: item.icon || 'Settings',
-          children: [],
-        });
-      });
-
-      // Attach children to parents
-      const rootItems: ConfigMenuItem[] = [];
-      itemMap.forEach(item => {
-        if (item.parent_id && itemMap.has(item.parent_id)) {
-          itemMap.get(item.parent_id)!.children.push(item);
-        } else if (!item.parent_id) {
-          rootItems.push(item);
-        }
-      });
-
-      // Sort children
-      const sortChildren = (items: ConfigMenuItem[]) => {
-        items.sort((a, b) => a.display_order - b.display_order);
-        items.forEach(i => sortChildren(i.children));
-      };
-      rootItems.forEach(i => sortChildren(i.children));
-
-      // Attach items to groups
-      const menuGroups: ConfigMenuGroup[] = groups.map(g => ({
-        ...g,
-        items: rootItems
-          .filter(i => i.group_id === g.id)
-          .sort((a, b) => a.display_order - b.display_order),
-      }));
-
-      // Only return groups that have at least one item
-      return menuGroups.filter(g => g.items.length > 0);
-    },
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 30 * 60 * 1000, // 30 minutes
+    queryFn: fetchConfigMenuItems,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
   });
 
   if (error) {
@@ -94,7 +68,9 @@ export function useConfigMenu() {
   }
 
   return {
-    menuGroups: data || [],
+    menuItems: data || [],
+    /** @deprecated Use menuItems instead */
+    menuGroups: [],
     isLoading,
     error: error ? (error as Error).message : null,
   };
