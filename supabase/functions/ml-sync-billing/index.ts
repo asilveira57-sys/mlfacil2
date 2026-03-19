@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { classifyBillingCharge } from '../_shared/ml-billing-classifier.ts';
 
 declare const EdgeRuntime: {
   waitUntil(promise: Promise<unknown>): void;
@@ -723,19 +724,21 @@ async function fetchOrderBillingWithRetry(
       if (billingResp.ok) {
         const billingData = await billingResp.json();
         
-        if (billingData.seller?.charges) {
-          for (const charge of billingData.seller.charges) {
-            const chargeType = (charge.type || '').toLowerCase();
-            const amount = Math.abs(charge.value || 0);
+        // Try seller.charges first, then top-level charges/billing_info
+        const charges = billingData.seller?.charges || billingData.charges || billingData.billing_info || [];
+        if (Array.isArray(charges)) {
+          for (const charge of charges) {
+            // Read from multiple possible fields (new ML format uses name/label/description)
+            const label = (charge.name || charge.label || charge.description || charge.type || charge.detail || '').toLowerCase();
+            const amount = Math.abs(charge.value || charge.amount || 0);
+            if (amount === 0) continue;
             
-            if (chargeType.includes('sale_fee') || chargeType.includes('commission')) {
-              financial.cost_sale_fee += amount;
-            } else if (chargeType.includes('shipping')) {
-              financial.cost_shipping_fee += amount;
-            } else if (chargeType.includes('financing') || chargeType.includes('installment')) {
-              financial.cost_installment_fee += amount;
-            } else if (chargeType.includes('cancel') || chargeType.includes('refund')) {
-              financial.cost_cancellations += amount;
+            const category = classifyBillingCharge(label);
+            switch (category) {
+              case 'commission': financial.cost_sale_fee += amount; break;
+              case 'shipping': financial.cost_shipping_fee += amount; break;
+              case 'installments': financial.cost_installment_fee += amount; break;
+              case 'adjustments': financial.cost_cancellations += amount; break;
             }
           }
         }

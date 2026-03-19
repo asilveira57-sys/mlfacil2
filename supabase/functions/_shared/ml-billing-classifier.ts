@@ -88,12 +88,14 @@ export function classifyBillingCharge(chargeType: string): BillingCategory {
     return 'shipping';
   }
 
-  // ---- Installments ----
+  // ---- Installments / Financing ----
   if (
     ct.includes('taxa de parcelamento') ||
     ct.includes('parcelamento') ||
     ct.includes('cuota') ||
     ct.includes('installment') ||
+    ct.includes('financing_fee') ||
+    ct.includes('financing') ||
     ct.includes('financiamento') ||
     ct.includes('financiamiento')
   ) {

@@ -1,66 +1,66 @@
 
+# Plano Mestre — Jornada Completa do Seller
 
-## Diagnóstico e Solução: Billing Lento + Formato Novo ML (04/03)
+## Status de cada item
 
-### Problemas Identificados
+### ✅ Já existe no sistema
+| # | Item | Status |
+|---|------|--------|
+| 2 | Cadastro (email/senha + confirmação) | ✅ Implementado |
+| 4 | Painel inicial (dashboard) | ✅ Existe (sem velocímetro) |
+| 5 | Conexão ML via OAuth | ✅ Implementado |
+| 6 | Elegibilidade para teste (>10 vendas) | ✅ Verificação existe na company |
+| 8 | Módulo Etiquetas (vendas abertas) | ✅ Implementado |
+| 9 | Módulo Custos (sem Passo 2) | ✅ Atualizado agora |
+| 13 | Seleção automática de plano | ✅ `useUserSalesVolume` + filtro de planos |
+| 15 | Cadastro fiscal (PF/PJ) | ✅ `company_billing` existe |
+| 12 | Bloqueio pós-trial | ✅ Parcial (trial_expired bloqueia) |
 
-**1. Performance — Por que o billing está lento:**
-- O `resync_single` (Strategy 3) faz uma busca linear em todas as páginas do billing period da API do ML para encontrar UM pedido. Com períodos de milhares de registros, isso gera dezenas de requests HTTP por pedido.
-- O `handleReprocessPending` executa Strategy 1 + Strategy 1b + Strategy 2 + Strategy 3 **sequencialmente** para cada pedido. Com 50 pedidos por batch + 200ms delay, um batch pode levar vários minutos.
-- O `cost-engine` bulk resync chama `ml-sync-real-costs` como uma **Edge Function HTTP separada** para cada pedido (800ms delay), multiplicando a latência.
+### 🔶 Existe parcialmente / precisa ajuste
+| # | Item | O que falta |
+|---|------|-------------|
+| 1 | Landing com 3 botões | Landing existe mas precisa revisar CTAs |
+| 3 | Tela de boas-vindas (primeiro acesso) | Onboarding existe mas pode não ter welcome screen |
+| 7 | Sincronização inicial automática (30d) | Import manual existe, falta auto-trigger pós-OAuth |
+| 10 | Módulo ADS (sync pós-pagamento) | ADS existe, falta gate de trial |
+| 11 | Linha do Tempo (30d trial vs 1yr pago) | Módulo existe, falta limitar por trial |
+| 14 | Dados fiscais obrigatórios pós-pagamento | Tela existe, falta gate de bloqueio |
 
-**2. Formato novo ML (pós 04/03/2026) — Por que comissão e frete estão zerados:**
-- O `ml-sync-billing` (função que alimenta `meli_order_financials_cache`) usa `billingData.seller.charges` com `charge.type` para classificar cobranças. Mas o **novo formato do ML** usa campos diferentes (`charge.name`, `charge.label`, `charge.description`) e labels em português ("Custo por vender no Mercado Livre", etc.).
-- O `ml-sync-billing` **NÃO usa o classificador unificado** (`ml-billing-classifier.ts`). Ele tem lógica própria inline que só reconhece `sale_fee`, `commission`, `shipping`, `financing` — termos do formato antigo.
-- Resultado: pedidos novos passam pelo `ml-sync-billing`, as charges não são reconhecidas, `cost_sale_fee=0`, `cost_shipping_fee=0` são gravados no `meli_order_financials_cache`. Quando o `cost-engine` roda, encontra zero no financials e mantém zero.
+### 🔴 Precisa ser desenvolvido
+| # | Item | Descrição |
+|---|------|-----------|
+| 4b | Velocímetro de ativação | Widget de progresso no dashboard |
+| 9b | Tabela `sync_jobs` + lock após sucesso | Controle de execução de syncs |
+| 9c | Lock do botão 1 ano após sucesso | Bloquear re-execução pós-sucesso |
+| 16 | Multi-conta (soma de vendas) | Lógica de soma cross-account |
+| 17-18 | Estados de conta + aviso pré-conexão | Workflow de nova conta |
+| 19 | Verificação de limite + pending_upgrade | Gate automático |
+| 20 | Upgrade com pró-rata | Cálculo proporcional |
+| 21 | Crescimento natural → bloqueio | Detecção automática de excesso |
+| 22 | Proteção contra abuso (logs) | Audit trail de conexões/upgrades |
 
-### Plano de Implementação
+## Ordem sugerida de implementação
 
-**Arquivo 1: `supabase/functions/ml-sync-billing/index.ts`** (Correção crítica)
-- Importar e usar `classifyBillingCharge` do `_shared/ml-billing-classifier.ts` em vez da lógica inline
-- Expandir a leitura de campos da resposta para cobrir o novo formato: `charge.name || charge.label || charge.description || charge.type`
-- Isso garante que pedidos pós-04/03 tenham comissão e frete gravados corretamente no `meli_order_financials_cache`
+### Fase 1 — Gates e bloqueios (impacto imediato)
+1. Velocímetro de ativação no dashboard
+2. Tabela `sync_jobs` + controle de locks
+3. Gate de dados fiscais pós-pagamento
+4. Auto-sync 30d após OAuth
 
-```typescript
-// ANTES (inline, só reconhece termos antigos):
-const chargeType = (charge.type || '').toLowerCase();
-if (chargeType.includes('sale_fee') || chargeType.includes('commission')) { ... }
+### Fase 2 — Trial gates nos módulos ✅
+5. ✅ ADS: banner de trial + sync bloqueado via ML API gate no backend
+6. ✅ Linha do Tempo: banner de trial informando limitação a 30d
+7. ✅ Etiquetas: filtro "Todos" agora capped a 30 dias
 
-// DEPOIS (usa classificador unificado):
-import { classifyBillingCharge } from '../_shared/ml-billing-classifier.ts';
-const label = (charge.name || charge.label || charge.description || charge.type || '').toLowerCase();
-const amount = Math.abs(charge.value || charge.amount || 0);
-const category = classifyBillingCharge(label);
-switch (category) {
-  case 'commission': financial.cost_sale_fee += amount; break;
-  case 'shipping': financial.cost_shipping_fee += amount; break;
-  case 'installments': financial.cost_installment_fee += amount; break;
-  case 'adjustments': financial.cost_cancellations += amount; break;
-}
-```
+### Fase 3 — Multi-conta e upgrade ✅
+8. ✅ Multi-conta: soma de vendas (get_tenant_total_sales + check_tenant_plan_limit)
+9. ✅ Estados de conta (account_state enum: active/pending_upgrade/disabled/error)
+10. ✅ Upgrade com pró-rata (calculate_prorata_upgrade + execute_plan_upgrade)
+11. ✅ Crescimento natural → bloqueio (PlanLimitBanner + useTenantLimits)
+12. ✅ Aviso pré-conexão de nova conta (AccountConnectionWarning)
+13. ✅ Audit log (tenant_limit_log)
 
-**Arquivo 2: `supabase/functions/ml-sync-real-costs/index.ts`** (Otimização de performance)
-- **Remover Strategy 3** (billing period search) do `handleReprocessPending` — esta estratégia busca pagina por pagina da API de billing periods para encontrar um pedido específico. É extremamente lenta e redundante quando o `ml-sync-billing` já grava os dados corretamente no cache.
-- No `handleReprocessPending`, após Strategy 1 + 1b falharem, ir direto para Strategy 2 (billing_details_cache). Se não encontrar, marcar como pending e seguir.
-- Manter Strategy 3 **apenas no `resync_single`** (ação manual do usuário para 1 pedido), onde a espera é aceitável.
-- Reduzir rate-limit delay de 200ms para 100ms entre pedidos no batch.
-
-**Arquivo 3: `supabase/functions/_shared/ml-billing-classifier.ts`** (Ajuste menor)
-- Verificar que o campo `charge.type` bruto da API (ex: `sale_fee_amount`, `marketplace_fee`, `financing_fee`) é coberto pelo classificador — já está, mas adicionar `financing_fee` explicitamente para cobrir edge case.
-
-### Detalhes Técnicos
-
-**Impacto esperado na performance:**
-- Remover Strategy 3 do batch: de ~30 requests HTTP por pedido pendente para ~2 requests (orders API + billing_info).
-- Um batch de 50 pedidos passa de ~5-10 minutos para ~30-60 segundos.
-
-**Impacto na correção de dados:**
-- Pedidos pós-04/03 terão comissão e frete gravados corretamente via `ml-sync-billing`.
-- O `cost-engine` encontrará dados reais no `meli_order_financials_cache` e calculará lucro correto.
-- Pedidos já gravados com zeros precisarão de um reprocessamento (o botão "Recalcular" existente já faz isso).
-
-### Arquivos modificados
-1. `supabase/functions/ml-sync-billing/index.ts` — usar classificador unificado
-2. `supabase/functions/ml-sync-real-costs/index.ts` — remover Strategy 3 do batch
-3. `supabase/functions/_shared/ml-billing-classifier.ts` — adicionar `financing_fee`
-
+### Fase 4 — Landing e onboarding ✅
+14. ✅ Landing com 3 CTAs (Login, Cadastro, Planos) no header e hero
+15. ✅ Welcome screen pós-confirmação de email (WelcomeScreen + aviso ML)
+16. ✅ Proteção contra abuso (system_audit_log + tenant_limit_log)
