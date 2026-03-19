@@ -1,47 +1,74 @@
 
 
-## Plano: Eliminar Welcome Onboarding Gate + Corrigir fluxo pós-confirmação de e-mail
+## Plano: Painel de Gerenciamento de Clientes (Admin)
 
-Dois problemas distintos:
+### Problema atual
+
+A tela `AdminUsers` atual é limitada: mostra apenas IDs truncados de `user_access_state`, sem email real, sem empresa vinculada, sem contas ML, e sem opção de excluir. Não serve para gestão de clientes.
 
 ---
 
-### Problema 1: Sistema ainda chama fluxo de Welcome Cards (deletado no admin)
+### Solução: Nova aba "Clientes" no Admin
 
-O `WelcomeOnboardingGate` está renderizado globalmente em `App.tsx` (linha 178). Se o fluxo foi excluído do banco, o hook `useActiveOnboardingFlow` retorna `null` e o gate não renderiza — mas o código continua fazendo queries desnecessárias e pode dar erro se as tabelas/dados forem removidos.
+Criar uma nova página `AdminClientes` com visão completa de cada seller, substituindo/complementando a atual `AdminUsers`.
 
-**Correção**: Eliminar completamente o `WelcomeOnboardingGate` do sistema:
+---
 
-| Arquivo | Ação |
+### O que será exibido por cliente
+
+| Dado | Origem |
 |---|---|
-| `src/App.tsx` | Remover import e uso de `<WelcomeOnboardingGate />` (linhas 18 e 178) |
-| `src/components/welcome/WelcomeOnboardingGate.tsx` | Pode manter o arquivo (sem risco), mas o componente não será mais chamado |
+| Nome completo, email, whatsapp, CPF | `profiles` |
+| Empresa (nome, CNPJ, cidade, UF) | `companies` (via `user_id`) |
+| Contas ML vinculadas (nickname, status, company_id) | `ml_accounts` (via `user_id`) |
+| Status de acesso (trial/ativo/expirado/bloqueado) | `user_access_state` |
+| Início e fim do trial | `user_access_state.trial_start_at`, `trial_end_at` |
+| Plano selecionado | `user_access_state.selected_plan_id` |
+| Data de cadastro | `profiles.created_at` |
+| Roles | `user_roles` |
 
-Simples e cirúrgico — sem efeitos colaterais.
+### Ações disponíveis por cliente
 
----
+1. **Ver detalhes** — modal/drawer com todos os dados acima
+2. **Ajustar período de trial** — adicionar/remover dias (já existe RPC `admin_adjust_trial`)
+3. **Resetar trial** — (já existe RPC)
+4. **Bloquear/Desbloquear** — (já existe RPC)
+5. **Excluir seller** — nova funcionalidade via Edge Function `admin-delete-user` que:
+   - Remove `ml_accounts`, `companies`, `user_access_state`, `profiles`, `user_roles`
+   - Deleta o user de `auth.users` (requer service_role)
+   - Registra log de auditoria
 
-### Problema 2: Após confirmar e-mail, seller vai direto para ML sem criar empresa
+### Mudanças necessárias
 
-**Fluxo atual**: `CriarAcesso.tsx` → confirma e-mail → `emailRedirectTo: /dashboard` → Dashboard → `MLConnectionCard` aparece direto → seller conecta ML → conta fica "órfã" (sem empresa vinculada).
+**1. Nova Edge Function `admin-delete-user`**
+- Recebe `user_id`, valida que o chamador é admin
+- Deleta dados relacionados em cascata
+- Deleta o auth user via `supabase.auth.admin.deleteUser()`
+- Retorna sucesso/erro
 
-**Fluxo correto**: Confirma e-mail → **`/primeiro-acesso`** (onde o step 2 é "Dados da empresa") → cria empresa → conecta ML → tudo vinculado.
+**2. Nova RPC `admin_get_clients_overview`**
+- Função SQL SECURITY DEFINER que retorna join de `profiles` + `user_access_state` + `companies` + `ml_accounts` + `user_roles`
+- Acesso restrito a admins via `has_role(auth.uid(), 'admin')`
+- Retorna dados completos para a listagem
 
-**Correção**:
+**3. Novo componente `src/pages/admin/AdminClientes.tsx`**
+- Tabela com colunas: Nome, Email, Empresa, Contas ML, Status, Trial, Cadastro, Ações
+- Filtros: busca por nome/email, status (trial/ativo/expirado/bloqueado)
+- Modal de detalhes com todas as informações do seller
+- Dialog de confirmação para exclusão (com digitação do email para confirmar)
+- Ações inline: ajustar trial, bloquear, excluir
 
-| Arquivo | Mudança |
-|---|---|
-| `src/pages/CriarAcesso.tsx` | Mudar `emailRedirectTo` de `/dashboard` para `/primeiro-acesso` (linha 64) |
-| `src/pages/Dashboard.tsx` | No Dashboard, se `requiresOnboarding` for `true` E não há empresa criada, redirecionar para `/primeiro-acesso` em vez de mostrar o `MLConnectionCard` direto |
-| `src/components/auth/ProtectedRoute.tsx` | Adicionar redirect para `/primeiro-acesso` quando `requiresOnboarding === true` e a rota atual não é `/primeiro-acesso` nem `/sincronizando` |
+**4. Hook `src/hooks/useAdminClients.ts`**
+- `useAdminClients()` — query da RPC
+- `useDeleteClient()` — mutation chamando a Edge Function
+- Reutiliza `useAdminTrialManagement` existente
 
-Dessa forma, o seller sempre passa pelo `/primeiro-acesso` (que já tem o step de criar empresa no step 2) antes de poder conectar o ML.
+**5. Registrar no Admin.tsx**
+- Nova tab "Clientes" com ícone `UserCheck`
+- Nova rota `/admin/clientes`
+- Posicionar após "Usuários" na lista de tabs
 
----
+### Resultado
 
-### Resultado esperado
-
-- Nenhuma tela de "Welcome Cards" modal aparece mais em nenhuma circunstância
-- Novo seller: confirma e-mail → vai para `/primeiro-acesso` → cria empresa → conecta ML → empresa já fica vinculada
-- Seller existente que já completou onboarding: não é afetado (vai direto para dashboard)
+O admin terá uma visão completa de todos os sellers: dados pessoais, empresa, contas ML vinculadas, status de trial/plano, com capacidade de ajustar prazos, bloquear e excluir completamente um seller de teste.
 
