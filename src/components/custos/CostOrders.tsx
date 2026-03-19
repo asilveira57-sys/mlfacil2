@@ -1168,7 +1168,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                         size="sm"
                         variant="ghost"
                         className="text-destructive h-6 px-2 text-xs"
-                        onClick={() => { safeCancelRef.current = true; }}
+                        onClick={handleCancelSafeJob}
                       >
                         Cancelar
                       </Button>
