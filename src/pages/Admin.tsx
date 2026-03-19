@@ -46,6 +46,7 @@ const adminTabs = [
   { id: 'canal-oficial', label: 'Canal Oficial', icon: Radio },
   { id: 'calendario-social', label: 'Calendário Social', icon: CalendarDays },
   { id: 'dica-consultor', label: 'Dica Consultor', icon: Sparkles },
+  { id: 'clientes', label: 'Clientes', icon: UserCheck },
   { id: 'usuarios', label: 'Usuários', icon: Users },
   { id: 'perfis', label: 'Perfis', icon: Shield },
   { id: 'colaboradores', label: 'Colaboradores', icon: Users },
