@@ -117,6 +117,7 @@ export function useOrderDetails(sellerId: string | null) {
       const items: OrderItemSummary[] = (itemsData || []).map(item => ({
         item_id: item.item_id,
         variation_id: item.variation_id,
+        variation_attributes: (item as any).variation_attributes || null,
         sku: item.sku,
         title_short: item.title_short,
         title: item.title,

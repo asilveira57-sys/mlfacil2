@@ -218,6 +218,7 @@ export async function exportSeparationReport({
       drawItemRow(doc, {
         item_id: item.item_id,
         variation_id: item.variation_id,
+        variation_attributes: item.variation_attributes || null,
         sku: item.sku,
         title_short: null,
         title: item.title,
