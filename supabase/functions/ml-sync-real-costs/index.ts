@@ -1629,7 +1629,7 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
                   user_id: userId, seller_id: sellerId, shipment_id: order.shipment_id, order_id: order.order_id, 
                   sender_cost: shippingCostSeller, gross_amount: d.gross_amount || 0, raw_json: d, 
                   synced_at: new Date().toISOString() 
-                }, { onConflict: "shipment_id" }); 
+                }, { onConflict: "seller_id,shipment_id" }); 
               }
             } catch {}
           }
