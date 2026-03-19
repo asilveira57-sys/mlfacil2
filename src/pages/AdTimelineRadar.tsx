@@ -473,7 +473,7 @@ export default function AdTimelineRadar() {
               >
                 <CardContent className="p-4">
                   <div className="text-2xl font-bold text-destructive">{bucketCounts?.['120D'] || 0}</div>
-                  <div className="text-xs text-muted-foreground">120 dias sem venda</div>
+                  <div className="text-xs text-muted-foreground">+120 dias sem venda</div>
                 </CardContent>
               </Card>
               <Card 
