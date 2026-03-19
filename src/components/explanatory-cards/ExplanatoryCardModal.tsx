@@ -36,7 +36,7 @@ export function ExplanatoryCardModal({ cards, onComplete, onSkip, isRequired }: 
   return (
     <Dialog open onOpenChange={() => { if (!isRequired) onSkip?.(); }}>
       <DialogContent
-        className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto p-0 gap-0"
+        className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto p-0 gap-0 [&>button.absolute]:hidden"
         onPointerDownOutside={(e) => { if (isRequired) e.preventDefault(); }}
         onEscapeKeyDown={(e) => { if (isRequired) e.preventDefault(); }}
       >
