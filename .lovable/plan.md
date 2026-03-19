@@ -1,55 +1,47 @@
 
 
-## Plano: Corrigir refresh destrutivo + Mover "Modo Seguro 1 a 1" para backend
+## Plano: Eliminar Welcome Onboarding Gate + Corrigir fluxo pós-confirmação de e-mail
 
-Dois problemas independentes resolvidos em conjunto.
+Dois problemas distintos:
 
 ---
 
-### Problema 1: Refresh desnecessário ao trocar de aba/tela
+### Problema 1: Sistema ainda chama fluxo de Welcome Cards (deletado no admin)
 
-**Causa raiz**: Em `Custos.tsx` (linha 69-72), toda vez que `activeTab` muda para `'pedidos'`, o código chama `invalidateCostCache('orders')`, que limpa o cache e força reload. E dentro de `CostOrders.tsx`, o `useEffect` na linha 687-691 recarrega pedidos quando qualquer filtro muda — incluindo quando o componente remonta ao voltar para a aba.
+O `WelcomeOnboardingGate` está renderizado globalmente em `App.tsx` (linha 178). Se o fluxo foi excluído do banco, o hook `useActiveOnboardingFlow` retorna `null` e o gate não renderiza — mas o código continua fazendo queries desnecessárias e pode dar erro se as tabelas/dados forem removidos.
+
+**Correção**: Eliminar completamente o `WelcomeOnboardingGate` do sistema:
+
+| Arquivo | Ação |
+|---|---|
+| `src/App.tsx` | Remover import e uso de `<WelcomeOnboardingGate />` (linhas 18 e 178) |
+| `src/components/welcome/WelcomeOnboardingGate.tsx` | Pode manter o arquivo (sem risco), mas o componente não será mais chamado |
+
+Simples e cirúrgico — sem efeitos colaterais.
+
+---
+
+### Problema 2: Após confirmar e-mail, seller vai direto para ML sem criar empresa
+
+**Fluxo atual**: `CriarAcesso.tsx` → confirma e-mail → `emailRedirectTo: /dashboard` → Dashboard → `MLConnectionCard` aparece direto → seller conecta ML → conta fica "órfã" (sem empresa vinculada).
+
+**Fluxo correto**: Confirma e-mail → **`/primeiro-acesso`** (onde o step 2 é "Dados da empresa") → cria empresa → conecta ML → tudo vinculado.
 
 **Correção**:
-- **Remover** `invalidateCostCache('orders')` do `useEffect` de troca de aba em `Custos.tsx` (linha 71). O cache de 3 minutos do `useCostModuleCache` já cuida de servir dados frescos. Se o usuário quiser forçar refresh, já existe o botão de refresh manual.
-- **No `CostOrders.tsx`**: Adicionar um `ref` para evitar reload automático se os dados já foram carregados e o cache está válido (o `getCostCache` já faz isso, mas o `loadOrders` é chamado desnecessariamente toda vez que o componente remonta).
-
----
-
-### Problema 2: "Modo Seguro 1 a 1" roda no frontend e aborta ao sair
-
-**Causa raiz**: O `handleSafeResync` atual é um loop `for` no frontend. Ao navegar para outra página, o componente desmonta e o processamento para.
-
-**Correção**: Mover para o backend reutilizando a infraestrutura de `cost_bulk_jobs` com um novo `job_type: 'safe_resync'`.
-
-#### Backend (`supabase/functions/cost-engine/index.ts`):
-
-1. **Novo case no router**: `orders/bulk-safe-resync` → chama `startBulkReimportJob` com `job_type = 'safe_resync'`
-2. **Novo bloco em `processChunkAndContinue`**: Quando `job_type === 'safe_resync'`:
-   - Chunk size = 1 (processa 1 pedido por vez)
-   - Para cada pedido: chama `ml-sync-real-costs` com `action: 'resync_single'` (via fetch interno com service_role)
-   - Retry 2x com delay de 2s em caso de erro
-   - A cada 10 pedidos processados com sucesso, chama `calculateSingleOrder` para os 10 pendentes
-   - Auto-encadeia via `EdgeRuntime.waitUntil` como os outros job types
-
-#### Frontend (`src/components/custos/CostOrders.tsx`):
-
-1. **Substituir `handleSafeResync`**: Em vez de loop local, chama `cost-engine/orders/bulk-safe-resync` (POST com `seller_id` + `order_ids`) e recebe `job_id`
-2. **Reutilizar `pollJobProgress`**: O mesmo polling por DB que já existe para bulk jobs monitora o progresso do safe resync
-3. **UI**: A barra verde de progresso continua igual, mas agora mostra dados do job no banco. Ao sair e voltar, o `checkActiveJob` no `useEffect` (linha 640-685) detecta o job ativo e retoma o polling automaticamente.
-
----
-
-### Arquivos modificados
 
 | Arquivo | Mudança |
 |---|---|
-| `src/pages/Custos.tsx` | Remover `invalidateCostCache('orders')` da troca de aba |
-| `src/components/custos/CostOrders.tsx` | Substituir loop local por chamada ao backend + polling |
-| `supabase/functions/cost-engine/index.ts` | Novo endpoint `orders/bulk-safe-resync` + lógica `safe_resync` no processChunkAndContinue |
+| `src/pages/CriarAcesso.tsx` | Mudar `emailRedirectTo` de `/dashboard` para `/primeiro-acesso` (linha 64) |
+| `src/pages/Dashboard.tsx` | No Dashboard, se `requiresOnboarding` for `true` E não há empresa criada, redirecionar para `/primeiro-acesso` em vez de mostrar o `MLConnectionCard` direto |
+| `src/components/auth/ProtectedRoute.tsx` | Adicionar redirect para `/primeiro-acesso` quando `requiresOnboarding === true` e a rota atual não é `/primeiro-acesso` nem `/sincronizando` |
+
+Dessa forma, o seller sempre passa pelo `/primeiro-acesso` (que já tem o step de criar empresa no step 2) antes de poder conectar o ML.
+
+---
 
 ### Resultado esperado
-- Trocar de aba/página não causa mais reload dos dados de pedidos
-- O "Modo Seguro 1 a 1" roda no backend: o usuário pode sair da tela, fechar o navegador, e o processamento continua
-- Ao voltar à aba de pedidos, o progresso é retomado automaticamente via polling
+
+- Nenhuma tela de "Welcome Cards" modal aparece mais em nenhuma circunstância
+- Novo seller: confirma e-mail → vai para `/primeiro-acesso` → cria empresa → conecta ML → empresa já fica vinculada
+- Seller existente que já completou onboarding: não é afetado (vai direto para dashboard)
 
