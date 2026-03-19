@@ -1905,10 +1905,31 @@ async function reimportOrder(supabase: any, userId: string, body: any) {
   const { seller_id, order_id } = body;
   if (!seller_id || !order_id) throw new Error('seller_id and order_id are required');
 
+  // Delete caches
   await supabase.from('order_cost_breakdown_cache').delete().eq('seller_id', seller_id).eq('order_id', order_id);
   await supabase.from('meli_order_financials_cache').delete().eq('seller_id', seller_id).eq('order_id', order_id);
   await supabase.from('meli_billing_details_cache').delete().eq('seller_id', seller_id).eq('order_id', order_id);
 
+  // CRITICAL FIX: Resync billing data BEFORE recalculating, otherwise we get zero commission/shipping
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  try {
+    const syncRes = await fetch(`${supabaseUrl}/functions/v1/ml-sync-real-costs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${serviceKey}` },
+      body: JSON.stringify({ action: 'resync_batch_orders', order_ids: [order_id], seller_id, user_id: userId }),
+    });
+    if (syncRes.ok) {
+      const syncResult = await syncRes.json();
+      console.log(`[cost-engine] Reimport billing resync for ${order_id}: processed=${syncResult.processed}`);
+    } else {
+      console.warn(`[cost-engine] Reimport billing resync failed for ${order_id}: ${syncRes.status}`);
+    }
+  } catch (e) {
+    console.error(`[cost-engine] Reimport billing resync error for ${order_id}:`, e);
+  }
+
+  // Now recalculate with fresh billing data
   try { await calculateSingleOrder(supabase, userId, seller_id, order_id); } catch (e) {
     console.error(`[cost-engine] Error recalculating after reimport:`, e);
   }
@@ -1932,6 +1953,8 @@ async function startBulkReimportJob(supabase: any, userId: string, sellerId: str
 
   if (jobType === 'reimport') {
     const BATCH = 50;
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     for (let i = 0; i < orderIds.length; i += BATCH) {
       const batch = orderIds.slice(i, i + BATCH);
       await Promise.all([
@@ -1939,6 +1962,16 @@ async function startBulkReimportJob(supabase: any, userId: string, sellerId: str
         supabase.from('meli_order_financials_cache').delete().eq('seller_id', sellerId).in('order_id', batch),
         supabase.from('meli_billing_details_cache').delete().eq('seller_id', sellerId).in('order_id', batch),
       ]);
+      // Resync billing data before recalculation to avoid zero commission/shipping
+      try {
+        await fetch(`${supabaseUrl}/functions/v1/ml-sync-real-costs`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${serviceKey}` },
+          body: JSON.stringify({ action: 'resync_batch_orders', order_ids: batch, seller_id: sellerId, user_id: userId }),
+        });
+      } catch (e) {
+        console.error(`[cost-engine] Bulk reimport billing resync error:`, e);
+      }
     }
   }
 

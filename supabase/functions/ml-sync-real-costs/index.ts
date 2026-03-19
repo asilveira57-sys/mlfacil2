@@ -273,7 +273,8 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
   }
 
   // Strategy 1b: If no fee from payments (new ML format post-2026-03-04), try /orders/{id}/billing_info
-  if (feeML === 0 && isNewMlBillingFormat(order.created_at_meli)) {
+  // Always try billing_info when no commission found (works for both legacy and new format)
+  if (feeML === 0) {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const biResp = await fetch(`https://api.mercadolibre.com/orders/${orderId}/billing_info`, { headers: { Authorization: `Bearer ${currentToken}` } });
@@ -456,17 +457,44 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
           user_id: userId, seller_id: sellerId, shipment_id: order.shipment_id, order_id: orderId,
           sender_cost: shippingCostSeller, gross_amount: d.gross_amount || 0, raw_json: d,
           synced_at: new Date().toISOString()
-        }, { onConflict: "shipment_id" });
+        }, { onConflict: "seller_id,shipment_id" });
       } else {
         await r.text();
       }
     } catch {}
   }
 
-  // 4. Get existing breakdown for cost_items_total and cost_packaging
-  const { data: existing } = await supabase.from("order_cost_breakdown_cache").select("cost_items_total, cost_packaging").eq("seller_id", sellerId).eq("order_id", orderId).maybeSingle();
+  // 4. Get existing breakdown for cost_items_total, cost_packaging and anti-overwrite
+  const { data: existing } = await supabase.from("order_cost_breakdown_cache").select("cost_items_total, cost_packaging, fee_ml, shipping_cost_seller, commission_cost, installments_cost, adjustments").eq("seller_id", sellerId).eq("order_id", orderId).maybeSingle();
   const costItemsTotal = existing?.cost_items_total || 0;
   const costPackaging = existing?.cost_packaging || 0;
+
+  // Anti-overwrite: preserve existing non-zero values when new values are zero
+  if (feeML === 0 && existing) {
+    const existingFee = Number(existing.fee_ml) || Number(existing.commission_cost) || 0;
+    if (existingFee > 0) {
+      feeML = existingFee;
+      feeMLSource = "billing";
+      sourceRefs.push("anti_overwrite:preserved_commission");
+      console.log(`[RealCosts] resync_single: preserved existing commission ${existingFee} for order ${orderId}`);
+    }
+  }
+  if (shippingCostSeller === 0 && existing) {
+    const existingShipping = Number(existing.shipping_cost_seller) || 0;
+    if (existingShipping > 0) {
+      shippingCostSeller = existingShipping;
+      sourceRefs.push("anti_overwrite:preserved_shipping");
+      console.log(`[RealCosts] resync_single: preserved existing shipping ${existingShipping} for order ${orderId}`);
+    }
+  }
+  if (installmentsCost === 0 && existing) {
+    const existingInst = Number(existing.installments_cost) || 0;
+    if (existingInst > 0) installmentsCost = existingInst;
+  }
+  if (adjustments === 0 && existing) {
+    const existingAdj = Number(existing.adjustments) || 0;
+    if (existingAdj > 0) adjustments = existingAdj;
+  }
 
   const revenueTotal = order.total_amount || 0;
   const commissionCost = feeML;
@@ -699,7 +727,8 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
     }
 
     // Strategy 1b: If no fee (new ML format), try /orders/{id}/billing_info
-    if (feeML === 0 && isNewMlBillingFormat(order.created_at_meli)) {
+    // Always try billing_info when no commission found
+    if (feeML === 0) {
       try {
         const biResp = await fetch(`https://api.mercadolibre.com/orders/${order.order_id}/billing_info`, { headers: { Authorization: `Bearer ${currentToken}` } });
         if (biResp.ok) {
@@ -777,7 +806,7 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
               user_id: userId, seller_id: sellerId, shipment_id: order.shipment_id, order_id: order.order_id,
               sender_cost: shippingCostSeller, gross_amount: d.gross_amount || 0, raw_json: d,
               synced_at: new Date().toISOString()
-            }, { onConflict: "shipment_id" });
+            }, { onConflict: "seller_id,shipment_id" });
           } else { await r.text(); }
         } catch {}
       }
@@ -898,9 +927,10 @@ async function handleResyncBatchOrders(supabase: any, userId: string, sellerId: 
   const orderMap = new Map(orders.map((o: any) => [o.order_id, o]));
 
   // 3. Bulk fetch existing breakdowns for cost_items_total / cost_packaging preservation
+  // Fetch existing breakdowns with ALL financial fields for anti-overwrite protection
   const { data: existingBreakdowns } = await supabase
     .from("order_cost_breakdown_cache")
-    .select("order_id, cost_items_total, cost_packaging")
+    .select("order_id, cost_items_total, cost_packaging, fee_ml, shipping_cost_seller, commission_cost, installments_cost, adjustments, fee_ml_source")
     .eq("seller_id", sellerId)
     .in("order_id", orderIds);
   const existingMap = new Map((existingBreakdowns || []).map((b: any) => [b.order_id, b]));
@@ -975,7 +1005,8 @@ async function handleResyncBatchOrders(supabase: any, userId: string, sellerId: 
     }
 
     // Strategy 1b: billing_info (new ML format)
-    if (feeML === 0 && isNewMlBillingFormat(order.created_at_meli)) {
+    // Always try billing_info when no commission found
+    if (feeML === 0) {
       try {
         const biResp = await fetch(`https://api.mercadolibre.com/orders/${orderId}/billing_info`, { headers: { Authorization: `Bearer ${currentToken}` } });
         if (biResp.ok) {
@@ -1015,10 +1046,54 @@ async function handleResyncBatchOrders(supabase: any, userId: string, sellerId: 
 
     // NO Strategy 3 in batch — too slow
 
-    // Shipping fallback from cache
+    // Shipping fallback: cache first, then API
     if (shippingCostSeller === 0 && order.shipment_id) {
-      const { data: sc } = await supabase.from("meli_shipment_costs_cache").select("sender_cost").eq("shipment_id", order.shipment_id).maybeSingle();
+      const { data: sc } = await supabase.from("meli_shipment_costs_cache").select("sender_cost").eq("seller_id", sellerId).eq("shipment_id", order.shipment_id).maybeSingle();
       if (sc) { shippingCostSeller = sc.sender_cost || 0; sourceRefs.push("shipment:cache"); }
+      else {
+        // API fallback for shipping
+        try {
+          const shipResp = await fetch(`https://api.mercadolibre.com/shipments/${order.shipment_id}/costs`, { headers: { Authorization: `Bearer ${currentToken}` } });
+          if (shipResp.ok) {
+            const shipData = await shipResp.json();
+            shippingCostSeller = shipData.sender?.cost || shipData.senders?.[0]?.cost || shipData.receiver?.cost || 0;
+            sourceRefs.push("shipment:api:batch");
+            if (shippingCostSeller > 0) {
+              await supabase.from("meli_shipment_costs_cache").upsert({
+                user_id: userId, seller_id: sellerId, shipment_id: order.shipment_id, order_id: orderId,
+                sender_cost: shippingCostSeller, gross_amount: shipData.gross_amount || 0, raw_json: shipData,
+                synced_at: new Date().toISOString()
+              }, { onConflict: "seller_id,shipment_id" });
+            }
+          } else { await shipResp.text(); }
+        } catch {}
+      }
+    }
+
+    // Anti-overwrite: preserve existing non-zero values when new values are zero
+    const existingBd = existingMap.get(orderId);
+    if (feeML === 0 && existingBd) {
+      const existingFee = Number(existingBd.fee_ml) || Number(existingBd.commission_cost) || 0;
+      if (existingFee > 0) {
+        feeML = existingFee;
+        feeMLSource = existingBd.fee_ml_source || "billing";
+        sourceRefs.push("anti_overwrite:preserved_commission");
+      }
+    }
+    if (shippingCostSeller === 0 && existingBd) {
+      const existingShipping = Number(existingBd.shipping_cost_seller) || 0;
+      if (existingShipping > 0) {
+        shippingCostSeller = existingShipping;
+        sourceRefs.push("anti_overwrite:preserved_shipping");
+      }
+    }
+    if (installmentsCost === 0 && existingBd) {
+      const existingInst = Number(existingBd.installments_cost) || 0;
+      if (existingInst > 0) installmentsCost = existingInst;
+    }
+    if (adjustments === 0 && existingBd) {
+      const existingAdj = Number(existingBd.adjustments) || 0;
+      if (existingAdj > 0) adjustments = existingAdj;
     }
 
     if (feeMLSource === "pending" && shippingCostSeller > 0) {
@@ -1554,7 +1629,7 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
                   user_id: userId, seller_id: sellerId, shipment_id: order.shipment_id, order_id: order.order_id, 
                   sender_cost: shippingCostSeller, gross_amount: d.gross_amount || 0, raw_json: d, 
                   synced_at: new Date().toISOString() 
-                }, { onConflict: "shipment_id" }); 
+                }, { onConflict: "seller_id,shipment_id" }); 
               }
             } catch {}
           }
@@ -1743,7 +1818,7 @@ async function handleStartOrContinue(supabase: any, userId: string, sellerId: st
                 user_id: userId, seller_id: sellerId, shipment_id: order.shipment_id, order_id: order.order_id, 
                 sender_cost: shippingCostSeller, gross_amount: d.gross_amount || 0, raw_json: d, 
                 synced_at: new Date().toISOString() 
-              }, { onConflict: "shipment_id" }); 
+              }, { onConflict: "seller_id,shipment_id" }); 
             }
           } catch {}
         }
