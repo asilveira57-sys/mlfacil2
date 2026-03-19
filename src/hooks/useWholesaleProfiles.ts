@@ -49,16 +49,26 @@ export function useWholesaleProfiles() {
   const companyId = activeAccount?.companyId;
   const queryClient = useQueryClient();
 
+  const getEffectiveTenant = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user?.id;
+    if (!userId) throw new Error("Sessão expirada. Faça login novamente.");
+    const tenantId = companyId || userId;
+    return { userId, tenantId };
+  };
+
+  const effectiveTenantId = companyId || null;
+
   const profilesQuery = useQuery({
     queryKey: ["wholesale-profiles", companyId],
     queryFn: async () => {
-      if (!companyId) return [] as WholesaleProfile[];
+      const { tenantId } = await getEffectiveTenant();
       
       // Fetch profiles
       const { data: profiles, error } = await (supabase as any)
         .from("wholesale_profiles")
         .select("*")
-        .eq("company_id", companyId)
+        .eq("company_id", tenantId)
         .order("created_at", { ascending: false });
       if (error) throw error;
       
@@ -79,23 +89,22 @@ export function useWholesaleProfiles() {
         tiers: (tiers || []).filter((t: any) => t.profile_id === p.id),
       })) as WholesaleProfile[];
     },
-    enabled: !!companyId,
+    enabled: true,
   });
 
   const createProfile = useMutation({
     mutationFn: async (formData: ProfileFormData) => {
-      if (!companyId) throw new Error("Sem empresa ativa");
-      const { data: { session } } = await supabase.auth.getSession();
+      const { userId, tenantId } = await getEffectiveTenant();
       
       const { data: profile, error } = await (supabase as any)
         .from("wholesale_profiles")
         .insert({
-          company_id: companyId,
+          company_id: tenantId,
           name: formData.name,
           rounding_mode: formData.rounding_mode,
           margin_min_pct: formData.margin_min_pct,
           allow_without_cost: formData.allow_without_cost,
-          created_by: session?.user?.id || null,
+          created_by: userId,
         })
         .select()
         .single();
