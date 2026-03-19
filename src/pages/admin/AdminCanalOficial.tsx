@@ -45,6 +45,7 @@ interface FormData {
   priority: number;
   is_active: boolean;
   target_seller_id: string;
+  expires_at: string;
 }
 
 const EMPTY_FORM: FormData = {
@@ -56,6 +57,7 @@ const EMPTY_FORM: FormData = {
   priority: 0,
   is_active: true,
   target_seller_id: '',
+  expires_at: '',
 };
 
 function AnnouncementForm({
