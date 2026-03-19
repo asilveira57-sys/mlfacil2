@@ -314,7 +314,12 @@ function ActiveSessionsSection() {
                   {!session.is_current && (
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
-                        <Button variant="ghost" size="sm" className="shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10 h-8 px-2 text-xs">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={signOutOthers.isPending}
+                          className="shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10 h-8 px-2 text-xs"
+                        >
                           <LogOut className="h-3.5 w-3.5 mr-1" />
                           Desconectar
                         </Button>
@@ -327,12 +332,13 @@ function ActiveSessionsSection() {
                           </AlertDialogDescription>
                         </AlertDialogHeader>
                         <AlertDialogFooter>
-                          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                          <AlertDialogCancel disabled={signOutOthers.isPending}>Cancelar</AlertDialogCancel>
                           <AlertDialogAction
                             onClick={() => signOutOthers.mutate(session.id)}
+                            disabled={signOutOthers.isPending}
                             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                           >
-                            Desconectar
+                            {signOutOthers.isPending ? 'Desconectando...' : 'Desconectar'}
                           </AlertDialogAction>
                         </AlertDialogFooter>
                       </AlertDialogContent>
@@ -349,7 +355,7 @@ function ActiveSessionsSection() {
             <Separator />
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button variant="destructive" className="w-full" size="sm">
+                <Button variant="destructive" className="w-full" size="sm" disabled={signOutOthers.isPending}>
                   <LogOut className="h-4 w-4 mr-2" />
                   Desconectar todos os outros dispositivos
                 </Button>
@@ -358,12 +364,12 @@ function ActiveSessionsSection() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Desconectar outros dispositivos?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    Isso vai encerrar a sessão em todos os outros dispositivos conectados à sua conta. 
+                    Isso vai encerrar a sessão em todos os outros dispositivos conectados à sua conta.
                     Você precisará fazer login novamente nesses dispositivos.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
-                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogCancel disabled={signOutOthers.isPending}>Cancelar</AlertDialogCancel>
                   <AlertDialogAction
                     onClick={() => signOutOthers.mutate(undefined)}
                     disabled={signOutOthers.isPending}

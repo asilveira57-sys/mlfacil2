@@ -157,30 +157,37 @@ export function useActiveSessions() {
   return useQuery({
     queryKey: ['active-sessions', userId],
     queryFn: async (): Promise<ActiveSession[]> => {
+      if (!userId) return [];
+
       const currentUserAgent = navigator.userAgent;
-      
+
       // Always ensure current session is registered first
       try {
-        // Check if we already have a recent login event for this user agent (last 24h)
+        // Check if we already have a recent login event for this exact user agent (last 24h)
         const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-        const { data: existing } = await supabase
+        const { data: existing, error: existingError } = await supabase
           .from('security_events')
           .select('id')
-          .eq('user_id', userId!)
+          .eq('user_id', userId)
           .eq('event_type', 'login')
           .eq('success', true)
+          .eq('user_agent', currentUserAgent)
           .gte('created_at', oneDayAgo)
           .limit(1);
-        
-        // If no recent login event, register one
+
+        if (existingError) throw existingError;
+
+        // If no recent login event for current user agent, register one
         if (!existing || existing.length === 0) {
-          await supabase.from('security_events').insert([{
-            user_id: userId!,
+          const { error: insertError } = await supabase.from('security_events').insert([{
+            user_id: userId,
             event_type: 'login',
             user_agent: currentUserAgent,
             success: true,
             metadata: { login_at: new Date().toISOString(), source: 'session_register' } as Json,
           }]);
+
+          if (insertError) throw insertError;
         }
       } catch {
         // Non-critical, continue
@@ -190,12 +197,12 @@ export function useActiveSessions() {
       const { data, error } = await supabase
         .from('security_events')
         .select('id, user_agent, ip_address, created_at')
-        .eq('user_id', userId!)
+        .eq('user_id', userId)
         .eq('event_type', 'login')
         .eq('success', true)
         .order('created_at', { ascending: false })
         .limit(10);
-      
+
       if (error) {
         console.error('[useActiveSessions] Query error:', error);
         // Return at least the current session on error
@@ -207,24 +214,22 @@ export function useActiveSessions() {
           is_current: true,
         }];
       }
-      
-      // Dedupe by user_agent (keep most recent per device)
-      const sessionsMap = new Map<string, ActiveSession>();
-      for (const event of data || []) {
-        const key = event.user_agent || event.id;
-        if (!sessionsMap.has(key)) {
-          sessionsMap.set(key, {
-            ...event,
-            is_current: event.user_agent === currentUserAgent,
-          });
-        }
-      }
-      
-      const sessions = Array.from(sessionsMap.values());
-      
-      // Always include current session even if DB returned nothing
-      if (sessions.length === 0) {
-        sessions.push({
+
+      // Keep recent sessions as distinct entries and mark only one as current
+      let currentMarked = false;
+      const sessions = (data || []).map((event) => {
+        const isCurrent = !currentMarked && event.user_agent === currentUserAgent;
+        if (isCurrent) currentMarked = true;
+
+        return {
+          ...event,
+          is_current: isCurrent,
+        };
+      });
+
+      // Always include current session if no matching row was found
+      if (!currentMarked) {
+        sessions.unshift({
           id: 'current-session',
           user_agent: currentUserAgent,
           ip_address: null,
@@ -232,7 +237,7 @@ export function useActiveSessions() {
           is_current: true,
         });
       }
-      
+
       return sessions;
     },
     enabled: !!userId,
@@ -245,49 +250,51 @@ export function useSignOutOtherSessions() {
 
   return useMutation({
     mutationFn: async (sessionId?: string) => {
-      // If sessionId provided, we're disconnecting a specific "session" (security_event record)
-      // signOut({ scope: 'others' }) revokes all other real auth sessions
-      const { error } = await supabase.auth.signOut({ scope: 'others' });
-      if (error) throw error;
+      if (!userId) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      const { error: authError } = await supabase.auth.signOut({ scope: 'others' });
+      if (authError) throw authError;
 
       const currentUserAgent = navigator.userAgent;
 
+      let deleteQuery = supabase
+        .from('security_events')
+        .delete()
+        .eq('user_id', userId)
+        .eq('event_type', 'login');
+
       if (sessionId) {
-        // Remove the specific login event
-        await supabase
-          .from('security_events')
-          .delete()
-          .eq('id', sessionId)
-          .eq('user_id', userId!);
+        deleteQuery = deleteQuery.eq('id', sessionId);
       } else {
-        // Remove all non-current login events
-        await supabase
-          .from('security_events')
-          .delete()
-          .eq('user_id', userId!)
-          .eq('event_type', 'login')
-          .neq('user_agent', currentUserAgent);
+        deleteQuery = deleteQuery.neq('user_agent', currentUserAgent);
       }
 
-      // Log the event
-      await supabase.from('security_events').insert([{
-        user_id: userId!,
+      const { error: deleteError } = await deleteQuery;
+      if (deleteError) throw deleteError;
+
+      const { error: logError } = await supabase.from('security_events').insert([{
+        user_id: userId,
         event_type: 'all_sessions_revoked',
         user_agent: currentUserAgent,
         success: true,
         metadata: { revoked_at: new Date().toISOString(), session_id: sessionId || 'all' } as Json,
       }]);
+
+      if (logError) throw logError;
     },
     onSuccess: (_data, sessionId) => {
       queryClient.invalidateQueries({ queryKey: ['active-sessions', userId] });
       queryClient.invalidateQueries({ queryKey: ['security-events', userId] });
-      toast.success(sessionId 
-        ? 'Dispositivo desconectado com sucesso' 
-        : 'Todos os outros dispositivos foram desconectados'
+      toast.success(
+        sessionId
+          ? 'Dispositivo desconectado com sucesso'
+          : 'Todos os outros dispositivos foram desconectados',
       );
     },
-    onError: () => {
-      toast.error('Erro ao desconectar dispositivos');
+    onError: (error: Error) => {
+      toast.error(error.message || 'Erro ao desconectar dispositivos');
     },
   });
 }
