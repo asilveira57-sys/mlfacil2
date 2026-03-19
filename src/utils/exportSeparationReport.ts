@@ -18,6 +18,7 @@ interface SeparationReportOptions {
 interface AccumulatedItem {
   item_id: string;
   variation_id: string | null;
+  variation_attributes: { name: string; value: string }[] | null;
   sku: string | null;
   title: string | null;
   thumbnail: string | null;
