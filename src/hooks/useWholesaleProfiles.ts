@@ -68,7 +68,7 @@ export function useWholesaleProfiles() {
       const { data: profiles, error } = await (supabase as any)
         .from("wholesale_profiles")
         .select("*")
-        .eq("company_id", companyId)
+        .eq("company_id", tenantId)
         .order("created_at", { ascending: false });
       if (error) throw error;
       
