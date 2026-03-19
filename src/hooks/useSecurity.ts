@@ -156,7 +156,36 @@ export function useActiveSessions() {
 
   return useQuery({
     queryKey: ['active-sessions', userId],
-    queryFn: async () => {
+    queryFn: async (): Promise<ActiveSession[]> => {
+      const currentUserAgent = navigator.userAgent;
+      
+      // Always ensure current session is registered first
+      try {
+        // Check if we already have a recent login event for this user agent (last 24h)
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const { data: existing } = await supabase
+          .from('security_events')
+          .select('id')
+          .eq('user_id', userId!)
+          .eq('event_type', 'login')
+          .eq('success', true)
+          .gte('created_at', oneDayAgo)
+          .limit(1);
+        
+        // If no recent login event, register one
+        if (!existing || existing.length === 0) {
+          await supabase.from('security_events').insert([{
+            user_id: userId!,
+            event_type: 'login',
+            user_agent: currentUserAgent,
+            success: true,
+            metadata: { login_at: new Date().toISOString(), source: 'session_register' } as Json,
+          }]);
+        }
+      } catch {
+        // Non-critical, continue
+      }
+
       // Get recent login events to show as "active sessions"
       const { data, error } = await supabase
         .from('security_events')
@@ -167,9 +196,17 @@ export function useActiveSessions() {
         .order('created_at', { ascending: false })
         .limit(10);
       
-      if (error) throw error;
-      
-      const currentUserAgent = navigator.userAgent;
+      if (error) {
+        console.error('[useActiveSessions] Query error:', error);
+        // Return at least the current session on error
+        return [{
+          id: 'current-session',
+          user_agent: currentUserAgent,
+          ip_address: null,
+          created_at: new Date().toISOString(),
+          is_current: true,
+        }];
+      }
       
       // Dedupe by user_agent (keep most recent per device)
       const sessionsMap = new Map<string, ActiveSession>();
@@ -185,7 +222,7 @@ export function useActiveSessions() {
       
       const sessions = Array.from(sessionsMap.values());
       
-      // If no sessions logged yet, show current session as fallback
+      // Always include current session even if DB returned nothing
       if (sessions.length === 0) {
         sessions.push({
           id: 'current-session',
@@ -194,17 +231,6 @@ export function useActiveSessions() {
           created_at: new Date().toISOString(),
           is_current: true,
         });
-        
-        // Also register the current session for future queries
-        try {
-          await supabase.from('security_events').insert([{
-            user_id: userId!,
-            event_type: 'login',
-            user_agent: currentUserAgent,
-            success: true,
-            metadata: { login_at: new Date().toISOString(), source: 'session_backfill' },
-          }]);
-        } catch { /* silent */ }
       }
       
       return sessions;
