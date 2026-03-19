@@ -26,6 +26,17 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  // Clean up stale onboarding localStorage when onboarding is done
+  useEffect(() => {
+    if (!requiresOnboarding && hasSession) {
+      const staleKey = "mktp_onboarding_progress";
+      if (localStorage.getItem(staleKey)) {
+        localStorage.removeItem(staleKey);
+        console.info("[ProtectedRoute] Cleared stale onboarding localStorage");
+      }
+    }
+  }, [requiresOnboarding, hasSession]);
+
   // Still checking session
   if (!sessionChecked || accessLoading) {
     return (
@@ -40,17 +51,6 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     console.info("[ProtectedRoute] No session, redirecting to /auth from:", location.pathname);
     return <Navigate to="/auth" state={{ from: location }} replace />;
   }
-
-  // Clean up stale onboarding localStorage when onboarding is done
-  useEffect(() => {
-    if (!requiresOnboarding && hasSession) {
-      const staleKey = "mktp_onboarding_progress";
-      if (localStorage.getItem(staleKey)) {
-        localStorage.removeItem(staleKey);
-        console.info("[ProtectedRoute] Cleared stale onboarding localStorage");
-      }
-    }
-  }, [requiresOnboarding, hasSession]);
 
   // Onboarding still pending — redirect to /primeiro-acesso unless already there
   const isBypassRoute = ONBOARDING_BYPASS.some((p) => location.pathname.startsWith(p));
