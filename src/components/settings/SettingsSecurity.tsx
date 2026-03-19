@@ -365,7 +365,7 @@ function ActiveSessionsSection() {
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancelar</AlertDialogCancel>
                   <AlertDialogAction
-                    onClick={() => signOutOthers.mutate()}
+                    onClick={() => signOutOthers.mutate(undefined)}
                     disabled={signOutOthers.isPending}
                     className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                   >
