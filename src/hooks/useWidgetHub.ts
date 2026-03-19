@@ -68,19 +68,20 @@ export function useUserWidgets() {
     queryKey: ['user-dashboard-widgets', tenantId],
     queryFn: async () => {
       const userId = await getCurrentUserId();
-      if (!userId || !tenantId) return [];
+      if (!userId) return [];
+      const effectiveTenant = tenantId || userId;
       const { data, error } = await supabase
         .from('user_dashboard_widgets')
         .select('*')
         .eq('user_id', userId)
-        .eq('tenant_id', tenantId)
+        .eq('tenant_id', effectiveTenant)
         .eq('visivel', true)
         .order('posicao_y')
         .order('posicao_x');
       if (error) throw error;
       return (data ?? []) as UserWidget[];
     },
-    enabled: !!tenantId,
+    enabled: true,
   });
 }
 
