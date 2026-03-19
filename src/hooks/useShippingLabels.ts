@@ -338,7 +338,7 @@ export function useShippingLabels({ sellerId }: UseShippingLabelsOptions) {
       
       const { data: items, error } = await supabase
         .from('meli_order_items_cache')
-        .select('order_id, item_id, variation_id, sku, title_short, title, quantity, unit_price, permalink, catalog_product_id, thumbnail')
+        .select('order_id, item_id, variation_id, variation_attributes, sku, title_short, title, quantity, unit_price, permalink, catalog_product_id, thumbnail')
         .eq('seller_id', sellerId)
         .in('order_id', orderIds);
 
