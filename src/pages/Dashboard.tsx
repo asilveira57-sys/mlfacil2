@@ -72,12 +72,7 @@ const Dashboard = () => {
       subtitle={t('dashboard:subtitle')}
     >
       <div className="p-4 lg:p-6 space-y-6">
-        {showWelcome ? (
-          <WelcomeScreen
-            userName={user?.user_metadata?.full_name || user?.email?.split('@')[0]}
-            onContinue={() => setShowWelcome(false)}
-          />
-        ) : isConnected ? (
+        {isConnected ? (
           <>
             {/* Connected status bar */}
             <MLConnectionCard connectionInfo={connectionInfo} />
