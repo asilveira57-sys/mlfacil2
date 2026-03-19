@@ -377,8 +377,8 @@ async function handleResyncSingle(supabase: any, userId: string, sellerId: strin
           let detailsResp: Response | undefined;
           for (let retry = 0; retry < 3; retry++) {
             detailsResp = await fetch(detailsUrl, { headers: { Authorization: `Bearer ${currentToken}` } });
-            if (detailsResp.status === 401) { await detailsResp.text(); if (await tryRefreshToken()) continue; break; }
-            if (detailsResp.status === 429) { await detailsResp.text(); await new Promise(r => setTimeout(r, 2000 * (retry + 1))); continue; }
+            if (detailsResp.status === 401) { await detailsResp.text(); detailsResp = undefined; if (await tryRefreshToken()) continue; break; }
+            if (detailsResp.status === 429) { await detailsResp.text(); detailsResp = undefined; await new Promise(r => setTimeout(r, 2000 * (retry + 1))); continue; }
             break;
           }
           
