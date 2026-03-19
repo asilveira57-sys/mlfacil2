@@ -281,6 +281,7 @@ async function processOrdersInBackground(
       permalink: string | null;
       catalog_product_id: string | null;
       thumbnail: string | null;
+      variation_attributes: { name: string; value: string }[] | null;
     }
     const allOrderItems: OrderItemData[] = [];
 
