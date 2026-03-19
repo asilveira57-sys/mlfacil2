@@ -96,7 +96,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const [resyncingOrder, setResyncingOrder] = useState<string | null>(null);
   const [reimportingOrder, setReimportingOrder] = useState<string | null>(null);
 
-  // Batch selection state
+  // Batch selection state (left side)
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
   const [selectAllPages, setSelectAllPages] = useState(false);
   const [loadingAllIds, setLoadingAllIds] = useState(false);
@@ -105,6 +105,14 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isPollingActiveRef = useRef(false);
+
+  // Safe 1-by-1 resync state (right side)
+  const [safeSelectedOrders, setSafeSelectedOrders] = useState<Set<string>>(new Set());
+  const [safeSelectAllPages, setSafeSelectAllPages] = useState(false);
+  const [safeLoadingAllIds, setSafeLoadingAllIds] = useState(false);
+  const [safeProcessing, setSafeProcessing] = useState(false);
+  const [safeProgress, setSafeProgress] = useState({ current: 0, total: 0, currentOrderId: '', errors: [] as string[] });
+  const safeCancelRef = useRef(false);
 
   const stopJobPolling = useCallback(() => {
     isPollingActiveRef.current = false;
@@ -358,6 +366,180 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     }
   };
 
+  // Safe selection toggles (right side)
+  const safeAllOnPageSelected = orders.length > 0 && orders.every(o => safeSelectedOrders.has(o.order_id));
+
+  const toggleSafeSelectAll = () => {
+    setSafeSelectAllPages(false);
+    setSafeSelectedOrders(prev => {
+      const next = new Set(prev);
+      if (safeAllOnPageSelected) {
+        orders.forEach(o => next.delete(o.order_id));
+      } else {
+        orders.forEach(o => next.add(o.order_id));
+      }
+      return next;
+    });
+  };
+
+  const toggleSafeSelectOrder = (orderId: string) => {
+    setSafeSelectAllPages(false);
+    setSafeSelectedOrders(prev => {
+      const next = new Set(prev);
+      if (next.has(orderId)) next.delete(orderId);
+      else next.add(orderId);
+      return next;
+    });
+  };
+
+  const handleSafeSelectAllPages = async () => {
+    setSafeLoadingAllIds(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const params = new URLSearchParams({
+        seller_id: sellerId,
+        period_days: periodDays,
+        search,
+        ids_only: 'true',
+      });
+
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+      if (profitFilter !== 'all') params.set('profit_type', profitFilter);
+      if (ecommerceFilter !== 'all') params.set('ecommerce_cost', ecommerceFilter);
+      if (shippingFilter !== 'all') params.set('shipping_filter', shippingFilter);
+      if (orderStatusFilter !== 'paid') params.set('order_status', orderStatusFilter);
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders?${params}`,
+        { headers: { Authorization: `Bearer ${session.access_token}` } }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        const allIds = data.order_ids || [];
+        setSafeSelectedOrders(new Set(allIds));
+        setSafeSelectAllPages(true);
+        toast.success(`${allIds.length} pedidos selecionados para modo seguro`);
+      }
+    } catch (error) {
+      console.error('Error fetching all IDs:', error);
+      toast.error('Erro ao selecionar todos os pedidos');
+    } finally {
+      setSafeLoadingAllIds(false);
+    }
+  };
+
+  // Safe 1-by-1 sequential resync handler
+  const handleSafeResync = async () => {
+    const ids = Array.from(safeSelectedOrders);
+    if (ids.length === 0) return;
+
+    safeCancelRef.current = false;
+    setSafeProcessing(true);
+    setSafeProgress({ current: 0, total: ids.length, currentOrderId: '', errors: [] });
+
+    const errors: string[] = [];
+    let sinceLastCalc = 0;
+    const pendingCalcIds: string[] = [];
+
+    for (let i = 0; i < ids.length; i++) {
+      if (safeCancelRef.current) {
+        toast.info(`Cancelado após ${i} de ${ids.length} pedidos`);
+        break;
+      }
+
+      const orderId = ids[i];
+      setSafeProgress(p => ({ ...p, current: i, currentOrderId: orderId }));
+
+      // Resync single with retry up to 2x
+      let success = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const { error } = await supabase.functions.invoke('ml-sync-real-costs', {
+            body: { seller_id: sellerId, action: 'resync_single', order_id: orderId }
+          });
+          if (error) throw error;
+          success = true;
+          break;
+        } catch (err) {
+          if (attempt < 2) {
+            await new Promise(r => setTimeout(r, 2000));
+          }
+        }
+      }
+
+      if (!success) {
+        errors.push(orderId);
+      }
+
+      pendingCalcIds.push(orderId);
+      sinceLastCalc++;
+
+      // Recalculate every 10 orders
+      if (sinceLastCalc >= 10) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            for (const calcId of pendingCalcIds) {
+              await fetch(
+                `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders/calculate`,
+                {
+                  method: 'POST',
+                  headers: {
+                    Authorization: `Bearer ${session.access_token}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({ seller_id: sellerId, order_id: calcId }),
+                }
+              );
+            }
+          }
+        } catch {}
+        pendingCalcIds.length = 0;
+        sinceLastCalc = 0;
+      }
+
+      setSafeProgress(p => ({ ...p, current: i + 1, errors: [...errors] }));
+    }
+
+    // Recalculate remaining
+    if (pendingCalcIds.length > 0) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          for (const calcId of pendingCalcIds) {
+            await fetch(
+              `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders/calculate`,
+              {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${session.access_token}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ seller_id: sellerId, order_id: calcId }),
+              }
+            );
+          }
+        }
+      } catch {}
+    }
+
+    setSafeProcessing(false);
+    setSafeSelectedOrders(new Set());
+    setSafeSelectAllPages(false);
+    invalidateCostCache('orders');
+    loadOrders();
+
+    const processed = safeCancelRef.current ? safeProgress.current : ids.length;
+    if (errors.length > 0) {
+      toast.warning(`${processed - errors.length} atualizados, ${errors.length} com erro`);
+    } else {
+      toast.success(`${processed} pedidos atualizados com sucesso!`);
+    }
+  };
+
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
       if (sortDirection === 'desc') {
@@ -452,6 +634,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
   // Reset selectAllPages when filters/page change
   useEffect(() => {
     setSelectAllPages(false);
+    setSafeSelectAllPages(false);
   }, [periodDays, statusFilter, profitFilter, ecommerceFilter, shippingFilter, orderStatusFilter, page, search]);
 
   // Check for active bulk jobs on mount
@@ -879,6 +1062,85 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                 </div>
               )}
 
+              {/* Safe 1-by-1 banners */}
+              {safeAllOnPageSelected && !safeSelectAllPages && totalOrders > orders.length && !safeProcessing && (
+                <div className="flex items-center gap-2 p-3 mb-2 rounded-lg bg-green-500/10 border border-green-500/20 text-sm">
+                  <span>
+                    Todos os <strong>{orders.length}</strong> desta página selecionados (modo seguro).
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="link"
+                    className="p-0 h-auto font-semibold"
+                    onClick={handleSafeSelectAllPages}
+                    disabled={safeLoadingAllIds}
+                  >
+                    {safeLoadingAllIds ? (
+                      <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />Carregando...</>
+                    ) : (
+                      <>Selecionar todos os {totalOrders.toLocaleString()} pedidos</>
+                    )}
+                  </Button>
+                </div>
+              )}
+
+              {safeSelectAllPages && (
+                <div className="flex items-center gap-2 p-3 mb-2 rounded-lg bg-green-500/10 border border-green-500/20 text-sm">
+                  <CheckSquare className="h-4 w-4 text-green-600" />
+                  <span>
+                    Todos os <strong>{safeSelectedOrders.size.toLocaleString()}</strong> pedidos selecionados (modo seguro 1 a 1).
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="link"
+                    className="p-0 h-auto"
+                    onClick={() => { setSafeSelectAllPages(false); setSafeSelectedOrders(new Set()); }}
+                  >
+                    Limpar seleção
+                  </Button>
+                </div>
+              )}
+
+              {/* Safe action bar */}
+              {(safeSelectedOrders.size > 0 || safeProcessing) && (
+                <div className="flex items-center gap-3 p-3 mb-2 rounded-lg bg-green-500/10 border border-green-500/20 flex-wrap">
+                  <span className="text-sm font-medium">🛡️ Modo Seguro: {safeSelectedOrders.size.toLocaleString()} selecionado(s)</span>
+                  {!safeProcessing ? (
+                    <>
+                      <Button
+                        size="sm"
+                        className="bg-green-600 hover:bg-green-700 text-white"
+                        onClick={handleSafeResync}
+                      >
+                        <RotateCw className="h-3.5 w-3.5 mr-1" />
+                        Atualizar 1 a 1 (seguro)
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => { setSafeSelectedOrders(new Set()); setSafeSelectAllPages(false); }}>
+                        Limpar seleção
+                      </Button>
+                    </>
+                  ) : (
+                    <div className="flex-1 flex items-center gap-2">
+                      <Progress value={safeProgress.total > 0 ? (safeProgress.current / safeProgress.total) * 100 : 0} className="flex-1 h-2" />
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">
+                        {safeProgress.current}/{safeProgress.total} — {safeProgress.currentOrderId}
+                      </span>
+                      {safeProgress.errors.length > 0 && (
+                        <Badge variant="destructive" className="text-xs">{safeProgress.errors.length} erro(s)</Badge>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive h-6 px-2 text-xs"
+                        onClick={() => { safeCancelRef.current = true; }}
+                      >
+                        Cancelar
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="border rounded-lg overflow-hidden">
                 <Table className="table-fixed w-full [&_td]:px-1.5 [&_td]:py-1.5 [&_th]:px-1.5 [&_th]:py-2 text-xs">
                   <TableHeader>
@@ -959,7 +1221,17 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                         </div>
                       </TableHead>
                       <TableHead className="w-[72px]">Status</TableHead>
-                      <TableHead className="w-[52px]"></TableHead>
+                      <TableHead className="w-[80px]">
+                        <div className="flex items-center gap-1">
+                          <Checkbox
+                            checked={safeAllOnPageSelected}
+                            onCheckedChange={toggleSafeSelectAll}
+                            disabled={safeProcessing}
+                            aria-label="Selecionar todos (modo seguro)"
+                          />
+                          <span className="text-[10px]">Ações</span>
+                        </div>
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1120,6 +1392,12 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                              <Checkbox
+                                checked={safeSelectedOrders.has(order.order_id)}
+                                onCheckedChange={() => toggleSafeSelectOrder(order.order_id)}
+                                disabled={safeProcessing}
+                                className="mr-0.5"
+                              />
                               <Button
                                 size="sm"
                                 variant="ghost"
