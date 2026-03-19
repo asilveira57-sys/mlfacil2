@@ -126,6 +126,7 @@ export default function Admin() {
           <Route path="onboarding" element={<AdminOnboarding />} />
           <Route path="canal-oficial" element={<AdminCanalOficial />} />
           <Route path="usuarios" element={<AdminUsers />} />
+          <Route path="clientes" element={<AdminClientes />} />
           <Route path="perfis" element={<AdminAccessProfiles />} />
           <Route path="colaboradores" element={<AdminCollaboratorsPlaceholder />} />
           <Route path="planos/*" element={<PlanosRedirect />} />
