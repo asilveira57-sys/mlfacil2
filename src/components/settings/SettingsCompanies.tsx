@@ -63,6 +63,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { CompanyLogoSection } from "./CompanyLogoSection";
 import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 
 interface MarketplaceAccount {
