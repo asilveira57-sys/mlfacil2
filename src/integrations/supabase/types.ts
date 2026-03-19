@@ -7600,6 +7600,7 @@ export type Database = {
           title_short: string | null
           unit_price: number
           user_id: string
+          variation_attributes: Json | null
           variation_id: string | null
         }
         Insert: {
@@ -7621,6 +7622,7 @@ export type Database = {
           title_short?: string | null
           unit_price?: number
           user_id: string
+          variation_attributes?: Json | null
           variation_id?: string | null
         }
         Update: {
@@ -7642,6 +7644,7 @@ export type Database = {
           title_short?: string | null
           unit_price?: number
           user_id?: string
+          variation_attributes?: Json | null
           variation_id?: string | null
         }
         Relationships: []
