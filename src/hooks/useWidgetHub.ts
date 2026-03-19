@@ -146,8 +146,7 @@ export function useWidgetActions() {
 
   const removeWidget = useMutation({
     mutationFn: async (widget: UserWidget) => {
-      const userId = await getCurrentUserId();
-      if (!userId) throw new Error('Auth required');
+      const { userId, tenantId } = await getEffectiveTenant();
       await supabase.from('user_dashboard_widgets').delete().eq('id', widget.id);
       await logWidgetAction(tenantId, userId, widget.widget_slug, 'remover_widget');
       await emitWidgetEvent(tenantId, userId, widget.widget_slug, 'widget_removido');
@@ -157,8 +156,7 @@ export function useWidgetActions() {
 
   const togglePin = useMutation({
     mutationFn: async (widget: UserWidget) => {
-      const userId = await getCurrentUserId();
-      if (!userId) throw new Error('Auth required');
+      const { userId, tenantId } = await getEffectiveTenant();
       const newVal = !widget.fixado;
       await supabase.from('user_dashboard_widgets').update({ fixado: newVal, updated_at: new Date().toISOString() } as any).eq('id', widget.id);
       await logWidgetAction(tenantId, userId, widget.widget_slug, 'fixar_widget', { fixado: newVal });
@@ -169,8 +167,7 @@ export function useWidgetActions() {
 
   const moveWidget = useMutation({
     mutationFn: async ({ widgetId, slug, x, y }: { widgetId: string; slug: string; x: number; y: number }) => {
-      const userId = await getCurrentUserId();
-      if (!userId) throw new Error('Auth required');
+      const { userId, tenantId } = await getEffectiveTenant();
       await supabase.from('user_dashboard_widgets').update({ posicao_x: x, posicao_y: y, updated_at: new Date().toISOString() } as any).eq('id', widgetId);
       await logWidgetAction(tenantId, userId, slug, 'mover_widget', { x, y });
       await emitWidgetEvent(tenantId, userId, slug, 'widget_movido');
@@ -180,8 +177,7 @@ export function useWidgetActions() {
 
   const resizeWidget = useMutation({
     mutationFn: async ({ widgetId, slug, w, h }: { widgetId: string; slug: string; w: number; h: number }) => {
-      const userId = await getCurrentUserId();
-      if (!userId) throw new Error('Auth required');
+      const { userId, tenantId } = await getEffectiveTenant();
       await supabase.from('user_dashboard_widgets').update({ largura: w, altura: h, updated_at: new Date().toISOString() } as any).eq('id', widgetId);
       await logWidgetAction(tenantId, userId, slug, 'redimensionar_widget', { w, h });
     },
@@ -190,8 +186,7 @@ export function useWidgetActions() {
 
   const resetLayout = useMutation({
     mutationFn: async () => {
-      const userId = await getCurrentUserId();
-      if (!userId || !tenantId) throw new Error('Auth required');
+      const { userId, tenantId } = await getEffectiveTenant();
       await supabase.from('user_dashboard_widgets').delete().eq('user_id', userId).eq('tenant_id', tenantId);
       await logWidgetAction(tenantId, userId, 'all', 'restaurar_layout');
       await emitWidgetEvent(tenantId, userId, 'all', 'layout_restaurado');
@@ -201,8 +196,7 @@ export function useWidgetActions() {
 
   const reorderWidgets = useMutation({
     mutationFn: async (orderedIds: string[]) => {
-      const userId = await getCurrentUserId();
-      if (!userId) throw new Error('Auth required');
+      const { userId, tenantId } = await getEffectiveTenant();
       const updates = orderedIds.map((id, i) =>
         supabase.from('user_dashboard_widgets').update({ posicao_y: i, updated_at: new Date().toISOString() } as any).eq('id', id)
       );
