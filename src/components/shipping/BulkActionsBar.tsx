@@ -24,6 +24,7 @@ export function BulkActionsBar({
   selectedCount,
   onClear,
   onGenerateLabels,
+  onSeparationReport,
   isGenerating,
   generationProgress,
 }: BulkActionsBarProps) {
