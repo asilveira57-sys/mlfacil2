@@ -821,8 +821,8 @@ async function handleReprocessPending(supabase: any, userId: string, sellerId: s
     
     processedCount++;
 
-    // Rate limit: 200ms between orders
-    await new Promise(r => setTimeout(r, 200));
+    // Rate limit: 100ms between orders
+    await new Promise(r => setTimeout(r, 100));
   }
 
   if (rowsToUpsert.length) {
