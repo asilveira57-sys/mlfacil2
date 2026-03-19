@@ -1969,9 +1969,10 @@ async function processChunkAndContinue(supabase: any, jobId: string) {
 
   const orderIds = job.order_ids as string[];
   const offset = job.current_offset as number;
-  const chunkSize = job.chunk_size as number;
   const isResync = job.job_type === 'resync';
-  const delayMs = isResync ? 800 : CHUNK_DELAY_MS;
+  // For resync: use larger chunks (batch API), for reimport: keep original chunk size
+  const chunkSize = isResync ? Math.min(orderIds.length - offset, 50) : (job.chunk_size as number);
+  const delayMs = isResync ? 100 : CHUNK_DELAY_MS;
 
   if (offset >= orderIds.length) {
     await supabase.from('cost_bulk_jobs').update({ status: 'done' }).eq('id', jobId);
@@ -1986,39 +1987,67 @@ async function processChunkAndContinue(supabase: any, jobId: string) {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-  for (let i = 0; i < chunk.length; i++) {
+  if (isResync) {
+    // BATCH resync: single call to ml-sync-real-costs with all orders in chunk
     try {
-      if (isResync) {
-        // Step 1: Call ml-sync-real-costs to fetch real billing/shipping from ML API
-        const syncRes = await fetch(`${supabaseUrl}/functions/v1/ml-sync-real-costs`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${serviceKey}`,
-          },
-          body: JSON.stringify({
-            action: 'resync_single',
-            order_id: chunk[i],
-            seller_id: job.seller_id,
-            user_id: job.user_id,
-          }),
-        });
-        if (!syncRes.ok) {
-          const errBody = await syncRes.text().catch(() => 'Unknown');
-          console.warn(`[cost-engine] ml-sync-real-costs failed for order ${chunk[i]}: ${syncRes.status} ${errBody}`);
+      const syncRes = await fetch(`${supabaseUrl}/functions/v1/ml-sync-real-costs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${serviceKey}`,
+        },
+        body: JSON.stringify({
+          action: 'resync_batch_orders',
+          order_ids: chunk,
+          seller_id: job.seller_id,
+          user_id: job.user_id,
+        }),
+      });
+      if (syncRes.ok) {
+        const syncResult = await syncRes.json();
+        console.log(`[cost-engine] Batch resync: ${syncResult.processed} orders in ${syncResult.duration_ms}ms`);
+        // Now consolidate each order with taxes, packaging, product cost
+        for (const oid of chunk) {
+          try {
+            await calculateSingleOrder(supabase, job.user_id, job.seller_id, oid);
+            successCount++;
+          } catch (e) {
+            errorCount++;
+            lastError = `${oid}: ${e instanceof Error ? e.message : 'Unknown error'}`;
+          }
         }
-        // Step 2: Consolidate with taxes, packaging, product cost
-        await calculateSingleOrder(supabase, job.user_id, job.seller_id, chunk[i]);
       } else {
-        await calculateSingleOrder(supabase, job.user_id, job.seller_id, chunk[i]);
+        const errBody = await syncRes.text().catch(() => 'Unknown');
+        console.warn(`[cost-engine] Batch resync failed: ${syncRes.status} ${errBody}`);
+        // Fallback: still calculate from existing cache
+        for (const oid of chunk) {
+          try {
+            await calculateSingleOrder(supabase, job.user_id, job.seller_id, oid);
+            successCount++;
+          } catch (e) {
+            errorCount++;
+            lastError = `${oid}: ${e instanceof Error ? e.message : 'Unknown error'}`;
+          }
+        }
       }
-      successCount++;
     } catch (e) {
-      errorCount++;
-      lastError = `${chunk[i]}: ${e instanceof Error ? e.message : 'Unknown error'}`;
-      console.error(`[cost-engine] Bulk ${job.job_type} error for order ${chunk[i]}:`, e);
+      console.error(`[cost-engine] Batch resync call failed:`, e);
+      errorCount += chunk.length;
+      lastError = e instanceof Error ? e.message : 'Batch resync failed';
     }
-    if (i < chunk.length - 1) await new Promise(r => setTimeout(r, delayMs));
+  } else {
+    // Non-resync (reimport): process individually
+    for (let i = 0; i < chunk.length; i++) {
+      try {
+        await calculateSingleOrder(supabase, job.user_id, job.seller_id, chunk[i]);
+        successCount++;
+      } catch (e) {
+        errorCount++;
+        lastError = `${chunk[i]}: ${e instanceof Error ? e.message : 'Unknown error'}`;
+        console.error(`[cost-engine] Bulk ${job.job_type} error for order ${chunk[i]}:`, e);
+      }
+      if (i < chunk.length - 1) await new Promise(r => setTimeout(r, delayMs));
+    }
   }
 
   const newOffset = offset + chunk.length;
@@ -2029,8 +2058,6 @@ async function processChunkAndContinue(supabase: any, jobId: string) {
   }).eq('id', jobId);
 
   if (newOffset < orderIds.length) {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     EdgeRuntime.waitUntil(
       fetch(`${supabaseUrl}/functions/v1/cost-engine/orders/bulk-reimport-continue`, {
         method: 'POST',

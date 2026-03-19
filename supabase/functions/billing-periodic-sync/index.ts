@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        // Trigger billing sync via edge function
+        // Trigger billing sync via edge function (internal call with service role)
         const response = await fetch(`${SUPABASE_URL}/functions/v1/ml-sync-billing-details`, {
           method: "POST",
           headers: {
@@ -78,6 +78,7 @@ Deno.serve(async (req) => {
           },
           body: JSON.stringify({
             seller_id: account.ml_user_id,
+            user_id: account.user_id,
             action: "sync",
             scope: "recent",
           }),

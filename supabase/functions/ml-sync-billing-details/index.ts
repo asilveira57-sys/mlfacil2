@@ -47,12 +47,37 @@ Deno.serve(async (req) => {
     }
 
     const token = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
-    if (userError || !user) {
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    
+    let user: { id: string };
+    
+    // Accept internal calls with service role key
+    if (token === serviceRoleKey) {
+      const body = await req.json().catch(() => ({}));
+      const bodyUserId = body.user_id as string;
+      // For internal calls, user_id is optional (cron jobs don't have one)
+      user = { id: bodyUserId || 'system' };
+      
+      const { seller_id, action, scope } = body;
+      if (!seller_id) {
+        return new Response(JSON.stringify({ error: "seller_id is required" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (action === "status") return await handleGetStatus(supabase, user.id, seller_id, corsHeaders);
+      if (action === "sync") return await handleSync(supabase, user.id, seller_id, scope || "recent", corsHeaders);
+      if (action === "reset") return await handleReset(supabase, user.id, seller_id, corsHeaders);
+      return await handleGetStatus(supabase, user.id, seller_id, corsHeaders);
+    }
+    
+    // External call: validate JWT
+    const { data: { user: authUser }, error: userError } = await supabase.auth.getUser(token);
+    if (userError || !authUser) {
       return new Response(JSON.stringify({ error: "Invalid token" }), {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    user = { id: authUser.id };
 
     // ML API Access Gate
     const gate = await assertMlApiAccess(supabase, user.id);
@@ -338,13 +363,14 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
         hasMorePeriods = false;
       } else {
         tempOffset += PERIODS_PER_PAGE;
-        if ((scope === "recent" || scope === "30d") && tempOffset >= PERIODS_PER_PAGE) {
+        if ((scope === "recent" || scope === "30d") && tempOffset >= PERIODS_PER_PAGE * 2) {
+          // For recent: sync current + previous period (2 pages of periods)
           hasMorePeriods = false;
         }
       }
       
-      // Wait 12s between period fetches to stay under 5 req/min limit
-      await delay(12000);
+      // Wait 2s between period fetches (reduced from 12s — use backoff only on 429)
+      await delay(2000);
     }
 
     // For scope "30d", filter periods to only those within last 30 days
@@ -502,8 +528,8 @@ async function handleSync(supabase: any, userId: string, sellerId: string, scope
         offset += results.length;
         hasMore = results.length >= DETAILS_PAGE_SIZE;
 
-        // Wait 12s between details fetches to stay under 5 req/min limit
-        await delay(12000);
+        // Wait 2s between details fetches (reduced from 12s — use backoff only on 429)
+        await delay(2000);
       }
 
       periodsProcessed = i + 1;

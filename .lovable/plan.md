@@ -1,56 +1,66 @@
 
-Objetivo: reduzir drasticamente o tempo de “Atualizar billing dos pedidos” e garantir cálculo por período (incluindo regra pós 04/03) com precisão.
+# Plano Mestre — Jornada Completa do Seller
 
-1) Diagnóstico confirmado (baseado no código + dados atuais)
-- O fluxo de “Atualizar selecionados” ainda processa 1 pedido por vez:
-  - `cost-engine` chama `ml-sync-real-costs` (`resync_single`) por pedido.
-  - Delay fixo de 800ms entre pedidos.
-- Último job real: 10 pedidos levou ~177s (quase 3 min).
-- Em `resync_single`, a Strategy 3 (busca linear no período) ainda roda por pedido e gera latência alta.
-- Há erro intermitente `Body already consumed` na Strategy 3 (leitura duplicada de response), causando retries/falhas e mais lentidão.
-- O cache de billing está defasado para pedidos recentes, forçando fallback lento por API de período.
+## Status de cada item
 
-2) Implementação proposta (foco em velocidade + consistência por período)
-- Criar ação nova em `ml-sync-real-costs`: `resync_batch_orders`
-  - Entrada: `seller_id`, `order_ids[]`, `user_id`.
-  - Fluxo:
-    - Busca pedidos selecionados em lote.
-    - Agrupa por período (mês do `created_at_meli`, com janela complementar quando necessário).
-    - Consulta billing por período 1 vez por período (paginação), filtra somente os `order_ids` alvo.
-    - Classifica com `classifyBillingCharge` (comissões/frete/parcelamento/ajustes).
-    - Faz upsert em lote no `meli_order_financials_cache` + `order_cost_breakdown_cache`.
-- No `cost-engine` (bulk resync):
-  - Trocar N chamadas `resync_single` por 1 chamada em lote por chunk.
-  - Reduzir espera fixa (800ms) para padrão curto (ex.: 100ms) e manter proteção de rate limit por backoff.
-- Manter `resync_single` para uso manual/diagnóstico, mas:
-  - Corrigir bug de `Body already consumed`.
-  - Adicionar flag `skip_strategy3` quando chamado em contexto batch.
-  - Otimizar loop da Strategy 3 para parar assim que encontrar todos alvos.
+### ✅ Já existe no sistema
+| # | Item | Status |
+|---|------|--------|
+| 2 | Cadastro (email/senha + confirmação) | ✅ Implementado |
+| 4 | Painel inicial (dashboard) | ✅ Existe (sem velocímetro) |
+| 5 | Conexão ML via OAuth | ✅ Implementado |
+| 6 | Elegibilidade para teste (>10 vendas) | ✅ Verificação existe na company |
+| 8 | Módulo Etiquetas (vendas abertas) | ✅ Implementado |
+| 9 | Módulo Custos (sem Passo 2) | ✅ Atualizado agora |
+| 13 | Seleção automática de plano | ✅ `useUserSalesVolume` + filtro de planos |
+| 15 | Cadastro fiscal (PF/PJ) | ✅ `company_billing` existe |
+| 12 | Bloqueio pós-trial | ✅ Parcial (trial_expired bloqueia) |
 
-3) Correção de pipeline para manter dados “quentes”
-- Ajustar `ml-sync-billing-details` para aceitar chamada interna segura (backend/cron), sem depender apenas de JWT de usuário final.
-- No modo `recent`, sempre atualizar período atual + anterior.
-- Remover `sleep` fixo de 12s entre requests e usar apenas backoff quando houver 429.
-- Resultado: menos necessidade de fallback lento no “Atualizar selecionados”.
+### 🔶 Existe parcialmente / precisa ajuste
+| # | Item | O que falta |
+|---|------|-------------|
+| 1 | Landing com 3 botões | Landing existe mas precisa revisar CTAs |
+| 3 | Tela de boas-vindas (primeiro acesso) | Onboarding existe mas pode não ter welcome screen |
+| 7 | Sincronização inicial automática (30d) | Import manual existe, falta auto-trigger pós-OAuth |
+| 10 | Módulo ADS (sync pós-pagamento) | ADS existe, falta gate de trial |
+| 11 | Linha do Tempo (30d trial vs 1yr pago) | Módulo existe, falta limitar por trial |
+| 14 | Dados fiscais obrigatórios pós-pagamento | Tela existe, falta gate de bloqueio |
 
-4) Garantia da regra por data (mudança de 04/03)
-- Preservar classificação híbrida atual (legado + novo formato).
-- Prioridade de fontes no lote:
-  1. `billing_info`/detalhes por período compatíveis com data da venda
-  2. cache local atualizado
-  3. pending controlado (sem zerar comissão indevidamente)
-- Evitar sobrescrever valores corretos com zero quando ML ainda não liberou cobrança.
+### 🔴 Precisa ser desenvolvido
+| # | Item | Descrição |
+|---|------|-----------|
+| 4b | Velocímetro de ativação | Widget de progresso no dashboard |
+| 9b | Tabela `sync_jobs` + lock após sucesso | Controle de execução de syncs |
+| 9c | Lock do botão 1 ano após sucesso | Bloquear re-execução pós-sucesso |
+| 16 | Multi-conta (soma de vendas) | Lógica de soma cross-account |
+| 17-18 | Estados de conta + aviso pré-conexão | Workflow de nova conta |
+| 19 | Verificação de limite + pending_upgrade | Gate automático |
+| 20 | Upgrade com pró-rata | Cálculo proporcional |
+| 21 | Crescimento natural → bloqueio | Detecção automática de excesso |
+| 22 | Proteção contra abuso (logs) | Audit trail de conexões/upgrades |
 
-5) Validação e critérios de aceite
-- Teste alvo: 10 pedidos selecionados concluir em ~30–45s (vs ~3 min atual).
-- Confirmar em pedidos pós 04/03:
-  - comissão preenchida corretamente,
-  - frete preservado,
-  - parcelamento separado.
-- Confirmar ausência de erro `Body already consumed` nos logs.
-- Confirmar que pedidos sem cobrança disponível ficam `pending` (sem distorcer lucro).
+## Ordem sugerida de implementação
 
-Arquivos foco desta implementação:
-- `supabase/functions/ml-sync-real-costs/index.ts`
-- `supabase/functions/cost-engine/index.ts`
-- `supabase/functions/ml-sync-billing-details/index.ts`
+### Fase 1 — Gates e bloqueios (impacto imediato)
+1. Velocímetro de ativação no dashboard
+2. Tabela `sync_jobs` + controle de locks
+3. Gate de dados fiscais pós-pagamento
+4. Auto-sync 30d após OAuth
+
+### Fase 2 — Trial gates nos módulos ✅
+5. ✅ ADS: banner de trial + sync bloqueado via ML API gate no backend
+6. ✅ Linha do Tempo: banner de trial informando limitação a 30d
+7. ✅ Etiquetas: filtro "Todos" agora capped a 30 dias
+
+### Fase 3 — Multi-conta e upgrade ✅
+8. ✅ Multi-conta: soma de vendas (get_tenant_total_sales + check_tenant_plan_limit)
+9. ✅ Estados de conta (account_state enum: active/pending_upgrade/disabled/error)
+10. ✅ Upgrade com pró-rata (calculate_prorata_upgrade + execute_plan_upgrade)
+11. ✅ Crescimento natural → bloqueio (PlanLimitBanner + useTenantLimits)
+12. ✅ Aviso pré-conexão de nova conta (AccountConnectionWarning)
+13. ✅ Audit log (tenant_limit_log)
+
+### Fase 4 — Landing e onboarding ✅
+14. ✅ Landing com 3 CTAs (Login, Cadastro, Planos) no header e hero
+15. ✅ Welcome screen pós-confirmação de email (WelcomeScreen + aviso ML)
+16. ✅ Proteção contra abuso (system_audit_log + tenant_limit_log)
