@@ -312,7 +312,7 @@ async function processOrdersInBackground(
       
       try {
         const itemsResponse = await fetch(
-          `https://api.mercadolibre.com/items?ids=${idsParam}&attributes=id,permalink,catalog_product_id,thumbnail`,
+          `https://api.mercadolibre.com/items?ids=${idsParam}&attributes=id,permalink,catalog_product_id,thumbnail,variations.id,variations.attribute_combinations`,
           {
             headers: {
               'Authorization': `Bearer ${accessToken}`,
