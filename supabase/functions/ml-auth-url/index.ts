@@ -112,6 +112,29 @@ serve(async (req) => {
       throw new Error('ML_APP_ID not configured');
     }
 
+    // GUARD: Verify user has a company before allowing OAuth
+    if (!companyId) {
+      // Try to find user's company server-side
+      const { data: userCompany } = await supabaseClient
+        .from('companies')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .limit(1)
+        .maybeSingle();
+      
+      if (userCompany) {
+        companyId = userCompany.id;
+        console.log('Resolved company server-side:', companyId);
+      } else {
+        console.error('No company found for user — blocking OAuth');
+        return new Response(
+          JSON.stringify({ error: 'Empresa não encontrada. Complete o cadastro antes de conectar o Mercado Livre.' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
     // Generate PKCE pair
     const { codeVerifier, codeChallenge } = await generatePKCE();
     console.log('PKCE generated, challenge method: S256');

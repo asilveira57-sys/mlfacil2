@@ -70,7 +70,7 @@ export function WelcomeOnboardingGate() {
     isExcluded ? null : companyId
   );
 
-  if (isExcluded || isLoading || !flowData || dismissed || !userId || !companyId) {
+  if (isExcluded || onboardingCompleted || isLoading || !flowData || dismissed || !userId || !companyId) {
     return null;
   }
 
