@@ -433,115 +433,149 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     }
   };
 
-  // Safe 1-by-1 sequential resync handler
+  // Safe resync: stop polling
+  const stopSafePolling = useCallback(() => {
+    isSafePollingRef.current = false;
+    if (safePollingRef.current) {
+      clearTimeout(safePollingRef.current);
+      safePollingRef.current = null;
+    }
+  }, []);
+
+  // Safe resync: poll backend job progress
+  const pollSafeJobProgress = useCallback((jobId: string) => {
+    stopSafePolling();
+    isSafePollingRef.current = true;
+    setSafeJobId(jobId);
+
+    const poll = async () => {
+      if (!isSafePollingRef.current) return;
+      try {
+        const { data: job } = await supabase
+          .from('cost_bulk_jobs')
+          .select('*')
+          .eq('id', jobId)
+          .maybeSingle();
+
+        if (!job) { safePollingRef.current = setTimeout(poll, 5000); return; }
+
+        const processed = (job.success_count || 0) + (job.error_count || 0);
+        setSafeProgress({
+          current: processed,
+          total: job.total_orders || 0,
+          currentOrderId: `${processed}/${job.total_orders || '?'}`,
+          errors: job.error_count > 0 ? [`${job.error_count} erro(s)`] : [],
+        });
+
+        if (job.status === 'done' || job.status === 'error' || job.status === 'cancelled') {
+          stopSafePolling();
+          setSafeProcessing(false);
+          setSafeJobId(null);
+          setSafeSelectedOrders(new Set());
+          setSafeSelectAllPages(false);
+          invalidateCostCache('orders');
+          loadOrders();
+
+          if (job.status === 'done') {
+            toast.success(`${job.success_count} pedidos atualizados${job.error_count > 0 ? `, ${job.error_count} com erro` : ''}`);
+          } else if (job.status === 'cancelled') {
+            toast.info('Atualização segura cancelada.');
+          } else {
+            toast.error(`Erro: ${job.last_error || 'desconhecido'}`);
+          }
+          return;
+        }
+
+        if (isSafePollingRef.current) {
+          safePollingRef.current = setTimeout(poll, 3000);
+        }
+      } catch {
+        if (isSafePollingRef.current) {
+          safePollingRef.current = setTimeout(poll, 5000);
+        }
+      }
+    };
+
+    poll();
+  }, [stopSafePolling]);
+
+  // Check for active safe_resync job on mount
+  useEffect(() => {
+    if (!sellerId) return;
+    const checkSafeJob = async () => {
+      const { data } = await supabase
+        .from('cost_bulk_jobs')
+        .select('id, total_orders, success_count, error_count, status')
+        .eq('seller_id', sellerId)
+        .eq('job_type', 'safe_resync')
+        .in('status', ['running', 'queued'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (data) {
+        setSafeProcessing(true);
+        const processed = (data.success_count || 0) + (data.error_count || 0);
+        setSafeProgress({ current: processed, total: data.total_orders, currentOrderId: `${processed}/${data.total_orders}`, errors: [] });
+        pollSafeJobProgress(data.id);
+      }
+    };
+    checkSafeJob();
+    return () => { stopSafePolling(); };
+  }, [sellerId, pollSafeJobProgress, stopSafePolling]);
+
+  // Safe 1-by-1 resync handler — now sends to backend
   const handleSafeResync = async () => {
     const ids = Array.from(safeSelectedOrders);
     if (ids.length === 0) return;
 
-    safeCancelRef.current = false;
     setSafeProcessing(true);
-    setSafeProgress({ current: 0, total: ids.length, currentOrderId: '', errors: [] });
+    setSafeProgress({ current: 0, total: ids.length, currentOrderId: 'iniciando...', errors: [] });
 
-    const errors: string[] = [];
-    let sinceLastCalc = 0;
-    const pendingCalcIds: string[] = [];
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { toast.error('Sessão expirada'); setSafeProcessing(false); return; }
 
-    for (let i = 0; i < ids.length; i++) {
-      if (safeCancelRef.current) {
-        toast.info(`Cancelado após ${i} de ${ids.length} pedidos`);
-        break;
-      }
-
-      const orderId = ids[i];
-      setSafeProgress(p => ({ ...p, current: i, currentOrderId: orderId }));
-
-      // Resync single with retry up to 2x
-      let success = false;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          const { error } = await supabase.functions.invoke('ml-sync-real-costs', {
-            body: { seller_id: sellerId, action: 'resync_single', order_id: orderId }
-          });
-          if (error) throw error;
-          success = true;
-          break;
-        } catch (err) {
-          if (attempt < 2) {
-            await new Promise(r => setTimeout(r, 2000));
-          }
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders/bulk-reimport`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ seller_id: sellerId, order_ids: ids, job_type: 'safe_resync' }),
         }
+      );
+
+      if (response.ok) {
+        const result = await response.json();
+        toast.success(`Atualização segura de ${ids.length} pedidos iniciada. Pode sair da tela.`);
+        pollSafeJobProgress(result.job_id);
+      } else {
+        const err = await response.json().catch(() => ({}));
+        toast.error(err.error || 'Erro ao iniciar atualização segura');
+        setSafeProcessing(false);
       }
-
-      if (!success) {
-        errors.push(orderId);
-      }
-
-      pendingCalcIds.push(orderId);
-      sinceLastCalc++;
-
-      // Recalculate every 10 orders
-      if (sinceLastCalc >= 10) {
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session) {
-            for (const calcId of pendingCalcIds) {
-              await fetch(
-                `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/calculate-order`,
-                {
-                  method: 'POST',
-                  headers: {
-                    Authorization: `Bearer ${session.access_token}`,
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify({ seller_id: sellerId, order_id: calcId }),
-                }
-              );
-            }
-          }
-        } catch {}
-        pendingCalcIds.length = 0;
-        sinceLastCalc = 0;
-      }
-
-      setSafeProgress(p => ({ ...p, current: i + 1, errors: [...errors] }));
-    }
-
-    // Recalculate remaining
-    if (pendingCalcIds.length > 0) {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          for (const calcId of pendingCalcIds) {
-            await fetch(
-              `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/calculate-order`,
-              {
-                method: 'POST',
-                headers: {
-                  Authorization: `Bearer ${session.access_token}`,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ seller_id: sellerId, order_id: calcId }),
-              }
-            );
-          }
-        }
-      } catch {}
-    }
-
-    setSafeProcessing(false);
-    setSafeSelectedOrders(new Set());
-    setSafeSelectAllPages(false);
-    invalidateCostCache('orders');
-    loadOrders();
-
-    const processed = safeCancelRef.current ? safeProgress.current : ids.length;
-    if (errors.length > 0) {
-      toast.warning(`${processed - errors.length} atualizados, ${errors.length} com erro`);
-    } else {
-      toast.success(`${processed} pedidos atualizados com sucesso!`);
+    } catch {
+      toast.error('Erro ao iniciar atualização segura');
+      setSafeProcessing(false);
     }
   };
 
+  // Cancel safe resync job
+  const handleCancelSafeJob = async () => {
+    if (!safeJobId) return;
+    try {
+      await supabase.from('cost_bulk_jobs').update({ status: 'cancelled' }).eq('id', safeJobId);
+      stopSafePolling();
+      setSafeProcessing(false);
+      setSafeJobId(null);
+      toast.info('Atualização segura cancelada.');
+    } catch {
+      toast.error('Erro ao cancelar');
+    }
+  };
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
       if (sortDirection === 'desc') {
