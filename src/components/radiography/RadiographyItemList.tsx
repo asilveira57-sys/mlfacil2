@@ -88,6 +88,11 @@ export function RadiographyItemList({
       if (sortBy === "sales") return (b.sales_count_30d ?? 0) - (a.sales_count_30d ?? 0);
       if (sortBy === "days_no_sale") return (b.days_without_sale ?? 0) - (a.days_without_sale ?? 0);
       if (sortBy === "seo") return (a.seo_score ?? 999) - (b.seo_score ?? 999);
+      if (sortBy === "conversion") {
+        const convA = (a.visits_last && a.visits_last > 0 && a.sales_count_30d != null) ? a.sales_count_30d / a.visits_last : -1;
+        const convB = (b.visits_last && b.visits_last > 0 && b.sales_count_30d != null) ? b.sales_count_30d / b.visits_last : -1;
+        return convB - convA;
+      }
       return 0;
     });
 
