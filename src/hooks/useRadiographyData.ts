@@ -350,11 +350,16 @@ export function useRadiographyData(sellerId: string | null) {
     [sellerId]
   );
 
-  // 4. Trigger update (edge function)
+  // 4. Trigger update (edge function) — also enrich sales
   const triggerUpdate = useCallback(async () => {
     if (!sellerId) return;
+    // Run full collection
     await supabase.functions.invoke("radiography-collector", {
       body: { action: "full", seller_id: sellerId },
+    });
+    // Then enrich sales data (doesn't need ML API)
+    await supabase.functions.invoke("radiography-collector", {
+      body: { action: "enrich_sales", seller_id: sellerId },
     });
   }, [sellerId]);
 
