@@ -439,7 +439,7 @@ async function handleStatus(supabase: any, userId: string, sellerId: string, cor
 // LIST: List items with their latest scores
 // ============================================================================
 async function handleListItems(supabase: any, userId: string, sellerId: string, params: any, corsHeaders: any) {
-  const { sort_by = "score_total", order = "desc", limit = 50, offset = 0 } = params;
+  const { sort_by = "score_total", order = "desc" } = params;
   
   const today = new Date().toISOString().split('T')[0];
 
