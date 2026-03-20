@@ -265,7 +265,30 @@ const SettingsCompanies = () => {
     }
   };
 
-  const handleConnectAccount = async (companyId?: string | null) => {
+  const handleRenameCompany = async (companyId: string) => {
+    const newName = editingCompanyName.trim();
+    if (!newName) {
+      toast.error("Nome não pode ficar vazio");
+      return;
+    }
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from("companies")
+        .update({ display_name: newName })
+        .eq("id", companyId);
+      if (error) throw error;
+      toast.success("Nome da empresa atualizado!");
+      setEditingCompanyId(null);
+      fetchData();
+    } catch (err) {
+      console.error("[SettingsCompanies] Error renaming company:", err);
+      toast.error("Erro ao renomear empresa");
+    } finally {
+      setSaving(false);
+    }
+  };
+
     setSaving(true);
     setConnectingForCompany(companyId || null);
     try {
