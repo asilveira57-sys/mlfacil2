@@ -114,6 +114,10 @@ const ANOMALY_LABELS: Record<string, string> = {
   visit_drop: "Queda acentuada de visitas (>40%)",
   high_stock_low_traction: "Estoque alto sem tração",
   consistent_decline: "Declínio consistente de tráfego",
+  no_sales_30d: "Sem vendas há mais de 30 dias",
+  no_sales_14d: "Sem vendas há mais de 14 dias",
+  visits_no_conversion: "Recebe visitas mas não converte",
+  low_conversion: "Taxa de conversão muito baixa",
 };
 
 export function getAnomalyLabel(flag: string): string {
