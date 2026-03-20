@@ -503,10 +503,13 @@ export function useSeed(): UseSeedResult {
       if (deleteError) throw deleteError;
 
       // Update seed balance (return seed)
+      const newUsed = Math.max(0, seedBalance.seeds_used - 1);
+      const newAvailable = Math.max(0, seedBalance.seeds_from_plan - newUsed);
       const { error: balanceError } = await supabase
         .from('send_seed_balance')
         .update({
-          seeds_used: Math.max(0, seedBalance.seeds_used - 1),
+          seeds_used: newUsed,
+          seeds_available: newAvailable,
           updated_at: new Date().toISOString(),
         })
         .eq('id', seedBalance.id);
