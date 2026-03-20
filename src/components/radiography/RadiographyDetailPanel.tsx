@@ -214,27 +214,7 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, sele
     if (open && item) loadHistory();
   }, [period]);
 
-  if (!item) return null;
-
-  const health = classifyHealth(item);
-  const config = HEALTH_STATUS_CONFIG[health];
-  const healthFactors = getHealthBreakdown(item);
-  const recommendations = buildRecommendations(item);
-  const allAlerts = [
-    ...(item.alerts_json || []),
-    ...((item.anomaly_flags || [])
-      .filter(f => !(item.alerts_json || []).some(a => a.type === f))
-      .map(f => ({ type: f, severity: "medium", title: getAnomalyLabel(f), description: "", context: {} } as StructuredAlert))),
-  ];
-  const changes = item.change_flags || [];
-
-  const HealthIcon = ({ status }: { status: RadiographyHealthStatus }) => {
-    const iconMap = { healthy: HeartPulse, stable: Activity, observation: Stethoscope, alert: AlertTriangle, critical: Siren };
-    const Icon = iconMap[status];
-    return <Icon className="h-5 w-5" />;
-  };
-
-  // Chart data — aggregate by date to avoid duplicate x-axis labels
+  // Chart data — aggregate by date to avoid duplicate x-axis labels (must be before early return)
   const chartData = useMemo(() => {
     if (!history.length) return [];
     const byDate = new Map<string, { visits: number; price: number; stock: number; count: number; fullDate: string }>();
@@ -244,7 +224,6 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, sele
       if (existing) {
         existing.visits += h.visits ?? 0;
         existing.count++;
-        // Keep latest price/stock
         existing.price = h.price ?? existing.price;
         existing.stock = h.available_quantity ?? existing.stock;
       } else {
@@ -269,6 +248,26 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, sele
   }, [history]);
 
   const hasMultipleDates = chartData.length >= 2;
+
+  if (!item) return null;
+
+  const health = classifyHealth(item);
+  const config = HEALTH_STATUS_CONFIG[health];
+  const healthFactors = getHealthBreakdown(item);
+  const recommendations = buildRecommendations(item);
+  const allAlerts = [
+    ...(item.alerts_json || []),
+    ...((item.anomaly_flags || [])
+      .filter(f => !(item.alerts_json || []).some(a => a.type === f))
+      .map(f => ({ type: f, severity: "medium", title: getAnomalyLabel(f), description: "", context: {} } as StructuredAlert))),
+  ];
+  const changes = item.change_flags || [];
+
+  const HealthIcon = ({ status }: { status: RadiographyHealthStatus }) => {
+    const iconMap = { healthy: HeartPulse, stable: Activity, observation: Stethoscope, alert: AlertTriangle, critical: Siren };
+    const Icon = iconMap[status];
+    return <Icon className="h-5 w-5" />;
+  };
 
   // Evolution
   const calcDelta = (key: "visits" | "price" | "available_quantity") =>
