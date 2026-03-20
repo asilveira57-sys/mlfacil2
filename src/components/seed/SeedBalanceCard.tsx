@@ -10,6 +10,10 @@ interface SeedBalanceCardProps {
   usedSeeds: number;
   plantedCount: number;
   planTier: string;
+  salesCount90d?: number;
+  soldListingsCount90d?: number;
+  seedPercentage?: number | null;
+  calculatedAt?: string | null;
   onBuySeeds?: () => void;
 }
 
