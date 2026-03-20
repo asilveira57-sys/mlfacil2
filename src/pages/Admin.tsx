@@ -39,6 +39,7 @@ import AdminCentralDeAjuda from './admin/AdminCentralDeAjuda';
 import { AdminEmails } from './admin/AdminEmails';
 import AdminSuporte from './admin/AdminSuporte';
 import { AdminClientes } from './admin/AdminClientes';
+import AdminConsents from './admin/AdminConsents';
 
 const adminTabs = [
   { id: '', label: 'Dashboard', icon: LayoutDashboard },
