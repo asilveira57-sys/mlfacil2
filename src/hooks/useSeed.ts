@@ -85,7 +85,39 @@ export function useSeed(): UseSeedResult {
         return;
       }
 
-      // Fetch seed balance (or create default)
+      // Resolve tenant_id from company
+      let tenantId: string | null = null;
+      const { data: mlAccount } = await supabase
+        .from('ml_accounts')
+        .select('company_id')
+        .eq('ml_user_id', sellerId)
+        .eq('user_id', user.id)
+        .limit(1)
+        .single();
+
+      if (mlAccount?.company_id) {
+        const { data: company } = await supabase
+          .from('companies')
+          .select('tenant_id')
+          .eq('id', mlAccount.company_id)
+          .single();
+        tenantId = company?.tenant_id || null;
+      }
+
+      // Trigger recalculation via RPC (idempotent, fast)
+      if (tenantId) {
+        try {
+          await supabase.rpc('recalculate_seed_balance_for_seller', {
+            p_tenant_id: tenantId,
+            p_user_id: user.id,
+            p_seller_id: sellerId,
+          });
+        } catch (rpcErr) {
+          console.warn('[useSeed] RPC recalculate failed (non-blocking):', rpcErr);
+        }
+      }
+
+      // Fetch seed balance (now should exist after recalculate)
       let { data: balanceData } = await supabase
         .from('send_seed_balance')
         .select('*')
@@ -94,6 +126,7 @@ export function useSeed(): UseSeedResult {
         .single();
 
       if (!balanceData) {
+        // Fallback: create minimal balance if RPC didn't run (e.g. no tenant)
         const { data: newBalance } = await supabase
           .from('send_seed_balance')
           .insert({
