@@ -223,6 +223,8 @@ export function useRadiographyData(sellerId: string | null) {
         const cache = listings[h.item_id];
         return {
           ...h,
+          change_flags: (h.change_flags as any as ChangeFlag[]) || [],
+          alerts_json: (h.alerts_json as any as StructuredAlert[]) || [],
           title: cache?.title || null,
           thumbnail: cache?.thumbnail || null,
           permalink: cache?.permalink || null,
