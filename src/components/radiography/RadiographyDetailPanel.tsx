@@ -355,15 +355,29 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
               <MiniStat label={`Visitas (${period}d)`} value={item.visits_period != null ? item.visits_period.toLocaleString("pt-BR") : (item.visits_last != null ? item.visits_last.toLocaleString("pt-BR") : "—")} icon={<Eye className="h-3 w-3 text-cyan-400" />} />
               <MiniStat label={`Vendas (${period}d)`} value={String(item.sales_period ?? item.sales_count_30d ?? 0)} icon={<ShoppingCart className="h-3 w-3 text-emerald-400" />} />
               <MiniStat label="Conversão" value={
+                coverage.status === 'insufficient' ? "dados insuf." :
                 item.conversion_period != null ? `${item.conversion_period.toFixed(1)}%` :
                 (item.conversion_rate_7d != null ? `${item.conversion_rate_7d.toFixed(1)}%` : "—")
-              } icon={<BarChart3 className="h-3 w-3 text-violet-400" />} />
+              } icon={<BarChart3 className="h-3 w-3 text-violet-400" />} 
+                subtitle={coverage.status === 'partial' ? `base: ${coverage.days_with_data}d` : undefined}
+              />
               <MiniStat label="Dias s/ venda" value={item.days_without_sale != null ? String(item.days_without_sale) : "—"} icon={<Clock className="h-3 w-3 text-amber-400" />} highlight={item.days_without_sale != null && item.days_without_sale > 14} />
             </div>
-            <div className="grid grid-cols-3 gap-2">
-              <MiniStat label="Preço" value={item.price != null ? `R$ ${item.price.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : "—"} />
-              <MiniStat label="Estoque" value={item.available_quantity != null ? String(item.available_quantity) : "—"} highlight={item.available_quantity === 0} />
-              <MiniStat label="Vendas (7d)" value={String(item.sales_count_7d ?? 0)} icon={<ShoppingCart className="h-3 w-3 text-emerald-400" />} />
+            {/* Coverage indicator */}
+            {coverage.status !== 'good' && coverage.days_with_data > 0 && (
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${
+                coverage.status === 'insufficient' 
+                  ? 'bg-amber-500/10 border border-amber-500/20 text-amber-300' 
+                  : 'bg-cyan-500/5 border border-cyan-500/15 text-cyan-300'
+              }`}>
+                <Activity className="h-3.5 w-3.5 flex-shrink-0" />
+                <span>
+                  Histórico de visitas disponível em {coverage.days_with_data} dos últimos {coverage.days_requested} dias.
+                  {coverage.status === 'partial' && ' A conversão foi calculada com base nos dias com coleta válida.'}
+                  {coverage.status === 'insufficient' && ' Os dados anteriores podem estar incompletos.'}
+                </span>
+              </div>
+            )}
             </div>
 
             {/* SECTION 2 — Health breakdown */}
