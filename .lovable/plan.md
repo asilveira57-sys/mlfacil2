@@ -1,71 +1,45 @@
 
 
-# Plano: Corrigir exclusão completa de usuário no admin
+# Diagnóstico e Correção: Sementes do ADECONEX.SP
 
-## Problema raiz
+## Diagnóstico
 
-Os logs mostram o erro exato:
+**As sementes NÃO foram perdidas.** Elas estão vinculadas à conta seller **ADECONEXVV** (66043362), não à **ADECONEX.SP** (1411095727).
 
-```text
-ERROR: update or delete on table "ml_accounts" violates foreign key constraint
-"finance_accounts_ml_account_id_fkey" on table "finance_accounts" (SQLSTATE 23503)
-```
+Dados atuais no banco:
 
-A função `admin-delete-user` tenta excluir `ml_accounts` mas a tabela `finance_accounts` tem uma FK para `ml_accounts(id)` **sem ON DELETE CASCADE**. O mesmo erro acontece quando `auth.admin.deleteUser()` tenta cascatear a exclusão.
+| Conta | Seller ID | Seeds disponíveis | Seeds usadas | Itens plantados |
+|---|---|---|---|---|
+| ADECONEXVV | 66043362 | 5 | 5 | 5 itens (dormantes) |
+| ADECONEX.SP | 1411095727 | 5 | 0 | 0 |
 
-Resultado: o registro em `auth.users` permanece intacto e o seller continua logando normalmente.
+O módulo Seed filtra por `seller_id` — quando o usuário troca para ADECONEX.SP na interface, vê o jardim vazio porque os plantios estão na outra conta.
 
-## Tabelas com FK para ml_accounts (precisam ser limpas ANTES)
+**Causa provável:** O usuário plantou na conta ADECONEXVV e depois trocou a conta ativa para ADECONEX.SP, dando a impressão de perda.
 
-| Tabela | FK | Cascade? |
-|---|---|---|
-| `finance_accounts` | `ml_account_id → ml_accounts(id)` | Nao |
-| `clone_drafts` | `ml_account_id → ml_accounts(id)` | ON DELETE SET NULL |
-| `analyzed_items` | `ml_account_id → ml_accounts(id)` | ON DELETE SET NULL |
-| `sync_jobs` | `ml_account_id → ml_accounts(id)` | Nao |
-| `user_access_state` | `ml_account_id → ml_accounts(id)` | Nao |
-| `listing_clone_drafts` | `destination_account_id → ml_accounts(id)` | Nao |
+## Correções
 
-Tabelas com FK para `finance_accounts` (precisam ser limpas ANTES de `finance_accounts`):
-- `finance_payments` (ON DELETE CASCADE)
-- `finance_movements` (ON DELETE CASCADE)
-- `finance_sync_jobs` (ON DELETE CASCADE)
-- `finance_sync_runs` (ON DELETE CASCADE)
+### 1. Adicionar tabelas Seed ao `admin-delete-user`
 
-## Correção
-
-### 1. Atualizar `admin-delete-user/index.ts`
-
-Expandir a lista de tabelas para incluir TODAS as dependências na ordem correta de FK:
+Incluir as seguintes tabelas na rotina de exclusão, antes da fase de exclusão de `profiles`:
 
 ```text
-Ordem de exclusão:
-1. finance_payments, finance_movements, finance_sync_jobs, finance_sync_runs
-2. finance_accounts
-3. listing_clone_drafts, clone_drafts, analyzed_items, sync_jobs
-4. ad_timeline_stats, ad_timeline_actions (se existirem com user_id)
-5. security_events, user_security_settings
-6. billing_info, notification_preferences, user_feature_flags
-7. user_email_preferences, cookie_consents
-8. seller_item_visits, seller_item_sales_daily, seller_item_sales_monthly, monthly_rankings
-9. user_access_state
-10. user_roles
-11. ml_accounts
-12. user_context
-13. companies
-14. profiles
-15. auth.admin.deleteUser() — exclui auth.users
+Nova fase (Seed + Pricing):
+- send_metrics_snapshots (FK → send_planted_items)
+- send_item_history
+- send_planted_items
+- send_seed_balance
+- send_aplus_candidates
+- send_seed_purchases
+- pricing_simulation_results (via simulation_id)
+- pricing_simulation_inputs (via simulation_id)
+- pricing_simulations
 ```
 
-Adicionar tratamento de erro robusto: se `auth.admin.deleteUser()` falhar, retornar erro claro ao admin ao invés de silenciar.
+### 2. (Opcional) Indicar na UI qual conta tem sementes plantadas
 
-### 2. Invalidar sessão imediatamente
-
-Antes de deletar os dados, chamar `auth.admin.signOut(target_user_id)` (ou revogar todos os refresh tokens) para que o seller perca acesso imediatamente, mesmo que a exclusão de dados falhe parcialmente.
+Sem mudança proposta agora — apenas comunicar ao usuário que as sementes estão na conta ADECONEXVV.
 
 ### Arquivo modificado
-
 - `supabase/functions/admin-delete-user/index.ts`
-
-Nenhuma tabela nova, nenhuma tela nova, nenhuma alteração de arquitetura.
 
