@@ -129,6 +129,8 @@ export function useNotePins({ workspaceId, moduleKey, companyId }: UseNotePinsOp
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['note-pins'] });
+      queryClient.invalidateQueries({ queryKey: ['all-note-pins'] });
+      queryClient.invalidateQueries({ queryKey: ['notes'] });
       toast({ title: 'Nota fixada neste módulo' });
     },
     onError: (err) => {
