@@ -829,7 +829,7 @@ Deno.serve(async (req) => {
       if (targetCompanyId) {
         companiesQuery = supabase
           .from("companies")
-          .select("id, tenant_id, display_name")
+          .select("id, tenant_id, display_name, logo_url")
           .eq("id", targetCompanyId);
       }
 
