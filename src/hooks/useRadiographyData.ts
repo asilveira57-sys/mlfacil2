@@ -19,6 +19,14 @@ export interface HealthCurrentItem {
   anomaly_flags: string[] | null;
   last_collected_at: string | null;
   updated_at: string;
+  // Sales enrichment
+  sales_count_7d: number | null;
+  units_sold_7d: number | null;
+  sales_count_30d: number | null;
+  units_sold_30d: number | null;
+  conversion_rate_7d: number | null;
+  days_without_sale: number | null;
+  last_sale_at: string | null;
   // joined from meli_listings_cache
   title?: string | null;
   thumbnail?: string | null;
@@ -71,25 +79,33 @@ export function classifyHealth(item: {
   catalog_listing?: boolean | null;
   anomaly_flags?: string[] | null;
   last_collected_at?: string | null;
+  days_without_sale?: number | null;
+  sales_count_30d?: number | null;
+  conversion_rate_7d?: number | null;
 }): RadiographyHealthStatus {
   const flags = item.anomaly_flags || [];
-  const visits = item.visits_last ?? -1; // -1 = unknown
+  const visits = item.visits_last ?? -1;
   const stock = item.available_quantity ?? -1;
+  const daysNoSale = item.days_without_sale ?? null;
+  const sales30d = item.sales_count_30d ?? null;
   
   // If we have no data yet, show stable (not penalizing)
   if (!item.last_collected_at) return "stable";
 
-  // Critical: zero stock or critical flags
+  // Critical: zero stock, consistent decline, or 30+ days without sale with low visits
   if (stock === 0 || flags.includes("consistent_decline")) return "critical";
+  if (daysNoSale !== null && daysNoSale > 30 && visits < 20) return "critical";
 
-  // Alert: visit drop or zero visits with data
+  // Alert: visit drop, zero visits, or visits without conversion
   if (flags.includes("visit_drop") || flags.includes("zero_visits")) return "alert";
+  if (flags.includes("visits_no_conversion") || flags.includes("no_sales_30d")) return "alert";
 
-  // Observation: high stock low traction
-  if (flags.includes("high_stock_low_traction")) return "observation";
+  // Observation: high stock low traction, low conversion, or 14+ days without sale
+  if (flags.includes("high_stock_low_traction") || flags.includes("low_conversion")) return "observation";
+  if (flags.includes("no_sales_14d")) return "observation";
 
-  // Healthy: good visits, has stock, good logistics
-  if (visits > 10 && stock > 0) {
+  // Healthy: good visits, has stock, has sales, good logistics
+  if (visits > 10 && stock > 0 && (sales30d === null || sales30d > 0)) {
     const hasFulfillment = item.shipping_mode === "me2" || item.listing_type === "gold_pro";
     if (hasFulfillment || item.catalog_listing) return "healthy";
     return "stable";
@@ -101,11 +117,16 @@ export function classifyHealth(item: {
   return "stable";
 }
 
+
 const ANOMALY_LABELS: Record<string, string> = {
   zero_visits: "Sem visitas no período",
   visit_drop: "Queda acentuada de visitas (>40%)",
   high_stock_low_traction: "Estoque alto sem tração",
   consistent_decline: "Declínio consistente de tráfego",
+  no_sales_30d: "Sem vendas há mais de 30 dias",
+  no_sales_14d: "Sem vendas há mais de 14 dias",
+  visits_no_conversion: "Recebe visitas mas não converte",
+  low_conversion: "Taxa de conversão muito baixa",
 };
 
 export function getAnomalyLabel(flag: string): string {

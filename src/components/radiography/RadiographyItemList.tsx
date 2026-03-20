@@ -16,6 +16,8 @@ import {
   Siren,
   Scan,
   ExternalLink,
+  ShoppingCart,
+  Clock,
 } from "lucide-react";
 import {
   HEALTH_STATUS_CONFIG,
@@ -238,6 +240,16 @@ export function RadiographyItemList({
                         <Eye className="h-3 w-3 text-cyan-400" />
                         {item.visits_last != null ? item.visits_last.toLocaleString("pt-BR") : "—"} visitas
                       </span>
+                      <span className="flex items-center gap-1">
+                        <ShoppingCart className="h-3 w-3 text-emerald-400" />
+                        {item.sales_count_30d ?? 0} vendas (30d)
+                      </span>
+                      {item.days_without_sale != null && item.days_without_sale > 0 && (
+                        <span className={`flex items-center gap-1 ${item.days_without_sale > 30 ? "text-red-400" : item.days_without_sale > 14 ? "text-amber-400" : "text-slate-400"}`}>
+                          <Clock className="h-3 w-3" />
+                          {item.days_without_sale}d sem venda
+                        </span>
+                      )}
                       <span>
                         Estoque: {item.available_quantity ?? "—"}
                       </span>

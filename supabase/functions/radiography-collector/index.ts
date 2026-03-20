@@ -510,11 +510,79 @@ async function handleCollection(supabase: any, sellerId: string, startTime: numb
   }
 }
 
+// Fetch sales data for a batch of item_ids from meli_order_items_cache
+async function fetchSalesData(
+  supabase: any, sellerId: string, itemIds: string[]
+): Promise<Record<string, { sales_7d: number; units_7d: number; sales_30d: number; units_30d: number; last_sale_at: string | null }>> {
+  const result: Record<string, any> = {};
+  const now = Date.now();
+  const d7 = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const d30 = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  // Fetch all order items for these item_ids in the last 30 days (batched)
+  let allOrderItems: any[] = [];
+  for (let i = 0; i < itemIds.length; i += 500) {
+    const chunk = itemIds.slice(i, i + 500);
+    const { data } = await supabase
+      .from("meli_order_items_cache")
+      .select("item_id, quantity, created_at_meli")
+      .eq("seller_id", sellerId)
+      .in("item_id", chunk)
+      .gte("created_at_meli", d30);
+    allOrderItems = allOrderItems.concat(data || []);
+  }
+
+  // Also fetch last sale ever for each item (single query for max date)
+  let lastSaleItems: any[] = [];
+  for (let i = 0; i < itemIds.length; i += 500) {
+    const chunk = itemIds.slice(i, i + 500);
+    const { data } = await supabase
+      .from("meli_order_items_cache")
+      .select("item_id, created_at_meli")
+      .eq("seller_id", sellerId)
+      .in("item_id", chunk)
+      .order("created_at_meli", { ascending: false });
+    lastSaleItems = lastSaleItems.concat(data || []);
+  }
+
+  // Build last_sale map (first occurrence per item since ordered desc)
+  const lastSaleMap = new Map<string, string>();
+  for (const row of lastSaleItems) {
+    if (!lastSaleMap.has(row.item_id)) {
+      lastSaleMap.set(row.item_id, row.created_at_meli);
+    }
+  }
+
+  // Initialize all items
+  for (const id of itemIds) {
+    result[id] = { sales_7d: 0, units_7d: 0, sales_30d: 0, units_30d: 0, last_sale_at: lastSaleMap.get(id) || null };
+  }
+
+  // Aggregate
+  for (const row of allOrderItems) {
+    const entry = result[row.item_id];
+    if (!entry) continue;
+    const qty = row.quantity || 1;
+    entry.sales_30d += 1;
+    entry.units_30d += qty;
+    if (row.created_at_meli >= d7) {
+      entry.sales_7d += 1;
+      entry.units_7d += qty;
+    }
+  }
+
+  return result;
+}
+
 async function processVisitBatch(
   supabase: any, sellerId: string, batchIds: string[],
   visitsData: any, allItems: any[], collectedAt: string
 ) {
   const itemMap = new Map(allItems.map(i => [i.item_id, i]));
+
+  // Fetch sales data for this batch
+  const salesData = await fetchSalesData(supabase, sellerId, batchIds);
+
   const healthHistoryRows: any[] = [];
   const healthCurrentRows: any[] = [];
 
@@ -522,6 +590,15 @@ async function processVisitBatch(
     const visits = typeof visitsData === "object" && visitsData[itemId] !== undefined
       ? Number(visitsData[itemId]) || 0 : 0;
     const item = itemMap.get(itemId);
+    const sales = salesData[itemId] || { sales_7d: 0, units_7d: 0, sales_30d: 0, units_30d: 0, last_sale_at: null };
+
+    // Calculate days without sale
+    const daysWithoutSale = sales.last_sale_at
+      ? Math.floor((Date.now() - new Date(sales.last_sale_at).getTime()) / (24 * 60 * 60 * 1000))
+      : null;
+
+    // Conversion rate: sales_7d / visits (if visits > 0)
+    const conversionRate7d = visits > 0 ? Number(((sales.sales_7d / visits) * 100).toFixed(3)) : 0;
 
     healthHistoryRows.push({
       seller_id: sellerId, item_id: itemId, collected_at: collectedAt,
@@ -532,6 +609,10 @@ async function processVisitBatch(
       shipping_mode: item?.shipping_mode || item?.logistic_type || null,
       catalog_listing: !!item?.catalog_product_id,
       source: "night_collection",
+      sales_count: sales.sales_7d,
+      units_sold: sales.units_7d,
+      days_without_sale: daysWithoutSale,
+      last_sale_at: sales.last_sale_at,
     });
 
     healthCurrentRows.push({
@@ -542,6 +623,13 @@ async function processVisitBatch(
       listing_type: item?.listing_type_id || null,
       shipping_mode: item?.shipping_mode || item?.logistic_type || null,
       catalog_listing: !!item?.catalog_product_id,
+      sales_count_7d: sales.sales_7d,
+      units_sold_7d: sales.units_7d,
+      sales_count_30d: sales.sales_30d,
+      units_sold_30d: sales.units_30d,
+      conversion_rate_7d: conversionRate7d,
+      days_without_sale: daysWithoutSale,
+      last_sale_at: sales.last_sale_at,
     });
   }
 
@@ -807,7 +895,7 @@ async function detectAnomalies(supabase: any, sellerId: string, processedItemIds
       const chunk = processedItemIds.slice(i, i + 500);
       const { data } = await supabase
         .from("listing_health_current")
-        .select("item_id, visits_last, available_quantity, listing_status")
+        .select("item_id, visits_last, available_quantity, listing_status, sales_count_7d, sales_count_30d, days_without_sale, conversion_rate_7d")
         .eq("seller_id", sellerId)
         .in("item_id", chunk);
       allCurrent = allCurrent.concat(data || []);
@@ -816,7 +904,6 @@ async function detectAnomalies(supabase: any, sellerId: string, processedItemIds
     if (allCurrent.length === 0) return [];
 
     // Batch-fetch last 3 history entries for all processed items
-    // Use a single query with ordering, then group in memory
     let allHistory: any[] = [];
     for (let i = 0; i < processedItemIds.length; i += 500) {
       const chunk = processedItemIds.slice(i, i + 500);
@@ -846,6 +933,7 @@ async function detectAnomalies(supabase: any, sellerId: string, processedItemIds
     for (const current of allCurrent) {
       const flags: string[] = [];
 
+      // Visit-based anomalies
       if (current.listing_status === "active" && (current.visits_last === 0 || current.visits_last === null)) {
         flags.push("zero_visits");
       }
@@ -854,6 +942,22 @@ async function detectAnomalies(supabase: any, sellerId: string, processedItemIds
         flags.push("high_stock_low_traction");
       }
 
+      // Sales-based anomalies
+      if (current.days_without_sale !== null && current.days_without_sale > 30) {
+        flags.push("no_sales_30d");
+      } else if (current.days_without_sale !== null && current.days_without_sale > 14) {
+        flags.push("no_sales_14d");
+      }
+
+      if (current.visits_last > 20 && current.sales_count_7d === 0) {
+        flags.push("visits_no_conversion");
+      }
+
+      if (current.conversion_rate_7d !== null && current.conversion_rate_7d > 0 && current.conversion_rate_7d < 0.5 && current.visits_last > 30) {
+        flags.push("low_conversion");
+      }
+
+      // Visit trend anomalies
       const history = historyByItem.get(current.item_id) || [];
       if (history.length >= 2) {
         const latest = history[0].visits || 0;
