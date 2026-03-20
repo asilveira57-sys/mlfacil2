@@ -218,8 +218,76 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, sele
               />
             </div>
 
-            {/* Anomalies */}
-            {hasAnomalies && (
+            {/* Recent Changes */}
+            {item.change_flags && item.change_flags.length > 0 && (
+              <Card className="bg-amber-500/5 border-amber-500/20">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm text-amber-400 flex items-center gap-2">
+                    <ArrowUpDown className="h-4 w-4" />
+                    Mudanças Recentes
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {item.change_flags.map((change, idx) => (
+                    <div key={idx} className="flex items-start gap-3">
+                      <div className={`mt-0.5 h-2.5 w-2.5 rounded-full flex-shrink-0 ${
+                        change.severity === "critical" ? "bg-red-400" :
+                        change.severity === "high" ? "bg-orange-400" :
+                        change.severity === "medium" ? "bg-amber-400" :
+                        "bg-slate-400"
+                      }`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-slate-200">{change.label}</div>
+                        <div className="text-xs text-slate-400 mt-0.5">{change.detail}</div>
+                      </div>
+                      <Badge variant="outline" className={`text-xs flex-shrink-0 ${
+                        change.severity === "critical" ? "border-red-500/30 text-red-400" :
+                        change.severity === "high" ? "border-orange-500/30 text-orange-400" :
+                        "border-amber-500/30 text-amber-400"
+                      }`}>
+                        {change.severity}
+                      </Badge>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Structured Alerts (explained) */}
+            {item.alerts_json && item.alerts_json.length > 0 && (
+              <Card className="bg-red-500/5 border-red-500/20">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm text-red-400 flex items-center gap-2">
+                    <AlertOctagon className="h-4 w-4" />
+                    Alertas Explicados ({item.alerts_json.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {item.alerts_json.map((alert, idx) => (
+                    <div key={idx} className="border-l-2 pl-3 py-1 space-y-1" style={{
+                      borderColor: alert.severity === "critical" ? "#f87171" :
+                        alert.severity === "high" ? "#fb923c" :
+                        alert.severity === "medium" ? "#fbbf24" : "#94a3b8"
+                    }}>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-slate-200">{alert.title}</span>
+                        <Badge variant="outline" className={`text-xs ${
+                          alert.severity === "critical" ? "border-red-500/30 text-red-400" :
+                          alert.severity === "high" ? "border-orange-500/30 text-orange-400" :
+                          "border-amber-500/30 text-amber-400"
+                        }`}>
+                          {alert.severity}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-slate-400 leading-relaxed">{alert.description}</p>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Legacy anomaly flags (fallback if no structured alerts) */}
+            {hasAnomalies && (!item.alerts_json || item.alerts_json.length === 0) && (
               <Card className="bg-red-500/5 border-red-500/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm text-red-400 flex items-center gap-2">
