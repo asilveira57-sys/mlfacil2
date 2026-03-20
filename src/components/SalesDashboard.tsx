@@ -506,21 +506,8 @@ export function SalesDashboard() {
         fetchSalesData(undefined, true); // Full data available
       }
 
-      // PHASE 4: Sync billing data (real costs from ML)
-      console.log("[Progressive Sync] Phase 4: Billing data");
-      
-      const phase4Response = await supabase.functions.invoke("ml-sync-billing", {
-        headers: { Authorization: `Bearer ${accessToken}` },
-        body: { 
-          seller_id: sellerIdParam,
-          months: 6
-        }
-      });
-
-      if (phase4Response.data?.job_id) {
-        await waitForJobCompletion(phase4Response.data.job_id);
-        console.log("[Progressive Sync] Phase 4 complete - billing synced");
-      }
+      // PHASE 4: Billing auto-sync DISABLED — manual-only mode
+      console.log("[Progressive Sync] Phase 4 SKIPPED: Billing/cost sync is now manual-only");
 
     } catch (err: any) {
       console.error("Error in progressive sync:", err);

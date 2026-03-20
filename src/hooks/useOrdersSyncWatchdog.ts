@@ -140,40 +140,9 @@ export function useOrdersSyncWatchdog(sellerId: string | null, enabled: boolean)
           const success = await waitForJob(response.data.job_id);
 
           if (success) {
-            console.log("[OrdersWatchdog] Orders sync completed, triggering billing sync...");
+            console.log("[OrdersWatchdog] Orders sync completed. Billing/cost auto-sync DISABLED — manual-only mode.");
 
-            // Dispatch event to notify UI that billing sync is starting
-            window.dispatchEvent(new CustomEvent("billing_sync_start", {
-              detail: { sellerId }
-            }));
-
-            // First: Sync billing data (commissions, shipping fees) for recent periods
-            try {
-              await supabase.functions.invoke("ml-sync-billing-details", {
-                body: { seller_id: sellerId, action: "sync", scope: "recent" },
-              });
-              console.log("[OrdersWatchdog] Billing sync triggered successfully");
-            } catch (billingErr) {
-              console.error("[OrdersWatchdog] Billing sync failed:", billingErr);
-            }
-
-            // Wait a moment for billing to process before triggering cost calculation
-            await new Promise((r) => setTimeout(r, 3000));
-
-            console.log("[OrdersWatchdog] Triggering cost backfill...");
-
-            // Second: Trigger cost backfill to calculate costs using new billing data
-            await supabase.functions.invoke("ml-sync-real-costs", {
-              body: { seller_id: sellerId, action: "backfill_missing" },
-            });
-
-            // Third: Reprocess any pending orders that now have billing data
-            await new Promise((r) => setTimeout(r, 2000));
-            await supabase.functions.invoke("ml-sync-real-costs", {
-              body: { seller_id: sellerId, action: "reprocess_pending" },
-            });
-
-            // Dispatch event to notify dashboard to refresh
+            // Dispatch event to notify dashboard to refresh order data only
             window.dispatchEvent(new CustomEvent("orders_sync_complete", {
               detail: { sellerId }
             }));

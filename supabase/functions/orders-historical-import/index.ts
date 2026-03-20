@@ -467,39 +467,10 @@ Deno.serve(async (req) => {
           console.warn('[historical-import] Failed to reevaluate tenant limits:', err);
         }
 
-        // Trigger billing sync after completion
-        try {
-          await fetch(`${SUPABASE_URL}/functions/v1/ml-sync-billing-details`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-            },
-            body: JSON.stringify({ seller_id: job.seller_id, action: "sync", scope: "history" }),
-          });
-          console.log(`[historical-import] Triggered billing sync for ${job.seller_id}`);
-        } catch (err) {
-          console.error("[historical-import] Failed to trigger billing sync:", err);
-        }
-
-        // Trigger cost-engine/calculate to populate order_cost_breakdown_cache
-        try {
-          await fetch(`${SUPABASE_URL}/functions/v1/cost-engine/_internal/calculate`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-internal-key": SUPABASE_SERVICE_ROLE_KEY,
-            },
-            body: JSON.stringify({
-              user_id: account.user_id,
-              seller_id: job.seller_id,
-              period_days: job.days_back || 365,
-            }),
-          });
-          console.log(`[historical-import] Triggered cost-engine/calculate for ${job.seller_id} with period_days=${job.days_back || 365}`);
-        } catch (err) {
-          console.error("[historical-import] Failed to trigger cost-engine/calculate:", err);
-        }
+        // ====== BILLING & COST AUTO-SYNC DISABLED ======
+        // All billing/cost calculations are now manual-only to control cloud costs.
+        // Users must click "Recalcular" in the Cost module to trigger calculations.
+        console.log(`[historical-import] Billing/cost auto-sync DISABLED for ${job.seller_id} — manual-only mode`);
 
         // Trigger shipment backfill to fill geographic data for ABC cities
         try {
