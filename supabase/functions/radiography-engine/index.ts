@@ -572,9 +572,7 @@ async function handleListItems(supabase: any, userId: string, sellerId: string, 
 
   const snapshots = allSnapshots;
 
-  if (error) {
-    console.error("[Radiography] List error:", error);
-  }
+  // (error handling already done inside the pagination loop above)
 
   // Get thumbnails from listings cache
   const itemIds = (snapshots || []).map((s: any) => s.item_id);
