@@ -443,33 +443,50 @@ async function handleListItems(supabase: any, userId: string, sellerId: string, 
   
   const today = new Date().toISOString().split('T')[0];
 
-  // Get latest snapshots
-  const { data: snapshots, error } = await supabase
-    .from("listing_snapshots")
-    .select(`
-      item_id,
-      title,
-      price,
-      status,
-      score_total,
-      score_semantica,
-      score_visual,
-      score_clip,
-      score_competitividade,
-      score_logistica,
-      score_performance,
-      visits_7d,
-      sales_7d,
-      conversion_rate_7d,
-      available_quantity,
-      logistic_type,
-      catalog_product_id,
-      snapshot_date
-    `)
-    .eq("seller_id", sellerId)
-    .eq("snapshot_date", today)
-    .order(sort_by, { ascending: order === "asc" })
-    .range(offset, offset + limit - 1);
+  // Fetch ALL snapshots using pagination (no fixed limit)
+  let allSnapshots: any[] = [];
+  let from = 0;
+  const PAGE_SIZE = 1000;
+  
+  while (true) {
+    const { data: page, error } = await supabase
+      .from("listing_snapshots")
+      .select(`
+        item_id,
+        title,
+        price,
+        status,
+        score_total,
+        score_semantica,
+        score_visual,
+        score_clip,
+        score_competitividade,
+        score_logistica,
+        score_performance,
+        visits_7d,
+        sales_7d,
+        conversion_rate_7d,
+        available_quantity,
+        logistic_type,
+        catalog_product_id,
+        snapshot_date
+      `)
+      .eq("seller_id", sellerId)
+      .eq("snapshot_date", today)
+      .order(sort_by, { ascending: order === "asc" })
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (error) {
+      console.error("[Radiography] List error:", error);
+      break;
+    }
+    
+    allSnapshots = allSnapshots.concat(page || []);
+    if (!page || page.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+
+  const snapshots = allSnapshots;
 
   if (error) {
     console.error("[Radiography] List error:", error);
