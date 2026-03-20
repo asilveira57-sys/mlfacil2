@@ -921,16 +921,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                       </>
                     )}
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={handleBulkReimport}
-                    disabled={batchProcessing}
-                  >
-                    <Trash2 className="h-3.5 w-3.5 mr-1" />
-                    Excluir e reimportar
-                  </Button>
-                  {!batchProcessing && !selectAllPages && (
+                  {!batchProcessing && (
                     <Button size="sm" variant="ghost" onClick={() => setSelectedOrders(new Set())}>
                       Limpar seleção
                     </Button>
