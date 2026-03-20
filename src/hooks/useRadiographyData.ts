@@ -117,11 +117,6 @@ export function classifyHealth(item: {
   return "stable";
 }
 
-  // Stable by default
-  if (visits >= 0 && stock > 0) return "stable";
-
-  return "stable";
-}
 
 const ANOMALY_LABELS: Record<string, string> = {
   zero_visits: "Sem visitas no período",
