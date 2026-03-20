@@ -120,7 +120,7 @@ export function TaskBulkActions({
                 key={member.user_id}
                 onClick={() => handleAction(() => onAssigneeChange(member.user_id))}
               >
-                {member.user_id.slice(0, 8)}...
+                {member.full_name || member.user_id.slice(0, 8) + '...'}
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>
