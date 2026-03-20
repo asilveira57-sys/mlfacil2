@@ -1,67 +1,60 @@
 
+# Plano: Módulo Radiografia — Backend Completo
 
-# Plano: Fundação de Banco de Dados do Módulo Radiografia
+## Status: PROMPT 2 CONCLUÍDO ✅
 
-## Estado Atual
+## O que foi implementado
 
-Já existem 4 tabelas do módulo Radiografia:
-- `listing_snapshots` — snapshots periódicos com scores e métricas
-- `listing_events` — eventos detectados (imutáveis)
-- `listing_radiography` — análise profunda sob demanda
-- `listing_monitor_config` — configuração por seller
+### PROMPT 1 — Banco de Dados ✅
+- 4 novas tabelas: `listing_health_history`, `listing_health_current`, `radiography_backfill_control`, `radiography_collection_logs`
+- 3 colunas adicionais em `meli_listings_cache` (shipping_mode, updated_at, last_visit_collection_at)
+- ~10 índices, constraints de unicidade, triggers updated_at
+- RLS + policies em todas as tabelas
+- Coluna `anomaly_flags` em `listing_health_current`
 
-A `meli_listings_cache` existe mas falta: `shipping_mode`, `updated_at`, `last_visit_collection_at`.
+### PROMPT 2 — Backend, Jobs e Coleta ✅
+**Edge Function:** `supabase/functions/radiography-collector/index.ts`
 
-## Tabelas a Criar
+#### Fluxo 1 — Sync de Anúncios (action: "sync")
+- Busca todos os itens ativos via API ML com paginação
+- Multiget de detalhes em lotes de 20
+- Upsert em `meli_listings_cache`
+- Atualiza `last_sync_at`
+- Logs completos
 
-### 1. `listing_health_history`
-Histórico de coletas por item. Uma linha por coleta, nunca sobrescreve.
-- Campos: id, seller_id, item_id, collected_at, window_days, visits, price, available_quantity, listing_status, listing_type, shipping_mode, catalog_listing, source, created_at
-- Unique constraint: `(seller_id, item_id, collected_at, window_days)` — idempotência
-- Índices: `(seller_id, item_id)`, `(seller_id, collected_at DESC)`, `(seller_id, listing_status)`
+#### Fluxo 2 — Coleta Noturna (action: "collection")
+- Seleciona itens com `last_visit_collection_at` nulo ou >= 4 dias
+- Multiget de visitas em lotes de 50
+- Insere em `listing_health_history`
+- Atualiza `listing_health_current` por upsert
+- Atualiza `last_visit_collection_at`
+- Retry em rate limit
+- Detecção de anomalias ao final
 
-### 2. `listing_health_current`
-Estado atual de cada item (upsert, leitura rápida para a UI).
-- Campos: id, seller_id, item_id, last_collected_at, visits_last, price, available_quantity, listing_status, listing_type, shipping_mode, catalog_listing, updated_at
-- Unique constraint: `(seller_id, item_id)`
-- Índices: `(seller_id)`, `(seller_id, listing_status)`
-- Trigger `updated_at`
+#### Fluxo 3 — Backfill Histórico (action: "backfill")
+- 5 janelas: 0-30, 31-60, 61-90, 91-120, 121-150 dias
+- Checkpoint e retomada via `radiography_backfill_control`
+- Self-chain para evitar timeout (50s safety)
+- Status: pending → running → paused → done/failed
 
-### 3. `radiography_backfill_control`
-Controle de carga histórica por seller com retomada.
-- Campos: id, seller_id, status (enum: pending/running/paused/done/failed), progress_percent, last_processed_item_id, current_window_start, current_window_end, started_at, finished_at, updated_at, error_message
-- Unique constraint: `(seller_id)` — um backfill ativo por seller
-- Trigger `updated_at`
+#### Fluxo 4 — Atualização Current
+- Integrado nos fluxos 2 e 3 (upsert em `listing_health_current`)
 
-### 4. `radiography_collection_logs`
-Logs de todas as execuções do módulo.
-- Campos: id, seller_id, job_type (sync/collection/backfill), total_items, items_processed, items_failed, duration_ms, started_at, finished_at, status, error_message, metadata_json, created_at
-- Índices: `(seller_id, created_at DESC)`, `(job_type, status)`
+#### Fluxo 5 — Detecção de Anomalias
+- `zero_visits` — item ativo sem visitas
+- `high_stock_low_traction` — estoque alto sem tração
+- `visit_drop` — queda >40% de visitas
+- `consistent_decline` — declínio em 3 períodos consecutivos
+- Flags persistidos em `listing_health_current.anomaly_flags`
 
-## Ajustes em `meli_listings_cache`
-Adicionar 3 colunas faltantes:
-- `shipping_mode TEXT`
-- `updated_at TIMESTAMPTZ DEFAULT now()`
-- `last_visit_collection_at TIMESTAMPTZ`
+#### Cron Job
+- `radiography-nightly-collection`: roda a cada 4 dias às 05:00 UTC (02:00 BRT)
+- Chama action "nightly" que processa todos os sellers ativos
 
-Adicionar índice: `(seller_id, status)`
-Trigger `updated_at` na tabela.
+#### Action "full"
+- Pipeline completo para um seller: sync → collection → backfill (async)
 
-## Segurança (RLS)
-Todas as 4 novas tabelas:
-- RLS habilitado
-- Policy SELECT para usuários via `ml_accounts` (mesmo padrão das tabelas existentes)
-- Policy ALL para service role
-
-## Resumo da Migration
-
-Uma única migration SQL com:
-- 4 novas tabelas com constraints
-- ~10 índices
-- 3 colunas adicionais em `meli_listings_cache`
-- RLS + policies em todas as novas tabelas
-- Triggers `updated_at` onde aplicável
-
-## Arquivo Modificado
-- Nova migration SQL (via ferramenta de migração)
-
+## Arquivos Criados/Modificados
+- `supabase/functions/radiography-collector/index.ts` — NOVO
+- Migrations para tabelas, índices, RLS
+- Cron job configurado via pg_cron
