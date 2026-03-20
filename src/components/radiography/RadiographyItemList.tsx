@@ -313,17 +313,18 @@ export function RadiographyItemList({
                       <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
                         <span className="flex items-center gap-1">
                           <Eye className="h-3 w-3 text-cyan-400" />
-                          {item.visits_last != null ? item.visits_last.toLocaleString("pt-BR") : "—"}
+                          {(item.visits_period ?? item.visits_last) != null ? (item.visits_period ?? item.visits_last)!.toLocaleString("pt-BR") : "—"}
                         </span>
-                        <span className={`flex items-center gap-1 ${!hasSalesData ? "opacity-50" : ""}`}>
+                        <span className={`flex items-center gap-1 ${!(item.sales_period ?? item.sales_count_30d) && !item.last_sale_at ? "opacity-50" : ""}`}>
                           <ShoppingCart className="h-3 w-3 text-emerald-400" />
-                          {hasSalesData ? (item.sales_count_30d ?? 0) : "—"}
+                          {(item.sales_period ?? item.sales_count_30d) != null ? (item.sales_period ?? item.sales_count_30d) : "—"}
                         </span>
                         {/* Conversion rate */}
                         {(() => {
-                          const conv = (item.visits_last && item.visits_last > 0 && item.sales_count_30d != null)
-                            ? ((item.sales_count_30d / item.visits_last) * 100)
-                            : null;
+                          const conv = item.conversion_period ??
+                            ((item.visits_period && item.visits_period > 0 && item.sales_period != null)
+                              ? ((item.sales_period / item.visits_period) * 100)
+                              : null);
                           return conv != null ? (
                             <span className={`flex items-center gap-1 font-mono ${
                               conv >= 3 ? "text-emerald-400" : conv >= 1 ? "text-amber-400" : "text-red-400"
