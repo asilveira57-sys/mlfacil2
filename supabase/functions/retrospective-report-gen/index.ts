@@ -328,7 +328,7 @@ function generateHtmlReport(retro: any, companyName: string): string {
   ` : ""}
 
   <div class="footer">
-    <p>Relatório gerado automaticamente pela <span class="brand">Marketplace Fácil</span> • ${new Date().getFullYear()}</p>
+    <p>Relatório gerado automaticamente pela <span class="brand">MKTP Fácil</span> • ${new Date().getFullYear()}</p>
   </div>
 </div>
 </body>
