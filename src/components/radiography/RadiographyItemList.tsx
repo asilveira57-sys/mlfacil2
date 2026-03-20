@@ -18,6 +18,7 @@ import {
   ExternalLink,
   ShoppingCart,
   Clock,
+  ArrowUpDown,
 } from "lucide-react";
 import {
   HEALTH_STATUS_CONFIG,
@@ -27,6 +28,7 @@ import {
   HealthCurrentItem,
   classifyHealth,
   getAnomalyLabel,
+  getChangeLabel,
   AnomalyFilter,
   PeriodDays,
 } from "@/hooks/useRadiographyData";
