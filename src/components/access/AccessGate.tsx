@@ -98,7 +98,7 @@ export function AccessGate({
         title="Teste finalizado"
         description={ACCESS_MESSAGES.TRIAL_EXPIRED}
         action={
-          <Button onClick={() => navigate('/planos')}>
+          <Button onClick={() => navigate('/settings?section=plano')}>
             Escolher plano
           </Button>
         }
@@ -120,7 +120,7 @@ export function AccessGate({
             <Button onClick={() => navigate('/settings?tab=integrations')}>
               Conectar conta titular
             </Button>
-            <Button variant="outline" onClick={() => navigate('/planos')}>
+            <Button variant="outline" onClick={() => navigate('/settings?section=plano')}>
               <ExternalLink className="h-4 w-4 mr-2" />
               Ver plano ZPL
             </Button>
@@ -140,7 +140,7 @@ export function AccessGate({
         title="Recurso bloqueado"
         description="Seu plano atual não inclui acesso a este recurso."
         action={
-          <Button variant="outline" onClick={() => navigate('/planos')}>
+          <Button variant="outline" onClick={() => navigate('/settings?section=plano')}>
             Ver planos
           </Button>
         }

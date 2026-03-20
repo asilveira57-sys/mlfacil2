@@ -31,7 +31,7 @@ export function PlanLimitBanner({ limitCheck, compact = false }: PlanLimitBanner
               : `${usage_percent.toFixed(0)}% do limite: ${total_sales_30d}/${plan_max_sales} vendas`
             }
           </span>
-          <Button size="sm" variant={isCritical ? 'destructive' : 'outline'} onClick={() => navigate('/planos')}>
+          <Button size="sm" variant={isCritical ? 'destructive' : 'outline'} onClick={() => navigate('/settings?section=plano')}>
             {isCritical ? 'Fazer upgrade' : 'Ver planos'}
           </Button>
         </AlertDescription>
@@ -56,7 +56,7 @@ export function PlanLimitBanner({ limitCheck, compact = false }: PlanLimitBanner
               {limitCheck.accounts_count > 1 && ` (${limitCheck.accounts_count} contas somadas)`}
             </p>
           </div>
-          <Button size="sm" variant={isCritical ? 'destructive' : 'outline'} onClick={() => navigate('/planos')}>
+          <Button size="sm" variant={isCritical ? 'destructive' : 'outline'} onClick={() => navigate('/settings?section=plano')}>
             {isCritical ? 'Fazer upgrade agora' : 'Ver planos'}
           </Button>
         </div>

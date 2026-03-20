@@ -25,7 +25,7 @@ export function ToolsPromoCard() {
           </div>
         </div>
         <Button 
-          onClick={() => navigate("/planos")}
+          onClick={() => navigate("/settings?section=plano")}
           className="gap-2 whitespace-nowrap"
         >
           {t('promo.cta')}
