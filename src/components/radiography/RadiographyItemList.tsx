@@ -84,13 +84,13 @@ export function RadiographyItemList({
       if (sortBy === "health") {
         return (healthPriority[classifyHealth(a)] ?? 5) - (healthPriority[classifyHealth(b)] ?? 5);
       }
-      if (sortBy === "visits") return (b.visits_last ?? 0) - (a.visits_last ?? 0);
-      if (sortBy === "sales") return (b.sales_count_30d ?? 0) - (a.sales_count_30d ?? 0);
+      if (sortBy === "visits") return (b.visits_period ?? b.visits_last ?? 0) - (a.visits_period ?? a.visits_last ?? 0);
+      if (sortBy === "sales") return (b.sales_period ?? b.sales_count_30d ?? 0) - (a.sales_period ?? a.sales_count_30d ?? 0);
       if (sortBy === "days_no_sale") return (b.days_without_sale ?? 0) - (a.days_without_sale ?? 0);
       if (sortBy === "seo") return (a.seo_score ?? 999) - (b.seo_score ?? 999);
       if (sortBy === "conversion") {
-        const convA = (a.visits_last && a.visits_last > 0 && a.sales_count_30d != null) ? a.sales_count_30d / a.visits_last : -1;
-        const convB = (b.visits_last && b.visits_last > 0 && b.sales_count_30d != null) ? b.sales_count_30d / b.visits_last : -1;
+        const convA = a.conversion_period ?? ((a.visits_period && a.visits_period > 0 && a.sales_period != null) ? (a.sales_period / a.visits_period) * 100 : -1);
+        const convB = b.conversion_period ?? ((b.visits_period && b.visits_period > 0 && b.sales_period != null) ? (b.sales_period / b.visits_period) * 100 : -1);
         return convB - convA;
       }
       return 0;
