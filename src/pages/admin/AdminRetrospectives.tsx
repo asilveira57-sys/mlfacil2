@@ -220,6 +220,9 @@ export function AdminRetrospectives() {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [activeTab, setActiveTab] = useState<'retrospectives' | 'rules' | 'targets' | 'snapshots'>('retrospectives');
   const [selectedRetro, setSelectedRetro] = useState<RetrospectiveWithCompany | null>(null);
+  const [retroPage, setRetroPage] = useState(0);
+  const [targetPage, setTargetPage] = useState(0);
+  const PAGE_SIZE = 20;
 
   // Stats
   const stats = useMemo(() => {
