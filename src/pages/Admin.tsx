@@ -74,6 +74,7 @@ const adminTabs = [
   { id: 'central-de-ajuda', label: 'Central Ajuda', icon: HelpCircle },
   { id: 'emails', label: 'Comunicação', icon: Mail },
   { id: 'suporte', label: 'Suporte', icon: Headphones },
+  { id: 'consentimentos', label: 'Consentimentos', icon: Shield },
 ];
 
 export default function Admin() {
