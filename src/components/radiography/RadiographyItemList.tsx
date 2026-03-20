@@ -84,13 +84,13 @@ export function RadiographyItemList({
       if (sortBy === "health") {
         return (healthPriority[classifyHealth(a)] ?? 5) - (healthPriority[classifyHealth(b)] ?? 5);
       }
-      if (sortBy === "visits") return (b.visits_last ?? 0) - (a.visits_last ?? 0);
-      if (sortBy === "sales") return (b.sales_count_30d ?? 0) - (a.sales_count_30d ?? 0);
+      if (sortBy === "visits") return (b.visits_period ?? b.visits_last ?? 0) - (a.visits_period ?? a.visits_last ?? 0);
+      if (sortBy === "sales") return (b.sales_period ?? b.sales_count_30d ?? 0) - (a.sales_period ?? a.sales_count_30d ?? 0);
       if (sortBy === "days_no_sale") return (b.days_without_sale ?? 0) - (a.days_without_sale ?? 0);
       if (sortBy === "seo") return (a.seo_score ?? 999) - (b.seo_score ?? 999);
       if (sortBy === "conversion") {
-        const convA = (a.visits_last && a.visits_last > 0 && a.sales_count_30d != null) ? a.sales_count_30d / a.visits_last : -1;
-        const convB = (b.visits_last && b.visits_last > 0 && b.sales_count_30d != null) ? b.sales_count_30d / b.visits_last : -1;
+        const convA = a.conversion_period ?? ((a.visits_period && a.visits_period > 0 && a.sales_period != null) ? (a.sales_period / a.visits_period) * 100 : -1);
+        const convB = b.conversion_period ?? ((b.visits_period && b.visits_period > 0 && b.sales_period != null) ? (b.sales_period / b.visits_period) * 100 : -1);
         return convB - convA;
       }
       return 0;
@@ -262,7 +262,7 @@ export function RadiographyItemList({
                 const health = classifyHealth(item);
                 const config = HEALTH_STATUS_CONFIG[health];
                 const alertCount = (item.alerts_json?.length ?? 0) + (item.anomaly_flags?.length ?? 0);
-                const hasSalesData = (item.sales_count_30d ?? 0) > 0 || !!item.last_sale_at;
+                
 
                 return (
                   <div
@@ -313,17 +313,18 @@ export function RadiographyItemList({
                       <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
                         <span className="flex items-center gap-1">
                           <Eye className="h-3 w-3 text-cyan-400" />
-                          {item.visits_last != null ? item.visits_last.toLocaleString("pt-BR") : "—"}
+                          {(item.visits_period ?? item.visits_last) != null ? (item.visits_period ?? item.visits_last)!.toLocaleString("pt-BR") : "—"}
                         </span>
-                        <span className={`flex items-center gap-1 ${!hasSalesData ? "opacity-50" : ""}`}>
+                        <span className={`flex items-center gap-1 ${!(item.sales_period ?? item.sales_count_30d) && !item.last_sale_at ? "opacity-50" : ""}`}>
                           <ShoppingCart className="h-3 w-3 text-emerald-400" />
-                          {hasSalesData ? (item.sales_count_30d ?? 0) : "—"}
+                          {(item.sales_period ?? item.sales_count_30d) != null ? (item.sales_period ?? item.sales_count_30d) : "—"}
                         </span>
                         {/* Conversion rate */}
                         {(() => {
-                          const conv = (item.visits_last && item.visits_last > 0 && item.sales_count_30d != null)
-                            ? ((item.sales_count_30d / item.visits_last) * 100)
-                            : null;
+                          const conv = item.conversion_period ??
+                            ((item.visits_period && item.visits_period > 0 && item.sales_period != null)
+                              ? ((item.sales_period / item.visits_period) * 100)
+                              : null);
                           return conv != null ? (
                             <span className={`flex items-center gap-1 font-mono ${
                               conv >= 3 ? "text-emerald-400" : conv >= 1 ? "text-amber-400" : "text-red-400"

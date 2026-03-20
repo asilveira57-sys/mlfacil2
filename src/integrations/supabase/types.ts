@@ -19689,6 +19689,23 @@ export type Database = {
       }
       get_global_ads_metrics: { Args: never; Returns: Json }
       get_global_total_revenue: { Args: never; Returns: number }
+      get_item_metrics_by_period: {
+        Args: { p_days?: number; p_seller_id: string }
+        Returns: {
+          conversion_period: number
+          item_id: string
+          sales_period: number
+          units_period: number
+          visits_period: number
+        }[]
+      }
+      get_item_visit_series: {
+        Args: { p_days?: number; p_item_id: string; p_seller_id: string }
+        Returns: {
+          visit_date: string
+          visits: number
+        }[]
+      }
       get_or_create_ml_account: {
         Args: {
           p_access_token?: string

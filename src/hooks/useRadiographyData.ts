@@ -77,6 +77,11 @@ export interface HealthCurrentItem {
   thumbnail?: string | null;
   permalink?: string | null;
   logistic_type?: string | null;
+  // Period-based metrics (from RPC)
+  visits_period?: number | null;
+  sales_period?: number | null;
+  units_period?: number | null;
+  conversion_period?: number | null;
 }
 
 export interface HealthHistoryEntry {
@@ -92,6 +97,11 @@ export interface HealthHistoryEntry {
   catalog_listing: boolean | null;
   source: string | null;
   window_days: number;
+}
+
+export interface VisitSeriesEntry {
+  visit_date: string;
+  visits: number;
 }
 
 export interface DiagnosticSummary {
@@ -118,6 +128,7 @@ export type PeriodDays = 7 | 15 | 30 | 60 | 150;
 
 export function classifyHealth(item: {
   visits_last?: number | null;
+  visits_period?: number | null;
   available_quantity?: number | null;
   listing_type?: string | null;
   shipping_mode?: string | null;
@@ -126,37 +137,33 @@ export function classifyHealth(item: {
   last_collected_at?: string | null;
   days_without_sale?: number | null;
   sales_count_30d?: number | null;
+  sales_period?: number | null;
   conversion_rate_7d?: number | null;
+  conversion_period?: number | null;
 }): RadiographyHealthStatus {
   const flags = item.anomaly_flags || [];
-  const visits = item.visits_last ?? -1;
+  const visits = item.visits_period ?? item.visits_last ?? -1;
   const stock = item.available_quantity ?? -1;
   const daysNoSale = item.days_without_sale ?? null;
-  const sales30d = item.sales_count_30d ?? null;
+  const sales = item.sales_period ?? item.sales_count_30d ?? null;
   
-  // If we have no data yet, show stable (not penalizing)
-  if (!item.last_collected_at) return "stable";
+  if (!item.last_collected_at && visits < 0) return "stable";
 
-  // Critical: zero stock, consistent decline, or 30+ days without sale with low visits
   if (stock === 0 || flags.includes("consistent_decline")) return "critical";
   if (daysNoSale !== null && daysNoSale > 30 && visits < 20) return "critical";
 
-  // Alert: visit drop, zero visits, or visits without conversion
   if (flags.includes("visit_drop") || flags.includes("zero_visits")) return "alert";
   if (flags.includes("visits_no_conversion") || flags.includes("no_sales_30d")) return "alert";
 
-  // Observation: high stock low traction, low conversion, or 14+ days without sale
   if (flags.includes("high_stock_low_traction") || flags.includes("low_conversion")) return "observation";
   if (flags.includes("no_sales_14d")) return "observation";
 
-  // Healthy: good visits, has stock, has sales, good logistics
-  if (visits > 10 && stock > 0 && (sales30d === null || sales30d > 0)) {
+  if (visits > 10 && stock > 0 && (sales === null || sales > 0)) {
     const hasFulfillment = item.shipping_mode === "me2" || item.listing_type === "gold_pro";
     if (hasFulfillment || item.catalog_listing) return "healthy";
     return "stable";
   }
 
-  // Stable by default
   if (visits >= 0 && stock > 0) return "stable";
 
   return "stable";
@@ -197,30 +204,47 @@ export function getChangeLabel(type: string): string {
 
 // --- Main hook ---
 
-export function useRadiographyData(sellerId: string | null) {
-  // 1. Fetch current health + listing info (main table)
+export function useRadiographyData(sellerId: string | null, selectedPeriod: PeriodDays = 30) {
+  // 1. Fetch current health + listing info + period metrics
   const {
     data: items,
     isLoading: itemsLoading,
     refetch: refetchItems,
   } = useQuery({
-    queryKey: ["radiography-items", sellerId],
+    queryKey: ["radiography-items", sellerId, selectedPeriod],
     queryFn: async () => {
       if (!sellerId) return [];
 
-      // Get health current
-      const { data: healthRows, error: healthErr } = await supabase
-        .from("listing_health_current")
-        .select("*")
-        .eq("seller_id", sellerId);
+      // Get health current + period metrics in parallel
+      const [healthRes, metricsRes] = await Promise.all([
+        supabase
+          .from("listing_health_current")
+          .select("*")
+          .eq("seller_id", sellerId),
+        supabase.rpc("get_item_metrics_by_period", {
+          p_seller_id: sellerId,
+          p_days: selectedPeriod,
+        }),
+      ]);
 
-      if (healthErr) throw healthErr;
-      if (!healthRows?.length) return [];
+      if (healthRes.error) throw healthRes.error;
+      if (!healthRes.data?.length) return [];
+
+      // Build metrics lookup
+      const metricsMap: Record<string, { visits_period: number; sales_period: number; units_period: number; conversion_period: number | null }> = {};
+      if (metricsRes.data) {
+        for (const m of metricsRes.data) {
+          metricsMap[m.item_id] = {
+            visits_period: Number(m.visits_period) || 0,
+            sales_period: Number(m.sales_period) || 0,
+            units_period: Number(m.units_period) || 0,
+            conversion_period: m.conversion_period != null ? Number(m.conversion_period) : null,
+          };
+        }
+      }
 
       // Get listing cache for titles/thumbnails (deduplicated by item_id)
-      const itemIds = [...new Set(healthRows.map((r) => r.item_id))];
-      
-      // Fetch in batches of 100
+      const itemIds = [...new Set(healthRes.data.map((r) => r.item_id))];
       const listings: Record<string, any> = {};
       for (let i = 0; i < itemIds.length; i += 100) {
         const batch = itemIds.slice(i, i + 100);
@@ -240,8 +264,9 @@ export function useRadiographyData(sellerId: string | null) {
       }
 
       // Merge
-      return healthRows.map((h) => {
+      return healthRes.data.map((h) => {
         const cache = listings[h.item_id];
+        const metrics = metricsMap[h.item_id];
         return {
           ...h,
           change_flags: (h.change_flags as any as ChangeFlag[]) || [],
@@ -251,6 +276,10 @@ export function useRadiographyData(sellerId: string | null) {
           thumbnail: cache?.thumbnail || null,
           permalink: cache?.permalink || null,
           logistic_type: cache?.logistic_type || null,
+          visits_period: metrics?.visits_period ?? null,
+          sales_period: metrics?.sales_period ?? null,
+          units_period: metrics?.units_period ?? null,
+          conversion_period: metrics?.conversion_period ?? null,
         } as HealthCurrentItem;
       });
     },
@@ -267,47 +296,27 @@ export function useRadiographyData(sellerId: string | null) {
     queryFn: async (): Promise<DiagnosticSummary> => {
       if (!sellerId) {
         return {
-          totalActive: 0,
-          updatedRecently: 0,
-          awaitingCollection: 0,
-          totalExams: 0,
-          anomalyCount: 0,
-          lastSyncAt: null,
-          lastCollectionAt: null,
-          lastCollectionStatus: null,
-          lastCollectionError: null,
-          lastCollectionProcessed: 0,
-          lastCollectionFailed: 0,
-          backfillStatus: null,
-          backfillProgress: null,
-          backfillError: null,
+          totalActive: 0, updatedRecently: 0, awaitingCollection: 0,
+          totalExams: 0, anomalyCount: 0, lastSyncAt: null,
+          lastCollectionAt: null, lastCollectionStatus: null, lastCollectionError: null,
+          lastCollectionProcessed: 0, lastCollectionFailed: 0,
+          backfillStatus: null, backfillProgress: null, backfillError: null,
         };
       }
 
-      const fourDaysAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString();
-
-      // Parallel queries
       const [distinctRes, historyRes, anomalyRes, lastSyncRes, lastCollectionSuccessRes, lastCollectionAnyRes, backfillRes] = await Promise.all([
-        // Distinct active items (ignoring variations)
         supabase.rpc("count_distinct_active_items", { p_seller_id: sellerId }),
-        // Total history records
         supabase.from("listing_health_history").select("id", { count: "exact", head: true }).eq("seller_id", sellerId),
-        // Anomaly count
         supabase.from("listing_health_current").select("id", { count: "exact", head: true }).eq("seller_id", sellerId).not("anomaly_flags", "eq", "{}"),
-        // Last sync
         supabase.from("radiography_collection_logs").select("finished_at").eq("seller_id", sellerId).eq("job_type", "sync").eq("status", "success").order("finished_at", { ascending: false }).limit(1),
-        // Last collection
         supabase.from("radiography_collection_logs").select("finished_at").eq("seller_id", sellerId).eq("job_type", "collection").eq("status", "success").order("finished_at", { ascending: false }).limit(1),
-        // Last collection attempt (success or fail)
         supabase.from("radiography_collection_logs").select("status, error_message, items_processed, items_failed, finished_at, created_at").eq("seller_id", sellerId).eq("job_type", "collection").order("created_at", { ascending: false }).limit(1),
-        // Backfill
         supabase.from("radiography_backfill_control").select("status, progress_percent, error_message").eq("seller_id", sellerId).limit(1).maybeSingle(),
       ]);
 
       const distinctData = distinctRes.data?.[0];
       const totalActive = Number(distinctData?.total_distinct || 0);
       const recentCount = Number(distinctData?.updated_recently || 0);
-
       const lastCollectionAny = lastCollectionAnyRes.data?.[0];
 
       return {
@@ -331,7 +340,25 @@ export function useRadiographyData(sellerId: string | null) {
     staleTime: 5 * 60 * 1000,
   });
 
-  // 3. Fetch history for a specific item (lazy)
+  // 3. Fetch visit time series for a specific item (real daily data)
+  const fetchItemVisitSeries = useCallback(
+    async (itemId: string, days: PeriodDays = 30): Promise<VisitSeriesEntry[]> => {
+      if (!sellerId) return [];
+      const { data, error } = await supabase.rpc("get_item_visit_series", {
+        p_seller_id: sellerId,
+        p_item_id: itemId,
+        p_days: days,
+      });
+      if (error) throw error;
+      return (data || []).map((r: any) => ({
+        visit_date: r.visit_date,
+        visits: Number(r.visits) || 0,
+      }));
+    },
+    [sellerId]
+  );
+
+  // 3b. Fetch history snapshots (price/stock overlay)
   const fetchItemHistory = useCallback(
     async (itemId: string, days: PeriodDays = 30): Promise<HealthHistoryEntry[]> => {
       if (!sellerId) return [];
@@ -349,14 +376,12 @@ export function useRadiographyData(sellerId: string | null) {
     [sellerId]
   );
 
-  // 4. Trigger update (edge function) — also enrich sales
+  // 4. Trigger update (edge function)
   const triggerUpdate = useCallback(async () => {
     if (!sellerId) return;
-    // Run full collection
     await supabase.functions.invoke("radiography-collector", {
       body: { action: "full", seller_id: sellerId },
     });
-    // Then enrich sales data (doesn't need ML API)
     await supabase.functions.invoke("radiography-collector", {
       body: { action: "enrich_sales", seller_id: sellerId },
     });
@@ -368,6 +393,7 @@ export function useRadiographyData(sellerId: string | null) {
     diagnostics: diagnostics || null,
     diagnosticsLoading,
     fetchItemHistory,
+    fetchItemVisitSeries,
     triggerUpdate,
     refetchItems,
   };

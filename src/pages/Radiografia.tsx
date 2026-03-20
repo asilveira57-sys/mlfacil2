@@ -12,7 +12,7 @@ import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { useModuleFeedbackIntegration } from "@/hooks/useModuleFeedbackIntegration";
 import { FeedbackPromptCard } from "@/components/feedback";
-import { useRadiographyData, PeriodDays, HealthCurrentItem } from "@/hooks/useRadiographyData";
+import { useRadiographyData, PeriodDays } from "@/hooks/useRadiographyData";
 import { RadiographyDiagnosticCards } from "@/components/radiography/RadiographyDiagnosticCards";
 import { RadiographyItemList } from "@/components/radiography/RadiographyItemList";
 import { RadiographyDetailPanel } from "@/components/radiography/RadiographyDetailPanel";
@@ -25,17 +25,19 @@ export default function Radiografia() {
   const feedback = useModuleFeedbackIntegration("radiografia-seed");
   const { toast } = useToast();
 
+  const [selectedPeriod, setSelectedPeriod] = useState<PeriodDays>(30);
+
   const {
     items,
     itemsLoading,
     diagnostics,
     diagnosticsLoading,
     fetchItemHistory,
+    fetchItemVisitSeries,
     triggerUpdate,
     refetchItems,
-  } = useRadiographyData(sellerId);
+  } = useRadiographyData(sellerId, selectedPeriod);
 
-  const [selectedPeriod, setSelectedPeriod] = useState<PeriodDays>(30);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -153,6 +155,7 @@ export default function Radiografia() {
                   setSelectedItemId(null);
                 }}
                 fetchHistory={fetchItemHistory}
+                fetchVisitSeries={fetchItemVisitSeries}
                 selectedPeriod={selectedPeriod}
               />
 

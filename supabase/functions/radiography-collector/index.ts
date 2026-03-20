@@ -886,10 +886,8 @@ async function handleBackfill(supabase: any, sellerId: string, chainDepth: numbe
       const dateFrom = new Date(now - window.daysEnd * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
       const dateTo = new Date(now - window.daysStart * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
       
-      // Normalize collected_at per window for idempotency
-      const windowCollectedAt = new Date();
-      windowCollectedAt.setSeconds(0, 0);
-      const collectedAt = windowCollectedAt.toISOString();
+      // Use the window end date as collected_at (not "now") for proper historical timeline
+      const collectedAt = new Date(dateTo + "T12:00:00.000Z").toISOString();
 
       console.log(`[rad-collector] Backfill window ${window.label}: ${dateFrom} → ${dateTo}`);
 

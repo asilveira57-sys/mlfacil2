@@ -21,7 +21,7 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { HEALTH_STATUS_CONFIG, RadiographyHealthStatus } from "@/types/radiography";
 import {
-  HealthCurrentItem, HealthHistoryEntry, StructuredAlert, ChangeFlag,
+  HealthCurrentItem, HealthHistoryEntry, VisitSeriesEntry, StructuredAlert, ChangeFlag,
   SeoAnalysis, classifyHealth, getAnomalyLabel, PeriodDays,
 } from "@/hooks/useRadiographyData";
 
@@ -30,6 +30,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   fetchHistory: (itemId: string, days: PeriodDays) => Promise<HealthHistoryEntry[]>;
+  fetchVisitSeries: (itemId: string, days: PeriodDays) => Promise<VisitSeriesEntry[]>;
   selectedPeriod: PeriodDays;
 }
 
@@ -188,66 +189,77 @@ const factorStatusStyles = {
   neutral: "text-slate-400 bg-slate-500/10 border-slate-500/20",
 };
 
-export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, selectedPeriod }: Props) {
+export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetchVisitSeries, selectedPeriod }: Props) {
   const [history, setHistory] = useState<HealthHistoryEntry[]>([]);
+  const [visitSeries, setVisitSeries] = useState<VisitSeriesEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [period, setPeriod] = useState<PeriodDays>(selectedPeriod);
 
-  const loadHistory = useCallback(async () => {
+  const loadData = useCallback(async () => {
     if (!item) return;
     setHistoryLoading(true);
     try {
-      const data = await fetchHistory(item.item_id, period);
-      setHistory(data);
+      const [histData, seriesData] = await Promise.all([
+        fetchHistory(item.item_id, period),
+        fetchVisitSeries(item.item_id, period),
+      ]);
+      setHistory(histData);
+      setVisitSeries(seriesData);
     } catch {
       setHistory([]);
+      setVisitSeries([]);
     } finally {
       setHistoryLoading(false);
     }
-  }, [item, period, fetchHistory]);
+  }, [item, period, fetchHistory, fetchVisitSeries]);
 
   useEffect(() => {
-    if (open && item) { setPeriod(selectedPeriod); loadHistory(); }
+    if (open && item) { setPeriod(selectedPeriod); loadData(); }
   }, [open, item?.item_id]);
 
   useEffect(() => {
-    if (open && item) loadHistory();
+    if (open && item) loadData();
   }, [period]);
 
-  // Chart data — aggregate by date to avoid duplicate x-axis labels (must be before early return)
+  // Chart data — use visit series (real daily) with price/stock overlay from history snapshots
   const chartData = useMemo(() => {
-    if (!history.length) return [];
-    const byDate = new Map<string, { visits: number; price: number; stock: number; count: number; fullDate: string }>();
+    if (!visitSeries.length) return [];
+    
+    // Build price/stock lookup from history snapshots by date
+    const snapshotByDate = new Map<string, { price: number; stock: number }>();
     for (const h of history) {
-      const dateKey = format(new Date(h.collected_at), "yyyy-MM-dd");
-      const existing = byDate.get(dateKey);
-      if (existing) {
-        existing.visits += h.visits ?? 0;
-        existing.count++;
-        existing.price = h.price ?? existing.price;
-        existing.stock = h.available_quantity ?? existing.stock;
-      } else {
-        byDate.set(dateKey, {
-          visits: h.visits ?? 0,
-          price: h.price ?? 0,
-          stock: h.available_quantity ?? 0,
-          count: 1,
-          fullDate: h.collected_at,
-        });
-      }
+      const dateKey = new Date(h.collected_at).toISOString().slice(0, 10);
+      snapshotByDate.set(dateKey, {
+        price: h.price ?? 0,
+        stock: h.available_quantity ?? 0,
+      });
     }
-    return Array.from(byDate.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, val]) => ({
-        date: format(new Date(key), "dd/MM", { locale: ptBR }),
-        fullDate: val.fullDate,
-        visits: val.visits,
-        price: val.price,
-        stock: val.stock,
-      }));
-  }, [history]);
+
+    // Use current item values as fallback
+    const currentPrice = item?.price ?? 0;
+    const currentStock = item?.available_quantity ?? 0;
+    let lastKnownPrice = currentPrice;
+    let lastKnownStock = currentStock;
+
+    return visitSeries.map((v) => {
+      const dateKey = v.visit_date;
+      const snapshot = snapshotByDate.get(dateKey);
+      if (snapshot) {
+        lastKnownPrice = snapshot.price;
+        lastKnownStock = snapshot.stock;
+      }
+      return {
+        date: format(new Date(dateKey), "dd/MM", { locale: ptBR }),
+        fullDate: dateKey,
+        visits: v.visits,
+        price: snapshot?.price ?? lastKnownPrice,
+        stock: snapshot?.stock ?? lastKnownStock,
+      };
+    });
+  }, [visitSeries, history, item]);
 
   const hasMultipleDates = chartData.length >= 2;
+  const hasAnyVisits = chartData.some(d => d.visits > 0);
 
   const health = item ? classifyHealth(item) : ("stable" as RadiographyHealthStatus);
   const config = HEALTH_STATUS_CONFIG[health];
@@ -335,9 +347,12 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, sele
           <div className="p-5 space-y-5">
             {/* SECTION 1 — Summary metrics */}
             <div className="grid grid-cols-4 gap-2">
-              <MiniStat label="Visitas" value={item.visits_last != null ? item.visits_last.toLocaleString("pt-BR") : "—"} icon={<Eye className="h-3 w-3 text-cyan-400" />} />
-              <MiniStat label="Vendas (30d)" value={String(item.sales_count_30d ?? 0)} icon={<ShoppingCart className="h-3 w-3 text-emerald-400" />} />
-              <MiniStat label="Conversão" value={item.conversion_rate_7d != null ? `${item.conversion_rate_7d.toFixed(1)}%` : "—"} icon={<BarChart3 className="h-3 w-3 text-violet-400" />} />
+              <MiniStat label={`Visitas (${period}d)`} value={item.visits_period != null ? item.visits_period.toLocaleString("pt-BR") : (item.visits_last != null ? item.visits_last.toLocaleString("pt-BR") : "—")} icon={<Eye className="h-3 w-3 text-cyan-400" />} />
+              <MiniStat label={`Vendas (${period}d)`} value={String(item.sales_period ?? item.sales_count_30d ?? 0)} icon={<ShoppingCart className="h-3 w-3 text-emerald-400" />} />
+              <MiniStat label="Conversão" value={
+                item.conversion_period != null ? `${item.conversion_period.toFixed(1)}%` :
+                (item.conversion_rate_7d != null ? `${item.conversion_rate_7d.toFixed(1)}%` : "—")
+              } icon={<BarChart3 className="h-3 w-3 text-violet-400" />} />
               <MiniStat label="Dias s/ venda" value={item.days_without_sale != null ? String(item.days_without_sale) : "—"} icon={<Clock className="h-3 w-3 text-amber-400" />} highlight={item.days_without_sale != null && item.days_without_sale > 14} />
             </div>
             <div className="grid grid-cols-3 gap-2">
@@ -427,11 +442,14 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, sele
             >
               {historyLoading ? (
                 <Skeleton className="h-[200px] w-full bg-slate-700" />
-              ) : chartData.length === 0 ? (
+              ) : chartData.length === 0 || !hasAnyVisits ? (
                 <div className="h-[200px] flex flex-col items-center justify-center text-slate-500 text-sm gap-2">
                   <BarChart3 className="h-8 w-8 text-slate-600" />
-                  <p>Histórico será preenchido conforme a coleta avança.</p>
-                  <p className="text-xs text-slate-600">A coleta ocorre automaticamente a cada 4 dias.</p>
+                  <p>{chartData.length === 0 
+                    ? "Sem dados de visitas para este período." 
+                    : `Dados históricos insuficientes para ${period} dias.`}
+                  </p>
+                  <p className="text-xs text-slate-600">Tente um período menor ou aguarde a próxima coleta.</p>
                 </div>
               ) : !hasMultipleDates ? (
                 <div className="space-y-3">
