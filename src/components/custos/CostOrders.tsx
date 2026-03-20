@@ -150,44 +150,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     });
   };
 
-  const handleSelectAllPages = async () => {
-    setLoadingAllIds(true);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      const params = new URLSearchParams({
-        seller_id: sellerId,
-        period_days: periodDays,
-        search,
-        ids_only: 'true',
-      });
-
-      if (statusFilter !== 'all') params.set('status', statusFilter);
-      if (profitFilter !== 'all') params.set('profit_type', profitFilter);
-      if (ecommerceFilter !== 'all') params.set('ecommerce_cost', ecommerceFilter);
-      if (shippingFilter !== 'all') params.set('shipping_filter', shippingFilter);
-      if (orderStatusFilter !== 'paid') params.set('order_status', orderStatusFilter);
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders?${params}`,
-        { headers: { Authorization: `Bearer ${session.access_token}` } }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        const allIds = data.order_ids || [];
-        setSelectedOrders(new Set(allIds));
-        setSelectAllPages(true);
-        toast.success(`${allIds.length} pedidos selecionados`);
-      }
-    } catch (error) {
-      console.error('Error fetching all IDs:', error);
-      toast.error('Erro ao selecionar todos os pedidos');
-    } finally {
-      setLoadingAllIds(false);
-    }
-  };
+  // "Select all pages" removed — only page-level selection allowed
 
   // Poll a bulk job for progress — queries DB directly (no Edge Function boot overhead)
   const pollJobProgress = (jobId: string) => {
@@ -324,49 +287,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     }
   };
 
-  const handleBulkReimport = async () => {
-    const ids = Array.from(selectedOrders);
-    if (ids.length === 0) return;
-
-    if (!confirm(`Excluir e reimportar ${ids.length} pedido(s)? Os dados de custo serão recalculados em background, mesmo se você fechar o navegador.`)) return;
-
-    setBatchProcessing(true);
-    setBatchProgress({ current: 0, total: ids.length, currentOrderId: 'iniciando...' });
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        toast.error('Sessão expirada');
-        setBatchProcessing(false);
-        return;
-      }
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders/bulk-reimport`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ seller_id: sellerId, order_ids: ids, job_type: 'reimport' }),
-        }
-      );
-
-      if (response.ok) {
-        const result = await response.json();
-        toast.success(`Reimportação de ${ids.length} pedidos iniciada em background. Pode fechar o navegador.`);
-        pollJobProgress(result.job_id);
-      } else {
-        const err = await response.json().catch(() => ({}));
-        toast.error(err.error || 'Erro ao iniciar reimportação');
-        setBatchProcessing(false);
-      }
-    } catch {
-      toast.error('Erro ao iniciar reimportação em massa');
-      setBatchProcessing(false);
-    }
-  };
+  // "Excluir e reimportar" bulk action removed — manual-only mode
 
   // Safe selection toggles (right side)
   const safeAllOnPageSelected = orders.length > 0 && orders.every(o => safeSelectedOrders.has(o.order_id));
@@ -394,44 +315,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     });
   };
 
-  const handleSafeSelectAllPages = async () => {
-    setSafeLoadingAllIds(true);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      const params = new URLSearchParams({
-        seller_id: sellerId,
-        period_days: periodDays,
-        search,
-        ids_only: 'true',
-      });
-
-      if (statusFilter !== 'all') params.set('status', statusFilter);
-      if (profitFilter !== 'all') params.set('profit_type', profitFilter);
-      if (ecommerceFilter !== 'all') params.set('ecommerce_cost', ecommerceFilter);
-      if (shippingFilter !== 'all') params.set('shipping_filter', shippingFilter);
-      if (orderStatusFilter !== 'paid') params.set('order_status', orderStatusFilter);
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders?${params}`,
-        { headers: { Authorization: `Bearer ${session.access_token}` } }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        const allIds = data.order_ids || [];
-        setSafeSelectedOrders(new Set(allIds));
-        setSafeSelectAllPages(true);
-        toast.success(`${allIds.length} pedidos selecionados para modo seguro`);
-      }
-    } catch (error) {
-      console.error('Error fetching all IDs:', error);
-      toast.error('Erro ao selecionar todos os pedidos');
-    } finally {
-      setSafeLoadingAllIds(false);
-    }
-  };
+  // "Select all pages" for safe mode removed — only page-level selection allowed
 
   // Safe resync: stop polling
   const stopSafePolling = useCallback(() => {
@@ -993,44 +877,11 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
             </div>
           ) : (
             <>
-              {/* Select all pages banner */}
-              {allOnPageSelected && !selectAllPages && totalOrders > orders.length && !batchProcessing && (
-                <div className="flex items-center gap-2 p-3 mb-2 rounded-lg bg-primary/10 border border-primary/20 text-sm">
-                  <span>
-                    Todos os <strong>{orders.length}</strong> desta página estão selecionados.
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="link"
-                    className="p-0 h-auto font-semibold"
-                    onClick={handleSelectAllPages}
-                    disabled={loadingAllIds}
-                  >
-                    {loadingAllIds ? (
-                      <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />Carregando...</>
-                    ) : (
-                      <>Selecionar todos os {totalOrders.toLocaleString()} pedidos</>
-                    )}
-                  </Button>
-                </div>
-              )}
-
-              {selectAllPages && (
-                <div className="flex items-center gap-2 p-3 mb-2 rounded-lg bg-primary/10 border border-primary/20 text-sm">
-                  <CheckSquare className="h-4 w-4 text-primary" />
-                  <span>
-                    Todos os <strong>{selectedOrders.size.toLocaleString()}</strong> pedidos de todas as páginas estão selecionados.
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="link"
-                    className="p-0 h-auto"
-                    onClick={() => { setSelectAllPages(false); setSelectedOrders(new Set()); }}
-                  >
-                    Limpar seleção
-                  </Button>
-                </div>
-              )}
+              {/* Order status warning */}
+              <div className="flex items-center gap-2 p-3 mb-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-sm text-amber-700 dark:text-amber-400">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>Pedidos não enviados ou não entregues podem não possuir valores completos de comissão e taxas.</span>
+              </div>
 
               {/* Active job banner (when resumed from previous session and no explicit selection) */}
               {batchProcessing && selectedOrders.size === 0 && (
@@ -1070,16 +921,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                       </>
                     )}
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={handleBulkReimport}
-                    disabled={batchProcessing}
-                  >
-                    <Trash2 className="h-3.5 w-3.5 mr-1" />
-                    Excluir e reimportar
-                  </Button>
-                  {!batchProcessing && !selectAllPages && (
+                  {!batchProcessing && (
                     <Button size="sm" variant="ghost" onClick={() => setSelectedOrders(new Set())}>
                       Limpar seleção
                     </Button>
@@ -1098,27 +940,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                 </div>
               )}
 
-              {/* Safe 1-by-1 banners */}
-              {safeAllOnPageSelected && !safeSelectAllPages && totalOrders > orders.length && !safeProcessing && (
-                <div className="flex items-center gap-2 p-3 mb-2 rounded-lg bg-green-500/10 border border-green-500/20 text-sm">
-                  <span>
-                    Todos os <strong>{orders.length}</strong> desta página selecionados (modo seguro).
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="link"
-                    className="p-0 h-auto font-semibold"
-                    onClick={handleSafeSelectAllPages}
-                    disabled={safeLoadingAllIds}
-                  >
-                    {safeLoadingAllIds ? (
-                      <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />Carregando...</>
-                    ) : (
-                      <>Selecionar todos os {totalOrders.toLocaleString()} pedidos</>
-                    )}
-                  </Button>
-                </div>
-              )}
+              {/* Safe 1-by-1 — no "select all pages" */}
 
               {safeSelectAllPages && (
                 <div className="flex items-center gap-2 p-3 mb-2 rounded-lg bg-green-500/10 border border-green-500/20 text-sm">
@@ -1457,45 +1279,6 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                                 title="Atualizar custos deste pedido"
                               >
                                 <RotateCw className={`h-3 w-3 ${resyncingOrder === order.order_id ? 'animate-spin' : ''}`} />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={reimportingOrder === order.order_id}
-                                onClick={async () => {
-                                  if (!confirm(`Reimportar pedido ${order.order_id}? Isso vai excluir e reimportar os dados.`)) return;
-                                  setReimportingOrder(order.order_id);
-                                  try {
-                                    const { data: { session } } = await supabase.auth.getSession();
-                                    if (!session) return;
-                                    const response = await fetch(
-                                      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders/reimport`,
-                                      {
-                                        method: 'POST',
-                                        headers: {
-                                          Authorization: `Bearer ${session.access_token}`,
-                                          'Content-Type': 'application/json',
-                                        },
-                                        body: JSON.stringify({ seller_id: sellerId, order_id: order.order_id }),
-                                      }
-                                    );
-                                     if (response.ok) {
-                                      toast.success(`Pedido ${order.order_id} reimportado`);
-                                      invalidateCostCache('orders');
-                                      loadOrders();
-                                    } else {
-                                      const err = await response.json().catch(() => ({}));
-                                      toast.error(err.error || 'Erro ao reimportar');
-                                    }
-                                  } catch {
-                                    toast.error('Erro ao reimportar pedido');
-                                  } finally {
-                                    setReimportingOrder(null);
-                                  }
-                                }}
-                                title="Reimportar pedido (excluir e reimportar)"
-                              >
-                                <Trash2 className={`h-3 w-3 ${reimportingOrder === order.order_id ? 'animate-spin' : ''}`} />
                               </Button>
                             </div>
                           </TableCell>

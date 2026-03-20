@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
-const POLL_INTERVAL_MS = 30000; // 30 seconds
+const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes — manual refresh preferred
 
 export interface CostSummaryData {
   total_revenue: number;
@@ -109,20 +109,8 @@ export function useCostDataPolling({
     }
   }, [sellerId, enabled, dateFrom, dateTo, periodDays, onSummaryUpdate]);
 
-  // Track tab visibility
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      isVisibleRef.current = document.visibilityState === "visible";
-      if (isVisibleRef.current && sellerId && enabled) {
-        fetchSummary();
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [sellerId, enabled, fetchSummary]);
+  // No auto-refresh on tab visibility — manual refresh only
+  // This prevents unnecessary queries on tab switch
 
   // Polling effect
   useEffect(() => {

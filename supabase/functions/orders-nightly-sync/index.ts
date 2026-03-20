@@ -416,24 +416,9 @@ serve(async (req) => {
         stats.total_orders += allOrders.length;
         stats.total_items += allOrderItems.length;
 
-        // ====== AUTO-TRIGGER BILLING & COST SYNC PER ACCOUNT ======
-        try {
-          console.log(`[nightly-sync] Triggering billing sync for seller ${account.ml_user_id}...`);
-          await supabaseAdmin.functions.invoke('ml-sync-billing-details', {
-            body: { seller_id: account.ml_user_id, action: 'sync', scope: 'recent' },
-          });
-          await sleep(3000);
-          await supabaseAdmin.functions.invoke('ml-sync-real-costs', {
-            body: { seller_id: account.ml_user_id, action: 'backfill_missing' },
-          });
-          await sleep(2000);
-          await supabaseAdmin.functions.invoke('ml-sync-real-costs', {
-            body: { seller_id: account.ml_user_id, action: 'reprocess_pending' },
-          });
-          console.log(`[nightly-sync] Billing/cost sync completed for seller ${account.ml_user_id}`);
-        } catch (billingErr) {
-          console.warn(`[nightly-sync] Billing sync error for ${account.ml_user_id} (non-fatal):`, billingErr);
-        }
+        // ====== BILLING & COST AUTO-SYNC DISABLED ======
+        // All billing/cost calculations are now manual-only to control cloud costs.
+        console.log(`[nightly-sync] Billing/cost auto-sync DISABLED for ${account.ml_user_id} — manual-only mode`);
 
         // Delay between accounts to respect rate limits
         await sleep(DELAY_BETWEEN_ACCOUNTS_MS);

@@ -574,37 +574,10 @@ async function processOrdersInBackground(
       console.warn(`[Job ${jobId}] Buyer enrichment error (non-fatal):`, enrichErr);
     }
 
-    // ====== AUTO-TRIGGER BILLING & COST SYNC ======
-    // This ensures billing data is populated without relying on client-side watchdog
-    try {
-      console.log(`[Job ${jobId}] Triggering billing sync...`);
-      const billingResp = await supabaseAdmin.functions.invoke('ml-sync-billing-details', {
-        body: { seller_id: sellerId, action: 'sync', scope: 'recent' },
-      });
-      if (billingResp.error) {
-        console.warn(`[Job ${jobId}] Billing sync error:`, billingResp.error);
-      } else {
-        console.log(`[Job ${jobId}] Billing sync triggered successfully`);
-      }
-
-      // Wait for billing to process before triggering cost backfill
-      await sleep(3000);
-
-      console.log(`[Job ${jobId}] Triggering cost backfill...`);
-      await supabaseAdmin.functions.invoke('ml-sync-real-costs', {
-        body: { seller_id: sellerId, action: 'backfill_missing' },
-      });
-
-      await sleep(2000);
-
-      // Reprocess pending orders that now have billing data
-      await supabaseAdmin.functions.invoke('ml-sync-real-costs', {
-        body: { seller_id: sellerId, action: 'reprocess_pending' },
-      });
-      console.log(`[Job ${jobId}] Cost sync pipeline completed`);
-    } catch (syncErr) {
-      console.warn(`[Job ${jobId}] Post-sync billing/cost error (non-fatal):`, syncErr);
-    }
+    // ====== BILLING & COST AUTO-SYNC DISABLED ======
+    // All billing/cost calculations are now manual-only to control cloud costs.
+    // Users must click "Recalcular" in the Cost module to trigger calculations.
+    console.log(`[Job ${jobId}] Billing/cost auto-sync DISABLED — manual-only mode`);
 
     // Mark job as done
     await supabaseAdmin.from('sync_jobs').update({
