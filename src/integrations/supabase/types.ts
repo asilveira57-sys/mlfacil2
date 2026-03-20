@@ -6703,6 +6703,102 @@ export type Database = {
           },
         ]
       }
+      listing_health_current: {
+        Row: {
+          available_quantity: number | null
+          catalog_listing: boolean | null
+          id: string
+          item_id: string
+          last_collected_at: string | null
+          listing_status: string | null
+          listing_type: string | null
+          price: number | null
+          seller_id: string
+          shipping_mode: string | null
+          updated_at: string
+          visits_last: number | null
+        }
+        Insert: {
+          available_quantity?: number | null
+          catalog_listing?: boolean | null
+          id?: string
+          item_id: string
+          last_collected_at?: string | null
+          listing_status?: string | null
+          listing_type?: string | null
+          price?: number | null
+          seller_id: string
+          shipping_mode?: string | null
+          updated_at?: string
+          visits_last?: number | null
+        }
+        Update: {
+          available_quantity?: number | null
+          catalog_listing?: boolean | null
+          id?: string
+          item_id?: string
+          last_collected_at?: string | null
+          listing_status?: string | null
+          listing_type?: string | null
+          price?: number | null
+          seller_id?: string
+          shipping_mode?: string | null
+          updated_at?: string
+          visits_last?: number | null
+        }
+        Relationships: []
+      }
+      listing_health_history: {
+        Row: {
+          available_quantity: number | null
+          catalog_listing: boolean | null
+          collected_at: string
+          created_at: string
+          id: string
+          item_id: string
+          listing_status: string | null
+          listing_type: string | null
+          price: number | null
+          seller_id: string
+          shipping_mode: string | null
+          source: string | null
+          visits: number | null
+          window_days: number
+        }
+        Insert: {
+          available_quantity?: number | null
+          catalog_listing?: boolean | null
+          collected_at?: string
+          created_at?: string
+          id?: string
+          item_id: string
+          listing_status?: string | null
+          listing_type?: string | null
+          price?: number | null
+          seller_id: string
+          shipping_mode?: string | null
+          source?: string | null
+          visits?: number | null
+          window_days?: number
+        }
+        Update: {
+          available_quantity?: number | null
+          catalog_listing?: boolean | null
+          collected_at?: string
+          created_at?: string
+          id?: string
+          item_id?: string
+          listing_status?: string | null
+          listing_type?: string | null
+          price?: number | null
+          seller_id?: string
+          shipping_mode?: string | null
+          source?: string | null
+          visits?: number | null
+          window_days?: number
+        }
+        Relationships: []
+      }
       listing_monitor_config: {
         Row: {
           alert_on_critical: boolean | null
@@ -7437,6 +7533,7 @@ export type Database = {
           id: string
           item_id: string
           last_sync_at: string
+          last_visit_collection_at: string | null
           length_cm: number | null
           listing_type_id: string | null
           logistic_type: string | null
@@ -7444,12 +7541,14 @@ export type Database = {
           permalink: string | null
           price: number
           seller_id: string
+          shipping_mode: string | null
           sku: string | null
           sold_quantity: number | null
           status: string | null
           thumbnail: string | null
           title: string | null
           title_short: string | null
+          updated_at: string | null
           user_id: string
           variation_id: string
           weight_kg: number | null
@@ -7473,6 +7572,7 @@ export type Database = {
           id?: string
           item_id: string
           last_sync_at?: string
+          last_visit_collection_at?: string | null
           length_cm?: number | null
           listing_type_id?: string | null
           logistic_type?: string | null
@@ -7480,12 +7580,14 @@ export type Database = {
           permalink?: string | null
           price?: number
           seller_id: string
+          shipping_mode?: string | null
           sku?: string | null
           sold_quantity?: number | null
           status?: string | null
           thumbnail?: string | null
           title?: string | null
           title_short?: string | null
+          updated_at?: string | null
           user_id: string
           variation_id?: string
           weight_kg?: number | null
@@ -7509,6 +7611,7 @@ export type Database = {
           id?: string
           item_id?: string
           last_sync_at?: string
+          last_visit_collection_at?: string | null
           length_cm?: number | null
           listing_type_id?: string | null
           logistic_type?: string | null
@@ -7516,12 +7619,14 @@ export type Database = {
           permalink?: string | null
           price?: number
           seller_id?: string
+          shipping_mode?: string | null
           sku?: string | null
           sold_quantity?: number | null
           status?: string | null
           thumbnail?: string | null
           title?: string | null
           title_short?: string | null
+          updated_at?: string | null
           user_id?: string
           variation_id?: string
           weight_kg?: number | null
@@ -12986,6 +13091,96 @@ export type Database = {
           seller_id?: string
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      radiography_backfill_control: {
+        Row: {
+          current_window_end: string | null
+          current_window_start: string | null
+          error_message: string | null
+          finished_at: string | null
+          id: string
+          last_processed_item_id: string | null
+          progress_percent: number | null
+          seller_id: string
+          started_at: string | null
+          status: Database["public"]["Enums"]["radiography_backfill_status"]
+          updated_at: string
+        }
+        Insert: {
+          current_window_end?: string | null
+          current_window_start?: string | null
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          last_processed_item_id?: string | null
+          progress_percent?: number | null
+          seller_id: string
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["radiography_backfill_status"]
+          updated_at?: string
+        }
+        Update: {
+          current_window_end?: string | null
+          current_window_start?: string | null
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          last_processed_item_id?: string | null
+          progress_percent?: number | null
+          seller_id?: string
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["radiography_backfill_status"]
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      radiography_collection_logs: {
+        Row: {
+          created_at: string
+          duration_ms: number | null
+          error_message: string | null
+          finished_at: string | null
+          id: string
+          items_failed: number | null
+          items_processed: number | null
+          job_type: string
+          metadata_json: Json | null
+          seller_id: string
+          started_at: string
+          status: string
+          total_items: number | null
+        }
+        Insert: {
+          created_at?: string
+          duration_ms?: number | null
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          items_failed?: number | null
+          items_processed?: number | null
+          job_type: string
+          metadata_json?: Json | null
+          seller_id: string
+          started_at?: string
+          status?: string
+          total_items?: number | null
+        }
+        Update: {
+          created_at?: string
+          duration_ms?: number | null
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          items_failed?: number | null
+          items_processed?: number | null
+          job_type?: string
+          metadata_json?: Json | null
+          seller_id?: string
+          started_at?: string
+          status?: string
+          total_items?: number | null
         }
         Relationships: []
       }
@@ -19768,6 +19963,12 @@ export type Database = {
         | "ai_edited"
         | "ml_synced"
       qa_risk_level: "low" | "medium" | "high"
+      radiography_backfill_status:
+        | "pending"
+        | "running"
+        | "paused"
+        | "done"
+        | "failed"
       send_growth_stage: "seed" | "sprout" | "growing" | "mature" | "fruiting"
       send_health_status: "healthy" | "stagnant" | "weakening" | "dormant"
       send_position_tier:
@@ -20028,6 +20229,13 @@ export const Constants = {
         "ml_synced",
       ],
       qa_risk_level: ["low", "medium", "high"],
+      radiography_backfill_status: [
+        "pending",
+        "running",
+        "paused",
+        "done",
+        "failed",
+      ],
       send_growth_stage: ["seed", "sprout", "growing", "mature", "fruiting"],
       send_health_status: ["healthy", "stagnant", "weakening", "dormant"],
       send_position_tier: [
