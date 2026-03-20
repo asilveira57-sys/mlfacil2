@@ -19,6 +19,9 @@ import {
   ShoppingCart,
   Clock,
   AlertOctagon,
+  ChevronLeft,
+  ChevronRight,
+  AlertCircle,
 } from "lucide-react";
 import {
   HEALTH_STATUS_CONFIG,
@@ -30,6 +33,8 @@ import {
   AnomalyFilter,
   PeriodDays,
 } from "@/hooks/useRadiographyData";
+
+const ITEMS_PER_PAGE = 50;
 
 interface Props {
   items: HealthCurrentItem[];
@@ -54,6 +59,7 @@ export function RadiographyItemList({
   const [healthFilter, setHealthFilter] = useState<string>("all");
   const [anomalyFilter, setAnomalyFilter] = useState<AnomalyFilter>("all");
   const [sortBy, setSortBy] = useState<string>("health");
+  const [page, setPage] = useState(0);
 
   const filteredItems = useMemo(() => {
     let result = items.filter((item) => {
@@ -88,6 +94,12 @@ export function RadiographyItemList({
     return result;
   }, [items, search, healthFilter, anomalyFilter, sortBy]);
 
+  // Reset page on filter change
+  useMemo(() => setPage(0), [search, healthFilter, anomalyFilter, sortBy]);
+
+  const totalPages = Math.ceil(filteredItems.length / ITEMS_PER_PAGE);
+  const pagedItems = filteredItems.slice(page * ITEMS_PER_PAGE, (page + 1) * ITEMS_PER_PAGE);
+
   const HealthIcon = ({ status }: { status: RadiographyHealthStatus }) => {
     const iconMap = { healthy: HeartPulse, stable: Activity, observation: Stethoscope, alert: AlertTriangle, critical: Siren };
     const Icon = iconMap[status];
@@ -100,6 +112,16 @@ export function RadiographyItemList({
     const counts: Record<string, number> = { healthy: 0, stable: 0, observation: 0, alert: 0, critical: 0 };
     items.forEach(i => { counts[classifyHealth(i)]++; });
     return counts;
+  }, [items]);
+
+  // Data quality check
+  const dataQuality = useMemo(() => {
+    if (items.length === 0) return null;
+    const noSalesData = items.filter(i => i.sales_count_30d === 0 && i.sales_count_7d === 0 && !i.last_sale_at).length;
+    const noVisits = items.filter(i => (i.visits_last ?? 0) === 0).length;
+    const hasSalesIssue = noSalesData > items.length * 0.9;
+    const hasVisitsIssue = noVisits > items.length * 0.8;
+    return { noSalesData, noVisits, hasSalesIssue, hasVisitsIssue };
   }, [items]);
 
   return (
@@ -137,6 +159,21 @@ export function RadiographyItemList({
               })}
             </div>
           </div>
+
+          {/* Data quality warnings */}
+          {dataQuality?.hasSalesIssue && (
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+              <AlertCircle className="h-4 w-4 text-amber-400 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="text-sm text-amber-300 font-medium">Dados de vendas pendentes</p>
+                <p className="text-xs text-amber-400/70 mt-0.5">
+                  {dataQuality.noSalesData} de {items.length} anúncios ainda sem cruzamento de vendas. 
+                  Clique em "Atualizar Dados" para enriquecer.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Filters row */}
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative flex-1 min-w-[200px]">
@@ -213,115 +250,174 @@ export function RadiographyItemList({
             </p>
           </div>
         ) : (
-          <div className="space-y-1.5">
-            {filteredItems.map((item) => {
-              const health = classifyHealth(item);
-              const config = HEALTH_STATUS_CONFIG[health];
-              const alertCount = (item.alerts_json?.length ?? 0) + (item.anomaly_flags?.length ?? 0);
+          <>
+            <div className="space-y-1.5">
+              {pagedItems.map((item) => {
+                const health = classifyHealth(item);
+                const config = HEALTH_STATUS_CONFIG[health];
+                const alertCount = (item.alerts_json?.length ?? 0) + (item.anomaly_flags?.length ?? 0);
+                const hasSalesData = (item.sales_count_30d ?? 0) > 0 || !!item.last_sale_at;
 
-              return (
-                <div
-                  key={item.id}
-                  className={`relative flex items-center gap-3 p-3 rounded-lg border bg-slate-800/30 hover:bg-slate-800/60 cursor-pointer transition-all group ${config.borderClass}`}
-                  onClick={() => onSelectItem(item.item_id)}
-                >
-                  {/* Left health bar */}
-                  <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-lg ${config.bgClass.replace("/10", "/60")}`} />
+                return (
+                  <div
+                    key={item.id}
+                    className={`relative flex items-center gap-3 p-3 rounded-lg border bg-slate-800/30 hover:bg-slate-800/60 cursor-pointer transition-all group ${config.borderClass}`}
+                    onClick={() => onSelectItem(item.item_id)}
+                  >
+                    {/* Left health bar */}
+                    <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-lg ${config.bgClass.replace("/10", "/60")}`} />
 
-                  {/* Thumbnail */}
-                  <div className="relative flex-shrink-0 ml-1">
-                    {item.thumbnail ? (
-                      <img
-                        src={item.thumbnail}
-                        alt=""
-                        className="h-12 w-12 object-cover rounded-md grayscale-[30%] group-hover:grayscale-0 transition-all"
-                      />
-                    ) : (
-                      <div className="h-12 w-12 bg-slate-800 rounded-md flex items-center justify-center border border-slate-700">
-                        <Package className="h-6 w-6 text-slate-600" />
+                    {/* Thumbnail */}
+                    <div className="relative flex-shrink-0 ml-1">
+                      {item.thumbnail ? (
+                        <img
+                          src={item.thumbnail}
+                          alt=""
+                          className="h-12 w-12 object-cover rounded-md grayscale-[30%] group-hover:grayscale-0 transition-all"
+                        />
+                      ) : (
+                        <div className="h-12 w-12 bg-slate-800 rounded-md flex items-center justify-center border border-slate-700">
+                          <Package className="h-6 w-6 text-slate-600" />
+                        </div>
+                      )}
+                      <div className={`absolute -bottom-1 -right-1 h-5 w-5 rounded-full ${config.bgClass} border ${config.borderClass} flex items-center justify-center`}>
+                        <HealthIcon status={health} />
                       </div>
-                    )}
-                    <div className={`absolute -bottom-1 -right-1 h-5 w-5 rounded-full ${config.bgClass} border ${config.borderClass} flex items-center justify-center`}>
-                      <HealthIcon status={health} />
                     </div>
-                  </div>
 
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <span className="font-medium text-sm text-slate-200 truncate group-hover:text-white transition-colors">
-                        {item.title || item.item_id}
-                      </span>
-                      {item.permalink && (
-                        <a
-                          href={item.permalink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          className="text-slate-500 hover:text-cyan-400 transition-colors flex-shrink-0"
-                        >
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
-                      )}
-                    </div>
-                    {/* Metrics row */}
-                    <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
-                      <span className="flex items-center gap-1">
-                        <Eye className="h-3 w-3 text-cyan-400" />
-                        {item.visits_last != null ? item.visits_last.toLocaleString("pt-BR") : "—"}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <ShoppingCart className="h-3 w-3 text-emerald-400" />
-                        {item.sales_count_30d ?? 0}
-                      </span>
-                      {item.days_without_sale != null && item.days_without_sale > 0 && (
-                        <span className={`flex items-center gap-1 ${
-                          item.days_without_sale > 30 ? "text-red-400" : item.days_without_sale > 14 ? "text-amber-400" : ""
-                        }`}>
-                          <Clock className="h-3 w-3" />
-                          {item.days_without_sale}d
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="font-medium text-sm text-slate-200 truncate group-hover:text-white transition-colors">
+                          {item.title || item.item_id}
                         </span>
-                      )}
-                      <span className="text-slate-500">
-                        Est: {item.available_quantity ?? "—"}
-                      </span>
-                      <span className="text-slate-500">
-                        R$ {item.price != null ? item.price.toLocaleString("pt-BR", { minimumFractionDigits: 2 }) : "—"}
-                      </span>
-                      {item.seo_score != null && (
-                        <span className={`font-mono ${
-                          item.seo_score >= 70 ? "text-emerald-400" :
-                          item.seo_score >= 40 ? "text-amber-400" :
-                          "text-red-400"
-                        }`}>
-                          SEO {item.seo_score}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Right side: alerts count + examine */}
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {alertCount > 0 && (
-                      <div className="flex items-center gap-1 px-2 py-1 rounded-md bg-red-500/10 border border-red-500/20">
-                        <AlertOctagon className="h-3 w-3 text-red-400" />
-                        <span className="text-xs font-mono text-red-400">{alertCount}</span>
+                        {item.permalink && (
+                          <a
+                            href={item.permalink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-slate-500 hover:text-cyan-400 transition-colors flex-shrink-0"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        )}
                       </div>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 text-xs px-2"
-                      onClick={(e) => { e.stopPropagation(); onSelectItem(item.item_id); }}
-                    >
-                      <Stethoscope className="h-3.5 w-3.5 mr-1" />
-                      Examinar
-                    </Button>
+                      {/* Metrics row */}
+                      <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
+                        <span className="flex items-center gap-1">
+                          <Eye className="h-3 w-3 text-cyan-400" />
+                          {item.visits_last != null ? item.visits_last.toLocaleString("pt-BR") : "—"}
+                        </span>
+                        <span className={`flex items-center gap-1 ${!hasSalesData ? "opacity-50" : ""}`}>
+                          <ShoppingCart className="h-3 w-3 text-emerald-400" />
+                          {hasSalesData ? (item.sales_count_30d ?? 0) : "—"}
+                        </span>
+                        {item.days_without_sale != null && item.days_without_sale > 0 && (
+                          <span className={`flex items-center gap-1 ${
+                            item.days_without_sale > 30 ? "text-red-400" : item.days_without_sale > 14 ? "text-amber-400" : ""
+                          }`}>
+                            <Clock className="h-3 w-3" />
+                            {item.days_without_sale}d
+                          </span>
+                        )}
+                        <span className="text-slate-500">
+                          Est: {item.available_quantity ?? "—"}
+                        </span>
+                        <span className="text-slate-500">
+                          R$ {item.price != null ? item.price.toLocaleString("pt-BR", { minimumFractionDigits: 2 }) : "—"}
+                        </span>
+                        {item.seo_score != null && (
+                          <span className={`font-mono ${
+                            item.seo_score >= 70 ? "text-emerald-400" :
+                            item.seo_score >= 40 ? "text-amber-400" :
+                            "text-red-400"
+                          }`}>
+                            SEO {item.seo_score}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Right side: alerts count + examine */}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {alertCount > 0 && (
+                        <div className="flex items-center gap-1 px-2 py-1 rounded-md bg-red-500/10 border border-red-500/20">
+                          <AlertOctagon className="h-3 w-3 text-red-400" />
+                          <span className="text-xs font-mono text-red-400">{alertCount}</span>
+                        </div>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 text-xs px-2"
+                        onClick={(e) => { e.stopPropagation(); onSelectItem(item.item_id); }}
+                      >
+                        <Stethoscope className="h-3.5 w-3.5 mr-1" />
+                        Examinar
+                      </Button>
+                    </div>
                   </div>
+                );
+              })}
+            </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between mt-4 pt-4 border-t border-slate-700/50">
+                <p className="text-xs text-slate-500">
+                  Mostrando {page * ITEMS_PER_PAGE + 1}–{Math.min((page + 1) * ITEMS_PER_PAGE, filteredItems.length)} de {filteredItems.length}
+                </p>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={page === 0}
+                    onClick={() => setPage(p => p - 1)}
+                    className="h-8 w-8 p-0 text-slate-400 hover:text-slate-200"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+                    let pageNum: number;
+                    if (totalPages <= 7) {
+                      pageNum = i;
+                    } else if (page < 3) {
+                      pageNum = i;
+                    } else if (page > totalPages - 4) {
+                      pageNum = totalPages - 7 + i;
+                    } else {
+                      pageNum = page - 3 + i;
+                    }
+                    return (
+                      <Button
+                        key={pageNum}
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setPage(pageNum)}
+                        className={`h-8 w-8 p-0 text-xs ${
+                          page === pageNum
+                            ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/30"
+                            : "text-slate-400 hover:text-slate-200"
+                        }`}
+                      >
+                        {pageNum + 1}
+                      </Button>
+                    );
+                  })}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={page >= totalPages - 1}
+                    onClick={() => setPage(p => p + 1)}
+                    className="h-8 w-8 p-0 text-slate-400 hover:text-slate-200"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
                 </div>
-              );
-            })}
-          </div>
+              </div>
+            )}
+          </>
         )}
       </CardContent>
     </Card>
