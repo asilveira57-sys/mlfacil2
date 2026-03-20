@@ -23,6 +23,10 @@ export function SeedBalanceCard({
   usedSeeds,
   plantedCount,
   planTier,
+  salesCount90d,
+  soldListingsCount90d,
+  seedPercentage,
+  calculatedAt,
   onBuySeeds,
 }: SeedBalanceCardProps) {
   const { t } = useTranslation('seed');
