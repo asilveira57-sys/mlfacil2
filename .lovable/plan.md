@@ -1,58 +1,71 @@
 
 
-## Plano: Corrigir Canal Oficial — Comunicados retroativos e segmentação
+# Plano: Corrigir exclusão completa de usuário no admin
 
-### Dois problemas identificados
+## Problema raiz
 
-**Problema 1**: Comunicados globais (`target_seller_id = NULL`) aparecem para **todos os sellers**, inclusive novos que entram meses depois. Acumulação infinita — em 1 ano poderiam ser 100+ mensagens retroativas na caixa de um seller novo.
+Os logs mostram o erro exato:
 
-**Problema 2**: O comunicado do agente de promoções ("Agente aderiu a 5 produtos") usa `target_seller_id = sellerId` (ML user ID numérico), mas o filtro no frontend compara com `external_user_id` da `marketplace_accounts`. Se o match funcionar, ok, mas precisa garantir que **só o seller dono** vê.
+```text
+ERROR: update or delete on table "ml_accounts" violates foreign key constraint
+"finance_accounts_ml_account_id_fkey" on table "finance_accounts" (SQLSTATE 23503)
+```
 
----
+A função `admin-delete-user` tenta excluir `ml_accounts` mas a tabela `finance_accounts` tem uma FK para `ml_accounts(id)` **sem ON DELETE CASCADE**. O mesmo erro acontece quando `auth.admin.deleteUser()` tenta cascatear a exclusão.
 
-### Solução
+Resultado: o registro em `auth.users` permanece intacto e o seller continua logando normalmente.
 
-#### 1. Comunicados globais viram "snapshot no tempo"
+## Tabelas com FK para ml_accounts (precisam ser limpas ANTES)
 
-Adicionar coluna `published_at` na tabela `mktpfacil_announcements`. No filtro do frontend, comunicados globais só aparecem para sellers cujo `profiles.created_at` é **anterior** ao `published_at` do comunicado.
+| Tabela | FK | Cascade? |
+|---|---|---|
+| `finance_accounts` | `ml_account_id → ml_accounts(id)` | Nao |
+| `clone_drafts` | `ml_account_id → ml_accounts(id)` | ON DELETE SET NULL |
+| `analyzed_items` | `ml_account_id → ml_accounts(id)` | ON DELETE SET NULL |
+| `sync_jobs` | `ml_account_id → ml_accounts(id)` | Nao |
+| `user_access_state` | `ml_account_id → ml_accounts(id)` | Nao |
+| `listing_clone_drafts` | `destination_account_id → ml_accounts(id)` | Nao |
 
-Regra: se o seller entrou depois que o comunicado foi publicado, ele **não vê**.
+Tabelas com FK para `finance_accounts` (precisam ser limpas ANTES de `finance_accounts`):
+- `finance_payments` (ON DELETE CASCADE)
+- `finance_movements` (ON DELETE CASCADE)
+- `finance_sync_jobs` (ON DELETE CASCADE)
+- `finance_sync_runs` (ON DELETE CASCADE)
 
-| Mudança | Detalhe |
-|---|---|
-| Migration SQL | Adicionar coluna `published_at timestamptz DEFAULT now()` |
-| Migration SQL | Preencher `published_at = created_at` nos comunicados existentes |
-| `useOfficialChannel.ts` | No filtro de globais, buscar `profiles.created_at` do user e comparar com `published_at` |
+## Correção
 
-#### 2. Segmentação por seller continua funcionando
+### 1. Atualizar `admin-delete-user/index.ts`
 
-O `target_seller_id` já funciona — o agente de promoções grava o ML seller ID e o frontend compara com `external_user_id`. Apenas confirmar que o match está correto (ambos usam o mesmo ID numérico do ML).
+Expandir a lista de tabelas para incluir TODAS as dependências na ordem correta de FK:
 
-#### 3. Auto-desativar comunicados antigos (opcional mas recomendado)
+```text
+Ordem de exclusão:
+1. finance_payments, finance_movements, finance_sync_jobs, finance_sync_runs
+2. finance_accounts
+3. listing_clone_drafts, clone_drafts, analyzed_items, sync_jobs
+4. ad_timeline_stats, ad_timeline_actions (se existirem com user_id)
+5. security_events, user_security_settings
+6. billing_info, notification_preferences, user_feature_flags
+7. user_email_preferences, cookie_consents
+8. seller_item_visits, seller_item_sales_daily, seller_item_sales_monthly, monthly_rankings
+9. user_access_state
+10. user_roles
+11. ml_accounts
+12. user_context
+13. companies
+14. profiles
+15. auth.admin.deleteUser() — exclui auth.users
+```
 
-Adicionar coluna `expires_at timestamptz NULL`. Comunicados com `expires_at < now()` são automaticamente filtrados no frontend. Isso evita acúmulo mesmo para sellers antigos.
+Adicionar tratamento de erro robusto: se `auth.admin.deleteUser()` falhar, retornar erro claro ao admin ao invés de silenciar.
 
-| Mudança | Detalhe |
-|---|---|
-| Migration SQL | Adicionar coluna `expires_at timestamptz NULL` |
-| `useOfficialChannel.ts` | Filtrar `expires_at IS NULL OR expires_at > now()` |
-| Admin Canal Oficial | Campo opcional "Expira em" no formulário de criação |
+### 2. Invalidar sessão imediatamente
 
----
+Antes de deletar os dados, chamar `auth.admin.signOut(target_user_id)` (ou revogar todos os refresh tokens) para que o seller perca acesso imediatamente, mesmo que a exclusão de dados falhe parcialmente.
 
-### Arquivos afetados
+### Arquivo modificado
 
-| Arquivo | Mudança |
-|---|---|
-| Migration SQL | `published_at`, `expires_at` colunas novas + backfill |
-| `src/hooks/useOfficialChannel.ts` | Filtro: globais só para sellers criados antes do `published_at`; respeitar `expires_at` |
-| `src/pages/admin/AdminCanalOficial.tsx` | Campo "Expira em" no formulário |
-| `supabase/functions/promotion-agent-run/index.ts` | Nenhuma mudança necessária — já segmenta corretamente |
+- `supabase/functions/admin-delete-user/index.ts`
 
-### Resultado
-
-- Seller novo entra → caixa vazia (zero mensagens retroativas)
-- Comunicado global → entregue apenas a quem estava no sistema no momento
-- Comunicado do agente → continua indo só pro seller alvo
-- Comunicados antigos → expiram automaticamente se configurado
+Nenhuma tabela nova, nenhuma tela nova, nenhuma alteração de arquitetura.
 
