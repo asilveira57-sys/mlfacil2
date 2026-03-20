@@ -574,6 +574,96 @@ async function fetchSalesData(
   return result;
 }
 
+// Detect changes between previous and new state
+function detectChanges(
+  prev: any | null,
+  newPrice: number | null,
+  newVisits: number,
+  newStock: number | null,
+  newStatus: string,
+  newShippingMode: string | null,
+  newCatalogListing: boolean
+): any[] {
+  if (!prev) return [];
+  const changes: any[] = [];
+
+  // Price changes
+  if (prev.price != null && newPrice != null && prev.price !== newPrice) {
+    const pctChange = ((newPrice - prev.price) / prev.price) * 100;
+    if (newPrice > prev.price) {
+      changes.push({
+        type: "price_increased",
+        label: "Preço aumentou",
+        detail: `R$ ${prev.price.toFixed(2)} → R$ ${newPrice.toFixed(2)} (${pctChange > 0 ? "+" : ""}${pctChange.toFixed(1)}%)`,
+        severity: pctChange > 15 ? "high" : "medium",
+        prev_value: prev.price,
+        new_value: newPrice,
+        pct_change: Number(pctChange.toFixed(1)),
+      });
+    } else {
+      changes.push({
+        type: "price_decreased",
+        label: "Preço diminuiu",
+        detail: `R$ ${prev.price.toFixed(2)} → R$ ${newPrice.toFixed(2)} (${pctChange.toFixed(1)}%)`,
+        severity: Math.abs(pctChange) > 15 ? "high" : "medium",
+        prev_value: prev.price,
+        new_value: newPrice,
+        pct_change: Number(pctChange.toFixed(1)),
+      });
+    }
+  }
+
+  // Stock changes
+  if (prev.available_quantity != null && newStock != null && prev.available_quantity !== newStock) {
+    const diff = newStock - prev.available_quantity;
+    if (newStock === 0 && prev.available_quantity > 0) {
+      changes.push({ type: "stock_zeroed", label: "Estoque zerou", detail: `${prev.available_quantity} → 0`, severity: "critical", prev_value: prev.available_quantity, new_value: 0 });
+    } else if (diff < 0) {
+      changes.push({ type: "stock_decreased", label: "Estoque diminuiu", detail: `${prev.available_quantity} → ${newStock} (${diff})`, severity: Math.abs(diff) > 10 ? "medium" : "low", prev_value: prev.available_quantity, new_value: newStock });
+    } else {
+      changes.push({ type: "stock_increased", label: "Estoque aumentou", detail: `${prev.available_quantity} → ${newStock} (+${diff})`, severity: "info", prev_value: prev.available_quantity, new_value: newStock });
+    }
+  }
+
+  // Status changes
+  if (prev.listing_status && newStatus && prev.listing_status !== newStatus) {
+    changes.push({ type: "status_changed", label: "Status mudou", detail: `${prev.listing_status} → ${newStatus}`, severity: newStatus === "paused" || newStatus === "closed" ? "high" : "medium", prev_value: prev.listing_status, new_value: newStatus });
+  }
+
+  // Shipping/logistics changes
+  if (prev.shipping_mode && newShippingMode && prev.shipping_mode !== newShippingMode) {
+    changes.push({ type: "logistics_changed", label: "Logística mudou", detail: `${prev.shipping_mode} → ${newShippingMode}`, severity: "medium", prev_value: prev.shipping_mode, new_value: newShippingMode });
+  }
+
+  // Catalog changes
+  if (prev.catalog_listing !== null && prev.catalog_listing !== newCatalogListing) {
+    changes.push({
+      type: newCatalogListing ? "catalog_joined" : "catalog_left",
+      label: newCatalogListing ? "Entrou no catálogo" : "Saiu do catálogo",
+      detail: newCatalogListing ? "Anúncio vinculado ao catálogo" : "Anúncio desvinculado do catálogo",
+      severity: "medium",
+      prev_value: prev.catalog_listing,
+      new_value: newCatalogListing,
+    });
+  }
+
+  // Visit trend (significant drop)
+  if (prev.visits_last != null && prev.visits_last > 10 && newVisits < prev.visits_last * 0.5) {
+    const pctDrop = ((newVisits - prev.visits_last) / prev.visits_last) * 100;
+    changes.push({
+      type: "visits_dropped",
+      label: "Queda de visitas",
+      detail: `${prev.visits_last} → ${newVisits} (${pctDrop.toFixed(0)}%)`,
+      severity: Math.abs(pctDrop) > 60 ? "high" : "medium",
+      prev_value: prev.visits_last,
+      new_value: newVisits,
+      pct_change: Number(pctDrop.toFixed(1)),
+    });
+  }
+
+  return changes;
+}
+
 async function processVisitBatch(
   supabase: any, sellerId: string, batchIds: string[],
   visitsData: any, allItems: any[], collectedAt: string
@@ -582,6 +672,22 @@ async function processVisitBatch(
 
   // Fetch sales data for this batch
   const salesData = await fetchSalesData(supabase, sellerId, batchIds);
+
+  // Fetch previous state for change detection (batched)
+  const prevStateMap = new Map<string, any>();
+  for (let i = 0; i < batchIds.length; i += 500) {
+    const chunk = batchIds.slice(i, i + 500);
+    const { data: prevRows } = await supabase
+      .from("listing_health_current")
+      .select("item_id, price, visits_last, available_quantity, listing_status, shipping_mode, catalog_listing")
+      .eq("seller_id", sellerId)
+      .in("item_id", chunk);
+    if (prevRows) {
+      for (const row of prevRows) {
+        prevStateMap.set(row.item_id, row);
+      }
+    }
+  }
 
   const healthHistoryRows: any[] = [];
   const healthCurrentRows: any[] = [];
@@ -600,14 +706,24 @@ async function processVisitBatch(
     // Conversion rate: sales_7d / visits (if visits > 0)
     const conversionRate7d = visits > 0 ? Number(((sales.sales_7d / visits) * 100).toFixed(3)) : 0;
 
+    const newPrice = item?.price || null;
+    const newStock = item?.available_quantity ?? null;
+    const newStatus = item?.status || "active";
+    const newShippingMode = item?.shipping_mode || item?.logistic_type || null;
+    const newCatalogListing = !!item?.catalog_product_id;
+
+    // Detect changes against previous state
+    const prevState = prevStateMap.get(itemId);
+    const changeFlags = detectChanges(prevState, newPrice, visits, newStock, newStatus, newShippingMode, newCatalogListing);
+
     healthHistoryRows.push({
       seller_id: sellerId, item_id: itemId, collected_at: collectedAt,
       window_days: 7, visits,
-      price: item?.price || null, available_quantity: item?.available_quantity || null,
-      listing_status: item?.status || "active",
+      price: newPrice, available_quantity: newStock,
+      listing_status: newStatus,
       listing_type: item?.listing_type_id || null,
-      shipping_mode: item?.shipping_mode || item?.logistic_type || null,
-      catalog_listing: !!item?.catalog_product_id,
+      shipping_mode: newShippingMode,
+      catalog_listing: newCatalogListing,
       source: "night_collection",
       sales_count: sales.sales_7d,
       units_sold: sales.units_7d,
@@ -618,11 +734,11 @@ async function processVisitBatch(
     healthCurrentRows.push({
       seller_id: sellerId, item_id: itemId,
       last_collected_at: collectedAt, visits_last: visits,
-      price: item?.price || null, available_quantity: item?.available_quantity || null,
-      listing_status: item?.status || "active",
+      price: newPrice, available_quantity: newStock,
+      listing_status: newStatus,
       listing_type: item?.listing_type_id || null,
-      shipping_mode: item?.shipping_mode || item?.logistic_type || null,
-      catalog_listing: !!item?.catalog_product_id,
+      shipping_mode: newShippingMode,
+      catalog_listing: newCatalogListing,
       sales_count_7d: sales.sales_7d,
       units_sold_7d: sales.units_7d,
       sales_count_30d: sales.sales_30d,
@@ -630,6 +746,14 @@ async function processVisitBatch(
       conversion_rate_7d: conversionRate7d,
       days_without_sale: daysWithoutSale,
       last_sale_at: sales.last_sale_at,
+      change_flags: changeFlags,
+      // Store previous values for next comparison
+      prev_price: prevState?.price ?? null,
+      prev_visits: prevState?.visits_last ?? null,
+      prev_available_quantity: prevState?.available_quantity ?? null,
+      prev_listing_status: prevState?.listing_status ?? null,
+      prev_shipping_mode: prevState?.shipping_mode ?? null,
+      prev_catalog_listing: prevState?.catalog_listing ?? null,
     });
   }
 
@@ -647,12 +771,18 @@ async function processVisitBatch(
     if (error) throw new Error(`Health current upsert error: ${error.message}`);
   }
 
+  const totalChanges = healthCurrentRows.reduce((sum, r) => sum + (r.change_flags?.length || 0), 0);
+  if (totalChanges > 0) {
+    console.log(`[rad-collector] Changes detected: ${totalChanges} across ${healthCurrentRows.filter(r => r.change_flags?.length > 0).length} items`);
+  }
+
   return {
     persisted: healthHistoryRows.length,
     failed: 0,
     persistedItemIds: batchIds,
     historyRows: healthHistoryRows.length,
     currentRows: healthCurrentRows.length,
+    changesDetected: totalChanges,
   };
 }
 
