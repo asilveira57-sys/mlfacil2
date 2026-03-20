@@ -13807,6 +13807,42 @@ export type Database = {
         }
         Relationships: []
       }
+      seed_account_rules: {
+        Row: {
+          active: boolean | null
+          created_at: string | null
+          id: string
+          max_seeds: number
+          min_seeds: number
+          sales_range_max: number | null
+          sales_range_min: number
+          seed_percentage: number
+          updated_at: string | null
+        }
+        Insert: {
+          active?: boolean | null
+          created_at?: string | null
+          id?: string
+          max_seeds: number
+          min_seeds: number
+          sales_range_max?: number | null
+          sales_range_min: number
+          seed_percentage: number
+          updated_at?: string | null
+        }
+        Update: {
+          active?: boolean | null
+          created_at?: string | null
+          id?: string
+          max_seeds?: number
+          min_seeds?: number
+          sales_range_max?: number | null
+          sales_range_min?: number
+          seed_percentage?: number
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       seller_category_eligibility: {
         Row: {
           api_attempts_count: number
@@ -14392,39 +14428,74 @@ export type Database = {
       }
       send_seed_balance: {
         Row: {
+          calculated_at: string | null
           created_at: string
           id: string
           plan_tier: string | null
+          rule_id: string | null
+          sales_count_90d: number | null
+          seed_percentage_applied: number | null
+          seeds_available: number | null
+          seeds_bonus: number | null
           seeds_from_plan: number
+          seeds_manual_adjustment: number | null
           seeds_purchased: number
           seeds_used: number
           seller_id: string
+          sold_listings_count_90d: number | null
+          tenant_id: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
+          calculated_at?: string | null
           created_at?: string
           id?: string
           plan_tier?: string | null
+          rule_id?: string | null
+          sales_count_90d?: number | null
+          seed_percentage_applied?: number | null
+          seeds_available?: number | null
+          seeds_bonus?: number | null
           seeds_from_plan?: number
+          seeds_manual_adjustment?: number | null
           seeds_purchased?: number
           seeds_used?: number
           seller_id: string
+          sold_listings_count_90d?: number | null
+          tenant_id?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
+          calculated_at?: string | null
           created_at?: string
           id?: string
           plan_tier?: string | null
+          rule_id?: string | null
+          sales_count_90d?: number | null
+          seed_percentage_applied?: number | null
+          seeds_available?: number | null
+          seeds_bonus?: number | null
           seeds_from_plan?: number
+          seeds_manual_adjustment?: number | null
           seeds_purchased?: number
           seeds_used?: number
           seller_id?: string
+          sold_listings_count_90d?: number | null
+          tenant_id?: string | null
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "send_seed_balance_rule_id_fkey"
+            columns: ["rule_id"]
+            isOneToOne: false
+            referencedRelation: "seed_account_rules"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       send_seed_purchases: {
         Row: {
@@ -19330,6 +19401,63 @@ export type Database = {
         }
         Relationships: []
       }
+      vw_send_seed_balance: {
+        Row: {
+          calculated_at: string | null
+          id: string | null
+          is_over_capacity: boolean | null
+          remaining: number | null
+          sales_count_90d: number | null
+          seed_percentage_applied: number | null
+          seeds_available: number | null
+          seeds_bonus: number | null
+          seeds_from_plan: number | null
+          seeds_manual_adjustment: number | null
+          seeds_used: number | null
+          seller_id: string | null
+          sold_listings_count_90d: number | null
+          tenant_id: string | null
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          calculated_at?: string | null
+          id?: string | null
+          is_over_capacity?: never
+          remaining?: never
+          sales_count_90d?: number | null
+          seed_percentage_applied?: number | null
+          seeds_available?: number | null
+          seeds_bonus?: number | null
+          seeds_from_plan?: number | null
+          seeds_manual_adjustment?: number | null
+          seeds_used?: number | null
+          seller_id?: string | null
+          sold_listings_count_90d?: number | null
+          tenant_id?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          calculated_at?: string | null
+          id?: string | null
+          is_over_capacity?: never
+          remaining?: never
+          sales_count_90d?: number | null
+          seed_percentage_applied?: number | null
+          seeds_available?: number | null
+          seeds_bonus?: number | null
+          seeds_from_plan?: number | null
+          seeds_manual_adjustment?: number | null
+          seeds_used?: number | null
+          seller_id?: string | null
+          sold_listings_count_90d?: number | null
+          tenant_id?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       add_admin_by_email: { Args: { p_email: string }; Returns: undefined }
@@ -19707,6 +19835,10 @@ export type Database = {
       on_account_connected_check_limit: {
         Args: { p_account_id: string; p_company_id: string }
         Returns: Json
+      }
+      recalculate_seed_balance_for_seller: {
+        Args: { p_seller_id: string; p_tenant_id: string; p_user_id: string }
+        Returns: undefined
       }
       register_system_log: {
         Args: {

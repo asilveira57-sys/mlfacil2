@@ -244,6 +244,10 @@ export default function Seed() {
               usedSeeds={usedSeeds}
               plantedCount={plantedCount}
               planTier={seedBalance?.plan_tier || 'basic'}
+              salesCount90d={seedBalance?.sales_count_90d}
+              soldListingsCount90d={seedBalance?.sold_listings_count_90d}
+              seedPercentage={seedBalance?.seed_percentage_applied}
+              calculatedAt={seedBalance?.calculated_at}
               onBuySeeds={() => navigate('/seed/sementes')}
             />
 

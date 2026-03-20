@@ -6,12 +6,21 @@ export type SeedPositionTier = 'top_page_1' | 'page_1' | 'page_2' | 'page_3_plus
 
 export interface SeedBalance {
   id: string;
+  tenant_id: string | null;
   user_id: string;
   seller_id: string;
+  sales_count_90d: number;
+  sold_listings_count_90d: number;
+  rule_id: string | null;
+  seed_percentage_applied: number | null;
   seeds_from_plan: number;
   seeds_purchased: number;
+  seeds_bonus: number;
+  seeds_manual_adjustment: number;
   seeds_used: number;
+  seeds_available: number;
   plan_tier: string;
+  calculated_at: string | null;
   created_at: string;
   updated_at: string;
 }

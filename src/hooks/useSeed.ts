@@ -85,7 +85,39 @@ export function useSeed(): UseSeedResult {
         return;
       }
 
-      // Fetch seed balance (or create default)
+      // Resolve tenant_id from company
+      let tenantId: string | null = null;
+      const { data: mlAccount } = await supabase
+        .from('ml_accounts')
+        .select('company_id')
+        .eq('ml_user_id', sellerId)
+        .eq('user_id', user.id)
+        .limit(1)
+        .single();
+
+      if (mlAccount?.company_id) {
+        const { data: company } = await supabase
+          .from('companies')
+          .select('tenant_id')
+          .eq('id', mlAccount.company_id)
+          .single();
+        tenantId = company?.tenant_id || null;
+      }
+
+      // Trigger recalculation via RPC (idempotent, fast)
+      if (tenantId) {
+        try {
+          await supabase.rpc('recalculate_seed_balance_for_seller', {
+            p_tenant_id: tenantId,
+            p_user_id: user.id,
+            p_seller_id: sellerId,
+          });
+        } catch (rpcErr) {
+          console.warn('[useSeed] RPC recalculate failed (non-blocking):', rpcErr);
+        }
+      }
+
+      // Fetch seed balance (now should exist after recalculate)
       let { data: balanceData } = await supabase
         .from('send_seed_balance')
         .select('*')
@@ -94,6 +126,7 @@ export function useSeed(): UseSeedResult {
         .single();
 
       if (!balanceData) {
+        // Fallback: create minimal balance if RPC didn't run (e.g. no tenant)
         const { data: newBalance } = await supabase
           .from('send_seed_balance')
           .insert({
@@ -377,7 +410,7 @@ export function useSeed(): UseSeedResult {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return false;
 
-    const available = seedBalance.seeds_from_plan + seedBalance.seeds_purchased - seedBalance.seeds_used;
+    const available = seedBalance.seeds_available;
     if (available <= 0) {
       setError('Você não tem sementes disponíveis. Compre mais sementes ou remova um anúncio.');
       return false;
@@ -405,10 +438,13 @@ export function useSeed(): UseSeedResult {
       if (insertError) throw insertError;
 
       // Update seed balance
+      const newUsed = seedBalance.seeds_used + 1;
+      const newAvailable = Math.max(0, seedBalance.seeds_from_plan - newUsed);
       const { error: balanceError } = await supabase
         .from('send_seed_balance')
         .update({
-          seeds_used: seedBalance.seeds_used + 1,
+          seeds_used: newUsed,
+          seeds_available: newAvailable,
           updated_at: new Date().toISOString(),
         })
         .eq('id', seedBalance.id);
@@ -467,10 +503,13 @@ export function useSeed(): UseSeedResult {
       if (deleteError) throw deleteError;
 
       // Update seed balance (return seed)
+      const newUsed = Math.max(0, seedBalance.seeds_used - 1);
+      const newAvailable = Math.max(0, seedBalance.seeds_from_plan - newUsed);
       const { error: balanceError } = await supabase
         .from('send_seed_balance')
         .update({
-          seeds_used: Math.max(0, seedBalance.seeds_used - 1),
+          seeds_used: newUsed,
+          seeds_available: newAvailable,
           updated_at: new Date().toISOString(),
         })
         .eq('id', seedBalance.id);
@@ -488,14 +527,15 @@ export function useSeed(): UseSeedResult {
     }
   }, [sellerId, seedBalance, fetchData]);
 
-  const availableSeeds = seedBalance 
-    ? seedBalance.seeds_from_plan + seedBalance.seeds_purchased - seedBalance.seeds_used 
+  const availableSeeds = seedBalance?.seeds_available ?? 0;
+  const totalSeeds = seedBalance 
+    ? seedBalance.seeds_from_plan + (seedBalance.seeds_bonus || 0) + (seedBalance.seeds_manual_adjustment || 0) 
     : 0;
 
   return {
     seedBalance,
     availableSeeds,
-    totalSeeds: seedBalance ? seedBalance.seeds_from_plan + seedBalance.seeds_purchased : 0,
+    totalSeeds,
     usedSeeds: seedBalance?.seeds_used || 0,
     plantedItems,
     plantedCount: plantedItems.length,
