@@ -6705,6 +6705,7 @@ export type Database = {
       }
       listing_health_current: {
         Row: {
+          anomaly_flags: string[] | null
           available_quantity: number | null
           catalog_listing: boolean | null
           id: string
@@ -6719,6 +6720,7 @@ export type Database = {
           visits_last: number | null
         }
         Insert: {
+          anomaly_flags?: string[] | null
           available_quantity?: number | null
           catalog_listing?: boolean | null
           id?: string
@@ -6733,6 +6735,7 @@ export type Database = {
           visits_last?: number | null
         }
         Update: {
+          anomaly_flags?: string[] | null
           available_quantity?: number | null
           catalog_listing?: boolean | null
           id?: string
