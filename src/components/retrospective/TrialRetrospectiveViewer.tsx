@@ -337,6 +337,34 @@ export function TrialRetrospectiveViewer({ report, open, onOpenChange }: Props) 
               </div>
             )}
 
+            {/* Promotions Section */}
+            <div>
+              <h3 className="font-semibold text-lg flex items-center gap-2 mb-4">
+                <Megaphone className="h-5 w-5 text-primary" />
+                Central de Promoções
+              </h3>
+              {summary.promotions_snapshot ? (
+                <div className="border rounded-lg p-4 bg-muted/20">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Promoções Ativas</p>
+                      <p className="text-lg font-bold">{summary.promotions_snapshot.active_count ?? 0}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Itens em Promoção</p>
+                      <p className="text-lg font-bold">{summary.promotions_snapshot.items_count ?? 0}</p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="border rounded-lg p-4 bg-muted/10 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    Dados de promoções serão incluídos após sincronização do módulo de Promoções.
+                  </p>
+                </div>
+              )}
+            </div>
+
             {/* Module Usage */}
             {narrative?.module_usage && (
               <div>

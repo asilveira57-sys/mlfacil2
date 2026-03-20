@@ -467,7 +467,43 @@ export function generateRetrospectivePdfFromEngine(retro: Retrospective, company
     }
   }
 
-  // ─── Footer on every page ───
+  // ─── Promotions ───
+  if (y > 240) { pdf.addPage(); y = 20; }
+
+  pdf.setFontSize(14);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setTextColor(30, 41, 59);
+  pdf.text('Central de Promoções', margin, y);
+  y += 2;
+  pdf.setDrawColor(79, 70, 229);
+  pdf.setLineWidth(0.8);
+  pdf.line(margin, y, margin + 50, y);
+  y += 8;
+
+  const promos = summary.promotions_snapshot;
+  if (promos) {
+    pdf.setFontSize(9);
+    pdf.setTextColor(100, 116, 139);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text('Promoções Ativas', margin, y);
+    pdf.setTextColor(30, 41, 59);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text(String(promos.active_count ?? 0), margin + 50, y);
+    y += 6;
+    pdf.setTextColor(100, 116, 139);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text('Itens em Promoção', margin, y);
+    pdf.setTextColor(30, 41, 59);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text(String(promos.items_count ?? 0), margin + 50, y);
+    y += 6;
+  } else {
+    pdf.setFontSize(9);
+    pdf.setFont('helvetica', 'italic');
+    pdf.setTextColor(148, 163, 184);
+    pdf.text('Dados de promoções serão incluídos após sincronização do módulo de Promoções.', margin, y);
+    y += 6;
+  }
   const totalPages = pdf.getNumberOfPages();
   for (let i = 1; i <= totalPages; i++) {
     pdf.setPage(i);
