@@ -242,6 +242,20 @@ export function AdminRetrospectives() {
     }
   };
 
+  const handleRegenerateComplete = async (r: RetrospectiveWithCompany) => {
+    if (!confirm('Criar nova versão com dados atualizados?')) return;
+    try {
+      await triggerEngine.mutateAsync({
+        mode: 'force',
+        tenant_id: r.tenant_id,
+        company_id: r.company_id || undefined,
+      });
+      toast.success('Nova versão gerada com dados completos');
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao regenerar');
+    }
+  };
+
   const handleDownloadPdf = (r: RetrospectiveWithCompany) => {
     try {
       generateRetrospectivePdfFromEngine(r, r.company_name || undefined);
