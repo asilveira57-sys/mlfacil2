@@ -570,7 +570,11 @@ async function handleBackfill(supabase: any, sellerId: string, chainDepth: numbe
             continue;
           }
 
-          if (!resp.ok) { totalFailed += batchIds.length; continue; }
+          if (!resp.ok) {
+            const errBody = await resp.text().catch(() => "");
+            console.warn(`[rad-collector] Backfill visits failed: ${resp.status} — ${errBody.slice(0, 200)}`);
+            totalFailed += batchIds.length; continue;
+          }
 
           const visitsData = await resp.json();
           const rows: any[] = [];
