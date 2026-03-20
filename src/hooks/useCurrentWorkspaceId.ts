@@ -37,7 +37,15 @@ export function useCurrentWorkspaceId() {
         .limit(1)
         .maybeSingle();
 
-      return (member as any)?.workspace_id as string | null;
+      if ((member as any)?.workspace_id) {
+        return (member as any).workspace_id as string;
+      }
+
+      // No workspace found — ensure one is created (idempotent RPC)
+      const { data: ensureResult } = await supabase
+        .rpc('ensure_workspace', { p_user_id: userId });
+
+      return (ensureResult as any)?.active_workspace_id as string | null;
     },
     staleTime: 30 * 60 * 1000, // 30 minutes
     gcTime: 60 * 60 * 1000, // 60 minutes
