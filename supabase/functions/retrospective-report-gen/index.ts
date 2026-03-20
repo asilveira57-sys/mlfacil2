@@ -492,7 +492,7 @@ function generateSlidesHtml(retro: any, companyName: string): string {
         <div class="cover-icon">🎯</div>
         <h1>Obrigado!</h1>
         ${companyName ? `<p class="subtitle">${companyName}</p>` : ""}
-        <p class="tagline">Marketplace Fácil • ${new Date().getFullYear()}</p>
+        <p class="tagline">MKTP Fácil • ${new Date().getFullYear()}</p>
       </div>
     </div>
   `);

@@ -475,7 +475,7 @@ export function generateRetrospectivePdfFromEngine(retro: Retrospective, company
     pdf.setFont('helvetica', 'normal');
     pdf.setTextColor(148, 163, 184);
     pdf.text(
-      `${sellerName ? sellerName + ' • ' : ''}Desenvolvido por Marketplace Facil • ${new Date().getFullYear()}`,
+      `${sellerName ? sellerName + ' • ' : ''}Desenvolvido por MKTP Fácil • ${new Date().getFullYear()}`,
       W / 2,
       290,
       { align: 'center' }

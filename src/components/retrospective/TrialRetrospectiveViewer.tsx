@@ -119,7 +119,7 @@ export function TrialRetrospectiveViewer({ report, open, onOpenChange }: Props) 
 
           {/* MKTP Fácil signature */}
           <p className="text-xs text-muted-foreground mt-4 opacity-60">
-            Desenvolvido por Marketplace Fácil
+            Desenvolvido por MKTP Fácil
           </p>
         </div>
 
