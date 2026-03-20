@@ -1,71 +1,106 @@
 
 
-# Plano: Corrigir E-mails de Boas-Vindas e Logs
+# Plano: Corrigir Nome do Cliente + PDF Completo + Regeneração Individual
 
 ## Diagnóstico
 
-### Problema 1 — E-mail de confirmação vem em inglês do @lovable
-O `auth-email-hook` existe com templates em PT-BR, mas o domínio de e-mail (`notify.www.mktpfacil.com`) **falhou na verificação DNS**. Resultado: o sistema ignora o hook customizado e envia o e-mail padrão do Lovable — em inglês, de `@auth.lovable.cloud`.
+### Problema 1 — Nome do cliente sempre "—"
+**Causa raiz: RLS.** A tabela `companies` tem política `auth.uid() = user_id` e `profiles` tem `auth.uid() = id`. O admin consegue ler `retrospectives` (tem policy admin), mas NÃO consegue ler `companies` nem `profiles` de OUTROS usuários. O join retorna NULL para tudo que não é do admin logado.
 
-**Solução:** O domínio precisa ser reconfigurado. O problema é que `www.mktpfacil.com` provavelmente não é o domínio raiz — o subdomínio `notify.www.mktpfacil.com` não conseguiu propagar os registros NS. Você precisa verificar/reconfigurar o domínio de e-mail nas configurações do projeto.
+**Evidência no banco:**
+- 49 retrospectivas têm `company_id` preenchido, 15 são consolidadas
+- Todas as 64 têm `summary_json->>'company_name'` = NULL (engine não gravava esse campo)
+- Tenant names existem: "ADX", "Adeconex Etiquetas", "raffaelvon", etc.
 
-### Problema 2 — E-mail de boas-vindas via Resend não envia ("No email found")
-O `email-enqueue-event` busca o e-mail do usuário **apenas** na tabela `profiles`. Porém, dos 8 usuários do sistema, **apenas 2 têm registro na tabela profiles**. Os outros 6 não têm `profiles.email` preenchido.
+### Problema 2 — PDF básico, sem ADS/ABC/Onboarding/Logo
+**Causa raiz:** Todas as 64 retrospectivas foram geradas ANTES do código que inclui `onboarding_context`, `ads_snapshot`, `abc_analysis` e `company_logo_url` no `summary_json`. Confirmado: 0 de 64 têm esses campos.
 
-Usuários sem profile (confirmado no banco):
-- `4f72b283...` (raffaelvon@gmail.com) — sem profile
-- `b8dfb2cd...` (adeconex4@gmail.com) — sem profile
-- `5c51a800...` — sem profile
+O botão "Regenerar" atual (`useGenerateRetrospectiveReports`) chama `retrospective-report-gen` que apenas regenera HTML/Slides a partir do `summary_json` existente — NÃO recalcula os dados.
 
-O e-mail existe em `auth.users`, mas o código não consulta lá como fallback.
-
-### Problema 3 — Logs mostram UUID ao invés do nome
-A mensagem de log é `"No email found for user {UUID}"`. Não busca nome, empresa ou qualquer referência humana.
+### Problema 3 — Assinatura usa "Marketplace Fácil" em vez de "MKTP Fácil"
 
 ---
 
 ## Correções
 
-### 1. Corrigir lookup de e-mail no `email-enqueue-event`
-**Arquivo:** `supabase/functions/email-enqueue-event/index.ts`
+### 1. Migration — Admin pode ler companies e profiles de todos
 
-Alterar o bloco de resolução de e-mail (linhas 187-208):
-- Manter busca em `profiles.email` como primeira opção
-- Adicionar fallback: buscar em `auth.users` via `supabase.auth.admin.getUserById(targetUserId)`
-- Se encontrar, usar o e-mail de `auth.users`
+Adicionar policies de SELECT para admin:
+```sql
+CREATE POLICY "admin_read_all_companies" ON companies FOR SELECT
+  USING (has_role(auth.uid(), 'admin'));
 
-### 2. Melhorar mensagem de log com nome/empresa
-**Arquivo:** `supabase/functions/email-enqueue-event/index.ts`
+CREATE POLICY "admin_read_all_profiles" ON profiles FOR SELECT
+  USING (has_role(auth.uid(), 'admin'));
+```
 
-Antes de logar, buscar dados de contexto do usuário:
-- `profiles.full_name` (se existir)
-- `companies.display_name` (se `company_id` fornecido)
-- Usar na mensagem: `"No email found for [Nome] (empresa: [Empresa])"` ao invés de UUID
-- Aplicar mesma lógica para logs de sucesso: `"Enqueued marketplace_connected → [Nome] (email@x.com)"`
+Isso resolve instantaneamente a coluna "Cliente" para o admin.
 
-### 3. Melhorar exibição dos logs no frontend
-**Arquivo:** `src/components/admin/email/EmailLogsTab.tsx`
+### 2. Coluna Cliente — fallback para consolidados
 
-- Adicionar badge de cor para `invalid_email` (amarelo/warning)
-- Truncar UUIDs se ainda aparecerem: mostrar apenas primeiros 8 chars
+No `useAllRetrospectives` (AdminRetrospectives.tsx), para linhas sem `company_id` (consolidadas):
+- Mostrar o nome do tenant (já funciona no código, só falhava por RLS)
+- Resultado: "ADX", "Adeconex Etiquetas", "raffaelvon", etc.
 
-### 4. Garantir profiles sejam criados no signup
-**Arquivo:** Verificar se o trigger `handle_new_user` ou equivalente cria profile com email. Se não, ajustar para que todo novo usuário tenha profile com email preenchido desde o cadastro.
+### 3. Regeneração Individual — re-executar o engine para 1 retrospectiva
 
-### 5. Domínio de e-mail — reconfigurar
-O domínio `notify.www.mktpfacil.com` falhou. Precisa ser reconfigurado — idealmente usando o domínio raiz (ex: `mktpfacil.com` ao invés de `www.mktpfacil.com`), pois subdomínios de `www` são incomuns para delegação DNS.
+Criar botão "Regenerar Dados" que:
+1. Chama `retrospective-engine` com `mode: 'force'`, `company_id` e `tenant_id` da retrospectiva
+2. O engine já tem skip-duplicate, então precisa **deletar a retrospectiva antiga antes** e re-gerar
+3. Como o usuário quer "criar nova versão": manter a original e gerar uma nova com dados atualizados
 
-Após resolver o DNS, o `auth-email-hook` passará a funcionar e os e-mails de confirmação virão em PT-BR, com a identidade visual do MKTP Fácil.
+**Implementação:**
+- No `AdminRetrospectives.tsx`, adicionar botão "Regenerar Completo" 
+- Chama `useTriggerRetrospectiveEngine` com `{ mode: 'force', tenant_id, company_id }`
+- O engine roda `buildSummaryJson` com o código atualizado (que inclui onboarding, ADS, ABC, logo)
+- Nova retrospectiva é criada com todos os dados enriquecidos
+
+### 4. Assinatura — trocar para "MKTP Fácil"
+
+Substituir "Marketplace Fácil" por "MKTP Fácil" em:
+- `RetrospectiveEnginePdfExporter.ts` (2 ocorrências: header e footer)
+- `TrialRetrospectiveViewer.tsx` (1 ocorrência: assinatura no header)
+- `retrospective-report-gen/index.ts` (footer do HTML e slides)
+
+### 5. Seção Promoções — mostrar com aviso quando sem dados
+
+No `RetrospectiveEnginePdfExporter.ts`, `TrialRetrospectiveViewer.tsx` e `retrospective-report-gen`:
+- Se `summary_json.promotions_snapshot` existir: exibir dados
+- Se não existir: exibir seção "Central de Promoções" com texto "Dados de promoções serão incluídos após sincronização do módulo de Promoções."
+
+No `retrospective-engine/index.ts`, adicionar coleta de `promotion_snapshots`:
+- Buscar da tabela `promotion_snapshots` por `seller_id` no período
+- Incluir no `summary_json` como `promotions_snapshot` com: promoções ativas, tipo, itens, período
+
+### 6. Engine — garantir company_name e logo_url no summary_json
+
+O `buildSummaryJson` já grava `company_name` e `company_logo_url` (linhas 608-609), mas os dados antigos não têm. Após a regeneração, os novos registros terão.
 
 ---
 
 ## Arquivos modificados
-1. `supabase/functions/email-enqueue-event/index.ts` — fallback auth.users + logs humanizados
-2. `src/components/admin/email/EmailLogsTab.tsx` — badge para invalid_email
-3. Deploy da edge function atualizada
+
+1. **Migration SQL** — admin policies em `companies` e `profiles`
+2. **`src/pages/admin/AdminRetrospectives.tsx`** — botão "Regenerar Completo" individual
+3. **`src/components/retrospective/RetrospectiveEnginePdfExporter.ts`** — "MKTP Fácil" + seção promoções
+4. **`src/components/retrospective/TrialRetrospectiveViewer.tsx`** — "MKTP Fácil" + seção promoções
+5. **`supabase/functions/retrospective-engine/index.ts`** — coleta de promoções
+6. **`supabase/functions/retrospective-report-gen/index.ts`** — "MKTP Fácil" + seção promoções no HTML/Slides
+
+## Ordem de execução
+
+1. Migration (RLS) — nome aparece imediatamente
+2. Assinatura "MKTP Fácil" — rápido
+3. Seção promoções no engine + viewers
+4. Botão de regeneração individual
+5. Deploy edge functions
+6. Testar regeneração da ADX
 
 ## Resultado esperado
-- E-mails de boas-vindas via Resend passam a ser enviados (fallback para auth.users)
-- Logs mostram nome da pessoa e empresa, não UUID
-- Domínio de e-mail precisa ser reconfigurado para o auth-email-hook funcionar
+
+- Admin vê nome do cliente em TODAS as linhas
+- Botão de regeneração individual recria com dados completos (ADS, ABC, onboarding, promoções, logo)
+- PDF/HTML/Slides com logo do seller + "Desenvolvido por MKTP Fácil"
+- Seção de promoções presente (com dados ou aviso)
+- Versões anteriores mantidas no histórico
 
