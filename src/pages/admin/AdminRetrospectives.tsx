@@ -616,12 +616,12 @@ export function AdminRetrospectives() {
             {targets.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-8">Nenhum alvo na fila</p>
             ) : (
-              <ScrollArea className="max-h-[400px]">
+              <>
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Tenant</TableHead>
-                      <TableHead>Company</TableHead>
+                      <TableHead>Cliente</TableHead>
+                      <TableHead>Empresa</TableHead>
                       <TableHead>Escopo</TableHead>
                       <TableHead>Âncora</TableHead>
                       <TableHead>Vencimento</TableHead>
@@ -630,10 +630,15 @@ export function AdminRetrospectives() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {targets.map((t) => (
+                    {targets.slice(targetPage * PAGE_SIZE, (targetPage + 1) * PAGE_SIZE).map((t: any) => (
                       <TableRow key={t.id}>
-                        <TableCell className="text-xs font-mono truncate max-w-[120px]">{t.tenant_id.slice(0, 8)}…</TableCell>
-                        <TableCell className="text-xs font-mono truncate max-w-[120px]">{t.company_id?.slice(0, 8) ?? '—'}…</TableCell>
+                        <TableCell className="text-sm truncate max-w-[160px]">
+                          <div className="flex items-center gap-1.5">
+                            <Building2 className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                            {t._tenantName || '—'}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm truncate max-w-[160px]">{t._companyName || '—'}</TableCell>
                         <TableCell className="text-xs">{t.target_scope}</TableCell>
                         <TableCell className="text-xs">{t.anchor_date}</TableCell>
                         <TableCell className="text-xs">{t.due_date}</TableCell>
@@ -649,7 +654,22 @@ export function AdminRetrospectives() {
                     ))}
                   </TableBody>
                 </Table>
-              </ScrollArea>
+                {targets.length > PAGE_SIZE && (
+                  <div className="flex items-center justify-between px-4 py-3 border-t">
+                    <p className="text-xs text-muted-foreground">
+                      {targetPage * PAGE_SIZE + 1}–{Math.min((targetPage + 1) * PAGE_SIZE, targets.length)} de {targets.length}
+                    </p>
+                    <div className="flex gap-1">
+                      <Button variant="outline" size="sm" disabled={targetPage === 0} onClick={() => setTargetPage(p => p - 1)}>
+                        Anterior
+                      </Button>
+                      <Button variant="outline" size="sm" disabled={(targetPage + 1) * PAGE_SIZE >= targets.length} onClick={() => setTargetPage(p => p + 1)}>
+                        Próxima
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </CardContent>
         </Card>
