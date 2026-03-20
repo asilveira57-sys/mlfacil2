@@ -155,6 +155,7 @@ export default function Admin() {
           <Route path="central-de-ajuda" element={<AdminCentralDeAjuda />} />
           <Route path="emails" element={<AdminEmails />} />
           <Route path="suporte" element={<AdminSuporte />} />
+          <Route path="consentimentos" element={<AdminConsents />} />
         </Routes>
       </div>
     </PageContainer>
