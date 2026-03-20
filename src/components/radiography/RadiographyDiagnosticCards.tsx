@@ -97,15 +97,28 @@ export function RadiographyDiagnosticCards({ data, loading }: Props) {
               label="Sync"
               value={data.lastSyncAt}
             />
-            <StatusLine
-              label="Coleta"
-              value={data.lastCollectionAt}
-            />
-            {data.backfillStatus && data.backfillStatus !== "done" && (
-              <div className="flex items-center gap-1 text-amber-400">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                Backfill {data.backfillProgress ? `${data.backfillProgress}%` : "em andamento"}
+            {data.lastCollectionStatus === "failed" ? (
+              <div className="flex items-center justify-between text-slate-400">
+                <span>Coleta:</span>
+                <span className="text-red-300">Falhou na última execução</span>
               </div>
+            ) : (
+              <StatusLine
+                label="Coleta"
+                value={data.lastCollectionAt}
+              />
+            )}
+
+            <BackfillStatus
+              status={data.backfillStatus}
+              progress={data.backfillProgress}
+              error={data.backfillError}
+            />
+
+            {data.lastSyncAt && data.totalExams === 0 && data.lastCollectionStatus === "failed" && (
+              <p className="pt-1 text-[11px] leading-relaxed text-red-300">
+                Anúncios sincronizados, mas a coleta falhou. O histórico ainda não foi gerado.
+              </p>
             )}
           </div>
         )}
@@ -125,6 +138,46 @@ function StatusLine({ label, value }: { label: string; value: string | null }) {
       </span>
     </div>
   );
+}
+
+function BackfillStatus({
+  status,
+  progress,
+  error,
+}: {
+  status: string | null;
+  progress: number | null;
+  error: string | null;
+}) {
+  if (!status) return null;
+
+  if (status === "running") {
+    return (
+      <div className="flex items-center gap-1 text-amber-400">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Backfill {typeof progress === "number" ? `${progress}%` : "em andamento"}
+      </div>
+    );
+  }
+
+  if (status === "pending") {
+    return <div className="text-amber-300">Backfill pendente</div>;
+  }
+
+  if (status === "paused") {
+    return <div className="text-amber-300">Backfill pausado ({progress ?? 0}%)</div>;
+  }
+
+  if (status === "failed") {
+    return (
+      <div className="text-red-300">
+        Backfill com falha
+        {error ? `: ${error}` : ""}
+      </div>
+    );
+  }
+
+  return null;
 }
 
 interface VitalCardProps {
