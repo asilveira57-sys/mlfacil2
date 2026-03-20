@@ -1014,6 +1014,80 @@ async function handleBackfill(supabase: any, sellerId: string, chainDepth: numbe
 // ============================================================================
 // FLOW 5 — OPTIMIZED ANOMALY DETECTION (scoped to processed items)
 // ============================================================================
+// Build structured alert with context and explanation
+function buildAlert(
+  type: string,
+  current: any,
+  history: any[]
+): { type: string; severity: string; title: string; description: string; context: Record<string, any> } | null {
+  switch (type) {
+    case "zero_visits":
+      return {
+        type, severity: "high",
+        title: "Sem visitas no período",
+        description: "Este anúncio não recebeu nenhuma visita na última janela de coleta. Verifique se o anúncio está ativo, se o título está claro e se há problemas de posicionamento.",
+        context: { visits: 0, status: current.listing_status },
+      };
+    case "visit_drop": {
+      const latest = history[0]?.visits || 0;
+      const previous = history[1]?.visits || 0;
+      const pct = previous > 0 ? Math.round(((latest - previous) / previous) * 100) : 0;
+      return {
+        type, severity: "high",
+        title: "Queda acentuada de visitas",
+        description: `As visitas caíram ${Math.abs(pct)}% em relação à coleta anterior (de ${previous} para ${latest}). Isso pode indicar perda de posicionamento, mudança de preço ou concorrência.`,
+        context: { visits_current: latest, visits_previous: previous, pct_change: pct },
+      };
+    }
+    case "consistent_decline": {
+      const v = history.map(h => h.visits || 0);
+      return {
+        type, severity: "critical",
+        title: "Declínio consistente de tráfego",
+        description: `As visitas estão em queda contínua nas últimas 3 coletas (${v.reverse().join(" → ")}). Recomenda-se revisar preço, título, fotos e posicionamento competitivo.`,
+        context: { visits_sequence: v },
+      };
+    }
+    case "high_stock_low_traction":
+      return {
+        type, severity: "medium",
+        title: "Estoque alto sem tração",
+        description: `O anúncio tem ${current.available_quantity} unidades em estoque mas recebeu apenas ${current.visits_last || 0} visitas. Considere revisar preço ou investir em publicidade.`,
+        context: { stock: current.available_quantity, visits: current.visits_last },
+      };
+    case "no_sales_30d":
+      return {
+        type, severity: "high",
+        title: "Sem vendas há mais de 30 dias",
+        description: `Este anúncio está há ${current.days_without_sale || "30+"} dias sem venda. Avalie se o preço está competitivo e se o anúncio precisa de atualização.`,
+        context: { days_without_sale: current.days_without_sale, last_sale_at: current.last_sale_at },
+      };
+    case "no_sales_14d":
+      return {
+        type, severity: "medium",
+        title: "Sem vendas há mais de 14 dias",
+        description: `Anúncio sem venda há ${current.days_without_sale} dias. Monitore de perto — pode ser sazonal ou indicar necessidade de ajuste.`,
+        context: { days_without_sale: current.days_without_sale },
+      };
+    case "visits_no_conversion":
+      return {
+        type, severity: "high",
+        title: "Visitas sem conversão",
+        description: `O anúncio recebeu ${current.visits_last} visitas mas não gerou vendas nos últimos 7 dias. O problema pode estar no preço, fotos, descrição ou reputação.`,
+        context: { visits: current.visits_last, sales_7d: current.sales_count_7d },
+      };
+    case "low_conversion":
+      return {
+        type, severity: "medium",
+        title: "Taxa de conversão muito baixa",
+        description: `A taxa de conversão está em ${(current.conversion_rate_7d || 0).toFixed(2)}% (${current.sales_count_7d || 0} vendas de ${current.visits_last} visitas). O ideal é acima de 1%.`,
+        context: { conversion_rate: current.conversion_rate_7d, visits: current.visits_last, sales: current.sales_count_7d },
+      };
+    default:
+      return null;
+  }
+}
+
 async function detectAnomalies(supabase: any, sellerId: string, processedItemIds: string[]) {
   if (!processedItemIds || processedItemIds.length === 0) return [];
   console.log(`[rad-collector] Detecting anomalies for ${sellerId} (${processedItemIds.length} items)`);
@@ -1025,7 +1099,7 @@ async function detectAnomalies(supabase: any, sellerId: string, processedItemIds
       const chunk = processedItemIds.slice(i, i + 500);
       const { data } = await supabase
         .from("listing_health_current")
-        .select("item_id, visits_last, available_quantity, listing_status, sales_count_7d, sales_count_30d, days_without_sale, conversion_rate_7d")
+        .select("item_id, visits_last, available_quantity, listing_status, sales_count_7d, sales_count_30d, days_without_sale, conversion_rate_7d, last_sale_at, change_flags")
         .eq("seller_id", sellerId)
         .in("item_id", chunk);
       allCurrent = allCurrent.concat(data || []);
@@ -1062,6 +1136,7 @@ async function detectAnomalies(supabase: any, sellerId: string, processedItemIds
 
     for (const current of allCurrent) {
       const flags: string[] = [];
+      const alerts: any[] = [];
 
       // Visit-based anomalies
       if (current.listing_status === "active" && (current.visits_last === 0 || current.visits_last === null)) {
@@ -1099,17 +1174,37 @@ async function detectAnomalies(supabase: any, sellerId: string, processedItemIds
         }
       }
 
-      if (flags.length > 0) {
-        anomalies.push({ item_id: current.item_id, flags });
+      // Build structured alerts for each detected anomaly
+      for (const flag of flags) {
+        const alert = buildAlert(flag, current, history);
+        if (alert) alerts.push(alert);
+      }
+
+      // Also add change-based alerts from change_flags
+      const changeFlags = current.change_flags || [];
+      for (const change of changeFlags) {
+        if (change.severity === "critical" || change.severity === "high") {
+          alerts.push({
+            type: `change_${change.type}`,
+            severity: change.severity,
+            title: change.label,
+            description: change.detail,
+            context: { prev_value: change.prev_value, new_value: change.new_value },
+          });
+        }
+      }
+
+      if (flags.length > 0 || alerts.length > 0) {
+        anomalies.push({ item_id: current.item_id, flags, alerts });
       } else {
         cleanItemIds.push(current.item_id);
       }
     }
 
-    // Batch update anomaly flags
+    // Batch update anomaly flags + alerts_json
     for (const anomaly of anomalies) {
       await supabase.from("listing_health_current")
-        .update({ anomaly_flags: anomaly.flags })
+        .update({ anomaly_flags: anomaly.flags, alerts_json: anomaly.alerts })
         .eq("seller_id", sellerId)
         .eq("item_id", anomaly.item_id);
     }
@@ -1118,12 +1213,12 @@ async function detectAnomalies(supabase: any, sellerId: string, processedItemIds
     for (let i = 0; i < cleanItemIds.length; i += 500) {
       const chunk = cleanItemIds.slice(i, i + 500);
       await supabase.from("listing_health_current")
-        .update({ anomaly_flags: [] })
+        .update({ anomaly_flags: [], alerts_json: [] })
         .eq("seller_id", sellerId)
         .in("item_id", chunk);
     }
 
-    console.log(`[rad-collector] Anomalies: ${anomalies.length} flagged, ${cleanItemIds.length} clean`);
+    console.log(`[rad-collector] Anomalies: ${anomalies.length} flagged (${anomalies.reduce((s, a) => s + a.alerts.length, 0)} alerts), ${cleanItemIds.length} clean`);
     return anomalies;
   } catch (err) {
     console.warn(`[rad-collector] Anomaly detection error:`, err);
