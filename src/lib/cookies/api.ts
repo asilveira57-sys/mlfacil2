@@ -9,7 +9,7 @@ export async function recordConsentOnServer(params: {
   consent_type: string;
   performance?: boolean;
   analytics?: boolean;
-  source: 'banner' | 'settings' | 'system';
+  source: 'banner' | 'settings' | 'system' | 'signup';
 }): Promise<{ consent_id: string; document_version: string } | null> {
   try {
     const { data, error } = await supabase.functions.invoke('record-consent', {
