@@ -138,9 +138,11 @@ function useAllRetrospectives() {
   });
 }
 
-function useAllTargets() {
+// ─── Resolve names for targets ───
+
+function useTargetsWithNames() {
   return useQuery({
-    queryKey: ['admin-retrospective-targets'],
+    queryKey: ['admin-retrospective-targets-named'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('retrospective_targets')
@@ -148,7 +150,41 @@ function useAllTargets() {
         .order('due_date', { ascending: false })
         .limit(200);
       if (error) throw error;
-      return (data ?? []) as RetrospectiveTarget[];
+      const targets = (data ?? []) as RetrospectiveTarget[];
+
+      // Resolve tenant and company names
+      const tenantIds = [...new Set(targets.map(t => t.tenant_id).filter(Boolean))] as string[];
+      const companyIds = [...new Set(targets.map(t => t.company_id).filter(Boolean))] as string[];
+
+      let tenantMap: Record<string, string> = {};
+      if (tenantIds.length > 0) {
+        const { data: tenants } = await supabase.from('tenants').select('id, name, owner_user_id').in('id', tenantIds);
+        const ownerIds = [...new Set((tenants || []).map((t: any) => t.owner_user_id).filter(Boolean))];
+        let profileMap: Record<string, string> = {};
+        if (ownerIds.length > 0) {
+          const { data: profiles } = await supabase.from('profiles').select('id, full_name, email').in('id', ownerIds);
+          for (const p of (profiles || []) as any[]) {
+            profileMap[p.id] = p.full_name || p.email || '';
+          }
+        }
+        for (const t of (tenants || []) as any[]) {
+          tenantMap[t.id] = t.name || profileMap[t.owner_user_id] || t.id.slice(0, 8) + '…';
+        }
+      }
+
+      let companyMap: Record<string, string> = {};
+      if (companyIds.length > 0) {
+        const { data: companies } = await supabase.from('companies').select('id, display_name').in('id', companyIds);
+        for (const c of (companies || []) as any[]) {
+          if (c.display_name) companyMap[c.id] = c.display_name;
+        }
+      }
+
+      return targets.map(t => ({
+        ...t,
+        _tenantName: t.tenant_id ? (tenantMap[t.tenant_id] || t.tenant_id.slice(0, 8) + '…') : '—',
+        _companyName: t.company_id ? (companyMap[t.company_id] || t.company_id.slice(0, 8) + '…') : '—',
+      }));
     },
   });
 }
