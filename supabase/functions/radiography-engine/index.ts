@@ -357,12 +357,13 @@ async function handleSnapshot(supabase: any, userId: string, sellerId: string, c
       total_items_monitored: listings.length,
     }, { onConflict: "seller_id" });
 
-  console.log(`[Radiography] Created ${snapshots.length} snapshots, ${events.length} events`);
+  console.log(`[Radiography] Created ${snapshots.length} snapshots, ${events.length} events, ${visitsCollected} items with visits`);
 
   return new Response(JSON.stringify({
     success: true,
     items_processed: snapshots.length,
     events_detected: events.length,
+    visits_collected: visitsCollected,
     snapshot_date: today,
   }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
