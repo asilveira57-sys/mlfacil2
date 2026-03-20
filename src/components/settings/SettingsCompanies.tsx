@@ -289,6 +289,7 @@ const SettingsCompanies = () => {
     }
   };
 
+  const handleConnectAccount = async (companyId?: string | null) => {
     setSaving(true);
     setConnectingForCompany(companyId || null);
     try {
