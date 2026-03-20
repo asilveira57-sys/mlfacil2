@@ -378,6 +378,10 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
                 </span>
               </div>
             )}
+            <div className="grid grid-cols-3 gap-2">
+              <MiniStat label="Preço" value={item.price != null ? `R$ ${item.price.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : "—"} />
+              <MiniStat label="Estoque" value={item.available_quantity != null ? String(item.available_quantity) : "—"} highlight={item.available_quantity === 0} />
+              <MiniStat label="Vendas (7d)" value={String(item.sales_count_7d ?? 0)} icon={<ShoppingCart className="h-3 w-3 text-emerald-400" />} />
             </div>
 
             {/* SECTION 2 — Health breakdown */}
