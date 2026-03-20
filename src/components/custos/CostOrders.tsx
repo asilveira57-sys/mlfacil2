@@ -1280,45 +1280,6 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                               >
                                 <RotateCw className={`h-3 w-3 ${resyncingOrder === order.order_id ? 'animate-spin' : ''}`} />
                               </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={reimportingOrder === order.order_id}
-                                onClick={async () => {
-                                  if (!confirm(`Reimportar pedido ${order.order_id}? Isso vai excluir e reimportar os dados.`)) return;
-                                  setReimportingOrder(order.order_id);
-                                  try {
-                                    const { data: { session } } = await supabase.auth.getSession();
-                                    if (!session) return;
-                                    const response = await fetch(
-                                      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders/reimport`,
-                                      {
-                                        method: 'POST',
-                                        headers: {
-                                          Authorization: `Bearer ${session.access_token}`,
-                                          'Content-Type': 'application/json',
-                                        },
-                                        body: JSON.stringify({ seller_id: sellerId, order_id: order.order_id }),
-                                      }
-                                    );
-                                     if (response.ok) {
-                                      toast.success(`Pedido ${order.order_id} reimportado`);
-                                      invalidateCostCache('orders');
-                                      loadOrders();
-                                    } else {
-                                      const err = await response.json().catch(() => ({}));
-                                      toast.error(err.error || 'Erro ao reimportar');
-                                    }
-                                  } catch {
-                                    toast.error('Erro ao reimportar pedido');
-                                  } finally {
-                                    setReimportingOrder(null);
-                                  }
-                                }}
-                                title="Reimportar pedido (excluir e reimportar)"
-                              >
-                                <Trash2 className={`h-3 w-3 ${reimportingOrder === order.order_id ? 'animate-spin' : ''}`} />
-                              </Button>
                             </div>
                           </TableCell>
                         </TableRow>

@@ -109,20 +109,8 @@ export function useCostDataPolling({
     }
   }, [sellerId, enabled, dateFrom, dateTo, periodDays, onSummaryUpdate]);
 
-  // Track tab visibility
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      isVisibleRef.current = document.visibilityState === "visible";
-      if (isVisibleRef.current && sellerId && enabled) {
-        fetchSummary();
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [sellerId, enabled, fetchSummary]);
+  // No auto-refresh on tab visibility — manual refresh only
+  // This prevents unnecessary queries on tab switch
 
   // Polling effect
   useEffect(() => {
