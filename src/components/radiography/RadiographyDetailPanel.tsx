@@ -30,6 +30,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   fetchHistory: (itemId: string, days: PeriodDays) => Promise<HealthHistoryEntry[]>;
+  fetchVisitSeries: (itemId: string, days: PeriodDays) => Promise<VisitSeriesEntry[]>;
   selectedPeriod: PeriodDays;
 }
 
