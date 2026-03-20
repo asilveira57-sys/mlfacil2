@@ -65,10 +65,7 @@ export default function Custos() {
     checkAuth();
   }, [navigate]);
 
-  // Refresh when switching tabs
-  useEffect(() => {
-    if (activeTab === 'resumo' && sellerId) refreshSummary();
-  }, [activeTab, sellerId, refreshSummary]);
+  // Tab-switch auto-refresh DISABLED — manual refresh only to control cloud costs
 
   const handleCalculate = async () => {
     if (!sellerId) return;

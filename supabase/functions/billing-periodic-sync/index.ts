@@ -24,28 +24,23 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // ====== BILLING PERIODIC SYNC PERMANENTLY DISABLED ======
+  // All billing/cost calculations are now manual-only to control cloud costs.
+  // This function is kept for reference but will not execute any processing.
+  console.log(`[billing-periodic-sync] BLOCKED — automatic billing sync is disabled. Use manual recalculation.`);
+
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-  const timer = syncStartTimer();
 
-  try {
-    console.log(`[billing-periodic-sync] Starting at ${timer.startedAt}`);
+  await logSyncEvent(supabase, {
+    action: "sync_blocked",
+    entityType: "billing_sync",
+    entityId: "billing-periodic-cron",
+    metadata: { module: "billing_sync", scope: "periodic", reason: "SYSTEM_BLOCK: automatic billing disabled", blocked_at: new Date().toISOString() },
+  });
 
-    await logSyncEvent(supabase, {
-      action: "sync_started",
-      entityType: "billing_sync",
-      entityId: "billing-periodic-cron",
-      metadata: { module: "billing_sync", scope: "periodic_30m", started_at: timer.startedAt },
-    });
-
-    // Get all active ML accounts
-    const { data: accounts, error: accErr } = await supabase
-      .from("ml_accounts")
-      .select("id, user_id, ml_user_id, nickname, is_active")
-      .eq("is_active", true);
-
-    if (accErr) throw new Error(`Failed to fetch accounts: ${accErr.message}`);
-
-    console.log(`[billing-periodic-sync] Found ${accounts?.length || 0} active accounts`);
+  return new Response(JSON.stringify({ success: false, blocked: true, reason: "Automatic billing sync is permanently disabled. Use manual recalculation." }), {
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
 
     const stats = {
       accounts_total: accounts?.length || 0,
