@@ -848,18 +848,65 @@ const SettingsCompanies = () => {
                 className="border rounded-lg px-4 bg-card"
               >
                 <AccordionTrigger className="hover:no-underline py-4">
-                  <div className="flex items-center gap-3 text-left">
+                  <div className="flex items-center gap-3 text-left flex-1">
                     <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
                       <Building2 className="h-5 w-5 text-primary" />
                     </div>
-                    <div>
-                      <h4 className="font-semibold text-foreground">{company.display_name}</h4>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span>{company.billing_type === "PF" ? "Pessoa Física" : "Pessoa Jurídica"}</span>
-                        <span>•</span>
-                        <span>{hasAccount ? '1 conta ML' : 'Sem conta ML'}</span>
+                    {editingCompanyId === company.id ? (
+                      <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                        <Input
+                          value={editingCompanyName}
+                          onChange={(e) => setEditingCompanyName(e.target.value)}
+                          className="h-8 w-48 text-sm"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleRenameCompany(company.id);
+                            if (e.key === 'Escape') setEditingCompanyId(null);
+                          }}
+                        />
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7"
+                          onClick={() => handleRenameCompany(company.id)}
+                          disabled={saving}
+                        >
+                          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5 text-green-600" />}
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7"
+                          onClick={() => setEditingCompanyId(null)}
+                        >
+                          <X className="h-3.5 w-3.5 text-destructive" />
+                        </Button>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <div>
+                          <h4 className="font-semibold text-foreground">{company.display_name}</h4>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <span>{company.billing_type === "PF" ? "Pessoa Física" : "Pessoa Jurídica"}</span>
+                            <span>•</span>
+                            <span>{hasAccount ? '1 conta ML' : 'Sem conta ML'}</span>
+                          </div>
+                        </div>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingCompanyId(company.id);
+                            setEditingCompanyName(company.display_name);
+                          }}
+                          title="Renomear empresa"
+                        >
+                          <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </AccordionTrigger>
                 <AccordionContent className="pb-4">
