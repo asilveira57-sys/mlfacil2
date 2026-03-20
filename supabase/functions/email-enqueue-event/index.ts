@@ -183,24 +183,57 @@ serve(async (req) => {
       }
     }
 
-    // 4. Resolve email address
+    // 4. Resolve email address + human-readable context for logs
     let email = to_email;
-    if (!email) {
-      // Try to get from profiles
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("email")
-        .eq("user_id", targetUserId)
-        .maybeSingle();
-      email = profile?.email;
+    let userName: string | null = null;
+    let companyName: string | null = null;
+
+    // Get profile info (name + email)
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("email, full_name")
+      .eq("user_id", targetUserId)
+      .maybeSingle();
+
+    if (profile) {
+      email = email || profile.email;
+      userName = profile.full_name || null;
     }
+
+    // Fallback: get email from auth.users if not found in profiles
+    if (!email) {
+      try {
+        const { data: authData } = await supabase.auth.admin.getUserById(targetUserId);
+        if (authData?.user?.email) {
+          email = authData.user.email;
+        }
+        if (!userName && authData?.user?.user_metadata?.full_name) {
+          userName = authData.user.user_metadata.full_name;
+        }
+      } catch (_) {
+        // fail-safe
+      }
+    }
+
+    // Get company name for log context
+    if (company_id) {
+      const { data: company } = await supabase
+        .from("companies")
+        .select("display_name")
+        .eq("id", company_id)
+        .maybeSingle();
+      companyName = company?.display_name || null;
+    }
+
+    const userLabel = userName || email || targetUserId.substring(0, 8) + "…";
+    const companyLabel = companyName ? ` (empresa: ${companyName})` : "";
 
     if (!email) {
       await supabase.from("email_logs").insert({
         ...logBase,
         action: "invalid_email",
         template_id: rule.template_id,
-        message: `No email found for user ${targetUserId}`,
+        message: `Sem e-mail encontrado para ${userLabel}${companyLabel}`,
       });
       return new Response(JSON.stringify({ skipped: true, reason: "no_email" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -285,7 +318,7 @@ serve(async (req) => {
       template_id: rule.template_id,
       queue_id: queueItem.id,
       email,
-      message: `Enqueued ${event_key} → ${email}`,
+      message: `Enqueued ${event_key} → ${userLabel} (${email})${companyLabel}`,
       details_json: {
         queue_id: queueItem.id,
         template_key: template.key,
