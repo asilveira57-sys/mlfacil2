@@ -62,7 +62,7 @@ export function generateRetrospectivePdfFromEngine(retro: Retrospective, company
   pdf.setFontSize(8);
   pdf.setFont('helvetica', 'italic');
   pdf.setTextColor(148, 163, 184);
-  pdf.text('Desenvolvido por Marketplace Fácil', W / 2, y, { align: 'center' });
+  pdf.text('Desenvolvido por MKTP Fácil', W / 2, y, { align: 'center' });
   y += 8;
 
   // ─── Onboarding Context ───
