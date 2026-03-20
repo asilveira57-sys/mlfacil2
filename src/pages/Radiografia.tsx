@@ -12,7 +12,7 @@ import { useActiveAccount } from "@/contexts/ActiveAccountContext";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { useModuleFeedbackIntegration } from "@/hooks/useModuleFeedbackIntegration";
 import { FeedbackPromptCard } from "@/components/feedback";
-import { useRadiographyData, PeriodDays, HealthCurrentItem } from "@/hooks/useRadiographyData";
+import { useRadiographyData, PeriodDays } from "@/hooks/useRadiographyData";
 import { RadiographyDiagnosticCards } from "@/components/radiography/RadiographyDiagnosticCards";
 import { RadiographyItemList } from "@/components/radiography/RadiographyItemList";
 import { RadiographyDetailPanel } from "@/components/radiography/RadiographyDetailPanel";
