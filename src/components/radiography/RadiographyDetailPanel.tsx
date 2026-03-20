@@ -50,6 +50,7 @@ import {
   HealthHistoryEntry,
   StructuredAlert,
   ChangeFlag,
+  SeoAnalysis,
   classifyHealth,
   getAnomalyLabel,
   PeriodDays,
