@@ -319,6 +319,19 @@ export function RadiographyItemList({
                           <ShoppingCart className="h-3 w-3 text-emerald-400" />
                           {hasSalesData ? (item.sales_count_30d ?? 0) : "—"}
                         </span>
+                        {/* Conversion rate */}
+                        {(() => {
+                          const conv = (item.visits_last && item.visits_last > 0 && item.sales_count_30d != null)
+                            ? ((item.sales_count_30d / item.visits_last) * 100)
+                            : null;
+                          return conv != null ? (
+                            <span className={`flex items-center gap-1 font-mono ${
+                              conv >= 3 ? "text-emerald-400" : conv >= 1 ? "text-amber-400" : "text-red-400"
+                            }`}>
+                              {conv.toFixed(1)}%
+                            </span>
+                          ) : null;
+                        })()}
                         {item.days_without_sale != null && item.days_without_sale > 0 && (
                           <span className={`flex items-center gap-1 ${
                             item.days_without_sale > 30 ? "text-red-400" : item.days_without_sale > 14 ? "text-amber-400" : ""
