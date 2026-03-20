@@ -38,7 +38,6 @@ export default function Radiografia() {
     refetchItems,
   } = useRadiographyData(sellerId, selectedPeriod);
 
-  const [selectedPeriod, setSelectedPeriod] = useState<PeriodDays>(30);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
