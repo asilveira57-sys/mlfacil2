@@ -47,7 +47,7 @@ function wrapLine(text: string, maxChars: number): string[] {
   return lines;
 }
 
-// ─── Multi-page PDF generator ───
+// ─── Multi-page PDF generator with branding ───
 function generateMultiPagePdf(pages: string[][]): Uint8Array {
   const PAGE_W = 595;
   const PAGE_H = 842;
@@ -57,23 +57,26 @@ function generateMultiPagePdf(pages: string[][]): Uint8Array {
   const LINE_H = 13;
   const FONT_SIZE = 9;
   const TITLE_SIZE = 13;
+  const BRAND_SIZE = 18;
   const MAX_CHARS = 90;
+  const BRAND_NAME = "MKTP Facil";
+  const BRAND_TAGLINE = "Analytics Pro";
 
   // Pre-process: split all lines into wrapped segments and paginate
   const paginatedPages: string[][] = [];
 
   for (const pageLines of pages) {
     let currentPage: string[] = [];
-    let y = PAGE_H - MARGIN_TOP;
+    // Reserve space for branding header
+    let y = PAGE_H - MARGIN_TOP - 50;
 
     for (const rawLine of pageLines) {
       const wrapped = rawLine === "" ? [""] : wrapLine(ascii(rawLine), MAX_CHARS);
       for (const seg of wrapped) {
         if (y - LINE_H < MARGIN_BOTTOM) {
-          // overflow → new page
           paginatedPages.push(currentPage);
           currentPage = [];
-          y = PAGE_H - MARGIN_TOP;
+          y = PAGE_H - MARGIN_TOP - 50;
         }
         currentPage.push(seg);
         y -= LINE_H;
@@ -87,44 +90,52 @@ function generateMultiPagePdf(pages: string[][]): Uint8Array {
   const totalPages = paginatedPages.length;
 
   // Build PDF objects
-  // obj 1: Catalog, obj 2: Pages, obj 3: Font
-  // then pairs of (Page, Stream) for each page
+  // obj 1: Catalog, obj 2: Pages, obj 3: Helvetica, obj 4: Helvetica-Bold
   const objs: string[] = [];
   const pageObjNums: number[] = [];
 
-  // Placeholder for Catalog (1) and Pages (2) and Font (3)
   objs.push(""); // index 0 → obj 1
   objs.push(""); // index 1 → obj 2
   objs.push("3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj");
+  objs.push("4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj");
 
-  let nextObj = 4;
+  let nextObj = 5;
 
   for (let p = 0; p < totalPages; p++) {
     const pageObjNum = nextObj++;
     const streamObjNum = nextObj++;
     pageObjNums.push(pageObjNum);
 
-    let y = PAGE_H - MARGIN_TOP;
-    let stream = "BT\n";
+    let stream = "";
 
-    // Title line (first segment of first page, or continuation)
-    const isFirstPage = p === 0;
-    const lines = paginatedPages[p];
+    // ── Branding header ──
+    const headerY = PAGE_H - MARGIN_TOP;
+    // Brand accent line (green bar)
+    stream += `0.133 0.545 0.133 rg\n`;
+    stream += `${MARGIN_L} ${headerY - 2} ${PAGE_W - 2 * MARGIN_L} 3 re f\n`;
+    // Brand name
+    stream += `BT\n/F2 ${BRAND_SIZE} Tf\n0 0 0 rg\n${MARGIN_L} ${headerY + 8} Td\n(${BRAND_NAME}) Tj\nET\n`;
+    // Tagline
+    stream += `BT\n/F1 8 Tf\n0.4 0.4 0.4 rg\n${MARGIN_L + 130} ${headerY + 12} Td\n(${BRAND_TAGLINE}) Tj\nET\n`;
 
-    // Position
+    // ── Content ──
+    let y = headerY - 20;
+    stream += "BT\n";
     stream += `${MARGIN_L} ${y} Td\n`;
+
+    const lines = paginatedPages[p];
+    const isFirstPage = p === 0;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      // Detect title lines (all caps, short)
       const isTitle = isFirstPage && i <= 1 && line === line.toUpperCase() && line.length > 5;
       const fs = isTitle ? TITLE_SIZE : FONT_SIZE;
 
       if (i === 0) {
-        stream += `/F1 ${fs} Tf\n`;
+        stream += `0 0 0 rg\n/F1 ${fs} Tf\n`;
       } else {
         stream += `0 -${LINE_H} Td\n`;
-        if (isTitle) stream += `/F1 ${fs} Tf\n`;
+        if (isTitle) stream += `/F2 ${fs} Tf\n`;
         else stream += `/F1 ${FONT_SIZE} Tf\n`;
       }
       stream += `(${line}) Tj\n`;
@@ -133,21 +144,21 @@ function generateMultiPagePdf(pages: string[][]): Uint8Array {
 
     // Footer
     const footerY = 35;
-    stream += `ET\nBT\n/F1 7 Tf\n${MARGIN_L} ${footerY} Td\n(${FOOTER_LINE1} | ${FOOTER_LINE2} | Pagina ${p + 1}/${totalPages}) Tj\nET`;
+    stream += `ET\n`;
+    // Footer line
+    stream += `0.8 0.8 0.8 rg\n${MARGIN_L} ${footerY + 12} ${PAGE_W - 2 * MARGIN_L} 0.5 re f\n`;
+    stream += `BT\n/F1 7 Tf\n0.4 0.4 0.4 rg\n${MARGIN_L} ${footerY} Td\n(${FOOTER_LINE1} | ${FOOTER_LINE2} | Pagina ${p + 1}/${totalPages}) Tj\nET`;
 
     const streamLen = new TextEncoder().encode(stream).length;
 
-    // Page object
     objs.push(
-      `${pageObjNum} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Contents ${streamObjNum} 0 R /Resources << /Font << /F1 3 0 R >> >> >>\nendobj`
+      `${pageObjNum} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Contents ${streamObjNum} 0 R /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> >>\nendobj`
     );
-    // Stream object
     objs.push(
       `${streamObjNum} 0 obj\n<< /Length ${streamLen} >>\nstream\n${stream}\nendstream\nendobj`
     );
   }
 
-  // Now fill Catalog and Pages
   const kidsStr = pageObjNums.map((n) => `${n} 0 R`).join(" ");
   objs[0] = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj";
   objs[1] = `2 0 obj\n<< /Type /Pages /Kids [${kidsStr}] /Count ${totalPages} >>\nendobj`;
@@ -162,7 +173,7 @@ function generateMultiPagePdf(pages: string[][]): Uint8Array {
   }
 
   const xrefOff = pdf.length;
-  const totalObjs = objs.length + 1; // +1 for free entry
+  const totalObjs = objs.length + 1;
   pdf += "xref\n";
   pdf += `0 ${totalObjs}\n`;
   pdf += "0000000000 65535 f \n";

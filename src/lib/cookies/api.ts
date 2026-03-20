@@ -40,8 +40,22 @@ export async function generateConsentPdf(consentId: string): Promise<string | nu
 
     const url = data?.pdf_url || null;
     if (url) {
-      // Open in new tab for download
-      window.open(url, '_blank');
+      // Fetch blob and trigger download to avoid ad-blocker blocking supabase URLs
+      try {
+        const response = await fetch(url);
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = `consentimento-${consentId.slice(0, 8)}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+      } catch (fetchErr) {
+        console.warn('[Consent API] blob download failed, falling back to window.open:', fetchErr);
+        window.open(url, '_blank');
+      }
     }
     return url;
   } catch (err) {
