@@ -74,6 +74,9 @@ const CriarAcesso = () => {
         return;
       }
 
+      // Mark terms acceptance for sync on first login
+      localStorage.setItem('mktp_pending_terms_consent', new Date().toISOString());
+
       if (data?.user && !data.user.email_confirmed_at) {
         setSignupEmail(email);
         setShowVerifyEmail(true);
