@@ -22,7 +22,7 @@ import { ptBR } from "date-fns/locale";
 import { HEALTH_STATUS_CONFIG, RadiographyHealthStatus } from "@/types/radiography";
 import {
   HealthCurrentItem, HealthHistoryEntry, VisitSeriesEntry, StructuredAlert, ChangeFlag,
-  SeoAnalysis, classifyHealth, getAnomalyLabel, PeriodDays,
+  SeoAnalysis, classifyHealth, getAnomalyLabel, PeriodDays, CoverageInfo, computeCoverage,
 } from "@/hooks/useRadiographyData";
 
 interface Props {
@@ -261,6 +261,11 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
   const hasMultipleDates = chartData.length >= 2;
   const hasAnyVisits = chartData.some(d => d.visits > 0);
 
+  // Coverage calculation
+  const coverage = useMemo<CoverageInfo>(() => {
+    return computeCoverage(visitSeries, period);
+  }, [visitSeries, period]);
+
   const health = item ? classifyHealth(item) : ("stable" as RadiographyHealthStatus);
   const config = HEALTH_STATUS_CONFIG[health];
   const healthFactors = item ? getHealthBreakdown(item) : [];
@@ -350,11 +355,29 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
               <MiniStat label={`Visitas (${period}d)`} value={item.visits_period != null ? item.visits_period.toLocaleString("pt-BR") : (item.visits_last != null ? item.visits_last.toLocaleString("pt-BR") : "—")} icon={<Eye className="h-3 w-3 text-cyan-400" />} />
               <MiniStat label={`Vendas (${period}d)`} value={String(item.sales_period ?? item.sales_count_30d ?? 0)} icon={<ShoppingCart className="h-3 w-3 text-emerald-400" />} />
               <MiniStat label="Conversão" value={
+                coverage.status === 'insufficient' ? "dados insuf." :
                 item.conversion_period != null ? `${item.conversion_period.toFixed(1)}%` :
                 (item.conversion_rate_7d != null ? `${item.conversion_rate_7d.toFixed(1)}%` : "—")
-              } icon={<BarChart3 className="h-3 w-3 text-violet-400" />} />
+              } icon={<BarChart3 className="h-3 w-3 text-violet-400" />} 
+                subtitle={coverage.status === 'partial' ? `base: ${coverage.days_with_data}d` : undefined}
+              />
               <MiniStat label="Dias s/ venda" value={item.days_without_sale != null ? String(item.days_without_sale) : "—"} icon={<Clock className="h-3 w-3 text-amber-400" />} highlight={item.days_without_sale != null && item.days_without_sale > 14} />
             </div>
+            {/* Coverage indicator */}
+            {coverage.status !== 'good' && coverage.days_with_data > 0 && (
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${
+                coverage.status === 'insufficient' 
+                  ? 'bg-amber-500/10 border border-amber-500/20 text-amber-300' 
+                  : 'bg-cyan-500/5 border border-cyan-500/15 text-cyan-300'
+              }`}>
+                <Activity className="h-3.5 w-3.5 flex-shrink-0" />
+                <span>
+                  Histórico de visitas disponível em {coverage.days_with_data} dos últimos {coverage.days_requested} dias.
+                  {coverage.status === 'partial' && ' A conversão foi calculada com base nos dias com coleta válida.'}
+                  {coverage.status === 'insufficient' && ' Os dados anteriores podem estar incompletos.'}
+                </span>
+              </div>
+            )}
             <div className="grid grid-cols-3 gap-2">
               <MiniStat label="Preço" value={item.price != null ? `R$ ${item.price.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : "—"} />
               <MiniStat label="Estoque" value={item.available_quantity != null ? String(item.available_quantity) : "—"} highlight={item.available_quantity === 0} />
@@ -428,16 +451,27 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
               title="Histórico de Visitas"
               icon={<Scan className="h-4 w-4 text-cyan-400" />}
               action={
-                <Select value={String(period)} onValueChange={(v) => setPeriod(Number(v) as PeriodDays)}>
-                  <SelectTrigger className="w-24 h-7 bg-slate-800/50 border-slate-700 text-slate-200 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-slate-800 border-slate-700">
-                    {([7, 15, 30, 60, 150] as PeriodDays[]).map(p => (
-                      <SelectItem key={p} value={String(p)} className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">{p} dias</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex items-center gap-2">
+                  {coverage.days_with_data > 0 && (
+                    <Badge variant="outline" className={`text-[10px] ${
+                      coverage.status === 'good' ? 'border-emerald-500/30 text-emerald-400' :
+                      coverage.status === 'partial' ? 'border-amber-500/30 text-amber-400' :
+                      'border-red-500/30 text-red-400'
+                    }`}>
+                      {coverage.days_with_data}/{coverage.days_requested}d
+                    </Badge>
+                  )}
+                  <Select value={String(period)} onValueChange={(v) => setPeriod(Number(v) as PeriodDays)}>
+                    <SelectTrigger className="w-24 h-7 bg-slate-800/50 border-slate-700 text-slate-200 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-slate-800 border-slate-700">
+                      {([7, 15, 30, 60, 150] as PeriodDays[]).map(p => (
+                        <SelectItem key={p} value={String(p)} className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">{p} dias</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               }
             >
               {historyLoading ? (
@@ -574,11 +608,12 @@ function SectionCard({ title, icon, subtitle, action, children }: {
   );
 }
 
-function MiniStat({ label, value, icon, highlight }: { label: string; value: string; icon?: React.ReactNode; highlight?: boolean }) {
+function MiniStat({ label, value, icon, highlight, subtitle }: { label: string; value: string; icon?: React.ReactNode; highlight?: boolean; subtitle?: string }) {
   return (
     <div className={`rounded-lg border p-2.5 ${highlight ? "bg-red-500/5 border-red-500/20" : "bg-slate-800/40 border-slate-700/40"}`}>
       <div className="flex items-center gap-1 text-[11px] text-slate-400 mb-0.5">{icon}{label}</div>
       <div className={`text-sm font-bold font-mono ${highlight ? "text-red-400" : "text-slate-200"}`}>{value}</div>
+      {subtitle && <div className="text-[10px] text-slate-500 mt-0.5">{subtitle}</div>}
     </div>
   );
 }
