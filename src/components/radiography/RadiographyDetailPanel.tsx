@@ -22,7 +22,7 @@ import { ptBR } from "date-fns/locale";
 import { HEALTH_STATUS_CONFIG, RadiographyHealthStatus } from "@/types/radiography";
 import {
   HealthCurrentItem, HealthHistoryEntry, VisitSeriesEntry, StructuredAlert, ChangeFlag,
-  SeoAnalysis, classifyHealth, getAnomalyLabel, PeriodDays,
+  SeoAnalysis, classifyHealth, getAnomalyLabel, PeriodDays, CoverageInfo, computeCoverage,
 } from "@/hooks/useRadiographyData";
 
 interface Props {
