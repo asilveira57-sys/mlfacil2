@@ -120,7 +120,7 @@ export function AccessGate({
             <Button onClick={() => navigate('/settings?tab=integrations')}>
               Conectar conta titular
             </Button>
-            <Button variant="outline" onClick={() => navigate('/planos')}>
+            <Button variant="outline" onClick={() => navigate('/settings?section=plano')}>
               <ExternalLink className="h-4 w-4 mr-2" />
               Ver plano ZPL
             </Button>
