@@ -597,11 +597,12 @@ function SectionCard({ title, icon, subtitle, action, children }: {
   );
 }
 
-function MiniStat({ label, value, icon, highlight }: { label: string; value: string; icon?: React.ReactNode; highlight?: boolean }) {
+function MiniStat({ label, value, icon, highlight, subtitle }: { label: string; value: string; icon?: React.ReactNode; highlight?: boolean; subtitle?: string }) {
   return (
     <div className={`rounded-lg border p-2.5 ${highlight ? "bg-red-500/5 border-red-500/20" : "bg-slate-800/40 border-slate-700/40"}`}>
       <div className="flex items-center gap-1 text-[11px] text-slate-400 mb-0.5">{icon}{label}</div>
       <div className={`text-sm font-bold font-mono ${highlight ? "text-red-400" : "text-slate-200"}`}>{value}</div>
+      {subtitle && <div className="text-[10px] text-slate-500 mt-0.5">{subtitle}</div>}
     </div>
   );
 }
