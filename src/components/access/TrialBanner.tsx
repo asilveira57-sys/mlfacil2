@@ -33,7 +33,7 @@ export function TrialBanner({ className, compact = false }: TrialBannerProps) {
           <Button 
             size={compact ? 'sm' : 'default'} 
             variant="destructive"
-            onClick={() => navigate('/planos')}
+            onClick={() => navigate('/settings?section=plano')}
           >
             Escolher plano
           </Button>
