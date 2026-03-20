@@ -263,6 +263,27 @@ export function RadiographyItemList({
                       </Badge>
                     </div>
                     {/* Anomaly flags */}
+                    {/* Change flags */}
+                    {item.change_flags && item.change_flags.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {item.change_flags.map((change, idx) => (
+                          <Badge
+                            key={`change-${idx}`}
+                            variant="outline"
+                            className={`text-xs ${
+                              change.severity === "critical" ? "border-red-500/30 text-red-400 bg-red-500/5" :
+                              change.severity === "high" ? "border-orange-500/30 text-orange-400 bg-orange-500/5" :
+                              change.severity === "medium" ? "border-amber-500/30 text-amber-400 bg-amber-500/5" :
+                              "border-slate-500/30 text-slate-400 bg-slate-500/5"
+                            }`}
+                          >
+                            <ArrowUpDown className="h-2.5 w-2.5 mr-1" />
+                            {change.label}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                    {/* Anomaly flags */}
                     {hasAnomalies && (
                       <div className="flex flex-wrap gap-1 mt-1.5">
                         {item.anomaly_flags!.map((flag) => (
