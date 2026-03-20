@@ -142,7 +142,101 @@ async function handleSnapshot(supabase: any, userId: string, sellerId: string, c
 
   console.log(`[Radiography] Found ${listings.length} active listings`);
 
-  // Get recent sales and visits for performance metrics
+  // Get ML access token for visit collection
+  const { data: mlAccount } = await supabase
+    .from("ml_accounts")
+    .select("access_token")
+    .eq("ml_user_id", String(sellerId))
+    .not("access_token", "is", null)
+    .limit(1)
+    .maybeSingle();
+
+  const accessToken = mlAccount?.access_token;
+
+  // Collect visits from ML API for ALL active items
+  const RATE_LIMIT_DELAY = 800;
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+  const visitsByItem = new Map<string, number>();
+  let visitsCollected = 0;
+
+  if (accessToken) {
+    console.log(`[Radiography] Collecting visits for ${listings.length} items from ML API`);
+    const uniqueItemIds = [...new Set(listings.map((l: any) => l.item_id))];
+    const allVisitsToUpsert: any[] = [];
+
+    for (const itemId of uniqueItemIds) {
+      try {
+        await sleep(RATE_LIMIT_DELAY);
+        const response = await fetch(
+          `https://api.mercadolibre.com/items/${itemId}/visits/time_window?last=7&unit=day`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+
+        if (response.status === 429) {
+          console.warn(`[Radiography] Rate limited on visits for ${itemId}, waiting...`);
+          await sleep(5000);
+          continue;
+        }
+
+        if (!response.ok) continue;
+
+        const data = await response.json();
+        if (data.results && Array.isArray(data.results)) {
+          let total7d = 0;
+          for (const dayData of data.results) {
+            const visitDate = dayData.date?.split('T')[0];
+            const dailyCount = dayData.total || 0;
+            if (visitDate) {
+              total7d += dailyCount;
+              allVisitsToUpsert.push({
+                user_id: userId,
+                seller_id: sellerId,
+                item_id: itemId,
+                visit_date: visitDate,
+                visits_count: dailyCount,
+              });
+            }
+          }
+          visitsByItem.set(itemId, total7d);
+          visitsCollected++;
+        }
+      } catch (err) {
+        console.warn(`[Radiography] Error fetching visits for ${itemId}:`, err);
+      }
+    }
+
+    // Batch upsert visits in chunks of 500
+    if (allVisitsToUpsert.length > 0) {
+      for (let i = 0; i < allVisitsToUpsert.length; i += 500) {
+        const chunk = allVisitsToUpsert.slice(i, i + 500);
+        const { error: upsertErr } = await supabase
+          .from('seller_item_visits')
+          .upsert(chunk, { onConflict: 'seller_id,item_id,visit_date' });
+        if (upsertErr) {
+          console.warn(`[Radiography] Failed to upsert visits chunk:`, upsertErr.message);
+        }
+      }
+      console.log(`[Radiography] Upserted ${allVisitsToUpsert.length} visit records for ${visitsCollected} items`);
+    }
+  } else {
+    console.warn(`[Radiography] No ML access token found, falling back to cached visits`);
+    // Fallback: read from seller_item_visits
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0];
+
+    const { data: recentVisits } = await supabase
+      .from("seller_item_visits")
+      .select("item_id, visits_count")
+      .eq("seller_id", sellerId)
+      .gte("visit_date", sevenDaysAgoStr);
+
+    for (const visit of recentVisits || []) {
+      visitsByItem.set(visit.item_id, (visitsByItem.get(visit.item_id) || 0) + visit.visits_count);
+    }
+  }
+
+  // Get recent sales
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
   const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0];
@@ -156,17 +250,6 @@ async function handleSnapshot(supabase: any, userId: string, sellerId: string, c
   const salesByItem = new Map<string, number>();
   for (const sale of recentSales || []) {
     salesByItem.set(sale.item_id, (salesByItem.get(sale.item_id) || 0) + sale.quantity);
-  }
-
-  const { data: recentVisits } = await supabase
-    .from("seller_item_visits")
-    .select("item_id, visits_count")
-    .eq("seller_id", sellerId)
-    .gte("visit_date", sevenDaysAgoStr);
-
-  const visitsByItem = new Map<string, number>();
-  for (const visit of recentVisits || []) {
-    visitsByItem.set(visit.item_id, (visitsByItem.get(visit.item_id) || 0) + visit.visits_count);
   }
 
   // Get previous snapshots for comparison
