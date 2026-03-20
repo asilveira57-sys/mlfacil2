@@ -234,14 +234,41 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, sele
     return <Icon className="h-5 w-5" />;
   };
 
-  // Chart data
-  const chartData = history.map((h) => ({
-    date: format(new Date(h.collected_at), "dd/MM", { locale: ptBR }),
-    fullDate: h.collected_at,
-    visits: h.visits ?? 0,
-    price: h.price ?? 0,
-    stock: h.available_quantity ?? 0,
-  }));
+  // Chart data — aggregate by date to avoid duplicate x-axis labels
+  const chartData = useMemo(() => {
+    if (!history.length) return [];
+    const byDate = new Map<string, { visits: number; price: number; stock: number; count: number; fullDate: string }>();
+    for (const h of history) {
+      const dateKey = format(new Date(h.collected_at), "yyyy-MM-dd");
+      const existing = byDate.get(dateKey);
+      if (existing) {
+        existing.visits += h.visits ?? 0;
+        existing.count++;
+        // Keep latest price/stock
+        existing.price = h.price ?? existing.price;
+        existing.stock = h.available_quantity ?? existing.stock;
+      } else {
+        byDate.set(dateKey, {
+          visits: h.visits ?? 0,
+          price: h.price ?? 0,
+          stock: h.available_quantity ?? 0,
+          count: 1,
+          fullDate: h.collected_at,
+        });
+      }
+    }
+    return Array.from(byDate.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, val]) => ({
+        date: format(new Date(key), "dd/MM", { locale: ptBR }),
+        fullDate: val.fullDate,
+        visits: val.visits,
+        price: val.price,
+        stock: val.stock,
+      }));
+  }, [history]);
+
+  const hasMultipleDates = chartData.length >= 2;
 
   // Evolution
   const calcDelta = (key: "visits" | "price" | "available_quantity") =>
