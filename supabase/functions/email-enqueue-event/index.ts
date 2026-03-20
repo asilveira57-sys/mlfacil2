@@ -318,7 +318,7 @@ serve(async (req) => {
       template_id: rule.template_id,
       queue_id: queueItem.id,
       email,
-      message: `Enqueued ${event_key} → ${email}`,
+      message: `Enqueued ${event_key} → ${userLabel} (${email})${companyLabel}`,
       details_json: {
         queue_id: queueItem.id,
         template_key: template.key,

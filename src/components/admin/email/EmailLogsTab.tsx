@@ -10,6 +10,21 @@ const actionColors: Record<string, string> = {
   send_attempt: 'bg-yellow-100 text-yellow-800',
   skip_opt_out: 'bg-orange-100 text-orange-800',
   cancel: 'bg-gray-100 text-gray-800',
+  invalid_email: 'bg-amber-100 text-amber-800',
+  dedup_block: 'bg-purple-100 text-purple-800',
+  throttle_block: 'bg-pink-100 text-pink-800',
+};
+
+const actionLabels: Record<string, string> = {
+  sent: 'Enviado',
+  fail: 'Falha',
+  enqueue: 'Enfileirado',
+  send_attempt: 'Tentativa',
+  skip_opt_out: 'Opt-out',
+  cancel: 'Cancelado',
+  invalid_email: 'Sem e-mail',
+  dedup_block: 'Duplicado',
+  throttle_block: 'Limite/dia',
 };
 
 export function EmailLogsTab() {
@@ -37,13 +52,14 @@ export function EmailLogsTab() {
               {logs.map((log) => (
                 <div key={log.id} className="py-2.5 flex items-start gap-3">
                   <Badge className={`text-[10px] shrink-0 ${actionColors[log.action] || 'bg-muted text-muted-foreground'}`}>
-                    {log.action}
+                    {actionLabels[log.action] || log.action}
                   </Badge>
                   <div className="min-w-0 flex-1">
                     <p className="text-xs truncate">{log.message || '—'}</p>
                     <div className="flex gap-2 text-[10px] text-muted-foreground mt-0.5">
                       {log.email && <span>{log.email}</span>}
                       {log.source_type && <span>via {log.source_type}</span>}
+                      {log.event_key && <span className="font-mono">{log.event_key}</span>}
                       <span>{new Date(log.created_at).toLocaleString('pt-BR')}</span>
                     </div>
                   </div>
