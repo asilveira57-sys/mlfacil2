@@ -70,7 +70,7 @@ export function TrialBanner({ className, compact = false }: TrialBannerProps) {
               <Button 
                 size="sm" 
                 variant={isUrgent ? 'default' : 'outline'}
-                onClick={() => navigate('/planos')}
+                onClick={() => navigate('/settings?section=plano')}
               >
                 Ver planos
               </Button>

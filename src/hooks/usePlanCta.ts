@@ -115,7 +115,7 @@ export function usePlanCta(): UsePlanCtaReturn {
         break;
 
       case 'manage_plan':
-        navigate('/configuracoes/plano');
+        navigate('/settings?section=plano');
         break;
     }
   };

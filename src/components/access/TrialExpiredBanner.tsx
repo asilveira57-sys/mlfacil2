@@ -45,7 +45,7 @@ export function TrialExpiredBanner() {
               : message || 'Acesso à sincronização bloqueado.'}
         </span>
         {isTrialExpired && (
-          <Button size="sm" onClick={() => navigate('/planos')}>
+          <Button size="sm" onClick={() => navigate('/settings?section=plano')}>
             Assinar plano
           </Button>
         )}

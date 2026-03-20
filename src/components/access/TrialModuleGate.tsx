@@ -42,7 +42,7 @@ export function TrialModuleGate({ feature, message, soft = false, children }: Tr
       {trialExpired ? <Lock className="h-4 w-4" /> : <Clock className="h-4 w-4" />}
       <AlertDescription className="flex items-center justify-between gap-4 flex-wrap">
         <span className="text-sm">{message || defaultMessage}</span>
-        <Button size="sm" variant="outline" onClick={() => navigate('/planos')}>
+        <Button size="sm" variant="outline" onClick={() => navigate('/settings?section=plano')}>
           Ver planos
         </Button>
       </AlertDescription>

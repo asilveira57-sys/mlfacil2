@@ -81,7 +81,7 @@ export function TrialExpiredPaywall() {
             <Button 
               className="w-full" 
               size="lg"
-              onClick={() => navigate('/planos')}
+              onClick={() => navigate('/settings?section=plano')}
             >
               <CreditCard className="w-4 h-4 mr-2" />
               {selectedPlan ? 'Ativar meu plano' : 'Escolher um plano'}

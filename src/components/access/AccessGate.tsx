@@ -140,7 +140,7 @@ export function AccessGate({
         title="Recurso bloqueado"
         description="Seu plano atual não inclui acesso a este recurso."
         action={
-          <Button variant="outline" onClick={() => navigate('/planos')}>
+          <Button variant="outline" onClick={() => navigate('/settings?section=plano')}>
             Ver planos
           </Button>
         }
