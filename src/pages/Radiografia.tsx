@@ -25,15 +25,18 @@ export default function Radiografia() {
   const feedback = useModuleFeedbackIntegration("radiografia-seed");
   const { toast } = useToast();
 
+  const [selectedPeriod, setSelectedPeriod] = useState<PeriodDays>(30);
+
   const {
     items,
     itemsLoading,
     diagnostics,
     diagnosticsLoading,
     fetchItemHistory,
+    fetchItemVisitSeries,
     triggerUpdate,
     refetchItems,
-  } = useRadiographyData(sellerId);
+  } = useRadiographyData(sellerId, selectedPeriod);
 
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodDays>(30);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
