@@ -262,7 +262,7 @@ export function RadiographyItemList({
                 const health = classifyHealth(item);
                 const config = HEALTH_STATUS_CONFIG[health];
                 const alertCount = (item.alerts_json?.length ?? 0) + (item.anomaly_flags?.length ?? 0);
-                const hasSalesData = (item.sales_count_30d ?? 0) > 0 || !!item.last_sale_at;
+                
 
                 return (
                   <div
