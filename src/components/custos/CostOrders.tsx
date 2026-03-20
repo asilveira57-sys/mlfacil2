@@ -287,49 +287,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     }
   };
 
-  const handleBulkReimport = async () => {
-    const ids = Array.from(selectedOrders);
-    if (ids.length === 0) return;
-
-    if (!confirm(`Excluir e reimportar ${ids.length} pedido(s)? Os dados de custo serão recalculados em background, mesmo se você fechar o navegador.`)) return;
-
-    setBatchProcessing(true);
-    setBatchProgress({ current: 0, total: ids.length, currentOrderId: 'iniciando...' });
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        toast.error('Sessão expirada');
-        setBatchProcessing(false);
-        return;
-      }
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders/bulk-reimport`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ seller_id: sellerId, order_ids: ids, job_type: 'reimport' }),
-        }
-      );
-
-      if (response.ok) {
-        const result = await response.json();
-        toast.success(`Reimportação de ${ids.length} pedidos iniciada em background. Pode fechar o navegador.`);
-        pollJobProgress(result.job_id);
-      } else {
-        const err = await response.json().catch(() => ({}));
-        toast.error(err.error || 'Erro ao iniciar reimportação');
-        setBatchProcessing(false);
-      }
-    } catch {
-      toast.error('Erro ao iniciar reimportação em massa');
-      setBatchProcessing(false);
-    }
-  };
+  // "Excluir e reimportar" bulk action removed — manual-only mode
 
   // Safe selection toggles (right side)
   const safeAllOnPageSelected = orders.length > 0 && orders.every(o => safeSelectedOrders.has(o.order_id));
