@@ -156,11 +156,13 @@ export function RadiographyItemList({
               <Package className="h-8 w-8 text-slate-500" />
             </div>
             <p className="text-lg font-medium text-slate-300">
-              {items.length === 0 ? "Estamos preparando seus dados" : "Nenhum resultado encontrado"}
+              {items.length === 0
+                ? "Aguardando primeira coleta de dados"
+                : "Nenhum resultado encontrado"}
             </p>
             <p className="text-sm text-slate-500 mt-1">
               {items.length === 0
-                ? "A coleta inicial está em andamento. Os dados aparecerão automaticamente."
+                ? "Clique em \"Atualizar Dados\" para iniciar a coleta. Os prontuários aparecerão após o processamento."
                 : "Tente ajustar os filtros."}
             </p>
           </div>
