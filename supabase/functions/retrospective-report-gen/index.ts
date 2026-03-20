@@ -328,7 +328,7 @@ function generateHtmlReport(retro: any, companyName: string): string {
   ` : ""}
 
   <div class="footer">
-    <p>Relatório gerado automaticamente pela <span class="brand">Marketplace Fácil</span> • ${new Date().getFullYear()}</p>
+    <p>Relatório gerado automaticamente pela <span class="brand">MKTP Fácil</span> • ${new Date().getFullYear()}</p>
   </div>
 </div>
 </body>
@@ -492,7 +492,7 @@ function generateSlidesHtml(retro: any, companyName: string): string {
         <div class="cover-icon">🎯</div>
         <h1>Obrigado!</h1>
         ${companyName ? `<p class="subtitle">${companyName}</p>` : ""}
-        <p class="tagline">Marketplace Fácil • ${new Date().getFullYear()}</p>
+        <p class="tagline">MKTP Fácil • ${new Date().getFullYear()}</p>
       </div>
     </div>
   `);
