@@ -62,6 +62,7 @@ const TYPE_LABELS: Record<string, string> = {
 
 interface RetrospectiveWithCompany extends Retrospective {
   company_name?: string | null;
+  company_logo_url?: string | null;
 }
 
 // ─── Admin hook: list ALL retrospectives with company name ───
