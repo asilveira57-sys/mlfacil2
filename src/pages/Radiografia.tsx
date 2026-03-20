@@ -155,6 +155,7 @@ export default function Radiografia() {
                   setSelectedItemId(null);
                 }}
                 fetchHistory={fetchItemHistory}
+                fetchVisitSeries={fetchItemVisitSeries}
                 selectedPeriod={selectedPeriod}
               />
 
