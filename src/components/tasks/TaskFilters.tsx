@@ -216,7 +216,7 @@ export function TaskFilters({
             <SelectItem value="unassigned">Sem responsável</SelectItem>
             {members.map(member => (
               <SelectItem key={member.user_id} value={member.user_id}>
-                {member.user_id.slice(0, 8)}...
+                {member.full_name || member.user_id.slice(0, 8) + '...'}
               </SelectItem>
             ))}
           </SelectContent>
