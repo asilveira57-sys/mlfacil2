@@ -24,6 +24,10 @@ import {
   Info,
   AlertOctagon,
   Lightbulb,
+  Search,
+  Check,
+  X,
+  Target,
 } from "lucide-react";
 import {
   ComposedChart,
