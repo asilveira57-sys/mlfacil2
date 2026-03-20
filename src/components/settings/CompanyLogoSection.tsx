@@ -133,7 +133,21 @@ export function CompanyLogoSection({ companyId, logoUrl, onLogoChange }: Company
         <Checkbox
           id={`apply-all-${companyId}`}
           checked={applyAll}
-          onCheckedChange={(v) => setApplyAll(v === true)}
+          disabled={uploading}
+          onCheckedChange={async (v) => {
+            const checked = v === true;
+            setApplyAll(checked);
+            if (checked && logoUrl) {
+              const { data: { user } } = await supabase.auth.getUser();
+              if (user) {
+                const ok = await applyLogoToAll(user.id, logoUrl);
+                if (ok) {
+                  toast.success("Logo aplicada em todas as empresas!");
+                  onLogoChange();
+                }
+              }
+            }
+          }}
         />
         <Label htmlFor={`apply-all-${companyId}`} className="text-xs text-muted-foreground cursor-pointer">
           Usar esta logo em todas as empresas
