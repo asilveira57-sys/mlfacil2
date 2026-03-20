@@ -249,19 +249,23 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, sele
 
   const hasMultipleDates = chartData.length >= 2;
 
+  const health = item ? classifyHealth(item) : ("stable" as RadiographyHealthStatus);
+  const config = HEALTH_STATUS_CONFIG[health];
+  const healthFactors = item ? getHealthBreakdown(item) : [];
+  const recommendations = item ? buildRecommendations(item) : [];
+  const allAlerts = useMemo(() => {
+    if (!item) return [];
+    return [
+      ...(item.alerts_json || []),
+      ...((item.anomaly_flags || [])
+        .filter(f => !(item.alerts_json || []).some(a => a.type === f))
+        .map(f => ({ type: f, severity: "medium", title: getAnomalyLabel(f), description: "", context: {} } as StructuredAlert))),
+    ];
+  }, [item]);
+  const changes = item?.change_flags || [];
+
   if (!item) return null;
 
-  const health = classifyHealth(item);
-  const config = HEALTH_STATUS_CONFIG[health];
-  const healthFactors = getHealthBreakdown(item);
-  const recommendations = buildRecommendations(item);
-  const allAlerts = [
-    ...(item.alerts_json || []),
-    ...((item.anomaly_flags || [])
-      .filter(f => !(item.alerts_json || []).some(a => a.type === f))
-      .map(f => ({ type: f, severity: "medium", title: getAnomalyLabel(f), description: "", context: {} } as StructuredAlert))),
-  ];
-  const changes = item.change_flags || [];
 
   const HealthIcon = ({ status }: { status: RadiographyHealthStatus }) => {
     const iconMap = { healthy: HeartPulse, stable: Activity, observation: Stethoscope, alert: AlertTriangle, critical: Siren };
