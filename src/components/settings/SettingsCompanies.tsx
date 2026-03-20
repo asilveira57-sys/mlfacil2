@@ -126,6 +126,8 @@ const SettingsCompanies = () => {
   const [erpOpenStates, setErpOpenStates] = useState<Record<string, boolean>>({});
   const [showTokenStates, setShowTokenStates] = useState<Record<string, boolean>>({});
   const [savingErpId, setSavingErpId] = useState<string | null>(null);
+  const [editingCompanyId, setEditingCompanyId] = useState<string | null>(null);
+  const [editingCompanyName, setEditingCompanyName] = useState("");
   
   const { activeAccountId, setActiveAccount, refreshAccounts: refreshActiveAccountContext } = useActiveAccount();
 
