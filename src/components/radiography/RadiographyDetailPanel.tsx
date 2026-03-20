@@ -442,11 +442,14 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
             >
               {historyLoading ? (
                 <Skeleton className="h-[200px] w-full bg-slate-700" />
-              ) : chartData.length === 0 ? (
+              ) : chartData.length === 0 || !hasAnyVisits ? (
                 <div className="h-[200px] flex flex-col items-center justify-center text-slate-500 text-sm gap-2">
                   <BarChart3 className="h-8 w-8 text-slate-600" />
-                  <p>Histórico será preenchido conforme a coleta avança.</p>
-                  <p className="text-xs text-slate-600">A coleta ocorre automaticamente a cada 4 dias.</p>
+                  <p>{chartData.length === 0 
+                    ? "Sem dados de visitas para este período." 
+                    : `Dados históricos insuficientes para ${period} dias.`}
+                  </p>
+                  <p className="text-xs text-slate-600">Tente um período menor ou aguarde a próxima coleta.</p>
                 </div>
               ) : !hasMultipleDates ? (
                 <div className="space-y-3">
