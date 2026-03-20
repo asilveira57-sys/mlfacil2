@@ -490,6 +490,9 @@ async function handleCollection(supabase: any, sellerId: string, startTime: numb
     // Detect anomalies only on the processed items (optimized)
     await detectAnomalies(supabase, sellerId, processedItemIds);
 
+    // SEO analysis (after anomalies, using processed items)
+    await analyzeSeoForItems(supabase, sellerId, processedItemIds);
+
     const duration = Date.now() - startTime;
     const finalStatus = processed === 0 && failed > 0 ? "failed" : "success";
     await finishLog(supabase, logId, {
