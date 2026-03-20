@@ -9,6 +9,7 @@ import {
   Rocket, TrendingUp, Target, ShoppingCart, DollarSign,
   BarChart3, Lightbulb, ArrowRight, Sparkles, Activity,
   Package, AlertTriangle, Zap, Crown, FileText, Presentation, ExternalLink,
+  Calendar, Shield, Link2, Megaphone, MapPin, Users, Trophy,
 } from 'lucide-react';
 import type { Retrospective } from '@/hooks/useRetrospectiveEngine';
 
@@ -17,6 +18,15 @@ function fmt(val: number | null | undefined, decimals = 2): string {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });
+}
+
+function fmtDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return '—';
+  try {
+    return new Date(dateStr).toLocaleDateString('pt-BR');
+  } catch {
+    return dateStr;
+  }
 }
 
 interface Props {
@@ -32,18 +42,47 @@ export function TrialRetrospectiveViewer({ report, open, onOpenChange }: Props) 
   const narrative = summary.trial_narrative;
   const current = summary.current ?? {};
   const evolution = summary.evolution;
+  const onboarding = summary.onboarding_context;
+  const adsSnapshot = summary.ads_snapshot;
+  const abc = summary.abc_analysis;
   const isConversion = narrative?.cta?.type === 'trial_conversion';
+  const companyLogo = summary.company_logo_url;
+  const companyName = summary.company_name;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[90vh] p-0 overflow-hidden">
-        {/* Hero Header */}
-        <div className={`p-8 text-center ${isConversion ? 'bg-gradient-to-br from-primary/10 via-primary/5 to-background' : 'bg-muted/30'}`}>
-          <div className="flex justify-center mb-4">
-            <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center">
-              {isConversion ? <Rocket className="h-8 w-8 text-primary" /> : <Sparkles className="h-8 w-8 text-primary" />}
+        {/* Hero Header — Seller branding */}
+        <div className="p-8 text-center bg-gradient-to-br from-muted/40 via-background to-muted/20">
+          {/* Seller Logo */}
+          {companyLogo ? (
+            <div className="flex justify-center mb-4">
+              <img
+                src={companyLogo}
+                alt={companyName || 'Logo'}
+                className="h-20 max-w-[200px] object-contain rounded-lg"
+              />
             </div>
-          </div>
+          ) : companyName ? (
+            <div className="flex justify-center mb-4">
+              <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center">
+                <span className="text-2xl font-bold text-primary">
+                  {companyName.charAt(0).toUpperCase()}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="flex justify-center mb-4">
+              <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center">
+                {isConversion ? <Rocket className="h-8 w-8 text-primary" /> : <Sparkles className="h-8 w-8 text-primary" />}
+              </div>
+            </div>
+          )}
+
+          {companyName && (
+            <p className="text-lg font-semibold mb-1">{companyName}</p>
+          )}
+
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">
               {narrative?.opening?.headline || 'Retrospectiva de 14 Dias'}
@@ -77,6 +116,11 @@ export function TrialRetrospectiveViewer({ report, open, onOpenChange }: Props) 
               )}
             </div>
           )}
+
+          {/* MKTP Fácil signature */}
+          <p className="text-xs text-muted-foreground mt-4 opacity-60">
+            Desenvolvido por Marketplace Fácil
+          </p>
         </div>
 
         <ScrollArea className="max-h-[60vh]">
@@ -86,6 +130,40 @@ export function TrialRetrospectiveViewer({ report, open, onOpenChange }: Props) 
               <div className="space-y-3 text-sm leading-relaxed">
                 <p className="text-muted-foreground">{narrative.opening.initial_state}</p>
                 <p className="text-muted-foreground">{narrative.opening.analysis}</p>
+              </div>
+            )}
+
+            {/* Onboarding Context — Cenário de Entrada */}
+            {onboarding && (
+              <div>
+                <h3 className="font-semibold text-lg flex items-center gap-2 mb-4">
+                  <Calendar className="h-5 w-5 text-primary" />
+                  Cenário de Entrada
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+                  <MiniInfoCard icon={Shield} label="LGPD / Termos" value={fmtDate(onboarding.lgpd_accepted_at)} />
+                  <MiniInfoCard icon={Calendar} label="Primeiro Acesso" value={fmtDate(onboarding.first_access_at)} />
+                  <MiniInfoCard icon={Link2} label="Conta ML Vinculada" value={fmtDate(onboarding.ml_linked_at)} />
+                </div>
+                {onboarding.baseline_30d && (
+                  <div className="border rounded-lg p-4 bg-muted/20">
+                    <p className="text-xs text-muted-foreground mb-3 font-medium">Vendas nos 30 dias anteriores ao cadastro</p>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Pedidos</p>
+                        <p className="text-lg font-bold">{onboarding.baseline_30d.orders ?? 0}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Faturamento</p>
+                        <p className="text-lg font-bold text-primary">R$ {fmt(onboarding.baseline_30d.revenue)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Ticket Médio</p>
+                        <p className="text-lg font-bold">R$ {fmt(onboarding.baseline_30d.ticket)}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -129,6 +207,130 @@ export function TrialRetrospectiveViewer({ report, open, onOpenChange }: Props) 
                         {evolution.revenue_growth_pct > 0 ? '+' : ''}{Number(evolution.revenue_growth_pct).toFixed(1)}%
                       </p>
                       <span className="text-xs text-muted-foreground">({evolution.revenue_delta > 0 ? '+' : ''}R$ {fmt(evolution.revenue_delta)})</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ADS Snapshot */}
+            {adsSnapshot && (
+              <div>
+                <h3 className="font-semibold text-lg flex items-center gap-2 mb-4">
+                  <Megaphone className="h-5 w-5 text-primary" />
+                  Fotografia do Mercado Ads
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                  <KpiCard icon={DollarSign} label="Investimento" value={`R$ ${fmt(adsSnapshot.total_invested)}`} />
+                  <KpiCard icon={TrendingUp} label="ROAS" value={`${fmt(adsSnapshot.roas, 1)}x`} highlight />
+                  <KpiCard icon={Target} label="ACOS" value={`${fmt(adsSnapshot.acos, 1)}%`} />
+                  <KpiCard icon={BarChart3} label="TACoS" value={`${fmt(adsSnapshot.tacos, 1)}%`} />
+                </div>
+                {adsSnapshot.top_campaigns?.length > 0 && (
+                  <div className="border rounded-lg overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-muted/40">
+                          <th className="text-left p-2 font-medium text-muted-foreground">Campanha</th>
+                          <th className="text-right p-2 font-medium text-muted-foreground">Investido</th>
+                          <th className="text-right p-2 font-medium text-muted-foreground">Receita</th>
+                          <th className="text-right p-2 font-medium text-muted-foreground">ROAS</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adsSnapshot.top_campaigns.map((c: any, i: number) => (
+                          <tr key={i} className="border-t border-border/50">
+                            <td className="p-2 truncate max-w-[180px]">{c.name}</td>
+                            <td className="p-2 text-right">R$ {fmt(c.spent)}</td>
+                            <td className="p-2 text-right">R$ {fmt(c.revenue)}</td>
+                            <td className="p-2 text-right font-medium">{fmt(c.roas, 1)}x</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ABC Analysis */}
+            {abc && (abc.top_products?.length > 0 || abc.top_cities?.length > 0 || abc.top_buyers?.length > 0) && (
+              <div>
+                <h3 className="font-semibold text-lg flex items-center gap-2 mb-4">
+                  <Trophy className="h-5 w-5 text-primary" />
+                  Curva ABC — Top 10
+                </h3>
+
+                {/* Top Products */}
+                {abc.top_products?.length > 0 && (
+                  <div className="mb-4">
+                    <h4 className="text-sm font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
+                      <Package className="h-3.5 w-3.5" /> Top Produtos
+                    </h4>
+                    <div className="border rounded-lg overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-muted/40">
+                            <th className="text-left p-2 font-medium text-muted-foreground">#</th>
+                            <th className="text-left p-2 font-medium text-muted-foreground">Produto</th>
+                            <th className="text-right p-2 font-medium text-muted-foreground">Receita</th>
+                            <th className="text-right p-2 font-medium text-muted-foreground">Unid.</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {abc.top_products.map((p: any, i: number) => (
+                            <tr key={i} className="border-t border-border/50">
+                              <td className="p-2 text-muted-foreground">{i + 1}</td>
+                              <td className="p-2 truncate max-w-[200px]">{p.title}</td>
+                              <td className="p-2 text-right font-medium">R$ {fmt(p.revenue)}</td>
+                              <td className="p-2 text-right">{p.units}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Top Cities + Buyers side by side */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {abc.top_cities?.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
+                        <MapPin className="h-3.5 w-3.5" /> Top Cidades
+                      </h4>
+                      <div className="border rounded-lg overflow-hidden">
+                        <table className="w-full text-xs">
+                          <tbody>
+                            {abc.top_cities.slice(0, 5).map((c: any, i: number) => (
+                              <tr key={i} className={i > 0 ? 'border-t border-border/50' : ''}>
+                                <td className="p-2">{c.city}{c.state ? ` - ${c.state}` : ''}</td>
+                                <td className="p-2 text-right font-medium">R$ {fmt(c.revenue)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {abc.top_buyers?.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
+                        <Users className="h-3.5 w-3.5" /> Top Compradores
+                      </h4>
+                      <div className="border rounded-lg overflow-hidden">
+                        <table className="w-full text-xs">
+                          <tbody>
+                            {abc.top_buyers.slice(0, 5).map((b: any, i: number) => (
+                              <tr key={i} className={i > 0 ? 'border-t border-border/50' : ''}>
+                                <td className="p-2">{b.nickname}</td>
+                                <td className="p-2 text-right">{b.orders} pedidos</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -267,8 +469,9 @@ export function TrialRetrospectiveViewer({ report, open, onOpenChange }: Props) 
             )}
 
             {/* Footer */}
-            <div className="text-center text-xs text-muted-foreground pt-4 border-t">
-              Relatório gerado automaticamente pela plataforma • {new Date().getFullYear()}
+            <div className="text-center text-xs text-muted-foreground pt-4 border-t space-y-1">
+              <p>Desenvolvido por <span className="font-medium">Marketplace Fácil</span></p>
+              <p className="opacity-60">Relatório gerado automaticamente • {new Date().getFullYear()}</p>
             </div>
           </div>
         </ScrollArea>
@@ -285,6 +488,18 @@ function KpiCard({ icon: Icon, label, value, highlight }: { icon: any; label: st
         <span className="text-xs text-muted-foreground">{label}</span>
       </div>
       <p className={`text-lg font-bold ${highlight ? 'text-primary' : ''}`}>{value}</p>
+    </div>
+  );
+}
+
+function MiniInfoCard({ icon: Icon, label, value }: { icon: any; label: string; value: string }) {
+  return (
+    <div className="border rounded-lg p-3">
+      <div className="flex items-center gap-1.5 mb-1">
+        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-xs text-muted-foreground">{label}</span>
+      </div>
+      <p className="text-sm font-medium">{value}</p>
     </div>
   );
 }
