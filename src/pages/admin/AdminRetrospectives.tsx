@@ -427,107 +427,121 @@ export function AdminRetrospectives() {
             </Card>
           ) : (
             <Card>
-              <ScrollArea className="max-h-[500px]">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Cliente</TableHead>
-                      <TableHead>Título</TableHead>
-                      <TableHead>Tipo</TableHead>
-                      <TableHead>Período</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Relatórios</TableHead>
-                      <TableHead>Criado em</TableHead>
-                      <TableHead className="text-right">Ações</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filtered.map((r) => {
-                      const st = STATUS_MAP[r.status] || { label: r.status, variant: 'outline' as const };
-                      return (
-                        <TableRow key={r.id}>
-                          <TableCell>
-                            <div className="flex items-center gap-1.5">
-                              <Building2 className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                              <span className="font-medium text-sm max-w-[140px] truncate">
-                                {r.company_name || '—'}
-                              </span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="font-medium max-w-[180px] truncate">
-                            {r.title}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className="text-xs">
-                              {TYPE_LABELS[r.retrospective_type] || r.retrospective_type}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                            {r.period_start} → {r.period_end}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={st.variant} className="text-xs">
-                              {st.label}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex gap-1">
-                              {r.html_url && (
-                                <a href={r.html_url} target="_blank" rel="noopener noreferrer"
-                                  className="text-primary hover:underline text-xs flex items-center gap-0.5">
-                                  <FileText className="h-3 w-3" /> HTML
-                                </a>
-                              )}
-                              {r.presentation_url && (
-                                <a href={r.presentation_url} target="_blank" rel="noopener noreferrer"
-                                  className="text-primary hover:underline text-xs flex items-center gap-0.5 ml-2">
-                                  <Presentation className="h-3 w-3" /> Slides
-                                </a>
-                              )}
-                              {!r.html_url && !r.presentation_url && (
-                                <span className="text-xs text-muted-foreground">—</span>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                            {format(new Date(r.created_at), 'dd/MM/yy HH:mm')}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex justify-end gap-1">
-                              <Button variant="ghost" size="icon" className="h-7 w-7"
-                                onClick={() => setSelectedRetro(r)} title="Visualizar">
-                                <Eye className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-7 w-7"
-                                onClick={() => handleDownloadPdf(r)} title="Download PDF">
-                                <Download className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-7 w-7"
-                                onClick={() => handleRegenerateReports(r.id)}
-                                disabled={generateReports.isPending}
-                                title="Regenerar relatórios (HTML/Slides)">
-                                <RefreshCw className={`h-3.5 w-3.5 ${generateReports.isPending ? 'animate-spin' : ''}`} />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-7 w-7 text-primary"
-                                onClick={() => handleRegenerateComplete(r)}
-                                disabled={triggerEngine.isPending}
-                                title="Regenerar Completo (nova versão com dados atualizados)">
-                                <Zap className={`h-3.5 w-3.5 ${triggerEngine.isPending ? 'animate-spin' : ''}`} />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
-                                onClick={() => handleDelete(r.id)}
-                                disabled={deleteMut.isPending}
-                                title="Excluir">
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Título</TableHead>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead>Período</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Relatórios</TableHead>
+                    <TableHead>Criado em</TableHead>
+                    <TableHead className="text-right">Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered.slice(retroPage * PAGE_SIZE, (retroPage + 1) * PAGE_SIZE).map((r) => {
+                    const st = STATUS_MAP[r.status] || { label: r.status, variant: 'outline' as const };
+                    return (
+                      <TableRow key={r.id}>
+                        <TableCell>
+                          <div className="flex items-center gap-1.5">
+                            <Building2 className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                            <span className="font-medium text-sm max-w-[140px] truncate">
+                              {r.company_name || '—'}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-medium max-w-[180px] truncate">
+                          {r.title}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-xs">
+                            {TYPE_LABELS[r.retrospective_type] || r.retrospective_type}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                          {r.period_start} → {r.period_end}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={st.variant} className="text-xs">
+                            {st.label}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            {r.html_url && (
+                              <a href={r.html_url} target="_blank" rel="noopener noreferrer"
+                                className="text-primary hover:underline text-xs flex items-center gap-0.5">
+                                <FileText className="h-3 w-3" /> HTML
+                              </a>
+                            )}
+                            {r.presentation_url && (
+                              <a href={r.presentation_url} target="_blank" rel="noopener noreferrer"
+                                className="text-primary hover:underline text-xs flex items-center gap-0.5 ml-2">
+                                <Presentation className="h-3 w-3" /> Slides
+                              </a>
+                            )}
+                            {!r.html_url && !r.presentation_url && (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                          {format(new Date(r.created_at), 'dd/MM/yy HH:mm')}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex justify-end gap-1">
+                            <Button variant="ghost" size="icon" className="h-7 w-7"
+                              onClick={() => setSelectedRetro(r)} title="Visualizar">
+                              <Eye className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7"
+                              onClick={() => handleDownloadPdf(r)} title="Download PDF">
+                              <Download className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7"
+                              onClick={() => handleRegenerateReports(r.id)}
+                              disabled={generateReports.isPending}
+                              title="Regenerar relatórios (HTML/Slides)">
+                              <RefreshCw className={`h-3.5 w-3.5 ${generateReports.isPending ? 'animate-spin' : ''}`} />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-primary"
+                              onClick={() => handleRegenerateComplete(r)}
+                              disabled={triggerEngine.isPending}
+                              title="Regenerar Completo (nova versão com dados atualizados)">
+                              <Zap className={`h-3.5 w-3.5 ${triggerEngine.isPending ? 'animate-spin' : ''}`} />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
+                              onClick={() => handleDelete(r.id)}
+                              disabled={deleteMut.isPending}
+                              title="Excluir">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+              {/* Pagination */}
+              {filtered.length > PAGE_SIZE && (
+                <div className="flex items-center justify-between px-4 py-3 border-t">
+                  <p className="text-xs text-muted-foreground">
+                    {retroPage * PAGE_SIZE + 1}–{Math.min((retroPage + 1) * PAGE_SIZE, filtered.length)} de {filtered.length}
+                  </p>
+                  <div className="flex gap-1">
+                    <Button variant="outline" size="sm" disabled={retroPage === 0} onClick={() => setRetroPage(p => p - 1)}>
+                      Anterior
+                    </Button>
+                    <Button variant="outline" size="sm" disabled={(retroPage + 1) * PAGE_SIZE >= filtered.length} onClick={() => setRetroPage(p => p + 1)}>
+                      Próxima
+                    </Button>
+                  </div>
+                </div>
+              )}
             </Card>
           )}
         </div>
