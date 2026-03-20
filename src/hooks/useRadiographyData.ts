@@ -153,8 +153,25 @@ const ANOMALY_LABELS: Record<string, string> = {
   low_conversion: "Taxa de conversão muito baixa",
 };
 
+const CHANGE_ICONS: Record<string, string> = {
+  price_increased: "↑ Preço",
+  price_decreased: "↓ Preço",
+  stock_zeroed: "⚠ Estoque zerou",
+  stock_decreased: "↓ Estoque",
+  stock_increased: "↑ Estoque",
+  status_changed: "🔄 Status",
+  logistics_changed: "🚚 Logística",
+  catalog_joined: "📦 Catálogo",
+  catalog_left: "📦 Catálogo",
+  visits_dropped: "📉 Visitas",
+};
+
 export function getAnomalyLabel(flag: string): string {
   return ANOMALY_LABELS[flag] || flag;
+}
+
+export function getChangeLabel(type: string): string {
+  return CHANGE_ICONS[type] || type;
 }
 
 // --- Main hook ---
