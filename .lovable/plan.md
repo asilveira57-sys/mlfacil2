@@ -1,43 +1,67 @@
 
 
-# Plano: Corrigir Radiografia — Limite, Visitas e Filtros
+# Plano: Fundação de Banco de Dados do Módulo Radiografia
 
-## Problemas Identificados
+## Estado Atual
 
-### 1. Limite de 50 anúncios
-O `handleListItems` na edge function `radiography-engine` tem `limit = 50` como padrão (linha 442). O frontend não envia paginação nem limit diferente. Se o seller tiver mais de 50 itens ativos, os excedentes não aparecem.
+Já existem 4 tabelas do módulo Radiografia:
+- `listing_snapshots` — snapshots periódicos com scores e métricas
+- `listing_events` — eventos detectados (imutáveis)
+- `listing_radiography` — análise profunda sob demanda
+- `listing_monitor_config` — configuração por seller
 
-### 2. Visitas zeradas
-O `radiography-engine` **não coleta visitas** — ele apenas **lê** da tabela `seller_item_visits`. Quem popula essa tabela é o `trends-collect-seller`, que busca visitas apenas de itens presentes na `meli_order_items_cache` (itens que já tiveram vendas). Itens que **nunca venderam** ficam sem visitas registradas.
+A `meli_listings_cache` existe mas falta: `shipping_mode`, `updated_at`, `last_visit_collection_at`.
 
-Além disso, o snapshot do radiography busca visitas de 7 dias na `seller_item_visits`, mas se o `trends-collect-seller` não rodou para esse seller, tudo ficará zerado.
+## Tabelas a Criar
 
-### 3. Texto dos filtros escuro em fundo escuro
-O `SelectContent` usa `bg-slate-800 border-slate-700`, mas o `SelectItem` herda `text-popover-foreground` do tema global (que pode ser escuro). Precisa forçar `text-slate-200` nos items do dropdown.
+### 1. `listing_health_history`
+Histórico de coletas por item. Uma linha por coleta, nunca sobrescreve.
+- Campos: id, seller_id, item_id, collected_at, window_days, visits, price, available_quantity, listing_status, listing_type, shipping_mode, catalog_listing, source, created_at
+- Unique constraint: `(seller_id, item_id, collected_at, window_days)` — idempotência
+- Índices: `(seller_id, item_id)`, `(seller_id, collected_at DESC)`, `(seller_id, listing_status)`
 
----
+### 2. `listing_health_current`
+Estado atual de cada item (upsert, leitura rápida para a UI).
+- Campos: id, seller_id, item_id, last_collected_at, visits_last, price, available_quantity, listing_status, listing_type, shipping_mode, catalog_listing, updated_at
+- Unique constraint: `(seller_id, item_id)`
+- Índices: `(seller_id)`, `(seller_id, listing_status)`
+- Trigger `updated_at`
 
-## Correções Propostas
+### 3. `radiography_backfill_control`
+Controle de carga histórica por seller com retomada.
+- Campos: id, seller_id, status (enum: pending/running/paused/done/failed), progress_percent, last_processed_item_id, current_window_start, current_window_end, started_at, finished_at, updated_at, error_message
+- Unique constraint: `(seller_id)` — um backfill ativo por seller
+- Trigger `updated_at`
 
-### 1. Remover limite de 50 — carregar todos os itens
-**Arquivo:** `supabase/functions/radiography-engine/index.ts`
-- Na função `handleListItems`, aumentar o limit padrão para 1000
-- Nota: Supabase tem limite de 1000 por query, que é suficiente para a maioria dos sellers
+### 4. `radiography_collection_logs`
+Logs de todas as execuções do módulo.
+- Campos: id, seller_id, job_type (sync/collection/backfill), total_items, items_processed, items_failed, duration_ms, started_at, finished_at, status, error_message, metadata_json, created_at
+- Índices: `(seller_id, created_at DESC)`, `(job_type, status)`
 
-### 2. Coletar visitas de TODOS os itens ativos no snapshot
-**Arquivo:** `supabase/functions/radiography-engine/index.ts`
-- Na função `handleSnapshot`, após obter os listings ativos, buscar visitas diretamente da API do Mercado Livre para cada item (usando o token do seller)
-- Gravar na `seller_item_visits` para histórico, igual ao `trends-collect-seller`
-- Isso garante que itens sem vendas também tenham dados de visitas
-- Usar rate limit de 800ms entre chamadas para respeitar a API
+## Ajustes em `meli_listings_cache`
+Adicionar 3 colunas faltantes:
+- `shipping_mode TEXT`
+- `updated_at TIMESTAMPTZ DEFAULT now()`
+- `last_visit_collection_at TIMESTAMPTZ`
 
-### 3. Corrigir texto dos filtros
-**Arquivo:** `src/components/radiography/RadiographyItemList.tsx`
-- Adicionar `text-slate-200` nas classes do `SelectContent` e `SelectItem` para garantir contraste
+Adicionar índice: `(seller_id, status)`
+Trigger `updated_at` na tabela.
 
----
+## Segurança (RLS)
+Todas as 4 novas tabelas:
+- RLS habilitado
+- Policy SELECT para usuários via `ml_accounts` (mesmo padrão das tabelas existentes)
+- Policy ALL para service role
 
-## Arquivos Modificados
-- `supabase/functions/radiography-engine/index.ts` — limit 1000 + coleta de visitas no snapshot
-- `src/components/radiography/RadiographyItemList.tsx` — texto branco nos filtros dropdown
+## Resumo da Migration
+
+Uma única migration SQL com:
+- 4 novas tabelas com constraints
+- ~10 índices
+- 3 colunas adicionais em `meli_listings_cache`
+- RLS + policies em todas as novas tabelas
+- Triggers `updated_at` onde aplicável
+
+## Arquivo Modificado
+- Nova migration SQL (via ferramenta de migração)
 
