@@ -214,6 +214,41 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, sele
     if (open && item) loadHistory();
   }, [period]);
 
+  // Chart data — aggregate by date to avoid duplicate x-axis labels (must be before early return)
+  const chartData = useMemo(() => {
+    if (!history.length) return [];
+    const byDate = new Map<string, { visits: number; price: number; stock: number; count: number; fullDate: string }>();
+    for (const h of history) {
+      const dateKey = format(new Date(h.collected_at), "yyyy-MM-dd");
+      const existing = byDate.get(dateKey);
+      if (existing) {
+        existing.visits += h.visits ?? 0;
+        existing.count++;
+        existing.price = h.price ?? existing.price;
+        existing.stock = h.available_quantity ?? existing.stock;
+      } else {
+        byDate.set(dateKey, {
+          visits: h.visits ?? 0,
+          price: h.price ?? 0,
+          stock: h.available_quantity ?? 0,
+          count: 1,
+          fullDate: h.collected_at,
+        });
+      }
+    }
+    return Array.from(byDate.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, val]) => ({
+        date: format(new Date(key), "dd/MM", { locale: ptBR }),
+        fullDate: val.fullDate,
+        visits: val.visits,
+        price: val.price,
+        stock: val.stock,
+      }));
+  }, [history]);
+
+  const hasMultipleDates = chartData.length >= 2;
+
   if (!item) return null;
 
   const health = classifyHealth(item);
@@ -233,15 +268,6 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, sele
     const Icon = iconMap[status];
     return <Icon className="h-5 w-5" />;
   };
-
-  // Chart data
-  const chartData = history.map((h) => ({
-    date: format(new Date(h.collected_at), "dd/MM", { locale: ptBR }),
-    fullDate: h.collected_at,
-    visits: h.visits ?? 0,
-    price: h.price ?? 0,
-    stock: h.available_quantity ?? 0,
-  }));
 
   // Evolution
   const calcDelta = (key: "visits" | "price" | "available_quantity") =>
@@ -398,19 +424,47 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, sele
               {historyLoading ? (
                 <Skeleton className="h-[200px] w-full bg-slate-700" />
               ) : chartData.length === 0 ? (
-                <div className="h-[200px] flex items-center justify-center text-slate-500 text-sm">
-                  Histórico será preenchido conforme a coleta avança.
+                <div className="h-[200px] flex flex-col items-center justify-center text-slate-500 text-sm gap-2">
+                  <BarChart3 className="h-8 w-8 text-slate-600" />
+                  <p>Histórico será preenchido conforme a coleta avança.</p>
+                  <p className="text-xs text-slate-600">A coleta ocorre automaticamente a cada 4 dias.</p>
+                </div>
+              ) : !hasMultipleDates ? (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 p-3 rounded-lg bg-cyan-500/5 border border-cyan-500/15">
+                    <Activity className="h-4 w-4 text-cyan-400 flex-shrink-0" />
+                    <div>
+                      <p className="text-sm text-cyan-300">Primeiro exame realizado em {chartData[0]?.date}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {chartData[0]?.visits.toLocaleString("pt-BR")} visitas registradas. 
+                        A evolução será visível após a próxima coleta.
+                      </p>
+                    </div>
+                  </div>
+                  {/* Show current snapshot as single-point summary */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="rounded-lg bg-slate-800/50 border border-slate-700/40 p-2.5 text-center">
+                      <div className="text-[11px] text-slate-400">Visitas</div>
+                      <div className="text-sm font-bold font-mono text-cyan-400">{chartData[0]?.visits.toLocaleString("pt-BR")}</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-800/50 border border-slate-700/40 p-2.5 text-center">
+                      <div className="text-[11px] text-slate-400">Preço</div>
+                      <div className="text-sm font-bold font-mono text-slate-200">R$ {chartData[0]?.price.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-800/50 border border-slate-700/40 p-2.5 text-center">
+                      <div className="text-[11px] text-slate-400">Estoque</div>
+                      <div className="text-sm font-bold font-mono text-slate-200">{chartData[0]?.stock}</div>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <>
                   {/* Evolution deltas */}
-                  {history.length >= 2 && (
-                    <div className="flex items-center gap-3 mb-3">
-                      <EvolutionPill label="Visitas" delta={calcDelta("visits")} />
-                      <EvolutionPill label="Preço" delta={calcDelta("price")} isCurrency />
-                      <EvolutionPill label="Estoque" delta={calcDelta("available_quantity")} />
-                    </div>
-                  )}
+                  <div className="flex items-center gap-3 mb-3">
+                    <EvolutionPill label="Visitas" delta={chartData[chartData.length - 1].visits - chartData[0].visits} />
+                    <EvolutionPill label="Preço" delta={chartData[chartData.length - 1].price - chartData[0].price} isCurrency />
+                    <EvolutionPill label="Estoque" delta={chartData[chartData.length - 1].stock - chartData[0].stock} />
+                  </div>
                   <ResponsiveContainer width="100%" height={200}>
                     <ComposedChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
@@ -424,7 +478,7 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, sele
                         </linearGradient>
                       </defs>
                       <Area type="monotone" dataKey="visits" fill="url(#visitGradDetail)" stroke="none" />
-                      <Line type="monotone" dataKey="visits" stroke="#22d3ee" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#22d3ee" }} />
+                      <Line type="monotone" dataKey="visits" stroke="#22d3ee" strokeWidth={2} dot={chartData.length < 30} activeDot={{ r: 4, fill: "#22d3ee" }} />
                     </ComposedChart>
                   </ResponsiveContainer>
                 </>

@@ -88,6 +88,11 @@ export function RadiographyItemList({
       if (sortBy === "sales") return (b.sales_count_30d ?? 0) - (a.sales_count_30d ?? 0);
       if (sortBy === "days_no_sale") return (b.days_without_sale ?? 0) - (a.days_without_sale ?? 0);
       if (sortBy === "seo") return (a.seo_score ?? 999) - (b.seo_score ?? 999);
+      if (sortBy === "conversion") {
+        const convA = (a.visits_last && a.visits_last > 0 && a.sales_count_30d != null) ? a.sales_count_30d / a.visits_last : -1;
+        const convB = (b.visits_last && b.visits_last > 0 && b.sales_count_30d != null) ? b.sales_count_30d / b.visits_last : -1;
+        return convB - convA;
+      }
       return 0;
     });
 
@@ -204,6 +209,7 @@ export function RadiographyItemList({
                 <SelectItem value="visits" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Por visitas</SelectItem>
                 <SelectItem value="sales" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Por vendas</SelectItem>
                 <SelectItem value="days_no_sale" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Dias s/ venda</SelectItem>
+                <SelectItem value="conversion" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Por conversão</SelectItem>
                 <SelectItem value="seo" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Por SEO</SelectItem>
               </SelectContent>
             </Select>
@@ -313,6 +319,19 @@ export function RadiographyItemList({
                           <ShoppingCart className="h-3 w-3 text-emerald-400" />
                           {hasSalesData ? (item.sales_count_30d ?? 0) : "—"}
                         </span>
+                        {/* Conversion rate */}
+                        {(() => {
+                          const conv = (item.visits_last && item.visits_last > 0 && item.sales_count_30d != null)
+                            ? ((item.sales_count_30d / item.visits_last) * 100)
+                            : null;
+                          return conv != null ? (
+                            <span className={`flex items-center gap-1 font-mono ${
+                              conv >= 3 ? "text-emerald-400" : conv >= 1 ? "text-amber-400" : "text-red-400"
+                            }`}>
+                              {conv.toFixed(1)}%
+                            </span>
+                          ) : null;
+                        })()}
                         {item.days_without_sale != null && item.days_without_sale > 0 && (
                           <span className={`flex items-center gap-1 ${
                             item.days_without_sale > 30 ? "text-red-400" : item.days_without_sale > 14 ? "text-amber-400" : ""
