@@ -181,12 +181,20 @@ export function useTasks(workspaceId: string | null): UseTasksResult {
       if (updates.source_ref !== undefined) {
         dbUpdates.source_ref = updates.source_ref as Record<string, unknown> | null;
       }
+
+      // Optimistic update — move card immediately in the UI
+      setTasks(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+
       const { error } = await supabase
         .from('tasks')
         .update(dbUpdates)
         .eq('id', id);
 
-      if (error) throw error;
+      if (error) {
+        // Revert on failure
+        setTasks(prev => prev.map(t => t.id === id ? { ...t } : t));
+        throw error;
+      }
 
       return true;
     } catch (err) {
