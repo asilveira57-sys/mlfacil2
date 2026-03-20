@@ -1,110 +1,147 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { ToolsLayout } from "./ToolsLayout";
-import { 
-  ToolsNavTabs, 
-  ToolsPromoCard, 
-  PricingInputForm, 
-  PricingResultDisplay 
-} from "@/components/tools";
+import { ToolsNavTabs, ToolsPromoCard } from "@/components/tools";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Info } from "lucide-react";
-
-interface PricingInputs {
-  salePrice: number;
-  productCost: number;
-  marketplaceFee: number;
-  shippingCost: number;
-  packagingCost: number;
-  otherCosts: number;
-}
-
-const INITIAL_INPUTS: PricingInputs = {
-  salePrice: 0,
-  productCost: 0,
-  marketplaceFee: 16, // Default ML fee
-  shippingCost: 0,
-  packagingCost: 0,
-  otherCosts: 0,
-};
+import { Button } from "@/components/ui/button";
+import { Info, RotateCcw } from "lucide-react";
+import {
+  PricingProductBlock,
+  PricingLogisticsBlock,
+  PricingCostsBlock,
+  PricingResultsBlock,
+  PricingScenariosBlock,
+  PricingVariationsBlock,
+} from "@/components/tools/pricing";
+import { calculateSimulation, DEFAULT_INPUT, type SimulationInput } from "@/lib/pricing-engine";
+import { usePricingSimulations, type SavedSimulation } from "@/hooks/usePricingSimulations";
 
 export default function PricingSimulatorTool() {
   const { t } = useTranslation('tools');
-  const [inputs, setInputs] = useState<PricingInputs>(INITIAL_INPUTS);
+  const [input, setInput] = useState<SimulationInput>({ ...DEFAULT_INPUT });
+  const [editingId, setEditingId] = useState<string | null>(null);
 
-  const handleInputChange = (field: keyof PricingInputs, value: number) => {
-    setInputs(prev => ({ ...prev, [field]: value }));
-  };
+  const {
+    simulations, isLoading, isAuthenticated, isSaving,
+    save, update, duplicate, delete: deleteSim,
+  } = usePricingSimulations();
 
-  const handleReset = () => {
-    setInputs(INITIAL_INPUTS);
-  };
+  // Auto-calculate on every input change
+  const result = useMemo(() => calculateSimulation(input), [input]);
 
-  const results = useMemo(() => {
-    const { salePrice, productCost, marketplaceFee, shippingCost, packagingCost, otherCosts } = inputs;
+  const handleChange = useCallback((field: keyof SimulationInput, value: string | number) => {
+    setInput(prev => ({ ...prev, [field]: value }));
+  }, []);
 
-    // Calculate marketplace fees
-    const fees = salePrice * (marketplaceFee / 100);
+  const handleReset = useCallback(() => {
+    setInput({ ...DEFAULT_INPUT });
+    setEditingId(null);
+  }, []);
 
-    // Calculate total cost
-    const totalCost = productCost + shippingCost + packagingCost + otherCosts + fees;
+  const handleSave = useCallback(async () => {
+    if (editingId) {
+      await update({ id: editingId, input });
+    } else {
+      await save(input);
+    }
+  }, [input, editingId, save, update]);
 
-    // Calculate profit
-    const profit = salePrice - totalCost;
+  const handleLoad = useCallback((sim: SavedSimulation) => {
+    if (sim.inputs) {
+      setInput(sim.inputs);
+      setEditingId(sim.id);
+    }
+  }, []);
 
-    // Calculate margin percentage
-    const margin = salePrice > 0 ? (profit / salePrice) * 100 : 0;
+  const handleDuplicate = useCallback(async (sim: SavedSimulation) => {
+    await duplicate(sim);
+  }, [duplicate]);
 
-    // Calculate break-even price (minimum sale price for zero profit)
-    // breakeven = (productCost + shippingCost + packagingCost + otherCosts) / (1 - marketplaceFee/100)
-    const fixedCosts = productCost + shippingCost + packagingCost + otherCosts;
-    const breakeven = marketplaceFee < 100 
-      ? fixedCosts / (1 - marketplaceFee / 100)
-      : fixedCosts;
+  const handleDelete = useCallback(async (id: string) => {
+    await deleteSim(id);
+    if (editingId === id) {
+      setEditingId(null);
+      setInput({ ...DEFAULT_INPUT });
+    }
+  }, [deleteSim, editingId]);
 
-    return {
-      profit,
-      margin,
-      totalCost,
-      fees,
-      breakeven,
-    };
-  }, [inputs]);
+  const handleCompare = useCallback((_sim: SavedSimulation) => {
+    // Comparison is handled inside PricingScenariosBlock
+  }, []);
 
   return (
     <ToolsLayout>
       <div className="container mx-auto px-4 py-8 space-y-6">
         {/* Header */}
-        <div className="text-center space-y-2">
-          <h1 className="text-3xl font-bold text-foreground">
-            {t('pricing.title')}
-          </h1>
-          <p className="text-muted-foreground max-w-2xl mx-auto">
-            {t('pricing.subtitle')}
-          </p>
+        <div className="flex items-center justify-between">
+          <div className="space-y-1">
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
+              {t('pricing.title')}
+            </h1>
+            <p className="text-sm text-muted-foreground max-w-xl">
+              {t('pricing.subtitle')}
+            </p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={handleReset} className="gap-2 shrink-0">
+            <RotateCcw className="w-4 h-4" />
+            {t('pricing.btn_reset')}
+          </Button>
         </div>
 
         {/* Navigation Tabs */}
         <ToolsNavTabs />
 
-        {/* Main Content */}
-        <div className="grid lg:grid-cols-2 gap-6">
-          <PricingInputForm
-            inputs={inputs}
-            onInputChange={handleInputChange}
-            onReset={handleReset}
-          />
-          <PricingResultDisplay
-            results={results}
-            salePrice={inputs.salePrice}
-          />
+        {/* Editing indicator */}
+        {editingId && (
+          <Alert className="bg-primary/5 border-primary/20">
+            <Info className="h-4 w-4 text-primary" />
+            <AlertDescription className="text-sm">
+              {t('pricing.editing_simulation', 'Editando simulação')}: <strong>{input.productName || 'Sem nome'}</strong>
+              <Button variant="link" size="sm" className="ml-2 h-auto p-0" onClick={handleReset}>
+                {t('pricing.new_simulation', 'Nova simulação')}
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Main Content - 2 columns */}
+        <div className="grid lg:grid-cols-5 gap-4">
+          {/* Left: Inputs (3 cols) */}
+          <div className="lg:col-span-3 space-y-4">
+            <PricingProductBlock input={input} onChange={handleChange} />
+            <PricingLogisticsBlock input={input} result={result} onChange={handleChange} />
+            <PricingCostsBlock input={input} onChange={handleChange} />
+          </div>
+
+          {/* Right: Results + Scenarios (2 cols) */}
+          <div className="lg:col-span-2 space-y-4">
+            <PricingResultsBlock result={result} salePrice={input.salePrice} />
+            <PricingScenariosBlock
+              simulations={simulations}
+              isLoading={isLoading}
+              isAuthenticated={isAuthenticated}
+              isSaving={isSaving}
+              currentInput={input}
+              currentResult={result}
+              onSave={handleSave}
+              onLoad={handleLoad}
+              onDuplicate={handleDuplicate}
+              onDelete={handleDelete}
+              onCompare={handleCompare}
+            />
+          </div>
         </div>
+
+        {/* Variations */}
+        {input.salePrice > 0 && (
+          <PricingVariationsBlock baseInput={input} baseResult={result} />
+        )}
 
         {/* Disclaimer */}
         <Alert variant="default" className="bg-muted/50 border-muted">
           <Info className="h-4 w-4" />
           <AlertDescription className="text-sm text-muted-foreground">
-            {t('pricing.disclaimer')}
+            {t('pricing.disclaimer_full', 'Os valores apresentados são estimativas baseadas nas regras vigentes do Mercado Livre. O frete pode variar conforme medição final do pacote e as regras podem ser alteradas pela plataforma a qualquer momento. Simulação para MercadoLíder / reputação verde.')}
           </AlertDescription>
         </Alert>
 
