@@ -412,8 +412,6 @@ export function useSeed(): UseSeedResult {
 
     const available = seedBalance.seeds_available;
     if (available <= 0) {
-      const totalSeeds = seedBalance.seeds_from_plan + (seedBalance.seeds_bonus || 0) + (seedBalance.seeds_manual_adjustment || 0);
-      if (seedBalance.seeds_used >= totalSeeds) {
       setError('Você não tem sementes disponíveis. Compre mais sementes ou remova um anúncio.');
       return false;
     }
