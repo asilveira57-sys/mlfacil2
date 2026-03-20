@@ -209,7 +209,7 @@ function useAllSnapshots() {
 export function AdminRetrospectives() {
   const { data: retrospectives = [], isLoading } = useAllRetrospectives();
   const { data: rules = [] } = useRetrospectiveRules();
-  const { data: targets = [] } = useAllTargets();
+  const { data: targets = [] } = useTargetsWithNames();
   const { data: snapshots = [] } = useAllSnapshots();
   const triggerEngine = useTriggerRetrospectiveEngine();
   const deleteMut = useDeleteRetrospectiveNew();
