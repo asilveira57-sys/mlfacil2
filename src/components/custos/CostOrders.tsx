@@ -315,44 +315,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     });
   };
 
-  const handleSafeSelectAllPages = async () => {
-    setSafeLoadingAllIds(true);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      const params = new URLSearchParams({
-        seller_id: sellerId,
-        period_days: periodDays,
-        search,
-        ids_only: 'true',
-      });
-
-      if (statusFilter !== 'all') params.set('status', statusFilter);
-      if (profitFilter !== 'all') params.set('profit_type', profitFilter);
-      if (ecommerceFilter !== 'all') params.set('ecommerce_cost', ecommerceFilter);
-      if (shippingFilter !== 'all') params.set('shipping_filter', shippingFilter);
-      if (orderStatusFilter !== 'paid') params.set('order_status', orderStatusFilter);
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders?${params}`,
-        { headers: { Authorization: `Bearer ${session.access_token}` } }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        const allIds = data.order_ids || [];
-        setSafeSelectedOrders(new Set(allIds));
-        setSafeSelectAllPages(true);
-        toast.success(`${allIds.length} pedidos selecionados para modo seguro`);
-      }
-    } catch (error) {
-      console.error('Error fetching all IDs:', error);
-      toast.error('Erro ao selecionar todos os pedidos');
-    } finally {
-      setSafeLoadingAllIds(false);
-    }
-  };
+  // "Select all pages" for safe mode removed — only page-level selection allowed
 
   // Safe resync: stop polling
   const stopSafePolling = useCallback(() => {
