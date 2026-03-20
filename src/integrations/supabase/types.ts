@@ -19630,6 +19630,14 @@ export type Database = {
       }
       check_snoozed_notifications: { Args: never; Returns: undefined }
       check_tenant_plan_limit: { Args: { p_company_id: string }; Returns: Json }
+      count_distinct_active_items: {
+        Args: { p_seller_id: string }
+        Returns: {
+          awaiting_collection: number
+          total_distinct: number
+          updated_recently: number
+        }[]
+      }
       count_orders_needing_cost_sync: {
         Args: { p_seller_id: string }
         Returns: {

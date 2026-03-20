@@ -287,15 +287,13 @@ export function useRadiographyData(sellerId: string | null) {
       const fourDaysAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString();
 
       // Parallel queries
-      const [activeRes, historyRes, anomalyRes, recentCollectedRes, lastSyncRes, lastCollectionSuccessRes, lastCollectionAnyRes, backfillRes] = await Promise.all([
-        // Total active listings
-        supabase.from("meli_listings_cache").select("id", { count: "exact", head: true }).eq("seller_id", sellerId).eq("status", "active"),
+      const [distinctRes, historyRes, anomalyRes, lastSyncRes, lastCollectionSuccessRes, lastCollectionAnyRes, backfillRes] = await Promise.all([
+        // Distinct active items (ignoring variations)
+        supabase.rpc("count_distinct_active_items", { p_seller_id: sellerId }),
         // Total history records
         supabase.from("listing_health_history").select("id", { count: "exact", head: true }).eq("seller_id", sellerId),
         // Anomaly count
         supabase.from("listing_health_current").select("id", { count: "exact", head: true }).eq("seller_id", sellerId).not("anomaly_flags", "eq", "{}"),
-        // Recently collected (within 4 days)
-        supabase.from("listing_health_current").select("id", { count: "exact", head: true }).eq("seller_id", sellerId).gte("last_collected_at", fourDaysAgo),
         // Last sync
         supabase.from("radiography_collection_logs").select("finished_at").eq("seller_id", sellerId).eq("job_type", "sync").eq("status", "success").order("finished_at", { ascending: false }).limit(1),
         // Last collection
@@ -306,8 +304,9 @@ export function useRadiographyData(sellerId: string | null) {
         supabase.from("radiography_backfill_control").select("status, progress_percent, error_message").eq("seller_id", sellerId).limit(1).maybeSingle(),
       ]);
 
-      const totalActive = activeRes.count || 0;
-      const recentCount = recentCollectedRes.count || 0;
+      const distinctData = distinctRes.data?.[0];
+      const totalActive = Number(distinctData?.total_distinct || 0);
+      const recentCount = Number(distinctData?.updated_recently || 0);
 
       const lastCollectionAny = lastCollectionAnyRes.data?.[0];
 
