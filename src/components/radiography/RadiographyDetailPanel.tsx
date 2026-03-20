@@ -297,15 +297,15 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, sele
   );
 }
 
-function MiniStat({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
+function MiniStat({ label, value, icon, highlight }: { label: string; value: string; icon?: React.ReactNode; highlight?: boolean }) {
   return (
-    <Card className="bg-slate-800/50 border-slate-700">
+    <Card className={`border-slate-700 ${highlight ? "bg-red-500/5 border-red-500/20" : "bg-slate-800/50"}`}>
       <CardContent className="p-3">
         <div className="flex items-center gap-1 text-xs text-slate-400 mb-1">
           {icon}
           {label}
         </div>
-        <div className="text-sm font-bold text-slate-200 font-mono">{value}</div>
+        <div className={`text-sm font-bold font-mono ${highlight ? "text-red-400" : "text-slate-200"}`}>{value}</div>
       </CardContent>
     </Card>
   );
