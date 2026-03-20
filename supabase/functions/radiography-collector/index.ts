@@ -323,7 +323,7 @@ async function handleCollection(supabase: any, sellerId: string, startTime: numb
 
       try {
         let resp = await fetch(
-          `https://api.mercadolibre.com/items/visits?ids=${idsParam}&date_from=${dateFrom}&date_to=${dateTo}`,
+          `https://api.mercadolibre.com/visits/items?ids=${idsParam}&date_from=${dateFrom}&date_to=${dateTo}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
 
@@ -331,7 +331,7 @@ async function handleCollection(supabase: any, sellerId: string, startTime: numb
           console.warn(`[rad-collector] Rate limited, waiting 10s...`);
           await sleep(10_000);
           resp = await fetch(
-            `https://api.mercadolibre.com/items/visits?ids=${idsParam}&date_from=${dateFrom}&date_to=${dateTo}`,
+            `https://api.mercadolibre.com/visits/items?ids=${idsParam}&date_from=${dateFrom}&date_to=${dateTo}`,
             { headers: { Authorization: `Bearer ${token}` } }
           );
           if (!resp.ok) { failed += batchIds.length; continue; }
@@ -558,7 +558,7 @@ async function handleBackfill(supabase: any, sellerId: string, chainDepth: numbe
 
         try {
           const resp = await fetch(
-            `https://api.mercadolibre.com/items/visits?ids=${idsParam}&date_from=${dateFrom}&date_to=${dateTo}`,
+            `https://api.mercadolibre.com/visits/items?ids=${idsParam}&date_from=${dateFrom}&date_to=${dateTo}`,
             { headers: { Authorization: `Bearer ${token}` } }
           );
 

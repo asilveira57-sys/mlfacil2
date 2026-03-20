@@ -1,0 +1,1 @@
+ALTER TABLE meli_listings_cache DROP CONSTRAINT IF EXISTS meli_listings_cache_seller_item_unique;
