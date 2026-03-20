@@ -845,7 +845,7 @@ const SettingsCompanies = () => {
               <AccordionItem
                 key={company.id}
                 value={company.id}
-                className="border rounded-lg px-4 bg-card"
+                className="border rounded-lg px-4 bg-card group"
               >
                 <AccordionTrigger className="hover:no-underline py-4">
                   <div className="flex items-center gap-3 text-left flex-1">
