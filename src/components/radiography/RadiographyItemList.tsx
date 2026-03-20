@@ -35,6 +35,8 @@ interface Props {
   onSelectItem: (itemId: string) => void;
   selectedPeriod: PeriodDays;
   onPeriodChange: (p: PeriodDays) => void;
+  collectionStatus?: string | null;
+  collectionError?: string | null;
 }
 
 export function RadiographyItemList({
@@ -43,6 +45,8 @@ export function RadiographyItemList({
   onSelectItem,
   selectedPeriod,
   onPeriodChange,
+  collectionStatus,
+  collectionError,
 }: Props) {
   const [search, setSearch] = useState("");
   const [healthFilter, setHealthFilter] = useState<string>("all");
@@ -157,12 +161,16 @@ export function RadiographyItemList({
             </div>
             <p className="text-lg font-medium text-slate-300">
               {items.length === 0
-                ? "Aguardando primeira coleta de dados"
+                ? collectionStatus === "failed"
+                  ? "Sincronização concluída, mas a coleta falhou"
+                  : "Aguardando primeira coleta de dados"
                 : "Nenhum resultado encontrado"}
             </p>
             <p className="text-sm text-slate-500 mt-1">
               {items.length === 0
-                ? "Clique em \"Atualizar Dados\" para iniciar a coleta. Os prontuários aparecerão após o processamento."
+                ? collectionStatus === "failed"
+                  ? (collectionError || "A coleta não conseguiu gerar histórico. Verifique os logs da coleta e tente atualizar novamente.")
+                  : "Clique em \"Atualizar Dados\" para iniciar a coleta. Os prontuários aparecerão após o processamento."
                 : "Tente ajustar os filtros."}
             </p>
           </div>

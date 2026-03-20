@@ -49,8 +49,13 @@ export interface DiagnosticSummary {
   anomalyCount: number;
   lastSyncAt: string | null;
   lastCollectionAt: string | null;
+  lastCollectionStatus: string | null;
+  lastCollectionError: string | null;
+  lastCollectionProcessed: number;
+  lastCollectionFailed: number;
   backfillStatus: string | null;
   backfillProgress: number | null;
+  backfillError: string | null;
 }
 
 export type AnomalyFilter = "all" | "with_anomaly" | "without_anomaly";
@@ -175,13 +180,28 @@ export function useRadiographyData(sellerId: string | null) {
     queryKey: ["radiography-diagnostics", sellerId],
     queryFn: async (): Promise<DiagnosticSummary> => {
       if (!sellerId) {
-        return { totalActive: 0, updatedRecently: 0, awaitingCollection: 0, totalExams: 0, anomalyCount: 0, lastSyncAt: null, lastCollectionAt: null, backfillStatus: null, backfillProgress: null };
+        return {
+          totalActive: 0,
+          updatedRecently: 0,
+          awaitingCollection: 0,
+          totalExams: 0,
+          anomalyCount: 0,
+          lastSyncAt: null,
+          lastCollectionAt: null,
+          lastCollectionStatus: null,
+          lastCollectionError: null,
+          lastCollectionProcessed: 0,
+          lastCollectionFailed: 0,
+          backfillStatus: null,
+          backfillProgress: null,
+          backfillError: null,
+        };
       }
 
       const fourDaysAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString();
 
       // Parallel queries
-      const [activeRes, historyRes, anomalyRes, recentCollectedRes, lastSyncRes, lastCollectionRes, backfillRes] = await Promise.all([
+      const [activeRes, historyRes, anomalyRes, recentCollectedRes, lastSyncRes, lastCollectionSuccessRes, lastCollectionAnyRes, backfillRes] = await Promise.all([
         // Total active listings
         supabase.from("meli_listings_cache").select("id", { count: "exact", head: true }).eq("seller_id", sellerId).eq("status", "active"),
         // Total history records
@@ -194,12 +214,16 @@ export function useRadiographyData(sellerId: string | null) {
         supabase.from("radiography_collection_logs").select("finished_at").eq("seller_id", sellerId).eq("job_type", "sync").eq("status", "success").order("finished_at", { ascending: false }).limit(1),
         // Last collection
         supabase.from("radiography_collection_logs").select("finished_at").eq("seller_id", sellerId).eq("job_type", "collection").eq("status", "success").order("finished_at", { ascending: false }).limit(1),
+        // Last collection attempt (success or fail)
+        supabase.from("radiography_collection_logs").select("status, error_message, items_processed, items_failed, finished_at, created_at").eq("seller_id", sellerId).eq("job_type", "collection").order("created_at", { ascending: false }).limit(1),
         // Backfill
-        supabase.from("radiography_backfill_control").select("status, progress_percent").eq("seller_id", sellerId).limit(1).maybeSingle(),
+        supabase.from("radiography_backfill_control").select("status, progress_percent, error_message").eq("seller_id", sellerId).limit(1).maybeSingle(),
       ]);
 
       const totalActive = activeRes.count || 0;
       const recentCount = recentCollectedRes.count || 0;
+
+      const lastCollectionAny = lastCollectionAnyRes.data?.[0];
 
       return {
         totalActive,
@@ -208,9 +232,14 @@ export function useRadiographyData(sellerId: string | null) {
         totalExams: historyRes.count || 0,
         anomalyCount: anomalyRes.count || 0,
         lastSyncAt: lastSyncRes.data?.[0]?.finished_at || null,
-        lastCollectionAt: lastCollectionRes.data?.[0]?.finished_at || null,
+        lastCollectionAt: lastCollectionSuccessRes.data?.[0]?.finished_at || null,
+        lastCollectionStatus: lastCollectionAny?.status || null,
+        lastCollectionError: lastCollectionAny?.error_message || null,
+        lastCollectionProcessed: lastCollectionAny?.items_processed || 0,
+        lastCollectionFailed: lastCollectionAny?.items_failed || 0,
         backfillStatus: backfillRes.data?.status || null,
         backfillProgress: backfillRes.data?.progress_percent || null,
+        backfillError: backfillRes.data?.error_message || null,
       };
     },
     enabled: !!sellerId,

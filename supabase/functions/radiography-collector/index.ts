@@ -16,6 +16,113 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 // Safety timeout for edge function (50s to leave margin)
 const SAFETY_TIMEOUT_MS = 50_000;
 
+function parseVisitsValue(itemId: string, payload: any, depth = 0): number {
+  if (depth > 3) return 0;
+  if (payload == null) return 0;
+  if (typeof payload === "number") return Number(payload) || 0;
+
+  if (Array.isArray(payload)) {
+    if (payload.length === 0) return 0;
+
+    for (const entry of payload) {
+      if (typeof entry === "number") return Number(entry) || 0;
+      if (entry?.id === itemId) return parseVisitsValue(itemId, entry, depth + 1);
+      if (entry?.body && (entry.body.id === itemId || entry.id === itemId)) {
+        return parseVisitsValue(itemId, entry.body, depth + 1);
+      }
+    }
+
+    return parseVisitsValue(itemId, payload[0], depth + 1);
+  }
+
+  if (typeof payload === "object") {
+    if (typeof payload[itemId] === "number") return Number(payload[itemId]) || 0;
+    if (typeof payload.visits === "number") return Number(payload.visits) || 0;
+    if (typeof payload.total_visits === "number") return Number(payload.total_visits) || 0;
+    if (typeof payload.value === "number") return Number(payload.value) || 0;
+    if (payload.body !== undefined) return parseVisitsValue(itemId, payload.body, depth + 1);
+    if (Array.isArray(payload.results)) return parseVisitsValue(itemId, payload.results, depth + 1);
+  }
+
+  return 0;
+}
+
+async function fetchVisitsForItems(
+  token: string,
+  itemIds: string[],
+  dateFrom: string,
+  dateTo: string,
+  context: "collection" | "backfill"
+) {
+  const CONCURRENCY = 8;
+  const visitsMap: Record<string, number> = {};
+  const failedIds: string[] = [];
+  const statusCounts: Record<string, number> = {};
+  let validVisitsCount = 0;
+  let payloadsReceived = 0;
+
+  for (let i = 0; i < itemIds.length; i += CONCURRENCY) {
+    const slice = itemIds.slice(i, i + CONCURRENCY);
+
+    const settled = await Promise.all(
+      slice.map(async (itemId) => {
+        const url = `https://api.mercadolibre.com/items/visits?ids=${encodeURIComponent(itemId)}&date_from=${dateFrom}&date_to=${dateTo}`;
+
+        let resp = await fetch(url, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (resp.status === 429) {
+          await sleep(4_000);
+          resp = await fetch(url, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+        }
+
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => "");
+          return { itemId, ok: false, status: resp.status, body };
+        }
+
+        const json = await resp.json();
+        const visits = parseVisitsValue(itemId, json);
+        return { itemId, ok: true, status: resp.status, visits };
+      })
+    );
+
+    for (const result of settled) {
+      const statusKey = String(result.status);
+      statusCounts[statusKey] = (statusCounts[statusKey] || 0) + 1;
+
+      if (!result.ok) {
+        failedIds.push(result.itemId);
+        console.warn(
+          `[rad-collector] ${context} visit fetch failed for ${result.itemId}: ${result.status} — ${String(result.body || "").slice(0, 160)}`
+        );
+        continue;
+      }
+
+      payloadsReceived += 1;
+      visitsMap[result.itemId] = Number(result.visits) || 0;
+      validVisitsCount += 1;
+    }
+
+    await sleep(180);
+  }
+
+  console.log(
+    `[rad-collector] ${context} batch summary: ids=${itemIds.join(",")}, http=${JSON.stringify(statusCounts)}, received=${payloadsReceived}, valid=${validVisitsCount}, failed=${failedIds.length}`
+  );
+
+  return {
+    visitsMap,
+    failedIds,
+    successIds: Object.keys(visitsMap),
+    validVisitsCount,
+    payloadsReceived,
+  };
+}
+
 // ============================================================================
 // TOKEN MANAGEMENT
 // ============================================================================
@@ -257,7 +364,7 @@ async function handleSync(supabase: any, sellerId: string, startTime: number) {
 // ============================================================================
 // FLOW 2 — VISIT COLLECTION
 // ============================================================================
-async function handleCollection(supabase: any, sellerId: string, startTime: number) {
+async function handleCollection(supabase: any, sellerId: string, startTime: number, startIndex = 0) {
   const logId = await createLog(supabase, sellerId, "collection");
   console.log(`[rad-collector] COLLECTION started for ${sellerId}`);
 
@@ -312,59 +419,71 @@ async function handleCollection(supabase: any, sellerId: string, startTime: numb
     const dateFrom = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
     const itemIds = items.map(i => i.item_id);
 
-    const VISIT_BATCH = 50;
+    const VISIT_BATCH = 40;
     let processed = 0;
     let failed = 0;
     const processedItemIds: string[] = [];
 
-    for (let i = 0; i < itemIds.length; i += VISIT_BATCH) {
+    for (let i = startIndex; i < itemIds.length; i += VISIT_BATCH) {
       const batchIds = itemIds.slice(i, i + VISIT_BATCH);
-      const idsParam = batchIds.join(",");
 
       try {
-        let resp = await fetch(
-          `https://api.mercadolibre.com/items/visits?ids=${idsParam}&date_from=${dateFrom}&date_to=${dateTo}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
+        const visitResult = await fetchVisitsForItems(token, batchIds, dateFrom, dateTo, "collection");
 
-        if (resp.status === 429) {
-          console.warn(`[rad-collector] Rate limited, waiting 10s...`);
-          await sleep(10_000);
-          resp = await fetch(
-            `https://api.mercadolibre.com/items/visits?ids=${idsParam}&date_from=${dateFrom}&date_to=${dateTo}`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          if (!resp.ok) { failed += batchIds.length; continue; }
-        }
-
-        if (!resp.ok) {
-          const errBody = await resp.text().catch(() => "");
-          console.warn(`[rad-collector] Visits multiget failed: ${resp.status} — ${errBody.slice(0, 200)}`);
+        if (visitResult.successIds.length === 0) {
           failed += batchIds.length;
           continue;
         }
 
-        const visitsData = await resp.json();
-        await processVisitBatch(supabase, sellerId, batchIds, visitsData, items, collectedAt);
-        processed += batchIds.length;
-        processedItemIds.push(...batchIds);
+        const persistResult = await processVisitBatch(
+          supabase,
+          sellerId,
+          visitResult.successIds,
+          visitResult.visitsMap,
+          items,
+          collectedAt
+        );
+
+        processed += persistResult.persisted;
+        failed += visitResult.failedIds.length + persistResult.failed;
+        processedItemIds.push(...persistResult.persistedItemIds);
+
+        if (persistResult.persistedItemIds.length > 0) {
+          await supabase
+            .from("meli_listings_cache")
+            .update({ last_visit_collection_at: collectedAt })
+            .eq("seller_id", sellerId)
+            .in("item_id", persistResult.persistedItemIds);
+        }
+
+        console.log(
+          `[rad-collector] collection persist summary: batch=${batchIds.length}, persisted=${persistResult.persisted}, failed=${visitResult.failedIds.length + persistResult.failed}`
+        );
       } catch (err) {
         console.warn(`[rad-collector] Visit batch error:`, err);
         failed += batchIds.length;
       }
 
       await sleep(500);
-    }
 
-    // Update last_visit_collection_at only for successfully processed items
-    if (processedItemIds.length > 0) {
-      for (let i = 0; i < processedItemIds.length; i += 500) {
-        const chunk = processedItemIds.slice(i, i + 500);
-        await supabase
-          .from("meli_listings_cache")
-          .update({ last_visit_collection_at: collectedAt })
-          .eq("seller_id", sellerId)
-          .in("item_id", chunk);
+      if (Date.now() - startTime > SAFETY_TIMEOUT_MS) {
+        await finishLog(supabase, logId, {
+          status: "success",
+          total_items: items.length,
+          items_processed: processed,
+          items_failed: failed,
+          duration_ms: Date.now() - startTime,
+          metadata_json: {
+            paused: true,
+            next_start_index: i + VISIT_BATCH,
+            window_days: 7,
+            date_from: dateFrom,
+            date_to: dateTo,
+          },
+        });
+
+        selfChain(sellerId, "collection", { start_index: i + VISIT_BATCH });
+        return { success: true, paused: true, processed, failed, next_start_index: i + VISIT_BATCH };
       }
     }
 
@@ -372,8 +491,11 @@ async function handleCollection(supabase: any, sellerId: string, startTime: numb
     await detectAnomalies(supabase, sellerId, processedItemIds);
 
     const duration = Date.now() - startTime;
+    const finalStatus = processed === 0 && failed > 0 ? "failed" : "success";
     await finishLog(supabase, logId, {
-      status: "success", total_items: items.length,
+      status: finalStatus,
+      error_message: finalStatus === "failed" ? `Collection failed for all eligible items (${failed})` : null,
+      total_items: items.length,
       items_processed: processed, items_failed: failed,
       duration_ms: duration,
       metadata_json: { window_days: 7, date_from: dateFrom, date_to: dateTo },
@@ -427,15 +549,23 @@ async function processVisitBatch(
     const { error } = await supabase
       .from("listing_health_history")
       .upsert(healthHistoryRows, { onConflict: "seller_id,item_id,collected_at,window_days" });
-    if (error) console.warn(`[rad-collector] Health history upsert error:`, error.message);
+    if (error) throw new Error(`Health history upsert error: ${error.message}`);
   }
 
   if (healthCurrentRows.length > 0) {
     const { error } = await supabase
       .from("listing_health_current")
       .upsert(healthCurrentRows, { onConflict: "seller_id,item_id" });
-    if (error) console.warn(`[rad-collector] Health current upsert error:`, error.message);
+    if (error) throw new Error(`Health current upsert error: ${error.message}`);
   }
+
+  return {
+    persisted: healthHistoryRows.length,
+    failed: 0,
+    persistedItemIds: batchIds,
+    historyRows: healthHistoryRows.length,
+    currentRows: healthCurrentRows.length,
+  };
 }
 
 // ============================================================================
@@ -527,7 +657,7 @@ async function handleBackfill(supabase: any, sellerId: string, chainDepth: numbe
 
     let totalProcessed = 0;
     let totalFailed = 0;
-    const VISIT_BATCH = 50;
+    const VISIT_BATCH = 40;
 
     for (let wi = startWindowIdx; wi < BACKFILL_WINDOWS.length; wi++) {
       const window = BACKFILL_WINDOWS[wi];
@@ -555,32 +685,18 @@ async function handleBackfill(supabase: any, sellerId: string, chainDepth: numbe
 
       for (let i = startIdx; i < allItemIds.length; i += VISIT_BATCH) {
         const batchIds = allItemIds.slice(i, i + VISIT_BATCH);
-        const idsParam = batchIds.join(",");
 
         try {
-          const resp = await fetch(
-            `https://api.mercadolibre.com/items/visits?ids=${idsParam}&date_from=${dateFrom}&date_to=${dateTo}`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
+          const visitResult = await fetchVisitsForItems(token, batchIds, dateFrom, dateTo, "backfill");
 
-          if (resp.status === 429) {
-            console.warn(`[rad-collector] Rate limited in backfill, waiting 15s...`);
-            await sleep(15_000);
-            i -= VISIT_BATCH;
+          if (visitResult.successIds.length === 0) {
+            totalFailed += batchIds.length;
             continue;
           }
 
-          if (!resp.ok) {
-            const errBody = await resp.text().catch(() => "");
-            console.warn(`[rad-collector] Backfill visits failed: ${resp.status} — ${errBody.slice(0, 200)}`);
-            totalFailed += batchIds.length; continue;
-          }
-
-          const visitsData = await resp.json();
           const rows: any[] = [];
-          for (const itemId of batchIds) {
-            const visits = typeof visitsData === "object" && visitsData[itemId] !== undefined
-              ? Number(visitsData[itemId]) || 0 : 0;
+          for (const itemId of visitResult.successIds) {
+            const visits = Number(visitResult.visitsMap[itemId]) || 0;
             rows.push({
               seller_id: sellerId, item_id: itemId, collected_at: collectedAt,
               window_days: window.daysEnd - window.daysStart,
@@ -592,8 +708,18 @@ async function handleBackfill(supabase: any, sellerId: string, chainDepth: numbe
             const { error } = await supabase
               .from("listing_health_history")
               .upsert(rows, { onConflict: "seller_id,item_id,collected_at,window_days" });
-            if (error) { console.warn(`[rad-collector] Backfill history upsert error:`, error.message); totalFailed += batchIds.length; }
-            else { totalProcessed += batchIds.length; }
+            if (error) {
+              console.warn(`[rad-collector] Backfill history upsert error:`, error.message);
+              totalFailed += rows.length;
+            }
+            else {
+              totalProcessed += rows.length;
+              totalFailed += visitResult.failedIds.length;
+            }
+
+            console.log(
+              `[rad-collector] backfill persist summary: batch=${batchIds.length}, persisted=${rows.length}, failed=${visitResult.failedIds.length}`
+            );
           }
 
           // Update checkpoint + heartbeat
@@ -637,14 +763,18 @@ async function handleBackfill(supabase: any, sellerId: string, chainDepth: numbe
     }
 
     // All windows completed
+    const backfillFinalStatus = totalProcessed === 0 && totalFailed > 0 ? "failed" : "done";
     await supabase.from("radiography_backfill_control").update({
-      status: "done", progress_percent: 100,
-      finished_at: new Date().toISOString(),
+      status: backfillFinalStatus,
+      progress_percent: backfillFinalStatus === "done" ? 100 : ctrl?.progress_percent || 0,
+      finished_at: backfillFinalStatus === "done" ? new Date().toISOString() : null,
+      error_message: backfillFinalStatus === "failed" ? `Backfill failed for all attempted items (${totalFailed})` : null,
     }).eq("seller_id", sellerId);
 
     const duration = Date.now() - startTime;
     await finishLog(supabase, logId, {
-      status: "success",
+      status: backfillFinalStatus === "done" ? "success" : "failed",
+      error_message: backfillFinalStatus === "failed" ? `Backfill failed for all attempted items (${totalFailed})` : null,
       total_items: allItemIds.length * BACKFILL_WINDOWS.length,
       items_processed: totalProcessed, items_failed: totalFailed,
       duration_ms: duration,
@@ -876,7 +1006,7 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json().catch(() => ({}));
-    const { seller_id, action, internal, chain_depth, last_processed_seller_id, skip_sync } = body;
+    const { seller_id, action, internal, chain_depth, last_processed_seller_id, skip_sync, start_index } = body;
 
     // Auth check
     if (!internal) {
@@ -904,7 +1034,7 @@ Deno.serve(async (req) => {
 
       case "collection":
         if (!seller_id) return new Response(JSON.stringify({ error: "seller_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        result = await handleCollection(supabase, seller_id, startTime);
+        result = await handleCollection(supabase, seller_id, startTime, start_index || 0);
         break;
 
       case "backfill":
@@ -919,7 +1049,7 @@ Deno.serve(async (req) => {
       case "full":
         if (!seller_id) return new Response(JSON.stringify({ error: "seller_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         const syncRes = await handleSync(supabase, seller_id, startTime);
-        const collRes = await handleCollection(supabase, seller_id, Date.now());
+        const collRes = await handleCollection(supabase, seller_id, Date.now(), 0);
         selfChain(seller_id, "backfill", { chain_depth: 0 });
         result = { sync: syncRes, collection: collRes, backfill: "triggered_async" };
         break;

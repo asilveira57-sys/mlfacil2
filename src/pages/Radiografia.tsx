@@ -140,6 +140,8 @@ export default function Radiografia() {
                 onSelectItem={handleSelectItem}
                 selectedPeriod={selectedPeriod}
                 onPeriodChange={setSelectedPeriod}
+                collectionStatus={diagnostics?.lastCollectionStatus ?? null}
+                collectionError={diagnostics?.lastCollectionError ?? null}
               />
 
               {/* Detail Panel */}
