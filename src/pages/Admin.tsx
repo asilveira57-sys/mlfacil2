@@ -39,6 +39,7 @@ import AdminCentralDeAjuda from './admin/AdminCentralDeAjuda';
 import { AdminEmails } from './admin/AdminEmails';
 import AdminSuporte from './admin/AdminSuporte';
 import { AdminClientes } from './admin/AdminClientes';
+import AdminConsents from './admin/AdminConsents';
 
 const adminTabs = [
   { id: '', label: 'Dashboard', icon: LayoutDashboard },
@@ -73,6 +74,7 @@ const adminTabs = [
   { id: 'central-de-ajuda', label: 'Central Ajuda', icon: HelpCircle },
   { id: 'emails', label: 'Comunicação', icon: Mail },
   { id: 'suporte', label: 'Suporte', icon: Headphones },
+  { id: 'consentimentos', label: 'Consentimentos', icon: Shield },
 ];
 
 export default function Admin() {
@@ -153,6 +155,7 @@ export default function Admin() {
           <Route path="central-de-ajuda" element={<AdminCentralDeAjuda />} />
           <Route path="emails" element={<AdminEmails />} />
           <Route path="suporte" element={<AdminSuporte />} />
+          <Route path="consentimentos" element={<AdminConsents />} />
         </Routes>
       </div>
     </PageContainer>
