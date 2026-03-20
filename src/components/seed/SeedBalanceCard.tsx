@@ -139,6 +139,30 @@ export function SeedBalanceCard({
             <span>{t('seeds.limit')}</span>
           </div>
         </div>
+
+        {/* Calculation details */}
+        {(salesCount90d !== undefined || calculatedAt) && (
+          <div className="mt-3 pt-3 border-t space-y-1">
+            {salesCount90d !== undefined && (
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Vendas 90d: <strong className="text-foreground">{salesCount90d}</strong></span>
+                {soldListingsCount90d !== undefined && (
+                  <span>Anúncios com venda: <strong className="text-foreground">{soldListingsCount90d}</strong></span>
+                )}
+              </div>
+            )}
+            {seedPercentage != null && (
+              <div className="text-xs text-muted-foreground">
+                Taxa aplicada: <strong className="text-foreground">{(seedPercentage * 100).toFixed(0)}%</strong>
+              </div>
+            )}
+            {calculatedAt && (
+              <div className="text-xs text-muted-foreground">
+                Calculado em: {new Date(calculatedAt).toLocaleDateString('pt-BR')}
+              </div>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
