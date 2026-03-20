@@ -1,79 +1,73 @@
-import { useEffect, useState } from "react";
+import { useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { 
-  Search, 
-  ArrowUpDown,
-  ExternalLink,
-  Zap,
+import {
+  Search,
   Package,
-  TrendingUp,
   Eye,
-  ShoppingCart,
   HeartPulse,
   Activity,
   AlertTriangle,
   Stethoscope,
   Siren,
   Scan,
+  ExternalLink,
 } from "lucide-react";
-import { useRadiography, ListingSnapshot } from "@/hooks/useRadiography";
-import { 
-  HEALTH_STATUS_CONFIG, 
-  CURVE_CONFIG, 
-  RadiographyHealthStatus, 
-  AbcCurve,
-  calculateHealthStatus,
-  getSuggestedAction,
-  SUGGESTED_ACTIONS,
+import {
+  HEALTH_STATUS_CONFIG,
+  RadiographyHealthStatus,
 } from "@/types/radiography";
+import {
+  HealthCurrentItem,
+  classifyHealth,
+  getAnomalyLabel,
+  AnomalyFilter,
+  PeriodDays,
+} from "@/hooks/useRadiographyData";
 
-interface RadiographyItemListProps {
-  sellerId: string | null;
+interface Props {
+  items: HealthCurrentItem[];
+  loading: boolean;
   onSelectItem: (itemId: string) => void;
+  selectedPeriod: PeriodDays;
+  onPeriodChange: (p: PeriodDays) => void;
 }
 
-export function RadiographyItemList({ sellerId, onSelectItem }: RadiographyItemListProps) {
-  const { loading, items, fetchItems } = useRadiography(sellerId);
+export function RadiographyItemList({
+  items,
+  loading,
+  onSelectItem,
+  selectedPeriod,
+  onPeriodChange,
+}: Props) {
   const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState("score_total");
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [healthFilter, setHealthFilter] = useState<string>("all");
+  const [anomalyFilter, setAnomalyFilter] = useState<AnomalyFilter>("all");
 
-  useEffect(() => {
-    if (sellerId) {
-      fetchItems(sortBy, sortOrder);
-    }
-  }, [sellerId, sortBy, sortOrder, fetchItems]);
-
-  const getHealthStatus = (item: ListingSnapshot): RadiographyHealthStatus => {
-    return calculateHealthStatus({
-      score_total: item.score_total,
-      conversion_rate_7d: item.conversion_rate_7d,
-      visits_trend: 0, // Would need trend data
-      stock_level: item.available_quantity,
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => {
+      // Search
+      const q = search.toLowerCase();
+      if (q && !item.title?.toLowerCase().includes(q) && !item.item_id.toLowerCase().includes(q)) {
+        return false;
+      }
+      // Health filter
+      if (healthFilter !== "all") {
+        if (classifyHealth(item) !== healthFilter) return false;
+      }
+      // Anomaly filter
+      if (anomalyFilter === "with_anomaly") {
+        if (!item.anomaly_flags?.length) return false;
+      } else if (anomalyFilter === "without_anomaly") {
+        if (item.anomaly_flags?.length) return false;
+      }
+      return true;
     });
-  };
-
-  // Mock curve data - in real implementation would come from abc_profit_cache
-  const getCurve = (item: ListingSnapshot): AbcCurve => {
-    if (item.score_total >= 80 && item.sales_7d >= 5) return 'A+';
-    if (item.score_total >= 70 && item.sales_7d >= 3) return 'A';
-    if (item.score_total >= 50 && item.sales_7d >= 1) return 'B';
-    return 'C';
-  };
-
-  const filteredItems = items.filter(item => {
-    const matchesSearch = item.title?.toLowerCase().includes(search.toLowerCase()) ||
-      item.item_id.toLowerCase().includes(search.toLowerCase());
-    
-    if (healthFilter === "all") return matchesSearch;
-    return matchesSearch && getHealthStatus(item) === healthFilter;
-  });
+  }, [items, search, healthFilter, anomalyFilter]);
 
   const HealthIcon = ({ status }: { status: RadiographyHealthStatus }) => {
     const iconMap = {
@@ -87,23 +81,6 @@ export function RadiographyItemList({ sellerId, onSelectItem }: RadiographyItemL
     const config = HEALTH_STATUS_CONFIG[status];
     return <Icon className={`h-4 w-4 ${config.colorClass}`} />;
   };
-
-  const getLogisticBadge = (type: string) => {
-    switch (type) {
-      case "fulfillment":
-        return <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30">Full</Badge>;
-      case "cross_docking":
-        return <Badge className="bg-cyan-500/20 text-cyan-400 border-cyan-500/30">Flex</Badge>;
-      case "drop_off":
-        return <Badge className="bg-slate-500/20 text-slate-400 border-slate-500/30">Coleta</Badge>;
-      default:
-        return <Badge variant="outline" className="border-slate-600 text-slate-400">{type || "N/A"}</Badge>;
-    }
-  };
-
-  if (!sellerId) {
-    return null;
-  }
 
   return (
     <Card className="bg-slate-900/60 border-slate-700/50">
@@ -132,43 +109,45 @@ export function RadiographyItemList({ sellerId, onSelectItem }: RadiographyItemL
               <SelectTrigger className="w-40 bg-slate-800/50 border-slate-700 text-slate-200">
                 <SelectValue placeholder="Estado clínico" />
               </SelectTrigger>
-              <SelectContent className="bg-slate-800 border-slate-700 text-slate-200">
-                <SelectItem value="all" className="text-slate-200">Todos os estados</SelectItem>
-                <SelectItem value="healthy" className="text-slate-200">🟢 Saudável</SelectItem>
-                <SelectItem value="stable" className="text-slate-200">🔵 Estável</SelectItem>
-                <SelectItem value="observation" className="text-slate-200">🟡 Em Observação</SelectItem>
-                <SelectItem value="alert" className="text-slate-200">🟠 Com Alerta</SelectItem>
-                <SelectItem value="critical" className="text-slate-200">🔴 Crítico</SelectItem>
+              <SelectContent className="bg-slate-800 border-slate-700">
+                <SelectItem value="all" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Todos os estados</SelectItem>
+                <SelectItem value="healthy" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">🟢 Saudável</SelectItem>
+                <SelectItem value="stable" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">🔵 Estável</SelectItem>
+                <SelectItem value="observation" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">🟡 Em Observação</SelectItem>
+                <SelectItem value="alert" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">🟠 Com Alerta</SelectItem>
+                <SelectItem value="critical" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">🔴 Crítico</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={sortBy} onValueChange={setSortBy}>
-              <SelectTrigger className="w-36 bg-slate-800/50 border-slate-700 text-slate-200">
-                <SelectValue placeholder="Ordenar por" />
+            <Select value={anomalyFilter} onValueChange={(v) => setAnomalyFilter(v as AnomalyFilter)}>
+              <SelectTrigger className="w-40 bg-slate-800/50 border-slate-700 text-slate-200">
+                <SelectValue placeholder="Anomalias" />
               </SelectTrigger>
-              <SelectContent className="bg-slate-800 border-slate-700 text-slate-200">
-                <SelectItem value="score_total" className="text-slate-200">Score Total</SelectItem>
-                <SelectItem value="score_performance" className="text-slate-200">Performance</SelectItem>
-                <SelectItem value="visits_7d" className="text-slate-200">Visitas 7d</SelectItem>
-                <SelectItem value="sales_7d" className="text-slate-200">Vendas 7d</SelectItem>
-                <SelectItem value="conversion_rate_7d" className="text-slate-200">Conversão</SelectItem>
+              <SelectContent className="bg-slate-800 border-slate-700">
+                <SelectItem value="all" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Todas</SelectItem>
+                <SelectItem value="with_anomaly" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Com anomalia</SelectItem>
+                <SelectItem value="without_anomaly" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Sem anomalia</SelectItem>
               </SelectContent>
             </Select>
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => setSortOrder(prev => prev === "asc" ? "desc" : "asc")}
-              className="bg-slate-800/50 border-slate-700 text-slate-400 hover:text-slate-200"
-            >
-              <ArrowUpDown className="h-4 w-4" />
-            </Button>
+            <Select value={String(selectedPeriod)} onValueChange={(v) => onPeriodChange(Number(v) as PeriodDays)}>
+              <SelectTrigger className="w-32 bg-slate-800/50 border-slate-700 text-slate-200">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-slate-800 border-slate-700">
+                <SelectItem value="7" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">7 dias</SelectItem>
+                <SelectItem value="15" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">15 dias</SelectItem>
+                <SelectItem value="30" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">30 dias</SelectItem>
+                <SelectItem value="60" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">60 dias</SelectItem>
+                <SelectItem value="150" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">150 dias</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
       </CardHeader>
       <CardContent>
         {loading ? (
           <div className="space-y-3">
-            {[1, 2, 3, 4, 5].map(i => (
-              <Skeleton key={i} className="h-24 w-full bg-slate-800/50" />
+            {[1, 2, 3, 4, 5].map((i) => (
+              <Skeleton key={i} className="h-20 w-full bg-slate-800/50" />
             ))}
           </div>
         ) : filteredItems.length === 0 ? (
@@ -176,47 +155,49 @@ export function RadiographyItemList({ sellerId, onSelectItem }: RadiographyItemL
             <div className="h-16 w-16 mx-auto mb-4 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center">
               <Package className="h-8 w-8 text-slate-500" />
             </div>
-            <p className="text-lg font-medium text-slate-300">Nenhum registro encontrado</p>
-            <p className="text-sm text-slate-500 mt-1">Execute a varredura para iniciar a coleta de dados.</p>
+            <p className="text-lg font-medium text-slate-300">
+              {items.length === 0 ? "Estamos preparando seus dados" : "Nenhum resultado encontrado"}
+            </p>
+            <p className="text-sm text-slate-500 mt-1">
+              {items.length === 0
+                ? "A coleta inicial está em andamento. Os dados aparecerão automaticamente."
+                : "Tente ajustar os filtros."}
+            </p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-2">
             {filteredItems.map((item) => {
-              const healthStatus = getHealthStatus(item);
-              const healthConfig = HEALTH_STATUS_CONFIG[healthStatus];
-              const curve = getCurve(item);
-              const curveConfig = curve ? CURVE_CONFIG[curve] : null;
-              const suggestedAction = getSuggestedAction(healthStatus, curve);
-              const actionConfig = SUGGESTED_ACTIONS[suggestedAction];
+              const health = classifyHealth(item);
+              const config = HEALTH_STATUS_CONFIG[health];
+              const hasAnomalies = !!item.anomaly_flags?.length;
 
               return (
                 <div
-                  key={item.item_id}
-                  className={`relative flex items-center gap-4 p-4 rounded-lg border bg-slate-800/30 hover:bg-slate-800/50 cursor-pointer transition-all group ${healthConfig.borderClass}`}
+                  key={item.id}
+                  className={`relative flex items-center gap-4 p-4 rounded-lg border bg-slate-800/30 hover:bg-slate-800/50 cursor-pointer transition-all group ${config.borderClass}`}
                   onClick={() => onSelectItem(item.item_id)}
                 >
-                  {/* Health Status Indicator - Left Bar */}
-                  <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-lg ${healthConfig.bgClass.replace('/10', '/60')}`} />
+                  {/* Left health bar */}
+                  <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-lg ${config.bgClass.replace("/10", "/60")}`} />
 
-                  {/* Thumbnail with X-ray Effect */}
+                  {/* Thumbnail */}
                   <div className="relative flex-shrink-0 ml-2">
                     {item.thumbnail ? (
                       <div className="relative">
-                        <img 
-                          src={item.thumbnail} 
-                          alt={item.title}
-                          className="h-16 w-16 object-cover rounded-md grayscale-[30%] group-hover:grayscale-0 transition-all"
+                        <img
+                          src={item.thumbnail}
+                          alt={item.title || ""}
+                          className="h-14 w-14 object-cover rounded-md grayscale-[30%] group-hover:grayscale-0 transition-all"
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 to-transparent rounded-md" />
                       </div>
                     ) : (
-                      <div className="h-16 w-16 bg-slate-800 rounded-md flex items-center justify-center border border-slate-700">
-                        <Package className="h-8 w-8 text-slate-600" />
+                      <div className="h-14 w-14 bg-slate-800 rounded-md flex items-center justify-center border border-slate-700">
+                        <Package className="h-7 w-7 text-slate-600" />
                       </div>
                     )}
-                    {/* Health Status Badge */}
-                    <div className={`absolute -bottom-1 -right-1 h-6 w-6 rounded-full ${healthConfig.bgClass} border ${healthConfig.borderClass} flex items-center justify-center`}>
-                      <HealthIcon status={healthStatus} />
+                    <div className={`absolute -bottom-1 -right-1 h-6 w-6 rounded-full ${config.bgClass} border ${config.borderClass} flex items-center justify-center`}>
+                      <HealthIcon status={health} />
                     </div>
                   </div>
 
@@ -226,13 +207,13 @@ export function RadiographyItemList({ sellerId, onSelectItem }: RadiographyItemL
                       <span className="font-medium text-slate-200 truncate group-hover:text-white transition-colors">
                         {item.title || item.item_id}
                       </span>
-                      {item.catalog_product_id && (
+                      {item.catalog_listing && (
                         <Badge variant="outline" className="text-xs border-violet-500/30 text-violet-400">Catálogo</Badge>
                       )}
                       {item.permalink && (
-                        <a 
-                          href={item.permalink} 
-                          target="_blank" 
+                        <a
+                          href={item.permalink}
+                          target="_blank"
                           rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
                           className="text-slate-500 hover:text-cyan-400 transition-colors"
@@ -242,62 +223,36 @@ export function RadiographyItemList({ sellerId, onSelectItem }: RadiographyItemL
                       )}
                     </div>
                     <div className="flex items-center gap-4 text-sm text-slate-400">
+                      <span className="font-mono text-xs text-slate-500">{item.item_id}</span>
                       <span className="flex items-center gap-1">
                         <Eye className="h-3 w-3 text-cyan-400" />
-                        {item.visits_7d} visitas
+                        {item.visits_last != null ? item.visits_last.toLocaleString("pt-BR") : "—"} visitas
                       </span>
-                      <span className="flex items-center gap-1">
-                        <ShoppingCart className="h-3 w-3 text-emerald-400" />
-                        {item.sales_7d} vendas
+                      <span>
+                        Estoque: {item.available_quantity ?? "—"}
                       </span>
-                      <span className="flex items-center gap-1">
-                        <TrendingUp className="h-3 w-3 text-violet-400" />
-                        {item.conversion_rate_7d.toFixed(1)}% conv.
+                      <span>
+                        R$ {item.price != null ? item.price.toLocaleString("pt-BR", { minimumFractionDigits: 2 }) : "—"}
                       </span>
-                      {getLogisticBadge(item.logistic_type)}
+                      <Badge className={`text-xs ${config.bgClass} ${config.colorClass} ${config.borderClass}`}>
+                        {config.label}
+                      </Badge>
                     </div>
-                    {/* Suggested Action */}
-                    <div className="mt-2">
-                      <span className={`text-xs ${
-                        actionConfig.priority === 'critical' ? 'text-red-400' :
-                        actionConfig.priority === 'high' ? 'text-orange-400' :
-                        actionConfig.priority === 'medium' ? 'text-amber-400' :
-                        'text-slate-500'
-                      }`}>
-                        {actionConfig.title}
-                      </span>
-                    </div>
+                    {/* Anomaly flags */}
+                    {hasAnomalies && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {item.anomaly_flags!.map((flag) => (
+                          <Badge key={flag} variant="outline" className="text-xs border-red-500/30 text-red-400 bg-red-500/5">
+                            {getAnomalyLabel(flag)}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
-                  {/* Curve Badge */}
-                  {curveConfig && (
-                    <div className={`flex-shrink-0 px-3 py-1.5 rounded-lg border ${curveConfig.bgClass} ${curveConfig.borderClass}`}>
-                      <span className={`text-sm font-bold ${curveConfig.colorClass}`}>
-                        {curve}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Score Blocks (mini) - X-Ray style */}
-                  <div className="hidden xl:flex items-center gap-1.5">
-                    <ScoreBlock label="SEM" score={item.score_semantica} />
-                    <ScoreBlock label="VIS" score={item.score_visual} />
-                    <ScoreBlock label="LOG" score={item.score_logistica} />
-                    <ScoreBlock label="COM" score={item.score_competitividade} />
-                    <ScoreBlock label="PER" score={item.score_performance} />
-                  </div>
-
-                  {/* Total Score - Clinical Display */}
-                  <div className={`flex-shrink-0 px-4 py-2 rounded-lg border ${healthConfig.bgClass} ${healthConfig.borderClass}`}>
-                    <div className={`text-2xl font-bold font-mono ${healthConfig.colorClass}`}>
-                      {item.score_total}
-                    </div>
-                    <div className="text-[10px] text-slate-500 text-center uppercase tracking-wide">Score</div>
-                  </div>
-
-                  {/* Examine Button */}
-                  <Button 
-                    variant="ghost" 
+                  {/* Examine */}
+                  <Button
+                    variant="ghost"
                     size="sm"
                     className="flex-shrink-0 text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10"
                     onClick={(e) => {
@@ -315,26 +270,5 @@ export function RadiographyItemList({ sellerId, onSelectItem }: RadiographyItemL
         )}
       </CardContent>
     </Card>
-  );
-}
-
-function ScoreBlock({ label, score }: { label: string; score: number }) {
-  const getColor = (s: number) => {
-    if (s >= 80) return "text-emerald-400";
-    if (s >= 60) return "text-amber-400";
-    return "text-red-400";
-  };
-
-  const getBgColor = (s: number) => {
-    if (s >= 80) return "bg-emerald-500/10";
-    if (s >= 60) return "bg-amber-500/10";
-    return "bg-red-500/10";
-  };
-
-  return (
-    <div className={`text-center px-2 py-1 rounded ${getBgColor(score)}`}>
-      <div className={`text-sm font-semibold font-mono ${getColor(score)}`}>{score}</div>
-      <div className="text-[9px] text-slate-500 uppercase tracking-wider">{label}</div>
-    </div>
   );
 }
