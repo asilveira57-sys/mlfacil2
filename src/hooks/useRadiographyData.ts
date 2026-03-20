@@ -1,0 +1,255 @@
+import { useState, useCallback, useMemo } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useQuery } from "@tanstack/react-query";
+import { RadiographyHealthStatus } from "@/types/radiography";
+
+// --- Types ---
+
+export interface HealthCurrentItem {
+  id: string;
+  item_id: string;
+  seller_id: string;
+  visits_last: number | null;
+  price: number | null;
+  available_quantity: number | null;
+  listing_status: string | null;
+  listing_type: string | null;
+  shipping_mode: string | null;
+  catalog_listing: boolean | null;
+  anomaly_flags: string[] | null;
+  last_collected_at: string | null;
+  updated_at: string;
+  // joined from meli_listings_cache
+  title?: string | null;
+  thumbnail?: string | null;
+  permalink?: string | null;
+  logistic_type?: string | null;
+}
+
+export interface HealthHistoryEntry {
+  id: string;
+  item_id: string;
+  collected_at: string;
+  visits: number | null;
+  price: number | null;
+  available_quantity: number | null;
+  listing_status: string | null;
+  listing_type: string | null;
+  shipping_mode: string | null;
+  catalog_listing: boolean | null;
+  source: string | null;
+  window_days: number;
+}
+
+export interface DiagnosticSummary {
+  totalActive: number;
+  updatedRecently: number;
+  awaitingCollection: number;
+  totalExams: number;
+  anomalyCount: number;
+  lastSyncAt: string | null;
+  lastCollectionAt: string | null;
+  backfillStatus: string | null;
+  backfillProgress: number | null;
+}
+
+export type AnomalyFilter = "all" | "with_anomaly" | "without_anomaly";
+export type PeriodDays = 7 | 15 | 30 | 60 | 150;
+
+// --- Health classification from real data ---
+
+export function classifyHealth(item: {
+  visits_last?: number | null;
+  available_quantity?: number | null;
+  listing_type?: string | null;
+  shipping_mode?: string | null;
+  catalog_listing?: boolean | null;
+  anomaly_flags?: string[] | null;
+  last_collected_at?: string | null;
+}): RadiographyHealthStatus {
+  const flags = item.anomaly_flags || [];
+  const visits = item.visits_last ?? -1; // -1 = unknown
+  const stock = item.available_quantity ?? -1;
+  
+  // If we have no data yet, show stable (not penalizing)
+  if (!item.last_collected_at) return "stable";
+
+  // Critical: zero stock or critical flags
+  if (stock === 0 || flags.includes("consistent_decline")) return "critical";
+
+  // Alert: visit drop or zero visits with data
+  if (flags.includes("visit_drop") || flags.includes("zero_visits")) return "alert";
+
+  // Observation: high stock low traction
+  if (flags.includes("high_stock_low_traction")) return "observation";
+
+  // Healthy: good visits, has stock, good logistics
+  if (visits > 10 && stock > 0) {
+    const hasFulfillment = item.shipping_mode === "me2" || item.listing_type === "gold_pro";
+    if (hasFulfillment || item.catalog_listing) return "healthy";
+    return "stable";
+  }
+
+  // Stable by default
+  if (visits >= 0 && stock > 0) return "stable";
+
+  return "stable";
+}
+
+const ANOMALY_LABELS: Record<string, string> = {
+  zero_visits: "Sem visitas no período",
+  visit_drop: "Queda acentuada de visitas (>40%)",
+  high_stock_low_traction: "Estoque alto sem tração",
+  consistent_decline: "Declínio consistente de tráfego",
+};
+
+export function getAnomalyLabel(flag: string): string {
+  return ANOMALY_LABELS[flag] || flag;
+}
+
+// --- Main hook ---
+
+export function useRadiographyData(sellerId: string | null) {
+  // 1. Fetch current health + listing info (main table)
+  const {
+    data: items,
+    isLoading: itemsLoading,
+    refetch: refetchItems,
+  } = useQuery({
+    queryKey: ["radiography-items", sellerId],
+    queryFn: async () => {
+      if (!sellerId) return [];
+
+      // Get health current
+      const { data: healthRows, error: healthErr } = await supabase
+        .from("listing_health_current")
+        .select("*")
+        .eq("seller_id", sellerId);
+
+      if (healthErr) throw healthErr;
+      if (!healthRows?.length) return [];
+
+      // Get listing cache for titles/thumbnails (deduplicated by item_id)
+      const itemIds = [...new Set(healthRows.map((r) => r.item_id))];
+      
+      // Fetch in batches of 100
+      const listings: Record<string, any> = {};
+      for (let i = 0; i < itemIds.length; i += 100) {
+        const batch = itemIds.slice(i, i + 100);
+        const { data: cacheRows } = await supabase
+          .from("meli_listings_cache")
+          .select("item_id, title, thumbnail, permalink, logistic_type")
+          .in("item_id", batch)
+          .eq("seller_id", sellerId);
+        
+        if (cacheRows) {
+          for (const row of cacheRows) {
+            if (!listings[row.item_id]) {
+              listings[row.item_id] = row;
+            }
+          }
+        }
+      }
+
+      // Merge
+      return healthRows.map((h) => {
+        const cache = listings[h.item_id];
+        return {
+          ...h,
+          title: cache?.title || null,
+          thumbnail: cache?.thumbnail || null,
+          permalink: cache?.permalink || null,
+          logistic_type: cache?.logistic_type || null,
+        } as HealthCurrentItem;
+      });
+    },
+    enabled: !!sellerId,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // 2. Diagnostic summary
+  const {
+    data: diagnostics,
+    isLoading: diagnosticsLoading,
+  } = useQuery({
+    queryKey: ["radiography-diagnostics", sellerId],
+    queryFn: async (): Promise<DiagnosticSummary> => {
+      if (!sellerId) {
+        return { totalActive: 0, updatedRecently: 0, awaitingCollection: 0, totalExams: 0, anomalyCount: 0, lastSyncAt: null, lastCollectionAt: null, backfillStatus: null, backfillProgress: null };
+      }
+
+      const fourDaysAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString();
+
+      // Parallel queries
+      const [activeRes, historyRes, anomalyRes, recentCollectedRes, lastSyncRes, lastCollectionRes, backfillRes] = await Promise.all([
+        // Total active listings
+        supabase.from("meli_listings_cache").select("id", { count: "exact", head: true }).eq("seller_id", sellerId).eq("status", "active"),
+        // Total history records
+        supabase.from("listing_health_history").select("id", { count: "exact", head: true }).eq("seller_id", sellerId),
+        // Anomaly count
+        supabase.from("listing_health_current").select("id", { count: "exact", head: true }).eq("seller_id", sellerId).not("anomaly_flags", "eq", "{}"),
+        // Recently collected (within 4 days)
+        supabase.from("listing_health_current").select("id", { count: "exact", head: true }).eq("seller_id", sellerId).gte("last_collected_at", fourDaysAgo),
+        // Last sync
+        supabase.from("radiography_collection_logs").select("finished_at").eq("seller_id", sellerId).eq("job_type", "sync").eq("status", "success").order("finished_at", { ascending: false }).limit(1),
+        // Last collection
+        supabase.from("radiography_collection_logs").select("finished_at").eq("seller_id", sellerId).eq("job_type", "collection").eq("status", "success").order("finished_at", { ascending: false }).limit(1),
+        // Backfill
+        supabase.from("radiography_backfill_control").select("status, progress_percent").eq("seller_id", sellerId).limit(1).maybeSingle(),
+      ]);
+
+      const totalActive = activeRes.count || 0;
+      const recentCount = recentCollectedRes.count || 0;
+
+      return {
+        totalActive,
+        updatedRecently: recentCount,
+        awaitingCollection: totalActive - recentCount,
+        totalExams: historyRes.count || 0,
+        anomalyCount: anomalyRes.count || 0,
+        lastSyncAt: lastSyncRes.data?.[0]?.finished_at || null,
+        lastCollectionAt: lastCollectionRes.data?.[0]?.finished_at || null,
+        backfillStatus: backfillRes.data?.status || null,
+        backfillProgress: backfillRes.data?.progress_percent || null,
+      };
+    },
+    enabled: !!sellerId,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // 3. Fetch history for a specific item (lazy)
+  const fetchItemHistory = useCallback(
+    async (itemId: string, days: PeriodDays = 30): Promise<HealthHistoryEntry[]> => {
+      if (!sellerId) return [];
+      const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+      const { data, error } = await supabase
+        .from("listing_health_history")
+        .select("*")
+        .eq("seller_id", sellerId)
+        .eq("item_id", itemId)
+        .gte("collected_at", since)
+        .order("collected_at", { ascending: true });
+      if (error) throw error;
+      return (data || []) as HealthHistoryEntry[];
+    },
+    [sellerId]
+  );
+
+  // 4. Trigger update (edge function)
+  const triggerUpdate = useCallback(async () => {
+    if (!sellerId) return;
+    await supabase.functions.invoke("radiography-collector", {
+      body: { action: "full", seller_id: sellerId },
+    });
+  }, [sellerId]);
+
+  return {
+    items: items || [],
+    itemsLoading,
+    diagnostics: diagnostics || null,
+    diagnosticsLoading,
+    fetchItemHistory,
+    triggerUpdate,
+    refetchItems,
+  };
+}
