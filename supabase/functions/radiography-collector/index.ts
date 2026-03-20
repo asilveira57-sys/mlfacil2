@@ -895,7 +895,7 @@ async function detectAnomalies(supabase: any, sellerId: string, processedItemIds
       const chunk = processedItemIds.slice(i, i + 500);
       const { data } = await supabase
         .from("listing_health_current")
-        .select("item_id, visits_last, available_quantity, listing_status")
+        .select("item_id, visits_last, available_quantity, listing_status, sales_count_7d, sales_count_30d, days_without_sale, conversion_rate_7d")
         .eq("seller_id", sellerId)
         .in("item_id", chunk);
       allCurrent = allCurrent.concat(data || []);
@@ -904,7 +904,6 @@ async function detectAnomalies(supabase: any, sellerId: string, processedItemIds
     if (allCurrent.length === 0) return [];
 
     // Batch-fetch last 3 history entries for all processed items
-    // Use a single query with ordering, then group in memory
     let allHistory: any[] = [];
     for (let i = 0; i < processedItemIds.length; i += 500) {
       const chunk = processedItemIds.slice(i, i + 500);
@@ -934,6 +933,7 @@ async function detectAnomalies(supabase: any, sellerId: string, processedItemIds
     for (const current of allCurrent) {
       const flags: string[] = [];
 
+      // Visit-based anomalies
       if (current.listing_status === "active" && (current.visits_last === 0 || current.visits_last === null)) {
         flags.push("zero_visits");
       }
@@ -942,6 +942,22 @@ async function detectAnomalies(supabase: any, sellerId: string, processedItemIds
         flags.push("high_stock_low_traction");
       }
 
+      // Sales-based anomalies
+      if (current.days_without_sale !== null && current.days_without_sale > 30) {
+        flags.push("no_sales_30d");
+      } else if (current.days_without_sale !== null && current.days_without_sale > 14) {
+        flags.push("no_sales_14d");
+      }
+
+      if (current.visits_last > 20 && current.sales_count_7d === 0) {
+        flags.push("visits_no_conversion");
+      }
+
+      if (current.conversion_rate_7d !== null && current.conversion_rate_7d > 0 && current.conversion_rate_7d < 0.5 && current.visits_last > 30) {
+        flags.push("low_conversion");
+      }
+
+      // Visit trend anomalies
       const history = historyByItem.get(current.item_id) || [];
       if (history.length >= 2) {
         const latest = history[0].visits || 0;
