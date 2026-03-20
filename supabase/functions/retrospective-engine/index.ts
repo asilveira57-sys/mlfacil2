@@ -822,7 +822,7 @@ Deno.serve(async (req) => {
       // 3. Load companies for tenant
       let companiesQuery = supabase
         .from("companies")
-        .select("id, tenant_id, display_name")
+        .select("id, tenant_id, display_name, logo_url")
         .eq("tenant_id", tenant.id)
         .eq("is_active", true);
 
