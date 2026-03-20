@@ -16,6 +16,8 @@ import {
   Siren,
   Scan,
   ExternalLink,
+  ShoppingCart,
+  Clock,
 } from "lucide-react";
 import {
   HEALTH_STATUS_CONFIG,
