@@ -53,7 +53,7 @@ export default function SystemAlertsMini() {
   }, []);
 
   const handleAlertClick = (alert: Alert) => {
-    navigate('/ads');
+    navigate('/publicidade');
   };
 
   if (loading) {
