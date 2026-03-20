@@ -246,6 +246,7 @@ export function useRadiographyData(sellerId: string | null) {
           ...h,
           change_flags: (h.change_flags as any as ChangeFlag[]) || [],
           alerts_json: (h.alerts_json as any as StructuredAlert[]) || [],
+          seo_analysis_json: (h.seo_analysis_json as any as SeoAnalysis) || null,
           title: cache?.title || null,
           thumbnail: cache?.thumbnail || null,
           permalink: cache?.permalink || null,
