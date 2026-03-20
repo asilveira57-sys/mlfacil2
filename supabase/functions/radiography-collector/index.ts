@@ -13,6 +13,9 @@ const ML_SECRET_KEY = Deno.env.get("ML_SECRET_KEY") || "";
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
+// Safety timeout for edge function (50s to leave margin)
+const SAFETY_TIMEOUT_MS = 50_000;
+
 // ============================================================================
 // TOKEN MANAGEMENT
 // ============================================================================
@@ -26,13 +29,11 @@ async function getValidToken(supabase: any, sellerId: string): Promise<string | 
 
   if (!acct) return null;
 
-  // Check if token is expired
   const expiresAt = acct.token_expires_at ? new Date(acct.token_expires_at) : null;
   if (expiresAt && expiresAt > new Date(Date.now() + 60_000)) {
     return acct.access_token;
   }
 
-  // Try refresh
   if (acct.refresh_token && ML_APP_ID && ML_SECRET_KEY) {
     try {
       const resp = await fetch("https://api.mercadolibre.com/oauth/token", {
@@ -89,10 +90,28 @@ async function finishLog(supabase: any, logId: string, updates: any) {
 }
 
 // ============================================================================
+// SELF-CHAIN (with concurrency guard)
+// ============================================================================
+function selfChain(sellerId: string | null, action: string, extra: any = {}) {
+  try {
+    const url = `${SUPABASE_URL}/functions/v1/radiography-collector`;
+    const body: any = { action, internal: true, ...extra };
+    if (sellerId) body.seller_id = sellerId;
+    fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify(body),
+    }).catch(() => {});
+  } catch {}
+}
+
+// ============================================================================
 // FLOW 1 — SYNC ACTIVE LISTINGS
 // ============================================================================
-async function handleSync(supabase: any, sellerId: string) {
-  const startTime = Date.now();
+async function handleSync(supabase: any, sellerId: string, startTime: number) {
   const logId = await createLog(supabase, sellerId, "sync");
   console.log(`[rad-collector] SYNC started for ${sellerId}`);
 
@@ -103,7 +122,6 @@ async function handleSync(supabase: any, sellerId: string) {
       return { success: false, error: "No valid ML token" };
     }
 
-    // Get user_id from ml_accounts
     const { data: acctData } = await supabase
       .from("ml_accounts")
       .select("user_id")
@@ -141,7 +159,6 @@ async function handleSync(supabase: any, sellerId: string) {
 
     console.log(`[rad-collector] Found ${allItemIds.length} active items (API total: ${totalFromApi})`);
 
-    // Fetch details in batches of 20 via multiget
     let processed = 0;
     let failed = 0;
     const DETAIL_BATCH = 20;
@@ -166,33 +183,22 @@ async function handleSync(supabase: any, sellerId: string) {
         const listings: any[] = [];
 
         for (const item of detailsData) {
-          if (item.code !== 200 || !item.body) {
-            failed++;
-            continue;
-          }
+          if (item.code !== 200 || !item.body) { failed++; continue; }
           const b = item.body;
           const baseData = {
-            user_id: userId,
-            seller_id: sellerId,
-            item_id: b.id,
-            title: b.title,
-            title_short: b.title?.substring(0, 50),
-            permalink: b.permalink,
-            thumbnail: b.thumbnail,
+            user_id: userId, seller_id: sellerId, item_id: b.id,
+            title: b.title, title_short: b.title?.substring(0, 50),
+            permalink: b.permalink, thumbnail: b.thumbnail,
             catalog_product_id: b.catalog_product_id || null,
-            category_id: b.category_id,
-            currency_id: b.currency_id,
-            condition: b.condition,
-            listing_type_id: b.listing_type_id,
+            category_id: b.category_id, currency_id: b.currency_id,
+            condition: b.condition, listing_type_id: b.listing_type_id,
             logistic_type: b.shipping?.logistic_type || null,
             shipping_mode: b.shipping?.mode || null,
-            status: b.status,
-            health: b.health || null,
+            status: b.status, health: b.health || null,
             last_sync_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           };
 
-          // Handle variations (same pattern as competitor-engine)
           if (b.variations && b.variations.length > 0) {
             for (const v of b.variations) {
               listings.push({
@@ -207,10 +213,8 @@ async function handleSync(supabase: any, sellerId: string) {
             }
           } else {
             listings.push({
-              ...baseData,
-              variation_id: "",
-              sku: b.seller_custom_field || null,
-              price: b.price,
+              ...baseData, variation_id: "",
+              sku: b.seller_custom_field || null, price: b.price,
               original_price: b.original_price || null,
               available_quantity: b.available_quantity || 0,
               sold_quantity: b.sold_quantity || 0,
@@ -218,17 +222,12 @@ async function handleSync(supabase: any, sellerId: string) {
           }
         }
 
-        // Upsert batch
         if (listings.length > 0) {
           const { error } = await supabase
             .from("meli_listings_cache")
             .upsert(listings, { onConflict: "seller_id,item_id,variation_id" });
-          if (error) {
-            console.warn(`[rad-collector] Upsert error:`, error.message);
-            failed += listings.length;
-          } else {
-            processed += listings.length;
-          }
+          if (error) { console.warn(`[rad-collector] Upsert error:`, error.message); failed += listings.length; }
+          else { processed += listings.length; }
         }
       } catch (err) {
         console.warn(`[rad-collector] Batch detail error:`, err);
@@ -240,33 +239,25 @@ async function handleSync(supabase: any, sellerId: string) {
 
     const duration = Date.now() - startTime;
     await finishLog(supabase, logId, {
-      status: "success",
-      total_items: allItemIds.length,
-      items_processed: processed,
-      items_failed: failed,
-      duration_ms: duration,
-      metadata_json: { total_from_api: totalFromApi },
+      status: "success", total_items: allItemIds.length,
+      items_processed: processed, items_failed: failed,
+      duration_ms: duration, metadata_json: { total_from_api: totalFromApi },
     });
 
     console.log(`[rad-collector] SYNC done: ${processed} processed, ${failed} failed in ${duration}ms`);
     return { success: true, total: allItemIds.length, processed, failed, duration_ms: duration };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
-    await finishLog(supabase, logId, {
-      status: "failed",
-      error_message: msg,
-      duration_ms: Date.now() - startTime,
-    });
+    await finishLog(supabase, logId, { status: "failed", error_message: msg, duration_ms: Date.now() - startTime });
     console.error(`[rad-collector] SYNC failed:`, err);
     return { success: false, error: msg };
   }
 }
 
 // ============================================================================
-// FLOW 2 — NIGHTLY VISIT COLLECTION
+// FLOW 2 — VISIT COLLECTION
 // ============================================================================
-async function handleCollection(supabase: any, sellerId: string) {
-  const startTime = Date.now();
+async function handleCollection(supabase: any, sellerId: string, startTime: number) {
   const logId = await createLog(supabase, sellerId, "collection");
   console.log(`[rad-collector] COLLECTION started for ${sellerId}`);
 
@@ -280,7 +271,6 @@ async function handleCollection(supabase: any, sellerId: string) {
     // Get active items that need collection (null or >= 4 days old)
     const fourDaysAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString();
 
-    // Fetch all eligible items with pagination
     let allItems: any[] = [];
     let from = 0;
     const PAGE = 1000;
@@ -294,10 +284,7 @@ async function handleCollection(supabase: any, sellerId: string) {
         .or(`last_visit_collection_at.is.null,last_visit_collection_at.lt.${fourDaysAgo}`)
         .range(from, from + PAGE - 1);
 
-      if (error) {
-        console.error(`[rad-collector] Fetch items error:`, error);
-        break;
-      }
+      if (error) { console.error(`[rad-collector] Fetch items error:`, error); break; }
       allItems = allItems.concat(page || []);
       if (!page || page.length < PAGE) break;
       from += PAGE;
@@ -317,22 +304,25 @@ async function handleCollection(supabase: any, sellerId: string) {
       return { success: true, processed: 0, message: "No items need collection" };
     }
 
-    // Collect visits using multiget in batches of 50
-    const VISIT_BATCH = 50;
-    let processed = 0;
-    let failed = 0;
+    // Normalize collected_at to minute precision for idempotency
     const now = new Date();
+    now.setSeconds(0, 0);
     const collectedAt = now.toISOString();
     const dateTo = now.toISOString().split("T")[0];
     const dateFrom = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
     const itemIds = items.map(i => i.item_id);
+
+    const VISIT_BATCH = 50;
+    let processed = 0;
+    let failed = 0;
+    const processedItemIds: string[] = [];
 
     for (let i = 0; i < itemIds.length; i += VISIT_BATCH) {
       const batchIds = itemIds.slice(i, i + VISIT_BATCH);
       const idsParam = batchIds.join(",");
 
       try {
-        const resp = await fetch(
+        let resp = await fetch(
           `https://api.mercadolibre.com/items/visits?ids=${idsParam}&date_from=${dateFrom}&date_to=${dateTo}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
@@ -340,19 +330,11 @@ async function handleCollection(supabase: any, sellerId: string) {
         if (resp.status === 429) {
           console.warn(`[rad-collector] Rate limited, waiting 10s...`);
           await sleep(10_000);
-          // Retry once
-          const retry = await fetch(
+          resp = await fetch(
             `https://api.mercadolibre.com/items/visits?ids=${idsParam}&date_from=${dateFrom}&date_to=${dateTo}`,
             { headers: { Authorization: `Bearer ${token}` } }
           );
-          if (!retry.ok) {
-            failed += batchIds.length;
-            continue;
-          }
-          const retryData = await retry.json();
-          await processVisitBatch(supabase, sellerId, batchIds, retryData, items, collectedAt);
-          processed += batchIds.length;
-          continue;
+          if (!resp.ok) { failed += batchIds.length; continue; }
         }
 
         if (!resp.ok) {
@@ -364,6 +346,7 @@ async function handleCollection(supabase: any, sellerId: string) {
         const visitsData = await resp.json();
         await processVisitBatch(supabase, sellerId, batchIds, visitsData, items, collectedAt);
         processed += batchIds.length;
+        processedItemIds.push(...batchIds);
       } catch (err) {
         console.warn(`[rad-collector] Visit batch error:`, err);
         failed += batchIds.length;
@@ -372,12 +355,10 @@ async function handleCollection(supabase: any, sellerId: string) {
       await sleep(500);
     }
 
-    // Update last_visit_collection_at for processed items
-    if (processed > 0) {
-      // Update in batches of 500 (Supabase .in() limit)
-      const processedIds = itemIds.slice(0, processed);
-      for (let i = 0; i < processedIds.length; i += 500) {
-        const chunk = processedIds.slice(i, i + 500);
+    // Update last_visit_collection_at only for successfully processed items
+    if (processedItemIds.length > 0) {
+      for (let i = 0; i < processedItemIds.length; i += 500) {
+        const chunk = processedItemIds.slice(i, i + 500);
         await supabase
           .from("meli_listings_cache")
           .update({ last_visit_collection_at: collectedAt })
@@ -386,15 +367,13 @@ async function handleCollection(supabase: any, sellerId: string) {
       }
     }
 
-    // Detect anomalies
-    await detectAnomalies(supabase, sellerId);
+    // Detect anomalies only on the processed items (optimized)
+    await detectAnomalies(supabase, sellerId, processedItemIds);
 
     const duration = Date.now() - startTime;
     await finishLog(supabase, logId, {
-      status: "success",
-      total_items: items.length,
-      items_processed: processed,
-      items_failed: failed,
+      status: "success", total_items: items.length,
+      items_processed: processed, items_failed: failed,
       duration_ms: duration,
       metadata_json: { window_days: 7, date_from: dateFrom, date_to: dateTo },
     });
@@ -409,12 +388,8 @@ async function handleCollection(supabase: any, sellerId: string) {
 }
 
 async function processVisitBatch(
-  supabase: any,
-  sellerId: string,
-  batchIds: string[],
-  visitsData: any,
-  allItems: any[],
-  collectedAt: string
+  supabase: any, sellerId: string, batchIds: string[],
+  visitsData: any, allItems: any[], collectedAt: string
 ) {
   const itemMap = new Map(allItems.map(i => [i.item_id, i]));
   const healthHistoryRows: any[] = [];
@@ -422,42 +397,31 @@ async function processVisitBatch(
 
   for (const itemId of batchIds) {
     const visits = typeof visitsData === "object" && visitsData[itemId] !== undefined
-      ? Number(visitsData[itemId]) || 0
-      : 0;
+      ? Number(visitsData[itemId]) || 0 : 0;
     const item = itemMap.get(itemId);
 
-    const historyRow = {
-      seller_id: sellerId,
-      item_id: itemId,
-      collected_at: collectedAt,
-      window_days: 7,
-      visits,
-      price: item?.price || null,
-      available_quantity: item?.available_quantity || null,
+    healthHistoryRows.push({
+      seller_id: sellerId, item_id: itemId, collected_at: collectedAt,
+      window_days: 7, visits,
+      price: item?.price || null, available_quantity: item?.available_quantity || null,
       listing_status: item?.status || "active",
       listing_type: item?.listing_type_id || null,
       shipping_mode: item?.shipping_mode || item?.logistic_type || null,
       catalog_listing: !!item?.catalog_product_id,
       source: "night_collection",
-    };
-    healthHistoryRows.push(historyRow);
+    });
 
-    const currentRow = {
-      seller_id: sellerId,
-      item_id: itemId,
-      last_collected_at: collectedAt,
-      visits_last: visits,
-      price: item?.price || null,
-      available_quantity: item?.available_quantity || null,
+    healthCurrentRows.push({
+      seller_id: sellerId, item_id: itemId,
+      last_collected_at: collectedAt, visits_last: visits,
+      price: item?.price || null, available_quantity: item?.available_quantity || null,
       listing_status: item?.status || "active",
       listing_type: item?.listing_type_id || null,
       shipping_mode: item?.shipping_mode || item?.logistic_type || null,
       catalog_listing: !!item?.catalog_product_id,
-    };
-    healthCurrentRows.push(currentRow);
+    });
   }
 
-  // Insert history (idempotent via unique constraint)
   if (healthHistoryRows.length > 0) {
     const { error } = await supabase
       .from("listing_health_history")
@@ -465,7 +429,6 @@ async function processVisitBatch(
     if (error) console.warn(`[rad-collector] Health history upsert error:`, error.message);
   }
 
-  // Upsert current state
   if (healthCurrentRows.length > 0) {
     const { error } = await supabase
       .from("listing_health_current")
@@ -475,7 +438,7 @@ async function processVisitBatch(
 }
 
 // ============================================================================
-// FLOW 3 — BACKFILL HISTORICAL
+// FLOW 3 — BACKFILL HISTORICAL (with safe self-chain)
 // ============================================================================
 const BACKFILL_WINDOWS = [
   { label: "0-30d", daysStart: 0, daysEnd: 30 },
@@ -485,13 +448,25 @@ const BACKFILL_WINDOWS = [
   { label: "121-150d", daysStart: 121, daysEnd: 150 },
 ];
 
-async function handleBackfill(supabase: any, sellerId: string) {
+// Max self-chain depth to prevent infinite loops
+const MAX_BACKFILL_CHAINS = 30; // 5 windows * ~3-4 chunks each max
+
+async function handleBackfill(supabase: any, sellerId: string, chainDepth: number = 0) {
   const startTime = Date.now();
   const logId = await createLog(supabase, sellerId, "backfill");
-  console.log(`[rad-collector] BACKFILL started for ${sellerId}`);
+  console.log(`[rad-collector] BACKFILL started for ${sellerId} (chain depth: ${chainDepth})`);
+
+  // Guard: prevent infinite self-chain
+  if (chainDepth > MAX_BACKFILL_CHAINS) {
+    console.error(`[rad-collector] BACKFILL exceeded max chain depth (${MAX_BACKFILL_CHAINS}), stopping.`);
+    await supabase.from("radiography_backfill_control").update({
+      status: "failed", error_message: `Exceeded max chain depth (${MAX_BACKFILL_CHAINS})`,
+    }).eq("seller_id", sellerId);
+    await finishLog(supabase, logId, { status: "failed", error_message: "Max chain depth exceeded", duration_ms: Date.now() - startTime });
+    return { success: false, error: "Max chain depth exceeded" };
+  }
 
   try {
-    // Check/create backfill control
     const { data: ctrl } = await supabase
       .from("radiography_backfill_control")
       .select("*")
@@ -503,14 +478,13 @@ async function handleBackfill(supabase: any, sellerId: string) {
       return { success: true, message: "Backfill already completed for this seller" };
     }
 
+    // Concurrency guard: only allow if paused/pending/failed or stale running
     if (ctrl?.status === "running") {
-      // Check for stale (> 10 min)
       const updatedAt = ctrl.updated_at ? new Date(ctrl.updated_at).getTime() : 0;
       if (Date.now() - updatedAt < 10 * 60 * 1000) {
-        await finishLog(supabase, logId, { status: "success", total_items: 0, items_processed: 0, items_failed: 0, duration_ms: Date.now() - startTime, metadata_json: { message: "Backfill already running" } });
+        await finishLog(supabase, logId, { status: "success", total_items: 0, items_processed: 0, items_failed: 0, duration_ms: Date.now() - startTime, metadata_json: { message: "Backfill already running (not stale)" } });
         return { success: true, message: "Backfill already running" };
       }
-      // Stale, continue from where it left off
       console.log(`[rad-collector] Stale backfill detected, resuming...`);
     }
 
@@ -537,17 +511,17 @@ async function handleBackfill(supabase: any, sellerId: string) {
     }
     allItemIds = [...new Set(allItemIds)];
 
-    // Determine starting window
     const startProgress = ctrl?.progress_percent || 0;
     const startWindowIdx = Math.floor((startProgress / 100) * BACKFILL_WINDOWS.length);
     const lastProcessedItem = ctrl?.last_processed_item_id || null;
 
-    // Upsert control as running
+    // Mark as running with heartbeat
     await supabase.from("radiography_backfill_control").upsert({
       seller_id: sellerId,
       status: "running",
       started_at: ctrl?.started_at || new Date().toISOString(),
       progress_percent: startProgress,
+      error_message: null,
     }, { onConflict: "seller_id" });
 
     let totalProcessed = 0;
@@ -559,7 +533,11 @@ async function handleBackfill(supabase: any, sellerId: string) {
       const now = Date.now();
       const dateFrom = new Date(now - window.daysEnd * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
       const dateTo = new Date(now - window.daysStart * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
-      const collectedAt = new Date().toISOString();
+      
+      // Normalize collected_at per window for idempotency
+      const windowCollectedAt = new Date();
+      windowCollectedAt.setSeconds(0, 0);
+      const collectedAt = windowCollectedAt.toISOString();
 
       console.log(`[rad-collector] Backfill window ${window.label}: ${dateFrom} → ${dateTo}`);
 
@@ -568,7 +546,6 @@ async function handleBackfill(supabase: any, sellerId: string) {
         current_window_end: dateTo,
       }).eq("seller_id", sellerId);
 
-      // Determine start index within this window
       let startIdx = 0;
       if (wi === startWindowIdx && lastProcessedItem) {
         const idx = allItemIds.indexOf(lastProcessedItem);
@@ -588,31 +565,21 @@ async function handleBackfill(supabase: any, sellerId: string) {
           if (resp.status === 429) {
             console.warn(`[rad-collector] Rate limited in backfill, waiting 15s...`);
             await sleep(15_000);
-            i -= VISIT_BATCH; // Retry this batch
+            i -= VISIT_BATCH;
             continue;
           }
 
-          if (!resp.ok) {
-            totalFailed += batchIds.length;
-            continue;
-          }
+          if (!resp.ok) { totalFailed += batchIds.length; continue; }
 
           const visitsData = await resp.json();
-
-          // Insert into health history
           const rows: any[] = [];
           for (const itemId of batchIds) {
             const visits = typeof visitsData === "object" && visitsData[itemId] !== undefined
-              ? Number(visitsData[itemId]) || 0
-              : 0;
+              ? Number(visitsData[itemId]) || 0 : 0;
             rows.push({
-              seller_id: sellerId,
-              item_id: itemId,
-              collected_at: collectedAt,
+              seller_id: sellerId, item_id: itemId, collected_at: collectedAt,
               window_days: window.daysEnd - window.daysStart,
-              visits,
-              source: "backfill",
-              listing_status: "active",
+              visits, source: "backfill", listing_status: "active",
             });
           }
 
@@ -620,20 +587,17 @@ async function handleBackfill(supabase: any, sellerId: string) {
             const { error } = await supabase
               .from("listing_health_history")
               .upsert(rows, { onConflict: "seller_id,item_id,collected_at,window_days" });
-            if (error) {
-              console.warn(`[rad-collector] Backfill history upsert error:`, error.message);
-              totalFailed += batchIds.length;
-            } else {
-              totalProcessed += batchIds.length;
-            }
+            if (error) { console.warn(`[rad-collector] Backfill history upsert error:`, error.message); totalFailed += batchIds.length; }
+            else { totalProcessed += batchIds.length; }
           }
 
-          // Update checkpoint
+          // Update checkpoint + heartbeat
           const lastId = batchIds[batchIds.length - 1];
           const progressPct = Math.round(((wi + (i + VISIT_BATCH) / allItemIds.length) / BACKFILL_WINDOWS.length) * 100);
           await supabase.from("radiography_backfill_control").update({
             last_processed_item_id: lastId,
             progress_percent: Math.min(progressPct, 99),
+            updated_at: new Date().toISOString(), // heartbeat
           }).eq("seller_id", sellerId);
 
         } catch (err) {
@@ -643,26 +607,25 @@ async function handleBackfill(supabase: any, sellerId: string) {
 
         await sleep(500);
 
-        // Check if we're approaching timeout (50s safety)
-        if (Date.now() - startTime > 50_000) {
-          console.log(`[rad-collector] Approaching timeout, pausing backfill for continuation`);
+        // Timeout check → pause and self-chain with incremented depth
+        if (Date.now() - startTime > SAFETY_TIMEOUT_MS) {
+          console.log(`[rad-collector] Approaching timeout, pausing backfill for continuation (chain ${chainDepth})`);
+          const pauseProgress = Math.round(((wi + (i + VISIT_BATCH) / allItemIds.length) / BACKFILL_WINDOWS.length) * 100);
           await supabase.from("radiography_backfill_control").update({
             status: "paused",
-            progress_percent: Math.round(((wi + (i + VISIT_BATCH) / allItemIds.length) / BACKFILL_WINDOWS.length) * 100),
+            progress_percent: Math.min(pauseProgress, 99),
           }).eq("seller_id", sellerId);
 
           await finishLog(supabase, logId, {
             status: "success",
             total_items: allItemIds.length * BACKFILL_WINDOWS.length,
-            items_processed: totalProcessed,
-            items_failed: totalFailed,
+            items_processed: totalProcessed, items_failed: totalFailed,
             duration_ms: Date.now() - startTime,
-            metadata_json: { paused: true, window: window.label, reason: "timeout_prevention" },
+            metadata_json: { paused: true, window: window.label, chain_depth: chainDepth },
           });
 
-          // Self-chain for continuation
-          selfChain(sellerId, "backfill");
-
+          // Self-chain with incremented depth
+          selfChain(sellerId, "backfill", { chain_depth: chainDepth + 1 });
           return { success: true, paused: true, processed: totalProcessed, failed: totalFailed };
         }
       }
@@ -670,8 +633,7 @@ async function handleBackfill(supabase: any, sellerId: string) {
 
     // All windows completed
     await supabase.from("radiography_backfill_control").update({
-      status: "done",
-      progress_percent: 100,
+      status: "done", progress_percent: 100,
       finished_at: new Date().toISOString(),
     }).eq("seller_id", sellerId);
 
@@ -679,10 +641,9 @@ async function handleBackfill(supabase: any, sellerId: string) {
     await finishLog(supabase, logId, {
       status: "success",
       total_items: allItemIds.length * BACKFILL_WINDOWS.length,
-      items_processed: totalProcessed,
-      items_failed: totalFailed,
+      items_processed: totalProcessed, items_failed: totalFailed,
       duration_ms: duration,
-      metadata_json: { completed: true, windows_processed: BACKFILL_WINDOWS.length },
+      metadata_json: { completed: true, windows_processed: BACKFILL_WINDOWS.length, chain_depth: chainDepth },
     });
 
     console.log(`[rad-collector] BACKFILL done: ${totalProcessed} processed, ${totalFailed} failed in ${duration}ms`);
@@ -690,128 +651,110 @@ async function handleBackfill(supabase: any, sellerId: string) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     await supabase.from("radiography_backfill_control").update({
-      status: "failed",
-      error_message: msg,
+      status: "failed", error_message: msg,
     }).eq("seller_id", sellerId);
     await finishLog(supabase, logId, { status: "failed", error_message: msg, duration_ms: Date.now() - startTime });
     return { success: false, error: msg };
   }
 }
 
-// Self-chain for long-running backfill
-function selfChain(sellerId: string, action: string) {
-  try {
-    const url = `${SUPABASE_URL}/functions/v1/radiography-collector`;
-    fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-      },
-      body: JSON.stringify({ seller_id: sellerId, action, internal: true }),
-    }).catch(() => {});
-  } catch {}
-}
-
 // ============================================================================
-// FLOW 5 — ANOMALY DETECTION (simple initial version)
+// FLOW 5 — OPTIMIZED ANOMALY DETECTION (scoped to processed items)
 // ============================================================================
-async function detectAnomalies(supabase: any, sellerId: string) {
-  console.log(`[rad-collector] Detecting anomalies for ${sellerId}`);
+async function detectAnomalies(supabase: any, sellerId: string, processedItemIds: string[]) {
+  if (!processedItemIds || processedItemIds.length === 0) return [];
+  console.log(`[rad-collector] Detecting anomalies for ${sellerId} (${processedItemIds.length} items)`);
 
   try {
-    // Get current health data
+    // Fetch current state only for processed items (batched)
     let allCurrent: any[] = [];
-    let from = 0;
-    while (true) {
-      const { data: page } = await supabase
+    for (let i = 0; i < processedItemIds.length; i += 500) {
+      const chunk = processedItemIds.slice(i, i + 500);
+      const { data } = await supabase
         .from("listing_health_current")
-        .select("*")
+        .select("item_id, visits_last, available_quantity, listing_status")
         .eq("seller_id", sellerId)
-        .range(from, from + 999);
-      allCurrent = allCurrent.concat(page || []);
-      if (!page || page.length < 1000) break;
-      from += 1000;
+        .in("item_id", chunk);
+      allCurrent = allCurrent.concat(data || []);
     }
 
-    if (allCurrent.length === 0) return;
+    if (allCurrent.length === 0) return [];
 
-    // Get previous collection for comparison (latest 2 entries per item from history)
+    // Batch-fetch last 3 history entries for all processed items
+    // Use a single query with ordering, then group in memory
+    let allHistory: any[] = [];
+    for (let i = 0; i < processedItemIds.length; i += 500) {
+      const chunk = processedItemIds.slice(i, i + 500);
+      const { data } = await supabase
+        .from("listing_health_history")
+        .select("item_id, visits, collected_at")
+        .eq("seller_id", sellerId)
+        .eq("window_days", 7)
+        .in("item_id", chunk)
+        .order("collected_at", { ascending: false });
+      allHistory = allHistory.concat(data || []);
+    }
+
+    // Group history by item_id, keep latest 3
+    const historyByItem = new Map<string, any[]>();
+    for (const h of allHistory) {
+      const existing = historyByItem.get(h.item_id) || [];
+      if (existing.length < 3) {
+        existing.push(h);
+        historyByItem.set(h.item_id, existing);
+      }
+    }
+
     const anomalies: any[] = [];
+    const cleanItemIds: string[] = [];
 
     for (const current of allCurrent) {
       const flags: string[] = [];
 
-      // 1. Active item with zero visits
       if (current.listing_status === "active" && (current.visits_last === 0 || current.visits_last === null)) {
         flags.push("zero_visits");
       }
 
-      // 2. High stock without traction
       if (current.available_quantity > 50 && (current.visits_last || 0) < 10) {
         flags.push("high_stock_low_traction");
       }
 
-      // Check visit trend from history
-      const { data: history } = await supabase
-        .from("listing_health_history")
-        .select("visits, collected_at")
-        .eq("seller_id", sellerId)
-        .eq("item_id", current.item_id)
-        .eq("window_days", 7)
-        .order("collected_at", { ascending: false })
-        .limit(3);
-
-      if (history && history.length >= 2) {
+      const history = historyByItem.get(current.item_id) || [];
+      if (history.length >= 2) {
         const latest = history[0].visits || 0;
         const previous = history[1].visits || 0;
-
-        // 3. Significant visit drop (>40%)
-        if (previous > 20 && latest < previous * 0.6) {
-          flags.push("visit_drop");
-        }
-
-        // 4. Consistent decline across 3 periods
+        if (previous > 20 && latest < previous * 0.6) flags.push("visit_drop");
         if (history.length >= 3) {
           const oldest = history[2].visits || 0;
-          if (oldest > previous && previous > latest && oldest > 0) {
-            flags.push("consistent_decline");
-          }
+          if (oldest > previous && previous > latest && oldest > 0) flags.push("consistent_decline");
         }
       }
 
       if (flags.length > 0) {
-        anomalies.push({
-          item_id: current.item_id,
-          flags,
-          visits_last: current.visits_last,
-          available_quantity: current.available_quantity,
-        });
+        anomalies.push({ item_id: current.item_id, flags });
+      } else {
+        cleanItemIds.push(current.item_id);
       }
     }
 
-    // Store anomaly flags in listing_health_current
+    // Batch update anomaly flags
     for (const anomaly of anomalies) {
-      await supabase
-        .from("listing_health_current")
+      await supabase.from("listing_health_current")
         .update({ anomaly_flags: anomaly.flags })
         .eq("seller_id", sellerId)
         .eq("item_id", anomaly.item_id);
     }
 
-    // Clear flags for items without anomalies
-    const anomalyItemIds = anomalies.map(a => a.item_id);
-    const cleanItems = allCurrent.filter(c => !anomalyItemIds.includes(c.item_id));
-    for (let i = 0; i < cleanItems.length; i += 500) {
-      const chunk = cleanItems.slice(i, i + 500).map(c => c.item_id);
-      await supabase
-        .from("listing_health_current")
+    // Clear flags for clean items (batched)
+    for (let i = 0; i < cleanItemIds.length; i += 500) {
+      const chunk = cleanItemIds.slice(i, i + 500);
+      await supabase.from("listing_health_current")
         .update({ anomaly_flags: [] })
         .eq("seller_id", sellerId)
         .in("item_id", chunk);
     }
 
-    console.log(`[rad-collector] Detected ${anomalies.length} items with anomalies`);
+    console.log(`[rad-collector] Anomalies: ${anomalies.length} flagged, ${cleanItemIds.length} clean`);
     return anomalies;
   } catch (err) {
     console.warn(`[rad-collector] Anomaly detection error:`, err);
@@ -820,37 +763,67 @@ async function detectAnomalies(supabase: any, sellerId: string) {
 }
 
 // ============================================================================
-// FLOW: NIGHTLY CRON — process all active sellers
+// NIGHTLY CRON — with seller cursor and self-chain for continuation
 // ============================================================================
-async function handleNightlyCron(supabase: any) {
-  console.log(`[rad-collector] NIGHTLY CRON started`);
+async function handleNightlyCron(supabase: any, lastProcessedSellerId?: string, skipSync?: boolean) {
+  console.log(`[rad-collector] NIGHTLY CRON started (cursor: ${lastProcessedSellerId || "start"}, skipSync: ${!!skipSync})`);
   const startTime = Date.now();
 
-  // Get all active ML accounts
   const { data: accounts } = await supabase
     .from("ml_accounts")
     .select("ml_user_id")
-    .eq("is_active", true);
+    .eq("is_active", true)
+    .order("ml_user_id", { ascending: true });
 
   if (!accounts || accounts.length === 0) {
     console.log(`[rad-collector] No active accounts found`);
     return { success: true, message: "No active accounts" };
   }
 
-  const sellerIds = [...new Set(accounts.map((a: any) => a.ml_user_id))];
-  console.log(`[rad-collector] Processing ${sellerIds.length} sellers`);
+  const sellerIds = [...new Set(accounts.map((a: any) => a.ml_user_id))].sort();
+  
+  // Find starting point from cursor
+  let startIdx = 0;
+  if (lastProcessedSellerId) {
+    const idx = sellerIds.indexOf(lastProcessedSellerId);
+    if (idx >= 0) startIdx = idx + 1;
+  }
+
+  console.log(`[rad-collector] Processing sellers ${startIdx + 1}–${sellerIds.length} of ${sellerIds.length}`);
 
   const results: any[] = [];
+  let lastProcessed: string | null = null;
 
-  for (const sellerId of sellerIds) {
+  for (let si = startIdx; si < sellerIds.length; si++) {
+    const sellerId = sellerIds[si];
+    const sellerStart = Date.now();
+
     try {
-      // Sync listings first
-      const syncResult = await handleSync(supabase, sellerId);
-      
-      // Then collect visits
-      const collResult = await handleCollection(supabase, sellerId);
+      // AJUSTE #5: Sync only if not skipped and last_sync_at is old (> 7 days)
+      if (!skipSync) {
+        const { data: lastSyncRow } = await supabase
+          .from("meli_listings_cache")
+          .select("last_sync_at")
+          .eq("seller_id", sellerId)
+          .order("last_sync_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-      // Check if backfill is needed
+        const lastSyncAt = lastSyncRow?.last_sync_at ? new Date(lastSyncRow.last_sync_at).getTime() : 0;
+        const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+
+        if (Date.now() - lastSyncAt > sevenDaysMs) {
+          console.log(`[rad-collector] Seller ${sellerId}: sync needed (last sync > 7 days)`);
+          await handleSync(supabase, sellerId, sellerStart);
+        } else {
+          console.log(`[rad-collector] Seller ${sellerId}: sync skipped (recent)`);
+        }
+      }
+
+      // Collection always runs (eligibility is per-item)
+      const collResult = await handleCollection(supabase, sellerId, Date.now());
+
+      // Trigger backfill if needed
       const { data: backfillCtrl } = await supabase
         .from("radiography_backfill_control")
         .select("status")
@@ -858,23 +831,31 @@ async function handleNightlyCron(supabase: any) {
         .maybeSingle();
 
       if (!backfillCtrl || backfillCtrl.status === "pending" || backfillCtrl.status === "paused") {
-        // Trigger backfill async
-        selfChain(sellerId, "backfill");
+        selfChain(sellerId, "backfill", { chain_depth: 0 });
       }
 
-      results.push({ seller_id: sellerId, sync: syncResult, collection: collResult });
+      results.push({ seller_id: sellerId, collection: collResult });
+      lastProcessed = sellerId;
     } catch (err) {
       console.error(`[rad-collector] Error processing seller ${sellerId}:`, err);
       results.push({ seller_id: sellerId, error: String(err) });
+      lastProcessed = sellerId;
     }
 
-    // Check timeout
-    if (Date.now() - startTime > 50_000) {
-      console.log(`[rad-collector] Approaching timeout, stopping cron loop`);
-      break;
+    // Timeout check → self-chain nightly with cursor
+    if (Date.now() - startTime > SAFETY_TIMEOUT_MS) {
+      console.log(`[rad-collector] Nightly timeout, chaining from seller ${lastProcessed}`);
+      selfChain(null, "nightly", { last_processed_seller_id: lastProcessed, skip_sync: true });
+      return {
+        success: true, partial: true,
+        sellers_processed: results.length, total_sellers: sellerIds.length,
+        last_processed_seller_id: lastProcessed,
+        results,
+      };
     }
   }
 
+  console.log(`[rad-collector] NIGHTLY CRON complete: ${results.length}/${sellerIds.length} sellers`);
   return { success: true, sellers_processed: results.length, total_sellers: sellerIds.length, results };
 }
 
@@ -890,9 +871,9 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json().catch(() => ({}));
-    const { seller_id, action, internal } = body;
+    const { seller_id, action, internal, chain_depth, last_processed_seller_id, skip_sync } = body;
 
-    // Auth check: internal calls use service_role, external need JWT
+    // Auth check
     if (!internal) {
       const authHeader = req.headers.get("Authorization");
       if (authHeader && !authHeader.includes(SUPABASE_SERVICE_ROLE_KEY)) {
@@ -900,77 +881,52 @@ Deno.serve(async (req) => {
         const { data: { user }, error: userError } = await supabase.auth.getUser(token);
         if (userError || !user) {
           return new Response(JSON.stringify({ error: "Unauthorized" }), {
-            status: 401,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
       }
     }
 
     console.log(`[rad-collector] Action: ${action}, Seller: ${seller_id || "all"}`);
-
+    const startTime = Date.now();
     let result: any;
 
     switch (action) {
       case "sync":
-        if (!seller_id) {
-          return new Response(JSON.stringify({ error: "seller_id required" }), {
-            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-        result = await handleSync(supabase, seller_id);
+        if (!seller_id) return new Response(JSON.stringify({ error: "seller_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        result = await handleSync(supabase, seller_id, startTime);
         break;
 
       case "collection":
-        if (!seller_id) {
-          return new Response(JSON.stringify({ error: "seller_id required" }), {
-            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-        result = await handleCollection(supabase, seller_id);
+        if (!seller_id) return new Response(JSON.stringify({ error: "seller_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        result = await handleCollection(supabase, seller_id, startTime);
         break;
 
       case "backfill":
-        if (!seller_id) {
-          return new Response(JSON.stringify({ error: "seller_id required" }), {
-            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-        result = await handleBackfill(supabase, seller_id);
+        if (!seller_id) return new Response(JSON.stringify({ error: "seller_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        result = await handleBackfill(supabase, seller_id, chain_depth || 0);
         break;
 
       case "nightly":
-        result = await handleNightlyCron(supabase);
+        result = await handleNightlyCron(supabase, last_processed_seller_id, skip_sync);
         break;
 
       case "full":
-        // Full pipeline for a single seller: sync → collection → backfill
-        if (!seller_id) {
-          return new Response(JSON.stringify({ error: "seller_id required" }), {
-            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-        const syncRes = await handleSync(supabase, seller_id);
-        const collRes = await handleCollection(supabase, seller_id);
-        // Trigger backfill async to avoid timeout
-        selfChain(seller_id, "backfill");
+        if (!seller_id) return new Response(JSON.stringify({ error: "seller_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        const syncRes = await handleSync(supabase, seller_id, startTime);
+        const collRes = await handleCollection(supabase, seller_id, Date.now());
+        selfChain(seller_id, "backfill", { chain_depth: 0 });
         result = { sync: syncRes, collection: collRes, backfill: "triggered_async" };
         break;
 
       default:
-        return new Response(JSON.stringify({ error: `Unknown action: ${action}. Use: sync, collection, backfill, nightly, full` }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return new Response(JSON.stringify({ error: `Unknown action: ${action}. Use: sync, collection, backfill, nightly, full` }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    return new Response(JSON.stringify(result), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("[rad-collector] Fatal error:", err);
     const msg = err instanceof Error ? err.message : "Unknown error";
-    return new Response(JSON.stringify({ error: msg }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(JSON.stringify({ error: msg }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });
