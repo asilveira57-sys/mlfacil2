@@ -17,6 +17,9 @@ import {
   Stethoscope,
   Siren,
   Scan,
+  ShoppingCart,
+  Clock,
+  BarChart3,
 } from "lucide-react";
 import {
   ComposedChart,
