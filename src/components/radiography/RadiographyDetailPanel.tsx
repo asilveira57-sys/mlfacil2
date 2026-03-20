@@ -347,9 +347,12 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
           <div className="p-5 space-y-5">
             {/* SECTION 1 — Summary metrics */}
             <div className="grid grid-cols-4 gap-2">
-              <MiniStat label="Visitas" value={item.visits_last != null ? item.visits_last.toLocaleString("pt-BR") : "—"} icon={<Eye className="h-3 w-3 text-cyan-400" />} />
-              <MiniStat label="Vendas (30d)" value={String(item.sales_count_30d ?? 0)} icon={<ShoppingCart className="h-3 w-3 text-emerald-400" />} />
-              <MiniStat label="Conversão" value={item.conversion_rate_7d != null ? `${item.conversion_rate_7d.toFixed(1)}%` : "—"} icon={<BarChart3 className="h-3 w-3 text-violet-400" />} />
+              <MiniStat label={`Visitas (${period}d)`} value={item.visits_period != null ? item.visits_period.toLocaleString("pt-BR") : (item.visits_last != null ? item.visits_last.toLocaleString("pt-BR") : "—")} icon={<Eye className="h-3 w-3 text-cyan-400" />} />
+              <MiniStat label={`Vendas (${period}d)`} value={String(item.sales_period ?? item.sales_count_30d ?? 0)} icon={<ShoppingCart className="h-3 w-3 text-emerald-400" />} />
+              <MiniStat label="Conversão" value={
+                item.conversion_period != null ? `${item.conversion_period.toFixed(1)}%` :
+                (item.conversion_rate_7d != null ? `${item.conversion_rate_7d.toFixed(1)}%` : "—")
+              } icon={<BarChart3 className="h-3 w-3 text-violet-400" />} />
               <MiniStat label="Dias s/ venda" value={item.days_without_sale != null ? String(item.days_without_sale) : "—"} icon={<Clock className="h-3 w-3 text-amber-400" />} highlight={item.days_without_sale != null && item.days_without_sale > 14} />
             </div>
             <div className="grid grid-cols-3 gap-2">
