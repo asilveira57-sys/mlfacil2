@@ -62,6 +62,7 @@ const TYPE_LABELS: Record<string, string> = {
 
 interface RetrospectiveWithCompany extends Retrospective {
   company_name?: string | null;
+  company_logo_url?: string | null;
 }
 
 // ─── Admin hook: list ALL retrospectives with company name ───
@@ -70,7 +71,6 @@ function useAllRetrospectives() {
   return useQuery({
     queryKey: ['admin-retrospectives-with-companies'],
     queryFn: async () => {
-      // Fetch retrospectives
       const { data: retros, error } = await supabase
         .from('retrospectives')
         .select('*')
@@ -78,29 +78,62 @@ function useAllRetrospectives() {
         .limit(500);
       if (error) throw error;
 
-      // Get unique company_ids
+      // Get unique company_ids and tenant_ids
       const companyIds = [...new Set(
         (retros ?? []).map(r => r.company_id).filter(Boolean)
       )] as string[];
+      const tenantIds = [...new Set(
+        (retros ?? []).map(r => r.tenant_id).filter(Boolean)
+      )] as string[];
 
-      // Fetch company names
-      let companyMap: Record<string, string> = {};
+      // Fetch company names + logos
+      let companyMap: Record<string, { name: string; logo: string | null }> = {};
       if (companyIds.length > 0) {
         const { data: companies } = await supabase
           .from('companies')
-          .select('id, display_name')
+          .select('id, display_name, logo_url')
           .in('id', companyIds);
-        
-        for (const c of companies || []) {
-          if (c.display_name) companyMap[c.id] = c.display_name;
+        for (const c of (companies || []) as any[]) {
+          if (c.display_name) companyMap[c.id] = { name: c.display_name, logo: c.logo_url || null };
         }
       }
 
-      // Merge
-      return (retros ?? []).map(r => ({
-        ...r,
-        company_name: r.company_id ? companyMap[r.company_id] || null : null,
-      })) as RetrospectiveWithCompany[];
+      // Fallback: fetch tenant owner profiles for companies without names
+      let tenantOwnerMap: Record<string, string> = {};
+      if (tenantIds.length > 0) {
+        const { data: tenants } = await supabase
+          .from('tenants')
+          .select('id, name, owner_user_id')
+          .in('id', tenantIds);
+        
+        const ownerIds = [...new Set((tenants || []).map((t: any) => t.owner_user_id).filter(Boolean))];
+        let profileMap: Record<string, string> = {};
+        if (ownerIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, full_name, email')
+            .in('id', ownerIds);
+          for (const p of (profiles || []) as any[]) {
+            profileMap[p.id] = p.full_name || p.email || '';
+          }
+        }
+
+        for (const t of (tenants || []) as any[]) {
+          tenantOwnerMap[t.id] = t.name || profileMap[t.owner_user_id] || '';
+        }
+      }
+
+      return (retros ?? []).map(r => {
+        const companyInfo = r.company_id ? companyMap[r.company_id] : null;
+        const clientName = companyInfo?.name
+          || (r.tenant_id ? tenantOwnerMap[r.tenant_id] : null)
+          || null;
+        return {
+          ...r,
+          company_name: clientName,
+          company_logo_url: companyInfo?.logo || null,
+        };
+      }) as RetrospectiveWithCompany[];
     },
   });
 }

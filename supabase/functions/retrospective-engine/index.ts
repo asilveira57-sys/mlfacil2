@@ -329,6 +329,264 @@ function buildTrialNarrative(
   return narrative;
 }
 
+async function buildOnboardingContext(
+  supabase: any,
+  tenantId: string,
+  companyId: string,
+  sellerId: string,
+  anchorDate: Date
+): Promise<Record<string, unknown>> {
+  const ctx: Record<string, unknown> = {};
+
+  // 1. First access (tenant owner)
+  try {
+    const { data: tenant } = await supabase
+      .from("tenants")
+      .select("owner_user_id, created_at, first_payment_at")
+      .eq("id", tenantId)
+      .single();
+
+    if (tenant) {
+      ctx.first_access_at = tenant.created_at;
+      ctx.plan_activated_at = tenant.first_payment_at || null;
+
+      // LGPD consent
+      const { data: consent } = await supabase
+        .from("user_consents")
+        .select("consented_at")
+        .eq("user_id", tenant.owner_user_id)
+        .order("consented_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      ctx.lgpd_accepted_at = consent?.consented_at || null;
+    }
+  } catch (e: any) {
+    console.error(`[retro-engine] Onboarding context error: ${e.message}`);
+  }
+
+  // 2. ML account linked date
+  try {
+    const { data: mlAcc } = await supabase
+      .from("ml_accounts")
+      .select("created_at")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    ctx.ml_linked_at = mlAcc?.created_at || null;
+  } catch (_) {}
+
+  // 3. Baseline 30d (already computed elsewhere, but re-fetch for explicit inclusion)
+  try {
+    const anchorStr = toDateStr(anchorDate);
+    const lookbackStart = toDateStr(addDays(anchorDate, -30));
+
+    const { data: lbOrders } = await supabase
+      .from("meli_orders_cache")
+      .select("order_id, total_amount")
+      .eq("seller_id", sellerId)
+      .eq("order_status", "paid")
+      .gte("created_at_meli", lookbackStart)
+      .lt("created_at_meli", anchorStr);
+
+    const count = lbOrders?.length || 0;
+    const revenue = (lbOrders || []).reduce(
+      (s: number, o: any) => s + Number(o.total_amount || 0), 0
+    );
+    ctx.baseline_30d = {
+      orders: count,
+      revenue,
+      ticket: count > 0 ? revenue / count : 0,
+    };
+  } catch (_) {}
+
+  return ctx;
+}
+
+async function buildAdsSnapshot(
+  supabase: any,
+  sellerId: string,
+  periodStart: string,
+  periodEnd: string
+): Promise<Record<string, unknown> | null> {
+  try {
+    // Campaigns
+    const { data: campaigns } = await supabase
+      .from("ads_campaigns")
+      .select("id, name, status, spent_total, campaign_type")
+      .eq("seller_id", sellerId);
+
+    const activeCampaigns = (campaigns || []).filter((c: any) => c.status === "active");
+
+    // Daily metrics for the period
+    const { data: metrics } = await supabase
+      .from("ads_daily_metrics")
+      .select("spent, revenue, clicks, impressions, conversions, campaign_id")
+      .eq("seller_id", sellerId)
+      .gte("metric_date", periodStart)
+      .lte("metric_date", periodEnd);
+
+    if (!metrics || metrics.length === 0) return null;
+
+    const totalInvested = metrics.reduce((s: number, m: any) => s + Number(m.spent || 0), 0);
+    const totalRevenue = metrics.reduce((s: number, m: any) => s + Number(m.revenue || 0), 0);
+    const totalClicks = metrics.reduce((s: number, m: any) => s + Number(m.clicks || 0), 0);
+    const totalImpressions = metrics.reduce((s: number, m: any) => s + Number(m.impressions || 0), 0);
+
+    if (totalInvested === 0) return null;
+
+    const roas = totalInvested > 0 ? totalRevenue / totalInvested : 0;
+    const acos = totalRevenue > 0 ? (totalInvested / totalRevenue) * 100 : 0;
+
+    // Get total revenue for TACoS
+    const { data: allOrders } = await supabase
+      .from("meli_orders_cache")
+      .select("total_amount")
+      .eq("seller_id", sellerId)
+      .eq("order_status", "paid")
+      .gte("created_at_meli", periodStart)
+      .lte("created_at_meli", periodEnd);
+
+    const totalSalesRevenue = (allOrders || []).reduce(
+      (s: number, o: any) => s + Number(o.total_amount || 0), 0
+    );
+    const tacos = totalSalesRevenue > 0 ? (totalInvested / totalSalesRevenue) * 100 : 0;
+
+    // Top 5 campaigns by revenue
+    const campaignRevenue: Record<string, { name: string; spent: number; revenue: number }> = {};
+    for (const m of metrics) {
+      const cId = m.campaign_id;
+      if (!campaignRevenue[cId]) {
+        const camp = (campaigns || []).find((c: any) => c.id === cId);
+        campaignRevenue[cId] = { name: camp?.name || cId, spent: 0, revenue: 0 };
+      }
+      campaignRevenue[cId].spent += Number(m.spent || 0);
+      campaignRevenue[cId].revenue += Number(m.revenue || 0);
+    }
+
+    const topCampaigns = Object.values(campaignRevenue)
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 5)
+      .map(c => ({ ...c, roas: c.spent > 0 ? c.revenue / c.spent : 0 }));
+
+    return {
+      campaigns_active: activeCampaigns.length,
+      campaigns_total: (campaigns || []).length,
+      total_invested: totalInvested,
+      total_revenue_ads: totalRevenue,
+      total_clicks: totalClicks,
+      total_impressions: totalImpressions,
+      roas,
+      acos,
+      tacos,
+      top_campaigns: topCampaigns,
+    };
+  } catch (e: any) {
+    console.error(`[retro-engine] ADS snapshot error: ${e.message}`);
+    return null;
+  }
+}
+
+async function buildAbcAnalysis(
+  supabase: any,
+  sellerId: string,
+  periodStart: string,
+  periodEnd: string
+): Promise<Record<string, unknown>> {
+  const analysis: Record<string, unknown> = {};
+
+  try {
+    // Top 10 products by revenue
+    const { data: orderItems } = await supabase
+      .from("meli_order_items_cache")
+      .select("item_id, item_title, unit_price, quantity, order_id")
+      .eq("seller_id", sellerId)
+      .gte("created_at", periodStart)
+      .lte("created_at", periodEnd);
+
+    if (orderItems && orderItems.length > 0) {
+      const productMap: Record<string, { title: string; revenue: number; units: number; orders: Set<string> }> = {};
+      for (const item of orderItems) {
+        const key = item.item_id;
+        if (!productMap[key]) {
+          productMap[key] = { title: item.item_title || key, revenue: 0, units: 0, orders: new Set() };
+        }
+        productMap[key].revenue += Number(item.unit_price || 0) * Number(item.quantity || 0);
+        productMap[key].units += Number(item.quantity || 0);
+        productMap[key].orders.add(item.order_id);
+      }
+
+      analysis.top_products = Object.entries(productMap)
+        .map(([item_id, data]) => ({
+          item_id,
+          title: data.title.substring(0, 80),
+          revenue: Math.round(data.revenue * 100) / 100,
+          units: data.units,
+          orders: data.orders.size,
+        }))
+        .sort((a, b) => b.revenue - a.revenue)
+        .slice(0, 10);
+    }
+
+    // Top 10 cities
+    const { data: orders } = await supabase
+      .from("meli_orders_cache")
+      .select("shipping_city, shipping_state, total_amount")
+      .eq("seller_id", sellerId)
+      .eq("order_status", "paid")
+      .gte("created_at_meli", periodStart)
+      .lte("created_at_meli", periodEnd);
+
+    if (orders && orders.length > 0) {
+      const cityMap: Record<string, { city: string; state: string; revenue: number; orders: number }> = {};
+      for (const o of orders) {
+        const city = o.shipping_city || "Não informado";
+        const state = o.shipping_state || "";
+        const key = `${city}-${state}`;
+        if (!cityMap[key]) cityMap[key] = { city, state, revenue: 0, orders: 0 };
+        cityMap[key].revenue += Number(o.total_amount || 0);
+        cityMap[key].orders += 1;
+      }
+
+      analysis.top_cities = Object.values(cityMap)
+        .sort((a, b) => b.revenue - a.revenue)
+        .slice(0, 10);
+    }
+
+    // Top 10 buyers
+    if (orders && orders.length > 0) {
+      const { data: ordersWithBuyer } = await supabase
+        .from("meli_orders_cache")
+        .select("buyer_nickname, total_amount")
+        .eq("seller_id", sellerId)
+        .eq("order_status", "paid")
+        .gte("created_at_meli", periodStart)
+        .lte("created_at_meli", periodEnd);
+
+      if (ordersWithBuyer && ordersWithBuyer.length > 0) {
+        const buyerMap: Record<string, { nickname: string; orders: number; revenue: number }> = {};
+        for (const o of ordersWithBuyer) {
+          const nick = o.buyer_nickname || "Anônimo";
+          if (!buyerMap[nick]) buyerMap[nick] = { nickname: nick, orders: 0, revenue: 0 };
+          buyerMap[nick].orders += 1;
+          buyerMap[nick].revenue += Number(o.total_amount || 0);
+        }
+
+        analysis.top_buyers = Object.values(buyerMap)
+          .sort((a, b) => b.orders - a.orders)
+          .slice(0, 10);
+      }
+    }
+  } catch (e: any) {
+    console.error(`[retro-engine] ABC analysis error: ${e.message}`);
+  }
+
+  return analysis;
+}
+
 async function buildSummaryJson(
   supabase: any,
   currentSnapshot: Record<string, unknown>,
@@ -337,12 +595,18 @@ async function buildSummaryJson(
   trialStatus: string,
   tenantId: string,
   companyId: string,
+  sellerId: string,
   periodStart: string,
-  periodEnd: string
+  periodEnd: string,
+  anchorDate: Date,
+  companyLogoUrl: string | null,
+  companyName: string | null
 ): Promise<Record<string, unknown>> {
   const summary: Record<string, unknown> = {
     type: rule.retrospective_type,
     period_days: rule.period_days,
+    company_name: companyName,
+    company_logo_url: companyLogoUrl,
     current: {
       orders: currentSnapshot.orders_count,
       revenue: currentSnapshot.revenue_total,
@@ -389,8 +653,21 @@ async function buildSummaryJson(
     };
   }
 
-  // Trial-specific enrichment
+  // Onboarding context (dates + baseline)
   const isTrialType = rule.retrospective_type === "trial_conversion" || rule.retrospective_type === "trial_summary";
+
+  summary.onboarding_context = await buildOnboardingContext(
+    supabase, tenantId, companyId, sellerId, anchorDate
+  );
+
+  // ADS Snapshot
+  const adsSnapshot = await buildAdsSnapshot(supabase, sellerId, periodStart, periodEnd);
+  if (adsSnapshot) summary.ads_snapshot = adsSnapshot;
+
+  // ABC Analysis
+  summary.abc_analysis = await buildAbcAnalysis(supabase, sellerId, periodStart, periodEnd);
+
+  // Trial-specific enrichment
   if (isTrialType) {
     const moduleUsage = await countModuleUsage(supabase, tenantId, companyId, periodStart, periodEnd);
     const isConversion = rule.retrospective_type === "trial_conversion" && trialStatus === "in_trial";
@@ -545,14 +822,14 @@ Deno.serve(async (req) => {
       // 3. Load companies for tenant
       let companiesQuery = supabase
         .from("companies")
-        .select("id, tenant_id, display_name")
+        .select("id, tenant_id, display_name, logo_url")
         .eq("tenant_id", tenant.id)
         .eq("is_active", true);
 
       if (targetCompanyId) {
         companiesQuery = supabase
           .from("companies")
-          .select("id, tenant_id, display_name")
+          .select("id, tenant_id, display_name, logo_url")
           .eq("id", targetCompanyId);
       }
 
@@ -804,8 +1081,12 @@ Deno.serve(async (req) => {
                 trialStatus,
                 tenant.id,
                 company.id,
+                sellerId,
                 periodStart,
-                periodEnd
+                periodEnd,
+                anchorDate,
+                (company as any).logo_url || null,
+                company.display_name || null
               );
 
               // Create retrospective
