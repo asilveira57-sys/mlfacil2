@@ -41,8 +41,7 @@ Deno.serve(async (req) => {
   return new Response(JSON.stringify({ success: false, blocked: true, reason: "Automatic billing sync is permanently disabled. Use manual recalculation." }), {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
-
-    const stats = {
+});
       accounts_total: accounts?.length || 0,
       accounts_triggered: 0,
       accounts_skipped: 0,
