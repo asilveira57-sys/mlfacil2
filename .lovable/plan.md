@@ -1,103 +1,71 @@
 
-Diagnóstico objetivo (conta ADECONEX.SP)
 
-1) O filtro de período da lista hoje é “visual”, não de dados
-- Em `RadiographyItemList.tsx`, o `selectedPeriod` só alimenta o `<Select>`.
-- A lista usa campos fixos de `listing_health_current` (`visits_last`, `sales_count_30d`, `conversion_rate_7d`), sem recalcular por 7/15/30/150 dias.
-- Resultado: trocar período não muda visitas/vendas/conversão na listagem.
+# Plano: Corrigir E-mails de Boas-Vindas e Logs
 
-2) O detalhe também não muda por falta de série temporal útil
-- `fetchItemHistory` filtra `listing_health_history.collected_at`, mas para ADECONEX.SP os dados estão concentrados no mesmo dia.
-- Banco (seller `1411095727`):
-  - `listing_health_history`: 809 linhas, **1 dia distinto** (`20/03`).
-  - Item exemplo `MLB3852550991`: 5 linhas e todas caem em qualquer filtro (7/15/30/60/150).
-- Resultado: gráfico parece “travado” e período parece sem efeito.
+## Diagnóstico
 
-3) Causa raiz da data repetida no histórico
-- No `radiography-collector` (backfill), `collected_at` é salvo com “agora” (`new Date()`), não com a data histórica da janela.
-- Isso comprime backfill em um único dia no gráfico.
+### Problema 1 — E-mail de confirmação vem em inglês do @lovable
+O `auth-email-hook` existe com templates em PT-BR, mas o domínio de e-mail (`notify.www.mktpfacil.com`) **falhou na verificação DNS**. Resultado: o sistema ignora o hook customizado e envia o e-mail padrão do Lovable — em inglês, de `@auth.lovable.cloud`.
 
-4) Armazenamento histórico real hoje (ADECONEX.SP)
-- `seller_item_visits`: 276 linhas, 86 itens, 8 dias distintos (`13/03` a `20/03`).
-- Ou seja: existe histórico diário parcial, mas a UI da Radiografia não usa essa base para o filtro principal.
+**Solução:** O domínio precisa ser reconfigurado. O problema é que `www.mktpfacil.com` provavelmente não é o domínio raiz — o subdomínio `notify.www.mktpfacil.com` não conseguiu propagar os registros NS. Você precisa verificar/reconfigurar o domínio de e-mail nas configurações do projeto.
 
-Plano cirúrgico para colocar o filtro para funcionar (urgente)
+### Problema 2 — E-mail de boas-vindas via Resend não envia ("No email found")
+O `email-enqueue-event` busca o e-mail do usuário **apenas** na tabela `profiles`. Porém, dos 8 usuários do sistema, **apenas 2 têm registro na tabela profiles**. Os outros 6 não têm `profiles.email` preenchido.
 
-Fase 1 — Corrigir o vínculo do filtro com dados reais (lista + detalhe)
-1. Atualizar `useRadiographyData` para receber `selectedPeriod` e recalcular métricas por período.
-2. Incluir uma query agregada por item (via função SQL/RPC) com:
-   - visitas no período (de `seller_item_visits`)
-   - vendas/unidades no período (de `meli_order_items_cache`)
-   - conversão do período
-3. Mesclar esses campos no payload da listagem e substituir, na UI:
-   - `visits_last` -> `visits_period`
-   - `sales_count_30d` -> `sales_period`
-   - conversão fixa -> `conversion_period`
-4. Ajustar ordenação da lista para usar métricas do período selecionado.
+Usuários sem profile (confirmado no banco):
+- `4f72b283...` (raffaelvon@gmail.com) — sem profile
+- `b8dfb2cd...` (adeconex4@gmail.com) — sem profile
+- `5c51a800...` — sem profile
 
-Fase 2 — Corrigir gráfico e série temporal do detalhe
-1. Trocar fonte do gráfico para série diária real:
-   - base primária: `seller_item_visits` (por dia)
-   - overlay de preço/estoque: `listing_health_history` (snapshot mais próximo do dia)
-2. Gerar série contínua diária (sem “buracos”) para 7/15/30/60/150.
-3. Corrigir efeitos no painel:
-   - recarregar quando `period`, `item` ou `selectedPeriod` mudar.
-4. Se histórico disponível for menor que o período:
-   - exibir aviso claro “dados históricos insuficientes para X dias” (sem fingir erro de UI).
+O e-mail existe em `auth.users`, mas o código não consulta lá como fallback.
 
-Fase 3 — Corrigir persistência do backfill (causa da data fixa)
-1. No `radiography-collector`, alterar backfill para salvar referência temporal histórica:
-   - `collected_at` da janela (ex.: fim da janela), não `now()`.
-2. (Recomendado) adicionar `window_start` e `window_end` em `listing_health_history` para rastreabilidade e idempotência robusta.
-3. Manter `listing_health_current` como snapshot rápido (sem quebrar arquitetura atual).
+### Problema 3 — Logs mostram UUID ao invés do nome
+A mensagem de log é `"No email found for user {UUID}"`. Não busca nome, empresa ou qualquer referência humana.
 
-Fase 4 — Reparo de dados da ADECONEX.SP
-1. Resetar `radiography_backfill_control` do seller `1411095727` para reprocessar com a regra corrigida.
-2. Reexecutar backfill para reconstruir histórico em datas corretas.
-3. Rodar uma coleta operacional + enrich para sincronizar estado atual com histórico.
+---
 
-Fase 5 — Observabilidade e estabilidade
-1. Corrigir log de `enrich_sales` para usar `metadata_json` (hoje usa `metadata`, pode deixar log “running” preso).
-2. Adicionar logs de período aplicado na UI/backend:
-   - seller_id, days_range, registros retornados, cobertura de dias.
-3. Adicionar validação automática:
-   - se todas datas do gráfico forem iguais -> flag `INVALID_TIME_SERIES`.
-   - se troca de período não alterar query/resultset -> flag `FILTER_NOT_APPLIED`.
+## Correções
 
-Arquivos/partes a ajustar
+### 1. Corrigir lookup de e-mail no `email-enqueue-event`
+**Arquivo:** `supabase/functions/email-enqueue-event/index.ts`
 
-Frontend
-- `src/hooks/useRadiographyData.ts`
-  - incluir `selectedPeriod` na busca de métricas e no contrato retornado.
-- `src/pages/Radiografia.tsx`
-  - passar `selectedPeriod` para o hook.
-- `src/components/radiography/RadiographyItemList.tsx`
-  - exibir/ordenar por métricas do período.
-- `src/components/radiography/RadiographyDetailPanel.tsx`
-  - gráfico diário por período + reload correto.
+Alterar o bloco de resolução de e-mail (linhas 187-208):
+- Manter busca em `profiles.email` como primeira opção
+- Adicionar fallback: buscar em `auth.users` via `supabase.auth.admin.getUserById(targetUserId)`
+- Se encontrar, usar o e-mail de `auth.users`
 
-Backend/database
-- `supabase/functions/radiography-collector/index.ts`
-  - corrigir timestamp do backfill (histórico real).
-  - ajustar log `metadata_json` no enrich.
-- Nova migration
-  - função SQL para agregação por período (visitas/vendas/conversão por item).
-  - (opcional recomendado) colunas `window_start/window_end` em `listing_health_history`.
+### 2. Melhorar mensagem de log com nome/empresa
+**Arquivo:** `supabase/functions/email-enqueue-event/index.ts`
 
-Validação final (checklist rápido)
-1. Lista:
-- mudar 7 -> 30 -> 150 e confirmar alteração de visitas/vendas/conversão (quando houver histórico suficiente).
-2. Detalhe:
-- eixo X com datas diferentes (não repetir só 20/03).
-- trocar período e verificar mudança no dataset.
-3. Banco:
-- `listing_health_history` com múltiplos dias reais após reprocesso.
-- `radiography_collection_logs` sem execuções “running” presas indevidas.
-4. UX:
-- quando faltar histórico para 150d, mostrar insuficiência de dados (sem mascarar como “normal”).
+Antes de logar, buscar dados de contexto do usuário:
+- `profiles.full_name` (se existir)
+- `companies.display_name` (se `company_id` fornecido)
+- Usar na mensagem: `"No email found for [Nome] (empresa: [Empresa])"` ao invés de UUID
+- Aplicar mesma lógica para logs de sucesso: `"Enqueued marketplace_connected → [Nome] (email@x.com)"`
 
-Resultado esperado após esse plano
-- filtro passa a ter efeito real na lista e no detalhe;
-- gráfico deixa de ficar “travado” por data única;
-- conversão/vendas/visitas deixam de ser percepção estática;
-- histórico volta a refletir o tempo corretamente para decisão.
+### 3. Melhorar exibição dos logs no frontend
+**Arquivo:** `src/components/admin/email/EmailLogsTab.tsx`
+
+- Adicionar badge de cor para `invalid_email` (amarelo/warning)
+- Truncar UUIDs se ainda aparecerem: mostrar apenas primeiros 8 chars
+
+### 4. Garantir profiles sejam criados no signup
+**Arquivo:** Verificar se o trigger `handle_new_user` ou equivalente cria profile com email. Se não, ajustar para que todo novo usuário tenha profile com email preenchido desde o cadastro.
+
+### 5. Domínio de e-mail — reconfigurar
+O domínio `notify.www.mktpfacil.com` falhou. Precisa ser reconfigurado — idealmente usando o domínio raiz (ex: `mktpfacil.com` ao invés de `www.mktpfacil.com`), pois subdomínios de `www` são incomuns para delegação DNS.
+
+Após resolver o DNS, o `auth-email-hook` passará a funcionar e os e-mails de confirmação virão em PT-BR, com a identidade visual do MKTP Fácil.
+
+---
+
+## Arquivos modificados
+1. `supabase/functions/email-enqueue-event/index.ts` — fallback auth.users + logs humanizados
+2. `src/components/admin/email/EmailLogsTab.tsx` — badge para invalid_email
+3. Deploy da edge function atualizada
+
+## Resultado esperado
+- E-mails de boas-vindas via Resend passam a ser enviados (fallback para auth.users)
+- Logs mostram nome da pessoa e empresa, não UUID
+- Domínio de e-mail precisa ser reconfigurado para o auth-email-hook funcionar
+
