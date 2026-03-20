@@ -314,6 +314,159 @@ export function generateRetrospectivePdfFromEngine(retro: Retrospective, company
     }
   }
 
+  // ─── ADS Snapshot ───
+  if (adsSnapshot && Number(adsSnapshot.total_invested) > 0) {
+    if (y > 230) { pdf.addPage(); y = 20; }
+
+    pdf.setFontSize(14);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(30, 41, 59);
+    pdf.text('Fotografia do Mercado Ads', margin, y);
+    y += 2;
+    pdf.setDrawColor(79, 70, 229);
+    pdf.setLineWidth(0.8);
+    pdf.line(margin, y, margin + 50, y);
+    y += 8;
+
+    const adsKpis = [
+      ['Investimento', `R$ ${fmt(adsSnapshot.total_invested)}`],
+      ['Receita Ads', `R$ ${fmt(adsSnapshot.total_revenue_ads)}`],
+      ['ROAS', `${fmt(adsSnapshot.roas, 1)}x`],
+      ['ACOS', `${fmt(adsSnapshot.acos, 1)}%`],
+      ['TACoS', `${fmt(adsSnapshot.tacos, 1)}%`],
+      ['Campanhas Ativas', String(adsSnapshot.campaigns_active ?? 0)],
+    ];
+
+    pdf.setFontSize(9);
+    for (const [label, value] of adsKpis) {
+      pdf.setTextColor(100, 116, 139);
+      pdf.setFont('helvetica', 'normal');
+      pdf.text(label, margin, y);
+      pdf.setTextColor(30, 41, 59);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text(value, margin + 50, y);
+      y += 6;
+    }
+
+    // Top campaigns table
+    if (adsSnapshot.top_campaigns?.length > 0) {
+      y += 4;
+      pdf.setFontSize(8);
+      pdf.setTextColor(100, 116, 139);
+      pdf.setFont('helvetica', 'normal');
+      pdf.text('Campanha', margin, y);
+      pdf.text('Investido', margin + 90, y);
+      pdf.text('Receita', margin + 120, y);
+      pdf.text('ROAS', margin + 150, y);
+      y += 4;
+      pdf.line(margin, y, W - margin, y);
+      y += 4;
+
+      pdf.setTextColor(30, 41, 59);
+      for (const c of adsSnapshot.top_campaigns.slice(0, 5)) {
+        if (y > 275) { pdf.addPage(); y = 20; }
+        const name = String(c.name || '').substring(0, 40);
+        pdf.setFont('helvetica', 'normal');
+        pdf.text(name, margin, y);
+        pdf.text(`R$ ${fmt(c.spent)}`, margin + 90, y);
+        pdf.text(`R$ ${fmt(c.revenue)}`, margin + 120, y);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text(`${fmt(c.roas, 1)}x`, margin + 150, y);
+        y += 5;
+      }
+    }
+    y += 6;
+  }
+
+  // ─── ABC Analysis ───
+  if (abc?.top_products?.length > 0) {
+    if (y > 220) { pdf.addPage(); y = 20; }
+
+    pdf.setFontSize(14);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(30, 41, 59);
+    pdf.text('Curva ABC — Top Produtos', margin, y);
+    y += 2;
+    pdf.setDrawColor(79, 70, 229);
+    pdf.setLineWidth(0.8);
+    pdf.line(margin, y, margin + 50, y);
+    y += 8;
+
+    pdf.setFontSize(8);
+    pdf.setTextColor(100, 116, 139);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text('#', margin, y);
+    pdf.text('Produto', margin + 8, y);
+    pdf.text('Receita', margin + 115, y);
+    pdf.text('Unid.', margin + 145, y);
+    y += 4;
+    pdf.line(margin, y, W - margin, y);
+    y += 4;
+
+    pdf.setTextColor(30, 41, 59);
+    for (let i = 0; i < Math.min(abc.top_products.length, 10); i++) {
+      if (y > 275) { pdf.addPage(); y = 20; }
+      const p = abc.top_products[i];
+      pdf.setFont('helvetica', 'normal');
+      pdf.text(String(i + 1), margin, y);
+      pdf.text(String(p.title || '').substring(0, 55), margin + 8, y);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text(`R$ ${fmt(p.revenue)}`, margin + 115, y);
+      pdf.setFont('helvetica', 'normal');
+      pdf.text(String(p.units), margin + 145, y);
+      y += 5;
+    }
+    y += 6;
+  }
+
+  // ─── Top Cities ───
+  if (abc?.top_cities?.length > 0) {
+    if (y > 240) { pdf.addPage(); y = 20; }
+
+    pdf.setFontSize(11);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(30, 41, 59);
+    pdf.text('Top Cidades', margin, y);
+    y += 6;
+
+    pdf.setFontSize(8);
+    for (const c of abc.top_cities.slice(0, 5)) {
+      if (y > 275) { pdf.addPage(); y = 20; }
+      pdf.setTextColor(71, 85, 105);
+      pdf.setFont('helvetica', 'normal');
+      pdf.text(`${c.city}${c.state ? ' - ' + c.state : ''}`, margin, y);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text(`R$ ${fmt(c.revenue)}`, margin + 90, y);
+      pdf.setFont('helvetica', 'normal');
+      pdf.text(`(${c.orders} pedidos)`, margin + 130, y);
+      y += 5;
+    }
+    y += 6;
+  }
+
+  // ─── Top Buyers ───
+  if (abc?.top_buyers?.length > 0) {
+    if (y > 240) { pdf.addPage(); y = 20; }
+
+    pdf.setFontSize(11);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(30, 41, 59);
+    pdf.text('Top Compradores', margin, y);
+    y += 6;
+
+    pdf.setFontSize(8);
+    for (const b of abc.top_buyers.slice(0, 5)) {
+      if (y > 275) { pdf.addPage(); y = 20; }
+      pdf.setTextColor(71, 85, 105);
+      pdf.setFont('helvetica', 'normal');
+      pdf.text(String(b.nickname).substring(0, 30), margin, y);
+      pdf.text(`${b.orders} pedidos`, margin + 60, y);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text(`R$ ${fmt(b.revenue)}`, margin + 100, y);
+      y += 5;
+    }
+  }
+
   // ─── Footer on every page ───
   const totalPages = pdf.getNumberOfPages();
   for (let i = 1; i <= totalPages; i++) {
@@ -322,13 +475,13 @@ export function generateRetrospectivePdfFromEngine(retro: Retrospective, company
     pdf.setFont('helvetica', 'normal');
     pdf.setTextColor(148, 163, 184);
     pdf.text(
-      `Relatório gerado automaticamente pela Marketplace Fácil • ${new Date().getFullYear()}`,
+      `${sellerName ? sellerName + ' • ' : ''}Desenvolvido por Marketplace Facil • ${new Date().getFullYear()}`,
       W / 2,
       290,
       { align: 'center' }
     );
   }
 
-  const fileName = `retrospectiva-${retro.retrospective_type}-${retro.period_start}${companyName ? `-${companyName.replace(/\s+/g, '_')}` : ''}.pdf`;
+  const fileName = `retrospectiva-${retro.retrospective_type}-${retro.period_start}${sellerName ? `-${sellerName.replace(/\s+/g, '_')}` : ''}.pdf`;
   pdf.save(fileName);
 }
