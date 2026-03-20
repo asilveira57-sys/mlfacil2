@@ -364,7 +364,7 @@ async function handleSync(supabase: any, sellerId: string, startTime: number) {
 // ============================================================================
 // FLOW 2 — VISIT COLLECTION
 // ============================================================================
-async function handleCollection(supabase: any, sellerId: string, startTime: number) {
+async function handleCollection(supabase: any, sellerId: string, startTime: number, startIndex = 0) {
   const logId = await createLog(supabase, sellerId, "collection");
   console.log(`[rad-collector] COLLECTION started for ${sellerId}`);
 
@@ -424,7 +424,7 @@ async function handleCollection(supabase: any, sellerId: string, startTime: numb
     let failed = 0;
     const processedItemIds: string[] = [];
 
-    for (let i = 0; i < itemIds.length; i += VISIT_BATCH) {
+    for (let i = startIndex; i < itemIds.length; i += VISIT_BATCH) {
       const batchIds = itemIds.slice(i, i + VISIT_BATCH);
 
       try {
@@ -448,6 +448,14 @@ async function handleCollection(supabase: any, sellerId: string, startTime: numb
         failed += visitResult.failedIds.length + persistResult.failed;
         processedItemIds.push(...persistResult.persistedItemIds);
 
+        if (persistResult.persistedItemIds.length > 0) {
+          await supabase
+            .from("meli_listings_cache")
+            .update({ last_visit_collection_at: collectedAt })
+            .eq("seller_id", sellerId)
+            .in("item_id", persistResult.persistedItemIds);
+        }
+
         console.log(
           `[rad-collector] collection persist summary: batch=${batchIds.length}, persisted=${persistResult.persisted}, failed=${visitResult.failedIds.length + persistResult.failed}`
         );
@@ -457,22 +465,26 @@ async function handleCollection(supabase: any, sellerId: string, startTime: numb
       }
 
       await sleep(500);
-    }
 
-    // Update last_visit_collection_at only for successfully processed items
-    if (processedItemIds.length > 0) {
-      for (let i = 0; i < processedItemIds.length; i += 500) {
-        const chunk = processedItemIds.slice(i, i + 500);
-        await supabase
-          .from("meli_listings_cache")
-          .update({ last_visit_collection_at: collectedAt })
-          .eq("seller_id", sellerId)
-          .in("item_id", chunk);
+      if (Date.now() - startTime > SAFETY_TIMEOUT_MS) {
+        await finishLog(supabase, logId, {
+          status: "success",
+          total_items: items.length,
+          items_processed: processed,
+          items_failed: failed,
+          duration_ms: Date.now() - startTime,
+          metadata_json: {
+            paused: true,
+            next_start_index: i + VISIT_BATCH,
+            window_days: 7,
+            date_from: dateFrom,
+            date_to: dateTo,
+          },
+        });
+
+        selfChain(sellerId, "collection", { start_index: i + VISIT_BATCH });
+        return { success: true, paused: true, processed, failed, next_start_index: i + VISIT_BATCH };
       }
-
-      console.log(
-        `[rad-collector] collection cache update summary: updated_last_visit_collection_at=${processedItemIds.length}`
-      );
     }
 
     // Detect anomalies only on the processed items (optimized)
@@ -994,7 +1006,7 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json().catch(() => ({}));
-    const { seller_id, action, internal, chain_depth, last_processed_seller_id, skip_sync } = body;
+    const { seller_id, action, internal, chain_depth, last_processed_seller_id, skip_sync, start_index } = body;
 
     // Auth check
     if (!internal) {
@@ -1022,7 +1034,7 @@ Deno.serve(async (req) => {
 
       case "collection":
         if (!seller_id) return new Response(JSON.stringify({ error: "seller_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        result = await handleCollection(supabase, seller_id, startTime);
+        result = await handleCollection(supabase, seller_id, startTime, start_index || 0);
         break;
 
       case "backfill":
@@ -1037,7 +1049,7 @@ Deno.serve(async (req) => {
       case "full":
         if (!seller_id) return new Response(JSON.stringify({ error: "seller_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         const syncRes = await handleSync(supabase, seller_id, startTime);
-        const collRes = await handleCollection(supabase, seller_id, Date.now());
+        const collRes = await handleCollection(supabase, seller_id, Date.now(), 0);
         selfChain(seller_id, "backfill", { chain_depth: 0 });
         result = { sync: syncRes, collection: collRes, backfill: "triggered_async" };
         break;
