@@ -527,14 +527,15 @@ export function useSeed(): UseSeedResult {
     }
   }, [sellerId, seedBalance, fetchData]);
 
-  const availableSeeds = seedBalance 
-    ? seedBalance.seeds_from_plan + seedBalance.seeds_purchased - seedBalance.seeds_used 
+  const availableSeeds = seedBalance?.seeds_available ?? 0;
+  const totalSeeds = seedBalance 
+    ? seedBalance.seeds_from_plan + (seedBalance.seeds_bonus || 0) + (seedBalance.seeds_manual_adjustment || 0) 
     : 0;
 
   return {
     seedBalance,
     availableSeeds,
-    totalSeeds: seedBalance ? seedBalance.seeds_from_plan + seedBalance.seeds_purchased : 0,
+    totalSeeds,
     usedSeeds: seedBalance?.seeds_used || 0,
     plantedItems,
     plantedCount: plantedItems.length,
