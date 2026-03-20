@@ -667,6 +667,29 @@ async function buildSummaryJson(
   // ABC Analysis
   summary.abc_analysis = await buildAbcAnalysis(supabase, sellerId, periodStart, periodEnd);
 
+  // Promotions Snapshot
+  try {
+    const { data: promoSnaps } = await supabase
+      .from("promotion_snapshots")
+      .select("id, promotion_type, items_count, status")
+      .eq("seller_id", sellerId)
+      .gte("created_at", periodStart)
+      .lte("created_at", periodEnd);
+
+    if (promoSnaps && promoSnaps.length > 0) {
+      const activePromos = promoSnaps.filter((p: any) => p.status === "active");
+      const totalItems = promoSnaps.reduce((s: number, p: any) => s + Number(p.items_count || 0), 0);
+      summary.promotions_snapshot = {
+        active_count: activePromos.length,
+        total_count: promoSnaps.length,
+        items_count: totalItems,
+        types: [...new Set(promoSnaps.map((p: any) => p.promotion_type).filter(Boolean))],
+      };
+    }
+  } catch (e: any) {
+    console.log(`[retro-engine] Promotions snapshot: table may not exist yet - ${e.message}`);
+  }
+
   // Trial-specific enrichment
   if (isTrialType) {
     const moduleUsage = await countModuleUsage(supabase, tenantId, companyId, periodStart, periodEnd);
