@@ -451,16 +451,27 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
               title="Histórico de Visitas"
               icon={<Scan className="h-4 w-4 text-cyan-400" />}
               action={
-                <Select value={String(period)} onValueChange={(v) => setPeriod(Number(v) as PeriodDays)}>
-                  <SelectTrigger className="w-24 h-7 bg-slate-800/50 border-slate-700 text-slate-200 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-slate-800 border-slate-700">
-                    {([7, 15, 30, 60, 150] as PeriodDays[]).map(p => (
-                      <SelectItem key={p} value={String(p)} className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">{p} dias</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex items-center gap-2">
+                  {coverage.days_with_data > 0 && (
+                    <Badge variant="outline" className={`text-[10px] ${
+                      coverage.status === 'good' ? 'border-emerald-500/30 text-emerald-400' :
+                      coverage.status === 'partial' ? 'border-amber-500/30 text-amber-400' :
+                      'border-red-500/30 text-red-400'
+                    }`}>
+                      {coverage.days_with_data}/{coverage.days_requested}d
+                    </Badge>
+                  )}
+                  <Select value={String(period)} onValueChange={(v) => setPeriod(Number(v) as PeriodDays)}>
+                    <SelectTrigger className="w-24 h-7 bg-slate-800/50 border-slate-700 text-slate-200 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-slate-800 border-slate-700">
+                      {([7, 15, 30, 60, 150] as PeriodDays[]).map(p => (
+                        <SelectItem key={p} value={String(p)} className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">{p} dias</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               }
             >
               {historyLoading ? (
