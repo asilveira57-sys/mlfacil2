@@ -311,6 +311,11 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, sele
               </Card>
             )}
 
+            {/* SEO Analysis */}
+            {item.seo_analysis_json && (
+              <SeoAnalysisCard seo={item.seo_analysis_json} score={item.seo_score} found={item.seo_keywords_found} missing={item.seo_keywords_missing} />
+            )}
+
             {/* Evolution metrics */}
             {history.length >= 2 && (
               <div className="grid grid-cols-3 gap-3">
