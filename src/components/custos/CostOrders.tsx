@@ -150,44 +150,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
     });
   };
 
-  const handleSelectAllPages = async () => {
-    setLoadingAllIds(true);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      const params = new URLSearchParams({
-        seller_id: sellerId,
-        period_days: periodDays,
-        search,
-        ids_only: 'true',
-      });
-
-      if (statusFilter !== 'all') params.set('status', statusFilter);
-      if (profitFilter !== 'all') params.set('profit_type', profitFilter);
-      if (ecommerceFilter !== 'all') params.set('ecommerce_cost', ecommerceFilter);
-      if (shippingFilter !== 'all') params.set('shipping_filter', shippingFilter);
-      if (orderStatusFilter !== 'paid') params.set('order_status', orderStatusFilter);
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cost-engine/orders?${params}`,
-        { headers: { Authorization: `Bearer ${session.access_token}` } }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        const allIds = data.order_ids || [];
-        setSelectedOrders(new Set(allIds));
-        setSelectAllPages(true);
-        toast.success(`${allIds.length} pedidos selecionados`);
-      }
-    } catch (error) {
-      console.error('Error fetching all IDs:', error);
-      toast.error('Erro ao selecionar todos os pedidos');
-    } finally {
-      setLoadingAllIds(false);
-    }
-  };
+  // "Select all pages" removed — only page-level selection allowed
 
   // Poll a bulk job for progress — queries DB directly (no Edge Function boot overhead)
   const pollJobProgress = (jobId: string) => {
