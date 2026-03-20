@@ -790,15 +790,25 @@ async function detectAnomalies(supabase: any, sellerId: string) {
       }
     }
 
-    // Store anomalies in listing_health_current metadata via update
+    // Store anomaly flags in listing_health_current
     for (const anomaly of anomalies) {
       await supabase
         .from("listing_health_current")
-        .update({
-          // We'll use a metadata approach - update is lightweight
-        })
+        .update({ anomaly_flags: anomaly.flags })
         .eq("seller_id", sellerId)
         .eq("item_id", anomaly.item_id);
+    }
+
+    // Clear flags for items without anomalies
+    const anomalyItemIds = anomalies.map(a => a.item_id);
+    const cleanItems = allCurrent.filter(c => !anomalyItemIds.includes(c.item_id));
+    for (let i = 0; i < cleanItems.length; i += 500) {
+      const chunk = cleanItems.slice(i, i + 500).map(c => c.item_id);
+      await supabase
+        .from("listing_health_current")
+        .update({ anomaly_flags: [] })
+        .eq("seller_id", sellerId)
+        .in("item_id", chunk);
     }
 
     console.log(`[rad-collector] Detected ${anomalies.length} items with anomalies`);
