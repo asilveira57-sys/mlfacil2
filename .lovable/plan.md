@@ -1,44 +1,32 @@
 
 
-# Plano: Remover modal redundante de Termos e registrar aceite no cadastro
+# Plano: Corrigir post-its e tarefas para novos usuários
 
 ## Problema
 
-1. O seller já aceita os termos no formulário de cadastro (`/criar-acesso`), mas esse aceite **não é registrado** na tabela `user_consents`
-2. Após confirmar o e-mail, o `TermsAcceptanceGate` exibe um modal redundante pedindo aceite novamente
-3. A tela de auditoria de consentimentos (`SettingsPrivacy`) já existe no código e está mapeada como `privacidade-lgpd` no `SettingsLayout`, mas precisa estar acessível no menu de configurações do seller
+A função `ensure_workspace` (que cria workspace, user_preferences e workspace_members para novos usuários) **só é chamada na página de Tarefas** (`useUserPreferences` → usado apenas em `Tarefas.tsx`).
 
-## Correções
+Novos sellers que tentam criar post-its ou tarefas via outros módulos usam `useCurrentWorkspaceId`, que apenas **consulta** as tabelas `user_preferences` e `workspace_members` — sem criar nada. Como o workspace nunca foi criado, `workspaceId` retorna `null`, e os inserts nas tabelas `notes` e `tasks` falham silenciosamente (o código verifica `if (!workspaceId) return`).
 
-### 1. Registrar aceite dos termos no momento do cadastro
+## Correção
 
-**Arquivo:** `src/pages/CriarAcesso.tsx`
+### 1. Mover `ensure_workspace` para dentro de `useCurrentWorkspaceId`
 
-Após o `signUp` bem-sucedido, chamar `recordConsentOnServer` para gravar o aceite na tabela `user_consents` com `source: 'signup'`. Como o usuário pode ainda não ter sessão confirmada nesse momento, uma alternativa é registrar o aceite no primeiro login (via `onAuthStateChange`) ou armazenar localmente e sincronizar depois.
+**Arquivo:** `src/hooks/useCurrentWorkspaceId.ts`
 
-Abordagem escolhida: salvar um flag no localStorage (`mktp_pending_terms_consent`) e sincronizar no primeiro login autenticado.
+Quando as duas consultas (user_preferences e workspace_members) retornarem `null`, chamar `supabase.rpc('ensure_workspace', { p_user_id: userId })` como fallback final. A função RPC já é idempotente e `SECURITY DEFINER`, então é segura para ser chamada a qualquer momento.
 
-### 2. Sincronizar aceite pendente no login
+Após a chamada, retornar o `active_workspace_id` do resultado.
 
-**Arquivo:** `src/components/cookies/CookieConsentGate.tsx` (ou criar `src/lib/cookies/terms-sync.ts`)
+Isso garante que **qualquer módulo** que dependa de `useCurrentWorkspaceId` (notes, post-its, ad actions, templates, etc.) terá um workspace válido automaticamente.
 
-No listener de `onAuthStateChange`, verificar se existe `mktp_pending_terms_consent` no localStorage. Se sim, chamar `recordConsentOnServer({ consent_scope: 'terms', consent_type: 'accepted', source: 'signup' })` e remover o flag.
+### 2. Nenhuma outra alteração necessária
 
-### 3. Remover o TermsAcceptanceGate
-
-**Arquivo:** `src/components/cookies/CookieConsentGate.tsx`
-
-- Remover import e uso do `TermsAcceptanceGate` — o componente deixa de envolver os `children`
-- O arquivo `TermsAcceptanceGate.tsx` pode ser mantido por segurança mas não será mais renderizado
-
-### 4. Garantir que "Privacidade & LGPD" esteja no menu de configurações
-
-**Verificação:** O componente `SettingsPrivacy` já está mapeado como `privacidade-lgpd` no `SettingsLayout`. Preciso verificar se existe um registro correspondente na tabela `config_menu_items` do banco de dados. Se não existir, criar via migration para que o item apareça no menu do seller.
+- A função `ensure_workspace` já existe no banco e é idempotente
+- Os hooks de notes/tasks já verificam `workspaceId` antes de operar
+- Nenhuma migration necessária
 
 ## Arquivos modificados
 
-- `src/pages/CriarAcesso.tsx` — marcar aceite pendente no localStorage
-- `src/components/cookies/CookieConsentGate.tsx` — remover TermsAcceptanceGate, adicionar sync de termos pendentes
-- `src/lib/cookies/terms-sync.ts` (novo) — lógica de sincronização do aceite de termos
-- Possível migration para garantir item de menu `privacidade-lgpd` nas configurações
+- `src/hooks/useCurrentWorkspaceId.ts` — adicionar fallback com `ensure_workspace` RPC
 
