@@ -1,32 +1,43 @@
 
 
-# Plano: Corrigir post-its e tarefas para novos usuários
+# Plano: Corrigir Radiografia — Limite, Visitas e Filtros
 
-## Problema
+## Problemas Identificados
 
-A função `ensure_workspace` (que cria workspace, user_preferences e workspace_members para novos usuários) **só é chamada na página de Tarefas** (`useUserPreferences` → usado apenas em `Tarefas.tsx`).
+### 1. Limite de 50 anúncios
+O `handleListItems` na edge function `radiography-engine` tem `limit = 50` como padrão (linha 442). O frontend não envia paginação nem limit diferente. Se o seller tiver mais de 50 itens ativos, os excedentes não aparecem.
 
-Novos sellers que tentam criar post-its ou tarefas via outros módulos usam `useCurrentWorkspaceId`, que apenas **consulta** as tabelas `user_preferences` e `workspace_members` — sem criar nada. Como o workspace nunca foi criado, `workspaceId` retorna `null`, e os inserts nas tabelas `notes` e `tasks` falham silenciosamente (o código verifica `if (!workspaceId) return`).
+### 2. Visitas zeradas
+O `radiography-engine` **não coleta visitas** — ele apenas **lê** da tabela `seller_item_visits`. Quem popula essa tabela é o `trends-collect-seller`, que busca visitas apenas de itens presentes na `meli_order_items_cache` (itens que já tiveram vendas). Itens que **nunca venderam** ficam sem visitas registradas.
 
-## Correção
+Além disso, o snapshot do radiography busca visitas de 7 dias na `seller_item_visits`, mas se o `trends-collect-seller` não rodou para esse seller, tudo ficará zerado.
 
-### 1. Mover `ensure_workspace` para dentro de `useCurrentWorkspaceId`
+### 3. Texto dos filtros escuro em fundo escuro
+O `SelectContent` usa `bg-slate-800 border-slate-700`, mas o `SelectItem` herda `text-popover-foreground` do tema global (que pode ser escuro). Precisa forçar `text-slate-200` nos items do dropdown.
 
-**Arquivo:** `src/hooks/useCurrentWorkspaceId.ts`
+---
 
-Quando as duas consultas (user_preferences e workspace_members) retornarem `null`, chamar `supabase.rpc('ensure_workspace', { p_user_id: userId })` como fallback final. A função RPC já é idempotente e `SECURITY DEFINER`, então é segura para ser chamada a qualquer momento.
+## Correções Propostas
 
-Após a chamada, retornar o `active_workspace_id` do resultado.
+### 1. Remover limite de 50 — carregar todos os itens
+**Arquivo:** `supabase/functions/radiography-engine/index.ts`
+- Na função `handleListItems`, aumentar o limit padrão para 1000
+- Nota: Supabase tem limite de 1000 por query, que é suficiente para a maioria dos sellers
 
-Isso garante que **qualquer módulo** que dependa de `useCurrentWorkspaceId` (notes, post-its, ad actions, templates, etc.) terá um workspace válido automaticamente.
+### 2. Coletar visitas de TODOS os itens ativos no snapshot
+**Arquivo:** `supabase/functions/radiography-engine/index.ts`
+- Na função `handleSnapshot`, após obter os listings ativos, buscar visitas diretamente da API do Mercado Livre para cada item (usando o token do seller)
+- Gravar na `seller_item_visits` para histórico, igual ao `trends-collect-seller`
+- Isso garante que itens sem vendas também tenham dados de visitas
+- Usar rate limit de 800ms entre chamadas para respeitar a API
 
-### 2. Nenhuma outra alteração necessária
+### 3. Corrigir texto dos filtros
+**Arquivo:** `src/components/radiography/RadiographyItemList.tsx`
+- Adicionar `text-slate-200` nas classes do `SelectContent` e `SelectItem` para garantir contraste
 
-- A função `ensure_workspace` já existe no banco e é idempotente
-- Os hooks de notes/tasks já verificam `workspaceId` antes de operar
-- Nenhuma migration necessária
+---
 
-## Arquivos modificados
-
-- `src/hooks/useCurrentWorkspaceId.ts` — adicionar fallback com `ensure_workspace` RPC
+## Arquivos Modificados
+- `supabase/functions/radiography-engine/index.ts` — limit 1000 + coleta de visitas no snapshot
+- `src/components/radiography/RadiographyItemList.tsx` — texto branco nos filtros dropdown
 
