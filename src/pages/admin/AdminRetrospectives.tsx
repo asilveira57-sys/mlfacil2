@@ -466,8 +466,14 @@ export function AdminRetrospectives() {
                               <Button variant="ghost" size="icon" className="h-7 w-7"
                                 onClick={() => handleRegenerateReports(r.id)}
                                 disabled={generateReports.isPending}
-                                title="Regenerar relatórios">
+                                title="Regenerar relatórios (HTML/Slides)">
                                 <RefreshCw className={`h-3.5 w-3.5 ${generateReports.isPending ? 'animate-spin' : ''}`} />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-primary"
+                                onClick={() => handleRegenerateComplete(r)}
+                                disabled={triggerEngine.isPending}
+                                title="Regenerar Completo (nova versão com dados atualizados)">
+                                <Zap className={`h-3.5 w-3.5 ${triggerEngine.isPending ? 'animate-spin' : ''}`} />
                               </Button>
                               <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
                                 onClick={() => handleDelete(r.id)}
