@@ -6708,14 +6708,21 @@ export type Database = {
           anomaly_flags: string[] | null
           available_quantity: number | null
           catalog_listing: boolean | null
+          conversion_rate_7d: number | null
+          days_without_sale: number | null
           id: string
           item_id: string
           last_collected_at: string | null
+          last_sale_at: string | null
           listing_status: string | null
           listing_type: string | null
           price: number | null
+          sales_count_30d: number | null
+          sales_count_7d: number | null
           seller_id: string
           shipping_mode: string | null
+          units_sold_30d: number | null
+          units_sold_7d: number | null
           updated_at: string
           visits_last: number | null
         }
@@ -6723,14 +6730,21 @@ export type Database = {
           anomaly_flags?: string[] | null
           available_quantity?: number | null
           catalog_listing?: boolean | null
+          conversion_rate_7d?: number | null
+          days_without_sale?: number | null
           id?: string
           item_id: string
           last_collected_at?: string | null
+          last_sale_at?: string | null
           listing_status?: string | null
           listing_type?: string | null
           price?: number | null
+          sales_count_30d?: number | null
+          sales_count_7d?: number | null
           seller_id: string
           shipping_mode?: string | null
+          units_sold_30d?: number | null
+          units_sold_7d?: number | null
           updated_at?: string
           visits_last?: number | null
         }
@@ -6738,14 +6752,21 @@ export type Database = {
           anomaly_flags?: string[] | null
           available_quantity?: number | null
           catalog_listing?: boolean | null
+          conversion_rate_7d?: number | null
+          days_without_sale?: number | null
           id?: string
           item_id?: string
           last_collected_at?: string | null
+          last_sale_at?: string | null
           listing_status?: string | null
           listing_type?: string | null
           price?: number | null
+          sales_count_30d?: number | null
+          sales_count_7d?: number | null
           seller_id?: string
           shipping_mode?: string | null
+          units_sold_30d?: number | null
+          units_sold_7d?: number | null
           updated_at?: string
           visits_last?: number | null
         }
@@ -6757,14 +6778,18 @@ export type Database = {
           catalog_listing: boolean | null
           collected_at: string
           created_at: string
+          days_without_sale: number | null
           id: string
           item_id: string
+          last_sale_at: string | null
           listing_status: string | null
           listing_type: string | null
           price: number | null
+          sales_count: number | null
           seller_id: string
           shipping_mode: string | null
           source: string | null
+          units_sold: number | null
           visits: number | null
           window_days: number
         }
@@ -6773,14 +6798,18 @@ export type Database = {
           catalog_listing?: boolean | null
           collected_at?: string
           created_at?: string
+          days_without_sale?: number | null
           id?: string
           item_id: string
+          last_sale_at?: string | null
           listing_status?: string | null
           listing_type?: string | null
           price?: number | null
+          sales_count?: number | null
           seller_id: string
           shipping_mode?: string | null
           source?: string | null
+          units_sold?: number | null
           visits?: number | null
           window_days?: number
         }
@@ -6789,14 +6818,18 @@ export type Database = {
           catalog_listing?: boolean | null
           collected_at?: string
           created_at?: string
+          days_without_sale?: number | null
           id?: string
           item_id?: string
+          last_sale_at?: string | null
           listing_status?: string | null
           listing_type?: string | null
           price?: number | null
+          sales_count?: number | null
           seller_id?: string
           shipping_mode?: string | null
           source?: string | null
+          units_sold?: number | null
           visits?: number | null
           window_days?: number
         }
