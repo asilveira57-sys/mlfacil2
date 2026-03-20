@@ -5,6 +5,24 @@ import { RadiographyHealthStatus } from "@/types/radiography";
 
 // --- Types ---
 
+export interface StructuredAlert {
+  type: string;
+  severity: string;
+  title: string;
+  description: string;
+  context: Record<string, any>;
+}
+
+export interface ChangeFlag {
+  type: string;
+  label: string;
+  detail: string;
+  severity: string;
+  prev_value: any;
+  new_value: any;
+  pct_change?: number;
+}
+
 export interface HealthCurrentItem {
   id: string;
   item_id: string;
@@ -27,6 +45,12 @@ export interface HealthCurrentItem {
   conversion_rate_7d: number | null;
   days_without_sale: number | null;
   last_sale_at: string | null;
+  // Change detection
+  change_flags: ChangeFlag[] | null;
+  alerts_json: StructuredAlert[] | null;
+  prev_price: number | null;
+  prev_visits: number | null;
+  prev_available_quantity: number | null;
   // joined from meli_listings_cache
   title?: string | null;
   thumbnail?: string | null;
@@ -129,8 +153,25 @@ const ANOMALY_LABELS: Record<string, string> = {
   low_conversion: "Taxa de conversão muito baixa",
 };
 
+const CHANGE_ICONS: Record<string, string> = {
+  price_increased: "↑ Preço",
+  price_decreased: "↓ Preço",
+  stock_zeroed: "⚠ Estoque zerou",
+  stock_decreased: "↓ Estoque",
+  stock_increased: "↑ Estoque",
+  status_changed: "🔄 Status",
+  logistics_changed: "🚚 Logística",
+  catalog_joined: "📦 Catálogo",
+  catalog_left: "📦 Catálogo",
+  visits_dropped: "📉 Visitas",
+};
+
 export function getAnomalyLabel(flag: string): string {
   return ANOMALY_LABELS[flag] || flag;
+}
+
+export function getChangeLabel(type: string): string {
+  return CHANGE_ICONS[type] || type;
 }
 
 // --- Main hook ---
@@ -182,6 +223,8 @@ export function useRadiographyData(sellerId: string | null) {
         const cache = listings[h.item_id];
         return {
           ...h,
+          change_flags: (h.change_flags as any as ChangeFlag[]) || [],
+          alerts_json: (h.alerts_json as any as StructuredAlert[]) || [],
           title: cache?.title || null,
           thumbnail: cache?.thumbnail || null,
           permalink: cache?.permalink || null,

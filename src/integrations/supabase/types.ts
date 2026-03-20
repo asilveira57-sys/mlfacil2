@@ -6705,9 +6705,11 @@ export type Database = {
       }
       listing_health_current: {
         Row: {
+          alerts_json: Json | null
           anomaly_flags: string[] | null
           available_quantity: number | null
           catalog_listing: boolean | null
+          change_flags: Json | null
           conversion_rate_7d: number | null
           days_without_sale: number | null
           id: string
@@ -6716,6 +6718,12 @@ export type Database = {
           last_sale_at: string | null
           listing_status: string | null
           listing_type: string | null
+          prev_available_quantity: number | null
+          prev_catalog_listing: boolean | null
+          prev_listing_status: string | null
+          prev_price: number | null
+          prev_shipping_mode: string | null
+          prev_visits: number | null
           price: number | null
           sales_count_30d: number | null
           sales_count_7d: number | null
@@ -6727,9 +6735,11 @@ export type Database = {
           visits_last: number | null
         }
         Insert: {
+          alerts_json?: Json | null
           anomaly_flags?: string[] | null
           available_quantity?: number | null
           catalog_listing?: boolean | null
+          change_flags?: Json | null
           conversion_rate_7d?: number | null
           days_without_sale?: number | null
           id?: string
@@ -6738,6 +6748,12 @@ export type Database = {
           last_sale_at?: string | null
           listing_status?: string | null
           listing_type?: string | null
+          prev_available_quantity?: number | null
+          prev_catalog_listing?: boolean | null
+          prev_listing_status?: string | null
+          prev_price?: number | null
+          prev_shipping_mode?: string | null
+          prev_visits?: number | null
           price?: number | null
           sales_count_30d?: number | null
           sales_count_7d?: number | null
@@ -6749,9 +6765,11 @@ export type Database = {
           visits_last?: number | null
         }
         Update: {
+          alerts_json?: Json | null
           anomaly_flags?: string[] | null
           available_quantity?: number | null
           catalog_listing?: boolean | null
+          change_flags?: Json | null
           conversion_rate_7d?: number | null
           days_without_sale?: number | null
           id?: string
@@ -6760,6 +6778,12 @@ export type Database = {
           last_sale_at?: string | null
           listing_status?: string | null
           listing_type?: string | null
+          prev_available_quantity?: number | null
+          prev_catalog_listing?: boolean | null
+          prev_listing_status?: string | null
+          prev_price?: number | null
+          prev_shipping_mode?: string | null
+          prev_visits?: number | null
           price?: number | null
           sales_count_30d?: number | null
           sales_count_7d?: number | null

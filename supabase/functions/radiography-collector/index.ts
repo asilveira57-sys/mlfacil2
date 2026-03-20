@@ -574,6 +574,96 @@ async function fetchSalesData(
   return result;
 }
 
+// Detect changes between previous and new state
+function detectChanges(
+  prev: any | null,
+  newPrice: number | null,
+  newVisits: number,
+  newStock: number | null,
+  newStatus: string,
+  newShippingMode: string | null,
+  newCatalogListing: boolean
+): any[] {
+  if (!prev) return [];
+  const changes: any[] = [];
+
+  // Price changes
+  if (prev.price != null && newPrice != null && prev.price !== newPrice) {
+    const pctChange = ((newPrice - prev.price) / prev.price) * 100;
+    if (newPrice > prev.price) {
+      changes.push({
+        type: "price_increased",
+        label: "Preço aumentou",
+        detail: `R$ ${prev.price.toFixed(2)} → R$ ${newPrice.toFixed(2)} (${pctChange > 0 ? "+" : ""}${pctChange.toFixed(1)}%)`,
+        severity: pctChange > 15 ? "high" : "medium",
+        prev_value: prev.price,
+        new_value: newPrice,
+        pct_change: Number(pctChange.toFixed(1)),
+      });
+    } else {
+      changes.push({
+        type: "price_decreased",
+        label: "Preço diminuiu",
+        detail: `R$ ${prev.price.toFixed(2)} → R$ ${newPrice.toFixed(2)} (${pctChange.toFixed(1)}%)`,
+        severity: Math.abs(pctChange) > 15 ? "high" : "medium",
+        prev_value: prev.price,
+        new_value: newPrice,
+        pct_change: Number(pctChange.toFixed(1)),
+      });
+    }
+  }
+
+  // Stock changes
+  if (prev.available_quantity != null && newStock != null && prev.available_quantity !== newStock) {
+    const diff = newStock - prev.available_quantity;
+    if (newStock === 0 && prev.available_quantity > 0) {
+      changes.push({ type: "stock_zeroed", label: "Estoque zerou", detail: `${prev.available_quantity} → 0`, severity: "critical", prev_value: prev.available_quantity, new_value: 0 });
+    } else if (diff < 0) {
+      changes.push({ type: "stock_decreased", label: "Estoque diminuiu", detail: `${prev.available_quantity} → ${newStock} (${diff})`, severity: Math.abs(diff) > 10 ? "medium" : "low", prev_value: prev.available_quantity, new_value: newStock });
+    } else {
+      changes.push({ type: "stock_increased", label: "Estoque aumentou", detail: `${prev.available_quantity} → ${newStock} (+${diff})`, severity: "info", prev_value: prev.available_quantity, new_value: newStock });
+    }
+  }
+
+  // Status changes
+  if (prev.listing_status && newStatus && prev.listing_status !== newStatus) {
+    changes.push({ type: "status_changed", label: "Status mudou", detail: `${prev.listing_status} → ${newStatus}`, severity: newStatus === "paused" || newStatus === "closed" ? "high" : "medium", prev_value: prev.listing_status, new_value: newStatus });
+  }
+
+  // Shipping/logistics changes
+  if (prev.shipping_mode && newShippingMode && prev.shipping_mode !== newShippingMode) {
+    changes.push({ type: "logistics_changed", label: "Logística mudou", detail: `${prev.shipping_mode} → ${newShippingMode}`, severity: "medium", prev_value: prev.shipping_mode, new_value: newShippingMode });
+  }
+
+  // Catalog changes
+  if (prev.catalog_listing !== null && prev.catalog_listing !== newCatalogListing) {
+    changes.push({
+      type: newCatalogListing ? "catalog_joined" : "catalog_left",
+      label: newCatalogListing ? "Entrou no catálogo" : "Saiu do catálogo",
+      detail: newCatalogListing ? "Anúncio vinculado ao catálogo" : "Anúncio desvinculado do catálogo",
+      severity: "medium",
+      prev_value: prev.catalog_listing,
+      new_value: newCatalogListing,
+    });
+  }
+
+  // Visit trend (significant drop)
+  if (prev.visits_last != null && prev.visits_last > 10 && newVisits < prev.visits_last * 0.5) {
+    const pctDrop = ((newVisits - prev.visits_last) / prev.visits_last) * 100;
+    changes.push({
+      type: "visits_dropped",
+      label: "Queda de visitas",
+      detail: `${prev.visits_last} → ${newVisits} (${pctDrop.toFixed(0)}%)`,
+      severity: Math.abs(pctDrop) > 60 ? "high" : "medium",
+      prev_value: prev.visits_last,
+      new_value: newVisits,
+      pct_change: Number(pctDrop.toFixed(1)),
+    });
+  }
+
+  return changes;
+}
+
 async function processVisitBatch(
   supabase: any, sellerId: string, batchIds: string[],
   visitsData: any, allItems: any[], collectedAt: string
@@ -582,6 +672,22 @@ async function processVisitBatch(
 
   // Fetch sales data for this batch
   const salesData = await fetchSalesData(supabase, sellerId, batchIds);
+
+  // Fetch previous state for change detection (batched)
+  const prevStateMap = new Map<string, any>();
+  for (let i = 0; i < batchIds.length; i += 500) {
+    const chunk = batchIds.slice(i, i + 500);
+    const { data: prevRows } = await supabase
+      .from("listing_health_current")
+      .select("item_id, price, visits_last, available_quantity, listing_status, shipping_mode, catalog_listing")
+      .eq("seller_id", sellerId)
+      .in("item_id", chunk);
+    if (prevRows) {
+      for (const row of prevRows) {
+        prevStateMap.set(row.item_id, row);
+      }
+    }
+  }
 
   const healthHistoryRows: any[] = [];
   const healthCurrentRows: any[] = [];
@@ -600,14 +706,24 @@ async function processVisitBatch(
     // Conversion rate: sales_7d / visits (if visits > 0)
     const conversionRate7d = visits > 0 ? Number(((sales.sales_7d / visits) * 100).toFixed(3)) : 0;
 
+    const newPrice = item?.price || null;
+    const newStock = item?.available_quantity ?? null;
+    const newStatus = item?.status || "active";
+    const newShippingMode = item?.shipping_mode || item?.logistic_type || null;
+    const newCatalogListing = !!item?.catalog_product_id;
+
+    // Detect changes against previous state
+    const prevState = prevStateMap.get(itemId);
+    const changeFlags = detectChanges(prevState, newPrice, visits, newStock, newStatus, newShippingMode, newCatalogListing);
+
     healthHistoryRows.push({
       seller_id: sellerId, item_id: itemId, collected_at: collectedAt,
       window_days: 7, visits,
-      price: item?.price || null, available_quantity: item?.available_quantity || null,
-      listing_status: item?.status || "active",
+      price: newPrice, available_quantity: newStock,
+      listing_status: newStatus,
       listing_type: item?.listing_type_id || null,
-      shipping_mode: item?.shipping_mode || item?.logistic_type || null,
-      catalog_listing: !!item?.catalog_product_id,
+      shipping_mode: newShippingMode,
+      catalog_listing: newCatalogListing,
       source: "night_collection",
       sales_count: sales.sales_7d,
       units_sold: sales.units_7d,
@@ -618,11 +734,11 @@ async function processVisitBatch(
     healthCurrentRows.push({
       seller_id: sellerId, item_id: itemId,
       last_collected_at: collectedAt, visits_last: visits,
-      price: item?.price || null, available_quantity: item?.available_quantity || null,
-      listing_status: item?.status || "active",
+      price: newPrice, available_quantity: newStock,
+      listing_status: newStatus,
       listing_type: item?.listing_type_id || null,
-      shipping_mode: item?.shipping_mode || item?.logistic_type || null,
-      catalog_listing: !!item?.catalog_product_id,
+      shipping_mode: newShippingMode,
+      catalog_listing: newCatalogListing,
       sales_count_7d: sales.sales_7d,
       units_sold_7d: sales.units_7d,
       sales_count_30d: sales.sales_30d,
@@ -630,6 +746,14 @@ async function processVisitBatch(
       conversion_rate_7d: conversionRate7d,
       days_without_sale: daysWithoutSale,
       last_sale_at: sales.last_sale_at,
+      change_flags: changeFlags,
+      // Store previous values for next comparison
+      prev_price: prevState?.price ?? null,
+      prev_visits: prevState?.visits_last ?? null,
+      prev_available_quantity: prevState?.available_quantity ?? null,
+      prev_listing_status: prevState?.listing_status ?? null,
+      prev_shipping_mode: prevState?.shipping_mode ?? null,
+      prev_catalog_listing: prevState?.catalog_listing ?? null,
     });
   }
 
@@ -647,12 +771,18 @@ async function processVisitBatch(
     if (error) throw new Error(`Health current upsert error: ${error.message}`);
   }
 
+  const totalChanges = healthCurrentRows.reduce((sum, r) => sum + (r.change_flags?.length || 0), 0);
+  if (totalChanges > 0) {
+    console.log(`[rad-collector] Changes detected: ${totalChanges} across ${healthCurrentRows.filter(r => r.change_flags?.length > 0).length} items`);
+  }
+
   return {
     persisted: healthHistoryRows.length,
     failed: 0,
     persistedItemIds: batchIds,
     historyRows: healthHistoryRows.length,
     currentRows: healthCurrentRows.length,
+    changesDetected: totalChanges,
   };
 }
 
@@ -884,6 +1014,80 @@ async function handleBackfill(supabase: any, sellerId: string, chainDepth: numbe
 // ============================================================================
 // FLOW 5 — OPTIMIZED ANOMALY DETECTION (scoped to processed items)
 // ============================================================================
+// Build structured alert with context and explanation
+function buildAlert(
+  type: string,
+  current: any,
+  history: any[]
+): { type: string; severity: string; title: string; description: string; context: Record<string, any> } | null {
+  switch (type) {
+    case "zero_visits":
+      return {
+        type, severity: "high",
+        title: "Sem visitas no período",
+        description: "Este anúncio não recebeu nenhuma visita na última janela de coleta. Verifique se o anúncio está ativo, se o título está claro e se há problemas de posicionamento.",
+        context: { visits: 0, status: current.listing_status },
+      };
+    case "visit_drop": {
+      const latest = history[0]?.visits || 0;
+      const previous = history[1]?.visits || 0;
+      const pct = previous > 0 ? Math.round(((latest - previous) / previous) * 100) : 0;
+      return {
+        type, severity: "high",
+        title: "Queda acentuada de visitas",
+        description: `As visitas caíram ${Math.abs(pct)}% em relação à coleta anterior (de ${previous} para ${latest}). Isso pode indicar perda de posicionamento, mudança de preço ou concorrência.`,
+        context: { visits_current: latest, visits_previous: previous, pct_change: pct },
+      };
+    }
+    case "consistent_decline": {
+      const v = history.map(h => h.visits || 0);
+      return {
+        type, severity: "critical",
+        title: "Declínio consistente de tráfego",
+        description: `As visitas estão em queda contínua nas últimas 3 coletas (${v.reverse().join(" → ")}). Recomenda-se revisar preço, título, fotos e posicionamento competitivo.`,
+        context: { visits_sequence: v },
+      };
+    }
+    case "high_stock_low_traction":
+      return {
+        type, severity: "medium",
+        title: "Estoque alto sem tração",
+        description: `O anúncio tem ${current.available_quantity} unidades em estoque mas recebeu apenas ${current.visits_last || 0} visitas. Considere revisar preço ou investir em publicidade.`,
+        context: { stock: current.available_quantity, visits: current.visits_last },
+      };
+    case "no_sales_30d":
+      return {
+        type, severity: "high",
+        title: "Sem vendas há mais de 30 dias",
+        description: `Este anúncio está há ${current.days_without_sale || "30+"} dias sem venda. Avalie se o preço está competitivo e se o anúncio precisa de atualização.`,
+        context: { days_without_sale: current.days_without_sale, last_sale_at: current.last_sale_at },
+      };
+    case "no_sales_14d":
+      return {
+        type, severity: "medium",
+        title: "Sem vendas há mais de 14 dias",
+        description: `Anúncio sem venda há ${current.days_without_sale} dias. Monitore de perto — pode ser sazonal ou indicar necessidade de ajuste.`,
+        context: { days_without_sale: current.days_without_sale },
+      };
+    case "visits_no_conversion":
+      return {
+        type, severity: "high",
+        title: "Visitas sem conversão",
+        description: `O anúncio recebeu ${current.visits_last} visitas mas não gerou vendas nos últimos 7 dias. O problema pode estar no preço, fotos, descrição ou reputação.`,
+        context: { visits: current.visits_last, sales_7d: current.sales_count_7d },
+      };
+    case "low_conversion":
+      return {
+        type, severity: "medium",
+        title: "Taxa de conversão muito baixa",
+        description: `A taxa de conversão está em ${(current.conversion_rate_7d || 0).toFixed(2)}% (${current.sales_count_7d || 0} vendas de ${current.visits_last} visitas). O ideal é acima de 1%.`,
+        context: { conversion_rate: current.conversion_rate_7d, visits: current.visits_last, sales: current.sales_count_7d },
+      };
+    default:
+      return null;
+  }
+}
+
 async function detectAnomalies(supabase: any, sellerId: string, processedItemIds: string[]) {
   if (!processedItemIds || processedItemIds.length === 0) return [];
   console.log(`[rad-collector] Detecting anomalies for ${sellerId} (${processedItemIds.length} items)`);
@@ -895,7 +1099,7 @@ async function detectAnomalies(supabase: any, sellerId: string, processedItemIds
       const chunk = processedItemIds.slice(i, i + 500);
       const { data } = await supabase
         .from("listing_health_current")
-        .select("item_id, visits_last, available_quantity, listing_status, sales_count_7d, sales_count_30d, days_without_sale, conversion_rate_7d")
+        .select("item_id, visits_last, available_quantity, listing_status, sales_count_7d, sales_count_30d, days_without_sale, conversion_rate_7d, last_sale_at, change_flags")
         .eq("seller_id", sellerId)
         .in("item_id", chunk);
       allCurrent = allCurrent.concat(data || []);
@@ -932,6 +1136,7 @@ async function detectAnomalies(supabase: any, sellerId: string, processedItemIds
 
     for (const current of allCurrent) {
       const flags: string[] = [];
+      const alerts: any[] = [];
 
       // Visit-based anomalies
       if (current.listing_status === "active" && (current.visits_last === 0 || current.visits_last === null)) {
@@ -969,17 +1174,37 @@ async function detectAnomalies(supabase: any, sellerId: string, processedItemIds
         }
       }
 
-      if (flags.length > 0) {
-        anomalies.push({ item_id: current.item_id, flags });
+      // Build structured alerts for each detected anomaly
+      for (const flag of flags) {
+        const alert = buildAlert(flag, current, history);
+        if (alert) alerts.push(alert);
+      }
+
+      // Also add change-based alerts from change_flags
+      const changeFlags = current.change_flags || [];
+      for (const change of changeFlags) {
+        if (change.severity === "critical" || change.severity === "high") {
+          alerts.push({
+            type: `change_${change.type}`,
+            severity: change.severity,
+            title: change.label,
+            description: change.detail,
+            context: { prev_value: change.prev_value, new_value: change.new_value },
+          });
+        }
+      }
+
+      if (flags.length > 0 || alerts.length > 0) {
+        anomalies.push({ item_id: current.item_id, flags, alerts });
       } else {
         cleanItemIds.push(current.item_id);
       }
     }
 
-    // Batch update anomaly flags
+    // Batch update anomaly flags + alerts_json
     for (const anomaly of anomalies) {
       await supabase.from("listing_health_current")
-        .update({ anomaly_flags: anomaly.flags })
+        .update({ anomaly_flags: anomaly.flags, alerts_json: anomaly.alerts })
         .eq("seller_id", sellerId)
         .eq("item_id", anomaly.item_id);
     }
@@ -988,12 +1213,12 @@ async function detectAnomalies(supabase: any, sellerId: string, processedItemIds
     for (let i = 0; i < cleanItemIds.length; i += 500) {
       const chunk = cleanItemIds.slice(i, i + 500);
       await supabase.from("listing_health_current")
-        .update({ anomaly_flags: [] })
+        .update({ anomaly_flags: [], alerts_json: [] })
         .eq("seller_id", sellerId)
         .in("item_id", chunk);
     }
 
-    console.log(`[rad-collector] Anomalies: ${anomalies.length} flagged, ${cleanItemIds.length} clean`);
+    console.log(`[rad-collector] Anomalies: ${anomalies.length} flagged (${anomalies.reduce((s, a) => s + a.alerts.length, 0)} alerts), ${cleanItemIds.length} clean`);
     return anomalies;
   } catch (err) {
     console.warn(`[rad-collector] Anomaly detection error:`, err);
