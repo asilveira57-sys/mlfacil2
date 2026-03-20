@@ -23,6 +23,22 @@ export interface ChangeFlag {
   pct_change?: number;
 }
 
+export interface SeoAnalysis {
+  category_name: string;
+  l1_category_name: string;
+  total_trending_keywords: number;
+  analyzed_keywords: number;
+  relevant_keywords: number;
+  found_count: number;
+  score: number;
+  details: Array<{
+    keyword: string;
+    found_in_title: boolean;
+    relevance: "high" | "medium" | "low";
+  }>;
+  analyzed_at: string;
+}
+
 export interface HealthCurrentItem {
   id: string;
   item_id: string;
@@ -51,6 +67,11 @@ export interface HealthCurrentItem {
   prev_price: number | null;
   prev_visits: number | null;
   prev_available_quantity: number | null;
+  // SEO
+  seo_score: number | null;
+  seo_keywords_found: string[] | null;
+  seo_keywords_missing: string[] | null;
+  seo_analysis_json: SeoAnalysis | null;
   // joined from meli_listings_cache
   title?: string | null;
   thumbnail?: string | null;
