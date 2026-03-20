@@ -261,6 +261,11 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, fetc
   const hasMultipleDates = chartData.length >= 2;
   const hasAnyVisits = chartData.some(d => d.visits > 0);
 
+  // Coverage calculation
+  const coverage = useMemo<CoverageInfo>(() => {
+    return computeCoverage(visitSeries, period);
+  }, [visitSeries, period]);
+
   const health = item ? classifyHealth(item) : ("stable" as RadiographyHealthStatus);
   const config = HEALTH_STATUS_CONFIG[health];
   const healthFactors = item ? getHealthBreakdown(item) : [];
