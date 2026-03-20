@@ -19,26 +19,32 @@ export function generateRetrospectivePdfFromEngine(retro: Retrospective, company
   const baseline = summary.baseline;
   const evolution = summary.evolution;
   const narrative = summary.trial_narrative;
+  const onboarding = summary.onboarding_context;
+  const adsSnapshot = summary.ads_snapshot;
+  const abc = summary.abc_analysis;
+  const sellerName = companyName || summary.company_name || '';
 
   const pdf = new jsPDF('p', 'mm', 'a4');
   const W = 210;
   const margin = 20;
   let y = 20;
 
-  // ─── Header ───
-  // Purple gradient simulation
+  // ─── Cover with Seller Branding ───
   pdf.setFillColor(79, 70, 229);
   pdf.roundedRect(margin, y, W - margin * 2, 52, 4, 4, 'F');
 
-  pdf.setFontSize(10);
-  pdf.setTextColor(255, 255, 255);
-  if (companyName) {
-    pdf.text(companyName.toUpperCase(), W / 2, y + 14, { align: 'center' });
+  // Seller name as main brand
+  if (sellerName) {
+    pdf.setFontSize(22);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(255, 255, 255);
+    pdf.text(sellerName, W / 2, y + 18, { align: 'center' });
   }
 
-  pdf.setFontSize(20);
+  pdf.setFontSize(16);
   pdf.setFont('helvetica', 'bold');
-  pdf.text(retro.title || 'Retrospectiva', W / 2, y + 28, { align: 'center' });
+  pdf.setTextColor(255, 255, 255);
+  pdf.text(retro.title || 'Retrospectiva', W / 2, y + 30, { align: 'center' });
 
   pdf.setFontSize(11);
   pdf.setFont('helvetica', 'normal');
@@ -50,7 +56,14 @@ export function generateRetrospectivePdfFromEngine(retro: Retrospective, company
   pdf.setFontSize(9);
   pdf.text(typeLabel, W / 2, y + 46, { align: 'center' });
 
-  y += 62;
+  y += 58;
+
+  // "Desenvolvido por Marketplace Fácil" under header
+  pdf.setFontSize(8);
+  pdf.setFont('helvetica', 'italic');
+  pdf.setTextColor(148, 163, 184);
+  pdf.text('Desenvolvido por Marketplace Fácil', W / 2, y, { align: 'center' });
+  y += 8;
 
   // ─── Baseline Section ───
   if (baseline) {
