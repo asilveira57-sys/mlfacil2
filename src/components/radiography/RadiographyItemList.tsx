@@ -209,6 +209,7 @@ export function RadiographyItemList({
                 <SelectItem value="visits" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Por visitas</SelectItem>
                 <SelectItem value="sales" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Por vendas</SelectItem>
                 <SelectItem value="days_no_sale" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Dias s/ venda</SelectItem>
+                <SelectItem value="conversion" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Por conversão</SelectItem>
                 <SelectItem value="seo" className="text-slate-200 focus:text-slate-100 focus:bg-slate-700">Por SEO</SelectItem>
               </SelectContent>
             </Select>
