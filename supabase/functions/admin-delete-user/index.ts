@@ -175,6 +175,28 @@ Deno.serve(async (req) => {
     await deleteFromTable("account_events", "user_id", target_user_id);
     await deleteFromTable("app_notifications", "user_id", target_user_id);
 
+    // Phase 7b: Seed module (FK-safe order)
+    await deleteFromTable("seed_metrics_snapshots", "user_id", target_user_id);
+    await deleteFromTable("seed_item_history", "user_id", target_user_id);
+    await deleteFromTable("seed_planted_items", "user_id", target_user_id);
+    await deleteFromTable("seed_balance", "user_id", target_user_id);
+    await deleteFromTable("seed_aplus_candidates", "user_id", target_user_id);
+    await deleteFromTable("seed_purchases", "user_id", target_user_id);
+
+    // Phase 7c: Pricing simulator
+    {
+      const { data: sims } = await supabaseAdmin
+        .from("pricing_simulations")
+        .select("id")
+        .eq("user_id", target_user_id);
+      const simIds = (sims || []).map((s: { id: string }) => s.id);
+      if (simIds.length > 0) {
+        await deleteFromTable("pricing_simulation_results", "simulation_id", simIds);
+        await deleteFromTable("pricing_simulation_inputs", "simulation_id", simIds);
+      }
+      await deleteFromTable("pricing_simulations", "user_id", target_user_id);
+    }
+
     // Phase 8: core user tables
     await deleteFromTable("user_access_state", "user_id", target_user_id);
     await deleteFromTable("user_roles", "user_id", target_user_id);
