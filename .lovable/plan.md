@@ -1,60 +1,56 @@
 
-# Plano: Módulo Radiografia — Backend Completo
 
-## Status: PROMPT 2 CONCLUÍDO ✅
+# Plano: Corrigir Radiografia — 2 bugs de raiz
 
-## O que foi implementado
+## Diagnóstico
 
-### PROMPT 1 — Banco de Dados ✅
-- 4 novas tabelas: `listing_health_history`, `listing_health_current`, `radiography_backfill_control`, `radiography_collection_logs`
-- 3 colunas adicionais em `meli_listings_cache` (shipping_mode, updated_at, last_visit_collection_at)
-- ~10 índices, constraints de unicidade, triggers updated_at
-- RLS + policies em todas as tabelas
-- Coluna `anomaly_flags` em `listing_health_current`
+A Radiografia não funciona por **dois bugs**:
 
-### PROMPT 2 — Backend, Jobs e Coleta ✅
-**Edge Function:** `supabase/functions/radiography-collector/index.ts`
+### Bug 1: SYNC falha 100% — constraint duplicada
+`meli_listings_cache` tem **duas** unique constraints:
+- `(seller_id, item_id, variation_id)` — a correta
+- `(seller_id, item_id)` — a antiga, sem variation_id
 
-#### Fluxo 1 — Sync de Anúncios (action: "sync")
-- Busca todos os itens ativos via API ML com paginação
-- Multiget de detalhes em lotes de 20
-- Upsert em `meli_listings_cache`
-- Atualiza `last_sync_at`
-- Logs completos
+O upsert usa `onConflict: "seller_id,item_id,variation_id"`, mas itens com variações criam múltiplas linhas com o mesmo `(seller_id, item_id)`, violando a constraint antiga. Resultado: **167/167 falham** no sync.
 
-#### Fluxo 2 — Coleta Noturna (action: "collection")
-- Seleciona itens com `last_visit_collection_at` nulo ou >= 4 dias
-- Multiget de visitas em lotes de 50
-- Insere em `listing_health_history`
-- Atualiza `listing_health_current` por upsert
-- Atualiza `last_visit_collection_at`
-- Retry em rate limit
-- Detecção de anomalias ao final
+Logs: `"Upsert error: duplicate key value violates unique constraint meli_listings_cache_seller_item_unique"`
 
-#### Fluxo 3 — Backfill Histórico (action: "backfill")
-- 5 janelas: 0-30, 31-60, 61-90, 91-120, 121-150 dias
-- Checkpoint e retomada via `radiography_backfill_control`
-- Self-chain para evitar timeout (50s safety)
-- Status: pending → running → paused → done/failed
+### Bug 2: COLLECTION e BACKFILL falham 100% — URL errada da API
+O código chama:
+```
+GET /items/visits?ids=...
+```
+A URL correta da API do Mercado Livre é:
+```
+GET /visits/items?ids=...
+```
+Resultado: todas as chamadas retornam **400**, zero visitas coletadas.
 
-#### Fluxo 4 — Atualização Current
-- Integrado nos fluxos 2 e 3 (upsert em `listing_health_current`)
+Logs: `"Visits multiget failed: 400"`
 
-#### Fluxo 5 — Detecção de Anomalias
-- `zero_visits` — item ativo sem visitas
-- `high_stock_low_traction` — estoque alto sem tração
-- `visit_drop` — queda >40% de visitas
-- `consistent_decline` — declínio em 3 períodos consecutivos
-- Flags persistidos em `listing_health_current.anomaly_flags`
+## Correções
 
-#### Cron Job
-- `radiography-nightly-collection`: roda a cada 4 dias às 05:00 UTC (02:00 BRT)
-- Chama action "nightly" que processa todos os sellers ativos
+### 1. Remover constraint antiga (migration)
+```sql
+ALTER TABLE meli_listings_cache
+DROP CONSTRAINT meli_listings_cache_seller_item_unique;
+```
 
-#### Action "full"
-- Pipeline completo para um seller: sync → collection → backfill (async)
+### 2. Corrigir URL da API de visitas
+**Arquivo:** `supabase/functions/radiography-collector/index.ts`
 
-## Arquivos Criados/Modificados
-- `supabase/functions/radiography-collector/index.ts` — NOVO
-- Migrations para tabelas, índices, RLS
-- Cron job configurado via pg_cron
+Substituir todas as ocorrencias de:
+`/items/visits?ids=` → `/visits/items?ids=`
+
+(3 ocorrencias: linhas ~326, ~334, ~561)
+
+## Resultado esperado
+- SYNC passa a funcionar: itens populam `meli_listings_cache` corretamente
+- COLLECTION e BACKFILL passam a funcionar: visitas são coletadas da API
+- `listing_health_history` e `listing_health_current` são populadas
+- Prontuário exibe os anúncios com dados reais
+
+## Arquivos modificados
+- Migration SQL: drop constraint antiga
+- `supabase/functions/radiography-collector/index.ts`: corrigir URL da API
+
