@@ -1081,8 +1081,12 @@ Deno.serve(async (req) => {
                 trialStatus,
                 tenant.id,
                 company.id,
+                sellerId,
                 periodStart,
-                periodEnd
+                periodEnd,
+                anchorDate,
+                (company as any).logo_url || null,
+                company.display_name || null
               );
 
               // Create retrospective
