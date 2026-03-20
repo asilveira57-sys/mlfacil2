@@ -132,25 +132,25 @@ export function RadiographyItemList({ sellerId, onSelectItem }: RadiographyItemL
               <SelectTrigger className="w-40 bg-slate-800/50 border-slate-700 text-slate-200">
                 <SelectValue placeholder="Estado clínico" />
               </SelectTrigger>
-              <SelectContent className="bg-slate-800 border-slate-700">
-                <SelectItem value="all">Todos os estados</SelectItem>
-                <SelectItem value="healthy">🟢 Saudável</SelectItem>
-                <SelectItem value="stable">🔵 Estável</SelectItem>
-                <SelectItem value="observation">🟡 Em Observação</SelectItem>
-                <SelectItem value="alert">🟠 Com Alerta</SelectItem>
-                <SelectItem value="critical">🔴 Crítico</SelectItem>
+              <SelectContent className="bg-slate-800 border-slate-700 text-slate-200">
+                <SelectItem value="all" className="text-slate-200">Todos os estados</SelectItem>
+                <SelectItem value="healthy" className="text-slate-200">🟢 Saudável</SelectItem>
+                <SelectItem value="stable" className="text-slate-200">🔵 Estável</SelectItem>
+                <SelectItem value="observation" className="text-slate-200">🟡 Em Observação</SelectItem>
+                <SelectItem value="alert" className="text-slate-200">🟠 Com Alerta</SelectItem>
+                <SelectItem value="critical" className="text-slate-200">🔴 Crítico</SelectItem>
               </SelectContent>
             </Select>
             <Select value={sortBy} onValueChange={setSortBy}>
               <SelectTrigger className="w-36 bg-slate-800/50 border-slate-700 text-slate-200">
                 <SelectValue placeholder="Ordenar por" />
               </SelectTrigger>
-              <SelectContent className="bg-slate-800 border-slate-700">
-                <SelectItem value="score_total">Score Total</SelectItem>
-                <SelectItem value="score_performance">Performance</SelectItem>
-                <SelectItem value="visits_7d">Visitas 7d</SelectItem>
-                <SelectItem value="sales_7d">Vendas 7d</SelectItem>
-                <SelectItem value="conversion_rate_7d">Conversão</SelectItem>
+              <SelectContent className="bg-slate-800 border-slate-700 text-slate-200">
+                <SelectItem value="score_total" className="text-slate-200">Score Total</SelectItem>
+                <SelectItem value="score_performance" className="text-slate-200">Performance</SelectItem>
+                <SelectItem value="visits_7d" className="text-slate-200">Visitas 7d</SelectItem>
+                <SelectItem value="sales_7d" className="text-slate-200">Vendas 7d</SelectItem>
+                <SelectItem value="conversion_rate_7d" className="text-slate-200">Conversão</SelectItem>
               </SelectContent>
             </Select>
             <Button
