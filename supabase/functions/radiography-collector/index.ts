@@ -338,7 +338,8 @@ async function handleCollection(supabase: any, sellerId: string, startTime: numb
         }
 
         if (!resp.ok) {
-          console.warn(`[rad-collector] Visits multiget failed: ${resp.status}`);
+          const errBody = await resp.text().catch(() => "");
+          console.warn(`[rad-collector] Visits multiget failed: ${resp.status} — ${errBody.slice(0, 200)}`);
           failed += batchIds.length;
           continue;
         }
