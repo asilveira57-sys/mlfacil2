@@ -182,9 +182,34 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, sele
           <div className="p-6 space-y-6">
             {/* Current snapshot */}
             <div className="grid grid-cols-3 gap-3">
-              <MiniStat label="Visitas" value={item.visits_last != null ? item.visits_last.toLocaleString("pt-BR") : "—"} icon={<Eye className="h-3 w-3 text-cyan-400" />} />
+              <MiniStat label="Visitas (7d)" value={item.visits_last != null ? item.visits_last.toLocaleString("pt-BR") : "—"} icon={<Eye className="h-3 w-3 text-cyan-400" />} />
               <MiniStat label="Preço" value={item.price != null ? `R$ ${item.price.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : "—"} />
               <MiniStat label="Estoque" value={item.available_quantity != null ? String(item.available_quantity) : "—"} />
+            </div>
+
+            {/* Sales metrics */}
+            <div className="grid grid-cols-4 gap-3">
+              <MiniStat
+                label="Vendas (7d)"
+                value={String(item.sales_count_7d ?? 0)}
+                icon={<ShoppingCart className="h-3 w-3 text-emerald-400" />}
+              />
+              <MiniStat
+                label="Vendas (30d)"
+                value={String(item.sales_count_30d ?? 0)}
+                icon={<ShoppingCart className="h-3 w-3 text-emerald-400" />}
+              />
+              <MiniStat
+                label="Conversão (7d)"
+                value={item.conversion_rate_7d != null ? `${item.conversion_rate_7d.toFixed(1)}%` : "—"}
+                icon={<BarChart3 className="h-3 w-3 text-violet-400" />}
+              />
+              <MiniStat
+                label="Dias s/ venda"
+                value={item.days_without_sale != null ? String(item.days_without_sale) : "—"}
+                icon={<Clock className="h-3 w-3 text-amber-400" />}
+                highlight={item.days_without_sale != null && item.days_without_sale > 14}
+              />
             </div>
 
             {/* Anomalies */}
