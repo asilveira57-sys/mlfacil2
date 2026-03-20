@@ -19,6 +19,14 @@ export interface HealthCurrentItem {
   anomaly_flags: string[] | null;
   last_collected_at: string | null;
   updated_at: string;
+  // Sales enrichment
+  sales_count_7d: number | null;
+  units_sold_7d: number | null;
+  sales_count_30d: number | null;
+  units_sold_30d: number | null;
+  conversion_rate_7d: number | null;
+  days_without_sale: number | null;
+  last_sale_at: string | null;
   // joined from meli_listings_cache
   title?: string | null;
   thumbnail?: string | null;
