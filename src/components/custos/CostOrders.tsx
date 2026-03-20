@@ -877,44 +877,11 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
             </div>
           ) : (
             <>
-              {/* Select all pages banner */}
-              {allOnPageSelected && !selectAllPages && totalOrders > orders.length && !batchProcessing && (
-                <div className="flex items-center gap-2 p-3 mb-2 rounded-lg bg-primary/10 border border-primary/20 text-sm">
-                  <span>
-                    Todos os <strong>{orders.length}</strong> desta página estão selecionados.
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="link"
-                    className="p-0 h-auto font-semibold"
-                    onClick={handleSelectAllPages}
-                    disabled={loadingAllIds}
-                  >
-                    {loadingAllIds ? (
-                      <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />Carregando...</>
-                    ) : (
-                      <>Selecionar todos os {totalOrders.toLocaleString()} pedidos</>
-                    )}
-                  </Button>
-                </div>
-              )}
-
-              {selectAllPages && (
-                <div className="flex items-center gap-2 p-3 mb-2 rounded-lg bg-primary/10 border border-primary/20 text-sm">
-                  <CheckSquare className="h-4 w-4 text-primary" />
-                  <span>
-                    Todos os <strong>{selectedOrders.size.toLocaleString()}</strong> pedidos de todas as páginas estão selecionados.
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="link"
-                    className="p-0 h-auto"
-                    onClick={() => { setSelectAllPages(false); setSelectedOrders(new Set()); }}
-                  >
-                    Limpar seleção
-                  </Button>
-                </div>
-              )}
+              {/* Order status warning */}
+              <div className="flex items-center gap-2 p-3 mb-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-sm text-amber-700 dark:text-amber-400">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>Pedidos não enviados ou não entregues podem não possuir valores completos de comissão e taxas.</span>
+              </div>
 
               {/* Active job banner (when resumed from previous session and no explicit selection) */}
               {batchProcessing && selectedOrders.size === 0 && (
