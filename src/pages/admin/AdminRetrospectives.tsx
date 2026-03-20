@@ -686,40 +686,38 @@ export function AdminRetrospectives() {
             {snapshots.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-8">Nenhum snapshot registrado</p>
             ) : (
-              <ScrollArea className="max-h-[400px]">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Tipo</TableHead>
-                      <TableHead>Período</TableHead>
-                      <TableHead>Pedidos</TableHead>
-                      <TableHead>Receita</TableHead>
-                      <TableHead>Lucro</TableHead>
-                      <TableHead>Margem</TableHead>
-                      <TableHead>ADS</TableHead>
-                      <TableHead>Data</TableHead>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead>Período</TableHead>
+                    <TableHead>Pedidos</TableHead>
+                    <TableHead>Receita</TableHead>
+                    <TableHead>Lucro</TableHead>
+                    <TableHead>Margem</TableHead>
+                    <TableHead>ADS</TableHead>
+                    <TableHead>Data</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {snapshots.map((s) => (
+                    <TableRow key={s.id}>
+                      <TableCell>
+                        <Badge variant="outline" className="text-xs">{s.snapshot_type}</Badge>
+                      </TableCell>
+                      <TableCell className="text-xs whitespace-nowrap">
+                        {s.period_start} → {s.period_end}
+                      </TableCell>
+                      <TableCell className="text-xs">{s.orders_count ?? '—'}</TableCell>
+                      <TableCell className="text-xs">R$ {fmt(s.revenue_total)}</TableCell>
+                      <TableCell className="text-xs">R$ {fmt(s.estimated_profit)}</TableCell>
+                      <TableCell className="text-xs">{s.average_margin != null ? `${fmt(s.average_margin, 1)}%` : '—'}</TableCell>
+                      <TableCell className="text-xs">R$ {fmt(s.ads_spend)}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{s.snapshot_date}</TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {snapshots.map((s) => (
-                      <TableRow key={s.id}>
-                        <TableCell>
-                          <Badge variant="outline" className="text-xs">{s.snapshot_type}</Badge>
-                        </TableCell>
-                        <TableCell className="text-xs whitespace-nowrap">
-                          {s.period_start} → {s.period_end}
-                        </TableCell>
-                        <TableCell className="text-xs">{s.orders_count ?? '—'}</TableCell>
-                        <TableCell className="text-xs">R$ {fmt(s.revenue_total)}</TableCell>
-                        <TableCell className="text-xs">R$ {fmt(s.estimated_profit)}</TableCell>
-                        <TableCell className="text-xs">{s.average_margin != null ? `${fmt(s.average_margin, 1)}%` : '—'}</TableCell>
-                        <TableCell className="text-xs">R$ {fmt(s.ads_spend)}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{s.snapshot_date}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
+                  ))}
+                </TableBody>
+              </Table>
             )}
           </CardContent>
         </Card>
