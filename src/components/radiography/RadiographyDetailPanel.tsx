@@ -20,6 +20,10 @@ import {
   ShoppingCart,
   Clock,
   BarChart3,
+  ArrowUpDown,
+  Info,
+  AlertOctagon,
+  Lightbulb,
 } from "lucide-react";
 import {
   ComposedChart,
@@ -40,6 +44,8 @@ import {
 import {
   HealthCurrentItem,
   HealthHistoryEntry,
+  StructuredAlert,
+  ChangeFlag,
   classifyHealth,
   getAnomalyLabel,
   PeriodDays,
