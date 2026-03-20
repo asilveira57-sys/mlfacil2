@@ -1418,6 +1418,145 @@ async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: stri
 }
 
 // ============================================================================
+// ENRICH SALES — Re-enrich all listing_health_current with sales data
+// without re-fetching visits from ML API
+// ============================================================================
+async function handleEnrichSales(supabase: any, sellerId: string) {
+  console.log(`[rad-collector] ENRICH_SALES: Starting for seller ${sellerId}`);
+  const startTime = Date.now();
+
+  // 1. Get all item_ids from listing_health_current
+  let allItemIds: string[] = [];
+  let from = 0;
+  const PAGE = 1000;
+  while (true) {
+    const { data, error } = await supabase
+      .from("listing_health_current")
+      .select("item_id")
+      .eq("seller_id", sellerId)
+      .range(from, from + PAGE - 1);
+    if (error) { console.error(`[rad-collector] ENRICH_SALES: fetch error:`, error.message); break; }
+    if (!data || data.length === 0) break;
+    allItemIds = allItemIds.concat(data.map((r: any) => r.item_id));
+    if (data.length < PAGE) break;
+    from += PAGE;
+  }
+
+  if (allItemIds.length === 0) {
+    console.log(`[rad-collector] ENRICH_SALES: No items found`);
+    return { success: true, enriched: 0, message: "No items to enrich" };
+  }
+
+  console.log(`[rad-collector] ENRICH_SALES: ${allItemIds.length} items to enrich`);
+
+  // 2. Process in batches of 200
+  const BATCH = 200;
+  let totalEnriched = 0;
+  let totalFailed = 0;
+
+  for (let i = 0; i < allItemIds.length; i += BATCH) {
+    const batchIds = allItemIds.slice(i, i + BATCH);
+
+    try {
+      const salesData = await fetchSalesData(supabase, sellerId, batchIds);
+
+      // Build update rows
+      const updates: any[] = [];
+      for (const itemId of batchIds) {
+        const sales = salesData[itemId];
+        if (!sales) continue;
+
+        const daysWithoutSale = sales.last_sale_at
+          ? Math.floor((Date.now() - new Date(sales.last_sale_at).getTime()) / (24 * 60 * 60 * 1000))
+          : null;
+
+        updates.push({
+          seller_id: sellerId,
+          item_id: itemId,
+          sales_count_7d: sales.sales_7d,
+          units_sold_7d: sales.units_7d,
+          sales_count_30d: sales.sales_30d,
+          units_sold_30d: sales.units_30d,
+          days_without_sale: daysWithoutSale,
+          last_sale_at: sales.last_sale_at,
+        });
+      }
+
+      // Upsert with only sales fields
+      if (updates.length > 0) {
+        const { error } = await supabase
+          .from("listing_health_current")
+          .upsert(updates, { onConflict: "seller_id,item_id", ignoreDuplicates: false });
+        if (error) {
+          console.warn(`[rad-collector] ENRICH_SALES: upsert error batch ${i}:`, error.message);
+          totalFailed += updates.length;
+        } else {
+          totalEnriched += updates.length;
+        }
+      }
+
+      // Also update conversion_rate_7d
+      for (const upd of updates) {
+        if (upd.sales_count_7d > 0) {
+          // Need visits_last for conversion calc
+          const { data: current } = await supabase
+            .from("listing_health_current")
+            .select("visits_last")
+            .eq("seller_id", sellerId)
+            .eq("item_id", upd.item_id)
+            .maybeSingle();
+          
+          const visits = current?.visits_last || 0;
+          if (visits > 0) {
+            const convRate = Number(((upd.sales_count_7d / visits) * 100).toFixed(3));
+            await supabase
+              .from("listing_health_current")
+              .update({ conversion_rate_7d: convRate })
+              .eq("seller_id", sellerId)
+              .eq("item_id", upd.item_id);
+          }
+        }
+      }
+
+      console.log(`[rad-collector] ENRICH_SALES: batch ${Math.floor(i/BATCH)+1}: enriched=${updates.length}`);
+    } catch (err) {
+      console.warn(`[rad-collector] ENRICH_SALES: batch error:`, err);
+      totalFailed += batchIds.length;
+    }
+
+    if (Date.now() - startTime > SAFETY_TIMEOUT_MS) {
+      console.log(`[rad-collector] ENRICH_SALES: timeout after ${totalEnriched} enriched`);
+      break;
+    }
+  }
+
+  // 3. Re-run anomaly detection with enriched data
+  try {
+    await detectAnomalies(supabase, sellerId);
+    console.log(`[rad-collector] ENRICH_SALES: anomaly detection completed`);
+  } catch (err) {
+    console.warn(`[rad-collector] ENRICH_SALES: anomaly detection failed:`, err);
+  }
+
+  const duration = Date.now() - startTime;
+  console.log(`[rad-collector] ENRICH_SALES: Complete. Enriched=${totalEnriched}, Failed=${totalFailed}, Duration=${duration}ms`);
+
+  // Log
+  await createLog(supabase, sellerId, "collection").then(async (logId) => {
+    await finishLog(supabase, logId, {
+      status: "success",
+      total_items: allItemIds.length,
+      items_processed: totalEnriched,
+      items_failed: totalFailed,
+      duration_ms: duration,
+      metadata: { action: "enrich_sales" },
+    });
+  }).catch(() => {});
+
+  return { success: true, enriched: totalEnriched, failed: totalFailed, duration_ms: duration };
+}
+
+// ============================================================================
 // NIGHTLY CRON — with seller cursor and self-chain for continuation
 // ============================================================================
 async function handleNightlyCron(supabase: any, lastProcessedSellerId?: string, skipSync?: boolean) {
