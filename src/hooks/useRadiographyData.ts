@@ -5,6 +5,24 @@ import { RadiographyHealthStatus } from "@/types/radiography";
 
 // --- Types ---
 
+export interface StructuredAlert {
+  type: string;
+  severity: string;
+  title: string;
+  description: string;
+  context: Record<string, any>;
+}
+
+export interface ChangeFlag {
+  type: string;
+  label: string;
+  detail: string;
+  severity: string;
+  prev_value: any;
+  new_value: any;
+  pct_change?: number;
+}
+
 export interface HealthCurrentItem {
   id: string;
   item_id: string;
@@ -27,6 +45,12 @@ export interface HealthCurrentItem {
   conversion_rate_7d: number | null;
   days_without_sale: number | null;
   last_sale_at: string | null;
+  // Change detection
+  change_flags: ChangeFlag[] | null;
+  alerts_json: StructuredAlert[] | null;
+  prev_price: number | null;
+  prev_visits: number | null;
+  prev_available_quantity: number | null;
   // joined from meli_listings_cache
   title?: string | null;
   thumbnail?: string | null;
