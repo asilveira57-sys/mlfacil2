@@ -940,27 +940,7 @@ export function CostOrders({ sellerId }: CostOrdersProps) {
                 </div>
               )}
 
-              {/* Safe 1-by-1 banners */}
-              {safeAllOnPageSelected && !safeSelectAllPages && totalOrders > orders.length && !safeProcessing && (
-                <div className="flex items-center gap-2 p-3 mb-2 rounded-lg bg-green-500/10 border border-green-500/20 text-sm">
-                  <span>
-                    Todos os <strong>{orders.length}</strong> desta página selecionados (modo seguro).
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="link"
-                    className="p-0 h-auto font-semibold"
-                    onClick={handleSafeSelectAllPages}
-                    disabled={safeLoadingAllIds}
-                  >
-                    {safeLoadingAllIds ? (
-                      <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />Carregando...</>
-                    ) : (
-                      <>Selecionar todos os {totalOrders.toLocaleString()} pedidos</>
-                    )}
-                  </Button>
-                </div>
-              )}
+              {/* Safe 1-by-1 — no "select all pages" */}
 
               {safeSelectAllPages && (
                 <div className="flex items-center gap-2 p-3 mb-2 rounded-lg bg-green-500/10 border border-green-500/20 text-sm">
