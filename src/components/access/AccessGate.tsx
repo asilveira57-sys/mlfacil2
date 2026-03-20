@@ -98,7 +98,7 @@ export function AccessGate({
         title="Teste finalizado"
         description={ACCESS_MESSAGES.TRIAL_EXPIRED}
         action={
-          <Button onClick={() => navigate('/planos')}>
+          <Button onClick={() => navigate('/settings?section=plano')}>
             Escolher plano
           </Button>
         }
