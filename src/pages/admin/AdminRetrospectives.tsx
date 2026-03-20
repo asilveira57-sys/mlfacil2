@@ -138,9 +138,11 @@ function useAllRetrospectives() {
   });
 }
 
-function useAllTargets() {
+// ─── Resolve names for targets ───
+
+function useTargetsWithNames() {
   return useQuery({
-    queryKey: ['admin-retrospective-targets'],
+    queryKey: ['admin-retrospective-targets-named'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('retrospective_targets')
@@ -148,7 +150,41 @@ function useAllTargets() {
         .order('due_date', { ascending: false })
         .limit(200);
       if (error) throw error;
-      return (data ?? []) as RetrospectiveTarget[];
+      const targets = (data ?? []) as RetrospectiveTarget[];
+
+      // Resolve tenant and company names
+      const tenantIds = [...new Set(targets.map(t => t.tenant_id).filter(Boolean))] as string[];
+      const companyIds = [...new Set(targets.map(t => t.company_id).filter(Boolean))] as string[];
+
+      let tenantMap: Record<string, string> = {};
+      if (tenantIds.length > 0) {
+        const { data: tenants } = await supabase.from('tenants').select('id, name, owner_user_id').in('id', tenantIds);
+        const ownerIds = [...new Set((tenants || []).map((t: any) => t.owner_user_id).filter(Boolean))];
+        let profileMap: Record<string, string> = {};
+        if (ownerIds.length > 0) {
+          const { data: profiles } = await supabase.from('profiles').select('id, full_name, email').in('id', ownerIds);
+          for (const p of (profiles || []) as any[]) {
+            profileMap[p.id] = p.full_name || p.email || '';
+          }
+        }
+        for (const t of (tenants || []) as any[]) {
+          tenantMap[t.id] = t.name || profileMap[t.owner_user_id] || t.id.slice(0, 8) + '…';
+        }
+      }
+
+      let companyMap: Record<string, string> = {};
+      if (companyIds.length > 0) {
+        const { data: companies } = await supabase.from('companies').select('id, display_name').in('id', companyIds);
+        for (const c of (companies || []) as any[]) {
+          if (c.display_name) companyMap[c.id] = c.display_name;
+        }
+      }
+
+      return targets.map(t => ({
+        ...t,
+        _tenantName: t.tenant_id ? (tenantMap[t.tenant_id] || t.tenant_id.slice(0, 8) + '…') : '—',
+        _companyName: t.company_id ? (companyMap[t.company_id] || t.company_id.slice(0, 8) + '…') : '—',
+      }));
     },
   });
 }
@@ -173,7 +209,7 @@ function useAllSnapshots() {
 export function AdminRetrospectives() {
   const { data: retrospectives = [], isLoading } = useAllRetrospectives();
   const { data: rules = [] } = useRetrospectiveRules();
-  const { data: targets = [] } = useAllTargets();
+  const { data: targets = [] } = useTargetsWithNames();
   const { data: snapshots = [] } = useAllSnapshots();
   const triggerEngine = useTriggerRetrospectiveEngine();
   const deleteMut = useDeleteRetrospectiveNew();
@@ -184,6 +220,9 @@ export function AdminRetrospectives() {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [activeTab, setActiveTab] = useState<'retrospectives' | 'rules' | 'targets' | 'snapshots'>('retrospectives');
   const [selectedRetro, setSelectedRetro] = useState<RetrospectiveWithCompany | null>(null);
+  const [retroPage, setRetroPage] = useState(0);
+  const [targetPage, setTargetPage] = useState(0);
+  const PAGE_SIZE = 20;
 
   // Stats
   const stats = useMemo(() => {
@@ -388,107 +427,121 @@ export function AdminRetrospectives() {
             </Card>
           ) : (
             <Card>
-              <ScrollArea className="max-h-[500px]">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Cliente</TableHead>
-                      <TableHead>Título</TableHead>
-                      <TableHead>Tipo</TableHead>
-                      <TableHead>Período</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Relatórios</TableHead>
-                      <TableHead>Criado em</TableHead>
-                      <TableHead className="text-right">Ações</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filtered.map((r) => {
-                      const st = STATUS_MAP[r.status] || { label: r.status, variant: 'outline' as const };
-                      return (
-                        <TableRow key={r.id}>
-                          <TableCell>
-                            <div className="flex items-center gap-1.5">
-                              <Building2 className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                              <span className="font-medium text-sm max-w-[140px] truncate">
-                                {r.company_name || '—'}
-                              </span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="font-medium max-w-[180px] truncate">
-                            {r.title}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className="text-xs">
-                              {TYPE_LABELS[r.retrospective_type] || r.retrospective_type}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                            {r.period_start} → {r.period_end}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={st.variant} className="text-xs">
-                              {st.label}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex gap-1">
-                              {r.html_url && (
-                                <a href={r.html_url} target="_blank" rel="noopener noreferrer"
-                                  className="text-primary hover:underline text-xs flex items-center gap-0.5">
-                                  <FileText className="h-3 w-3" /> HTML
-                                </a>
-                              )}
-                              {r.presentation_url && (
-                                <a href={r.presentation_url} target="_blank" rel="noopener noreferrer"
-                                  className="text-primary hover:underline text-xs flex items-center gap-0.5 ml-2">
-                                  <Presentation className="h-3 w-3" /> Slides
-                                </a>
-                              )}
-                              {!r.html_url && !r.presentation_url && (
-                                <span className="text-xs text-muted-foreground">—</span>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                            {format(new Date(r.created_at), 'dd/MM/yy HH:mm')}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex justify-end gap-1">
-                              <Button variant="ghost" size="icon" className="h-7 w-7"
-                                onClick={() => setSelectedRetro(r)} title="Visualizar">
-                                <Eye className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-7 w-7"
-                                onClick={() => handleDownloadPdf(r)} title="Download PDF">
-                                <Download className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-7 w-7"
-                                onClick={() => handleRegenerateReports(r.id)}
-                                disabled={generateReports.isPending}
-                                title="Regenerar relatórios (HTML/Slides)">
-                                <RefreshCw className={`h-3.5 w-3.5 ${generateReports.isPending ? 'animate-spin' : ''}`} />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-7 w-7 text-primary"
-                                onClick={() => handleRegenerateComplete(r)}
-                                disabled={triggerEngine.isPending}
-                                title="Regenerar Completo (nova versão com dados atualizados)">
-                                <Zap className={`h-3.5 w-3.5 ${triggerEngine.isPending ? 'animate-spin' : ''}`} />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
-                                onClick={() => handleDelete(r.id)}
-                                disabled={deleteMut.isPending}
-                                title="Excluir">
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Título</TableHead>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead>Período</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Relatórios</TableHead>
+                    <TableHead>Criado em</TableHead>
+                    <TableHead className="text-right">Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered.slice(retroPage * PAGE_SIZE, (retroPage + 1) * PAGE_SIZE).map((r) => {
+                    const st = STATUS_MAP[r.status] || { label: r.status, variant: 'outline' as const };
+                    return (
+                      <TableRow key={r.id}>
+                        <TableCell>
+                          <div className="flex items-center gap-1.5">
+                            <Building2 className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                            <span className="font-medium text-sm max-w-[140px] truncate">
+                              {r.company_name || '—'}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-medium max-w-[180px] truncate">
+                          {r.title}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-xs">
+                            {TYPE_LABELS[r.retrospective_type] || r.retrospective_type}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                          {r.period_start} → {r.period_end}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={st.variant} className="text-xs">
+                            {st.label}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            {r.html_url && (
+                              <a href={r.html_url} target="_blank" rel="noopener noreferrer"
+                                className="text-primary hover:underline text-xs flex items-center gap-0.5">
+                                <FileText className="h-3 w-3" /> HTML
+                              </a>
+                            )}
+                            {r.presentation_url && (
+                              <a href={r.presentation_url} target="_blank" rel="noopener noreferrer"
+                                className="text-primary hover:underline text-xs flex items-center gap-0.5 ml-2">
+                                <Presentation className="h-3 w-3" /> Slides
+                              </a>
+                            )}
+                            {!r.html_url && !r.presentation_url && (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                          {format(new Date(r.created_at), 'dd/MM/yy HH:mm')}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex justify-end gap-1">
+                            <Button variant="ghost" size="icon" className="h-7 w-7"
+                              onClick={() => setSelectedRetro(r)} title="Visualizar">
+                              <Eye className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7"
+                              onClick={() => handleDownloadPdf(r)} title="Download PDF">
+                              <Download className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7"
+                              onClick={() => handleRegenerateReports(r.id)}
+                              disabled={generateReports.isPending}
+                              title="Regenerar relatórios (HTML/Slides)">
+                              <RefreshCw className={`h-3.5 w-3.5 ${generateReports.isPending ? 'animate-spin' : ''}`} />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-primary"
+                              onClick={() => handleRegenerateComplete(r)}
+                              disabled={triggerEngine.isPending}
+                              title="Regenerar Completo (nova versão com dados atualizados)">
+                              <Zap className={`h-3.5 w-3.5 ${triggerEngine.isPending ? 'animate-spin' : ''}`} />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
+                              onClick={() => handleDelete(r.id)}
+                              disabled={deleteMut.isPending}
+                              title="Excluir">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+              {/* Pagination */}
+              {filtered.length > PAGE_SIZE && (
+                <div className="flex items-center justify-between px-4 py-3 border-t">
+                  <p className="text-xs text-muted-foreground">
+                    {retroPage * PAGE_SIZE + 1}–{Math.min((retroPage + 1) * PAGE_SIZE, filtered.length)} de {filtered.length}
+                  </p>
+                  <div className="flex gap-1">
+                    <Button variant="outline" size="sm" disabled={retroPage === 0} onClick={() => setRetroPage(p => p - 1)}>
+                      Anterior
+                    </Button>
+                    <Button variant="outline" size="sm" disabled={(retroPage + 1) * PAGE_SIZE >= filtered.length} onClick={() => setRetroPage(p => p + 1)}>
+                      Próxima
+                    </Button>
+                  </div>
+                </div>
+              )}
             </Card>
           )}
         </div>
@@ -563,12 +616,12 @@ export function AdminRetrospectives() {
             {targets.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-8">Nenhum alvo na fila</p>
             ) : (
-              <ScrollArea className="max-h-[400px]">
+              <>
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Tenant</TableHead>
-                      <TableHead>Company</TableHead>
+                      <TableHead>Cliente</TableHead>
+                      <TableHead>Empresa</TableHead>
                       <TableHead>Escopo</TableHead>
                       <TableHead>Âncora</TableHead>
                       <TableHead>Vencimento</TableHead>
@@ -577,10 +630,15 @@ export function AdminRetrospectives() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {targets.map((t) => (
+                    {targets.slice(targetPage * PAGE_SIZE, (targetPage + 1) * PAGE_SIZE).map((t: any) => (
                       <TableRow key={t.id}>
-                        <TableCell className="text-xs font-mono truncate max-w-[120px]">{t.tenant_id.slice(0, 8)}…</TableCell>
-                        <TableCell className="text-xs font-mono truncate max-w-[120px]">{t.company_id?.slice(0, 8) ?? '—'}…</TableCell>
+                        <TableCell className="text-sm truncate max-w-[160px]">
+                          <div className="flex items-center gap-1.5">
+                            <Building2 className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                            {t._tenantName || '—'}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm truncate max-w-[160px]">{t._companyName || '—'}</TableCell>
                         <TableCell className="text-xs">{t.target_scope}</TableCell>
                         <TableCell className="text-xs">{t.anchor_date}</TableCell>
                         <TableCell className="text-xs">{t.due_date}</TableCell>
@@ -596,7 +654,22 @@ export function AdminRetrospectives() {
                     ))}
                   </TableBody>
                 </Table>
-              </ScrollArea>
+                {targets.length > PAGE_SIZE && (
+                  <div className="flex items-center justify-between px-4 py-3 border-t">
+                    <p className="text-xs text-muted-foreground">
+                      {targetPage * PAGE_SIZE + 1}–{Math.min((targetPage + 1) * PAGE_SIZE, targets.length)} de {targets.length}
+                    </p>
+                    <div className="flex gap-1">
+                      <Button variant="outline" size="sm" disabled={targetPage === 0} onClick={() => setTargetPage(p => p - 1)}>
+                        Anterior
+                      </Button>
+                      <Button variant="outline" size="sm" disabled={(targetPage + 1) * PAGE_SIZE >= targets.length} onClick={() => setTargetPage(p => p + 1)}>
+                        Próxima
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </CardContent>
         </Card>
@@ -613,40 +686,38 @@ export function AdminRetrospectives() {
             {snapshots.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-8">Nenhum snapshot registrado</p>
             ) : (
-              <ScrollArea className="max-h-[400px]">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Tipo</TableHead>
-                      <TableHead>Período</TableHead>
-                      <TableHead>Pedidos</TableHead>
-                      <TableHead>Receita</TableHead>
-                      <TableHead>Lucro</TableHead>
-                      <TableHead>Margem</TableHead>
-                      <TableHead>ADS</TableHead>
-                      <TableHead>Data</TableHead>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead>Período</TableHead>
+                    <TableHead>Pedidos</TableHead>
+                    <TableHead>Receita</TableHead>
+                    <TableHead>Lucro</TableHead>
+                    <TableHead>Margem</TableHead>
+                    <TableHead>ADS</TableHead>
+                    <TableHead>Data</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {snapshots.map((s) => (
+                    <TableRow key={s.id}>
+                      <TableCell>
+                        <Badge variant="outline" className="text-xs">{s.snapshot_type}</Badge>
+                      </TableCell>
+                      <TableCell className="text-xs whitespace-nowrap">
+                        {s.period_start} → {s.period_end}
+                      </TableCell>
+                      <TableCell className="text-xs">{s.orders_count ?? '—'}</TableCell>
+                      <TableCell className="text-xs">R$ {fmt(s.revenue_total)}</TableCell>
+                      <TableCell className="text-xs">R$ {fmt(s.estimated_profit)}</TableCell>
+                      <TableCell className="text-xs">{s.average_margin != null ? `${fmt(s.average_margin, 1)}%` : '—'}</TableCell>
+                      <TableCell className="text-xs">R$ {fmt(s.ads_spend)}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{s.snapshot_date}</TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {snapshots.map((s) => (
-                      <TableRow key={s.id}>
-                        <TableCell>
-                          <Badge variant="outline" className="text-xs">{s.snapshot_type}</Badge>
-                        </TableCell>
-                        <TableCell className="text-xs whitespace-nowrap">
-                          {s.period_start} → {s.period_end}
-                        </TableCell>
-                        <TableCell className="text-xs">{s.orders_count ?? '—'}</TableCell>
-                        <TableCell className="text-xs">R$ {fmt(s.revenue_total)}</TableCell>
-                        <TableCell className="text-xs">R$ {fmt(s.estimated_profit)}</TableCell>
-                        <TableCell className="text-xs">{s.average_margin != null ? `${fmt(s.average_margin, 1)}%` : '—'}</TableCell>
-                        <TableCell className="text-xs">R$ {fmt(s.ads_spend)}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{s.snapshot_date}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
+                  ))}
+                </TableBody>
+              </Table>
             )}
           </CardContent>
         </Card>

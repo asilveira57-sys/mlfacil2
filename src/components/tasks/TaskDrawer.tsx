@@ -265,7 +265,7 @@ export function TaskDrawer({
                       <SelectItem value="none">Nenhum</SelectItem>
                       {members.map(member => (
                         <SelectItem key={member.user_id} value={member.user_id}>
-                          {member.user_id.slice(0, 8)}...
+                          {member.full_name || member.user_id.slice(0, 8) + '...'}
                         </SelectItem>
                       ))}
                     </SelectContent>
