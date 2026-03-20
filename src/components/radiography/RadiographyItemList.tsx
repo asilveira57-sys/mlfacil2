@@ -261,6 +261,15 @@ export function RadiographyItemList({
                       <Badge className={`text-xs ${config.bgClass} ${config.colorClass} ${config.borderClass}`}>
                         {config.label}
                       </Badge>
+                      {item.seo_score != null && (
+                        <Badge variant="outline" className={`text-xs ${
+                          item.seo_score >= 70 ? "border-emerald-500/30 text-emerald-400" :
+                          item.seo_score >= 40 ? "border-amber-500/30 text-amber-400" :
+                          "border-red-500/30 text-red-400"
+                        }`}>
+                          SEO {item.seo_score}
+                        </Badge>
+                      )}
                     </div>
                     {/* Anomaly flags */}
                     {/* Change flags */}

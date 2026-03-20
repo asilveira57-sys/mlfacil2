@@ -490,6 +490,9 @@ async function handleCollection(supabase: any, sellerId: string, startTime: numb
     // Detect anomalies only on the processed items (optimized)
     await detectAnomalies(supabase, sellerId, processedItemIds);
 
+    // SEO analysis (after anomalies, using processed items)
+    await analyzeSeoForItems(supabase, sellerId, processedItemIds);
+
     const duration = Date.now() - startTime;
     const finalStatus = processed === 0 && failed > 0 ? "failed" : "success";
     await finishLog(supabase, logId, {
@@ -1223,6 +1226,194 @@ async function detectAnomalies(supabase: any, sellerId: string, processedItemIds
   } catch (err) {
     console.warn(`[rad-collector] Anomaly detection error:`, err);
     return [];
+  }
+}
+
+// ============================================================================
+// FLOW 6 — SEO ANALYSIS (cross-reference with Trends keywords)
+// ============================================================================
+
+function normalizeText(text: string): string {
+  return text.toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function checkKeywordInText(keyword: string, normalizedTitle: string): boolean {
+  const normalizedKw = normalizeText(keyword);
+  // Check if all words of the keyword appear in the title
+  const kwWords = normalizedKw.split(" ").filter(w => w.length > 2);
+  if (kwWords.length === 0) return false;
+  const matchCount = kwWords.filter(w => normalizedTitle.includes(w)).length;
+  // At least 70% of keyword words must appear
+  return matchCount / kwWords.length >= 0.7;
+}
+
+function assessKeywordRelevance(keyword: string, title: string, categoryName: string | null): "high" | "medium" | "low" {
+  const normalizedKw = normalizeText(keyword);
+  const normalizedTitle = normalizeText(title);
+  const kwWords = normalizedKw.split(" ").filter(w => w.length > 2);
+  const titleWords = normalizedTitle.split(" ").filter(w => w.length > 2);
+  
+  if (kwWords.length === 0 || titleWords.length === 0) return "low";
+  
+  // How many keyword words overlap with title words?
+  const overlapCount = kwWords.filter(kw => titleWords.some(tw => tw === kw || tw.includes(kw) || kw.includes(tw))).length;
+  const overlapRatio = overlapCount / kwWords.length;
+  
+  if (overlapRatio >= 0.5) return "high";
+  if (overlapRatio >= 0.25) return "medium";
+  return "low";
+}
+
+async function analyzeSeoForItems(supabase: any, sellerId: string, itemIds: string[]) {
+  if (!itemIds || itemIds.length === 0) return;
+  console.log(`[rad-collector] SEO analysis for ${sellerId}: ${itemIds.length} items`);
+
+  try {
+    // 1. Get item details from meli_listings_cache (title + category_id)
+    const itemDetails = new Map<string, { title: string; category_id: string }>();
+    for (let i = 0; i < itemIds.length; i += 500) {
+      const chunk = itemIds.slice(i, i + 500);
+      const { data } = await supabase
+        .from("meli_listings_cache")
+        .select("item_id, title, category_id")
+        .eq("seller_id", sellerId)
+        .in("item_id", chunk);
+      if (data) {
+        for (const row of data) {
+          if (row.title && row.category_id && !itemDetails.has(row.item_id)) {
+            itemDetails.set(row.item_id, { title: row.title, category_id: row.category_id });
+          }
+        }
+      }
+    }
+
+    if (itemDetails.size === 0) {
+      console.log(`[rad-collector] SEO: No items with title+category found`);
+      return;
+    }
+
+    // 2. Get unique leaf categories and map to level1 via account_category_activity
+    const leafCategories = [...new Set([...itemDetails.values()].map(v => v.category_id))];
+    const categoryToL1 = new Map<string, { l1_id: string; l1_name: string; cat_name: string }>();
+    
+    for (let i = 0; i < leafCategories.length; i += 500) {
+      const chunk = leafCategories.slice(i, i + 500);
+      const { data } = await supabase
+        .from("account_category_activity")
+        .select("category_id, level1_category_id, level1_category_name, category_name")
+        .in("category_id", chunk);
+      if (data) {
+        for (const row of data) {
+          if (row.level1_category_id) {
+            categoryToL1.set(row.category_id, {
+              l1_id: row.level1_category_id,
+              l1_name: row.level1_category_name || "",
+              cat_name: row.category_name || "",
+            });
+          }
+        }
+      }
+    }
+
+    // 3. Get trending keywords from trend_snapshots for these L1 categories
+    const l1Ids = [...new Set([...categoryToL1.values()].map(v => v.l1_id))];
+    const keywordsByL1 = new Map<string, Array<{ keyword: string; url: string }>>();
+
+    if (l1Ids.length > 0) {
+      // Get the most recent snapshot for each L1 category
+      for (const l1Id of l1Ids) {
+        const { data } = await supabase
+          .from("trend_snapshots")
+          .select("trends_data")
+          .eq("category_id", l1Id)
+          .order("snapshot_date", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        
+        if (data?.trends_data && Array.isArray(data.trends_data)) {
+          keywordsByL1.set(l1Id, data.trends_data.slice(0, 30)); // Top 30 keywords
+        }
+      }
+    }
+
+    console.log(`[rad-collector] SEO: ${itemDetails.size} items, ${categoryToL1.size} categories mapped, ${keywordsByL1.size} L1s with keywords`);
+
+    // 4. Analyze each item
+    let analyzed = 0;
+    for (const [itemId, detail] of itemDetails) {
+      const mapping = categoryToL1.get(detail.category_id);
+      if (!mapping) continue;
+
+      const trendKeywords = keywordsByL1.get(mapping.l1_id);
+      if (!trendKeywords || trendKeywords.length === 0) continue;
+
+      const normalizedTitle = normalizeText(detail.title);
+      const found: string[] = [];
+      const missing: string[] = [];
+      const analysisDetails: Array<{
+        keyword: string;
+        found_in_title: boolean;
+        relevance: "high" | "medium" | "low";
+      }> = [];
+
+      // Check top 15 keywords for SEO coverage
+      const topKeywords = trendKeywords.slice(0, 15);
+      for (const kw of topKeywords) {
+        const foundInTitle = checkKeywordInText(kw.keyword, normalizedTitle);
+        const relevance = assessKeywordRelevance(kw.keyword, detail.title, mapping.cat_name);
+
+        analysisDetails.push({
+          keyword: kw.keyword,
+          found_in_title: foundInTitle,
+          relevance,
+        });
+
+        if (foundInTitle) {
+          found.push(kw.keyword);
+        } else if (relevance !== "low") {
+          // Only suggest missing keywords that are at least medium relevance
+          missing.push(kw.keyword);
+        }
+      }
+
+      // Calculate SEO score (0-100)
+      const relevantKeywords = analysisDetails.filter(a => a.relevance !== "low");
+      const totalRelevant = relevantKeywords.length || 1;
+      const foundRelevant = relevantKeywords.filter(a => a.found_in_title).length;
+      const seoScore = Math.round((foundRelevant / totalRelevant) * 100);
+
+      // Update listing_health_current
+      await supabase
+        .from("listing_health_current")
+        .update({
+          seo_score: seoScore,
+          seo_keywords_found: found.slice(0, 10),
+          seo_keywords_missing: missing.slice(0, 10),
+          seo_analysis_json: {
+            category_name: mapping.cat_name,
+            l1_category_name: mapping.l1_name,
+            total_trending_keywords: trendKeywords.length,
+            analyzed_keywords: analysisDetails.length,
+            relevant_keywords: totalRelevant,
+            found_count: foundRelevant,
+            score: seoScore,
+            details: analysisDetails,
+            analyzed_at: new Date().toISOString(),
+          },
+        })
+        .eq("seller_id", sellerId)
+        .eq("item_id", itemId);
+
+      analyzed++;
+    }
+
+    console.log(`[rad-collector] SEO: ${analyzed} items analyzed`);
+  } catch (err) {
+    console.warn(`[rad-collector] SEO analysis error:`, err);
   }
 }
 

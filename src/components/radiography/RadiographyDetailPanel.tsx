@@ -24,6 +24,10 @@ import {
   Info,
   AlertOctagon,
   Lightbulb,
+  Search,
+  Check,
+  X,
+  Target,
 } from "lucide-react";
 import {
   ComposedChart,
@@ -46,6 +50,7 @@ import {
   HealthHistoryEntry,
   StructuredAlert,
   ChangeFlag,
+  SeoAnalysis,
   classifyHealth,
   getAnomalyLabel,
   PeriodDays,
@@ -306,6 +311,11 @@ export function RadiographyDetailPanel({ item, open, onClose, fetchHistory, sele
               </Card>
             )}
 
+            {/* SEO Analysis */}
+            {item.seo_analysis_json && (
+              <SeoAnalysisCard seo={item.seo_analysis_json} score={item.seo_score} found={item.seo_keywords_found} missing={item.seo_keywords_missing} />
+            )}
+
             {/* Evolution metrics */}
             {history.length >= 2 && (
               <div className="grid grid-cols-3 gap-3">
@@ -403,6 +413,108 @@ function EvolutionCard({ label, delta, isCurrency }: { label: string; delta: num
           <Icon className="h-3 w-3" />
           {isPositive ? "+" : isZero ? "" : "-"}{formatted}
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function SeoAnalysisCard({ seo, score, found, missing }: { seo: SeoAnalysis; score: number | null; found: string[] | null; missing: string[] | null }) {
+  const scoreVal = score ?? seo.score ?? 0;
+  const scoreColor = scoreVal >= 70 ? "text-emerald-400" : scoreVal >= 40 ? "text-amber-400" : "text-red-400";
+  const scoreBg = scoreVal >= 70 ? "bg-emerald-500/10 border-emerald-500/20" : scoreVal >= 40 ? "bg-amber-500/10 border-amber-500/20" : "bg-red-500/10 border-red-500/20";
+
+  const relevantDetails = seo.details?.filter(d => d.relevance !== "low") || [];
+  const foundKws = found || [];
+  const missingKws = missing || [];
+
+  return (
+    <Card className={`${scoreBg}`}>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Search className="h-4 w-4 text-cyan-400" />
+            <span className="text-slate-200">Análise de SEO</span>
+          </CardTitle>
+          <div className="flex items-center gap-2">
+            <span className={`text-2xl font-bold font-mono ${scoreColor}`}>{scoreVal}</span>
+            <span className="text-xs text-slate-400">/100</span>
+          </div>
+        </div>
+        <p className="text-xs text-slate-400">
+          Baseado nas {seo.total_trending_keywords} palavras mais buscadas em {seo.l1_category_name || seo.category_name}
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Found keywords */}
+        {foundKws.length > 0 && (
+          <div>
+            <div className="text-xs font-medium text-emerald-400 mb-2 flex items-center gap-1">
+              <Check className="h-3 w-3" />
+              Palavras encontradas no título ({foundKws.length})
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {foundKws.map((kw) => (
+                <Badge key={kw} variant="outline" className="text-xs border-emerald-500/30 text-emerald-300 bg-emerald-500/5">
+                  {kw}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Missing relevant keywords */}
+        {missingKws.length > 0 && (
+          <div>
+            <div className="text-xs font-medium text-amber-400 mb-2 flex items-center gap-1">
+              <Target className="h-3 w-3" />
+              Oportunidades de SEO ({missingKws.length})
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {missingKws.map((kw) => (
+                <Badge key={kw} variant="outline" className="text-xs border-amber-500/30 text-amber-300 bg-amber-500/5">
+                  {kw}
+                </Badge>
+              ))}
+            </div>
+            <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+              Avalie quais dessas palavras realmente representam este produto e tente encaixar as aderentes no título, descrição e ficha técnica.
+            </p>
+          </div>
+        )}
+
+        {/* Keyword details */}
+        {relevantDetails.length > 0 && (
+          <div>
+            <div className="text-xs font-medium text-slate-400 mb-2">
+              Detalhes ({relevantDetails.length} palavras relevantes)
+            </div>
+            <div className="space-y-1 max-h-[200px] overflow-y-auto">
+              {relevantDetails.map((d, i) => (
+                <div key={i} className="flex items-center justify-between text-xs py-1 px-2 rounded bg-slate-800/50">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {d.found_in_title ? (
+                      <Check className="h-3 w-3 text-emerald-400 flex-shrink-0" />
+                    ) : (
+                      <X className="h-3 w-3 text-slate-500 flex-shrink-0" />
+                    )}
+                    <span className={d.found_in_title ? "text-slate-200" : "text-slate-400"}>{d.keyword}</span>
+                  </div>
+                  <Badge variant="outline" className={`text-[10px] ${
+                    d.relevance === "high" ? "border-cyan-500/30 text-cyan-400" : "border-slate-600 text-slate-500"
+                  }`}>
+                    {d.relevance === "high" ? "alta" : "média"}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {foundKws.length === 0 && missingKws.length === 0 && (
+          <p className="text-xs text-slate-500 text-center py-2">
+            Nenhuma palavra relevante da categoria encontrada para análise.
+          </p>
+        )}
       </CardContent>
     </Card>
   );

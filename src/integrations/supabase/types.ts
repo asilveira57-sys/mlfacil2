@@ -6728,6 +6728,10 @@ export type Database = {
           sales_count_30d: number | null
           sales_count_7d: number | null
           seller_id: string
+          seo_analysis_json: Json | null
+          seo_keywords_found: string[] | null
+          seo_keywords_missing: string[] | null
+          seo_score: number | null
           shipping_mode: string | null
           units_sold_30d: number | null
           units_sold_7d: number | null
@@ -6758,6 +6762,10 @@ export type Database = {
           sales_count_30d?: number | null
           sales_count_7d?: number | null
           seller_id: string
+          seo_analysis_json?: Json | null
+          seo_keywords_found?: string[] | null
+          seo_keywords_missing?: string[] | null
+          seo_score?: number | null
           shipping_mode?: string | null
           units_sold_30d?: number | null
           units_sold_7d?: number | null
@@ -6788,6 +6796,10 @@ export type Database = {
           sales_count_30d?: number | null
           sales_count_7d?: number | null
           seller_id?: string
+          seo_analysis_json?: Json | null
+          seo_keywords_found?: string[] | null
+          seo_keywords_missing?: string[] | null
+          seo_score?: number | null
           shipping_mode?: string | null
           units_sold_30d?: number | null
           units_sold_7d?: number | null
