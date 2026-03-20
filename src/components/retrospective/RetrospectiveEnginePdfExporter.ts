@@ -65,6 +65,34 @@ export function generateRetrospectivePdfFromEngine(retro: Retrospective, company
   pdf.text('Desenvolvido por Marketplace Fácil', W / 2, y, { align: 'center' });
   y += 8;
 
+  // ─── Onboarding Context ───
+  if (onboarding) {
+    const fmtDate = (d: string | null) => {
+      if (!d) return '—';
+      try { return new Date(d).toLocaleDateString('pt-BR'); } catch { return d; }
+    };
+
+    pdf.setFillColor(241, 245, 249);
+    pdf.roundedRect(margin, y, W - margin * 2, 20, 3, 3, 'F');
+    pdf.setFontSize(9);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setTextColor(71, 85, 105);
+    const dates = [
+      ['LGPD/Termos', fmtDate(onboarding.lgpd_accepted_at)],
+      ['1º Acesso', fmtDate(onboarding.first_access_at)],
+      ['Conta ML', fmtDate(onboarding.ml_linked_at)],
+    ];
+    let dx = margin + 6;
+    for (const [label, value] of dates) {
+      pdf.text(label, dx, y + 8);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text(value, dx, y + 14);
+      pdf.setFont('helvetica', 'normal');
+      dx += 55;
+    }
+    y += 26;
+  }
+
   // ─── Baseline Section ───
   if (baseline) {
     pdf.setFillColor(254, 243, 199);
@@ -73,14 +101,14 @@ export function generateRetrospectivePdfFromEngine(retro: Retrospective, company
     pdf.setFontSize(11);
     pdf.setFont('helvetica', 'bold');
     pdf.setTextColor(146, 64, 14);
-    pdf.text('📌 Cenário de Entrada (30 dias anteriores)', margin + 6, y + 10);
+    pdf.text('Cenario de Entrada (30 dias anteriores)', margin + 6, y + 10);
 
     pdf.setFontSize(9);
     pdf.setFont('helvetica', 'normal');
     const baseItems = [
       ['Faturamento', `R$ ${fmt(baseline.revenue)}`],
       ['Pedidos', String(baseline.orders ?? 0)],
-      ['Ticket Médio', `R$ ${fmt(baseline.ticket)}`],
+      ['Ticket Medio', `R$ ${fmt(baseline.ticket)}`],
     ];
     let bx = margin + 6;
     for (const [label, value] of baseItems) {
