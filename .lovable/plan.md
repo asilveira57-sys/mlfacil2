@@ -1,93 +1,103 @@
 
-# Plano: Auditoria e Correção da Radiografia
+Diagnóstico objetivo (conta ADECONEX.SP)
 
-## Diagnóstico Completo
+1) O filtro de período da lista hoje é “visual”, não de dados
+- Em `RadiographyItemList.tsx`, o `selectedPeriod` só alimenta o `<Select>`.
+- A lista usa campos fixos de `listing_health_current` (`visits_last`, `sales_count_30d`, `conversion_rate_7d`), sem recalcular por 7/15/30/150 dias.
+- Resultado: trocar período não muda visitas/vendas/conversão na listagem.
 
-### Verificação 1 — listing_health_history
-**Resultado: 0 registros.** Nenhuma coleta foi persistida.
+2) O detalhe também não muda por falta de série temporal útil
+- `fetchItemHistory` filtra `listing_health_history.collected_at`, mas para ADECONEX.SP os dados estão concentrados no mesmo dia.
+- Banco (seller `1411095727`):
+  - `listing_health_history`: 809 linhas, **1 dia distinto** (`20/03`).
+  - Item exemplo `MLB3852550991`: 5 linhas e todas caem em qualquer filtro (7/15/30/60/150).
+- Resultado: gráfico parece “travado” e período parece sem efeito.
 
-### Verificação 2 — listing_health_current
-**Resultado: 0 registros.** O estado atual nunca foi populado.
+3) Causa raiz da data repetida no histórico
+- No `radiography-collector` (backfill), `collected_at` é salvo com “agora” (`new Date()`), não com a data histórica da janela.
+- Isso comprime backfill em um único dia no gráfico.
 
-### Verificação 3 — radiography_collection_logs
-O sync funciona (167 items processed). A collection falha 100%:
-- `items_processed: 0, items_failed: 162` em todas as execuções
-- Motivo: `"Visits multiget failed: 400"` em todos os lotes
+4) Armazenamento histórico real hoje (ADECONEX.SP)
+- `seller_item_visits`: 276 linhas, 86 itens, 8 dias distintos (`13/03` a `20/03`).
+- Ou seja: existe histórico diário parcial, mas a UI da Radiografia não usa essa base para o filtro principal.
 
-### Verificação 4 — last_visit_collection_at
-**Todos NULL** — 783 registros (seller 66043362) e 321 registros (seller 1411095727), todos sem coleta.
+Plano cirúrgico para colocar o filtro para funcionar (urgente)
 
----
+Fase 1 — Corrigir o vínculo do filtro com dados reais (lista + detalhe)
+1. Atualizar `useRadiographyData` para receber `selectedPeriod` e recalcular métricas por período.
+2. Incluir uma query agregada por item (via função SQL/RPC) com:
+   - visitas no período (de `seller_item_visits`)
+   - vendas/unidades no período (de `meli_order_items_cache`)
+   - conversão do período
+3. Mesclar esses campos no payload da listagem e substituir, na UI:
+   - `visits_last` -> `visits_period`
+   - `sales_count_30d` -> `sales_period`
+   - conversão fixa -> `conversion_period`
+4. Ajustar ordenação da lista para usar métricas do período selecionado.
 
-## Causa Raiz Identificada — 3 Problemas
+Fase 2 — Corrigir gráfico e série temporal do detalhe
+1. Trocar fonte do gráfico para série diária real:
+   - base primária: `seller_item_visits` (por dia)
+   - overlay de preço/estoque: `listing_health_history` (snapshot mais próximo do dia)
+2. Gerar série contínua diária (sem “buracos”) para 7/15/30/60/150.
+3. Corrigir efeitos no painel:
+   - recarregar quando `period`, `item` ou `selectedPeriod` mudar.
+4. Se histórico disponível for menor que o período:
+   - exibir aviso claro “dados históricos insuficientes para X dias” (sem fingir erro de UI).
 
-### BUG 1: URL da API de visitas invertida (CRÍTICO)
-A correção anterior trocou `/items/visits` por `/visits/items`, mas a documentação oficial do Mercado Livre mostra:
-- **Com date_from/date_to**: `GET /items/visits?ids=...&date_from=...&date_to=...`
-- **Sem datas (total histórico)**: `GET /visits/items?ids=...`
+Fase 3 — Corrigir persistência do backfill (causa da data fixa)
+1. No `radiography-collector`, alterar backfill para salvar referência temporal histórica:
+   - `collected_at` da janela (ex.: fim da janela), não `now()`.
+2. (Recomendado) adicionar `window_start` e `window_end` em `listing_health_history` para rastreabilidade e idempotência robusta.
+3. Manter `listing_health_current` como snapshot rápido (sem quebrar arquitetura atual).
 
-O código atual usa `/visits/items` com parâmetros `date_from` e `date_to`, o que retorna **400** porque esse endpoint não aceita esses parâmetros. Precisa voltar para `/items/visits`.
+Fase 4 — Reparo de dados da ADECONEX.SP
+1. Resetar `radiography_backfill_control` do seller `1411095727` para reprocessar com a regra corrigida.
+2. Reexecutar backfill para reconstruir histórico em datas corretas.
+3. Rodar uma coleta operacional + enrich para sincronizar estado atual com histórico.
 
-**Correção:** Reverter todas as 3 ocorrências de `/visits/items` para `/items/visits` no `radiography-collector/index.ts`.
+Fase 5 — Observabilidade e estabilidade
+1. Corrigir log de `enrich_sales` para usar `metadata_json` (hoje usa `metadata`, pode deixar log “running” preso).
+2. Adicionar logs de período aplicado na UI/backend:
+   - seller_id, days_range, registros retornados, cobertura de dias.
+3. Adicionar validação automática:
+   - se todas datas do gráfico forem iguais -> flag `INVALID_TIME_SERIES`.
+   - se troca de período não alterar query/resultset -> flag `FILTER_NOT_APPLIED`.
 
-### BUG 2: RLS policy quebrada nas tabelas de saúde
-As policies de SELECT para `listing_health_current` e `listing_health_history` têm um erro na subquery:
-```sql
--- ERRADO (referencia a própria tabela):
-seller_id IN (SELECT listing_health_current.seller_id FROM ml_accounts WHERE ml_accounts.user_id = auth.uid())
+Arquivos/partes a ajustar
 
--- CORRETO:
-seller_id IN (SELECT ml_accounts.ml_user_id FROM ml_accounts WHERE ml_accounts.user_id = auth.uid())
-```
-Mesmo que a edge function grave os dados com service_role, o **frontend não consegue ler** porque a RLS bloqueia.
+Frontend
+- `src/hooks/useRadiographyData.ts`
+  - incluir `selectedPeriod` na busca de métricas e no contrato retornado.
+- `src/pages/Radiografia.tsx`
+  - passar `selectedPeriod` para o hook.
+- `src/components/radiography/RadiographyItemList.tsx`
+  - exibir/ordenar por métricas do período.
+- `src/components/radiography/RadiographyDetailPanel.tsx`
+  - gráfico diário por período + reload correto.
 
-**Correção:** Migration para recriar as 2 policies com a subquery correta.
+Backend/database
+- `supabase/functions/radiography-collector/index.ts`
+  - corrigir timestamp do backfill (histórico real).
+  - ajustar log `metadata_json` no enrich.
+- Nova migration
+  - função SQL para agregação por período (visitas/vendas/conversão por item).
+  - (opcional recomendado) colunas `window_start/window_end` em `listing_health_history`.
 
-### BUG 3: Backfill marcado como "done" sem processar nada
-O backfill completou `items_failed: 665, items_processed: 0` mas status `done`. Como a URL de visitas estava errada, todos os lotes falharam, mas o código marcou como concluído. Após corrigir a URL, precisamos resetar o backfill para que ele reprocesse.
+Validação final (checklist rápido)
+1. Lista:
+- mudar 7 -> 30 -> 150 e confirmar alteração de visitas/vendas/conversão (quando houver histórico suficiente).
+2. Detalhe:
+- eixo X com datas diferentes (não repetir só 20/03).
+- trocar período e verificar mudança no dataset.
+3. Banco:
+- `listing_health_history` com múltiplos dias reais após reprocesso.
+- `radiography_collection_logs` sem execuções “running” presas indevidas.
+4. UX:
+- quando faltar histórico para 150d, mostrar insuficiência de dados (sem mascarar como “normal”).
 
-**Correção:** Resetar `radiography_backfill_control` para status `pending` nos 2 sellers afetados.
-
----
-
-## Correções a Implementar
-
-### 1. Edge Function — corrigir URL da API (3 locais)
-**Arquivo:** `supabase/functions/radiography-collector/index.ts`
-- Linha ~326: `/visits/items?ids=` → `/items/visits?ids=`
-- Linha ~334: mesma correção (retry após rate limit)
-- Linha ~561: mesma correção (backfill)
-- Adicionar log do response body quando status != 200 para diagnóstico futuro
-
-### 2. Migration — corrigir RLS policies
-Recriar as 4 policies (2 tabelas × SELECT):
-```sql
-DROP POLICY "Users can view own health current" ON listing_health_current;
-CREATE POLICY "Users can view own health current" ON listing_health_current
-  FOR SELECT TO authenticated
-  USING (seller_id IN (SELECT ml_user_id::text FROM ml_accounts WHERE user_id = auth.uid()));
-
--- Mesmo para listing_health_history
-```
-
-### 3. Dados — resetar backfill_control
-Usar insert tool para atualizar os 2 registros de `radiography_backfill_control` de `done` para `pending`, `progress_percent = 0`.
-
-### 4. Melhorar logs na collection
-Adicionar log do response body da API ML quando retornar erro, para facilitar diagnóstico futuro.
-
-### 5. UI — melhorar mensagens de estado
-**Arquivo:** `src/components/radiography/RadiographyDiagnosticCards.tsx` e `RadiographyItemList.tsx`
-Diferenciar entre:
-- "Coleta inicial em andamento" (quando há logs de collection recentes com status running)
-- "Falha na coleta" (quando último log tem items_failed > 0)
-- "Sem dados ainda" (quando não há logs)
-- Exibir último erro quando aplicável
-
----
-
-## Arquivos Modificados
-- `supabase/functions/radiography-collector/index.ts` — reverter URL para `/items/visits`
-- Migration SQL — corrigir RLS + resetar backfill
-- `src/components/radiography/RadiographyDiagnosticCards.tsx` — mensagens de estado
-- `src/components/radiography/RadiographyItemList.tsx` — mensagem de erro
+Resultado esperado após esse plano
+- filtro passa a ter efeito real na lista e no detalhe;
+- gráfico deixa de ficar “travado” por data única;
+- conversão/vendas/visitas deixam de ser percepção estática;
+- histórico volta a refletir o tempo corretamente para decisão.
