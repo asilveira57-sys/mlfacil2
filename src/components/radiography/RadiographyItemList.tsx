@@ -131,6 +131,7 @@ export function RadiographyItemList({
   const activeFilterCount = [
     logisticsFilter !== "all", catalogFilter !== "all",
     mainProblemFilter !== "all", mediaFilter !== "all", anomalyFilter !== "all",
+    exposureFilter !== "all",
   ].filter(Boolean).length;
 
   return (
