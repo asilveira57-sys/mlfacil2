@@ -111,7 +111,7 @@ export function useDynamicMenu(): UseDynamicMenuReturn {
     const pruned = prune(roots);
     sortTree(pruned);
     return pruned;
-  }, [modules, isAdmin]);
+  }, [modules, isAdmin, hasPlanConfig, planModuleKeys]);
 
   return {
     menuTree,
