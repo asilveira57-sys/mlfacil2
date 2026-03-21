@@ -1677,10 +1677,10 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
   const startTime = Date.now();
   console.log(`[rad-collector] ANALYZE started for ${sellerId}${itemId ? ` item ${itemId}` : ' (all)'}`);
 
-  await supabase.from('listing_health_logs').insert({
+   await supabase.from('listing_health_logs').insert({
     seller_id: sellerId, item_id: itemId || null, log_type: 'analysis', log_level: 'info',
     action: 'analyze_started', message: `Analysis started`, metadata_json: { scope: itemId ? 'single' : 'all' },
-  }).catch(() => {});
+  });
 
   try {
     let query = supabase.from('listing_health_current').select('*').eq('seller_id', sellerId);
