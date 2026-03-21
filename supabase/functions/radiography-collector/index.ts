@@ -1845,6 +1845,10 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
         // Update row
         const logInfo = classifyLogisticType(merged);
         const catInfo = classifyCatalog(merged);
+        const isAdsActive = adsStatusMap.has(item.item_id) ? adsActiveSet.has(item.item_id) : null;
+        const adsStatus = adsStatusMap.get(item.item_id) || null;
+        const isPromoActive = promoStatusMap.has(item.item_id) ? promoActiveSet.has(item.item_id) : null;
+        const promoStatus = promoStatusMap.get(item.item_id) || null;
         updateRows.push({
           seller_id: sellerId, item_id: item.item_id, tenant_id: tenantId,
           photos_count: photos.count, has_video: photos.hasVideo,
@@ -1854,6 +1858,8 @@ async function handleAnalyze(supabase: any, sellerId: string, itemId?: string) {
           visits_7d: v7d, visits_30d: v30d, conversion_rate_30d: Number(convRate.toFixed(3)),
           health_score: hScore, health_status: hStatus, main_problem: mainProb,
           data_coverage_days: covDays, data_coverage_status: covStatus,
+          is_ads_active: isAdsActive, ads_status: adsStatus,
+          is_promotion_active: isPromoActive, promotion_status: promoStatus,
         });
         analyzed++;
       } catch (e) { errCount++; console.warn(`[rad-collector] ANALYZE item ${item.item_id} err:`, e); }
