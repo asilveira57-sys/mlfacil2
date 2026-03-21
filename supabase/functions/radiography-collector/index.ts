@@ -1678,39 +1678,80 @@ function determineMainProblem(scores: Record<string, number>, covStatus: string,
   return candidates[0].score >= 70 ? 'healthy' : candidates[0].key;
 }
 
+function generateDiagnosticText(mainProblem: string, item: any, scores: Record<string, number>): string {
+  const v30d = item.visits_30d || item.visits_last * 4 || 0;
+  switch (mainProblem) {
+    case 'exposure':
+      return 'O anúncio não possui campanhas ou promoções ativas. A baixa visibilidade pode estar relacionada à falta de estratégias de exposição.';
+    case 'campaign_performance':
+      return 'O anúncio está em campanha, mas não está gerando tráfego relevante. Isso pode indicar necessidade de ajuste na campanha ou atratividade do anúncio.';
+    case 'content':
+      if ((item.seo_score || 0) < 40) return 'O título e os atributos não cobrem termos comuns da categoria, o que pode reduzir a descoberta. Conteúdo visual também precisa de atenção.';
+      return 'O conteúdo visual do anúncio (fotos, vídeo, título) precisa de melhorias para aumentar a conversão.';
+    case 'conversion':
+      return `O anúncio recebe ${v30d} visitas mas não converte. Revise preço, fotos, descrição e condições de venda.`;
+    case 'discovery':
+      return 'O anúncio está com baixa visibilidade orgânica. Considere melhorar o título, investir em ADS ou participar de promoções.';
+    case 'stock':
+      return 'Estoque zerado ou muito baixo. O anúncio perde posicionamento e não pode vender.';
+    case 'data_coverage':
+      return 'Dados insuficientes para diagnóstico confiável. Aguarde mais dias de coleta.';
+    case 'healthy':
+      return 'Anúncio operando de forma saudável. Continue monitorando.';
+    default:
+      return '';
+  }
+}
+
 function generateSmartRecs(item: any, scores: Record<string, number>, mainProblem: string, existing: string[]): any[] {
   const recs: any[] = [];
   const has = (t: string) => existing.includes(t);
   const logInfo = classifyLogisticType(item);
   const catInfo = classifyCatalog(item);
   const v30d = item.visits_30d || item.visits_last * 4 || 0;
+  const hasTraffic = v30d >= 20;
+  const isHealthy = (item.health_score || 0) > 80;
 
-  if (scores.content < 60) {
+  // EXPOSURE-first recommendations
+  if (v30d < 10 && !item.is_ads_active && !has('consider_ads'))
+    recs.push({ recommendation_type: 'consider_ads', priority: 'high', title: 'Ativar publicidade (ADS)', description: 'Sem tráfego e sem publicidade ativa. ADS pode acelerar a descoberta.', category: 'exposure', estimated_impact: 'alto' });
+  
+  if (item.is_ads_active && v30d < 15 && !has('review_campaign'))
+    recs.push({ recommendation_type: 'review_campaign', priority: 'high', title: 'Revisar campanha ADS', description: 'ADS ativo mas sem gerar tráfego. Ajuste a campanha ou atratividade do anúncio.', category: 'exposure', estimated_impact: 'alto' });
+
+  // Promo — good conversion, has traffic
+  if (!item.is_promotion_active && scores.conversion >= 60 && hasTraffic && !has('consider_promo'))
+    recs.push({ recommendation_type: 'consider_promo', priority: 'low', title: 'Considerar promoção', description: 'Anúncio com boa conversão pode se beneficiar de promoções para escalar vendas.', category: 'exposure', estimated_impact: 'médio' });
+
+  // BLOCK: Content/media suggestions ONLY if has traffic
+  if (hasTraffic && scores.content < 60) {
     const pc = item.photos_count || 0;
     if (pc === 0 && !has('add_photos')) recs.push({ recommendation_type: 'add_photos', priority: 'critical', title: 'Adicionar fotos', description: 'Anúncio sem fotos. Adicione pelo menos 6 fotos de qualidade.', category: 'content', estimated_impact: 'alto' });
-    else if (pc < 4 && !has('more_photos')) recs.push({ recommendation_type: 'more_photos', priority: 'high', title: 'Adicionar mais fotos', description: `Apenas ${pc} foto(s). Recomendado: pelo menos 6.`, category: 'content', estimated_impact: 'médio' });
-    if (!item.has_video && !has('add_video')) recs.push({ recommendation_type: 'add_video', priority: 'medium', title: 'Adicionar vídeo', description: 'Anúncios com vídeo convertem até 20% mais.', category: 'content', estimated_impact: 'médio' });
+    else if (pc < 4 && !has('more_photos')) recs.push({ recommendation_type: 'more_photos', priority: isHealthy ? 'low' : 'high', title: 'Adicionar mais fotos', description: `Apenas ${pc} foto(s). Recomendado: pelo menos 6.`, category: 'content', estimated_impact: 'médio' });
+    if (!item.has_video && !has('add_video')) recs.push({ recommendation_type: 'add_video', priority: isHealthy ? 'low' : 'medium', title: 'Adicionar vídeo', description: 'Anúncios com vídeo convertem até 20% mais.', category: 'content', estimated_impact: 'médio' });
   }
+
   // BLOCK: only suggest full if confirmed NOT full
   if (logInfo.confirmed && !logInfo.isFull && !has('consider_full'))
-    recs.push({ recommendation_type: 'consider_full', priority: 'medium', title: 'Considerar Fulfillment', description: 'Anúncio não usa Full. Fulfillment melhora conversão.', category: 'logistics', estimated_impact: 'alto' });
+    recs.push({ recommendation_type: 'consider_full', priority: isHealthy ? 'low' : 'medium', title: 'Considerar Fulfillment', description: 'Anúncio não usa Full. Fulfillment melhora conversão.', category: 'logistics', estimated_impact: 'alto' });
   // BLOCK: only suggest catalog if confirmed NOT in catalog
   if (catInfo.confirmed && !catInfo.inCatalog && !has('join_catalog'))
-    recs.push({ recommendation_type: 'join_catalog', priority: 'medium', title: 'Vincular ao catálogo', description: 'Anúncio fora do catálogo. Catálogo dá exposição extra.', category: 'catalog', estimated_impact: 'médio' });
+    recs.push({ recommendation_type: 'join_catalog', priority: isHealthy ? 'low' : 'medium', title: 'Vincular ao catálogo', description: 'Anúncio fora do catálogo. Catálogo dá exposição extra.', category: 'catalog', estimated_impact: 'médio' });
   if ((item.available_quantity ?? 0) === 0 && !has('restock'))
     recs.push({ recommendation_type: 'restock', priority: 'critical', title: 'Repor estoque', description: 'Estoque zerado. Anúncio invisível nas buscas.', category: 'stock', estimated_impact: 'crítico' });
   else if ((item.available_quantity ?? 0) < 3 && !has('low_stock_warning'))
     recs.push({ recommendation_type: 'low_stock_warning', priority: 'high', title: 'Estoque baixo', description: `Apenas ${item.available_quantity} un. Reponha para evitar perda.`, category: 'stock', estimated_impact: 'alto' });
-  if (scores.traffic < 30 && !has('improve_seo'))
+  if (scores.traffic < 30 && hasTraffic && !has('improve_seo'))
     recs.push({ recommendation_type: 'improve_seo', priority: 'high', title: 'Melhorar visibilidade', description: 'Poucas visitas. Revise título e considere publicidade.', category: 'traffic', estimated_impact: 'alto' });
   // BLOCK: only suggest conversion improvement if there IS traffic
-  if (mainProblem === 'conversion' && v30d >= 20 && !has('improve_conversion'))
+  if (mainProblem === 'conversion' && hasTraffic && !has('improve_conversion'))
     recs.push({ recommendation_type: 'improve_conversion', priority: 'high', title: 'Melhorar conversão', description: 'Recebe visitas mas não converte. Revise preço, fotos e descrição.', category: 'conversion', estimated_impact: 'alto' });
-  // NEW: Exposure-based recommendations
-  if (v30d < 10 && !item.is_ads_active && !has('consider_ads'))
-    recs.push({ recommendation_type: 'consider_ads', priority: 'medium', title: 'Considerar publicidade (ADS)', description: 'Anúncio sem tráfego e sem publicidade ativa. ADS pode acelerar a descoberta.', category: 'exposure', estimated_impact: 'alto' });
-  if (!item.is_promotion_active && scores.conversion >= 60 && v30d >= 20 && !has('consider_promo'))
-    recs.push({ recommendation_type: 'consider_promo', priority: 'low', title: 'Considerar promoção', description: 'Anúncio com boa conversão pode se beneficiar de promoções para escalar vendas.', category: 'exposure', estimated_impact: 'médio' });
+
+  // Healthy items → classify as "otimização leve"
+  if (isHealthy) {
+    recs.forEach(r => { if (r.priority !== 'critical') r.priority = 'low'; });
+  }
+
   return recs;
 }
 
