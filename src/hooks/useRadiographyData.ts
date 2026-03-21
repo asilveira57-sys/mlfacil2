@@ -140,7 +140,6 @@ export interface DiagnosticSummary {
   dataStartDate: string | null; // earliest visit_date in seller_item_visits
   dataDaysAvailable: number; // distinct days with visit data
 }
-}
 
 export type AnomalyFilter = "all" | "with_anomaly" | "without_anomaly";
 export type PeriodDays = 7 | 15 | 30 | 60 | 150;
